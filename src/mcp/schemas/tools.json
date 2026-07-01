@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "tabs_context_mcp",
-      "description": "Get context information about the current MCP tab group. Returns all tab IDs inside the group if it exists. CRITICAL: You must get the context at least once before using other browser automation tools so you know what tabs exist. Each new conversation should create its own new tab (using tabs_create_mcp) rather than reusing existing tabs, unless the user explicitly asks to use an existing tab.",
+      "description": "Get context information about the current MCP tab group. Returns all tab IDs inside the group if it exists. CRITICAL: You must get the context at least once before using other browser automation tools so you know what tabs exist. Each new conversation should create its own new tab (using tabs_create) rather than reusing existing tabs, unless the user explicitly asks to use an existing tab.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -17,7 +17,7 @@
     },
     {
       "name": "tabs_create_mcp",
-      "description": "Creates a new empty tab in the MCP tab group. CRITICAL: You must get the context using tabs_context_mcp at least once before using other browser automation tools so you know what tabs exist.",
+      "description": "Creates a new empty tab in the MCP tab group.",
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -27,7 +27,7 @@
     },
     {
       "name": "navigate",
-      "description": "Navigate to a URL, or go forward/back in browser history. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "description": "Navigate to a URL, or go forward/back in browser history. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -37,7 +37,11 @@
           },
           "tabId": {
             "type": "number",
-            "description": "Tab ID to navigate. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
+            "description": "Tab ID to navigate. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "If the page shows a \"Leave site?\" dialog because of unsaved changes, discard those changes and navigate anyway. Defaults to false: navigation is blocked and an error is returned so you can decide first."
           }
         },
         "required": ["url", "tabId"],
@@ -46,18 +50,18 @@
     },
     {
       "name": "computer",
-      "description": "Use a mouse and keyboard to interact with a web browser, and take screenshots. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.\n* Whenever you intend to click on an element like an icon, you should consult a screenshot to determine the coordinates of the element before moving the cursor.\n* If you tried clicking on a program or link but it failed to load, even after waiting, try adjusting your click location so that the tip of the cursor visually falls on the element that you want to click.\n* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.",
+      "description": "Use a mouse and keyboard to interact with a web browser, and take screenshots. If you don't have a valid tab ID, use tabs_context first to get available tabs.\n* Whenever you intend to click on an element like an icon, you should consult a screenshot to determine the coordinates of the element before moving the cursor.\n* If you tried clicking on a program or link but it failed to load, even after waiting, try adjusting your click location so that the tip of the cursor visually falls on the element that you want to click.\n* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["left_click", "right_click", "double_click", "triple_click", "type", "screenshot", "wait", "scroll", "key", "left_click_drag", "zoom", "scroll_to", "hover"],
+            "enum": ["left_click", "right_click", "type", "screenshot", "wait", "scroll", "key", "left_click_drag", "double_click", "triple_click", "zoom", "scroll_to", "hover"],
             "description": "The action to perform:\n* `left_click`: Click the left mouse button at the specified coordinates.\n* `right_click`: Click the right mouse button at the specified coordinates to open context menus.\n* `double_click`: Double-click the left mouse button at the specified coordinates.\n* `triple_click`: Triple-click the left mouse button at the specified coordinates.\n* `type`: Type a string of text.\n* `screenshot`: Take a screenshot of the screen.\n* `wait`: Wait for a specified number of seconds.\n* `scroll`: Scroll up, down, left, or right at the specified coordinates.\n* `key`: Press a specific keyboard key.\n* `left_click_drag`: Drag from start_coordinate to coordinate.\n* `zoom`: Take a screenshot of a specific region for closer inspection.\n* `scroll_to`: Scroll an element into view using its element reference ID from read_page or find tools.\n* `hover`: Move the mouse cursor to the specified coordinates or element without clicking. Useful for revealing tooltips, dropdown menus, or triggering hover states."
           },
           "tabId": {
             "type": "number",
-            "description": "Tab ID to execute the action on. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
+            "description": "Tab ID to execute the action on. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
           },
           "coordinate": {
             "type": "array",
@@ -69,8 +73,8 @@
           "duration": {
             "type": "number",
             "minimum": 0,
-            "maximum": 30,
-            "description": "The number of seconds to wait. Required for `wait`. Maximum 30 seconds."
+            "maximum": 10,
+            "description": "The number of seconds to wait. Required for `wait`. Maximum 10 seconds."
           },
           "modifiers": {
             "type": "string",
@@ -122,7 +126,7 @@
     },
     {
       "name": "find",
-      "description": "Find elements on the page using natural language. Can search for elements by their purpose (e.g., \"search bar\", \"login button\") or by text content (e.g., \"organic mango product\"). Returns up to 20 matching elements with references that can be used with other tools. If more than 20 matches exist, you'll be notified to use a more specific query. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "description": "Find elements on the page using natural language. Can search for elements by their purpose (e.g., \"search bar\", \"login button\") or by text content (e.g., \"organic mango product\"). Returns up to 20 matching elements with references that can be used with other tools. If more than 20 matches exist, you'll be notified to use a more specific query. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -132,7 +136,7 @@
           },
           "tabId": {
             "type": "number",
-            "description": "Tab ID to search in. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
+            "description": "Tab ID to search in. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
           }
         },
         "required": ["query", "tabId"],
@@ -141,7 +145,7 @@
     },
     {
       "name": "form_input",
-      "description": "Set values in form elements using element reference ID from the read_page tool. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "description": "Set values in form elements using element reference ID from the read_page tool. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -155,7 +159,7 @@
           },
           "tabId": {
             "type": "number",
-            "description": "Tab ID to set form value in. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
+            "description": "Tab ID to set form value in. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
           }
         },
         "required": ["ref", "value", "tabId"],
@@ -164,13 +168,17 @@
     },
     {
       "name": "get_page_text",
-      "description": "Extract raw text content from the page, prioritizing article content. Ideal for reading articles, blog posts, or other text-heavy pages. Returns plain text without HTML formatting. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "description": "Extract raw text content from the page, prioritizing article content. Ideal for reading articles, blog posts, or other text-heavy pages. Returns plain text without HTML formatting. If you don't have a valid tab ID, use tabs_context first to get available tabs. Output is limited to 50000 characters by default. If the output exceeds this limit, you will receive an error suggesting alternatives.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "tabId": {
             "type": "number",
-            "description": "Tab ID to extract text from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
+            "description": "Tab ID to extract text from. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+          },
+          "max_chars": {
+            "type": "number",
+            "description": "Maximum characters for output (default: 50000). Set to a higher value if your client can handle large outputs."
           }
         },
         "required": ["tabId"],
@@ -179,22 +187,21 @@
     },
     {
       "name": "javascript_tool",
-      "description": "Execute JavaScript code in the context of the current page. The code runs in the page's context and can interact with the DOM, window object, and page variables. Returns the result of the last expression or any thrown errors. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "description": "Execute JavaScript code in the context of the current page. The code runs in the page's context and can interact with the DOM, window object, and page variables. Returns the result of the last expression or any thrown errors. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "action": {
             "type": "string",
-            "const": "javascript_exec",
             "description": "Must be set to 'javascript_exec'"
           },
           "text": {
             "type": "string",
-            "description": "The JavaScript code to execute. The code will be evaluated in the page context. The result of the last expression will be returned automatically. Do NOT use 'return' statements - just write the expression you want to evaluate (e.g., 'window.myData.value' not 'return window.myData.value'). You can access and modify the DOM, call page functions, and interact with page variables."
+            "description": "The JavaScript code to execute. Evaluated in the page context with REPL semantics: top-level `await` works, and the result of the last expression is returned automatically -- write the expression you want (e.g. `window.myData.value`, or `await fetch(url).then(r=>r.json())`) rather than `return ...`. You can access and modify the DOM, call page functions, and interact with page variables."
           },
           "tabId": {
             "type": "number",
-            "description": "Tab ID to execute the code in. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
+            "description": "Tab ID to execute the code in. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
           }
         },
         "required": ["action", "text", "tabId"],
@@ -203,13 +210,13 @@
     },
     {
       "name": "read_console_messages",
-      "description": "Read browser console messages (console.log, console.error, console.warn, etc.) from a specific tab. Useful for debugging JavaScript errors, viewing application logs, or understanding what's happening in the browser console. Returns console messages from the current domain only. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. IMPORTANT: Always provide a pattern to filter messages - without a pattern, you may get too many irrelevant messages.",
+      "description": "Read browser console messages (console.log, console.error, console.warn, etc.) from a specific tab. Useful for debugging JavaScript errors, viewing application logs, or understanding what's happening in the browser console. Returns console messages from the current domain only. If you don't have a valid tab ID, use tabs_context first to get available tabs. IMPORTANT: Always provide a pattern to filter messages - without a pattern, you may get too many irrelevant messages.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "tabId": {
             "type": "number",
-            "description": "Tab ID to read console messages from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
+            "description": "Tab ID to read console messages from. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
           },
           "pattern": {
             "type": "string",
@@ -234,13 +241,13 @@
     },
     {
       "name": "read_network_requests",
-      "description": "Read HTTP network requests (XHR, Fetch, documents, images, etc.) from a specific tab. Useful for debugging API calls, monitoring network activity, or understanding what requests a page is making. Returns all network requests made by the current page, including cross-origin requests. Requests are automatically cleared when the page navigates to a different domain. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "description": "Read HTTP network requests (XHR, Fetch, documents, images, etc.) from a specific tab. Useful for debugging API calls, monitoring network activity, or understanding what requests a page is making. Returns all network requests made by the current page, including cross-origin requests. Requests are automatically cleared when the page navigates to a different domain. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "tabId": {
             "type": "number",
-            "description": "Tab ID to read network requests from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
+            "description": "Tab ID to read network requests from. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
           },
           "urlPattern": {
             "type": "string",
@@ -261,13 +268,13 @@
     },
     {
       "name": "read_page",
-      "description": "Get an accessibility tree representation of elements on the page. By default returns all elements including non-visible ones. Output is limited to 50000 characters by default. If the output exceeds this limit, you will receive an error asking you to specify a smaller depth or focus on a specific element using ref_id. Optionally filter for only interactive elements. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "description": "Get an accessibility tree representation of elements on the page. By default returns all elements including non-visible ones. Output is limited to 50000 characters. If the output exceeds this limit, you will receive an error asking you to specify a smaller depth or focus on a specific element using ref_id. Optionally filter for only interactive elements. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "tabId": {
             "type": "number",
-            "description": "Tab ID to read from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
+            "description": "Tab ID to read from. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
           },
           "filter": {
             "type": "string",
@@ -293,7 +300,7 @@
     },
     {
       "name": "resize_window",
-      "description": "Resize the current browser window to specified dimensions. Useful for testing responsive designs or setting up specific screen sizes. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "description": "Resize the current browser window to specified dimensions. Useful for testing responsive designs or setting up specific screen sizes. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -307,7 +314,7 @@
           },
           "tabId": {
             "type": "number",
-            "description": "Tab ID to get the window for. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
+            "description": "Tab ID to get the window for. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
           }
         },
         "required": ["width", "height", "tabId"],

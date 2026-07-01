@@ -82,3 +82,117 @@ fn computer_advertises_all_thirteen_actions() {
         actions.len()
     );
 }
+
+/// Helper: fetch a tool by name (panics if absent).
+fn tool(name: &str) -> Value {
+    tools()
+        .into_iter()
+        .find(|t| t["name"] == name)
+        .unwrap_or_else(|| panic!("{name} tool must exist"))
+}
+
+/// The `computer.action` enum order is part of the trained surface. The official v1.0.78 order
+/// is NOT sorted and NOT the same order as its own description bullets -- it must be reproduced
+/// verbatim.
+#[test]
+fn computer_action_enum_matches_official_order() {
+    let computer = tool("computer");
+    let actions: Vec<&str> = computer["inputSchema"]["properties"]["action"]["enum"]
+        .as_array()
+        .expect("computer.action must have an enum")
+        .iter()
+        .map(|v| v.as_str().expect("enum entry must be a string"))
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            "left_click",
+            "right_click",
+            "type",
+            "screenshot",
+            "wait",
+            "scroll",
+            "key",
+            "left_click_drag",
+            "double_click",
+            "triple_click",
+            "zoom",
+            "scroll_to",
+            "hover",
+        ],
+        "computer.action enum order must match official v1.0.78 verbatim"
+    );
+}
+
+/// The parity corrections harvested from official v1.0.78 (docs/research/12 section A). Each
+/// assertion guards one correction against future drift.
+#[test]
+fn official_v1_0_78_schema_corrections_present() {
+    // A1: navigate advertises the `force` boolean.
+    assert_eq!(
+        tool("navigate")["inputSchema"]["properties"]["force"]["type"].as_str(),
+        Some("boolean"),
+        "navigate must advertise the `force` boolean (official v1.0.78)"
+    );
+
+    // A2: get_page_text advertises `max_chars`.
+    assert_eq!(
+        tool("get_page_text")["inputSchema"]["properties"]["max_chars"]["type"].as_str(),
+        Some("number"),
+        "get_page_text must advertise the `max_chars` number param"
+    );
+
+    // A3: computer.duration is capped at 10 seconds (was 30).
+    assert_eq!(
+        tool("computer")["inputSchema"]["properties"]["duration"]["maximum"].as_i64(),
+        Some(10),
+        "computer.duration.maximum must be 10 (official v1.0.78)"
+    );
+
+    // A4: javascript_tool.action must NOT declare a `const` (official omits it).
+    assert!(
+        tool("javascript_tool")["inputSchema"]["properties"]["action"]
+            .get("const")
+            .is_none(),
+        "javascript_tool.action must not declare `const` (official v1.0.78 omits it)"
+    );
+}
+
+/// A7: the official references the tab tools by their BARE names (`tabs_context`, `tabs_create`)
+/// in every description string -- the `_mcp` suffix appears only on the tool `name` fields. This
+/// reproduces the trained tokens exactly. No description (tool-level or param-level) may contain
+/// the `_mcp`-suffixed names.
+#[test]
+fn descriptions_reference_bare_tab_tool_names() {
+    for t in tools() {
+        let name = t["name"].as_str().unwrap_or("<unknown>");
+
+        let tool_desc = t["description"].as_str().unwrap_or("");
+        assert!(
+            !tool_desc.contains("tabs_context_mcp"),
+            "{name}: description must use bare `tabs_context`, not `tabs_context_mcp`"
+        );
+        assert!(
+            !tool_desc.contains("tabs_create_mcp"),
+            "{name}: description must use bare `tabs_create`, not `tabs_create_mcp`"
+        );
+
+        if let Some(props) = t["inputSchema"]["properties"].as_object() {
+            for (pname, p) in props {
+                let d = p["description"].as_str().unwrap_or("");
+                assert!(
+                    !d.contains("tabs_context_mcp"),
+                    "{name}.{pname}: param description must use bare `tabs_context`"
+                );
+                assert!(
+                    !d.contains("tabs_create_mcp"),
+                    "{name}.{pname}: param description must use bare `tabs_create`"
+                );
+            }
+        }
+    }
+
+    // The two renamed tab tools must still carry the `_mcp` suffix on their `name` field.
+    assert_eq!(tool("tabs_context_mcp")["name"].as_str(), Some("tabs_context_mcp"));
+    assert_eq!(tool("tabs_create_mcp")["name"].as_str(), Some("tabs_create_mcp"));
+}
