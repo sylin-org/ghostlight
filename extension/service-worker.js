@@ -98,10 +98,12 @@ chrome.debugger.onDetach.addListener((src) => attached.delete(src.tabId));
 chrome.debugger.onEvent.addListener((src, method, params) => {
   const tabId = src.tabId;
   if (method === "Runtime.consoleAPICalled") {
+    // Single console source. Both the Runtime domain (Runtime.consoleAPICalled) and the
+    // deprecated Console domain (Console.messageAdded) report the same console.* call, so
+    // enabling and buffering both double-counts every message. We keep only the richer
+    // Runtime event (structured args + method-accurate `type`) and never enable Console.
     const text = (params.args || []).map((a) => a.value !== undefined ? a.value : (a.description || "")).join(" ");
     pushCapped(consoleBuffer, tabId, { level: params.type || "log", text });
-  } else if (method === "Console.messageAdded" && params.message) {
-    pushCapped(consoleBuffer, tabId, { level: params.message.level, text: params.message.text });
   } else if (method === "Network.requestWillBeSent" && params.request) {
     pushCapped(networkBuffer, tabId, { requestId: params.requestId, method: params.request.method, url: params.request.url, status: 0 });
   } else if (method === "Network.responseReceived" && params.response) {
@@ -413,8 +415,8 @@ const handlers = {
   async read_console_messages(a) {
     if (!(await inGroup(a.tabId))) return text(`Tab ${a.tabId} is not in the group.`);
     await ensureAttached(a.tabId);
+    // Only enable Runtime; the Console domain is the deprecated duplicate source (see onEvent).
     await enableDomain(a.tabId, "Runtime");
-    await enableDomain(a.tabId, "Console");
     let msgs = consoleBuffer.get(a.tabId) || [];
     if (a.onlyErrors) msgs = msgs.filter((m) => ["error", "exception"].includes(m.level));
     if (a.pattern) {
