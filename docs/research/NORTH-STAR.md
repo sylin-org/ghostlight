@@ -43,16 +43,36 @@ Three postures, one engine:
 | **User-chosen** | the user | whatever limits *they* opt into |
 | **Policy-enforced (enterprise)** | deployment channel (Intune/GPO) | default-deny |
 
-## Principle 3 — User delight is co-equal with governance
+## Principle 3 — Delight is layered, mirroring the architecture
 
-Token efficiency, install-just-works, real-session magic, and agent-friendly ergonomics are
-**first-order goals for every mode** — not enterprise afterthoughts. **Delight must not depend on
-the overlay being present.**
+Delight is a **stack**, composed the same way the engine + overlay are:
 
-> **Corollary (un-mix the concerns):** token efficiency must come from the *engine* — lean
-> element refs, screenshot discipline — so the **all-open user gets it too**. It must NOT come
-> from tool-filtering, which only exists when a restrictive overlay is on. Do not sell "governance
-> filters tools → fewer tokens" as the delight story; that only helps restricted users.
+- **L0 — Base capability delight** *(engine; every persona, every mode)* — automating the
+  monotonous browser work in your **own authenticated context**: fast, token-lean,
+  install-just-works, agent-friendly. The floor everyone stands on, all-open included.
+- **L1 — Control delight** *(overlay; user-chosen)* — confidence the agent stays where you want.
+  A *personal* user can want a slice of this too ("don't let it touch my banking tab"), so the
+  overlay is a user-facing feature, not only an IT control.
+- **L2 — Governance delight** *(overlay; enterprise)* — the org can say **yes** to a powerful tool
+  *because* it's default-deny, audited, identity-bound: delight for the enterprise end user
+  (allowed to use it at all, and protected) and for the admin (safe rollout, clean audit).
+
+**Governance-as-delight is real — but it is composite and additive (L0 + L2), never a substitute
+for L0.** The enterprise user's total delight still rests on the base engine delight; weak L0
+cannot be rescued by L2. So build L0 to be excellent for *everyone*, then layer L1/L2 for those who
+want or need them.
+
+Two consequences:
+1. **L0 is load-bearing for every persona, including enterprise** — the engine is the foundation
+   the enterprise delight rests on, not "the personal-user track."
+2. **The overlay itself must be delightful, not merely correct** — governance UX (manifest
+   authoring, a pleasant "keep it to these sites" personal mode, agent-adaptable denials) must
+   not read as a tax, even to the person it constrains.
+
+> **Corollary (keep the layers un-mixed):** token efficiency is an **L0/engine** property (lean
+> element refs, screenshot discipline) — the all-open user gets it. It is *not* sourced from
+> tool-filtering, which is an **L2** side-benefit that only reaches restricted users. Don't let an
+> overlay side-benefit masquerade as base delight, or vice-versa.
 
 ## Principle 4 — The user's context is sacred
 
@@ -97,9 +117,11 @@ The eight forks split cleanly once engine and overlay are separated. This is the
 | 8 — policy resolution semantics | **Overlay (governance)** | inactive when all-open |
 | 6 — positioning | **Corrected below** | — |
 
-**Positioning, corrected:** the delight is *the user's own context + an unconstrained, efficient
-engine*. Governance is an **optional overlay** that some users (enterprises) need. 00's "governance
-as delight" framing is superseded by this doc — it conflated the two layers.
+**Positioning, corrected:** the base delight (L0) is *the user's own context + an unconstrained,
+efficient engine*, and every persona stands on it. Governance is an **additive delight layer**
+(L1 user-chosen / L2 enterprise), composed on top — not a substitute for L0. 00's "governance as
+delight" framing is *re-situated*, not discarded: it is real for the enterprise persona, but as
+L0 + L2, never as the source of the base delight. (See Principle 3.)
 
 ---
 
