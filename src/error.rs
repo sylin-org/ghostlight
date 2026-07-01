@@ -31,6 +31,30 @@ pub enum Error {
     /// Underlying I/O failure.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    /// The installer needs the unpacked extension ID (no build-time `key` yet); pass --extension-id.
+    #[error("extension id required: pass --extension-id <id> (see docs/research/11-install-detection.md)")]
+    MissingExtensionId,
+
+    /// The provided extension id is not a valid 32-char a-p Chrome id.
+    #[error("invalid extension id: {0}")]
+    InvalidExtensionId(String),
+
+    /// A native-messaging host registration (file drop or registry write) failed.
+    #[error("native host registration failed: {0}")]
+    HostRegistration(String),
+
+    /// An MCP client config write/merge/CLI invocation failed.
+    #[error("client registration failed: {0}")]
+    ClientRegistration(String),
+
+    /// A client config exists but is not a shape we can safely merge into.
+    #[error("cannot merge config (unexpected shape): {0}")]
+    MergeConflict(String),
+
+    /// The running platform/browser/client combination is not supported in this build.
+    #[error("unsupported target: {0}")]
+    Unsupported(String),
 }
 
 /// Convenience alias for fallible engine operations.

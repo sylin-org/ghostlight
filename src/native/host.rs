@@ -7,6 +7,14 @@
 use crate::{Error, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+/// The Chrome native-messaging host name. MUST match `extension/native-messaging-host.json`,
+/// `extension/manifest.json`, and every registration the installer writes. Distinct from the IPC
+/// socket name (`org.sylin.browser_mcp.v1.sock` in `super::ipc`).
+pub const HOST_NAME: &str = "org.sylin.browser_mcp";
+
+/// Human-readable description written into the native-messaging host manifest.
+pub const HOST_DESCRIPTION: &str = "Browser MCP native messaging host";
+
 /// Upper bound on a single framed message. Chrome caps host->extension messages at 1 MiB; we allow
 /// a generous ceiling for binary<->extension traffic (screenshots) and reject anything larger as
 /// almost certainly a framing desync.

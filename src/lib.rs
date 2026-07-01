@@ -15,6 +15,7 @@
 pub mod browser;
 pub mod dispatch;
 pub mod error;
+pub mod install;
 pub mod mcp;
 pub mod native;
 pub mod origin;
