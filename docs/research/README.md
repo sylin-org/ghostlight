@@ -39,6 +39,7 @@ re-derived the substance from primary sources (noted in-file). No track was sile
 |---|---|---|
 | [NORTH-STAR.md](NORTH-STAR.md) | **Governing** | **Read first.** Project-owner design principles: unconstrained engine + governance-as-overlay, "all-open" as a first-class mode, user-context is sacred, prior-art-as-concern-surface (not feature-copy). Governs how everything below is used. |
 | [00-synthesis-and-decisions.md](00-synthesis-and-decisions.md) | Synthesis | Cross-cutting findings + the 8 design forks. **Read through the lens of NORTH-STAR** — its emphasis is corrected there. |
+| [10-forks-decided.md](10-forks-decided.md) | **Decisions** | The eight forks re-lensed and **decided** (via adversarial workflow + owner review): per-fork calls, postures matrix, v1 scope, and the consolidated SPEC-change map. `extract` deferred to v2. |
 | [01-capability-survey-stagehand-browserbase.md](01-capability-survey-stagehand-browserbase.md) | Capabilities | Stagehand / Browserbase: `act`/`extract`/`observe`, self-healing action cache, live view, contexts. The semantic-primitive frontier. |
 | [02-install-and-onboarding-friction.md](02-install-and-onboarding-friction.md) | Delight (dev) | Real install pain across the ecosystem; the single-binary differentiator and the native-messaging landmine. |
 | [03-governance-enterprise-prior-art.md](03-governance-enterprise-prior-art.md) | Governance | Policy-resolution semantics, manifest ergonomics, audit standards (OCSF/CEF/RFC 5424), enterprise deployment mechanics. |
@@ -51,5 +52,5 @@ re-derived the substance from primary sources (noted in-file). No track was sile
 
 ## Status
 
-Discovery **complete**. Decisions on the 8 forks are **pending** — see
-[00-synthesis-and-decisions.md](00-synthesis-and-decisions.md). No code written yet.
+Discovery **complete**; the eight forks are **decided** — see
+[10-forks-decided.md](10-forks-decided.md) (`extract` deferred to v2). No code written yet.
