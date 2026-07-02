@@ -1130,3 +1130,71 @@ Steps:
 2. Repeat T16-1 through T16-5.
 Expect: no errors logged in the service worker console during any of the above (the illegal-
 return retry in T16-3 is expected internal control flow, not a logged error).
+
+## T17-1: Wrong tabId now lists the valid tab IDs instead of a generic refusal
+Changed: every tabId-bearing handler now resolves the target tab through a new
+`effectiveTabId` helper; a stale or foreign tabId throws `TabAccessError`, which `dispatch`
+still delivers as a plain text tool result (not a `tool_error`), but the message now lists the
+group's real tab IDs. This is an extension-only change; reload the extension at
+chrome://extensions, no MCP client restart needed (the binary is unchanged).
+Steps:
+1. Call `tabs_context_mcp` with `{ "createIfEmpty": true }` and note the real tab id(s) returned
+   (call them ID1, ID2, ...).
+2. Call `get_page_text` with `{ "tabId": 999999 }` (an id that cannot exist in the group).
+Expect: the result text is exactly
+`Tab 999999 is not in the Browser MCP group. Valid tab IDs are: ID1, ID2.` (comma-separated, in
+`tabs_context_mcp`'s order, ending with a period) -- not the old generic
+"Tab 999999 is not in the group." message, and not an `isError`/`tool_error` result.
+
+## T17-2: Omitted tabId falls back to the group's active tab
+Changed: a missing or null `tabId` no longer reaches `chrome.tabs.get(undefined)` and fail with
+"Tab undefined is not in the ... group."; it now resolves to the group's active tab (or its
+most recently accessed tab if none is active).
+Steps:
+1. With at least two tabs in the Browser MCP group, click one of them (tab A) in the Chrome tab
+   strip to make it the active tab.
+2. Call `get_page_text` with no `tabId` argument at all (omit the parameter; if your MCP client
+   requires a value, this step is easiest to run from the service worker console instead -- see
+   T17-4).
+Expect: the call succeeds and returns tab A's page text (the active tab), with no error.
+
+## T17-3: Valid tabId behaves exactly as before (regression)
+Changed: nothing observable for a correct tabId; confirms the happy path still costs one
+`inGroup` call and returns the same results as before this task.
+Steps:
+1. Call `navigate` with a valid tabId from step 1 of T17-1 and any URL (for example
+   `https://en.wikipedia.org/wiki/Dog`).
+2. Call `computer` with `{ "action": "screenshot", "tabId": <same valid tabId> }`.
+Expect: both calls behave exactly as they did before this task -- `navigate` returns
+"Navigated to <url>." and `computer` returns the plain "Screenshot captured (jpeg)." caption
+with an image, no change in wording or behavior.
+
+## T17-4: Fallback and error checks from the inspected service worker console
+Changed: `effectiveTabId` and `TabAccessError` are new top-level names on the service worker's
+global scope (classic, non-module worker), reachable directly from its console.
+Steps:
+1. Open chrome://extensions, find the Browser MCP dev extension, click "Inspect views: service
+   worker" to open its console.
+2. With at least one tab in the Browser MCP group, run
+   `effectiveTabId(null).then(console.log)`.
+3. Run `effectiveTabId(999999).catch((e) => console.log(e.message))`.
+4. Close every tab in the Browser MCP group (the group disappears with its last tab), then run
+   `effectiveTabId(null).catch((e) => console.log(e.message))`.
+5. Still with the group empty, run
+   `effectiveTabId(999999).catch((e) => console.log(e.message))`.
+Expect: step 2 logs the id of the group's active tab (or its most recently accessed tab if none
+is active). Step 3 logs a message ending in "Valid tab IDs are: <the group's tab ids, comma
+separated, same ids noted in T17-1's step 1>.". Step 4 logs exactly
+"No tabs in the Browser MCP group. Use tabs_create_mcp to open one, or tabs_context_mcp with
+createIfEmpty: true.". Step 5 logs exactly "Tab 999999 is not in the Browser MCP group. The
+group has no tabs; use tabs_create_mcp to open one.". Confirm no new tab, group, or window
+appeared in Chrome during steps 2-5 (the helper must never provision on failure).
+
+## T17-5: No console errors during tabId-fallback and valid-ID-listing calls
+Steps:
+1. Open chrome://extensions, find the Browser MCP dev extension, click "Inspect views: service
+   worker" to open its console.
+2. Repeat T17-1 through T17-4.
+Expect: no errors logged in the service worker console during any of the above (a caught
+`TabAccessError` delivered as a plain text result is expected control flow, not a logged
+error).

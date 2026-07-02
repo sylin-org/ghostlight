@@ -279,6 +279,36 @@ async function inGroup(tabId) {
     return false;
   }
 }
+// Thrown when a tool call names a tab outside the group or the group has no usable tab.
+// dispatch() converts it to a plain text tool result so the message reaches the model
+// verbatim, matching how group-membership refusals are delivered today.
+class TabAccessError extends Error {}
+
+// Resolve the tab a tool call acts on. A provided tabId must be in the group; an omitted or
+// null tabId falls back to the group's active tab, else its most recently accessed tab.
+async function effectiveTabId(rawTabId) {
+  if (rawTabId !== undefined && rawTabId !== null) {
+    if (await inGroup(rawTabId)) return rawTabId;
+    await ensureGroup(false);
+    const tabs = await groupTabs();
+    if (!tabs.length) {
+      throw new TabAccessError(`Tab ${rawTabId} is not in the ${GROUP_TITLE} group. The group has no tabs; use tabs_create_mcp to open one.`);
+    }
+    throw new TabAccessError(`Tab ${rawTabId} is not in the ${GROUP_TITLE} group. Valid tab IDs are: ${tabs.map((t) => t.id).join(", ")}.`);
+  }
+  await ensureGroup(false);
+  const tabs = await groupTabs();
+  if (!tabs.length) {
+    throw new TabAccessError(`No tabs in the ${GROUP_TITLE} group. Use tabs_create_mcp to open one, or tabs_context_mcp with createIfEmpty: true.`);
+  }
+  const active = tabs.filter((t) => t.active);
+  const pool = active.length ? active : tabs;
+  let best = pool[0];
+  for (const t of pool) {
+    if ((t.lastAccessed || 0) > (best.lastAccessed || 0)) best = t;
+  }
+  return best.id;
+}
 function tabContext(tabs) {
   const available = tabs.map((t) => ({ tabId: t.id, title: t.title || "", url: t.url || "" }));
   return text(JSON.stringify({ mcpGroupId: groupId, tabs: available }, null, 2));
@@ -633,8 +663,7 @@ function waitForLoad(tabId) {
 
 // --- computer (13 actions; screenshots only on screenshot/scroll/zoom) ---
 async function computer(a) {
-  const tabId = a.tabId;
-  if (!(await inGroup(tabId))) return text(`Tab ${tabId} is not in the ${GROUP_TITLE} group.`);
+  const tabId = await effectiveTabId(a.tabId);
   const modifiers = modifierBits(a.modifiers);
   showActivity(tabId); // best-effort "agent active" glow for the watching user
 
@@ -808,37 +837,37 @@ const handlers = {
     return r;
   },
   async navigate(a) {
-    if (!(await inGroup(a.tabId))) return text(`Tab ${a.tabId} is not in the ${GROUP_TITLE} group.`);
+    const tabId = await effectiveTabId(a.tabId);
     if (a.url === "back") {
-      await chrome.tabs.goBack(a.tabId);
+      await chrome.tabs.goBack(tabId);
     } else if (a.url === "forward") {
-      await chrome.tabs.goForward(a.tabId);
+      await chrome.tabs.goForward(tabId);
     } else {
       let url = a.url;
       if (!/^https?:\/\//i.test(url) && !/^(about|chrome|edge|brave):/i.test(url)) {
         url = "https://" + url.replace(/^[a-z]{1,6}:\/+/i, "");
       }
       try { new URL(url); } catch { return text(`Invalid URL: "${a.url}".`); }
-      await chrome.tabs.update(a.tabId, { url });
+      await chrome.tabs.update(tabId, { url });
     }
-    await waitForLoad(a.tabId);
-    const tab = await chrome.tabs.get(a.tabId);
+    await waitForLoad(tabId);
+    const tab = await chrome.tabs.get(tabId);
     return text(`Navigated to ${tab.url}${tab.status !== "complete" ? " (still loading)" : ""}.`);
   },
   computer,
   async read_page(a) {
-    if (!(await inGroup(a.tabId))) return text(`Tab ${a.tabId} is not in the group.`);
-    const r = await content(a.tabId, { type: "accessibilityTree", options: a });
+    const tabId = await effectiveTabId(a.tabId);
+    const r = await content(tabId, { type: "accessibilityTree", options: a });
     return text((r && r.result) || "Could not read the page.");
   },
   async get_page_text(a) {
-    if (!(await inGroup(a.tabId))) return text(`Tab ${a.tabId} is not in the group.`);
-    const r = await content(a.tabId, { type: "pageText", max_chars: a.max_chars });
+    const tabId = await effectiveTabId(a.tabId);
+    const r = await content(tabId, { type: "pageText", max_chars: a.max_chars });
     return text((r && r.result) || "Could not extract page text.");
   },
   async find(a) {
-    if (!(await inGroup(a.tabId))) return text(`Tab ${a.tabId} is not in the group.`);
-    const r = await content(a.tabId, { type: "find", query: a.query });
+    const tabId = await effectiveTabId(a.tabId);
+    const r = await content(tabId, { type: "find", query: a.query });
     const data = (r && r.result) || { results: [] };
     const results = data.results || [];
     if (!results.length) return text(`No elements matching "${a.query}".`);
@@ -847,8 +876,8 @@ const handlers = {
     return text(out);
   },
   async form_input(a) {
-    if (!(await inGroup(a.tabId))) return text(`Tab ${a.tabId} is not in the group.`);
-    const r = await content(a.tabId, { type: "setFormValue", ref: a.ref, value: a.value });
+    const tabId = await effectiveTabId(a.tabId);
+    const r = await content(tabId, { type: "setFormValue", ref: a.ref, value: a.value });
     // The engine is truthful: a content-script failure is a failure, never a masqueraded success.
     if (r && r.result && r.result.error) {
       const msg = r.result.error.endsWith(".") ? r.result.error.slice(0, -1) : r.result.error;
@@ -857,8 +886,8 @@ const handlers = {
     return text(`Set ${a.ref} = ${JSON.stringify(a.value)}.`);
   },
   async javascript_tool(a) {
-    if (!(await inGroup(a.tabId))) return text(`Tab ${a.tabId} is not in the group.`);
-    let r = await cdp(a.tabId, "Runtime.evaluate", { expression: a.text, returnByValue: true, awaitPromise: true, replMode: true });
+    const tabId = await effectiveTabId(a.tabId);
+    let r = await cdp(tabId, "Runtime.evaluate", { expression: a.text, returnByValue: true, awaitPromise: true, replMode: true });
     if (r.exceptionDetails) {
       const ed = r.exceptionDetails.exception;
       const probe = (r.exceptionDetails.text || "") + ((ed && ed.description) || "");
@@ -866,7 +895,7 @@ const handlers = {
       // async IIFE, which also preserves top-level await for the wrapped code.
       if (probe.includes("Illegal return statement")) {
         const wrapped = "(async () => {\n" + a.text + "\n})()";
-        r = await cdp(a.tabId, "Runtime.evaluate", { expression: wrapped, returnByValue: true, awaitPromise: true });
+        r = await cdp(tabId, "Runtime.evaluate", { expression: wrapped, returnByValue: true, awaitPromise: true });
       }
     }
     if (r.exceptionDetails) return text(`Error: ${r.exceptionDetails.text || "exception"}`);
@@ -876,14 +905,14 @@ const handlers = {
     return text(out);
   },
   async read_console_messages(a) {
-    if (!(await inGroup(a.tabId))) return text(`Tab ${a.tabId} is not in the group.`);
-    await ensureAttached(a.tabId);
+    const tabId = await effectiveTabId(a.tabId);
+    await ensureAttached(tabId);
     // Only enable Runtime; the Console domain is the deprecated duplicate source (see onEvent).
-    await enableDomain(a.tabId, "Runtime");
-    const tab = await chrome.tabs.get(a.tabId);
+    await enableDomain(tabId, "Runtime");
+    const tab = await chrome.tabs.get(tabId);
     const host = hostOf(tab.url || "");
-    tabHost.set(a.tabId, host);
-    const buf = bufferFor(consoleBuffer, a.tabId, host);
+    tabHost.set(tabId, host);
+    const buf = bufferFor(consoleBuffer, tabId, host);
     const total = buf.items.length;
     let msgs = buf.items;
     if (a.onlyErrors) msgs = msgs.filter((m) => ["error", "exception"].includes(m.level));
@@ -892,7 +921,7 @@ const handlers = {
       catch { msgs = msgs.filter((m) => m.text.includes(a.pattern)); }
     }
     msgs = msgs.slice(-(a.limit || 100));
-    if (a.clear) consoleBuffer.set(a.tabId, { host, items: [] });
+    if (a.clear) consoleBuffer.set(tabId, { host, items: [] });
     if (msgs.length) return text(msgs.map((m) => `[${m.level}] ${m.text}`).join("\n"));
     const primary = total
       ? `${total} console message(s) recorded for this tab, but none matched your filter.`
@@ -900,18 +929,18 @@ const handlers = {
     return text(`${primary}\nNote: console tracking begins when this tool is first used on a tab. Reload the page to capture messages emitted during page load.`);
   },
   async read_network_requests(a) {
-    if (!(await inGroup(a.tabId))) return text(`Tab ${a.tabId} is not in the group.`);
-    await ensureAttached(a.tabId);
-    await enableDomain(a.tabId, "Network");
-    const tab = await chrome.tabs.get(a.tabId);
+    const tabId = await effectiveTabId(a.tabId);
+    await ensureAttached(tabId);
+    await enableDomain(tabId, "Network");
+    const tab = await chrome.tabs.get(tabId);
     const host = hostOf(tab.url || "");
-    tabHost.set(a.tabId, host);
-    const buf = bufferFor(networkBuffer, a.tabId, host);
+    tabHost.set(tabId, host);
+    const buf = bufferFor(networkBuffer, tabId, host);
     const total = buf.items.length;
     let reqs = buf.items;
     if (a.urlPattern) reqs = reqs.filter((r) => r.url.includes(a.urlPattern));
     reqs = reqs.slice(-(a.limit || 100));
-    if (a.clear) networkBuffer.set(a.tabId, { host, items: [] });
+    if (a.clear) networkBuffer.set(tabId, { host, items: [] });
     if (reqs.length) return text(reqs.map((r) => `${r.method || "?"} ${r.url} ${r.status ? "-> " + r.status + (r.errorText ? " (" + r.errorText + ")" : "") : "(pending)"}`).join("\n"));
     const primary = total
       ? `${total} network request(s) recorded for this tab, but none matched your filter.`
@@ -919,15 +948,15 @@ const handlers = {
     return text(`${primary}\nNote: network tracking begins when this tool is first used on a tab. Reload the page to capture requests made during page load, or interact with the page to trigger new requests.`);
   },
   async resize_window(a) {
-    if (!(await inGroup(a.tabId))) return text(`Tab ${a.tabId} is not in the group.`);
-    const tab = await chrome.tabs.get(a.tabId);
+    const tabId = await effectiveTabId(a.tabId);
+    const tab = await chrome.tabs.get(tabId);
     await chrome.windows.update(tab.windowId, { width: a.width, height: a.height });
     // The viewport changed; drop any stale ScreenshotContext for this window's tabs so the next
     // screenshot re-establishes the coordinate mapping.
-    for (const tabId of attached.keys()) {
+    for (const attachedId of attached.keys()) {
       try {
-        const t = await chrome.tabs.get(tabId);
-        if (t.windowId === tab.windowId) screenshotCtx.delete(tabId);
+        const t = await chrome.tabs.get(attachedId);
+        if (t.windowId === tab.windowId) screenshotCtx.delete(attachedId);
       } catch { /* tab gone */ }
     }
     return text(`Resized window to ${a.width}x${a.height}.`);
@@ -945,6 +974,7 @@ async function dispatch(id, tool, args) {
   try {
     reply(id, await handler(args));
   } catch (e) {
+    if (e instanceof TabAccessError) return reply(id, text(e.message));
     // Hop-tagged errors (cdp/page) pass through as-is; untagged errors keep the tool-name prefix.
     if (e && e.hop) fail(id, e);
     else fail(id, `${tool} failed: ${(e && e.message) || e}`);

@@ -10,15 +10,15 @@ task's changes. Humans read it to understand exactly what happened.
 
 ## RESUME HERE
 
-- Current task: T17 (next pending). T04, T06, T07, T01, T02, T03, T12, T13, T14, T15, T08, T09,
-  T10, T11, T18, T16 are done.
+- Current task: T05 (next pending, LAST task in the sequence). T04, T06, T07, T01, T02, T03, T12,
+  T13, T14, T15, T08, T09, T10, T11, T18, T16, T17 are done.
 - Branch: release-1-hardening (create from main if absent).
-- Last commit: feat(extension): T16 javascript_tool REPL semantics + 50KB cap (this run)
+- Last commit: feat(extension): T17 effective-tabId fallback + valid-ID errors (this run)
 - Open concerns: pre-existing `cargo fmt` drift (unrelated to
-  T04/T06/T07/T01/T02/T03/T12/T13/T18/T16) in `src/policy/redact.rs` and
+  T04/T06/T07/T01/T02/T03/T12/T13/T18/T16/T17) in `src/policy/redact.rs` and
   `tests/tool_schema_fidelity.rs` -- both reformat under the installed rustfmt 1.9.0 but were left
   untouched again because they are out of scope / forbidden. A whole-repo `cargo fmt --check` will
-  report these two files; this has no bearing on T16 (which touched no Rust files at all --
+  report these two files; this has no bearing on T17 (which touched no Rust files at all --
   `git status --short -- '*.rs' src/ tests/` was empty before committing). A human may want to run
   `cargo fmt` repo-wide in its own dedicated commit at some point; do not fold that into an
   unrelated task's commit.
@@ -45,7 +45,7 @@ Order: T04, T06, T07, T01, T02, T03, T12, T13, T14, T15, T08, T09, T10, T11, T18
 | 14 | T11 | Real zoom region crop + coordinate-context update | - | done |
 | 15 | T18 | Background-tab screenshot via clip+scale | T11 helpful, not required | done |
 | 16 | T16 | javascript_tool REPL semantics + 50KB cap | - | done |
-| 17 | T17 | Effective-tabId fallback + valid-ID errors | - | pending |
+| 17 | T17 | Effective-tabId fallback + valid-ID errors | - | done |
 | 18 | T05 | Service-worker state recovery (runs LAST) | after all service-worker tasks | pending |
 
 Status values: pending, in_progress, done, blocked (with reason in the log).
@@ -1824,3 +1824,156 @@ Append one entry per task using this template. Newest at the bottom.
     honors) was left untouched, per this task's Constraints section.
 - Browser checks queued: T16-1, T16-2, T16-3, T16-4, T16-5, T16-6 in
   docs/tasks/release-1/BROWSER-TESTS.md (appended after T18-7, preserving task order).
+
+### T17 Effective-tabId fallback + valid-ID errors -- done -- 2026-07-02
+- Commit: (recorded after commit; see git log for `feat(extension): T17 ...`)
+- Files touched: extension/service-worker.js, docs/tasks/release-1/BROWSER-TESTS.md,
+  docs/tasks/release-1/LEDGER.md
+- Tests added: none in the Rust sense (this task touches only extension JS, which has no test
+  harness per project constraints). Verification performed instead:
+  - `node --check extension/service-worker.js` (syntax only), clean, both before and after the
+    edit.
+  - Full diff review confirming every one of the ten tabId-bearing handlers
+    (`computer`, `navigate`, `read_page`, `get_page_text`, `find`, `form_input`,
+    `javascript_tool`, `read_console_messages`, `read_network_requests`, `resize_window`) now
+    opens with `const tabId = await effectiveTabId(a.tabId);` and every later use of `a.tabId` in
+    each handler body was rewritten to the local `tabId` (confirmed with
+    `grep -n "a\.tabId" extension/service-worker.js`, which now only matches the ten
+    `effectiveTabId(a.tabId)` call sites themselves; and `grep -n "inGroup("`, which now only
+    matches `inGroup`'s own definition plus the single internal call inside `effectiveTabId`).
+  - `TabAccessError extends Error {}` and `async function effectiveTabId(rawTabId)` were inserted
+    verbatim (byte-for-byte, including both comments) immediately after `inGroup`'s closing brace,
+    per the prompt's exact code block. Confirmed algebraically: a numeric or truthy `rawTabId`
+    that passes `inGroup` returns unchanged (one `inGroup` call, same cost as before); a
+    stale/foreign `rawTabId` triggers `ensureGroup(false)` (recover-only, never `true`) then either
+    the empty-group message or the valid-IDs message, both built from the `GROUP_TITLE` template
+    literal (never a hardcoded "Browser MCP" string) with the id list joined by `", "` in
+    `chrome.tabs.query` order (`groupTabs()`'s own order, unmodified) with a trailing period;
+    `rawTabId === 0` takes the provided-id branch (`0 !== undefined && 0 !== null` is true), not
+    the fallback, matching the prompt's explicit "0 counts as provided" rule; a string id is never
+    coerced (no `Number(...)`/`parseInt` anywhere in the new code) and simply fails `inGroup`,
+    landing on the stale-id path as specified. Omitted/null `rawTabId` with tabs present: filters
+    to `t.active`, falls back to the full pool when none active, then linear-scans for the highest
+    `(t.lastAccessed || 0)` with strict `>` comparison (so an equal or lower `lastAccessed` never
+    replaces `best`, preserving first-in-query-order on ties, exactly as specified) -- tolerates a
+    missing `lastAccessed` on older Chrome per the prompt's manifest-version note. Omitted/null
+    `rawTabId` with an empty/absent group: throws the exact "No tabs in the Browser MCP group.
+    Use tabs_create_mcp to open one, or tabs_context_mcp with createIfEmpty: true." message.
+    Grepped the whole new function body for `chrome.tabs.create`, `chrome.tabs.group`,
+    `chrome.windows.create`, and `ensureGroup(true)` -- zero occurrences, confirming the helper
+    never provisions a tab, group, or window on any failure path, per constraint 4 and the
+    Verification section's explicit "confirm no new tab, group, or window appeared" check (left
+    as a deferred browser check; see below).
+  - `dispatch` now carries three branches in its catch block, in this order:
+    `TabAccessError` -> `reply(id, text(e.message))` (added by this task, matching the prompt's
+    literal replacement code); then the pre-existing (T06) `e.hop` -> `fail(id, e)` branch; then
+    the pre-existing untagged fallback -> `fail(id, ...)`. This is a deliberate reconciliation
+    against the prompt: the prompt's "Required behavior" step 2 shows a two-branch `dispatch`
+    (`TabAccessError` and the generic `fail`) because it was authored before T06 landed in this
+    run's actual sequence; T06 already added hop-tagged passthrough to the working tree by the
+    time this task ran. Dropping the `e.hop` branch to match the prompt literally would have
+    reintroduced a regression T06 fixed (hop-tagged cdp/page errors losing their `hop`/`detail`
+    fields and gaining a redundant `<tool> failed:` prefix), which is exactly the kind of drift
+    the prompt itself warns about ("trust function names and prose over line numbers"; the prose
+    here is "keeps the exact message and the exact delivery channel" for `TabAccessError`, which
+    does not require removing the unrelated `e.hop` branch). Kept both: `TabAccessError` is
+    checked first (an `instanceof` check that only matches the new class; `TabAccessError`
+    instances never carry `.hop`, so there is no branch-ordering ambiguity), then the T06 hop
+    branch, then the original catch-all.
+  - Found and fixed one call site the prompt's own line-inventory did not enumerate: inside
+    `javascript_tool`'s illegal-top-level-return retry path (added by T16, which landed after this
+    prompt was authored), the retry's `cdp(a.tabId, ...)` call still read `a.tabId` directly. The
+    prompt's instruction ("every later use of a.tabId in that handler body becomes tabId") covers
+    this by prose even though the retry branch did not exist when the prompt's line-numbered
+    inventory was written; fixed it to `cdp(tabId, ...)` for consistency with the rest of the
+    handler and to avoid resolving the tab twice under two different fallback rules within one
+    call (a latent bug this task's helper introduction made newly visible, since `a.tabId` could
+    now be null/omitted on a fallback-resolved call and `cdp(null, ...)` would have failed the
+    retry outright).
+  - `resize_window`'s inner loop variable was renamed from `tabId` (shadowing the new outer const)
+    to `attachedId` at its three occurrences (the `for` header over `attached.keys()`,
+    `chrome.tabs.get(attachedId)`, and `screenshotCtx.delete(attachedId)`), per the prompt's
+    explicit instruction; confirmed no other reference to the old shadowed name remains
+    (`grep -n "for (const tabId of attached" extension/service-worker.js` returns nothing).
+  - `cargo test` (all 91 tests across the workspace -- 80 unit + 4 mcp_protocol + 1 peer_death + 6
+    tool_schema_fidelity -- plus 0 doc-tests) passes unchanged, confirming the frozen tool schemas
+    (tabId still `required` everywhere) and every other Rust surface were left untouched.
+  - `git status --short -- '*.rs' src/ tests/` was empty throughout -- this task made zero Rust
+    changes, exactly as the prompt's "Build and test" note predicted ("no Rust rebuild is
+    required").
+  - `cargo clippy --all-targets -- -D warnings` clean (nothing to lint; no Rust changed).
+  - `cargo fmt --check` reports only the same two pre-existing drifted files every prior task in
+    this run has flagged (`src/policy/redact.rs`, `tests/tool_schema_fidelity.rs`); neither was
+    touched by this task, and there was nothing to run `cargo fmt` on (zero Rust changes).
+  - ASCII scan (the BOOTSTRAP.md python one-liner) on both edited files (`extension/service-
+    worker.js`, `docs/tasks/release-1/BROWSER-TESTS.md`) returned empty lists.
+- Drift reconciled:
+  - Line-number drift throughout, exactly as the prompt warned: the prompt cited `inGroup` at
+    lines 178-190 and the tabId-bearing handlers at lines 357-566 (568-line file at authoring
+    time); the actual working tree (954 lines, after every earlier task in this run landed first)
+    has `inGroup` at lines 269-281 and the handlers spread from line 664 (`computer`) to line 963
+    (`resize_window`'s close), with `dispatch` at line 971. Located everything by function/handler
+    name instead, per the prompt's own guidance, and the code shape at each site matched the
+    prompt's "Current behavior" section verbatim once located (both message variants --
+    `computer`/`navigate`'s fuller `GROUP_TITLE` phrasing and the short `is not in the group.`
+    phrasing on the other eight handlers -- were exactly as described).
+  - `dispatch`'s two-branch prompt code vs. the three-branch actual result: see the T06-interaction
+    note above; this is the one substantive (not just line-number) reconciliation this task made,
+    and it was resolved in favor of preserving T06's contract (explicitly named as an "Open
+    concerns" / "Notes for later tasks" item in this run's ledger for T06 and every subsequent
+    task) while adding exactly the new behavior this prompt specifies.
+  - The `javascript_tool` retry-path `a.tabId` call site (introduced by T16, not present when this
+    prompt was authored) -- see above; fixed for consistency, not left as `a.tabId`.
+- Decisions made:
+  - Kept `dispatch`'s new `TabAccessError` check as the first branch in the catch block (before
+    the T06 `e.hop` check), since `TabAccessError` instances are a disjoint class from hop-tagged
+    `Error` instances (the two never overlap) and the prompt's replacement code lists
+    `TabAccessError` first; ordering has no observable effect given the disjointness, but matching
+    the prompt's stated order keeps the diff closest to its literal instruction.
+  - Did not add a `tabId` coercion, range check, or default beyond exactly what the prompt
+    specifies (constraint 10 / Out of scope explicitly forbid this); a string tabId still fails
+    `inGroup` and takes the stale-id path with the valid-IDs message, as required.
+  - Did not touch `tabs_context_mcp`, `tabs_create_mcp`, or `update_plan` (they take no tabId and
+    are explicitly Out of scope); confirmed their handler bodies and the
+    "No Browser MCP tab group. Call with createIfEmpty: true." message are byte-identical to
+    before (`git diff` shows no hunk touching any of the three).
+  - Left `src/policy/redact.rs` and `tests/tool_schema_fidelity.rs` untouched (same pre-existing
+    rustfmt-version drift every prior task in this run has flagged). This task touched no Rust
+    files at all, so there was nothing to run `cargo fmt` on and no reformatting side effect to
+    revert this time; confirmed via `cargo fmt --check`, whose only reported diffs are in exactly
+    those same two files, byte-for-byte the same diffs every prior task's log already described.
+- Notes for later tasks:
+  - `effectiveTabId(rawTabId)` and `class TabAccessError extends Error {}` are now permanent
+    top-level names on the service worker's global scope, defined immediately after `inGroup`.
+    `dispatch` converts `TabAccessError` to a plain `text(...)` tool result (never `tool_error`);
+    any later task that adds a new tabId-bearing handler should call
+    `const tabId = await effectiveTabId(a.tabId);` rather than reintroducing a direct `inGroup`
+    check, to keep the fallback and valid-ID-listing behavior consistent across all handlers.
+  - The three refusal/fallback message templates
+    (`` `Tab ${rawTabId} is not in the ${GROUP_TITLE} group. Valid tab IDs are: ${...}.` ``,
+    `` `Tab ${rawTabId} is not in the ${GROUP_TITLE} group. The group has no tabs; use
+    tabs_create_mcp to open one.` ``, and
+    `` `No tabs in the ${GROUP_TITLE} group. Use tabs_create_mcp to open one, or
+    tabs_context_mcp with createIfEmpty: true.` ``) are now byte-exact contracts at the same tier
+    as every prior task's contract in this run (T01's marker-line formats, T02's Note line, T03's
+    get_page_text contract, T06's `[hop: ...]` contract, T08's type-dispatch contract, T09's
+    click-event contract, T10's scroll-verify strings, T11's zoom-result contract, T13's
+    exception-text format, T14's network per-line format, T15's zero-result strings, T18's
+    background-capture contract, T16's javascript_tool contract) -- do not reword any of them in a
+    later task without updating this note and the T17 BROWSER-TESTS.md entries. The old short
+    `` `Tab ${a.tabId} is not in the group.` `` message no longer exists anywhere in the file
+    (grepped for the literal substring `is not in the group.` -- zero matches remaining).
+  - T05 (service-worker state recovery, the LAST task in this run's sequence) is the only
+    remaining pending task. It touches service-worker startup/recovery generally; per this task's
+    own scope, `effectiveTabId`/`TabAccessError`/`dispatch`'s new branch, and all ten updated
+    handler bodies were left otherwise untouched (only the `a.tabId` -> `tabId` /
+    `inGroup` -> `effectiveTabId` substitution was made in each), so T05 should have no reason to
+    revisit this task's specific diff hunks unless it specifically needs to reason about
+    tab-group/tabId resolution during recovery -- re-verify against the actual tree before
+    assuming, per this run's standing convention.
+  - No `src/mcp/schemas/tools.json` edits were made or needed; `tests/tool_schema_fidelity.rs`
+    passed unchanged (6/6), confirming `tabId` stays `required` in every one of the ten schemas,
+    per this task's Constraints section (defense in depth only; the extension now tolerates an
+    absent tabId even though the schema still marks it required).
+- Browser checks queued: T17-1, T17-2, T17-3, T17-4, T17-5 in
+  docs/tasks/release-1/BROWSER-TESTS.md (appended after T16-6, preserving task order).
