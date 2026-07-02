@@ -68,9 +68,12 @@
       }).filter(Boolean);
       if (names.length) return names.join(" ");
     }
-    if (el.placeholder) return el.placeholder.trim();
-    if (el.title) return el.title.trim();
-    if (el.alt) return el.alt.trim();
+    // typeof-guarded: on a <form>, a child control named/id'd "title", "placeholder", or "alt"
+    // shadows the same-named IDL property with that control element (HTMLFormElement's named-item
+    // behavior), so el.title etc. can be an Element instead of a string -- .trim() would throw.
+    if (typeof el.placeholder === "string" && el.placeholder) return el.placeholder.trim();
+    if (typeof el.title === "string" && el.title) return el.title.trim();
+    if (typeof el.alt === "string" && el.alt) return el.alt.trim();
     if (el.id) {
       const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
       if (label) return label.textContent.trim();

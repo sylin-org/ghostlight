@@ -160,18 +160,20 @@ extension's own DevTools service-worker console).
 - All 18 tasks (T04, T06, T07, T01, T02, T03, T12, T13, T14, T15, T08, T09, T10, T11, T18, T16,
   T17, T05) are done. Nothing left in the fixed task sequence.
 - The interactive live-browser verification pass (see "BROWSER-TESTS.md VERIFICATION PASS" above)
-  found 7 confirmed bugs. CURRENT WORK: fixing those 7 bugs, one commit each, as BUGFIX-tagged
-  task-log entries appended after T05 below. Follow the same per-fix discipline as the original 18
-  tasks (implement, quality-gate, update this ledger, one commit) even though these are not part of
-  the original fixed sequence.
+  found 7 confirmed bugs (BUGFIX-01 through 07 below). BUGFIX WORK IS DONE: 5 of the 7 (01-05) are
+  fixed AND live-verified against their original failing reproductions (see "LIVE VERIFICATION of
+  BUGFIX-01 through BUGFIX-05" at the end of the file). BUGFIX-06 (doctor pipe-busy) and BUGFIX-07
+  (left_click_drag coordinate scale) were investigated and deliberately left unfixed -- see their
+  own entries for why (both need either a riskier redesign or a cleaner re-test than was possible
+  in this session). Nothing further is queued.
 - Branch: release-1-hardening (create from main if absent).
-- Last commit: feat(extension): T05 service-worker state recovery (before this bugfix work started)
-- NEXT ACTION for a future call: check the BUGFIX task-log entries below for which of the 7 bugs
-  are done vs still open, and continue with the next open one. Extension JS fixes need the human to
-  reload the extension at chrome://extensions before they can be verified live; the Rust doctor fix
-  (bug 3) needs a rebuild + MCP client restart. Once all 7 are fixed and verified, BOOTSTRAP.md's
-  "Completion" section was already run once (see RUN SUMMARY above) -- no need to re-run it, this
-  bugfix work is a separate follow-up pass, not a re-run of the 18-task sequence.
+- Last commit: fix(extension): resolve 5 bugs found in interactive BROWSER-TESTS.md pass (22c985b);
+  a follow-up commit recording the live-verification results (this update) lands next.
+- NEXT ACTION for a future call: nothing is pending from this bugfix pass. If picking this repo back
+  up, either (a) tackle BUGFIX-06/07 as their own properly-scoped tasks (read their ledger entries
+  first -- both have specific, non-obvious risks a naive fix would hit), or (b) treat release-1 as
+  complete and move to whatever is next (NOT docs/tasks/stage-2/ without an explicit human decision,
+  per ADR-0018).
 - Open concerns: pre-existing `cargo fmt` drift (unrelated to
   T04/T06/T07/T01/T02/T03/T12/T13/T18/T16/T17/T05) in `src/policy/redact.rs` and
   `tests/tool_schema_fidelity.rs` -- both reformat under the installed rustfmt 1.9.0 but were left
@@ -2340,42 +2342,54 @@ Append one entry per task using this template. Newest at the bottom.
 - Commit: (recorded after commit)
 - Files touched: extension/content.js
 - Tests added: none in the Rust sense (extension JS has no test harness). Verification performed:
-  `node --check extension/content.js` (clean); ASCII scan (clean). Live re-verification against
-  the exact reproduction (en.wikipedia.org/wiki/Cat and /wiki/Web_browser at default depth) is
-  QUEUED for after the human reloads the extension -- see the new BROWSER-TESTS.md entries below.
-- Root cause: not fully isolated to a specific line during the verification pass (no console-
-  visible exception was ever captured despite Runtime tracking being enabled). The evidence
-  (fails identically regardless of max_chars from 2000 to 2,000,000; fails at depth>=7 and passes
-  at depth<=6 on two independent large pages; the SAME subtree succeeds when re-rooted via ref_id
-  at an equivalent or greater relative depth) rules out the char-budget/collapse logic in pass 2
-  (emit) and points at pass 1 (measure): a real page's reachable node count within depth 7 from
-  document root is unbounded (wide citation lists, infobox tables, and similar structures), and
-  pass 1 had NO bound on its own traversal cost independent of MAX_ELEMENTS (which only bounds
-  pass 2's OUTPUT, applied after pass 1 already built the full render tree).
-- Fix: added `MAX_MEASURED = 20000`, a hard ceiling on nodes visited during pass 1 (measure),
-  independent of maxDepth/filter/max_chars. Once hit, further nodes are treated as absent from the
-  render tree (same handling as exceeding maxDepth) so the call still returns promptly with
-  whatever was measured, rather than not returning at all. This is a defensive bound that directly
-  targets the strongly-evidenced trigger (large-subtree traversal cost scaling with depth on real
-  pages) and does not change output for any page under the ceiling, including the T01-5 synthetic
-  12000-flat-element cap test (still well under 20000) and every other page tested in the
-  verification pass.
-- Decisions made: chose 20000 as a starting ceiling (double the existing MAX_ELEMENTS=10000, to
-  leave headroom for pages where filter="interactive" or non-matching nodes cause many more nodes
-  to be visited than are ultimately shown). This value has NOT been re-validated against the
-  original failing pages yet (needs the human's extension reload); if depth>=7 on Web_browser/Cat
-  still fails after reload, lower MAX_MEASURED further (or raise it, if it turns out the ceiling
-  itself is not yet being reached before whatever the true failure mode is) and re-test -- do not
-  assume 20000 is correct without live re-verification.
-- Notes for later tasks: if MAX_MEASURED's ceiling is ever hit on a real page, the render tree pass
-  1 builds is now silently incomplete (a subtree beyond the ceiling simply does not exist in the
-  tree, indistinguishable from a subtree that was never deep/wide enough to reach). No new marker
-  string was added for this (deliberately, to avoid growing the byte-exact contract list further
-  without live verification of the wording) -- a future task could add a dedicated notice line if
-  silent truncation here proves confusing in practice.
-- Browser checks queued: BUGFIX-01-1 (read_page default-depth on Web_browser/Cat succeeds; verify
-  MAX_MEASURED did not fire, i.e. no silent truncation, for these specific pages) in
-  docs/tasks/release-1/BROWSER-TESTS.md.
+  `node --check extension/content.js` (clean); ASCII scan (clean); live re-verification (see below).
+- UPDATE after the human's first reload: the original MAX_MEASURED=20000 defensive cap (see below,
+  kept as a genuine hardening measure) did NOT fix the crash -- live re-testing after reload showed
+  read_page still failing identically at depth>=7 on en.wikipedia.org/wiki/Cat. Direct measurement
+  via `javascript_tool` (bypasses the broken content-script message path entirely, since it uses
+  `Runtime.evaluate` via CDP, not `chrome.tabs.sendMessage`) showed only 187 total elements at
+  depth=7 and 9371 at depth=15 -- nowhere near the 20000 ceiling, disproving the "unbounded
+  traversal volume" theory outright. This forced a proper investigation, which found the REAL root
+  cause:
+- ACTUAL root cause (confirmed, not inferred): `accessibleName()`'s
+  `if (el.title) return el.title.trim();` throws `el.title.trim is not a function` for a `<form>`
+  element that contains a child form control named or id'd `"title"`. `HTMLFormElement`'s built-in
+  "named item" behavior means `form.title` resolves to THAT CHILD ELEMENT instead of the inherited
+  string title-attribute reflection whenever such a control exists -- confirmed directly:
+  `typeof document.getElementById("searchform").title === "object"` on Wikipedia's search form
+  (which has a hidden `name="title"` field, as most MediaWiki search forms do). The same shadowing
+  risk applies to `el.placeholder` and `el.alt`. The exception is thrown synchronously inside
+  `measure()`'s recursion, which crashes the content script's `chrome.runtime.onMessage` handler
+  before it can call `sendResponse`; the service worker's `content()` bridge then sees the
+  `chrome.tabs.sendMessage` promise fail, retries via re-injection (which hits the identical
+  exception again, since it's deterministic), and finally reports the generic, misleading
+  `[hop: page] content script unavailable (script injection blocked)` -- explaining every symptom
+  observed in the original verification pass (fails regardless of max_chars/filter; fails
+  consistently at exactly the depth where Wikipedia's search form first enters the walked subtree,
+  which happened to be depth 7 on both Cat and Web_browser's shared page chrome).
+- Fix: guarded all three property reads with `typeof X === "string"` before calling `.trim()`
+  (`el.placeholder`, `el.title`, `el.alt`), matching the type-guard pattern already used elsewhere
+  in this codebase (e.g. service-worker.js's `typeof details.url === "string"`). Verified directly
+  via `javascript_tool` (pasting the fixed function and calling it against the exact two `<form>`
+  elements that threw) BEFORE asking for a second reload: the fixed version returns `""` cleanly
+  instead of throwing.
+- Decisions made: kept `MAX_MEASURED = 20000` (see below) as a legitimate defensive hardening
+  measure even though it was not the actual fix for this specific bug -- an unbounded pass-1
+  traversal is still a latent risk on a sufficiently large/wide real page, even though 9371 elements
+  at depth 15 on Wikipedia's Cat article did not reach it.
+- Original (insufficient on its own, kept anyway) fix: added `MAX_MEASURED = 20000`, a hard ceiling
+  on nodes visited during pass 1 (measure), independent of maxDepth/filter/max_chars. Once hit,
+  further nodes are treated as absent from the render tree (same handling as exceeding maxDepth) so
+  the call still returns promptly with whatever was measured, rather than not returning at all.
+- Notes for later tasks: this is a good example of why "the fix looked plausible and didn't change
+  any existing test's output" is not sufficient evidence a fix is correct -- always re-verify
+  live against the ORIGINAL failing reproduction before trusting a defensive/inferred fix, even a
+  well-reasoned one. Any FUTURE property read added to `accessibleName()` (or anywhere else this
+  file reads a same-named IDL property generically across arbitrary tag types) should consider
+  whether `<form>`'s named-item shadowing could return an Element instead of the expected string.
+- Browser checks queued: BUGFIX-01-1 (read_page default-depth on Web_browser/Cat succeeds) in
+  docs/tasks/release-1/BROWSER-TESTS.md -- UPDATED to reflect the real fix; re-run after this
+  second reload.
 
 ### BUGFIX-02 ref_id re-rooting self-collapse dead-end -- done -- 2026-07-02
 - Commit: (recorded after commit)
@@ -2567,3 +2581,45 @@ Append one entry per task using this template. Newest at the bottom.
   handling based on the original finding alone; the evidence is now understood to be inconclusive.
 - Browser checks queued: none (not confirmed; a human re-running T09-5 personally, away from the
   keyboard during the drag, would settle this either way).
+
+## LIVE VERIFICATION of BUGFIX-01 through BUGFIX-05 -- 2026-07-02
+
+All five fixes were re-verified live after the human reloaded the extension (twice: once for the
+initial BUGFIX-02/03/04/05 fixes plus the FIRST [insufficient] BUGFIX-01 attempt, then a second
+time after BUGFIX-01's real fix was found and applied). Results, each against the exact original
+failing reproduction:
+
+- **BUGFIX-01**: FIRST reload's fix (MAX_MEASURED=20000) did NOT resolve the crash -- `read_page`
+  at default depth on en.wikipedia.org/wiki/Cat still failed identically after reload. Direct
+  measurement via `javascript_tool` showed only 187 elements at depth=7 and 9371 at depth=15,
+  nowhere near the 20000 ceiling, disproving the original "unbounded traversal volume" theory. This
+  led to isolating the REAL root cause (a `<form>` element's `.title` property shadowed by a child
+  control named "title", per HTMLFormElement's named-item behavior, throwing inside
+  `accessibleName()`) and a second, precise fix (typeof guards on `.title`/`.placeholder`/`.alt`).
+  After the SECOND reload: `read_page` at default depth (15) on both
+  en.wikipedia.org/wiki/Cat (5291 total elements, clean collapse markers, "[showing 147 of 5291
+  elements...]") and en.wikipedia.org/wiki/Web_browser (max_chars=2000; clean collapse markers,
+  "[showing 36 of 1236 elements...]") now succeeds completely. CONFIRMED FIXED.
+- **BUGFIX-02**: re-rooting at `ref_16` (depth=7, no max_chars override, on Cat) produced `div
+  "Cat" [ref_16]` as its own emitted first line, followed by its children being shown individually
+  or collapsed behind THEIR OWN distinct refs (`ref_45`, `ref_46`, etc.) -- never a marker
+  referencing ref_16 itself. CONFIRMED FIXED.
+- **BUGFIX-03**: zoom on a scrolled Cat page (after a 10-tick scroll) returned a real, magnified
+  crop of visible on-screen text ("cats", "various types o[f cats]"), not a blank image. (One
+  earlier attempt on a DIFFERENT tab that had just processed an unrelated 50,000-character
+  read_page call did return blank plus a 60s timeout on the preceding scroll call -- retried
+  cleanly on a fresh tab and confirmed working; that tab's own prior heavy activity, not this fix,
+  is the suspected cause, but was not further investigated since it was not reproducible on a
+  normal tab.) CONFIRMED FIXED for the documented scenario.
+- **BUGFIX-04**: a `setTimeout`-deferred throw on https://example.com now reads exactly
+  `[exception] Error: bugfix04 test (https://example.com/:1) [at <anonymous>@https://example.com/:1]`
+  -- non-empty url in both the location parenthetical and the stack frame. CONFIRMED FIXED.
+- **BUGFIX-05**: `javascript_tool` with `nosuchvariable.foo` now returns
+  `Error: ReferenceError: nosuchvariable is not defined\n    at <anonymous>:1:1`; with
+  `throw new Error("bugfix05 test")` now returns `Error: Error: bugfix05 test\n    at <anonymous>:1:7`.
+  Neither is the old bare `Error: Uncaught`. CONFIRMED FIXED.
+
+All 5 of the fixed bugs are now confirmed working end-to-end against their original failing
+reproductions. BUGFIX-06 (doctor pipe-busy) and BUGFIX-07 (left_click_drag coordinate scale) remain
+un-fixed by design (see their own entries above for why); nothing further is queued for this
+BROWSER-TESTS.md verification-and-fix pass.
