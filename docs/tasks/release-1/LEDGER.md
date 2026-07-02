@@ -6,7 +6,69 @@ task's changes. Humans read it to understand exactly what happened.
 
 ## RUN SUMMARY
 
-(Written by the agent at the end of the run. Empty until then.)
+Run completed 2026-07-02. All 18 tasks in the fixed sequence (T04, T06, T07, T01, T02, T03, T12,
+T13, T14, T15, T08, T09, T10, T11, T18, T16, T17, T05) reached status `done`. Zero tasks blocked.
+
+- Tasks done: 18 of 18 (100%). See the sequence table below for the full list; see the Task log
+  for one entry per task with files touched, tests added, drift reconciled, and decisions made.
+- Tasks blocked: none.
+- Total commits made during this run: 18 one-per-task commits (T04 through T05, in execution
+  order, all on branch `release-1-hardening`, none on `main`) plus this one
+  (`chore(ledger): run summary`), for 19 total. Verified via
+  `git log --oneline main..release-1-hardening` (18 feat commits before this summary commit) and
+  `git log --oneline release-1-hardening ^main | wc -l` (18, matching).
+- Quality gate re-verified at completion time (not just trusted from task logs): `cargo test`
+  (91 tests: 80 unit + 4 mcp_protocol + 1 peer_death + 6 tool_schema_fidelity, all passing),
+  `cargo clippy --all-targets -- -D warnings` (clean), `cargo fmt --check` (clean except the two
+  pre-existing drifted files noted below, unchanged from every task's own log).
+- Working tree: clean at completion (aside from the pre-existing, out-of-scope, untracked
+  `docs/tasks/stage-2/*.md` files, which this run never touched, staged, or committed, per
+  explicit instruction and ADR-0018).
+
+### Anything a human must decide in the morning
+
+1. **Pre-existing `cargo fmt` drift** in `src/policy/redact.rs` and `tests/tool_schema_fidelity.rs`
+   (both reformat under the installed rustfmt 1.9.0, likely a rustfmt-version difference from
+   whenever those two files were last formatted). No task in this run touched either file's
+   substance; both were deliberately left as-is every time `cargo fmt` was run as a side effect of
+   formatting other files, per the "one task = one commit, do not mix unrelated changes" rule. A
+   human may want to run a dedicated repo-wide `cargo fmt` in its own commit at some point.
+2. **T07's row-cap ambiguity** (see T07's own "Decisions made" log entry): whether the doctor
+   subcommand's 6-row non-verbose session cap counts "(skipping unreadable state file: ...)" lines
+   toward the cap the same as parsed rows. Implemented conservatively (cap applies to the first 6
+   files in the newest-first list, parsed or unreadable; the trailing "(and N older...)" note only
+   counts additional successfully-parsed sessions). Not unit-tested (out of the prompt's own
+   required test list). A human who wants stricter/different row-cap behavior should treat this as
+   a follow-up, not a bug.
+3. **Every byte-exact string/format contract introduced by this run** (T01's three marker-line
+   formats, T02's viewport-culling Note line, T03's get_page_text contract, T06's
+   `[hop: ...] ... Next step: ...` format, T08's type-dispatch event contract, T09's click-event
+   contract, T10's scroll-verify result strings, T11's zoom-result contract, T13's exception-text
+   format, T14's network per-line format, T15's six zero-result strings, T18's background-capture
+   contract, T16's javascript_tool contract, T17's tabId-fallback/valid-IDs messages, T05's two
+   buffer-reset notice lines) is now load-bearing for the deferred browser tests in
+   BROWSER-TESTS.md. None of this was verified against a real Chrome instance during this run (no
+   live browser was available, per BOOTSTRAP.md ground rule 3) -- the human running
+   BROWSER-TESTS.md top to bottom in the morning is the FIRST real-browser verification any of this
+   run's 18 tasks has received. Treat any mismatch found there as a real bug to fix, not as this
+   run having been wrong to defer it.
+4. **`browser-mcp doctor`'s exit code is now truthful** (0 = healthy, 1 = at least one finding),
+   a behavior change from before T07 (previously always 0). Any script that shells out to
+   `browser-mcp doctor` and ignored its exit code should be aware it can now be 1.
+
+### Reminders before running BROWSER-TESTS.md
+
+1. Restart the MCP client (the binary was rebuilt multiple times across this run; a stale
+   in-process copy would not reflect any of these 18 tasks' changes).
+2. Reload the extension at `chrome://extensions` (every task touching `extension/service-worker.js`
+   or `extension/content.js` needs a fresh load of the unpacked extension; a service worker that is
+   still running the old code will not exercise any of T01, T02, T03, T05, T08, T09, T10, T11, T12,
+   T13, T14, T15, T16, T17, or T18's changes).
+3. Then run `docs/tasks/release-1/BROWSER-TESTS.md` top to bottom, in the order its entries appear
+   (T04-1 through T05-9, appended in task-completion order across this run). Each entry names the
+   task it verifies, what changed, exact steps, and the expected result.
+4. Do not proceed into `docs/tasks/stage-2/` after BROWSER-TESTS.md; governance is a separate
+   staged run by explicit project decision (ADR-0018).
 
 ## RESUME HERE
 
