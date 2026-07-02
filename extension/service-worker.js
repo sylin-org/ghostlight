@@ -16,7 +16,7 @@ let groupId = null;
 const attached = new Map(); // tabId -> { domains: Set<string> }
 const consoleBuffer = new Map(); // tabId -> { host, items: [{ level, text }] }
 const networkBuffer = new Map(); // tabId -> { host, items: [{ requestId, method, url, status, mimeType, errorText, canceled }] }
-const screenshotCtx = new Map(); // tabId -> { vpW, vpH, shotW, shotH } (set on each screenshot)
+const screenshotCtx = new Map(); // tabId -> { vpW, vpH, shotW, shotH, offX, offY, regionW, regionH } (set on each screenshot/zoom)
 const tabHost = new Map(); // tabId -> hostname of the tab's current URL ("" when none)
 
 // A rejected promise must not tear down the service worker.
@@ -109,6 +109,13 @@ function targetDims(vpW, vpH) {
   if (longest > MAX_SIDE) { const s = MAX_SIDE / longest; w = Math.round(w * s); h = Math.round(h * s); }
   return { w: Math.max(1, w), h: Math.max(1, h) };
 }
+// Largest capture scale for a region of CSS size w x h that keeps the output inside the token +
+// longest-side budget; magnifies a small region, shrinks a large one.
+function zoomScale(w, h) {
+  let s = Math.min(MAX_SIDE / Math.max(w, h), Math.sqrt((MAX_TOKENS * PX_PER_TOKEN * PX_PER_TOKEN) / (w * h)));
+  while (s > 0 && Math.ceil(Math.round(w * s) / PX_PER_TOKEN) * Math.ceil(Math.round(h * s) / PX_PER_TOKEN) > MAX_TOKENS) s *= 0.98;
+  return s;
+}
 function bytesFromBase64(b64) {
   const bin = atob(b64), bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -127,11 +134,13 @@ async function encodeJpeg(bitmap, w, h, quality) {
   return base64FromBytes(new Uint8Array(await blob.arrayBuffer()));
 }
 // Map a model-provided coordinate (read off the downscaled screenshot) back to CSS viewport px.
-// Passthrough when no screenshot has been taken for the tab (nothing to map against).
+// Passthrough when no screenshot has been taken for the tab (nothing to map against). A zoomed
+// capture carries a region offset (offX, offY) that the mapped point is added back onto.
 function rescaleCoord(tabId, x, y) {
   const c = screenshotCtx.get(tabId);
   if (!c || !c.shotW || !c.shotH) return [Math.round(x), Math.round(y)];
-  return [Math.round((x * c.vpW) / c.shotW), Math.round((y * c.vpH) / c.shotH)];
+  const rw = c.regionW || c.vpW, rh = c.regionH || c.vpH;
+  return [Math.round((c.offX || 0) + (x * rw) / c.shotW), Math.round((c.offY || 0) + (y * rh) / c.shotH)];
 }
 async function cdp(tabId, method, params) {
   await ensureAttached(tabId);
@@ -322,8 +331,55 @@ async function screenshot(tabId) {
     shotW = w; shotH = h;
     if (bitmap.close) bitmap.close();
   } catch { /* OffscreenCanvas/createImageBitmap unavailable: keep the raw native capture */ }
-  screenshotCtx.set(tabId, { vpW, vpH, shotW, shotH });
+  // A full screenshot resets the zoom offset: subsequent coordinates map against the whole viewport.
+  screenshotCtx.set(tabId, { vpW, vpH, shotW, shotH, offX: 0, offY: 0, regionW: vpW, regionH: vpH });
   return base64;
+}
+
+// --- Zoom: capture a clipped, magnified region and record it as the tab's coordinate context ---
+async function zoomScreenshot(tabId, region) {
+  await ensureAttached(tabId);
+  const r = await cdp(tabId, "Runtime.evaluate", {
+    expression: "({w:innerWidth,h:innerHeight,sx:window.scrollX||0,sy:window.scrollY||0})",
+    returnByValue: true,
+  });
+  const v = r && r.result && r.result.value;
+  if (!v || !v.w || !v.h) throw hopError("page", "failed to probe viewport");
+  const vpW = v.w, vpH = v.h, sx = v.sx || 0, sy = v.sy || 0;
+  // Rescale against the context as it was BEFORE this zoom, so a zoom issued against a previous
+  // zoomed screenshot composes correctly (chained zooms).
+  const [rx0, ry0] = rescaleCoord(tabId, region[0], region[1]);
+  const [rx1, ry1] = rescaleCoord(tabId, region[2], region[3]);
+  const x0 = Math.min(Math.max(rx0, 0), vpW), y0 = Math.min(Math.max(ry0, 0), vpH);
+  const x1 = Math.min(Math.max(rx1, 0), vpW), y1 = Math.min(Math.max(ry1, 0), vpH);
+  const clamped = x0 !== rx0 || y0 !== ry0 || x1 !== rx1 || y1 !== ry1;
+  const w = x1 - x0, h = y1 - y0;
+  if (w < 1 || h < 1) return { error: "zoom region is empty or entirely outside the visible viewport." };
+  const s = zoomScale(w, h);
+  await sendToTab(tabId, { type: "HIDE_FOR_TOOL_USE" });
+  await sleep(40);
+  let cap;
+  try {
+    cap = await cdp(tabId, "Page.captureScreenshot", {
+      format: "jpeg", quality: 80,
+      // clip is document-relative CSS pixels, not viewport-relative, so the scroll offset is added.
+      clip: { x: sx + x0, y: sy + y0, width: w, height: h, scale: s },
+      captureBeyondViewport: false,
+    });
+  } finally {
+    sendToTab(tabId, { type: "SHOW_AFTER_TOOL_USE" });
+  }
+  let shotW = Math.max(1, Math.round(w * s)), shotH = Math.max(1, Math.round(h * s));
+  let base64 = cap.data;
+  try {
+    const bitmap = await createImageBitmap(new Blob([bytesFromBase64(cap.data)], { type: "image/jpeg" }));
+    base64 = await encodeJpeg(bitmap, bitmap.width, bitmap.height, 0.55);
+    if (base64.length > MAX_SCREENSHOT_B64) base64 = await encodeJpeg(bitmap, bitmap.width, bitmap.height, 0.3);
+    shotW = bitmap.width; shotH = bitmap.height;
+    if (bitmap.close) bitmap.close();
+  } catch { /* OffscreenCanvas/createImageBitmap unavailable: keep the raw native capture */ }
+  screenshotCtx.set(tabId, { vpW, vpH, shotW, shotH, offX: x0, offY: y0, regionW: w, regionH: h });
+  return { base64, x0, y0, x1, y1, clamped };
 }
 
 // --- Input helpers ---
@@ -554,8 +610,16 @@ async function computer(a) {
   switch (a.action) {
     case "screenshot":
       return textImage("Screenshot captured (jpeg).", await screenshot(tabId));
-    case "zoom":
-      return textImage(`Zoom region ${JSON.stringify(a.region || [])} (jpeg).`, await screenshot(tabId));
+    case "zoom": {
+      const r = a.region;
+      if (!Array.isArray(r) || r.length !== 4 || !r.every((v) => Number.isFinite(v)))
+        return text("region [x0, y0, x1, y1] is required for zoom.");
+      if (!(r[2] > r[0]) || !(r[3] > r[1]))
+        return text("zoom region is empty: x1 must be greater than x0 and y1 must be greater than y0.");
+      const z = await zoomScreenshot(tabId, r);
+      if (z.error) return text(z.error);
+      return textImage(`Zoom region (${z.x0}, ${z.y0}) -> (${z.x1}, ${z.y1}) captured (jpeg${z.clamped ? "; clamped to the visible viewport" : ""}).`, z.base64);
+    }
     case "wait": {
       const s = Math.min(a.duration || 1, 30);
       await sleep(s * 1000);

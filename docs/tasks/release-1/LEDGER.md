@@ -10,14 +10,14 @@ task's changes. Humans read it to understand exactly what happened.
 
 ## RESUME HERE
 
-- Current task: T11 (next pending). T04, T06, T07, T01, T02, T03, T12, T13, T14, T15, T08, T09,
-  T10 are done.
+- Current task: T18 (next pending). T04, T06, T07, T01, T02, T03, T12, T13, T14, T15, T08, T09,
+  T10, T11 are done.
 - Branch: release-1-hardening (create from main if absent).
-- Last commit: feat(extension): T10 scroll verify + scrollable-ancestor fallback (this run)
+- Last commit: feat(extension): T11 zoom region crop + coordinate-context update (this run)
 - Open concerns: pre-existing `cargo fmt` drift (unrelated to T04/T06/T07/T01/T02/T03/T12/T13) in
   `src/policy/redact.rs` and `tests/tool_schema_fidelity.rs` -- both reformat under the installed
   rustfmt 1.9.0 but were left untouched again because they are out of scope / forbidden. A
-  whole-repo `cargo fmt --check` will report these two files; this has no bearing on T13 (which
+  whole-repo `cargo fmt --check` will report these two files; this has no bearing on T11 (which
   touched no Rust files at all -- `git status --short -- '*.rs' src/ tests/` was empty before
   committing). A human may want to run `cargo fmt` repo-wide in its own dedicated commit at some
   point; do not fold that into an unrelated task's commit.
@@ -41,7 +41,7 @@ Order: T04, T06, T07, T01, T02, T03, T12, T13, T14, T15, T08, T09, T10, T11, T18
 | 11 | T08 | type via real keyDown/keyUp | - | done |
 | 12 | T09 | Mouse click fidelity (clickCount sequence, buttons, force) | - | done |
 | 13 | T10 | Scroll verify + scrollable-ancestor fallback | - | done |
-| 14 | T11 | Real zoom region crop + coordinate-context update | - | pending |
+| 14 | T11 | Real zoom region crop + coordinate-context update | - | done |
 | 15 | T18 | Background-tab screenshot via clip+scale | T11 helpful, not required | pending |
 | 16 | T16 | javascript_tool REPL semantics + 50KB cap | - | pending |
 | 17 | T17 | Effective-tabId fallback + valid-ID errors | - | pending |
@@ -1391,3 +1391,147 @@ Append one entry per task using this template. Newest at the bottom.
     future task touching `zoom`'s own verification (if ever proposed) could look here for precedent.
 - Browser checks queued: T10-1, T10-2, T10-3, T10-4 in docs/tasks/release-1/BROWSER-TESTS.md
   (appended after T09-5, preserving task order).
+
+### T11 Real zoom region crop + coordinate-context update -- done -- 2026-07-02
+- Commit: (recorded after commit; see git log for `feat(extension): T11 ...`)
+- Files touched: extension/service-worker.js, docs/tasks/release-1/BROWSER-TESTS.md,
+  docs/tasks/release-1/LEDGER.md
+- Tests added: none in the Rust sense (this task touches only extension JS, which has no test
+  harness per project constraints). Verification performed instead:
+  - `node --check extension/service-worker.js` (syntax only), clean.
+  - A standalone throwaway Node script (not committed; deleted from scratchpad after use) that
+    copied `zoomScale` and the new `rescaleCoord` body verbatim and asserted: (a) eight regions
+    from a tiny 1x1 box to a 3840x2160 box all produce an output within the 1568-token AND
+    1568px-longest-side budget (magnifying small regions by over 1000x, downscaling a 4K-sized
+    region to ~0.38x); (b) a full-screenshot context (offX=0, offY=0, regionW=vpW, regionH=vpH)
+    reproduces the exact pre-task `rescaleCoord` formula numerically (confirming clicks after a
+    plain screenshot behave identically to before this task); (c) a synthetic chained-zoom
+    scenario (offX=100, offY=100, regionW=200, regionH=200 from a first zoom) maps the center of
+    the zoomed image back to the center of the original 200x200 region ([200, 200]), confirming
+    the offset-addition formula; (d) the no-context passthrough (`undefined` context) still
+    rounds coordinates through unchanged, matching the pre-task behavior for a tab with no prior
+    screenshot.
+  - Full diff review confirming: the zoom case in `computer(a)` matches the prompt's exact
+    validation/dispatch snippet verbatim (three error strings, the success template with the
+    conditional "; clamped to the visible viewport" suffix); `zoomScale` was added directly after
+    `targetDims`, byte-identical to the prompt's snippet (magnify-or-shrink scale search with the
+    0.98 correction loop); `zoomScreenshot` was added directly after `screenshot()`, implementing
+    all ten steps in order (`ensureAttached`, the combined viewport+scroll-offset `Runtime.
+    evaluate` probe, the pre-overwrite `rescaleCoord` calls on both corners, the `[0,vpW]`/
+    `[0,vpH]` clamp with a `clamped` flag, the `w<1||h<1` empty-region guard, `zoomScale`, the
+    hide/sleep/capture-with-clip/show rhythm mirroring `screenshot()`'s, the re-encode-under-
+    budget block mirroring lines 318-324 of `screenshot()` with the bitmap's own actual width/
+    height as fallback-corrected dims, the final `screenshotCtx.set` with the new offset/region
+    fields, and the `{ base64, x0, y0, x1, y1, clamped }` return shape); `rescaleCoord`'s body was
+    replaced exactly as specified (the `|| c.vpW`/`|| c.vpH` fallbacks, the `offX`/`offY` addition);
+    `screenshot()`'s only change is the single `screenshotCtx.set` line (now carrying `offX: 0,
+    offY: 0, regionW: vpW, regionH: vpH`) -- confirmed via `git diff` hunk boundaries that no other
+    line inside `screenshot()`, `probeViewport`, `targetDims`, `encodeJpeg`, `bytesFromBase64`, or
+    `base64FromBytes` changed.
+  - Confirmed exactly two new module-level functions were added (`zoomScale`, `zoomScreenshot`)
+    and no new module-level state/constants beyond what the prompt's section 2 specifies (grepped
+    `git diff` for new top-level `const`/`let` -- none outside the two function declarations
+    themselves).
+  - Confirmed the three other `rescaleCoord` consumers (`resolveCoords` at the coordinate branch,
+    and the two `left_click_drag` endpoints) were not touched -- they automatically inherit the
+    generalized offset-aware formula with zero changes to their own call sites, exactly as the
+    prompt's Required-behavior intends.
+  - `cargo test` (all 91 tests across the workspace, including `tests/tool_schema_fidelity.rs`,
+    6/6) passes unchanged, confirming no Rust surface was touched and the frozen `computer` schema
+    (whose `region` parameter and `zoom` action description were already present, per the prompt's
+    Constraints) is intact.
+  - `git status --short -- '*.rs' src/ tests/` was empty throughout -- this task made zero Rust
+    changes, matching the prompt's "Build and test" note ("the Rust binary is not rebuilt for this
+    task").
+  - `cargo clippy --all-targets -- -D warnings` clean (nothing to lint; no Rust changed).
+  - `cargo fmt --check` reports only the same two pre-existing drifted files every prior task in
+    this run has flagged (`src/policy/redact.rs`, `tests/tool_schema_fidelity.rs`); neither was
+    touched by this task, and there was nothing to run `cargo fmt` on (zero Rust changes).
+  - ASCII scan (the BOOTSTRAP.md python one-liner) on all three edited files (`extension/service-
+    worker.js`, `docs/tasks/release-1/BROWSER-TESTS.md`, `docs/tasks/release-1/LEDGER.md`) returned
+    empty lists.
+- Drift reconciled: only line-number drift and one guard-style detail, as the prompt itself warned
+  ("line numbers verified at authoring time and DRIFT as earlier tasks land"). The prompt's
+  "Current behavior" section cites `screenshotCtx` at line 16, budget constants at line 70,
+  `probeViewport`/`targetDims`/`encodeJpeg`/`rescaleCoord` at lines 72-113, `screenshot()` at
+  214-239, and the zoom case at 366-367 (in a 568-line file); the actual working tree (grown to
+  840 lines by every earlier task in this run) had these at line 19, line 92, lines 94-127, lines
+  303-327, and 557-558 respectively -- same shapes, only line numbers moved. One substantive detail
+  had also drifted: the prompt's step 2 says to guard the new combined viewport+scroll probe "same
+  guard style as probeViewport", quoting `probeViewport`'s OLD plain `throw new Error("failed to
+  probe viewport")`. T06 (hop-attributed error reporting, earlier in the fixed sequence) had
+  already changed `probeViewport`'s actual guard to `throw hopError("page", "failed to probe
+  viewport")`. Reconciled literally per the prompt's own instruction ("same guard style as
+  probeViewport") by using the ACTUAL current guard (`hopError("page", ...)`), not the prompt's
+  stale quoted line -- this keeps the new probe's failure mode consistent with T06's hop-attributed
+  error contract (a page-hop failure), which is what "same guard style as probeViewport" means once
+  probeViewport itself changed.
+- Decisions made:
+  - The clamp step (Required-behavior item 4) was implemented as independent per-corner clamps
+    (`x0 = clamp(rx0)`, `x1 = clamp(rx1)`, no min/max reordering of `rx0`/`rx1` against each other)
+    exactly as the prompt's literal wording specifies ("Clamp to the viewport: x values to [0,
+    vpW]... producing x0, y0, x1, y1"), rather than adding defensive min/max sorting of the two
+    rescaled corners first. This is safe because `rescaleCoord` is a positive-scale affine map
+    (verified by inspection: `rw`/`shotW`/`rh`/`shotH` are always positive), so it preserves the
+    ordering guaranteed by the zoom case's own pre-check (`r[2] > r[0] && r[3] > r[1]`, in
+    screenshot-space, before rescale) -- `rx1 > rx0` and `ry1 > ry0` always hold after rescale, so
+    the unsorted per-corner clamp cannot silently produce an inverted region; verified numerically
+    in the throwaway Node script (case (c) above) and reasoned about algebraically. A first draft
+    did add defensive min/max sorting; removed it as unrequested complexity once the invariant was
+    confirmed, per this task's own "do not comment every step" / minimal-diff spirit and to stay
+    closest to the prompt's literal five-line clamp block.
+  - Named the local variables in `zoomScreenshot` exactly as the prompt's own numbered steps name
+    them (`vpW`, `vpH`, `sx`, `sy`, `rx0`/`ry0`/`rx1`/`ry1`, `x0`/`y0`/`x1`/`y1`, `w`/`h`, `s`,
+    `cap`, `shotW`/`shotH`, `base64`) rather than introducing different names, to keep the
+    implementation directly traceable against the prompt's ten-step description.
+  - Placed `zoomScreenshot` directly after `screenshot()` and before the `--- Input helpers ---`
+    section comment (which previously started immediately after `screenshot()`), giving the new
+    function its own one-line section comment (`--- Zoom: capture a clipped, magnified region and
+    record it as the tab's coordinate context ---`) rather than folding it under the existing
+    `--- Screenshot pipeline ---` header -- matches this file's existing convention of one banner
+    comment per logical block (`--- Screenshot pipeline ---`, `--- Input helpers ---`, etc.) and
+    keeps the zoom capture rhythm visually distinct from the plain-screenshot rhythm it mirrors.
+  - Added exactly the three comments constraint 7 names (one on `zoomScale`'s purpose, one on the
+    `clip` scroll-offset addition noting clip is document-relative, and the two one-line additions
+    to the `screenshotCtx`/`rescaleCoord` doc comments) plus one additional short comment on the
+    `screenshotCtx.set` line inside `screenshot()` itself (noting that a full screenshot resets the
+    zoom offset) -- judged to fall within "comments only for constraints the code cannot express"
+    since the offset-reset behavior is exactly the kind of non-obvious invariant (why THIS specific
+    line matters for T11's coordinate contract) that a future reader/task would otherwise have to
+    rediscover by re-deriving it from `rescaleCoord`'s formula.
+  - Left `src/policy/redact.rs` and `tests/tool_schema_fidelity.rs` untouched (same pre-existing
+    rustfmt-version drift every prior task in this run has flagged). This task touched no Rust
+    files at all, so there was nothing to run `cargo fmt` on and no reformatting side effect to
+    revert this time; confirmed via `cargo fmt --check`, whose only reported diffs are in exactly
+    those same two files, byte-for-byte the same diffs every prior task's log already described.
+- Notes for later tasks:
+  - `screenshotCtx` entries now always carry eight fields (`vpW, vpH, shotW, shotH, offX, offY,
+    regionW, regionH`) after either a full screenshot or a zoom; `rescaleCoord`'s `|| c.vpW`/
+    `|| c.vpH`/`|| 0` fallbacks keep it safe against any hypothetical caller that still constructs
+    a context object without the new fields, but no code path in this file does that anymore (both
+    writers -- `screenshot()` and `zoomScreenshot()` -- always write all eight fields).
+  - `zoomScale(w, h)` and `zoomScreenshot(tabId, region)` are new module-level helpers; the only
+    caller of either is the `zoom` case in `computer()`. A later task should not need to touch them
+    unless a new task prompt explicitly requires it.
+  - The zoom result-text contract (three exact validation error strings and the
+    `` `Zoom region (${z.x0}, ${z.y0}) -> (${z.x1}, ${z.y1}) captured (jpeg${...}).` `` success
+    template, including the exact "; clamped to the visible viewport" conditional suffix) is now a
+    byte-exact contract at the same tier as every prior task's contract in this run (T01's
+    marker-line formats, T02's Note line, T03's get_page_text contract, T06's `[hop: ...]`
+    contract, T08's type-dispatch contract, T09's click-event contract, T10's scroll-verify
+    strings, T13's exception-text format, T14's network per-line format, T15's zero-result
+    strings) -- do not reword any of the four strings in a later task without updating this note
+    and the T11 BROWSER-TESTS.md entries.
+  - T18 (background-tab screenshot via clip+scale) is listed as "T11 helpful, not required" in the
+    sequence table's Depends-on column; `zoomScreenshot`'s `Page.captureScreenshot` call already
+    demonstrates the `clip`/`scale` parameter pattern T18 will likely need (document-relative clip
+    origin via `sx + x0, sy + y0`, `scale` as a CSS-to-output-pixel multiplier) -- a later task
+    implementing T18 can reuse or mirror this pattern rather than deriving it from scratch, but is
+    not required to call `zoomScreenshot` itself (T18's own prompt should be read fresh for its
+    exact requirements).
+  - No `src/mcp/schemas/tools.json` edits were made or needed; `tests/tool_schema_fidelity.rs`
+    passed unchanged (6/6), confirming the frozen `computer` schema (whose `region` parameter and
+    `zoom` action description were already present before this task, per the prompt's Constraints
+    section) was left untouched.
+- Browser checks queued: T11-1, T11-2, T11-3, T11-4, T11-5, T11-6, T11-7, T11-8 in
+  docs/tasks/release-1/BROWSER-TESTS.md (appended after T10-4, preserving task order).

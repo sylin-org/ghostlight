@@ -888,3 +888,98 @@ Steps:
 5. `computer` with `{ "action": "scroll", "scroll_direction": "down" }` on any page. Expect: the
    result DOES include an image content block (scroll remains one of the three
    screenshot-returning actions: screenshot, scroll, zoom).
+
+## T11-1: zoom captures only the requested region, magnified
+Changed: `zoom` no longer echoes the region and returns a full-viewport screenshot; it now clips
+and magnifies the exact requested region via a fresh `Page.captureScreenshot` with `clip`, and
+records the region as the tab's new coordinate context.
+Steps:
+1. `navigate` a grouped tab to https://en.wikipedia.org/wiki/Cat.
+2. `computer` with `{ "action": "screenshot" }`. Note the pixel coordinates of a small element in
+   the returned image (for example the site logo in the top-left, or an inline citation marker).
+3. `computer` with `{ "action": "zoom", "region": [x0, y0, x1, y1] }` where `(x0,y0)-(x1,y1)` is a
+   small box around that element, read off the screenshot from step 2.
+Expect: the returned image shows ONLY that region, visibly magnified (not the full viewport), and
+the result text is `Zoom region (X0, Y0) -> (X1, Y1) captured (jpeg).` with no "clamped" suffix
+(assuming the region was fully inside the viewport), where X0/Y0/X1/Y1 are the actual captured
+CSS-pixel integers (may differ slightly from the requested region due to rescale rounding).
+
+## T11-2: zoom validation errors are exact text, no image
+Changed: `zoom` now validates `region` before ever attempting a capture.
+Steps:
+1. On any grouped tab, `computer` with `{ "action": "zoom" }` (no `region` field).
+   Expect: text-only result, exactly `region [x0, y0, x1, y1] is required for zoom.`, no image.
+2. `computer` with `{ "action": "zoom", "region": [200, 200, 100, 300] }` (x1 < x0).
+   Expect: text-only result, exactly
+   `zoom region is empty: x1 must be greater than x0 and y1 must be greater than y0.`, no image.
+3. `computer` with `{ "action": "zoom", "region": [9000, 9000, 9500, 9500] }` (far outside any
+   normal page).
+   Expect: text-only result, exactly
+   `zoom region is empty or entirely outside the visible viewport.`, no image.
+
+## T11-3: zoom region straddling the viewport edge is clamped and reported as such
+Changed: a region that partially exceeds the viewport is clamped to `[0, vpW] x [0, vpH]` rather
+than failing, and the result text says so.
+Steps:
+1. `navigate` a grouped tab to https://example.com (or any page smaller than the window).
+2. `computer` with `{ "action": "screenshot" }` to establish a coordinate context, then note the
+   approximate screenshot pixel dimensions of the viewport (near the max x/y visible).
+3. `computer` with `{ "action": "zoom", "region": [x, y, x+400, y+400] }` where `x, y` are chosen
+   so that `x+400` or `y+400` maps past the edge of the viewport (for example near the
+   bottom-right corner of the screenshot).
+Expect: an image is returned (not an error) and the result text ends with exactly
+"(jpeg; clamped to the visible viewport)." and the echoed `(X0, Y0) -> (X1, Y1)` coordinates are
+within `[0, viewport width]` x `[0, viewport height]`.
+
+## T11-4: coordinates read off a zoomed image map back correctly (offset mapping)
+Changed: `rescaleCoord` now adds back the zoomed region's offset, so a click coordinate read off
+a zoomed screenshot lands on the correct element, not on the un-offset viewport position.
+Steps:
+1. `navigate` a grouped tab to https://en.wikipedia.org/wiki/Cat.
+2. `computer` `{ "action": "screenshot" }`, then `computer` `{ "action": "zoom", "region": [...] }`
+   around a specific link or button visible in that screenshot.
+3. Read a coordinate off the ZOOMED image that sits on top of that link/button, then
+   `computer` with `{ "action": "left_click", "coordinate": [that x, that y] }`.
+Expect: the click lands on the element visible at that point in the zoomed image (for example the
+page navigates if it was a link, or a visible focus/selection change happens), not on whatever was
+at that raw pixel position in the un-zoomed viewport.
+
+## T11-5: chained zoom (zooming again off a zoomed image) composes correctly
+Changed: `zoomScreenshot` rescales the incoming region against the context as it stood BEFORE the
+new zoom, so a second zoom issued against a first zoomed image is interpreted correctly.
+Steps:
+1. Continue from T11-4 (a zoomed screenshot is the tab's current context), or repeat: `screenshot`
+   then `zoom` on a moderately large region (for example an entire paragraph).
+2. Read a smaller box off THAT zoomed image (for example a single word within the paragraph) and
+   call `computer` `{ "action": "zoom", "region": [...] }` with those coordinates.
+Expect: the new image is the correct, further-magnified sub-region (the single word visibly
+readable and centered), not a mis-mapped or unrelated part of the page.
+
+## T11-6: a subsequent full screenshot resets the zoom offset
+Changed: `screenshot()` now writes `offX: 0, offY: 0` (and the full viewport as the region) into
+the tab's context, so coordinates after a full screenshot map normally again even after a zoom.
+Steps:
+1. Perform a `zoom` (as in T11-1), then `computer` `{ "action": "screenshot" }` (full viewport).
+2. Read a coordinate off the FULL screenshot and `computer`
+   `{ "action": "left_click", "coordinate": [that x, that y] }`.
+Expect: the click lands at the normal (un-offset) position corresponding to the full screenshot,
+confirming the zoom offset was cleared by the intervening full screenshot.
+
+## T11-7: scrolling before a zoom is reflected correctly (scroll offset in the clip)
+Changed: `zoomScreenshot` adds the page's current `scrollX`/`scrollY` to the clip coordinates
+(CDP's `clip` is document-relative, not viewport-relative).
+Steps:
+1. `navigate` a grouped tab to https://en.wikipedia.org/wiki/Cat.
+2. `computer` `{ "action": "scroll", "scroll_direction": "down", "scroll_amount": 10,
+   "coordinate": [400, 300] }` to scroll well down the page.
+3. `computer` `{ "action": "screenshot" }`, then `computer` `{ "action": "zoom", "region": [...] }`
+   around an element visible in that (scrolled) screenshot.
+Expect: the zoomed image matches what is visible on screen at the scrolled position (not the
+top-of-page content at those same raw coordinates).
+
+## T11-8: no console errors during zoom actions
+Steps:
+1. Open chrome://extensions, find the Browser MCP dev extension, click "Inspect views: service
+   worker" to open its console.
+2. Repeat T11-1 through T11-7.
+Expect: no errors logged in the service worker console during any of the zoom actions above.
