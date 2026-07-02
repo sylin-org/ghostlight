@@ -6,7 +6,8 @@
 //! The same executable runs in several roles, selected at startup:
 //! - **mcp-server** (default, no subcommand) -- launched by the MCP client over stdio. Owns the
 //!   browser IPC endpoint, serves the native-host, and runs the JSON-RPC loop, forwarding tool
-//!   calls to the extension via a shared [`Browser`](browser_mcp::browser::Browser) handle.
+//!   calls to the extension via a shared
+//!   [`Browser`](browser_mcp::transport::executor::Browser) handle.
 //! - **native-host** -- launched by Chrome via `connectNative` (Chrome passes the calling
 //!   extension's origin, `chrome-extension://<id>/`, as an argument). Connects to the mcp-server
 //!   endpoint and relays native-messaging frames to/from the extension.
@@ -16,11 +17,11 @@
 //! and the installer needs none.
 
 use anyhow::Result;
-use browser_mcp::browser::Browser;
 use browser_mcp::debug::DebugSink;
 use browser_mcp::doctor::DoctorOptions;
 use browser_mcp::install::{InstallOptions, Selection, UninstallOptions};
 use browser_mcp::native::ipc;
+use browser_mcp::transport::executor::Browser;
 use clap::{Args, Parser, Subcommand};
 
 /// Browser MCP -- the user's own authenticated browser, for AI agents.

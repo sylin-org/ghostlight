@@ -5,7 +5,7 @@
 //! [`Browser::attach`] takes any async duplex stream -- a real IPC connection in production, an
 //! in-memory pipe in tests -- so the correlation logic is verifiable without a browser.
 //!
-//! Wire protocol (see also `native/messages.rs`): the mcp-server sends
+//! Wire protocol (see also `transport/native/messages.rs`): the mcp-server sends
 //! `{ "id", "type": "tool_request", "tool", "args" }`; the extension replies with
 //! `{ "id", "type": "tool_response", "result" }` or
 //! `{ "id", "type": "tool_error", "error", "hop"?, "detail"? }`. A `tool_error` is mapped to a
@@ -14,7 +14,7 @@
 //! (events, heartbeats) are ignored here (Phase 3 buffers events).
 
 use crate::debug::DebugSink;
-use crate::native::host;
+use crate::transport::native::host;
 use crate::ToolError;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -178,7 +178,8 @@ impl Browser {
     /// stray/extra one (a `doctor` probe, or a service-worker relaunch that overlaps the outgoing
     /// connection): it is rejected immediately with [`AttachOutcome::AlreadyAttached`] by dropping
     /// its stream halves (the peer then sees EOF and goes away) WITHOUT touching the live session's
-    /// sender, connected flag, or pending calls. This is what lets [`crate::native::ipc::serve`]
+    /// sender, connected flag, or pending calls. This is what lets
+    /// [`crate::transport::native::ipc::serve`]
     /// accept connections ahead of time (spawning `attach` per connection) so the pipe always has a
     /// spare instance ready, instead of parking the accept loop for the whole session lifetime.
     ///

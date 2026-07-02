@@ -9,9 +9,8 @@ current task prompt, then continue. Never rely on remembering earlier work; re-r
 
 - Branch: `stage-2` (off `main`, which has stage 1 merged). Never push, never merge, never commit to
   `main`.
-- Progress: NOTHING executed yet. Stage-2 begins here.
-- NEXT TASK: Phase A, task `a1` (`docs/tasks/stage-2/a1-module-reorg.md`). Read `BOOTSTRAP.md` first if
-  you have not.
+- Progress: task `a1` (module reorg) landed.
+- NEXT TASK: Phase A, task `a2` (`docs/tasks/stage-2/a2-governance-ports.md`).
 - Order authority: `PLAN.md` (Phase A -> B -> C -> D). Full linear sequence is in `BOOTSTRAP.md`.
 - Reconciliation: `RECONCILIATION.md` is AUTHORITATIVE over any conflicting detail in a `g`-doc.
 - Invariants that must hold after every task: all-open byte-identical (the all-open golden test +
@@ -29,6 +28,40 @@ current task prompt, then continue. Never rely on remembering earlier work; re-r
 - Deviations from the g-doc per RECONCILIATION.md: <placement / hot-reload / ports notes>
 - Verification: clippy/fmt/test status; which tests were added
 - Browser checks queued: <count> (appended to BROWSER-TESTS.md as <task-id>-<n>), or none
+
+### a1 module reorg (governance/ browser/ transport/) -- 2026-07-02
+- Commit: (pending, see this task's commit)
+- Files touched: `git mv` of `src/dispatch.rs`, `src/policy/{mod.rs,redact.rs}`, `src/tools/**`,
+  `src/native/**`, `src/mcp/**` (incl. `schemas/`), `src/browser.rs`; new
+  `src/{governance,browser,transport}/mod.rs`; edited `src/lib.rs`, `src/main.rs`, `src/doctor.rs`,
+  `src/install/native_host.rs`, `src/transport/executor.rs`, `src/transport/native/{ipc,messages}.rs`,
+  `src/transport/mcp/server.rs`, `src/governance/policy/mod.rs`; new `tests/all_open_golden.rs`.
+- Summary: pure move, zero behavior change. `governance/` got `dispatch.rs` + `policy/` (minus
+  `redact.rs`); `browser/` got `tools/` + `redact.rs`; `transport/` got `native/`, `mcp/`, and
+  `browser.rs` (renamed `executor.rs` to avoid colliding with the new `browser/` plugin module).
+  Every `use crate::...` cross-reference rewritten to the new absolute path; the one cross-bucket
+  call (`transport/mcp/server.rs` redacting `read_page` output) now calls
+  `crate::browser::redact::apply_to_result` directly. `lib.rs` re-exports `pub use
+  transport::{mcp, native};` so `tests/tool_schema_fidelity.rs` and `tests/mcp_protocol.rs` keep
+  resolving `browser_mcp::mcp::...` / `browser_mcp::native::...` unchanged, per the task's compat-
+  facade requirement.
+- Deviations from the g-doc per RECONCILIATION.md: none (A1 is not a g-doc; it is one of the new
+  a-prompts that already encodes the current vision). Followed a1-module-reorg.md as written.
+- Verification: `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` clean, `cargo
+  test` green (81 lib unit tests + 2 new `tests/all_open_golden.rs` + 4 `tests/mcp_protocol.rs`
+  unchanged + 1 `tests/peer_death.rs` + 6 `tests/tool_schema_fidelity.rs` unchanged = 94 total).
+  ASCII scan clean on every touched/moved file. Grep confirmed no stale `crate::browser::Browser`,
+  `crate::dispatch`, `crate::policy`, `crate::mcp`, `crate::native`, `crate::tools` paths remain.
+  `src/mcp/schemas/tools.json` -> `src/transport/mcp/schemas/tools.json` confirmed byte-identical
+  (diff empty). One environment snag: `git mv src/mcp` (whole-directory rename) twice failed with
+  Windows `Permission denied` (likely a transient AV/indexer lock); worked around by moving the 6
+  files inside `src/mcp/` individually with `git mv`, then removing the resulting empty leftover
+  `src/mcp/schemas/` and `src/mcp/` directories (untracked by git, harmless, but removed for
+  tidiness) -- no conservative policy choice involved, purely a retry mechanic. No other locked-exe
+  issue this task; `target/debug/browser-mcp.exe` needed the constraint-7 rename-aside once before
+  the first build.
+- Browser checks queued: none (binary-internal move; no user-visible behavior change per the task's
+  own scope note).
 
 ## Reminders before running BROWSER-TESTS.md
 

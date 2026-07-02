@@ -2,8 +2,8 @@
 //!
 //! Both directions carry UTF-8 JSON, one object per native message (Chrome frames each with a
 //! 4-byte little-endian length prefix; see [`super::host`]). The native-host relays these objects
-//! verbatim; only the mcp-server (in [`crate::browser`]) constructs and parses them, so they are
-//! documented here rather than modeled as types.
+//! verbatim; only the mcp-server (in [`crate::transport::executor`]) constructs and parses them, so
+//! they are documented here rather than modeled as types.
 //!
 //! ## binary -> extension
 //! ```json
@@ -23,5 +23,5 @@
 //! `"page"` -- the extension tags mechanism (which layer threw), never policy; an absent `hop`
 //! means the binary attributes the failure to the extension itself (see
 //! [`crate::ToolError::from_extension_wire`]). `detail` is debug-log-only material (logged with
-//! `tracing::debug!` in [`crate::browser`]) and must never appear in a tool result surfaced to the
-//! MCP client.
+//! `tracing::debug!` in [`crate::transport::executor`]) and must never appear in a tool result
+//! surfaced to the MCP client.

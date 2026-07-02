@@ -5,7 +5,7 @@
 //! OS; only the small apply primitives touch the registry / filesystem.
 
 use super::{Hive, PlanCtx, Scope};
-use crate::native::host::{HOST_DESCRIPTION, HOST_NAME};
+use crate::transport::native::host::{HOST_DESCRIPTION, HOST_NAME};
 use crate::{Error, Result};
 use serde_json::json;
 use std::path::{Path, PathBuf};

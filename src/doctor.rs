@@ -8,7 +8,7 @@
 
 use crate::install::native_host::WowView;
 use crate::install::{clients, host_file_path, native_host, Hive, PlanCtx};
-use crate::native::ipc::{self, EndpointProbe};
+use crate::transport::native::ipc::{self, EndpointProbe};
 use crate::Result;
 use std::path::PathBuf;
 

@@ -16,8 +16,6 @@
 //! and thread a [`Config`] through dispatch; the key names and semantics defined here are the
 //! stable contract. This is the "module to store all keys."
 
-pub mod redact;
-
 /// A governance configuration key: a stable dotted name, a human description, and its value under
 /// the built-in "Minimal" preset. Add an entry here (and a field on [`Config`]) for each new
 /// governed behavior. Keeping every key in one static table makes the surface introspectable and

@@ -2,19 +2,21 @@
 //!
 //! Reads newline-delimited JSON-RPC from stdin, handles `initialize` / `tools/list` / `tools/call`,
 //! and writes responses to stdout (one compact JSON object per line). `tools/call` routes through
-//! [`crate::dispatch`] (the v1.0 no-op policy/audit seams) and then forwards to the extension via
-//! the [`Browser`] handle. stdout is reserved for the protocol stream; operational logs go to stderr.
+//! [`crate::governance::dispatch`] (the v1.0 no-op policy/audit seams) and then forwards to the
+//! extension via the [`Browser`] handle. stdout is reserved for the protocol stream; operational
+//! logs go to stderr.
 //!
 //! `tools/call` runs concurrently: each call is spawned on its own task (so a slow or waiting call
 //! never blocks `initialize`, `ping`, or later requests) and every response -- inline or from a
 //! spawned call -- funnels through a single writer task that owns stdout, so lines are never
 //! interleaved mid-write.
 
-use crate::browser::Browser;
-use crate::dispatch;
-use crate::mcp::tools::{is_known_tool, TOOLS_JSON};
-use crate::mcp::types::{text_content, JsonRpcResponse};
-use crate::policy::{self, Config};
+use crate::browser::redact;
+use crate::governance::dispatch;
+use crate::governance::policy::Config;
+use crate::transport::executor::Browser;
+use crate::transport::mcp::tools::{is_known_tool, TOOLS_JSON};
+use crate::transport::mcp::types::{text_content, JsonRpcResponse};
 use crate::{Result, ToolError};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
@@ -259,7 +261,7 @@ async fn handle_tools_call(
         // the result leaves the binary. Other tools pass through untouched.
         Ok(mut result) => {
             if name == "read_page" {
-                policy::redact::apply_to_result(&mut result, config.secrets_redact());
+                redact::apply_to_result(&mut result, config.secrets_redact());
             }
             if let Some(waited) = waited {
                 append_wait_note(&mut result, waited);

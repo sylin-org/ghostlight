@@ -5,7 +5,7 @@
 //! ## Layering (see `docs/research/NORTH-STAR.md`)
 //! v1.0 is the **engine only** -- full capability, no governance overlay. Governance (policy,
 //! audit, domain enforcement) is a *separable* v1.5 overlay that attaches at the seams in
-//! [`dispatch`] without touching tool code. In v1.0 those seams are no-ops (all-open).
+//! [`governance::dispatch`] without touching tool code. In v1.0 those seams are no-ops (all-open).
 //!
 //! ## Dual-role binary
 //! The same executable runs in two roles depending on how it is launched (see [`native`]):
@@ -14,17 +14,21 @@
 
 pub mod browser;
 pub mod debug;
-pub mod dispatch;
 pub mod doctor;
 pub mod error;
+pub mod governance;
 pub mod install;
-pub mod mcp;
-pub mod native;
 pub mod origin;
-pub mod policy;
-pub mod tools;
+pub mod transport;
 
 pub use error::{Error, Result, ToolError};
+
+/// Compatibility facade: transport-owned submodules whose paths external consumers
+/// (integration tests, including the sacred `tool_schema_fidelity` guard) import at the
+/// crate root. Internal code uses the real `crate::transport::...` paths; these aliases
+/// exist only so the move is byte-transparent to callers outside the crate. They are
+/// public API, so they raise no unused-import warning.
+pub use transport::{mcp, native};
 
 /// Initialize operational (debug) logging to **stderr**.
 ///
