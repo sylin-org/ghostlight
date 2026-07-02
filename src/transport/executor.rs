@@ -20,20 +20,43 @@
 //! `hold_state` (or `hold_error`) reply. The dispatch chokepoint (`transport::mcp::server`)
 //! checks [`Browser::held_for`] before any policy or extension traffic; the flag itself
 //! carries no policy meaning here, only a user gesture the chokepoint acts on.
+//!
+//! Panic kill switch (g11, ADR-0018 step 2): the extension signals `{"type":"session_killed"}`
+//! (an event, no `id`) once it has severed its own debugger attachments and is tearing down the
+//! native port. [`Browser`] latches a `killed` flag (idempotent: only the false-to-true
+//! transition acts), fails every pending and future call with the truthful
+//! `"The user ended the browser session (kill switch)"` [`ToolError`], and invokes a
+//! once-per-kill hook so the mcp-server can write the audit session-event record. A fresh
+//! [`Browser::attach`] (only reachable after the extension's own storage-marker gate lets it
+//! reconnect) clears the flag: a fresh session begins only on the user's explicit reconnect.
 
 use crate::debug::DebugSink;
 use crate::transport::native::host;
 use crate::ToolError;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, watch};
 
+/// A kill hook: `Fn`, not `FnOnce`, because it is stored and may (in principle) be invoked more
+/// than once across the `Browser`'s lifetime -- once per kill event, across however many kills
+/// a single mcp-server process observes (each preceded by a fresh reconnect that clears the
+/// flag). The false-to-true transition guard in [`Browser::route_reply`] is what makes each
+/// individual kill fire it exactly once.
+type KillHook = Box<dyn Fn() + Send + Sync>;
+
 /// How long to wait for the extension to answer a single tool call before giving up.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The truthful, hop-attributed error for every call while [`Browser::is_killed`] is true
+/// (g11): the user severed the session; never a generic connection failure.
+fn kill_error() -> ToolError {
+    ToolError::extension("The user ended the browser session (kill switch)")
+        .next_step("ask the user to reconnect from the Browser MCP extension popup, then retry")
+}
 
 /// Delivered to a waiting caller: `Ok(result)` or `Err(hop-attributed tool error)`.
 type CallResult = std::result::Result<Value, ToolError>;
@@ -66,6 +89,12 @@ pub struct Browser {
     /// Take-the-wheel hold (g10): `None` while not held; `Some(t)` since the instant the user
     /// engaged it. Process memory only -- never persisted, never cleared by a disconnect.
     held: Arc<Mutex<Option<Instant>>>,
+    /// Panic kill switch (g11): `true` once the extension has reported the user ended the
+    /// session, until the next [`Browser::attach`] (a fresh, explicit reconnect) clears it.
+    killed: Arc<AtomicBool>,
+    /// The kill hook (g11), invoked exactly once per false-to-true `killed` transition. `None`
+    /// until [`Browser::on_session_killed`] registers one.
+    kill_hook: Arc<Mutex<Option<KillHook>>>,
 }
 
 impl Browser {
@@ -85,6 +114,8 @@ impl Browser {
             connected: Arc::new(watch::channel(false).0),
             debug,
             held: Arc::new(Mutex::new(None)),
+            killed: Arc::new(AtomicBool::new(false)),
+            kill_hook: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -129,6 +160,20 @@ impl Browser {
         now_held
     }
 
+    /// True once the extension has reported the user ended the session (g11), until the next
+    /// [`Browser::attach`] (a fresh, explicit reconnect) clears it.
+    pub fn is_killed(&self) -> bool {
+        self.killed.load(Ordering::SeqCst)
+    }
+
+    /// Register the hook invoked exactly once each time the extension reports the user ended
+    /// the session (the `session_killed` event, g11). The mcp-server role uses this to write
+    /// the kill audit session-event record. Registering a second hook replaces the first
+    /// (single-consumer by construction: one `Governance` per session).
+    pub fn on_session_killed(&self, hook: impl Fn() + Send + Sync + 'static) {
+        *self.kill_hook.lock().unwrap() = Some(Box::new(hook));
+    }
+
     /// True while a native-host / extension is connected.
     pub fn is_connected(&self) -> bool {
         self.outgoing.lock().unwrap().is_some()
@@ -161,6 +206,15 @@ impl Browser {
     /// `cdp`, `page`, or untagged and attributed to the `extension` hop), a mid-call disconnect,
     /// or a timeout.
     pub async fn call(&self, tool: &str, args: &Value) -> std::result::Result<Value, ToolError> {
+        // The killed check precedes everything else, including the pending-map insert and the
+        // not-connected check (g11 constraint 12): after a kill the port drops and `outgoing`
+        // becomes `None`, so the generic not-connected error would otherwise win by accident.
+        // The binary knows the real cause; the engine is truthful. No debug tool_begin/tool_end
+        // pairing here: the call never began in any trackable sense.
+        if self.killed.load(Ordering::SeqCst) {
+            return Err(kill_error());
+        }
+
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id.clone(), tx);
@@ -252,6 +306,11 @@ impl Browser {
             }
             *outgoing = Some(tx);
         }
+        // A new native-host stream becoming the live session means the extension reconnected --
+        // which, because of the extension's own storage-marker gate, only happens after the
+        // user's explicit reconnect or a full browser restart (g11). Either way that is a fresh
+        // session: clear the kill flag.
+        self.killed.store(false, Ordering::SeqCst);
         self.debug.set_connected(true);
         self.connected.send_replace(true);
 
@@ -293,9 +352,10 @@ impl Browser {
         AttachOutcome::Detached
     }
 
-    /// Route one framed message from the extension: either a hold request (g10:
-    /// `get_hold` / `set_hold` / `toggle_hold`, answered here and returned early) or a reply
-    /// to a waiting tool caller (by id). Messages without an id are events.
+    /// Route one framed message from the extension: the kill-switch event (g11:
+    /// `session_killed`, no `id`), a hold request (g10: `get_hold` / `set_hold` /
+    /// `toggle_hold`, answered here and returned early), or a reply to a waiting tool caller
+    /// (by id). Messages without an id are otherwise events.
     fn route_reply(&self, payload: &[u8]) {
         let Ok(reply) = serde_json::from_slice::<Value>(payload) else {
             tracing::warn!("dropping unparseable extension reply");
@@ -303,6 +363,12 @@ impl Browser {
         };
 
         let msg_type = reply.get("type").and_then(Value::as_str);
+
+        if reply.get("id").is_none() && msg_type == Some("session_killed") {
+            self.handle_session_killed();
+            return;
+        }
+
         if let (Some(id), Some(kind @ ("get_hold" | "set_hold" | "toggle_hold"))) =
             (reply.get("id").and_then(Value::as_str), msg_type)
         {
@@ -370,6 +436,22 @@ impl Browser {
         };
         if let Some(tx) = self.outgoing.lock().unwrap().as_ref() {
             let _ = tx.send(framed);
+        }
+    }
+
+    /// Handle the `session_killed` event (g11): exactly once per false-to-true transition
+    /// (`swap` makes duplicate frames on the same connection harmless), fail every pending
+    /// call with the kill error, then invoke the registered hook. Handling still sets the flag
+    /// and drains pending calls even if no hook is registered.
+    fn handle_session_killed(&self) {
+        if self.killed.swap(true, Ordering::SeqCst) {
+            return; // already handled; a duplicate frame is a no-op
+        }
+        for (_, tx) in self.pending.lock().unwrap().drain() {
+            let _ = tx.send(Err(kill_error()));
+        }
+        if let Some(hook) = self.kill_hook.lock().unwrap().as_ref() {
+            hook();
         }
     }
 }
@@ -670,5 +752,187 @@ mod tests {
             browser.held_for().is_some(),
             "the hold must survive the extension disconnecting"
         );
+    }
+
+    /// Test 1a (g11 spec section 9): the kill event fails an in-flight call with the exact
+    /// section-7 error, and the extension never sees a reply.
+    #[tokio::test]
+    async fn kill_fails_in_flight_calls() {
+        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
+        let browser = Browser::new();
+        let attached = browser.clone();
+        tokio::spawn(async move { attached.attach(browser_side).await });
+        wait_connected(&browser).await;
+
+        let caller = browser.clone();
+        let call_task = tokio::spawn(async move { caller.call("navigate", &json!({})).await });
+
+        let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
+        let _: Value = serde_json::from_slice(&req).unwrap();
+        host::write_message(
+            &mut ext_side,
+            &serde_json::to_vec(&json!({ "type": "session_killed" })).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let err = call_task.await.unwrap().unwrap_err();
+        let text = err.to_string();
+        assert!(text.starts_with("[hop: extension]"), "{text}");
+        assert!(
+            text.contains("The user ended the browser session (kill switch)"),
+            "{text}"
+        );
+        assert!(browser.is_killed());
+    }
+
+    /// Test 1b: after the kill, a new call fails immediately with the same message -- no frame
+    /// sent to the extension, no waiting on `TOOL_TIMEOUT`.
+    #[tokio::test]
+    async fn kill_fails_subsequent_calls_fast() {
+        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
+        let browser = Browser::new();
+        let attached = browser.clone();
+        tokio::spawn(async move { attached.attach(browser_side).await });
+        wait_connected(&browser).await;
+
+        host::write_message(
+            &mut ext_side,
+            &serde_json::to_vec(&json!({ "type": "session_killed" })).unwrap(),
+        )
+        .await
+        .unwrap();
+        // Wait for the event to be routed before issuing the next call.
+        for _ in 0..200 {
+            if browser.is_killed() {
+                break;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
+        assert!(browser.is_killed());
+
+        let result =
+            tokio::time::timeout(Duration::from_secs(1), browser.call("navigate", &json!({})))
+                .await
+                .expect("a killed call must fail immediately, not time out");
+        let text = result.unwrap_err().to_string();
+        assert!(
+            text.contains("The user ended the browser session (kill switch)"),
+            "{text}"
+        );
+    }
+
+    /// Test 1c: the kill error beats the not-connected error even after the stream itself
+    /// closes.
+    #[tokio::test]
+    async fn kill_error_outlives_the_disconnect() {
+        let (browser_side, ext_side) = tokio::io::duplex(64 * 1024);
+        let browser = Browser::new();
+        let attached = browser.clone();
+        let attach_task = tokio::spawn(async move { attached.attach(browser_side).await });
+        wait_connected(&browser).await;
+
+        let mut ext_side = ext_side;
+        host::write_message(
+            &mut ext_side,
+            &serde_json::to_vec(&json!({ "type": "session_killed" })).unwrap(),
+        )
+        .await
+        .unwrap();
+        drop(ext_side);
+        let _ = attach_task.await.unwrap();
+
+        let err = browser.call("navigate", &json!({})).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("The user ended the browser session (kill switch)"),
+            "{err}"
+        );
+    }
+
+    /// Test 1d: a fresh attach clears the kill; a call round-trips normally afterward.
+    #[tokio::test]
+    async fn fresh_attach_clears_the_kill() {
+        let (first_side, mut first_ext) = tokio::io::duplex(64 * 1024);
+        let browser = Browser::new();
+        let attached = browser.clone();
+        let first_attach = tokio::spawn(async move { attached.attach(first_side).await });
+        wait_connected(&browser).await;
+
+        host::write_message(
+            &mut first_ext,
+            &serde_json::to_vec(&json!({ "type": "session_killed" })).unwrap(),
+        )
+        .await
+        .unwrap();
+        for _ in 0..200 {
+            if browser.is_killed() {
+                break;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
+        assert!(browser.is_killed());
+
+        // Tear down the first connection (a real "session ended") and wait for the slot to
+        // free before attaching a fresh one; a stray attach while a session still holds the
+        // slot is rejected without touching the kill flag.
+        drop(first_ext);
+        let _ = first_attach.await.unwrap();
+
+        let (second_side, mut second_ext) = tokio::io::duplex(64 * 1024);
+        let attached = browser.clone();
+        tokio::spawn(async move { attached.attach(second_side).await });
+        wait_connected(&browser).await;
+        assert!(
+            !browser.is_killed(),
+            "a fresh attach must clear the kill flag"
+        );
+
+        let fake_ext = tokio::spawn(async move {
+            let req = host::read_message(&mut second_ext).await.unwrap().unwrap();
+            let v: Value = serde_json::from_slice(&req).unwrap();
+            let reply = json!({ "id": v["id"], "type": "tool_response", "result": { "ok": true } });
+            host::write_message(&mut second_ext, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+        });
+        let result = browser.call("navigate", &json!({})).await.unwrap();
+        assert_eq!(result, json!({ "ok": true }));
+        fake_ext.await.unwrap();
+    }
+
+    /// Test 1e: the hook fires exactly once even if two kill frames arrive on the same
+    /// connection.
+    #[tokio::test]
+    async fn kill_hook_fires_exactly_once_per_transition() {
+        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
+        let browser = Browser::new();
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let hook_count = Arc::clone(&count);
+        browser.on_session_killed(move || {
+            hook_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let attached = browser.clone();
+        tokio::spawn(async move { attached.attach(browser_side).await });
+        wait_connected(&browser).await;
+
+        for _ in 0..2 {
+            host::write_message(
+                &mut ext_side,
+                &serde_json::to_vec(&json!({ "type": "session_killed" })).unwrap(),
+            )
+            .await
+            .unwrap();
+        }
+        for _ in 0..200 {
+            if count.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+                break;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
+        // Give a possible (incorrect) second invocation a moment to land before asserting.
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

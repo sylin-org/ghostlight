@@ -15,8 +15,8 @@ current task prompt, then continue. Never rely on remembering earlier work; re-r
   landed. Phase A (foundations) is COMPLETE. `g05` (r/w classification), `g09` (manifest
   identity), `g06` (audit flight recorder), `g07` (domain matcher), `g08` (sacred domains,
   the FIRST real enforcement path), `g10` (take-the-wheel pause, the FIRST task touching
-  `extension/`) landed.
-- NEXT TASK: Phase C, task `g11` (`docs/tasks/stage-2/g11-panic-kill-switch.md`).
+  `extension/`), `g11` (panic kill switch) landed. Phase C is COMPLETE.
+- NEXT TASK: Phase D, task `g12` (`docs/tasks/stage-2/g12-manifest-engine.md`).
 - Order authority: `PLAN.md` (Phase A -> B -> C -> D). Full linear sequence is in `BOOTSTRAP.md`.
 - Reconciliation: `RECONCILIATION.md` is AUTHORITATIVE over any conflicting detail in a `g`-doc.
 - Invariants that must hold after every task: all-open byte-identical (the all-open golden test +
@@ -1114,6 +1114,150 @@ current task prompt, then continue. Never rely on remembering earlier work; re-r
   wire protocol, the dispatch-chokepoint ordering, the audit marker) without a browser;
   only the actual on-screen popup/badge/shortcut behavior and the literal
   reload-survives-a-worker-restart property need a human's eyes.
+
+### g11 panic kill switch: sever the session in one gesture -- 2026-07-02
+- Commit: (see this task's commit)
+- Files touched: `src/governance/ports.rs` (new `SessionEventRecord` type; `AuditSink` grew a
+  second method `record_session_event`; `NullSink` implements it; 3 new tests);
+  `src/governance/audit/mod.rs` (`Recorder` implements `record_session_event` via a shared
+  `write_serialized` helper factored out of the existing `record`; 1 new test);
+  `src/governance/dispatch.rs` (new `Governance::record_session_killed`; 1 new test);
+  `src/transport/executor.rs` (`Browser` grew `killed: Arc<AtomicBool>` +
+  `kill_hook: Arc<Mutex<Option<KillHook>>>`, `is_killed`/`on_session_killed`, the killed-check
+  as the first check in `call`, `session_killed` recognition in `route_reply` before the
+  id-less early return, a kill reset at the top of `attach`; a private `kill_error()`
+  builder; 5 new tests); `src/transport/mcp/server.rs` (the kill hook registered once in
+  `run`, right after `governance` is constructed); `src/transport/native/messages.rs` (the
+  `session_killed` event documented, additive); `extension/service-worker.js` (the
+  `session_killed` storage marker and gated `connect()`, `killSession()`/
+  `sweepDetachAll()`, the tool_request refusal while killed, startup recovery via a new
+  `init()`, and `GET_SESSION_STATE`/`KILL_SESSION`/`RECONNECT_SESSION` popup-message
+  handling); `extension/popup.html` + `extension/popup.js` (a second, visually distinct
+  section: connection/attached-tab status, and a button that is `kill-button`/
+  `End session now` or `reconnect-button`/`Start new session` depending on state); new
+  `tests/all_open_golden.rs`'s `NullAuditSink` grew the same trait method (compile-only
+  change, no new test); `tests/audit_recorder.rs` (1 new integration test).
+  `extension/manifest.json` was NOT touched this task: g10 already added the `action` key,
+  and this task adds no new manifest keys or permissions.
+- Summary: a one-click panic control (ADR-0018 step 2, alongside sacred domains and pause),
+  distinct from and never sharing a control with the take-the-wheel pause (g10). The
+  extension's `End session now` button persists a `chrome.storage.session` marker FIRST
+  (so a service-worker death mid-kill is completed by startup recovery: `init()` re-runs
+  the debugger-detach sweep on every worker start while the marker is set, without ever
+  reconnecting), signals the binary over the native channel while the port is still open,
+  detaches every debugger attachment (the in-memory map, then a
+  `chrome.debugger.getTargets()` sweep for attachments a prior worker instance forgot),
+  clears in-memory session state, then tears down the port -- never closing, ungrouping,
+  or navigating any tab. `Browser::route_reply` recognizes the `session_killed` event
+  (idempotent: only the false-to-true transition acts), fails every pending call and every
+  subsequent `Browser::call` with the exact truthful `[hop: extension] The user ended the
+  browser session (kill switch). Next step: ask the user to reconnect from the Browser MCP
+  extension popup, then retry.`, and invokes a once-per-kill hook that writes exactly one
+  audit session-event record (`event: "session_killed"`, none of the tool-call fields).
+  Recovery is explicit only: the extension refuses every reconnect attempt (keepalive
+  alarm, `onDisconnect` retry, worker restart) while the storage marker is set, and a
+  fresh `Browser::attach` clears the binary-side `killed` flag only because it is only
+  reachable after the user's own `Start new session` click removes that marker.
+- Deviations from the g-doc per RECONCILIATION.md / the module-placement map (paths
+  translated post-A1/A5/G06/G08/G10; no explicit g11 row in RECONCILIATION.md, so the
+  g06/g08/g10 placement precedents apply):
+  1. **The session-event record is a NEW type, `SessionEventRecord`, in the EXISTING
+     `governance/ports.rs`** (not a new file), alongside `AuditRecord` -- one definition
+     site for every governance-core wire type, per the same principle G06/G10 already
+     applied. Since its shape is deliberately different (an `event` discriminator, none of
+     `tool`/`action`/`rw`/`domain`/`decision`/`grant_id`/`denial_id`/`duration_ms`), it is a
+     genuinely separate struct, not a variant squeezed into `AuditRecord` with those eight
+     fields forced to `null`/`0` -- doing that would let a future reader mistake a session
+     event for a degenerate tool-call record.
+  2. **`AuditSink` grew a SECOND method, `record_session_event`, rather than a single
+     `record(&self, record: &Record)` taking an enum of the two shapes.** An enum wrapping
+     both record types would force every existing call site (`Governance::record_call`/
+     `record_deny`/`record_held`) to wrap in a variant for no benefit, and would make the
+     "no tool-call fields on a session event" invariant a runtime discipline instead of a
+     compile-time one (the two structs' very different field sets stay statically
+     separate). `Recorder`'s two trait methods share a private `write_serialized` helper
+     (generic over `impl Serialize`) so the actual file/stderr framing logic exists exactly
+     once.
+  3. **The kill hook is a plain `Fn() + Send + Sync + 'static` closure capturing an
+     `Arc<Governance>`, registered directly on `Browser` from `transport/mcp/server.rs`
+     (the composition root)** -- the same "injection at construction, orchestration at the
+     composition root" shape G06/G08/G10 already established for `classify`/
+     `domain_pattern_valid`/the sacred check, now applied to a callback instead of a bare
+     `fn` pointer (a closure is required here since it must capture the session's actual
+     `Governance` instance, not just point at a stateless function). `Browser`
+     (`transport::executor`) never names `Governance` (`governance::dispatch`) in its own
+     type signature, only `impl Fn() + Send + Sync + 'static` -- so the dependency edge
+     this closure encodes is `transport -> governance` (server.rs's composition-root
+     wiring), never `governance -> transport`, which stays forbidden.
+  4. **The doc's "async audit writer -> mpsc channel" fallback plan was not needed.**
+     `AuditSink::record`/`record_session_event` are synchronous (matching G06's original
+     design), so `Governance::record_session_killed` and the hook that calls it run
+     synchronously and directly; no channel or spawned drain task was added.
+  5. **`connect()`'s existing three callers (top-level startup, the keepalive alarm, the
+     `onDisconnect` retry timer) needed NO changes of their own** beyond `connect()` itself
+     becoming `async` (the doc's own point: none of them need to await it). The one NEW
+     top-level wrapper, `init()`, exists only because plain startup ALSO needs the
+     detach-sweep-then-return branch when a kill is already in force (a plain `connect()`
+     call would correctly refuse to open the port in that case via its own storage-marker
+     guard, but would never run the sweep) -- `init()` is not a general `connect()`
+     replacement, it is the one-time startup decision between "finish an interrupted kill"
+     and "connect normally."
+  6. **One addition beyond the doc's literal text: `updateHoldBadge(null)` at the end of
+     `killSession()`.** The doc's own g10 `onDisconnect` handler already clears the hold
+     badge to "unknown" on a disconnect, but `killSession()`'s own port teardown
+     (`nativePort.disconnect()`) does NOT fire that handler (Chrome does not raise
+     `onDisconnect` for a self-initiated disconnect, exactly as the doc notes for the
+     reconnect-timer concern) -- so without this call the toolbar badge would show a stale
+     hold state after a kill. Added for the same truthful-UI reason g10's own disconnect
+     handler exists; not requested by g11's own text, and not a shared control (it renders
+     a DIFFERENT widget's state, the pause badge, reacting to the fact that the session
+     ended).
+- Verification: `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings`
+  clean. `cargo test` green (224 lib unit tests, up from 215: +3 in `governance::ports
+  ::tests` -- `SessionEventRecord`'s field order with none of the eight tool-call fields
+  present, the null sink's session-event no-op, `AuditSink`'s object-safety check extended
+  to both methods; +1 in `governance::audit::tests` -- a session-event line appended
+  alongside tool-call lines in the same file; +1 in `governance::dispatch::tests` --
+  `record_session_killed` produces a session event carrying the captured client and
+  nothing else; +5 in `transport::executor::tests` -- an in-flight call failed by a kill
+  frame with the exact section-7 text, a subsequent call failing within a 1-second bound
+  (never the 60s `TOOL_TIMEOUT`), the kill error still winning after the stream itself
+  closes, a fresh attach (after tearing down and reconnecting) clearing the flag and
+  round-tripping a normal call, and the hook firing exactly once across two kill frames on
+  one connection; all other suites unchanged and green: `tests/all_open_golden.rs` 3
+  (its `NullAuditSink` updated for the grown trait, no behavior change),
+  `tests/architecture.rs` 4 -- confirms the grown `governance/ports.rs`/
+  `governance/audit/mod.rs`/`governance/dispatch.rs` introduce zero forbidden edges,
+  `tests/audit_recorder.rs` 2 (up from 1: the new end-to-end kill-hook-to-audit-file
+  test, driving a real duplex connection through `Browser::on_session_killed` exactly as
+  `server::run` wires it), `tests/config_schema_golden.rs` 5 unchanged -- g11 registers no
+  config key, `tests/mcp_protocol.rs` 4 UNCHANGED -- proves the kill-never-engaged path
+  stays byte-identical end to end over stdio, `tests/tool_schema_fidelity.rs` 6 unchanged
+  -- g11 advertises no tool and filters nothing from `tools/list`. `git status --short`
+  confirmed the touched-file set matches this entry's list exactly, with NO diff to
+  `Cargo.toml`/`Cargo.lock` (no new dependency), `extension/manifest.json`,
+  `extension/content.js`, `extension/agent-visual-indicator.js`,
+  `src/transport/native/host.rs`, `src/transport/native/ipc.rs`, `src/install/`,
+  `src/main.rs`, `src/debug.rs`, or `src/transport/mcp/schemas/tools.json` (`git diff
+  --stat` confirmed empty for all of these). ASCII scan (`rg -n "[^\x00-\x7F]"`) clean on
+  every touched/new file. `node --check` confirmed `service-worker.js` and `popup.js` stay
+  syntactically valid after this task's edits; `manifest.json` still parses as JSON (no
+  Chrome available in this environment to load the unpacked extension itself).
+- Browser checks queued: `BROWSER-TESTS.md` items `g11-1` through `g11-4`, covering this
+  task's own Verification steps 3 (mid-flight kill: infobar disappears, in-flight and
+  subsequent calls get the exact error text immediately, popup shows the killed view), 5
+  (the mid-kill service-worker-restart guarantee: kill, force the worker down, confirm it
+  stays killed across the restart and the keepalive alarm never reconnects it), 6
+  (explicit recovery via `Start new session`), and 7 (kill with the binary down, then
+  confirm on MCP client restart that calls fail not-connected until reconnect) -- ALL of
+  these need a live Chrome with the extension loaded and a live Claude Code connection
+  with an actual debugger-attached tab, which this unattended pass cannot drive. Step 8
+  (the all-open invariant with the kill button never touched) is already proven by
+  `tests/mcp_protocol.rs` staying unchanged and green. The automated suite proves every
+  binary-side state transition, the wire protocol, the dispatch-chokepoint ordering
+  (killed-check precedes not-connected), and the audit marker without a browser; only the
+  actual debugger-infobar disappearance, the real service-worker lifecycle event, and the
+  end-to-end popup interaction need a human's eyes.
 
 ## Reminders before running BROWSER-TESTS.md
 

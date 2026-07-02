@@ -157,6 +157,32 @@ pub struct AuditRecord {
     pub held: bool,
 }
 
+/// A session EVENT record (shared format doc section 6, g11): additive to the tool-call
+/// [`AuditRecord`] stream and deliberately distinguishable from it -- an `event` field, and
+/// NONE of `tool`/`action`/`rw`/`domain`/`decision`/`grant_id`/`denial_id`/`duration_ms`. The
+/// panic kill switch is the first (and, today, only) producer, with `event: "session_killed"`.
+/// Field ORDER is part of the format; `serde_json` is built with `preserve_order`. Downstream
+/// consumers that expect tool-call records (`policy simulate`, the activity ledger) must skip
+/// any line carrying an `event` field.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SessionEventRecord {
+    /// UUID v4, lowercase, hyphenated. Unique per record.
+    pub event_id: String,
+    /// RFC 3339 UTC timestamp, millisecond precision, e.g. `2026-07-02T14:32:15.003Z`.
+    pub ts: String,
+    /// From the active manifest's `identity` block; always `None` until the manifest task
+    /// (g12) lands.
+    pub identity: Option<Identity>,
+    /// MCP client identity from the `initialize` request's `clientInfo`; `None` if the client
+    /// did not provide it. Captured once per session.
+    pub client: Option<ClientInfo>,
+    /// The event discriminator. Always the literal `"session_killed"` today (g11); later
+    /// session events, if any, would add their own string here, never a new record shape.
+    pub event: &'static str,
+    /// Active manifest identity; always `None` until the manifest task (g12) wires it in.
+    pub manifest: Option<crate::governance::manifest::identity::ManifestIdentity>,
+}
+
 // --- The core decision types (serde is load-bearing) ---
 
 /// A generic governing resource, so the decision core stays domain-agnostic. The browser
@@ -261,6 +287,10 @@ pub trait ResourceResolver {
 pub trait AuditSink: Send + Sync {
     /// Record one audit line. Must not panic and must not block the call path meaningfully.
     fn record(&self, record: &AuditRecord);
+    /// Record one session-event line (g11: the panic kill switch is the first producer). Same
+    /// destination and framing as [`Self::record`]; a distinct method because the two record
+    /// shapes are deliberately different types, not a variant of one enum.
+    fn record_session_event(&self, record: &SessionEventRecord);
 }
 
 // --- Zero-policy implementations ---
@@ -284,6 +314,7 @@ pub struct NullSink;
 
 impl AuditSink for NullSink {
     fn record(&self, _record: &AuditRecord) {}
+    fn record_session_event(&self, _record: &SessionEventRecord) {}
 }
 
 #[cfg(test)]
@@ -358,6 +389,52 @@ mod tests {
     fn null_sink_record_is_a_noop() {
         let sink = NullSink;
         sink.record(&sample_audit_record("navigate"));
+    }
+
+    /// A minimal, otherwise-null `SessionEventRecord` for tests that only need a concrete value.
+    fn sample_session_event_record() -> SessionEventRecord {
+        SessionEventRecord {
+            event_id: "00000000-0000-4000-8000-000000000000".to_string(),
+            ts: "2026-07-02T00:00:00.000Z".to_string(),
+            identity: None,
+            client: None,
+            event: "session_killed",
+            manifest: None,
+        }
+    }
+
+    #[test]
+    fn null_sink_record_session_event_is_a_noop() {
+        let sink = NullSink;
+        sink.record_session_event(&sample_session_event_record());
+    }
+
+    #[test]
+    fn session_event_record_serializes_all_fields_in_order_with_no_tool_call_fields() {
+        let record = sample_session_event_record();
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
+        let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys,
+            vec!["event_id", "ts", "identity", "client", "event", "manifest"]
+        );
+        assert_eq!(v["event"], "session_killed");
+        for field in [
+            "tool",
+            "action",
+            "rw",
+            "domain",
+            "decision",
+            "grant_id",
+            "denial_id",
+            "duration_ms",
+        ] {
+            assert!(
+                v.get(field).is_none(),
+                "{field} must not appear on a session event record"
+            );
+        }
     }
 
     #[test]
@@ -441,6 +518,7 @@ mod tests {
     fn audit_sink_is_object_safe() {
         let sink: Box<dyn AuditSink> = Box::new(NullSink);
         sink.record(&sample_audit_record("read_page"));
+        sink.record_session_event(&sample_session_event_record());
     }
 
     #[test]

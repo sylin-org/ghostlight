@@ -54,3 +54,17 @@
 //! binary never pushes an unsolicited `hold_state` or `hold_error`. The native-host relays these
 //! messages verbatim, exactly like every other frame; only the mcp-server
 //! ([`crate::transport::executor::Browser`]) interprets them.
+//!
+//! ## Panic kill switch (g11, ADR-0018 step 2)
+//!
+//! ## extension -> binary (event; no `id` -- it is an event, not a reply)
+//! ```json
+//! { "type": "session_killed" }
+//! ```
+//!
+//! Sent once the extension has detached its own debugger attachments (or begun to; the marker
+//! that guarantees the detach completes lives in the extension's own storage, not on the wire)
+//! and is tearing down the native port. The mcp-server marks the session killed, fails every
+//! in-flight and subsequent tool call with a truthful hop-attributed error until a fresh
+//! native-host connection attaches, and writes one audit session-event record. No framing
+//! change; the native-host relays this event verbatim like any other frame.

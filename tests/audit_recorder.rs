@@ -91,3 +91,89 @@ fn a_recorded_call_lands_as_one_wellformed_jsonl_line() {
 
     std::fs::remove_file(&path).ok();
 }
+
+/// g11 test 2 (spec section 9): the kill hook, registered on `Browser` exactly as
+/// `transport::mcp::server::run` registers it, writes exactly one well-formed session-event
+/// audit line when the extension signals `session_killed` over a real duplex connection.
+#[test]
+fn session_killed_writes_one_session_event_record() {
+    let path = temp_path("session-killed");
+    let _ = std::fs::remove_file(&path);
+
+    let recorder = browser_mcp::governance::audit::Recorder::to_file(path.clone());
+    let governance = Arc::new(Governance::all_open(
+        Arc::new(recorder) as Arc<dyn AuditSink>,
+        classify::classify,
+    ));
+    governance.set_client("claude-code", "2.1.0");
+
+    let browser = browser_mcp::transport::executor::Browser::new();
+    {
+        let governance = Arc::clone(&governance);
+        browser.on_session_killed(move || governance.record_session_killed());
+    }
+
+    let rt = tokio::runtime::Runtime::new().expect("build a tokio runtime");
+    rt.block_on(async {
+        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
+        let attached = browser.clone();
+        tokio::spawn(async move {
+            let _ = attached.attach(browser_side).await;
+        });
+        for _ in 0..200 {
+            if browser.is_connected() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(browser.is_connected(), "browser never reported connected");
+
+        let event = serde_json::json!({ "type": "session_killed" });
+        browser_mcp::native::host::write_message(
+            &mut ext_side,
+            &serde_json::to_vec(&event).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        for _ in 0..200 {
+            if browser.is_killed() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(browser.is_killed(), "the kill event was never routed");
+    });
+
+    let content = std::fs::read_to_string(&path).expect("audit file exists");
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines.len(), 1, "exactly one session-event line");
+
+    let rec: Value = serde_json::from_str(lines[0]).expect("line is a JSON object");
+    assert_eq!(rec["event"], "session_killed");
+    assert_eq!(rec["client"]["name"], "claude-code");
+    let event_id = rec["event_id"].as_str().expect("event_id is a string");
+    assert_eq!(event_id.len(), 36, "event_id: {event_id}");
+    let ts = rec["ts"].as_str().expect("ts is a string");
+    chrono::DateTime::parse_from_rfc3339(ts).expect("ts parses as rfc3339");
+    for field in ["identity", "manifest"] {
+        assert!(rec[field].is_null(), "{field} must be null");
+    }
+    for field in [
+        "tool",
+        "action",
+        "rw",
+        "domain",
+        "decision",
+        "grant_id",
+        "denial_id",
+        "duration_ms",
+    ] {
+        assert!(
+            rec.get(field).is_none(),
+            "{field} must not appear on a session event record"
+        );
+    }
+
+    std::fs::remove_file(&path).ok();
+}

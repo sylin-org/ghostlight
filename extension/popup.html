@@ -34,6 +34,26 @@
     color: #666;
     margin-top: 10px;
   }
+  hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 14px 0;
+  }
+  #session-status {
+    font-size: 13px;
+    margin-bottom: 10px;
+  }
+  #session-button {
+    width: 100%;
+    padding: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #session-button.kill {
+    background: #b91c1c;
+    color: #fff;
+    border: 1px solid #7f1d1d;
+  }
 </style>
 </head>
 <body>
@@ -43,6 +63,9 @@
   <div id="shortcut-note">
     Keyboard shortcut: Alt+Shift+P by default; change it at chrome://extensions/shortcuts
   </div>
+  <hr>
+  <div id="session-status">Loading...</div>
+  <button id="session-button" disabled>Loading...</button>
   <script src="popup.js"></script>
 </body>
 </html>

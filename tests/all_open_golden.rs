@@ -63,6 +63,7 @@ fn tools_list_is_byte_stable_through_the_move() {
 struct NullAuditSink;
 impl AuditSink for NullAuditSink {
     fn record(&self, _record: &AuditRecord) {}
+    fn record_session_event(&self, _record: &browser_mcp::governance::ports::SessionEventRecord) {}
 }
 
 fn no_classification(

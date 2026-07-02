@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use crate::governance::ports::{
     AuditRecord, AuditSink, ClientInfo, Decision, DecisionRequest, Denial, EffectiveMode,
-    GoverningResource, PolicyDecisionPoint, RwClass,
+    GoverningResource, PolicyDecisionPoint, RwClass, SessionEventRecord,
 };
 
 /// How long a take-the-wheel hold may last before [`hold_message`] appends the resume hint
@@ -290,6 +290,25 @@ impl Governance {
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
+
+    /// Record the panic kill switch's session event (g11): the user severed the session. A
+    /// session event, not a tool call -- carries no `tool`/`action`/`rw`/`domain`/`decision`/
+    /// `grant_id`/`denial_id`/`duration_ms`, only the shared `event_id`/`ts`/`identity`/
+    /// `client`/`manifest` fields plus `event: "session_killed"`. Called from the
+    /// `Browser::on_session_killed` hook, registered once at session startup; the extension
+    /// signals the event at most once per kill (the flag transition is idempotent), so this
+    /// fires at most once per kill too.
+    pub fn record_session_killed(&self) {
+        let record = SessionEventRecord {
+            event_id: uuid::Uuid::new_v4().to_string(),
+            ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            identity: None,
+            client: self.current_client(),
+            event: "session_killed",
+            manifest: None,
+        };
+        self.audit.record_session_event(&record);
+    }
 }
 
 #[cfg(test)]
@@ -312,6 +331,9 @@ mod tests {
         fn record(&self, _record: &AuditRecord) {
             self.count.fetch_add(1, Ordering::SeqCst);
         }
+        fn record_session_event(&self, _record: &SessionEventRecord) {
+            self.count.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     /// A sink that keeps every record, so tests can assert on the actual built fields (`rw`,
@@ -319,10 +341,17 @@ mod tests {
     #[derive(Default)]
     struct CapturingAuditSink {
         records: Mutex<Vec<AuditRecord>>,
+        session_events: Mutex<Vec<SessionEventRecord>>,
     }
     impl AuditSink for CapturingAuditSink {
         fn record(&self, record: &AuditRecord) {
             self.records
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(record.clone());
+        }
+        fn record_session_event(&self, record: &SessionEventRecord) {
+            self.session_events
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(record.clone());
@@ -336,6 +365,15 @@ mod tests {
                 .last()
                 .cloned()
                 .expect("at least one record was captured")
+        }
+
+        fn last_session_event(&self) -> SessionEventRecord {
+            self.session_events
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .last()
+                .cloned()
+                .expect("at least one session event was captured")
         }
     }
 
@@ -517,5 +555,18 @@ mod tests {
 
         let plain = hold_message("read_page", None, Duration::from_secs(0));
         assert!(plain.contains("'read_page' call"));
+    }
+
+    #[test]
+    fn record_session_killed_writes_a_session_event_with_no_tool_call_fields() {
+        let sink = Arc::new(CapturingAuditSink::default());
+        let g = Governance::all_open(sink.clone(), no_classification);
+        g.set_client("claude-code", "2.1.0");
+        g.record_session_killed();
+        let rec = sink.last_session_event();
+        assert_eq!(rec.event, "session_killed");
+        assert_eq!(rec.client.as_ref().unwrap().name, "claude-code");
+        assert_eq!(rec.identity, None);
+        assert_eq!(rec.manifest, None);
     }
 }

@@ -1,6 +1,7 @@
 //! The audit flight recorder (ADR-0018 step 1). Records are written by the binary only; the
-//! extension never logs (SPEC section 7 trust boundary). One record per tool call; write
-//! failures never break tool calls but are reported via `tracing`.
+//! extension never logs (SPEC section 7 trust boundary). One record per tool call, plus one
+//! session-EVENT record per session event (g11: the panic kill switch); write failures never
+//! break tool calls but are reported via `tracing`.
 //!
 //! [`Recorder`] is the concrete [`crate::governance::ports::AuditSink`] impl held by the
 //! [`crate::governance::dispatch::Governance`] facade. Its destination (file, stderr, or
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
 
 use crate::governance::config::Config;
-use crate::governance::ports::{AuditRecord, AuditSink};
+use crate::governance::ports::{AuditRecord, AuditSink, SessionEventRecord};
 
 /// Where a `Recorder`'s lines currently go, or `None` when audit is disabled. Disabled
 /// creates no file and holds no path.
@@ -106,15 +107,19 @@ impl Recorder {
     }
 }
 
-impl AuditSink for Recorder {
-    fn record(&self, record: &AuditRecord) {
+impl Recorder {
+    /// Serialize and append one line to the resolved destination, or do nothing when disabled.
+    /// Shared by [`AuditSink::record`] and [`AuditSink::record_session_event`]: same framing,
+    /// same failure handling (a write failure never breaks the call path; it is reported via
+    /// `tracing::warn!` and swallowed), different record TYPES.
+    fn write_serialized(&self, record: &impl serde::Serialize, kind: &str) {
         let Some(inner) = &*self.inner.lock().unwrap_or_else(PoisonError::into_inner) else {
             return;
         };
         let line = match serde_json::to_string(record) {
             Ok(l) => l,
             Err(e) => {
-                tracing::warn!(error = %e, "failed to serialize audit record");
+                tracing::warn!(error = %e, kind, "failed to serialize audit record");
                 return;
             }
         };
@@ -124,12 +129,23 @@ impl AuditSink for Recorder {
                     tracing::warn!(
                         error = %e,
                         path = %path.display(),
+                        kind,
                         "failed to write audit record"
                     );
                 }
             }
             Inner::Stderr => destinations::write_line_to_stderr(&line),
         }
+    }
+}
+
+impl AuditSink for Recorder {
+    fn record(&self, record: &AuditRecord) {
+        self.write_serialized(record, "tool_call");
+    }
+
+    fn record_session_event(&self, record: &SessionEventRecord) {
+        self.write_serialized(record, "session_event");
     }
 }
 
@@ -154,6 +170,17 @@ mod tests {
             duration_ms: 0,
             manifest: None,
             held: false,
+        }
+    }
+
+    fn sample_session_event() -> SessionEventRecord {
+        SessionEventRecord {
+            event_id: "00000000-0000-4000-8000-000000000000".to_string(),
+            ts: "2026-07-02T00:00:00.000Z".to_string(),
+            identity: None,
+            client: None,
+            event: "session_killed",
+            manifest: None,
         }
     }
 
@@ -188,6 +215,23 @@ mod tests {
         assert!(!recorder.is_enabled());
         recorder.record(&sample_record("navigate", None, RwClass::Mutate));
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn session_event_appends_one_line_alongside_tool_call_records() {
+        let path = temp_path("session-event");
+        let _ = std::fs::remove_file(&path);
+        let recorder = Recorder::to_file(path.clone());
+        recorder.record(&sample_record("navigate", None, RwClass::Mutate));
+        recorder.record_session_event(&sample_session_event());
+        let content = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2);
+        let event_line: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+        assert_eq!(event_line["event"], "session_killed");
+        assert!(event_line.get("tool").is_none());
+        assert!(event_line.get("decision").is_none());
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

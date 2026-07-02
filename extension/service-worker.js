@@ -18,6 +18,11 @@ let groupId = null;
 // because tool ids are binary-chosen and hold ids are extension-chosen.
 const holdPending = new Map(); // id -> { resolve }
 let holdSeq = 0;
+// Panic kill switch (g11): the hot-path mirror of the chrome.storage.session "session_killed"
+// marker (the source of truth for reconnect gating). Set synchronously, before any await, at
+// the start of killSession() and by startup recovery; kept in sync on every transition so
+// nothing here ever drifts from storage across a service-worker restart.
+let sessionKilled = false;
 const attached = new Map(); // tabId -> { domains: Set<string> }
 const consoleBuffer = new Map(); // tabId -> { host, items: [{ level, text }] }
 const networkBuffer = new Map(); // tabId -> { host, items: [{ requestId, method, url, status, mimeType, errorText, canceled }] }
@@ -40,12 +45,22 @@ chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === "keepalive" && !nativePort) connect();
 });
 
-function connect() {
+// Async so it can consult the kill-switch marker before ever opening a port (g11). All three
+// callers -- the top-level startup path, the keepalive alarm, and the onDisconnect retry timer
+// -- call this unchanged; none of them need to await it.
+async function connect() {
   if (nativePort) return;
+  const s = await chrome.storage.session.get("session_killed");
+  if (s.session_killed) return; // killed: only an explicit user reconnect resumes
+  if (nativePort) return; // re-check: another caller may have won the await above
   try {
     nativePort = chrome.runtime.connectNative(NATIVE_HOST);
     nativePort.onMessage.addListener((msg) => {
       if (msg && msg.type === "tool_request" && msg.id) {
+        if (sessionKilled) {
+          fail(msg.id, hopError("extension", "The user ended the browser session (kill switch)"));
+          return;
+        }
         dispatch(msg.id, msg.tool, msg.args || {});
         return;
       }
@@ -126,6 +141,60 @@ chrome.commands.onCommand.addListener((command) => {
   holdRequest({ type: "toggle_hold" });
 });
 
+// --- Panic kill switch (g11): mechanism only. The extension severs only its OWN debugger
+// attachments and its OWN native port, at the user's direct gesture; it decides nothing about
+// domains, tools, or grants. Distinct from the hold above: its own button, never a shared
+// toggle, and it is never gated on or by any pause state.
+
+// Detach every debugger attachment: the in-memory map first (the common case), then a sweep of
+// chrome.debugger.getTargets() for attachments a prior service-worker instance made that this
+// instance's map has forgotten. Errors are swallowed throughout: the tab may be gone, or the
+// target may belong to something else (DevTools) and refuse to detach; either way there is
+// nothing more useful to do here.
+async function sweepDetachAll() {
+  for (const tabId of attached.keys()) {
+    try { await chrome.debugger.detach({ tabId }); } catch { /* tab may be gone */ }
+  }
+  try {
+    const targets = await chrome.debugger.getTargets();
+    for (const t of targets) {
+      if (t.attached && t.tabId) {
+        try { await chrome.debugger.detach({ tabId: t.tabId }); } catch { /* not ours, or already gone */ }
+      }
+    }
+  } catch { /* getTargets unavailable; nothing more to sweep */ }
+}
+
+// One gesture, severs everything. Order is load-bearing (g11 constraint 10): marker first (so
+// a service-worker death anywhere after this line is completed by startup recovery), signal the
+// binary while the port is still open, detach every debugger, clear in-memory state, then tear
+// down the port. Never closes, ungroups, or navigates any tab.
+async function killSession() {
+  sessionKilled = true; // set synchronously, before the first await: the hot-path refusal above
+  await chrome.storage.session.set({ session_killed: true });
+
+  if (nativePort) {
+    try { nativePort.postMessage({ type: "session_killed" }); } catch { /* port gone */ }
+    await sleep(100); // let the frame flush before the port is torn down
+  }
+
+  await sweepDetachAll();
+
+  attached.clear();
+  attaching.clear();
+  consoleBuffer.clear();
+  networkBuffer.clear();
+  screenshotCtx.clear();
+
+  if (nativePort) {
+    // Chrome does not fire our own onDisconnect for a self-initiated disconnect, and even if a
+    // reconnect timer were pending, the connect() guard above blocks it.
+    try { nativePort.disconnect(); } catch { /* already gone */ }
+    nativePort = null;
+  }
+  updateHoldBadge(null); // the session (and any hold state) is gone; render it as unknown
+}
+
 // Popup messages. Returns true to answer asynchronously; false for unrecognized types (the
 // popup treats a false/undefined response the same as "no active session").
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -143,6 +212,31 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         result ? { session: true, held: result.held === true } : { session: false, held: false }
       );
     });
+    return true;
+  }
+  if (msg && msg.type === "GET_SESSION_STATE") {
+    chrome.storage.session.get("session_killed").then((s) => {
+      sendResponse({
+        killed: s.session_killed === true,
+        connected: nativePort !== null,
+        attachedTabs: attached.size,
+      });
+    });
+    return true;
+  }
+  if (msg && msg.type === "KILL_SESSION") {
+    killSession().then(() => {
+      sendResponse({ killed: true, connected: nativePort !== null, attachedTabs: attached.size });
+    });
+    return true;
+  }
+  if (msg && msg.type === "RECONNECT_SESSION") {
+    (async () => {
+      await chrome.storage.session.remove("session_killed");
+      sessionKilled = false;
+      connect();
+      sendResponse({ killed: false, connected: nativePort !== null, attachedTabs: attached.size });
+    })();
     return true;
   }
   return false;
@@ -1181,5 +1275,19 @@ async function dispatch(id, tool, args) {
   }
 }
 
+// Startup recovery for the kill switch (g11): if a kill was in force (possibly interrupted by
+// a service-worker restart mid-kill), finish it -- set the hot-path flag and re-run the detach
+// sweep -- and do NOT connect. Recovery is explicit; only RECONNECT_SESSION calls connect()
+// again. Otherwise, normal startup: connect as always.
+async function init() {
+  const s = await chrome.storage.session.get("session_killed");
+  if (s.session_killed) {
+    sessionKilled = true;
+    await sweepDetachAll();
+    return;
+  }
+  connect();
+}
+
 const ready = rehydrate();
-connect();
+init();

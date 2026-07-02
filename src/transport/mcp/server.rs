@@ -61,6 +61,18 @@ pub async fn run(browser: Browser) -> Result<()> {
         classify::classify,
     ));
 
+    // Panic kill switch (g11, ADR-0018 step 2): the extension signals `session_killed` once it
+    // has severed its own debugger attachments; the binary writes exactly one audit
+    // session-event record per kill (`tracing::info!` fires regardless of `audit.enabled`, so
+    // the operational log always has the event).
+    browser.on_session_killed({
+        let governance = Arc::clone(&governance);
+        move || {
+            governance.record_session_killed();
+            tracing::info!("session killed by the user");
+        }
+    });
+
     let (tx, mut rx) = mpsc::unbounded_channel::<JsonRpcResponse>();
 
     // A single writer owns stdout so responses -- including those from spawned `tools/call`

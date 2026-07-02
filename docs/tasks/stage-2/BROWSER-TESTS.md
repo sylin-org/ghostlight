@@ -115,3 +115,65 @@ Steps: with the popup closed and an MCP session active, press `Alt+Shift+P` (or 
 Expect: the toolbar badge toggles (`II` appears or clears) immediately on the keypress;
 the popup's rendered state (`Agent browsing is PAUSED.` / `Agent browsing is allowed.`)
 matches the badge when opened afterward.
+
+## g11-1: mid-flight kill severs the session in one gesture
+Changed: g11 added the panic kill switch: `killSession()` in the service worker (marker,
+signal, debugger detach, state clear, port teardown, in that order) and the binary-side
+`killed` flag/error in `Browser`. This is the core scenario and needs a live Chrome tab
+with the CDP debugger actually attached, and a live MCP client to observe the truthful
+error text end to end.
+Steps:
+1. Start a session from the MCP client: `tabs_create_mcp`, `navigate` to any http(s) page,
+   `computer` `screenshot`. Confirm Chrome shows the "is debugging this browser" infobar.
+2. Issue a slow call (`computer` `wait` with a ~20s duration) and, while it is in flight,
+   open the Browser MCP toolbar popup and click `End session now` once.
+3. After the kill, ask the agent for any other browser tool call.
+Expect: step 2's in-flight call returns exactly
+`[hop: extension] The user ended the browser session (kill switch). Next step: ask the
+user to reconnect from the Browser MCP extension popup, then retry.`; the debugger infobar
+disappears (the detach happened); the popup now shows
+`Session ended. Browser access is severed until you start a new session.` with a
+`Start new session` button. Step 3's call returns the SAME error text immediately (no 60s
+wait).
+
+## g11-2: the audit log records exactly one session-killed line
+Changed: the kill hook writes one `SessionEventRecord` (`event: "session_killed"`) through
+the same destination the flight recorder resolves. Needs the real default audit file
+location and a live kill to produce it.
+Steps: with `audit.enabled` resolving true (the Minimal default), perform a kill (see
+g11-1), then open the resolved audit file (default
+`%LOCALAPPDATA%\browser-mcp\audit.jsonl` on Windows).
+Expect: the last line is a compact JSON object with `"event":"session_killed"`, a
+36-char lowercase `event_id`, an RFC 3339 `ts`, and no `tool`, `action`, `rw`, `domain`,
+`decision`, `grant_id`, `denial_id`, or `duration_ms` field.
+
+## g11-3: the mid-kill service-worker-restart guarantee
+Changed: the `chrome.storage.session` marker is set BEFORE the debugger detach begins,
+specifically so a service-worker death mid-kill is completed by startup recovery
+(`init()`) rather than leaving a live debugger attachment behind. This exact guarantee can
+only be observed against a real Chrome service-worker lifecycle event (a real worker
+teardown/restart), not simulated by dropping an in-memory duplex stream.
+Steps: kill the session (see g11-1), then force the service worker down from
+`chrome://extensions` (the extension's "service worker" link, or wait for MV3 idle
+teardown) and wake it (open the popup). Wait at least one keepalive alarm period
+(24 seconds) after it wakes.
+Expect: the popup still shows the killed view; the debugger infobar does not reappear; a
+tool call from the MCP client still fails with the section-7 kill text; the keepalive
+alarm firing during the wait does not reconnect the extension.
+
+## g11-4: explicit recovery and kill-with-binary-down
+Changed: `RECONNECT_SESSION` (`chrome.storage.session.remove` + `connect()`) is the only
+path back to a working session; a kill while no mcp-server is running must still leave the
+extension refusing to reconnect until that explicit gesture. Both need a live Chrome
+popup and, for the second half, starting/stopping the actual MCP client process.
+Steps:
+1. Click `Start new session` after a kill (see g11-1). Confirm reconnection, then run
+   `tabs_context_mcp` and a fresh `navigate` + `screenshot` from the client.
+2. Separately: quit the MCP client entirely (no mcp-server running), click
+   `End session now` in the popup, confirm the popup shows the killed view with no error
+   surfaced, then restart the MCP client and issue a tool call before clicking
+   `Start new session`.
+Expect: step 1 reconnects within a few seconds, the fresh flow works end to end, and the
+binary no longer reports the kill message. Step 2's tool call after the client restart
+fails with the ordinary not-connected error (the extension still refuses to reconnect)
+until `Start new session` is clicked.
