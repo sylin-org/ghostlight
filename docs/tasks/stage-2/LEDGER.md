@@ -10,8 +10,8 @@ current task prompt, then continue. Never rely on remembering earlier work; re-r
 - Branch: `stage-2` (off `main`, which has stage 1 merged). Never push, never merge, never commit to
   `main`.
 - Progress: tasks `a1` (module reorg), `a2` (governance ports, + RwClass correction), `a3`
-  (governance facade) landed.
-- NEXT TASK: Phase A, task `a7` (`docs/tasks/stage-2/a7-arch-test.md`).
+  (governance facade), `a7` (arch-test) landed.
+- NEXT TASK: Phase A, task `g01` (`docs/tasks/stage-2/g01-typed-key-registry.md`).
 - Order authority: `PLAN.md` (Phase A -> B -> C -> D). Full linear sequence is in `BOOTSTRAP.md`.
 - Reconciliation: `RECONCILIATION.md` is AUTHORITATIVE over any conflicting detail in a `g`-doc.
 - Invariants that must hold after every task: all-open byte-identical (the all-open golden test +
@@ -145,6 +145,34 @@ current task prompt, then continue. Never rely on remembering earlier work; re-r
   still times out at ~5s, read_page redaction still defaults on -- is covered by the automated
   `tests/all_open_golden.rs::read_page_redaction_is_still_wired_at_the_chokepoint` test added this
   task, so no live-browser check is queued).
+
+### a7 arch-test (fail-closed governance/ boundary guard) -- 2026-07-02
+- Commit: (see this task's commit)
+- Files touched: new `tests/architecture.rs` only.
+- Summary: a pure `std::fs` + text-scan integration test that recursively walks
+  `src/governance/` and fails if any `.rs` file names `crate::browser`, `crate::transport`,
+  `crate::mcp`, `crate::native`, or the `url` crate (path-token matched with identifier
+  boundaries, scanning raw lines including comments/strings, not just compiled code). Both
+  fail-closed properties are in place: a missing `src/governance/` fails loudly (does not
+  skip), and an empty directory fails rather than passing vacuously. Landed exactly as the
+  task's literal code specified, verbatim.
+- Deviations from the g-doc per RECONCILIATION.md: none (A7 is an a-prompt, not a g-doc).
+  Followed a7-arch-test.md as written, byte for byte.
+- Verification: `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` clean,
+  `cargo test` green (90 lib unit tests unchanged; new `tests/architecture.rs` 4 tests --
+  `governance_core_has_no_forbidden_back_edges`, `scanner_detects_forbidden_crate_edges`,
+  `scanner_detects_url_crate_reference`, `scanner_ignores_clean_lines`; `tests/all_open_golden.rs`
+  3 unchanged; `tests/mcp_protocol.rs` 4 unchanged; `tests/peer_death.rs` 1 unchanged;
+  `tests/tool_schema_fidelity.rs` 6 unchanged). Negative check per Verification step 4: added a
+  temporary `use crate::browser::redact;` line to the end of `src/governance/dispatch.rs`, ran
+  `cargo test --test architecture`, confirmed `governance_core_has_no_forbidden_back_edges`
+  FAILED naming the exact file, line 138, and the edge `crate::browser`; reverted with
+  `git checkout -- src/governance/dispatch.rs` and confirmed `git status` showed no diff before
+  re-running green. Robustness check per step 5: ran `cargo test --test architecture` from `src/`
+  (both with and without an explicit `--manifest-path`) and confirmed it still passes, since
+  the scanner anchors on `CARGO_MANIFEST_DIR`, not the working directory. ASCII scan clean.
+- Browser checks queued: none (pure build-time/test-time guard; no runtime or browser-facing
+  behavior).
 
 ## Reminders before running BROWSER-TESTS.md
 
