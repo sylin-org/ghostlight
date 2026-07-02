@@ -13,8 +13,8 @@ endpoint controls the user's browser, so no other local process may connect to i
 
 ## Decision
 
-The transport is tokio's native local socket -- `tokio::net::windows::named_pipe` on
-Windows, `tokio::net::Unix{Listener,Stream}` on Unix -- not the `interprocess` crate and
+The transport is tokio's native local socket (`tokio::net::windows::named_pipe` on
+Windows, `tokio::net::Unix{Listener,Stream}` on Unix), not the `interprocess` crate and
 not TCP (src/native/ipc.rs; commit 18b416b). These reads surface `Ok(0)`/`BrokenPipe`
 promptly on peer death, so liveness is detected structurally by the relay's `select!`
 completing; there is no application heartbeat.
@@ -31,13 +31,13 @@ namespace) (src/native/ipc.rs; commit 18b416b).
 ## Consequences
 
 - Two independent causes of the native-host zombie are eliminated (commit 18b416b):
-  (1) Transport -- `interprocess`'s async Windows named-pipe read never woke on peer death
+  (1) Transport: `interprocess`'s async Windows named-pipe read never woke on peer death
   (overlapped I/O plus an EOF-delaying "linger pool"), so the relay read hung forever;
-  tokio-native reads surface EOF promptly. (2) Shutdown -- even after the read returns,
+  tokio-native reads surface EOF promptly. (2) Shutdown: even after the read returns,
   tokio's stdin reader parks a blocking thread in a ReadFile on Chrome's still-open stdin,
   and dropping the runtime hangs joining it; the stateless relay therefore process-exits.
-- Rejected: a post-`select!` `ipc_write.shutdown().await` -- on an already-dead Windows
-  pipe that write never completes and re-hangs the exit (src/native/ipc.rs).
+- Rejected: a post-`select!` `ipc_write.shutdown().await`, which on an already-dead Windows
+  pipe never completes and re-hangs the exit (src/native/ipc.rs).
 - Zero new dependencies (tokio "net" was already enabled); `interprocess` is dropped.
 - Trade-off: `process::exit` skips graceful teardown, acceptable because the relay role
   holds no state. Locked by tests/peer_death.rs, which force-kills the server and asserts

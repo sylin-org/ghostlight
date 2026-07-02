@@ -1,8 +1,8 @@
-# Tool Schemas -- the sacred surface
+# Tool Schemas: the sacred surface
 
 `tools.json` is the advertised MCP `tools/list` surface: the **13 tools** Browser MCP preserves at
-**byte-parity with the official Claude-in-Chrome extension** -- the exact tool names, descriptions,
-parameter names/types/enums/constraints, and required sets the model's trained behavior depends on.
+**byte-parity with the official Claude-in-Chrome extension** (the exact tool names, descriptions,
+parameter names/types/enums/constraints, and required sets the model's trained behavior depends on).
 This is the **one** thing we preserve verbatim; everything else is a clean, lean re-design (Browser
 MCP is not a port). See [ADR-0007](../../../docs/adr/0007-sacred-tool-surface.md) and
 [ADR-0008](../../../docs/adr/0008-not-a-port.md).
@@ -25,7 +25,7 @@ MCP is not a port). See [ADR-0007](../../../docs/adr/0007-sacred-tool-surface.md
 
 ## Not advertised (excluded from v1)
 
-`gif_creator`, `shortcuts_list`, `shortcuts_execute`, `switch_browser`, `upload_image` -- see
+`gif_creator`, `shortcuts_list`, `shortcuts_execute`, `switch_browser`, `upload_image`. See
 [ADR-0014](../../../docs/adr/0014-v1-scope-exclusions.md). (`gif_creator` and `upload_image` are
 implemented in the official extension but deferred as niche; `shortcuts_*` are product-bound to the
 official's side-panel agent.)

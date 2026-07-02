@@ -5,7 +5,7 @@
 
 ## Context
 A person may be watching their own browser while the agent drives it, so the extension
-must show what the agent is doing -- part of the North Star "watching" delight and of
+must show what the agent is doing: part of the North Star "watching" delight and of
 true parity with the official Claude-in-Chrome, which renders on-page affordances.
 Separately, input must actually take effect: dispatching `keyDown`/`keyUp` without a
 Windows virtual key code delivers modified combos that Chrome maps to no editing
@@ -14,8 +14,8 @@ a synthetic `ctrl/cmd+r` or `F5` never reloads the tab.
 
 ## Decision
 (a) UI affordances. A dedicated content script `extension/agent-visual-indicator.js`
-(all_urls, document_idle) renders a phantom cursor -- its own SVG arrow, tip at the
-target, Claude-orange with a white outline and glow -- and a subtle "agent active" glow
+(all_urls, document_idle) renders a phantom cursor (its own SVG arrow, tip at the
+target, Claude-orange with a white outline and glow) and a subtle "agent active" glow
 border. The service worker sends `UPDATE_PHANTOM_CURSOR` with the rescaled CSS-px
 coordinate before every mouse dispatch (click/hover/drag endpoints/scroll) and awaits
 the settle, so the user sees the pointer arrive before the action fires;
@@ -23,7 +23,7 @@ the settle, so the user sees the pointer arrive before the action fires;
 (self-fades ~4s, respects `prefers-reduced-motion`). Before capture, `HIDE_FOR_TOOL_USE`
 (+40ms) then `SHOW_AFTER_TOOL_USE` keep the overlay out of the model's screenshot; the
 overlay's `browser-mcp-*` elements are excluded from `read_page`/`find`. The official's
-Stop button and static chat pill are omitted -- they are product controls for the
+Stop button and static chat pill are omitted: they are product controls for the
 official's in-browser agent (the official suppresses Stop in isMcp mode) and do not
 apply to our external-client model.
 

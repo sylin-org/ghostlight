@@ -1,4 +1,4 @@
-# Agentic Identity & "OAuth for Agents" Standards (2025–2026)
+# Agentic Identity & "OAuth for Agents" Standards (2025-2026)
 
 **Date:** 2026-07-01 · **Track:** Governance · **Source:** research agent (verbatim report)
 
@@ -6,24 +6,24 @@
 > exclude runtime IdP integration); kept as a concern-surface and a v2 plug-in-point map. The
 > one shipped item that matters for positioning: MCP Enterprise-Managed Authorization.
 
-The landscape is converging on three foundations — **RFC 8693 (Token Exchange), JWT (RFC 7519),
-SPIFFE** — recombined for AI-agent/workload delegation.
+The landscape is converging on three foundations, recombined for AI-agent/workload delegation:
+**RFC 8693 (Token Exchange), JWT (RFC 7519), SPIFFE**.
 
 ## 1. Cross-App Access / ID-JAG
 `draft-ietf-oauth-identity-assertion-authz-grant` (rev 04, 21 May 2026). Authors Parecki,
 McGuinness, Campbell. A profile of RFC 8693 letting an app obtain an ID-JAG JWT from a shared IdP
-and redeem it at *another* app's AS with no per-user consent/redirect — the mechanism behind
+and redeem it at *another* app's AS with no per-user consent/redirect, the mechanism behind
 **Cross-App Access (XAA)**. Explicit AI-agent use case in Appendix A.4 ("AI Agent using External
 Tools"). Builds on `draft-ietf-oauth-identity-chaining` (RFC 8693 + RFC 7523).
 
 ## 2. Token Exchange for Agents / delegation
 RFC 8693 `act` (delegation, nestable: Human → Agent A → Agent B → Service) and `may_act`.
 **Critical limitation:** consumers must only consider top-level + *current* `act`; nested prior
-actors are **informational only (audit)**, not enforceable — which is driving new drafts:
-- `draft-niyikiza-oauth-attenuating-agent-tokens` — extends RFC 9396 for **monotonic permission
+actors are **informational only (audit)**, not enforceable, which is driving new drafts:
+- `draft-niyikiza-oauth-attenuating-agent-tokens`: extends RFC 9396 for **monotonic permission
   reduction** at each hop.
-- `draft-mw-spice-actor-chain` — **cryptographically verifiable actor chains**.
-- `draft-mw-oauth-tls-session-bound-tokens` — binds tokens to an mTLS connection.
+- `draft-mw-spice-actor-chain`: **cryptographically verifiable actor chains**.
+- `draft-mw-oauth-tls-session-bound-tokens`: binds tokens to an mTLS connection.
 - Active OAuth-WG discussion (Feb 2026): "Delegation Chain Splicing in RFC 8693." Theme across
   the field: **delegation beats impersonation** (Red Hat).
 
@@ -31,7 +31,7 @@ actors are **informational only (audit)**, not enforceable — which is driving 
 - **SPIFFE ID:** `spiffe://<trust-domain>/<workload>`. **SVID** = X.509-SVID (SPIFFE ID in URI
   SAN) or JWT-SVID. **Workload API** gives a workload its ID + short-lived key/cert with no prior
   self-knowledge. **SPIRE** = server + per-node agents + attestation pipeline.
-- **Agent relevance:** an agent binary is a workload — SPIFFE gives it a verifiable, short-lived,
+- **Agent relevance:** an agent binary is a workload; SPIFFE gives it a verifiable, short-lived,
   auto-rotated identity for mTLS. This is the model **Google Cloud Agent Identity** adopts.
 
 ## 4. IETF WIMSE (Workload Identity in Multi System Environments)
@@ -45,7 +45,7 @@ and **WPT** = per-request proof-of-possession token in the `Workload-Proof-Token
 asserting a user/workload identity + an **immutable authorization context** that stays constant
 as a call flows through a chain of internal workloads. Claims: `iat`, `aud`, `exp`, `txn`, `sub`,
 `scope`, `req_wl`; optional `tctx`/`rctx`. Issued by a per-trust-domain TTS; the TTS **MUST NOT**
-expand scope or alter `sub`/`txn`/`aud` — tamper-proof "who initiated, on whose behalf." (Our
+expand scope or alter `sub`/`txn`/`aud`: tamper-proof "who initiated, on whose behalf." (Our
 per-call `event_id` + immutable-context framing is a lightweight analog.)
 
 ## 6. Vendor positions
@@ -54,7 +54,7 @@ per-call `event_id` + immutable-context framing is a lightweight analog.)
   PRM (MUST), RFC 8707 Resource Indicators (MUST), OAuth Client ID Metadata Documents, RFC 9207,
   PKCE. Servers **MUST** validate token `aud` and **MUST NOT** pass along other tokens
   (confused-deputy defense).
-- **Enterprise-Managed Authorization (EMA) — shipped 18 June 2026** — a stable MCP extension
+- **Enterprise-Managed Authorization (EMA), shipped 18 June 2026**, a stable MCP extension
   **implementing ID-JAG**: during SSO the client gets an ID-JAG from the IdP, exchanges it for an
   MCP-server access token ("authorize once, inherit everywhere"). Launch: Okta (via XAA) as first
   IdP; clients Claude + VS Code; servers Asana, Atlassian, Canva, Figma, Linear, Supabase.
@@ -70,10 +70,10 @@ Tokens (macaroons). Academic: "Agent Identity Protocol (AIP)."
 
 ## Relevance to browser-mcp
 Almost all of this is **v1-out-of-scope** (we do not wire in an IdP at runtime). The two things
-worth keeping: (1) model audit identity as **delegation** (`act`/`may_act`) — the industry
-consensus; (2) **position relative to MCP EMA / XAA** — our manifest is the deployment-channel
+worth keeping: (1) model audit identity as **delegation** (`act`/`may_act`), the industry
+consensus; (2) **position relative to MCP EMA / XAA**: our manifest is the deployment-channel
 equivalent of an ID-JAG assertion; complementary, not blind. If we ever want the *binary itself*
-to carry a verifiable identity, **SPIFFE** is the model — a v2+ radar item, not now.
+to carry a verifiable identity, **SPIFFE** is the model: a v2+ radar item, not now.
 
 ## Quick reference (exact identifiers)
 - ID-JAG: `draft-ietf-oauth-identity-assertion-authz-grant-04`

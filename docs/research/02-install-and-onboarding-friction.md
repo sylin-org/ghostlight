@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-01 · **Track:** Delight (developer) · **Source:** research agent (verbatim report)
 
-> The single-binary differentiator, validated with evidence — and the native-messaging landmine
+> The single-binary differentiator (validated with evidence), and the native-messaging landmine
 > that a binary does *not* solve.
 
 ---
@@ -17,13 +17,13 @@ server "starts but hangs silently."
   don't connect. `claude mcp add` with `cmd /c npx` mis-parses `/c` as a path → `C:/`. Working
   fix: bypass npx, call `node` with an absolute path to `cli.js`.
   https://github.com/microsoft/playwright-mcp/issues/1540
-- LM Studio #1301: "'npx' not a valid command" — MCP doesn't load.
+- LM Studio #1301: "'npx' not a valid command"; MCP doesn't load.
   https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1301
 - chrome-devtools-mcp troubleshooting (official): "On Windows, running a Node.js package via
   `npx` often requires the `cmd /c` prefix."
   https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/troubleshooting.md
 - A dedicated third-party repo exists *only* to translate chrome-devtools-mcp setup into
-  Windows-native scripting — its existence is itself evidence of systemic Windows friction.
+  Windows-native scripting. Its existence is itself evidence of systemic Windows friction.
   https://github.com/saifyxpro/chrome-devtools-mcp-windows-guide
 
 ### 2. Node/npx version + cache hell ("module not found")
@@ -34,7 +34,7 @@ server "starts but hangs silently."
 - Recommended `--yes` to auto-accept the npx install prompt (the interactive prompt silently
   blocks startup otherwise).
 
-### 3. Multi-component architecture never fully connects — AgentDeskAI browser-tools-mcp
+### 3. Multi-component architecture never fully connects: AgentDeskAI browser-tools-mcp
 Requires THREE separately-installed/-running pieces: (a) Chrome extension (manual zip + load
 unpacked), (b) `npx @agentdeskai/browser-tools-mcp` in the IDE, (c)
 `npx @agentdeskai/browser-tools-server` in a *separate terminal*.
@@ -49,13 +49,13 @@ Chrome finds the host only via an exact registry key (Windows) or JSON manifest 
 specific path. "Specified native messaging host not found" = key/manifest missing or misplaced;
 **Windows requires the registry `(Default)` value to be a full absolute path.**
 https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging
-- **Claude Code #21426 is the most on-point evidence** — same binary+extension+native-messaging
+- **Claude Code #21426 is the most on-point evidence**: same binary+extension+native-messaging
   design. On Windows, even with registry key, manifest, `.bat` wrapper and correct extension ID
   all verified "100% correct," the extension never invokes the host: "No log file was ever
   created. This definitively proves the Chrome extension is NOT initiating the native messaging
   connection." All tools dead; 14 troubleshooting attempts failed.
   https://github.com/anthropics/claude-code/issues/21426
-- **Extension-ID / host-name collision** — Claude Code #20887: with both Claude Desktop and
+- **Extension-ID / host-name collision** (Claude Code #20887): with both Claude Desktop and
   Claude Code installed, the extension requests host name
   `com.anthropic.claude_browser_extension` and always binds to Desktop's host, so Code's tools
   fail. A cautionary tale about host-name namespacing.
@@ -63,7 +63,7 @@ https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging
 
 ### 5. Extension loading friction (MV3 unpacked, dev mode, ID discovery)
 - `allowed_origins` in the host manifest must contain the exact `chrome-extension://<id>/`,
-  **no wildcards** — and the ID is only knowable *after* loading the unpacked extension, a
+  **no wildcards**, and the ID is only knowable *after* loading the unpacked extension, a
   chicken-and-egg step.
 - Mitigation to copy: webpage-mcp's installer auto-discovers local unpacked extension IDs from
   browser profiles and writes them into `allowed_origins`.
@@ -71,7 +71,7 @@ https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging
 
 ### 6. Browser-binary download step (Playwright/Python stack)
 - `playwright install` fails behind firewalls; startup-time browser download "often leads to
-  timeouts, crashes, or setup failed errors" — run manually first. browser-use inherits this.
+  timeouts, crashes, or setup failed errors"; run manually first. browser-use inherits this.
 
 ---
 
@@ -80,31 +80,31 @@ https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging
 - **Single static binary, zero deps, GitHub-Releases download for mac/Linux/Windows** is the
   emerging "it just works" bar (e.g., codebase-memory-mcp markets exactly this).
 - **Anthropic's MCPB (formerly DXT) desktop bundles** = one-click install in Claude Desktop,
-  cross-OS, language-agnostic — "ideal for users who shouldn't have to handle npm."
+  cross-OS, language-agnostic: "ideal for users who shouldn't have to handle npm."
   https://www.speakeasy.com/mcp/distributing-mcp-servers
 - No source praised an npx-based browser MCP for *easy* setup; praise clusters on compiled-binary
   / one-click distribution.
 
 ---
 
-## Is "single self-contained binary, zero runtime deps" a real differentiator? — YES
+## Is "single self-contained binary, zero runtime deps" a real differentiator? YES
 
 Strongest single source: a first-hand Node→Go MCP rewrite (dev.to/zoharbabin):
 - "npx spawns deeply nested process trees. When the parent MCP client crashes, the Node.js
-  process doesn't receive a signal — it keeps running" (orphaned processes; unsolvable in Node).
+  process doesn't receive a signal. It keeps running" (orphaned processes; unsolvable in Node).
 - Go single binary: "No runtime process tree. EOF on stdin = immediate exit… The entire problem
-  category disappeared." Also 430MB→~25MB idle, 2–4s→<100ms startup.
+  category disappeared." Also 430MB→~25MB idle, 2-4s→<100ms startup.
   https://dev.to/zoharbabin/from-nodejs-to-go-rebuilding-an-mcp-server-for-production-oil
 
 A single binary directly eliminates pain points #1, #2, #6 and shrinks #3.
 
-**Caveat — the binary does NOT eliminate #4 and #5** (native-messaging registration +
+**Caveat: the binary does NOT eliminate #4 and #5** (native-messaging registration +
 extension-ID/`allowed_origins` wiring). Those are inherent to any browser-extension + native-
 host design, and Claude Code #21426 / #20887 prove even Anthropic ships broken on Windows and in
 the dual-install collision case. The differentiator only fully lands if the binary **also ships
 an installer that programmatically writes the registry key/manifest with absolute paths and
 auto-discovers/injects the unpacked extension ID into `allowed_origins`** (the webpage-mcp
-pattern). That combination — zero-runtime binary + self-registering native-messaging installer —
+pattern). That combination (zero-runtime binary + self-registering native-messaging installer)
 would be genuinely novel against the field.
 
 ## Sources

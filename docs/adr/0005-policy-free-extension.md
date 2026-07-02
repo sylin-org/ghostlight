@@ -7,13 +7,13 @@
 
 The extension is untrusted execution and the binary is the trusted governor (SPEC 7.4,
 9.2). If any access decision lived in the extension, the audit trail and the governance
-overlay would only be as trustworthy as code running inside the browser -- code the binary
+overlay would only be as trustworthy as code running inside the browser, code the binary
 cannot verify at runtime. The governance overlay must therefore live entirely in the
 binary, never in the extension (SPEC 1.1, 2.4; CLAUDE.md, Extension Design Principle).
 
 At the same time, some capabilities are inherently DOM-side: building the accessibility
 tree, `find`, `form_input` with shadow-DOM traversal, and `get_page_text` are far more
-robust run in-page than driven remotely over CDP.
+reliable run in-page than driven remotely over CDP.
 
 ## Decision
 
@@ -21,10 +21,10 @@ The extension holds mechanism only: CDP execution, DOM reads via a content scrip
 (accessibility tree with element refs, `find`, shadow-DOM-aware `form_input`,
 `get_page_text`), console/network buffering, tab-group lifecycle, keepalive, and
 service-worker state recovery (SPEC 2.4; commit 9be07e5). It makes no access, tool
-classification, audit, or identity decision -- those are the binary's (SPEC 2.4,
+classification, audit, or identity decision. Those are the binary's (SPEC 2.4,
 Non-responsibilities). "Policy-free" is the invariant, not "minimal": the content script
 may carry real mechanism, but it never governs (SPEC 2.4; CLAUDE.md). Governance-level
-redaction -- omitting parameters or screenshots from audit -- is a manifest-driven binary
+redaction (omitting parameters or screenshots from audit) is a manifest-driven binary
 concern (SPEC 7.2), not an extension decision.
 
 ## Consequences
@@ -39,4 +39,4 @@ concern (SPEC 7.2), not an extension decision.
   runtime, so full mitigation needs enterprise force-install plus CRX signature checks
   (SPEC 9.2).
 - Trade-off: the extension carries more code than a bare CDP relay, accepted because
-  in-page DOM reads are more robust than remote DOM walking.
+  in-page DOM reads are more reliable than remote DOM walking.

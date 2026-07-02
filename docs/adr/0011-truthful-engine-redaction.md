@@ -8,15 +8,15 @@
 field's raw value unconditionally leaks passwords, one-time codes, and card numbers into
 the tree that travels to the (cloud) MCP client. The fix must not turn the engine into a
 content inspector: SPEC sec 9.5 says the binary governs structurally (which domains,
-which tools), not semantically (what data is on the page). The design stance is layered
--- the engine is always truthful, and governed behavior is an overlay keyed on typed
+which tools), not semantically (what data is on the page). The design stance is layered:
+the engine is always truthful, and governed behavior is an overlay keyed on typed
 configuration with a safe-by-default "Minimal" preset.
 
 ## Decision
 The engine stays truthful. In the extension (content.js) `read_page` emits real
 input/textarea values and truthful `<select>` options; a field the page itself marks
 secret (input `type=password`/`hidden`, or a sensitive `autocomplete` token) is emitted
-with a neutral `secret_value="..."` marker -- a fact, not a decision. No policy lives in
+with a neutral `secret_value="..."` marker: a fact, not a decision. No policy lives in
 the extension.
 
 Redaction is a governance overlay in the binary. `src/policy/redact.rs` rewrites the
@@ -30,7 +30,7 @@ markers, so it does not inspect content semantically, staying within SPEC sec 9.
 
 ## Consequences
 Positive: the raw value travels extension->binary (local, trusted) and is stripped
-before the MCP client (cloud). Toggling the key needs no engine change -- off yields the
+before the MCP client (cloud). Toggling the key needs no engine change: off yields the
 raw truth, on yields safe-by-default output. Keeping every governed behavior as a typed
 key in one registry makes the policy surface introspectable for future config UIs.
 

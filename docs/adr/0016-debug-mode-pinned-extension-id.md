@@ -6,8 +6,8 @@
 ## Context
 
 The mcp-server role is a subprocess launched by the client with stdout reserved
-for the JSON-RPC stream, so its inner state -- is the extension connected, what
-calls are in flight, what just happened -- is opaque during development and
+for the JSON-RPC stream, so its inner state (is the extension connected, what
+calls are in flight, what just happened) is opaque during development and
 support. Separately, an unpacked Chromium extension derives its id from its
 on-disk path, so the id changes across machines and checkouts; that makes the
 native-host `allowed_origins` and any `install --extension-id` value
@@ -16,8 +16,8 @@ non-deterministic and breaks reload-driven dogfooding.
 ## Decision
 
 (a) Opt-in observability (commit f566793). `--debug` or `BROWSER_MCP_DEBUG=1`
-turns on a sink that records the three boundaries -- MCP request/response,
-tool-call begin/end, and extension connect/disconnect -- into two per-PID files
+turns on a sink that records the three boundaries (MCP request/response,
+tool-call begin/end, and extension connect/disconnect) into two per-PID files
 under the log dir: `debug-state-<pid>.json` (a live snapshot: uptime, extension
 connected, in-flight calls, counters, recent events) and
 `debug-events-<pid>.jsonl` (the append-only event firehose). `browser-mcp

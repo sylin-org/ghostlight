@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Each ADR captures one significant decision -- its context, the decision, and its consequences -- in
+Each ADR captures one significant decision (its context, the decision, and its consequences) in
 [MADR-lite](https://adr.github.io/madr/) form. ADRs are immutable once accepted: a later decision
 *supersedes* an earlier one rather than editing it, so the evolution stays legible. The main docs
 (README, `docs/SPEC.md`, `CLAUDE.md`) present the current design as greenfield; the *why* and the

@@ -17,10 +17,10 @@ serious agent client already implements.
 
 The binary is an MCP server that exposes the browser over the MCP protocol
 (JSON-RPC 2.0 over stdio). Any MCP client can launch it as a subprocess and
-drive it -- Claude Code, Cursor, Zed, Cline, and anything else that speaks MCP.
+drive it: Claude Code, Cursor, Zed, Cline, and anything else that speaks MCP.
 The transport is plain stdio; the client owns the process lifecycle (SPEC 2.1,
-2.2). Configuration is the ordinary MCP `mcpServers` block -- a `command`, `args`,
-and `env` -- with nothing Anthropic-specific in it (SPEC 8.3). There is no
+2.2). Configuration is the ordinary MCP `mcpServers` block (a `command`, `args`,
+and `env`) with nothing Anthropic-specific in it (SPEC 8.3). There is no
 required side panel, no vendor account, and no cloud dependency in the path from
 agent to browser.
 

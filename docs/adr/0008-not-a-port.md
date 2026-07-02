@@ -11,7 +11,7 @@ official Claude-in-Chrome extension (v1.0.78). Both are instructive, but neither
 is a codebase to fork. The community reference is a lossy proxy that ships its own
 bugs (docs/research/12). The official extension is Anthropic proprietary, and
 this repository is intended open-source, so its code cannot enter our tree. Prior
-art is a concern-surface -- the hazards and questions others hit -- not a feature
+art is a concern-surface (the hazards and questions others hit), not a feature
 catalog to copy (README; SPEC 1.3, 1.4).
 
 ## Decision

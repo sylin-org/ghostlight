@@ -22,7 +22,7 @@ track the new size. This mirrors the reference implementation and is pinned as
 deliberate in CLAUDE.md (commit ce93e65).
 
 ## Consequences
-Positive: the coordinate math is trivial -- there is none. Screenshot pixels are input
+Positive: the coordinate math is trivial. There is none. Screenshot pixels are input
 pixels, so there is no per-tab state to track and no rescale step that can drift.
 
 Negative: the capture has no pixel cap. On a large or hi-DPI window the forced-native

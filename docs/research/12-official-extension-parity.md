@@ -7,7 +7,7 @@ of the parity-verification thread and the plan to re-baseline our tool surface a
 ## Why
 
 The sacred contract (CLAUDE.md) is that our tool surface is **byte-identical to what the official
-Claude in Chrome extension advertises** -- because the model was trained against those schemas.
+Claude in Chrome extension advertises**, because the model was trained against those schemas.
 Until now our schemas came from the *community reference* (`reference/open-claude-in-chrome`, a
 Node.js re-implementation). Verification proved the reference is a **lossy proxy** that carries its
 own bugs, so "we match the reference" is weaker than the real goal. The official extension is the
@@ -18,24 +18,24 @@ ground truth.
 Exercised all 13 tools live against Chrome. Three behavioral symptoms observed, and side-by-side
 code reading showed **all three are inherited verbatim from the reference, NOT rewrite regressions**:
 
-- **A) `read_network_requests` returns empty on first call** -- both sides enable the CDP `Network`
+- **A) `read_network_requests` returns empty on first call**: both sides enable the CDP `Network`
   domain *lazily* (only inside the handler). `Network.enable` is not retroactive, so the page-load +
   pre-read fetches are never captured. Our wiring is actually *better* than the reference (joins
   `requestWillBeSent`+`responseReceived` by `requestId` vs the reference's method-guessing).
-- **B) `read_console_messages` duplicates** -- both listen to `Runtime.consoleAPICalled` AND
+- **B) `read_console_messages` duplicates**: both listen to `Runtime.consoleAPICalled` AND
   `Console.messageAdded` with no dedup. Inherited double-count. **Fixed** (single Runtime source).
-- **C) `find` matches only literal text** -- identical whole-string substring algorithm to the
+- **C) `find` matches only literal text**: identical whole-string substring algorithm to the
   reference over `role name text placeholder ariaLabel title type tag`. "Submit button" is not a
   literal substring, so it misses; "Example Domain" hits. The reference's own `find` description
   over-promises "search by purpose"; our sacred schema preserves that gap verbatim.
 
 Real gaps the parity sweep found (relative to the reference), pending the official baseline:
 - **`read_page` omits node attributes the reference emits**: `img src`, `aria-expanded/checked/
-  selected`, `<select>` options. Medium -- loses state signals the model reads. (`extension/content.js` ~121-130)
+  selected`, `<select>` options. Medium: loses state signals the model reads. (`extension/content.js` ~121-130)
 - **`form_input` checkbox/radio truthiness**: ours accepts `1`/`"1"`/nonzero as check; reference
-  treats them false. This is a **deliberate earlier fix** (commit 0deef1c) -- keep ours.
+  treats them false. This is a **deliberate earlier fix** (commit 0deef1c). Keep ours.
 - Low-severity text/format/timing diffs (navigate `## Pages` list, `get_page_text` `Source:` line,
-  tabs shape, hover settle delay, scroll coordinate validation, zoom mimeType) -- mostly deliberate
+  tabs shape, hover settle delay, scroll coordinate validation, zoom mimeType): mostly deliberate
   lean choices; decide per-tool against the OFFICIAL, not the reference.
 
 ## The official extension (ground truth)
@@ -48,11 +48,11 @@ Real gaps the parity sweep found (relative to the reference), pending the offici
   `accessibility-tree.js` (all_urls) + `agent-visual-indicator.js`; service worker bridges to
   claude.ai / api.anthropic.com / `wss://bridge.claudeusercontent.com`.
 - Key files (bundled/minified, but plain JS):
-  - `assets/mcpPermissions-E9qdF7bb.js` (693 KB) -- **the MCP tool DEFINITIONS/schemas + the CDP
+  - `assets/mcpPermissions-E9qdF7bb.js` (693 KB): **the MCP tool DEFINITIONS/schemas + the CDP
     execution logic**. The core harvest target (28,715 lines beautified).
-  - `assets/accessibility-tree.js-CCweLwU2.js` -- the `read_page`/`find`/`get_page_text` engine
+  - `assets/accessibility-tree.js-CCweLwU2.js`: the `read_page`/`find`/`get_page_text` engine
     (220 lines beautified).
-  - `assets/service-worker.ts-CRgYaSdM.js` -- bootstrap / native-messaging bridge (2,380 lines).
+  - `assets/service-worker.ts-CRgYaSdM.js`: bootstrap / native-messaging bridge (2,380 lines).
 
 ### Re-extracting the official files for study (they live in the session scratchpad, ephemeral)
 
@@ -72,36 +72,36 @@ We harvest the observable **interface** (tool names/params/enums/description str
 **techniques** (CDP command sequences, algorithms) and **reimplement leanly**. We do **NOT** copy
 official code into our repo (it is Anthropic proprietary; our repo is intended open-source). The
 beautified official files stay in the throwaway scratchpad, never tracked. Interface + intent, not
-code -- consistent with the project's "not a port" principle.
+code. Consistent with the project's "not a port" principle.
 
-## Harvest results (official v1.0.78) -- the apply plan
+## Harvest results (official v1.0.78): the apply plan
 
 Source: the `harvest-official-extension` workflow (4 read-only study agents, high confidence). All
-13 of our tools have a 1:1 official counterpart -- no tool missing/extra. The model-facing schema is
+13 of our tools have a 1:1 official counterpart: no tool missing/extra. The model-facing schema is
 the `toAnthropicSchema()` return in `mcpPermissions.pretty.js` (NOT the internal `parameters` object,
 which has agent-internal placeholders). Line refs below are into the beautified official files
 (re-extract per the recipe above; they are ephemeral).
 
-### A. Schema corrections -- `src/mcp/schemas/tools.json` (sacred surface; re-baseline the golden fixture in `tests/tool_schema_fidelity.rs`)
+### A. Schema corrections: `src/mcp/schemas/tools.json` (sacred surface; re-baseline the golden fixture in `tests/tool_schema_fidelity.rs`)
 
-1. **[HIGH] navigate: add `force` boolean** -- "If the page shows a 'Leave site?' dialog because of
+1. **[HIGH] navigate: add `force` boolean**: "If the page shows a 'Leave site?' dialog because of
    unsaved changes, discard those changes and navigate anyway. Defaults to false..." (official 22718).
 2. **[HIGH] get_page_text: add `max_chars` (number, default 50000)** + description ends "Output is
    limited to 50000 characters by default. If the output exceeds this limit, you will receive an
    error suggesting alternatives." (official 22217-22232).
 3. **[HIGH] computer.duration.maximum: 30 -> 10** + text "Maximum 10 seconds." (official const `se`=10).
-4. **[MED] javascript_tool.action: remove the `const`** -- official is `{type:"string",
+4. **[MED] javascript_tool.action: remove the `const`**: official is `{type:"string",
    description:"Must be set to 'javascript_exec'"}` with no const (official 21718).
-5. **[MED] javascript_tool.text: adopt REPL wording** -- "Evaluated in the page context with REPL
+5. **[MED] javascript_tool.text: adopt REPL wording**: "Evaluated in the page context with REPL
    semantics: top-level `await` works, and the result of the last expression is returned
    automatically -- write the expression (e.g. `window.myData.value`, or
    `await fetch(url).then(r=>r.json())`) rather than `return ...`" (official 21724). NOTE: adopting
    this implies our js engine should actually support top-level await.
-6. **[MED] tabs_create_mcp: description is exactly "Creates a new empty tab in the MCP tab group."**
-   -- drop our extra "CRITICAL: ..." sentence (official 27922).
+6. **[MED] tabs_create_mcp: description is exactly "Creates a new empty tab in the MCP tab group."**:
+   drop our extra "CRITICAL: ..." sentence (official 27922).
 7. **[MED, decide] Description prose uses the BARE names `tabs_context`/`tabs_create`** everywhere
    (tool NAMES stay `_mcp`-suffixed). We (via the community reference) rewrote all prose to `_mcp`.
-   This is a trained-token divergence across ALL 13 descriptions -- match the official (bare in prose).
+   This is a trained-token divergence across ALL 13 descriptions: match the official (bare in prose).
 8. **[LOW] computer.action enum order**: `[left_click, right_click, type, screenshot, wait, scroll,
    key, left_click_drag, double_click, triple_click, zoom, scroll_to, hover]` (official 21360).
 9. **[LOW] read_page description**: remove our inserted "by default" (official 23071).
@@ -109,12 +109,12 @@ which has agent-internal placeholders). Line refs below are into the beautified 
    `{self.display_width_px}` resolution line); form_input/read_console/read_network/resize_window/
    update_plan params are field-identical.
 
-### B. Extension behavior/technique adoptions -- `extension/content.js`, `extension/service-worker.js`
+### B. Extension behavior/technique adoptions: `extension/content.js`, `extension/service-worker.js`
 
 read_page / accessibility engine (content.js):
-- **[HIGH] [DONE]** **Emit `<select>` option children** with `(selected)` + `value="..."` -- "single most
+- **[HIGH] [DONE]** **Emit `<select>` option children** with `(selected)` + `value="..."`: "single most
   load-bearing content gap"; without it the model is blind to dropdown choices (official a11y 157-162).
-- **[HIGH, SECURITY] [DONE]** **Redact sensitive values** -- gate on `type=password`/`hidden` + sensitive
+- **[HIGH, SECURITY] [DONE]** **Redact sensitive values**: gate on `type=password`/`hidden` + sensitive
   autocomplete (cc-number, cc-csc, one-time-code, new/current-password...) -> emit "[value redacted]",
   and suppress select options when redacted. OURS previously emitted raw `input.value` unconditionally,
   **leaking passwords/OTP/CC into the a11y tree** (official 37-43,89,92 vs old content.js:126). Fixed via a
@@ -122,7 +122,7 @@ read_page / accessibility engine (content.js):
   Verified with a jsdom harness (passwords/OTP/hidden/CC redacted; non-sensitive values + select options
   preserved). RESIDUAL (low sev, pre-existing): `find` still names unlabeled CONTAINER elements by their
   aggregate `textContent`, which can include a sensitive select's option LABELS (never a secret VALUE or
-  the user's selection -- input values are not in textContent). Goes away with the deferred find redesign.
+  the user's selection: input values are not in textContent). Goes away with the deferred find redesign.
 - **[MED] [DONE]** **select accessible-name = selected option text** (official 65-67); sensitive selects
   fall through to a label instead.
 - **[MED] [DONE]** **Emit inline `placeholder` attr** on element lines (official 156).
@@ -135,14 +135,14 @@ read_page / accessibility engine (content.js):
   tokenize (every-token-present) so "login button" matches a button named "Sign in". KEEP our x/y
   coords in the result (useful; official omits them).
 
-computer / screenshot pipeline (service-worker.js) -- biggest technique divergence:
-- **[HIGH] [DONE]** **Token-budget screenshot downscale** -- official caps to `ceil(w/28)*ceil(h/28)<=1568`
+computer / screenshot pipeline (service-worker.js), biggest technique divergence:
+- **[HIGH] [DONE]** **Token-budget screenshot downscale**: official caps to `ceil(w/28)*ceil(h/28)<=1568`
   tokens and <=1568px longest side (canvas), then steps JPEG quality 0.75 -> 0.10 by 0.05 until under
   ~1.05MB base64. OURS previously captured the raw viewport (q55, single 30 fallback >500KB) with **NO
   pixel cap** (official 13887-13910,19973-20059). Fixed: capture native (jpeg q80) -> downscale to the
   same token/longest-side budget via OffscreenCanvas in the service worker -> encode jpeg 0.55 (0.30
   fallback if >1.1MB b64).
-- **[HIGH, DECIDED -> full official model, user-approved 2026-07-01] [DONE]** **Coordinate model** --
+- **[HIGH, DECIDED -> full official model, user-approved 2026-07-01] [DONE]** **Coordinate model**:
   official NEVER uses `Emulation.setDeviceMetricsOverride`; it probes `innerWidth/innerHeight/
   devicePixelRatio` per screenshot, captures at native DPR, stores a per-tab ScreenshotContext, and
   rescales model coords via `Mv()=round(v*viewport/screenshot)` before dispatch (official
@@ -152,9 +152,9 @@ computer / screenshot pipeline (service-worker.js) -- biggest technique divergen
   ref-derived coords (getBoundingClientRect) are NOT rescaled (they are already CSS px). Removed the
   `resize_window` device-metrics refresh (now just invalidates stale ScreenshotContext). Rescale math
   verified numerically (corner->corner, center->center; longest side <=1568). CLAUDE.md updated.
-  RESIDUAL: `zoom` still returns a full (downscaled) screenshot rather than cropping `region` -- that
+  RESIDUAL: `zoom` still returns a full (downscaled) screenshot rather than cropping `region`. That
   is a step-5 item; the model-coord region would rescale via the same context when implemented.
-- **[MED] real `zoom`** -- ours ignores `a.region` and returns a full-viewport jpeg, so zoom does not
+- **[MED] real `zoom`**: ours ignores `a.region` and returns a full-viewport jpeg, so zoom does not
   zoom; official crops the region on a PNG canvas (official 21086-21174).
 - **[MED] double/triple click** send an incrementing `clickCount` sequence (not a lone clickCount:2/3);
   **[MED] type** via real keyDown/keyUp with key fields (code/windowsVirtualKeyCode/location/
@@ -167,7 +167,7 @@ console / network capture (service-worker.js):
 - **[CONFIRMED keep] Our single-source console (Runtime.consoleAPICalled only, never Console domain) is
   byte-for-byte the official's design.** The community-reference double-count fix we shipped (8c41a15)
   is correct. Symptom B resolved.
-- **[CONFIRMED keep] Lazy `Network.enable` on read matches the official** -- it ALSO returns empty for
+- **[CONFIRMED keep] Lazy `Network.enable` on read matches the official**: it ALSO returns empty for
   page-load traffic and tells the agent to refresh. Symptom A is expected behavior, not a bug.
 - **[MED] Append empty-result guidance** to read_console/read_network: "tracking starts when this tool
   is first called; if the page loaded before, refresh to capture page-load events" (official 22787/22914).
@@ -175,7 +175,7 @@ console / network capture (service-worker.js):
   stay "(pending)" forever.
 - **[MED] Capture `Runtime.exceptionThrown`** as a synthetic console `exception` entry so `onlyErrors`
   surfaces uncaught page errors (our read filter already matches `exception` but nothing produces it).
-- **[MED] Reset per-tab console+network buffers on domain change** -- ours leaks cross-domain data,
+- **[MED] Reset per-tab console+network buffers on domain change**: ours leaks cross-domain data,
   contradicting our own schema text "current domain only / cleared on navigation".
 - [LOW] guard debugger attach against `chrome://`/`chrome-extension://`; persist tracking-enabled
   across re-attach.
@@ -185,12 +185,12 @@ console / network capture (service-worker.js):
 - Console single-source + lazy network enable (matches official); JPEG 55/30 (CLAUDE.md pinned; note
   official uses a finer 0.75->0.10 ladder); single native-messaging port with id-correlated framing;
   tab-group recovery by title; "Browser MCP" blue branding; shadow-DOM traversal in read_page/find
-  (ours does MORE than the official -- an improvement); `form_input` broader checkbox truthiness (commit
+  (ours does MORE than the official, an improvement); `form_input` broader checkbox truthiness (commit
   0deef1c); find returning x/y center coords.
 
-### D. UI capabilities -- user-facing parity (NEW: requested for true 1:1 parity)
+### D. UI capabilities: user-facing parity (NEW: requested for true 1:1 parity)
 
-The official extension is not just a headless CDP executor -- it shows the USER what the agent is
+The official extension is more than a headless CDP executor: it shows the USER what the agent is
 doing. This matches our North Star's "end user watching" delight persona and is part of true parity.
 Our extension currently has **no visual indicator at all** (manifest `content_scripts` is just
 `content.js`); we must add this.
@@ -219,19 +219,19 @@ Plan (reimplement the CONCEPT leanly; do NOT copy Anthropic's overlay code): **[
   messages so the two content scripts don't both answer.
 - Omitted the official's Stop button + static "chat" pill: those are product controls for the
   OFFICIAL's in-browser agent (STOP_AGENT / SWITCH_TO_MAIN_TAB) and do not apply to our external-client
-  model -- the official itself suppresses the Stop button in isMcp mode. Lean by design.
+  model. The official itself suppresses the Stop button in isMcp mode. Lean by design.
 - Harvested from the official `agent-visual-indicator.js-CW8zgsee.js` + the mcpPermissions
   phantom-cursor/hide call sites (19604-19611, 19637, 19860); reimplemented, not copied.
 
 ### Sequencing
 
 1. [DONE, commit 60bf334] Schema corrections (A) + re-baseline `tests/tool_schema_fidelity.rs` golden
-   fixture. Pure Rust; the fidelity test is the guard -- update the fixture to the official surface and
+   fixture. Pure Rust; the fidelity test is the guard: update the fixture to the official surface and
    keep the tests passing.
-2. [DONE] Extension redaction (B, security) + `<select>` options -- highest user/safety value.
-3. [DONE] **UI visual cursor + agent-active indicator (D)** -- user-facing parity + "watching" delight.
+2. [DONE] Extension redaction (B, security) + `<select>` options: highest user/safety value.
+3. [DONE] **UI visual cursor + agent-active indicator (D)**: user-facing parity + "watching" delight.
    The cursor renders at the same rescaled CSS-px coordinate `rescaleCoord()` produces for dispatch.
-4. [DONE] Screenshot token-budget + coordinate-model decision (B) -- DECIDED: full official model
+4. [DONE] Screenshot token-budget + coordinate-model decision (B). DECIDED: full official model
    (probe viewport/DPR, downscale to budget, ScreenshotContext, rescale model coords). Done before 3
    so the cursor consumes the rescaled dispatch coord.
 5. The remaining MED technique adoptions (zoom, click/type/key, network loadingFailed/exception,

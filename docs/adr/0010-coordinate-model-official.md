@@ -14,7 +14,7 @@ v1.0.78 solves all three without overriding device metrics; we adopt its model.
 ## Decision
 No `Emulation.setDeviceMetricsOverride`. On each screenshot:
 - `probeViewport(tabId)` runs `Runtime.evaluate` for `innerWidth`, `innerHeight`, and
-  `devicePixelRatio` (no scripting permission -- the debugger is already attached).
+  `devicePixelRatio` (no scripting permission; the debugger is already attached).
 - Capture at native resolution, then downscale in an `OffscreenCanvas` to a token
   budget: `ceil(w/28)*ceil(h/28) <= 1568` tokens and longest side `<= 1568` px. Encode
   JPEG at quality 0.55, falling back to 0.30 if the base64 exceeds ~1.1 MB. If

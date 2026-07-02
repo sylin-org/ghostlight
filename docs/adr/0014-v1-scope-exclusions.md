@@ -36,7 +36,7 @@ v1 explicitly excludes (SPEC sec 10):
 
 Correction to stale rationale: SPEC sec 3.2 justifies excluding `upload_image`
 (and `gif_creator`) as "non-functional stubs in the reference." That rationale
-is stale -- the official Claude-in-Chrome v1.0.78 implements both fully. The
+is stale: the official Claude-in-Chrome v1.0.78 implements both fully. The
 exclusion of `upload_image` stands, but on scope and niche grounds: it is
 deferred as a niche capability, not because it is a stub. (`shortcuts_list`,
 `shortcuts_execute`, and `switch_browser` remain genuine reference stubs.)

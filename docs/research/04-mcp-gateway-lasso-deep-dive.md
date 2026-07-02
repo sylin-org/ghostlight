@@ -1,8 +1,8 @@
-# MCP Gateway Deep-Dive — Lasso Security mcp-gateway
+# MCP Gateway Deep-Dive: Lasso Security mcp-gateway
 
 **Date:** 2026-07-01 · **Track:** Governance · **Source:** research agent (source-level, verbatim report)
 
-> A content-sanitization/DLP proxy pattern — useful as a contrast to our access-control model,
+> A content-sanitization/DLP proxy pattern, useful as a contrast to our access-control model,
 > plus a few reusable implementation patterns.
 
 **Repo:** `github.com/lasso-security/mcp-gateway` (Python, PyPI `mcp-gateway`, v1.2.1)
@@ -11,18 +11,18 @@ more downstream ("proxied") MCP servers, applying guardrail + tracing plugins to
 requests/responses in-flight.
 
 ## Architecture (verified from source)
-- Config is **JSON, not YAML** — it reuses the client's own `mcp.json` /
+- Config is **JSON, not YAML**: it reuses the client's own `mcp.json` /
   `claude_desktop_config.json`. The gateway is an entry in `mcpServers`, nesting downstream
   servers under a **`servers`** key inside its own entry.
 - Two protocol boundaries: client ↔ gateway (MCP/stdio) and gateway ↔ proxied servers (spawned
   as child MCP servers).
 
-## (a) Tool visibility / filtering — essentially NONE
+## (a) Tool visibility / filtering: essentially NONE
 Most important negative finding. **Lasso does NOT do per-user or per-role tool masking.**
 `register_proxied_capabilities()` exposes every proxied tool individually, namespaced
 `f"{server_name}_{tool.name}"`. There is **no allowlist/denylist of tool names, no role concept,
 no identity concept** in config. Filtering, if any, happens **per-call at runtime** via guardrail
-plugins inspecting args/responses — not at advertisement time. (README's `run_tool`/`get_metadata`
+plugins inspecting args/responses, not at advertisement time. (README's `run_tool`/`get_metadata`
 two-tool facade is stale; current source registers each tool individually and defines only
 `get_metadata`.)
 
@@ -48,13 +48,13 @@ Audit is delivered **only via the `xetrack` tracing plugin** (no built-in file/s
 subsystem). `xetrack`: SQLite (DuckDB) + optional log files; logs `call_id`, `arguments`,
 `response_type`, `content`, `mime_type`. Env config `XETRACK_DB_PATH`, `XETRACK_LOGS_PATH`,
 `XETRACK_FLATTEN_ARGUMENTS/RESPONSE`, etc. **No identity/user field, no grant-ID, no domain, no
-deny-reason** in the schema — a notable gap vs. our audit requirements.
+deny-reason** in the schema, a notable gap vs. our audit requirements.
 
 ## (d) Config schema + plugin selection
 CLI (argparse): `--mcp-json-path` (required), `-p/--plugin` (repeatable),
 `--enable-guardrails`/`--enable-tracing` (deprecated), `--scan`. Plugins are enabled via a
 type→[names] map; empty/`all` enables all of that type; discovery via `@register_plugin`
-decorator. Per-plugin `load(config)` exists but is currently passed an empty dict — plugins are
+decorator. Per-plugin `load(config)` exists but is currently passed an empty dict. Plugins are
 configured via **env vars** today.
 
 ## (e) Built-in plugins
@@ -72,13 +72,13 @@ poisoning (supply-chain scanner, not a runtime guardrail).
 ## Bottom line for browser-mcp
 Lasso's model is **orthogonal to ours**: a *content-sanitization/DLP proxy*, configured by
 *enabling plugins*, not an *access-control layer*. It has no per-user tool visibility filtering,
-no declarative allow/deny, and no identity/domain/grant concept — all of which are our
+no declarative allow/deny, and no identity/domain/grant concept, all of which are our
 differentiators. Runtime plugin block is **fail-closed on request, fail-open on response**
-(a design precedent worth noting).
+(a design precedent).
 
 **Reusable ideas worth borrowing:** the **`@register_plugin` auto-discovery + type/name registry**
 pattern (natural fit for our audit *destinations*); the **secret-masking regex table** (12
-patterns to port for response/param redaction — PHI-aware logging); the **tracing-vs-guardrail
+patterns to port for response/param redaction, PHI-aware logging); the **tracing-vs-guardrail
 ordering discipline** (tracing before guardrails on request, reversed on response).
 
 **Caveats:** README's `run_tool` facade is stale vs source; `load()` structured config is not yet

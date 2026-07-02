@@ -11,37 +11,37 @@
 
 ## 1. Purpose
 
-This document specifies a single-binary MCP server that gives AI coding agents (Claude Code, Cursor, etc.) governed access to the user's **own authenticated Chromium browser session** — enabling them to observe and interact with web applications the user is already logged in to.
+This document specifies a single-binary MCP server that gives AI coding agents (Claude Code, Cursor, etc.) governed access to the user's **own authenticated Chromium browser session**, enabling them to observe and interact with web applications the user is already logged in to.
 
-The system is an **unconstrained engine with an optional governance overlay**. The engine exposes the full browser-automation capability surface with no built-in limits; governance is a *separable* layer that can gate that surface — set by enterprise policy, chosen by the user, or absent entirely. The same binary serves an unrestricted personal tool and a default-deny enterprise deployment with no code changes.
+The system is an **unconstrained engine with an optional governance overlay**. The engine exposes the full browser-automation capability surface with no built-in limits; governance is a *separable* layer that can gate that surface: set by enterprise policy, chosen by the user, or absent entirely. The same binary serves an unrestricted personal tool and a default-deny enterprise deployment with no code changes.
 
 ### 1.1. Core Concerns (independent lifecycles)
 
-- **Engine** — MCP↔CDP translation and the complete browser-automation capability surface (navigation, input, reads, extraction, scripting). Hosts the MCP server on stdio and the native-messaging host for the extension. **It has no built-in limits and no opinions about policy** — capability is its only job.
-- **Governance overlay** — an optional, separable layer (co-hosted in the binary, never in the extension) that gates, masks, classifies (read/write), and audits engine calls per a capability manifest. **In all-open mode the overlay is a pass-through** and the engine's full surface is exposed.
-- **Identity** — resolution of "who is connecting" into "which manifest (if any) applies." Pluggable; resolved at connection time. In enterprise the *deployment channel is* the identity resolution; in personal use there is no identity step.
+- **Engine**: MCP↔CDP translation and the complete browser-automation capability surface (navigation, input, reads, extraction, scripting). Hosts the MCP server on stdio and the native-messaging host for the extension. **It has no built-in limits and no opinions about policy**: capability is its only job.
+- **Governance overlay**: an optional, separable layer (co-hosted in the binary, never in the extension) that gates, masks, classifies (read/write), and audits engine calls per a capability manifest. **In all-open mode the overlay is a pass-through** and the engine's full surface is exposed.
+- **Identity**: resolution of "who is connecting" into "which manifest (if any) applies." Pluggable; resolved at connection time. In enterprise the *deployment channel is* the identity resolution; in personal use there is no identity step.
 
 ### 1.2. Operating Postures
 
 Three postures, one engine, no code changes:
 
-- **All-open (personal default)** — no manifest; the overlay is inert. A first-class, fully-supported unrestricted browser-automation MCP. *Not* "enterprise minus governance" — it must be excellent on its own terms.
-- **User-chosen** — the user opts into whatever limits *they* want ("keep the agent to these sites"). Governance here is a user-facing control feature, not an IT mandate.
-- **Policy-enforced (enterprise)** — manifest pushed via Intune/GPO to managed machines. Default-deny, full audit, identity-bound. The deployment channel is the identity resolution; no governance infrastructure to build.
+- **All-open (personal default)**: no manifest; the overlay is inert. A first-class, fully-supported unrestricted browser-automation MCP. *Not* "enterprise minus governance"; it must be excellent on its own terms.
+- **User-chosen**: the user opts into whatever limits *they* want ("keep the agent to these sites"). Governance here is a user-facing control feature, not an IT mandate.
+- **Policy-enforced (enterprise)**: manifest pushed via Intune/GPO to managed machines. Default-deny, full audit, identity-bound. The deployment channel is the identity resolution; no governance infrastructure to build.
 
 ### 1.3. Design Principles
 
 1. **Unconstrained engine, governance as overlay.** The engine enables full capability; access control is a separable overlay with its own lifecycle. The engine never bakes in policy.
-2. **"All-open" is first-class.** Zero restrictions is a valid, supported, default configuration — excellent on its own terms, not a degraded mode.
+2. **"All-open" is first-class.** Zero restrictions is a valid, supported, default configuration, excellent on its own terms, not a degraded mode.
 3. **The user's context is sacred.** We attach to the user's real, authenticated, live browser session. We never relocate their work to a cloud/fresh/separate-profile browser to gain a technical property; where such a technique is unavoidable it is at most an *opt-in* deployment profile, never the default.
 4. **Delight is layered and composable** (mirroring the architecture):
-   - **L0 — base capability delight** *(engine; every persona, all-open included)* — automating monotonous browser work in the user's own context: fast, token-lean, install-just-works.
-   - **L1 — control delight** *(overlay; user-chosen)* — confidence the agent stays where the user wants.
-   - **L2 — governance delight** *(overlay; enterprise)* — the org can say *yes* to a powerful tool because it's default-deny, audited, identity-bound.
+   - **L0: base capability delight** *(engine; every persona, all-open included)*: automating monotonous browser work in the user's own context: fast, token-lean, install-just-works.
+   - **L1: control delight** *(overlay; user-chosen)*: confidence the agent stays where the user wants.
+   - **L2: governance delight** *(overlay; enterprise)*: the org can say *yes* to a capable tool because it's default-deny, audited, identity-bound.
 
-   Governance-as-delight is real but **composite and additive (L0 + L2)** — never a substitute for L0. L0 is load-bearing for every persona, so the engine is built to be excellent for everyone, and the overlay UX must itself be delightful, not merely correct.
+   Governance-as-delight is real but **composite and additive (L0 + L2)**: never a substitute for L0. L0 is load-bearing for every persona, so the engine is built to be excellent for everyone, and the overlay UX must itself be delightful, not merely correct.
 5. **Separation of concerns.** Engine, overlay, identity, and audit have independent lifecycles; a change to one must not force a change to another.
-6. **Prior art is a concern-surface, not a feature catalog.** Competitor and standards research informs our design by surfacing hazards and questions (see §1.4); we do not import paradigms — anything that moves away from the user's context (Principle 3) is rejected regardless of how common it is.
+6. **Prior art is a concern-surface, not a feature catalog.** Competitor and standards research informs our design by surfacing hazards and questions (see §1.4); we do not import paradigms. Anything that moves away from the user's context (Principle 3) is rejected regardless of how common it is.
 
 ### 1.4. Prior Art and Positioning
 
@@ -56,7 +56,7 @@ This design is informed by, but architecturally distinct from, the following:
 | MCP Gateway ecosystem (TrueFoundry, MintMCP, Cloudflare, etc.) | Precedent for MCP-level RBAC, tool allowlisting, and audit. Not browser-specific. |
 | Okta XAA / Entra Agent Identity | Precedent for identity-governed agent access. Protocol-layer; not an implementation. |
 
-**The gap this project fills:** No existing project combines extension-based browser automation (user's authenticated session), identity-bound capability projection (enterprise directory → per-connection manifest), tool-level r/w classification, default-deny posture, and healthcare-grade audit — in a single deployable artifact.
+**The gap this project fills:** No existing project combines extension-based browser automation (user's authenticated session), identity-bound capability projection (enterprise directory → per-connection manifest), tool-level r/w classification, default-deny posture, and healthcare-grade audit, in a single deployable artifact.
 
 ---
 
@@ -65,11 +65,11 @@ This design is informed by, but architecturally distinct from, the following:
 ### 2.1. Process Model
 
 ```
-MCP Client ←—stdio—→ Binary ←—native messaging—→ Extension ←—CDP—→ Browser
+MCP Client <--stdio--> Binary <--native messaging--> Extension <--CDP--> Browser
    (1)                  (2)                          (3)            (4)
 ```
 
-**Process reality (corrected in Phase 0).** The Binary is a *single executable* but runs as **two instances**: because Chrome spawns its own native-messaging host process on `connectNative`, one instance plays the **mcp-server role** (launched by the MCP client over stdio) and another plays the **native-host role** (launched by Chrome), bridged by a local IPC -- a named pipe on Windows, a Unix domain socket elsewhere. This is still a major simplification over the reference's five processes / four boundaries (one Rust executable instead of two Node processes; a local pipe instead of a localhost-TCP relay), but it is not literally a single process. The first instance to acquire the IPC endpoint owns the browser; a second concurrent session is rejected (single active session -- see sec 10).
+**Process reality (corrected in Phase 0).** The Binary is a *single executable* but runs as **two instances**: because Chrome spawns its own native-messaging host process on `connectNative`, one instance plays the **mcp-server role** (launched by the MCP client over stdio) and another plays the **native-host role** (launched by Chrome), bridged by a local IPC: a named pipe on Windows, a Unix domain socket elsewhere. This is still a major simplification over the reference's five processes / four boundaries (one Rust executable instead of two Node processes; a local pipe instead of a localhost-TCP relay), but it is not literally a single process. The first instance to acquire the IPC endpoint owns the browser; a second concurrent session is rejected (single active session, see sec 10).
 
 | Component | Runtime | Responsibility |
 |---|---|---|
@@ -82,7 +82,7 @@ MCP Client ←—stdio—→ Binary ←—native messaging—→ Extension ←�
 
 **Binary ↔ MCP Client:** MCP over stdio. JSON-RPC 2.0 per the MCP specification. The binary is launched as a subprocess by the MCP client.
 
-**Binary ↔ Extension:** Chromium Native Messaging. 4-byte little-endian length prefix + UTF-8 JSON payload. The browser launches the binary as a native-messaging host when the extension connects, so the same executable plays both roles -- native-messaging host (for the extension) and MCP server (for the client on stdio) -- as **two instances bridged by a local IPC** (named pipe / Unix domain socket), not a single process (Chrome always spawns its own host process). The simplification over the reference is one Rust executable and a local pipe in place of two Node processes and a localhost-TCP relay.
+**Binary ↔ Extension:** Chromium Native Messaging. 4-byte little-endian length prefix + UTF-8 JSON payload. The browser launches the binary as a native-messaging host when the extension connects, so the same executable plays both roles, native-messaging host (for the extension) and MCP server (for the client on stdio), as **two instances bridged by a local IPC** (named pipe / Unix domain socket), not a single process (Chrome always spawns its own host process). The simplification over the reference is one Rust executable and a local pipe in place of two Node processes and a localhost-TCP relay.
 
 **Extension ↔ Browser:** Chrome DevTools Protocol via `chrome.debugger` API. The extension attaches to target tabs and dispatches CDP commands.
 
@@ -99,7 +99,7 @@ MCP Client ←—stdio—→ Binary ←—native messaging—→ Extension ←�
 
 ### 2.4. Extension Design
 
-The extension is **policy-free**: it holds mechanism (CDP execution, DOM reads via a content script, event buffering) but makes **no access decisions**. All policy, tool classification, and audit live in the binary. "Policy-free" is the invariant -- not "minimal": the extension may carry real mechanism (e.g. the content script that builds the accessibility tree and does shadow-DOM form input), but it never governs.
+The extension is **policy-free**: it holds mechanism (CDP execution, DOM reads via a content script, event buffering) but makes **no access decisions**. All policy, tool classification, and audit live in the binary. "Policy-free" is the invariant, not "minimal": the extension may carry real mechanism (e.g. the content script that builds the accessibility tree and does shadow-DOM form input), but it never governs.
 
 **Responsibilities:**
 - Maintain a debugger attachment to target tabs (with `Emulation.setDeviceMetricsOverride` for coordinate normalization).
@@ -249,36 +249,36 @@ The `computer` enum has **13 actions** (verified in Phase 0): `left_click`, `rig
 
 ### 4.2. Field Definitions
 
-**`schema`** — Integer. Manifest schema version. The binary validates this before proceeding.
+**`schema`**: Integer. Manifest schema version. The binary validates this before proceeding.
 
-**`identity`** — Object. Metadata about how the manifest was resolved. Informational; included in audit records. Not used for authorization decisions (the manifest *is* the authorization decision).
+**`identity`**: Object. Metadata about how the manifest was resolved. Informational; included in audit records. Not used for authorization decisions (the manifest *is* the authorization decision).
 
-- `resolved_by` — Enum: `"managed_config"`, `"local_file"`, `"environment"`, `"http"`. How the binary obtained this manifest.
-- `principal` — String. The resolved identity (e.g., UPN, SAM account name). Included in audit records.
-- `groups` — Array of strings. The group memberships that produced this grant set. Informational.
-- `resolved_at` — ISO 8601 timestamp. When the manifest was resolved.
+- `resolved_by`. Enum: `"managed_config"`, `"local_file"`, `"environment"`, `"http"`. How the binary obtained this manifest.
+- `principal`: String. The resolved identity (e.g., UPN, SAM account name). Included in audit records.
+- `groups`: Array of strings. The group memberships that produced this grant set. Informational.
+- `resolved_at`: ISO 8601 timestamp. When the manifest was resolved.
 
-**`grants`** — Array of grant objects. Each grant authorizes access to a set of domains at a specified tier.
+**`grants`**: Array of grant objects. Each grant authorizes access to a set of domains at a specified tier.
 
-- `id` — String. Human-readable identifier for this grant. Used in audit records and denial messages.
-- `domains` — Array of domain patterns. Wildcards: `*.example.com` matches `foo.example.com` and `bar.baz.example.com` but not `example.com`. Use `["example.com", "*.example.com"]` for both. Patterns are matched against the hostname of the URL, case-insensitive.
-- `access` — Enum: `"observe"`, `"mutate"`. The maximum tier available for matched domains.
-- `tools` — Array of tool names (positive list), or `null` for "all tools in this tier." Mutually exclusive with `exclude_tools`.
-- `exclude_tools` — Array of tool names (negative list). All tools in the tier *except* these. Mutually exclusive with `tools`.
-- `description` — String. Human-readable description. Included in denial messages.
+- `id`: String. Human-readable identifier for this grant. Used in audit records and denial messages.
+- `domains`: Array of domain patterns. Wildcards: `*.example.com` matches `foo.example.com` and `bar.baz.example.com` but not `example.com`. Use `["example.com", "*.example.com"]` for both. Patterns are matched against the hostname of the URL, case-insensitive.
+- `access`. Enum: `"observe"`, `"mutate"`. The maximum tier available for matched domains.
+- `tools`: Array of tool names (positive list), or `null` for "all tools in this tier." Mutually exclusive with `exclude_tools`.
+- `exclude_tools`: Array of tool names (negative list). All tools in the tier *except* these. Mutually exclusive with `tools`.
+- `description`: String. Human-readable description. Included in denial messages.
 
-**`defaults`** — Object. Global settings.
+**`defaults`**: Object. Global settings.
 
-- `unlisted_domains` — Enum: `"deny"`, `"observe"`, `"mutate"`. Action when a domain matches no grant. Enterprise deployments: `"deny"`. Personal use: `"observe"` or `"mutate"`.
+- `unlisted_domains`. Enum: `"deny"`, `"observe"`, `"mutate"`. Action when a domain matches no grant. Enterprise deployments: `"deny"`. Personal use: `"observe"` or `"mutate"`.
 - Screenshot and timeout settings as documented.
-- `max_concurrent_tabs` — Integer. Maximum tabs in the MCP tab group.
+- `max_concurrent_tabs`: Integer. Maximum tabs in the MCP tab group.
 
-**`audit`** — Object. Audit configuration.
+**`audit`**: Object. Audit configuration.
 
-- `destination` — Enum: `"file"`, `"syslog"`, `"http"`, `"stderr"`, `"none"`.
-- `include_tool_parameters` — Boolean. Whether tool call parameters are included in audit records. Default `false` in healthcare (parameters may contain PHI from form fills).
-- `include_screenshots_in_log` — Boolean. Whether screenshot data is included in audit records. Default `false` (screenshots may capture PHI).
-- `log_denials` — Boolean. Whether denied tool calls are logged. Should always be `true` in enterprise.
+- `destination`. Enum: `"file"`, `"syslog"`, `"http"`, `"stderr"`, `"none"`.
+- `include_tool_parameters`: Boolean. Whether tool call parameters are included in audit records. Default `false` in healthcare (parameters may contain PHI from form fills).
+- `include_screenshots_in_log`: Boolean. Whether screenshot data is included in audit records. Default `false` (screenshots may capture PHI).
+- `log_denials`: Boolean. Whether denied tool calls are logged. Should always be `true` in enterprise.
 
 ### 4.3. Grant Resolution
 
@@ -390,7 +390,7 @@ No device-metrics override. On each screenshot the extension probes the CSS view
 
 ### 6.3. Screenshot-per-Action Policy
 
-Screenshots are returned only on the `computer` actions that produce one -- `screenshot`, `scroll`, and `zoom`. Every other `computer` action returns a short text confirmation, and the agent requests a screenshot separately when it needs one. This reduces context consumption by roughly 10x in multi-step workflows.
+Screenshots are returned only on the `computer` actions that produce one: `screenshot`, `scroll`, and `zoom`. Every other `computer` action returns a short text confirmation, and the agent requests a screenshot separately when it needs one. This reduces context consumption by roughly 10x in multi-step workflows.
 
 ---
 
@@ -423,11 +423,11 @@ Every tool call (permitted or denied) produces a structured audit record:
 
 ### 7.2. Sensitive Field Handling
 
-**`parameters`** — Only populated if `audit.include_tool_parameters` is `true`. In healthcare deployments, tool parameters may contain PHI (e.g., text typed into a patient record via `form_input`, or JS code that reads patient data via `javascript_tool`). Default: `null` (not logged).
+**`parameters`**: Only populated if `audit.include_tool_parameters` is `true`. In healthcare deployments, tool parameters may contain PHI (e.g., text typed into a patient record via `form_input`, or JS code that reads patient data via `javascript_tool`). Default: `null` (not logged).
 
-**`screenshot`** — Only populated if `audit.include_screenshots_in_log` is `true`. Screenshots may capture PHI visible on the page. Default: `null` (not logged).
+**`screenshot`**: Only populated if `audit.include_screenshots_in_log` is `true`. Screenshots may capture PHI visible on the page. Default: `null` (not logged).
 
-**`url`** — Always logged. The URL itself may contain PHI (e.g., patient IDs in query strings). Organizations requiring URL redaction should implement it at the SIEM/log aggregation layer, not in the binary. The binary logs what it sees; downstream systems apply retention and redaction policy.
+**`url`**: Always logged. The URL itself may contain PHI (e.g., patient IDs in query strings). Organizations requiring URL redaction should implement it at the SIEM/log aggregation layer, not in the binary. The binary logs what it sees; downstream systems apply retention and redaction policy.
 
 ### 7.3. Audit Destinations
 
@@ -441,7 +441,7 @@ Every tool call (permitted or denied) produces a structured audit record:
 
 ### 7.4. Trust Boundary
 
-Audit records are generated by the binary, not the extension. The extension is untrusted execution — it executes CDP commands and returns results, but it does not log. If the extension is tampered with (a modified content script, an injected response), the binary still logs what it dispatched and what came back. The audit trail is as trustworthy as the binary.
+Audit records are generated by the binary, not the extension. The extension is untrusted execution: it executes CDP commands and returns results, but it does not log. If the extension is tampered with (a modified content script, an injected response), the binary still logs what it dispatched and what came back. The audit trail is as trustworthy as the binary.
 
 ---
 
@@ -455,7 +455,7 @@ Three artifacts, all pushed through existing IT channels:
 
 **2. Extension.** A Chromium extension (unpacked folder or .crx). Force-installed via Chrome enterprise policy (`ExtensionInstallForcelist`) or Edge policy equivalent. The extension's native messaging host manifest points to the binary path.
 
-**3. Capability manifest.** Pushed as a managed extension configuration via Chrome's `ExtensionSettings` policy (`managed_storage` schema), or as a signed JSON file at a well-known path. The manifest is role-specific — IT generates manifests per AD group and pushes them to the appropriate machines.
+**3. Capability manifest.** Pushed as a managed extension configuration via Chrome's `ExtensionSettings` policy (`managed_storage` schema), or as a signed JSON file at a well-known path. The manifest is role-specific: IT generates manifests per AD group and pushes them to the appropriate machines.
 
 **Identity resolution in this model is the deployment channel itself.** The binary doesn't need to speak LDAP or OIDC. The fact that machine X, joined to the domain under user Y, received manifest Z *is* the identity resolution. The manifest's `identity` block is metadata for audit, not an input to authorization.
 
@@ -470,7 +470,7 @@ Three artifacts, all pushed through existing IT channels:
 ### 8.3. MCP Client Integration
 
 The binary is a standard MCP server (JSON-RPC 2.0 over stdio), launched as a subprocess. It is
-**client-agnostic**: any MCP client works — Claude Code, Cursor, Zed, Cline, and others. Point the
+**client-agnostic**: any MCP client works (Claude Code, Cursor, Zed, Cline, and others). Point the
 client at the binary; the same governed engine serves whatever agent connects. The config shape is
 the common `mcpServers` map (Claude Code / Cursor / Cline share it; other clients use their own
 equivalent stdio-server config with the same command + args + env):
@@ -514,7 +514,7 @@ The governance model does not reduce the trust surface of the *code*. It constra
 
 ### 9.2. Extension Tampering
 
-If the extension is modified (by a malicious actor with access to the user's machine or browser profile), it could bypass domain restrictions by lying about the current URL or intercepting CDP responses. The binary mitigates this partially by including the current URL in audit records (which the extension provides — a tampered extension could falsify this too).
+If the extension is modified (by a malicious actor with access to the user's machine or browser profile), it could bypass domain restrictions by lying about the current URL or intercepting CDP responses. The binary mitigates this partially by including the current URL in audit records (which the extension provides; a tampered extension could falsify this too).
 
 Full mitigation requires the extension to be force-installed via enterprise policy (preventing user modification) and validated via Chrome's built-in extension integrity checks (CRX signature verification for packaged extensions). The binary cannot independently verify the extension's integrity at runtime.
 
@@ -524,11 +524,11 @@ A locally stored manifest file could be modified by a user with write access to 
 
 - Use `chrome.storage.managed` (Chrome enterprise policy), which the user cannot modify.
 - Or store the manifest in a directory with restricted ACLs (readable by the binary's execution context, not writable by the logged-in user).
-- Or sign the manifest (v2 consideration — adds complexity and a key management requirement).
+- Or sign the manifest (v2 consideration: adds complexity and a key management requirement).
 
 ### 9.4. MCP Client Trust
 
-The binary trusts the MCP client (Claude Code) to relay tool calls faithfully. A modified MCP client could send forged tool calls. This is inherent to the MCP architecture — the binary is a server, not a gatekeeper for the client. The audit trail records what was dispatched regardless of client behavior.
+The binary trusts the MCP client (Claude Code) to relay tool calls faithfully. A modified MCP client could send forged tool calls. This is inherent to the MCP architecture: the binary is a server, not a gatekeeper for the client. The audit trail records what was dispatched regardless of client behavior.
 
 ### 9.5. No Content Inspection
 
@@ -556,7 +556,7 @@ The following are explicitly out of scope for v1:
 
 **Dynamic grant refresh.** The `chrome.storage.managed` source could be polled periodically (e.g., every 5 minutes) to pick up mid-session manifest changes pushed by IT. The binary would re-resolve grants and re-advertise tools if the manifest changed.
 
-**Per-session purpose tagging.** The MCP client could pass a `purpose` parameter at connection time (e.g., "incident-response", "asset-research", "training"). The manifest could include purpose-scoped grants — different tool sets for different declared intents.
+**Per-session purpose tagging.** The MCP client could pass a `purpose` parameter at connection time (e.g., "incident-response", "asset-research", "training"). The manifest could include purpose-scoped grants: different tool sets for different declared intents.
 
 **Manifest signing.** For file-based manifests, a detached signature (e.g., Ed25519) verified against a pinned public key in the binary. Prevents local tampering without `chrome.storage.managed`.
 

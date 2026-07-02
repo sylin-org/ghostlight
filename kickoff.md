@@ -1,4 +1,4 @@
-# Kickoff: Phase 0 — Reference Study + Project Bootstrap
+# Kickoff: Phase 0, Reference Study + Project Bootstrap
 
 Read CLAUDE.md and docs/SPEC.md fully before doing anything else. These are your authoritative sources.
 
@@ -15,11 +15,11 @@ git clone https://github.com/noemica-io/open-claude-in-chrome.git reference/open
 
 Read every file in `reference/open-claude-in-chrome/`. The codebase is ~2,200 lines across 6 files. Focus on:
 
-- `host/mcp-server.js` — the MCP server. Extract the complete tool schemas (every tool name, parameter, type, description, enum). These schemas are sacred and must be preserved verbatim in our implementation.
-- `host/native-host.js` — the native messaging bridge. Understand the 4-byte LE protocol and the TCP relay (which we're eliminating).
-- `extension/service-worker.js` — the extension. Understand every CDP call, the tab group management, the keepalive alarm, the state recovery pattern, the coordinate normalization (`Emulation.setDeviceMetricsOverride`), and the screenshot pipeline.
-- `extension/manifest.json` — permissions, native messaging host declaration.
-- `install.sh` — native messaging host registration across browsers.
+- `host/mcp-server.js`: the MCP server. Extract the complete tool schemas (every tool name, parameter, type, description, enum). These schemas are sacred and must be preserved verbatim in our implementation.
+- `host/native-host.js`: the native messaging bridge. Understand the 4-byte LE protocol and the TCP relay (which we're eliminating).
+- `extension/service-worker.js`: the extension. Understand every CDP call, the tab group management, the keepalive alarm, the state recovery pattern, the coordinate normalization (`Emulation.setDeviceMetricsOverride`), and the screenshot pipeline.
+- `extension/manifest.json`: permissions, native messaging host declaration.
+- `install.sh`: native messaging host registration across browsers.
 
 ## 3. Write `reference/ANALYSIS.md`
 

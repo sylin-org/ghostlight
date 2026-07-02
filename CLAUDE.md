@@ -1,4 +1,4 @@
-# Browser MCP — Governed Browser Automation
+# Browser MCP: Governed Browser Automation
 
 ## Project Identity
 
@@ -8,14 +8,14 @@ The authoritative design specification is `docs/SPEC.md`. Read it fully before w
 
 ## Origin
 
-This is a clean-room Rust rewrite informed by [open-claude-in-chrome](https://github.com/noemica-io/open-claude-in-chrome), a Node.js reimplementation of Anthropic's Claude in Chrome extension. The reference repo is cloned into `reference/open-claude-in-chrome/` for study. We are not forking it — we are understanding what it does and rebuilding the concept in Rust with a fundamentally different architecture (governance-first, single-binary, no Node.js dependency).
+This is a clean-room Rust rewrite informed by [open-claude-in-chrome](https://github.com/noemica-io/open-claude-in-chrome), a Node.js reimplementation of Anthropic's Claude in Chrome extension. The reference repo is cloned into `reference/open-claude-in-chrome/` for study. We are not forking it. We are understanding what it does and rebuilding the concept in Rust with a fundamentally different architecture (governance-first, single-binary, no Node.js dependency).
 
 **Critical constraint:** Preserve the exact MCP tool names, parameter signatures, and description strings from the reference implementation's tool schemas. Claude was trained against these schemas. The tool surface must be byte-identical to what the official Claude in Chrome extension advertises. Our governance layer shapes which tools are visible and when they execute, but the schemas themselves are sacred.
 
 ## Architecture (from spec §2)
 
 ```
-MCP Client ←—stdio—→ Binary ←—native messaging—→ Extension ←—CDP—→ Browser
+MCP Client <--stdio--> Binary <--native messaging--> Extension <--CDP--> Browser
 ```
 
 Three processes, two protocol boundaries.
@@ -90,7 +90,7 @@ browser-mcp/
 - Clone `https://github.com/noemica-io/open-claude-in-chrome` into `reference/`.
 - Read and understand every file. The codebase is ~2,200 lines across 6 files.
 - Document the following in a `reference/ANALYSIS.md`:
-  - The exact tool schemas (names, parameters, descriptions) — these must be preserved verbatim.
+  - The exact tool schemas (names, parameters, descriptions): these must be preserved verbatim.
   - The CDP commands used by each tool.
   - The native messaging protocol (message format, handshake, keepalive).
   - The extension's service worker lifecycle management (keepalive alarm, state recovery).
@@ -139,20 +139,20 @@ browser-mcp/
 ### Phase 6: Platform + Packaging
 - Cross-compile for Linux x86_64, macOS x86_64/aarch64, Windows x86_64.
 - Write install scripts for native messaging host registration (bash + PowerShell).
-- Write example manifests (enterprise healthcare, developer unrestricted, QA staging — from spec Appendix A).
+- Write example manifests (enterprise healthcare, developer unrestricted, QA staging; from spec Appendix A).
 - Write README with installation instructions for both enterprise and personal deployment.
 - Verify: the binary works on all three platforms with no runtime dependencies.
 
 ## Key Technical Decisions
 
 ### Rust Crates
-- **`tokio`** — Async runtime. MCP stdio and native messaging are concurrent I/O streams that must be multiplexed.
-- **`serde` / `serde_json`** — JSON serialization for MCP messages, native messaging, manifests, audit records.
-- **`clap`** — CLI argument parsing (`--manifest`, `--version`, `--help`).
-- **`tracing` / `tracing-subscriber`** — Structured logging (separate from audit — this is debug/operational logging).
-- **`uuid`** — Audit event IDs.
-- **`chrono`** — Timestamps in audit records.
-- **`glob` or hand-rolled** — Domain wildcard matching (simple enough to not need a crate).
+- **`tokio`**: Async runtime. MCP stdio and native messaging are concurrent I/O streams that must be multiplexed.
+- **`serde` / `serde_json`**: JSON serialization for MCP messages, native messaging, manifests, audit records.
+- **`clap`**: CLI argument parsing (`--manifest`, `--version`, `--help`).
+- **`tracing` / `tracing-subscriber`**: Structured logging (separate from audit; this is debug/operational logging).
+- **`uuid`**: Audit event IDs.
+- **`chrono`**: Timestamps in audit records.
+- **`glob` or hand-rolled**: Domain wildcard matching (simple enough to not need a crate).
 - **Do NOT use** an MCP SDK crate. The MCP protocol is simple JSON-RPC 2.0 over stdio. Hand-roll it. External MCP crates add dependency risk and may not match the exact tool schema format we need to preserve.
 
 ### Native Messaging
@@ -177,7 +177,7 @@ Return screenshots only on `computer` actions that produce one: `screenshot`, `s
 
 ### Extension Design Principle
 The extension is **policy-free**: it holds mechanism but makes no access decisions. All policy, tool classification, and audit live in the binary.
-- The extension executes CDP commands and runs DOM reads (accessibility tree, `find`, `form_input` with shadow-DOM traversal) in a content script -- so it is *policy-free*, not necessarily *minimal* (Phase 0 decision; the reference does the same).
+- The extension executes CDP commands and runs DOM reads (accessibility tree, `find`, `form_input` with shadow-DOM traversal) in a content script, so it is *policy-free*, not necessarily *minimal* (Phase 0 decision; the reference does the same).
 - The extension does NOT check domains, classify tools, generate audit records, or make any policy decision.
 - The extension DOES manage: debugger attachment, tab group lifecycle, keepalive alarms, console/network event buffering, DOM-read mechanism, and service worker state recovery.
 
@@ -193,7 +193,7 @@ The extension is **policy-free**: it holds mechanism but makes no access decisio
 - Format with `rustfmt`, lint with `clippy` (deny warnings).
 
 ## Testing Strategy
-- **Unit tests:** Domain matching, grant resolution, manifest validation, tool classification, denial message formatting. These are pure functions — no I/O, no mocking.
+- **Unit tests:** Domain matching, grant resolution, manifest validation, tool classification, denial message formatting. These are pure functions: no I/O, no mocking.
 - **Integration tests:** Binary launches, handles MCP initialize, advertises correct tools for a given manifest, enforces policy on tool calls. These use the binary as a subprocess with stdio pipes.
 - **Manual verification:** After each phase, use the test prompt from the reference repo (adapted) to verify end-to-end behavior with Claude Code.
 

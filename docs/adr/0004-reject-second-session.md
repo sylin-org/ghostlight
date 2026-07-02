@@ -15,8 +15,8 @@ authorizes exactly one subject at a time, and it is listed as an explicit v1 exc
 ## Decision
 
 There is one active session. The first instance to acquire the IPC endpoint owns the
-browser (SPEC 2.1); a second concurrent mcp-server is rejected cleanly -- "another session
-owns the browser" -- rather than sharing the browser via a primary/client relay
+browser (SPEC 2.1); a second concurrent mcp-server is rejected cleanly ("another session
+owns the browser") rather than sharing the browser via a primary/client relay
 (SPEC 10). The rejection is enforced at endpoint acquisition and surfaces as `SessionBusy`
 (mechanism per ADR-0003). Shared machines use separate OS profiles. Primary/client
 sharing is deferred, not designed away.
@@ -24,7 +24,7 @@ sharing is deferred, not designed away.
 ## Consequences
 
 - No multiplexing machinery: no cross-session state, no primary/client relay to build, no
-  question of which manifest applies to which client -- the single manifest binds the one
+  question of which manifest applies to which client: the single manifest binds the one
   session.
 - A clean, legible failure ("another session owns the browser") instead of two agents
   silently contending for the same tabs.

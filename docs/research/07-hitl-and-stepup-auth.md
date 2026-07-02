@@ -3,9 +3,9 @@
 **Date:** 2026-07-01 · **Track:** Security / Delight · **Source:** research agent (verbatim report)
 
 > The key finding: approval can be **protocol-native** (MCP elicitation / MRTR) driven by our
-> binary — no custom extension UI required. Plus the MCP tool-annotation "risk vocabulary."
+> binary: no custom extension UI required. Plus the MCP tool-annotation "risk vocabulary."
 
-## 1. "Pause and ask a human" — implementations
+## 1. "Pause and ask a human": implementations
 
 ### MCP Elicitation (the standards-native mechanism)
 Lets an MCP *server* request user input mid-tool-call, pausing until the client answers. Flow:
@@ -40,22 +40,22 @@ tools (HumanLayer) for production workflows.
   `canUseTool` callback; **plan mode routes write tools to `canUseTool` regardless of allow
   rules** (writes can't be auto-approved while planning).
 
-## 2. Step-up authentication — RFC 9470
+## 2. Step-up authentication: RFC 9470
 RS signals the token's auth event is insufficient: `401` + `WWW-Authenticate: Bearer
 error="insufficient_user_authentication"` with `acr_values` (strength) and/or `max_age`
 (recency). Client re-authorizes requesting the `acr` claim as essential + `prompt=login`. The
 standardized way to force *fresh, stronger* human auth before a sensitive/write op.
 
-## 3. Risk-based classification — MCP tool annotations (the "risk vocabulary")
+## 3. Risk-based classification: MCP tool annotations (the "risk vocabulary")
 Four boolean hints: **`readOnlyHint`** (default false), **`destructiveHint`** (default true),
 **`idempotentHint`** (default false), **`openWorldHint`** (default true). Conservative defaults →
 unmarked tools treated as destructive + open-world. Governance use: `readOnlyHint:true` from a
 *trusted* server may skip confirmation; `destructiveHint:true` triggers approval.
 
-**Critical caveat:** these are **hints, not enforceable guarantees** — untrusted unless from a
+**Critical caveat:** these are **hints, not enforceable guarantees**, untrusted unless from a
 trusted server. They inform UX/policy but are **not a security boundary**; enforcement must come
 from a policy engine cross-referencing multiple signals. (Directly relevant: our read/write
-classification driving visibility/approval — annotations can't be the enforcement point; the
+classification driving visibility/approval: annotations can't be the enforcement point; the
 binary must be.)
 
 Identity platforms: Okta's blueprint uses **CIBA-based step-up** for high-risk actions, action-
@@ -63,26 +63,26 @@ scoped tokens, least-privilege time-boxed access, an agent "kill switch," and va
 authorization **at the moment of action, not just at token issuance**.
 
 ## 4. Approval UX patterns
-- **Inline elicitation** (blocking, in-context) — MCP form/URL, LangGraph `interrupt()`, OpenAI
+- **Inline elicitation** (blocking, in-context): MCP form/URL, LangGraph `interrupt()`, OpenAI
   interruptions.
-- **Out-of-band / decoupled** — OIDC **CIBA** and **HumanLayer** (push/Slack/email; poll via
+- **Out-of-band / decoupled**: OIDC **CIBA** and **HumanLayer** (push/Slack/email; poll via
   `auth_req_id` or webhook). For autonomous/long-running flows with no shared screen.
-- **Time-boxed / action-scoped grants** — CIBA issues short-lived single-purpose tokens; no
+- **Time-boxed / action-scoped grants**: CIBA issues short-lived single-purpose tokens; no
   persisted consent (one-time per action by design).
-- **One-time vs standing approval** — LangGraph/OpenAI support per-call; HumanLayer's learned
+- **One-time vs standing approval**: LangGraph/OpenAI support per-call; HumanLayer's learned
   auto-approvals move toward standing grants.
 
 ## 5. Emerging standards for approval & consent
-- **RFC 9470** — Step-Up Authentication Challenge (fresh/stronger auth gating).
-- **RFC 9396 — Rich Authorization Requests (RAR):** `authorization_details` JSON array for
+- **RFC 9470**: Step-Up Authentication Challenge (fresh/stronger auth gating).
+- **RFC 9396, Rich Authorization Requests (RAR):** `authorization_details` JSON array for
   fine-grained, per-action scoped consent (vs coarse `scope`). Applicable to per-action, per-
   domain agent consent.
-- **OIDC CIBA** — decoupled/out-of-band approval.
-- **MCP MRTR / SEP-2322** — protocol-native mid-call approval (2026-07 RC).
+- **OIDC CIBA**: decoupled/out-of-band approval.
+- **MCP MRTR / SEP-2322**: protocol-native mid-call approval (2026-07 RC).
 
 ## Relevance to browser-mcp
 - Our read/write classification maps onto MCP annotation semantics (`readOnlyHint`/
-  `destructiveHint`) — but treat annotations as **UX hints only; enforcement lives in the Rust
+  `destructiveHint`), but treat annotations as **UX hints only; enforcement lives in the Rust
   binary** (matches the "hints, not guarantees" warning and our architecture).
 - For "fresh human auth before a write," RFC 9470 is the standards-based gate; CIBA is the
   out-of-band flow; RFC 9396 RAR expresses per-action scoped consent; **MCP elicitation (URL

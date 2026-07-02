@@ -1,17 +1,17 @@
-# Identity — Okta Cross-App Access, ID-JAG, RFC 8693
+# Identity: Okta Cross-App Access, ID-JAG, RFC 8693
 
 **Date:** 2026-07-01 · **Track:** Governance · **Source:** research agent (verbatim report)
 
-> Prior art on delegation modeling. Relevant to us mainly as a *concern surface* — the
+> Prior art on delegation modeling. Relevant to us mainly as a *concern surface*: the
 > `act`/`may_act` delegation shape is a clean way to model "agent acting for a human" in audit
 > records. NOT a call to integrate an IdP (explicitly out of v1 scope).
 
 ## Standards stack (most general → most specific)
-1. **RFC 8693 — OAuth 2.0 Token Exchange** (the primitive: subject/actor tokens, `act`/`may_act`
+1. **RFC 8693: OAuth 2.0 Token Exchange** (the primitive: subject/actor tokens, `act`/`may_act`
    delegation claims).
-2. **draft-ietf-oauth-identity-chaining** — a profile composing RFC 8693 + RFC 7523 into a
+2. **draft-ietf-oauth-identity-chaining**, a profile composing RFC 8693 + RFC 7523 into a
    two-step cross-domain flow.
-3. **draft-ietf-oauth-identity-assertion-authz-grant (ID-JAG)** — an enterprise-SSO
+3. **draft-ietf-oauth-identity-assertion-authz-grant (ID-JAG)**, an enterprise-SSO
    specialization of identity chaining, defining a concrete token type + `typ`.
 
 **Okta Cross-App Access (XAA)** = Okta's product brand for its ID-JAG implementation.
@@ -37,20 +37,20 @@ connects, enforce policy, see/audit, one-click revoke.
 
 ## RFC 8693 delegation primitive (the reusable concept)
 - **Impersonation:** A is indistinguishable from B (no `act`).
-- **Delegation:** A keeps its own identity while acting for B — expressed via the **`act`** claim:
+- **Delegation:** A keeps its own identity while acting for B, expressed via the **`act`** claim:
   ```json
   { "sub": "user@example.com", "act": { "sub": "admin@example.com" } }
   ```
   Nesting expresses a delegation chain (outermost = current actor). **`may_act`** states a party
   is authorized to become the actor for another (an authorization to delegate).
 
-## What to borrow *conceptually* (modeling only — no IdP wiring)
+## What to borrow *conceptually* (modeling only, no IdP wiring)
 1. **`act`/`may_act` delegation shape → audit records.** Model every governed tool call as
    delegation, not impersonation: audit `sub` = the human on whose behalf the agent acts;
    `act.sub` = the agent/client identity. Provenance without conflating agent and user. A
    manifest naming "which agent may act for a user" is exactly `may_act` semantics.
-2. **Audience-binding.** Every authorization bound to one target (domain/origin), never ambient —
-   mirrors ID-JAG's single-audience rule.
+2. **Audience-binding.** Every authorization bound to one target (domain/origin), never ambient.
+   Mirrors ID-JAG's single-audience rule.
 3. **Assertion tuple `{iss, sub, aud, client_id, scope}`** is a clean schema for per-call
    governance context: who vouches, which user, which target domain, which acting agent, what
    scope.

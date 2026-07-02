@@ -37,7 +37,7 @@ instances is refined in ADR-0002; the extension's policy-free invariant in ADR-0
   and integration-testable; the extension holds only mechanism.
 - Three processes and two protocol boundaries instead of the reference's five and four
   (SPEC Appendix B; README architecture section).
-- Trade-off: the split does not reduce the trust surface of the code -- the extension
+- Trade-off: the split does not reduce the trust surface of the code. The extension
   still has full CDP access to the session (SPEC 9.1); it constrains the usage surface,
   not the code trust.
 - Follow-up: per-platform native build and packaging replace the "just run npx" story.
