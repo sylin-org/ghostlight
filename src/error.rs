@@ -56,8 +56,11 @@ pub enum Error {
     #[error("unsupported target: {0}")]
     Unsupported(String),
 
-    /// A configuration file failed to load or validate (user config or org policy file).
-    #[error("configuration error: {0}")]
+    /// A configuration operation failed: a config file failed to load or validate (user config
+    /// or org policy file), or a `config` CLI request failed (unknown key, invalid value,
+    /// org-locked key, unusable user config file). Display is the full, self-contained
+    /// user-facing message; callers do not add their own prefix.
+    #[error("{0}")]
     Config(String),
 }
 

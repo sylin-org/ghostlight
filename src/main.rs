@@ -52,6 +52,44 @@ enum Command {
     Doctor(DoctorArgs),
     /// Show the running server's live inner state (needs a server started with --debug).
     Status(StatusArgs),
+    /// Inspect and edit the layered configuration (list / get / set).
+    Config(ConfigArgs),
+}
+
+#[derive(Debug, Args)]
+struct ConfigArgs {
+    #[command(subcommand)]
+    action: ConfigAction,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigAction {
+    /// Show every key: effective value, source layer, lock state, description.
+    List,
+    /// Show one key's effective value, source layer, and lock state.
+    Get {
+        /// The dotted key name (see 'config list').
+        key: String,
+    },
+    /// Set a key in the user layer. Refused when the organization locks the key.
+    Set {
+        /// The dotted key name.
+        key: String,
+        /// The raw value (bool: true/false; uint: digits; enum/string: verbatim;
+        /// string list: a JSON array, e.g. ["example.com","*.example.com"]).
+        value: String,
+    },
+}
+
+impl From<ConfigArgs> for browser_mcp::governance::config::cli::ConfigCommand {
+    fn from(a: ConfigArgs) -> Self {
+        use browser_mcp::governance::config::cli::ConfigCommand;
+        match a.action {
+            ConfigAction::List => ConfigCommand::List,
+            ConfigAction::Get { key } => ConfigCommand::Get { key },
+            ConfigAction::Set { key, value } => ConfigCommand::Set { key, value },
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -193,6 +231,13 @@ fn main() -> Result<()> {
             command: Some(Command::Status(args)),
             ..
         } => run_status(args),
+        Cli {
+            command: Some(Command::Config(args)),
+            ..
+        } => browser_mcp::governance::config::cli::run(
+            args.into(),
+            browser_mcp::browser::pattern::is_valid_pattern,
+        )?,
         Cli {
             command: None,
             manifest,

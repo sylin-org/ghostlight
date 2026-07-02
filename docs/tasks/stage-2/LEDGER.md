@@ -11,8 +11,8 @@ current task prompt, then continue. Never rely on remembering earlier work; re-r
   `main`.
 - Progress: tasks `a1` (module reorg), `a2` (governance ports, + RwClass correction), `a3`
   (governance facade), `a7` (arch-test), `g01` (typed key registry), `g02` (layered
-  resolution), `a5` (hot-reload substrate) landed.
-- NEXT TASK: Phase A, task `g03` (`docs/tasks/stage-2/g03-config-cli.md`).
+  resolution), `a5` (hot-reload substrate), `g03` (config CLI) landed.
+- NEXT TASK: Phase A, task `g04` (`docs/tasks/stage-2/g04-schema-generation.md`).
 - Order authority: `PLAN.md` (Phase A -> B -> C -> D). Full linear sequence is in `BOOTSTRAP.md`.
 - Reconciliation: `RECONCILIATION.md` is AUTHORITATIVE over any conflicting detail in a `g`-doc.
 - Invariants that must hold after every task: all-open byte-identical (the all-open golden test +
@@ -354,6 +354,76 @@ current task prompt, then continue. Never rely on remembering earlier work; re-r
   logic end to end through the resolver (see `invalid_org_is_fail_closed`), so the behavior is
   covered; only the literal file-watch-plus-stderr smoke is deferred, to a human, next to the
   standard BROWSER-TESTS.md pass.
+
+### g03 config CLI (list / get / set with source and lock display) -- 2026-07-02
+- Commit: (see this task's commit)
+- Files touched: new `src/governance/config/cli.rs`; `src/governance/config/mod.rs`
+  (`pub mod cli;`); `src/main.rs` (`ConfigArgs`/`ConfigAction` clap types, `Command::Config`
+  variant, the `From` impl, and the match arm); `src/error.rs` (changed `Error::Config`'s
+  Display from `"configuration error: {0}"` to `"{0}"`, see deviation below -- no new variant
+  added, since G02 already introduced `Error::Config(String)`).
+- Summary: `browser-mcp config list` prints the pinned ASCII table (key/value/source/locked/
+  description, `{:<40}{:<24}{:<17}{:<8}{}` per row) in registry order; `config get <key>`
+  prints the pinned five-line block; `config set <key> <value>` does lock-check (before any
+  parsing or file access) -> parse-by-type -> registry validation -> value-preserving atomic
+  write to the user config file (via the existing `install::native_host::write_file_atomic`)
+  -> two-line success output. Unknown keys, invalid values, and locked keys all produce exact
+  pinned `Error::Config` messages, surfaced by the top-level `anyhow` path as `Error: <message>`
+  with exit code 1. Warnings from loading the user/org files print as `warning: <text>` on
+  stderr via a dedicated `resolve_with_warnings` helper (not `tracing`, so the CLI's output
+  stays exactly the pinned format rather than a logging format).
+- Deviations from the g-doc per RECONCILIATION.md / carried forward from G01/G02/A5's
+  precedent:
+  1. **No new `Error::Config` variant.** The g03 doc (written before G02 landed) assumes it
+     adds `Error::Config(String)` itself with Display `"{0}"` (no prefix). G02 already added
+     `Error::Config(String)` with Display `"configuration error: {0}"` for file-load failures.
+     Since a Rust enum cannot have two variants of the same name, and no existing test pins the
+     "configuration error: " prefix text (grep-verified: only `.contains(...)` substring checks
+     exist), changed the ONE existing variant's Display to `"{0}"` and updated its doc comment
+     to cover both file-load and CLI-request failures. This reconciles the two tasks' needs
+     with a single one-line change and produces exactly the pinned CLI messages (e.g.
+     `Error: unknown config key '...'`, not `Error: configuration error: unknown config key ...`).
+  2. **`domain_pattern_valid` threading, one level further than G01/G02/A5.** `cli.rs` lives in
+     `governance/config/` (RECONCILIATION section 1 placement, consistent with G01/G02/A5) and
+     therefore cannot name the browser plugin's real pattern-syntax checker directly (the a7
+     arch-test). `ConfigCommand::run` and every function it calls take
+     `domain_pattern_valid: fn(&str) -> bool` as an explicit parameter; `src/main.rs` (the
+     composition root, free to depend on `browser::`) supplies
+     `browser_mcp::browser::pattern::is_valid_pattern` at the one call site. This is the same
+     deviation shape as G01/G02/A5, now propagated to the CLI's public entry point.
+  3. **No shared loading function reused verbatim.** `resolve_with_warnings` re-implements the
+     read+parse+resolve orchestration `load::load_and_resolve` already does, rather than calling
+     it, because `load_and_resolve` (a) does not return warnings (it only logs them via
+     `tracing`, wrong format for the CLI) and (b) its warning-emission is a side effect the CLI
+     needs to suppress and re-render itself. Rather than widen `reload.rs`'s private
+     `read_and_parse_org`/`read_and_parse_user` helpers to `pub(super)` for reuse (which would
+     touch a file g03's own scope note does not list), `cli.rs` duplicates the ~25-line
+     NotFound-tolerant read+parse orchestration locally. This keeps the touched-file list
+     exactly what the task specifies (plus the one new file) at the cost of a third copy of
+     that small orchestration (the other two are in `load.rs`'s own `load_and_resolve` and
+     `reload.rs`'s `read_and_parse_*`); noted as a deliberate scope-discipline trade-off.
+- Verification: `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` clean.
+  `cargo test` green (143 lib unit tests, up from 129: +14 new in `governance::config::cli::tests`
+  covering pinned list/get rendering across all five source values with a genuine locked key,
+  every value-type parse path including all the specified accept/reject cases, the lock-refusal
+  message text, and five user-file-write scenarios -- preserve siblings, replace in place,
+  create missing file, refuse invalid JSON untouched, refuse non-object root untouched; all
+  other suites unchanged: `tests/all_open_golden.rs` 3, `tests/architecture.rs` 4 (confirms
+  `governance/config/cli.rs` introduces zero forbidden edges despite calling into file I/O and
+  the write-atomic installer helper), `tests/mcp_protocol.rs` 4, `tests/peer_death.rs` 1,
+  `tests/tool_schema_fidelity.rs` 6). Manual smoke per the task's own Verification step 4, run
+  live since it needs no browser: `config list` (pinned table, all 7 keys, builtin source,
+  exit 0), `config get audit.destination` (pinned 5 lines, exit 0), `config get`/`config set`
+  on `no.such.key` (both exact unknown-key message, exit 1), `config set audit.destination
+  bogus` (`Error: invalid value for audit.destination: expected one of: file, stderr`, exit 1),
+  `config set audit.destination stderr` (two-line success, exit 0) followed by `config get`
+  showing `source: user` and the real `%APPDATA%\browser-mcp\config.json` containing exactly
+  `{"config":{"audit.destination":"stderr"}}` -- confirmed the file did not exist before this
+  test and deleted it (and the now-empty parent dir) afterward, restoring the pre-test state;
+  `cargo test` re-run clean after cleanup to confirm no stray state. ASCII scan clean on every
+  touched/new file.
+- Browser checks queued: none (this task needs no browser; the manual smoke above was run live
+  in this pass since it required only the binary, not BROWSER-TESTS.md deferral).
 
 ## Reminders before running BROWSER-TESTS.md
 

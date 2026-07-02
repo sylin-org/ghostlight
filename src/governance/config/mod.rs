@@ -32,7 +32,9 @@
 //! [`Config::from_resolution`] builds the typed session `Config` from a [`layers::Resolution`].
 //! [`reload`] holds the in-force snapshot behind an atomic swap and re-resolves it live on a
 //! debounced file-watch, so config and org-policy changes take effect with no restart.
+//! [`cli`] is the `browser-mcp config list/get/set` presentation surface over this registry.
 
+pub mod cli;
 pub mod layers;
 pub mod load;
 pub mod reload;
