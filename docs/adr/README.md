@@ -33,6 +33,7 @@ history live here.
 | [0023](0023-one-loader-for-the-policy-file.md) | One loader for the policy file | Accepted |
 | [0024](0024-tool-registry-and-generic-ingest-pipeline.md) | Tool registry and the generic ingest pipeline | Accepted |
 | [0025](0025-manifest-hot-reload.md) | Manifest hot-reload | Accepted |
+| [0026](0026-release-maturity-and-externalities.md) | Release maturity and externalities sequencing (license, CI, spec currency, syslog + managed://, extension JS coverage, live-verify) | Accepted |
 
 ## Conventions
 
