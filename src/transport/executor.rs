@@ -62,7 +62,7 @@ const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 /// (g11): the user severed the session; never a generic connection failure.
 fn kill_error() -> ToolError {
     ToolError::extension("The user ended the browser session (kill switch)")
-        .next_step("ask the user to reconnect from the Browser MCP extension popup, then retry")
+        .next_step("ask the user to reconnect from the Ghostlight extension popup, then retry")
 }
 
 /// Delivered to a waiting caller: `Ok(result)` or `Err(hop-attributed tool error)`.

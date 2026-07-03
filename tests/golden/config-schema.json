@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "browser-mcp user configuration file",
-  "description": "User-level configuration for browser-mcp. Both fields are optional; an absent file means no user layer.",
+  "title": "ghostlight user configuration file",
+  "description": "User-level configuration for ghostlight. Both fields are optional; an absent file means no user layer.",
   "type": "object",
   "additionalProperties": false,
   "properties": {

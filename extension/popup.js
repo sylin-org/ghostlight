@@ -1,4 +1,4 @@
-// Browser MCP -- popup. Renders binary/worker-reported state and submits user gestures.
+// Ghostlight -- popup. Renders binary/worker-reported state and submits user gestures.
 // Caches nothing (no chrome.storage, no persisted state) and decides nothing: the service
 // worker holds the state and answers every render() call fresh. Two independent controls,
 // each its own section: take-the-wheel pause (g10) and the panic kill switch (g11). They

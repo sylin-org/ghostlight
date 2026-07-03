@@ -103,12 +103,12 @@ pub fn config_file_schema() -> serde_json::Value {
     );
     root.insert(
         "title".to_string(),
-        json!("browser-mcp user configuration file"),
+        json!("ghostlight user configuration file"),
     );
     root.insert(
         "description".to_string(),
         json!(
-            "User-level configuration for browser-mcp. Both fields are optional; an absent \
+            "User-level configuration for ghostlight. Both fields are optional; an absent \
              file means no user layer."
         ),
     );
@@ -123,7 +123,7 @@ pub fn config_file_schema() -> serde_json::Value {
 }
 
 /// `config_file_schema()` pretty-printed (serde_json 2-space style) plus exactly one trailing
-/// LF. This exact string is what `browser-mcp config schema` prints and what the golden test
+/// LF. This exact string is what `ghostlight config schema` prints and what the golden test
 /// pins.
 pub fn render_config_schema() -> String {
     let mut s = serde_json::to_string_pretty(&config_file_schema()).expect("schema serializes");
@@ -182,11 +182,11 @@ fn compact_json(value: KeyValue) -> String {
 }
 
 /// The markdown key reference generated from the registry, LF line endings, exactly one
-/// trailing LF. This exact string is what `browser-mcp config docs` prints and what the golden
+/// trailing LF. This exact string is what `ghostlight config docs` prints and what the golden
 /// test pins.
 pub fn render_key_reference() -> String {
     let header = "# Configuration key reference\n\n\
-Generated from the typed key registry in src/policy/mod.rs by `browser-mcp config docs`.\n\
+Generated from the typed key registry in src/policy/mod.rs by `ghostlight config docs`.\n\
 Do not edit by hand; change the registry and regenerate.\n\n\
 Layer resolution: org-mandatory > user > org-recommended > preset default > built-in\n\
 Minimal. The built-in Minimal defaults equal the `safe` preset.";

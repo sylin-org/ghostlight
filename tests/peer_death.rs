@@ -12,21 +12,21 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_browser-mcp")
+    env!("CARGO_BIN_EXE_ghostlight")
 }
 
 #[test]
 fn native_host_exits_when_server_dies() {
-    let endpoint = format!("browser-mcp-peerdeath-{}", std::process::id());
+    let endpoint = format!("ghostlight-peerdeath-{}", std::process::id());
     let log_dir = std::env::temp_dir().join(format!("bmcp-peerdeath-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&log_dir);
 
     // mcp-server: debug on (so we can observe the connection), stdin held open so the MCP stdio loop
     // does not hit EOF and exit before we are done.
     let mut server = Command::new(bin())
-        .env("BROWSER_MCP_ENDPOINT", &endpoint)
-        .env("BROWSER_MCP_DEBUG", "1")
-        .env("BROWSER_MCP_LOG_DIR", &log_dir)
+        .env("GHOSTLIGHT_ENDPOINT", &endpoint)
+        .env("GHOSTLIGHT_DEBUG", "1")
+        .env("GHOSTLIGHT_LOG_DIR", &log_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -38,7 +38,7 @@ fn native_host_exits_when_server_dies() {
     // open so the upstream (Chrome -> IPC) reader does not EOF.
     let mut host = Command::new(bin())
         .arg(format!("chrome-extension://{}/", "a".repeat(32)))
-        .env("BROWSER_MCP_ENDPOINT", &endpoint)
+        .env("GHOSTLIGHT_ENDPOINT", &endpoint)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

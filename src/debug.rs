@@ -1,10 +1,10 @@
 //! Debug / observability sink for the mcp-server role.
 //!
-//! When enabled (`--debug` or `BROWSER_MCP_DEBUG=1`), the server records what it does at the three
+//! When enabled (`--debug` or `GHOSTLIGHT_DEBUG=1`), the server records what it does at the three
 //! process boundaries -- MCP request/response, tool-call begin/end, extension connect/disconnect --
 //! into two per-process files under the log directory:
 //! - `debug-state-<pid>.json`: a live snapshot (pid, uptime, extension connected?, in-flight calls,
-//!   counters, recent events) that `browser-mcp status` reads (newest session wins).
+//!   counters, recent events) that `ghostlight status` reads (newest session wins).
 //! - `debug-events-<pid>.jsonl`: the append-only structured event stream (one JSON object per
 //!   line), a full firehose for post-hoc inspection and a precursor to the v1.5 audit subsystem.
 //!
@@ -49,12 +49,12 @@ pub(crate) fn now_ms() -> u128 {
         .unwrap_or(0)
 }
 
-/// The log directory: `BROWSER_MCP_LOG_DIR`, else `<data-local>/browser-mcp`.
+/// The log directory: `GHOSTLIGHT_LOG_DIR`, else `<data-local>/ghostlight`.
 pub fn log_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("BROWSER_MCP_LOG_DIR") {
+    if let Some(dir) = std::env::var_os("GHOSTLIGHT_LOG_DIR") {
         return Some(PathBuf::from(dir));
     }
-    dirs::data_local_dir().map(|d| d.join("browser-mcp"))
+    dirs::data_local_dir().map(|d| d.join("ghostlight"))
 }
 
 /// Truncate `s` to at most `max` bytes on a UTF-8 char boundary (so non-ASCII never panics).
@@ -135,7 +135,7 @@ pub fn raw_state() -> Option<String> {
     std::fs::read_to_string(newest).ok()
 }
 
-/// A human-readable `browser-mcp status` report, or a hint when no debug session is found.
+/// A human-readable `ghostlight status` report, or a hint when no debug session is found.
 ///
 /// Role-aware: `status` describes the mcp-server role only. A state file is a *candidate* when it
 /// parses as JSON and its `role` field is either absent (old-format files, written before the
@@ -148,7 +148,7 @@ pub fn status_report() -> String {
     let files = session_state_files(&dir);
     if files.is_empty() {
         return format!(
-            "no debug state under {}\nstart the server with --debug (or BROWSER_MCP_DEBUG=1), then re-run status",
+            "no debug state under {}\nstart the server with --debug (or GHOSTLIGHT_DEBUG=1), then re-run status",
             dir.display()
         );
     }
@@ -183,7 +183,7 @@ pub fn status_report() -> String {
             .unwrap_or(0)
     };
 
-    let mut out = String::from("browser-mcp status\n");
+    let mut out = String::from("ghostlight status\n");
     out += &format!("  pid            {}\n", v["pid"].as_u64().unwrap_or(0));
     out += &format!("  uptime         {}\n", fmt_ms(now.saturating_sub(started)));
     out += &format!(
@@ -653,7 +653,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("browser-mcp-debug-{tag}-{}", std::process::id()))
+        std::env::temp_dir().join(format!("ghostlight-debug-{tag}-{}", std::process::id()))
     }
 
     fn state_path(dir: &Path) -> PathBuf {

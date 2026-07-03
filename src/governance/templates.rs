@@ -1,4 +1,4 @@
-//! `browser-mcp policy init --template <name>` (G18, ADR-0020 consequence: manifest templates
+//! `ghostlight policy init --template <name>` (G18, ADR-0020 consequence: manifest templates
 //! ride the same schema as `policy explain`/`policy simulate`). Writes one of three embedded
 //! example manifests as an org admin's starting point. The embedded bytes and the committed
 //! `examples/*.json` files are identical by construction (`include_str!`), so what ships is
@@ -81,12 +81,12 @@ pub fn render_orientation(outcome: &InitOutcome) -> String {
          organization, then deploy it with your management channel (GPO, Intune, Jamf)\n\
          to the org policy path for each platform:\n\
          \n\
-         \x20 Windows  %ProgramData%\\browser-mcp\\policy.json\n\
-         \x20 macOS    /Library/Application Support/browser-mcp/policy.json\n\
-         \x20 Linux    /etc/browser-mcp/policy.json\n\
+         \x20 Windows  %ProgramData%\\ghostlight\\policy.json\n\
+         \x20 macOS    /Library/Application Support/ghostlight/policy.json\n\
+         \x20 Linux    /etc/ghostlight/policy.json\n\
          \n\
          For personal use, load it instead with:\n\
-         \x20 browser-mcp --manifest file:///absolute/path/to/policy.json\n\
+         \x20 ghostlight --manifest file:///absolute/path/to/policy.json\n\
          \n\
          Manifests are strict JSON (no comments). Grant \"description\" fields carry the\n\
          explanatory text.\n",
@@ -187,7 +187,7 @@ mod tests {
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "browser-mcp-g18-templates-{}-{}",
+            "ghostlight-g18-templates-{}-{}",
             std::process::id(),
             tag
         ));
@@ -248,12 +248,12 @@ This file is a starting point. Edit the grants and config entries for your\n\
 organization, then deploy it with your management channel (GPO, Intune, Jamf)\n\
 to the org policy path for each platform:\n\
 \n\
-\x20 Windows  %ProgramData%\\browser-mcp\\policy.json\n\
-\x20 macOS    /Library/Application Support/browser-mcp/policy.json\n\
-\x20 Linux    /etc/browser-mcp/policy.json\n\
+\x20 Windows  %ProgramData%\\ghostlight\\policy.json\n\
+\x20 macOS    /Library/Application Support/ghostlight/policy.json\n\
+\x20 Linux    /etc/ghostlight/policy.json\n\
 \n\
 For personal use, load it instead with:\n\
-\x20 browser-mcp --manifest file:///absolute/path/to/policy.json\n\
+\x20 ghostlight --manifest file:///absolute/path/to/policy.json\n\
 \n\
 Manifests are strict JSON (no comments). Grant \"description\" fields carry the\n\
 explanatory text.\n";

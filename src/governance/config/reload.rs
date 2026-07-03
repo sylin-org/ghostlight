@@ -70,7 +70,7 @@ pub struct ConfigStore {
     domain_pattern_valid: fn(&str) -> bool,
     /// The resolved user-supplied manifest source string (ADR-0025 Decision 1), retained so
     /// [`Self::reresolve`] can re-run the FULL org+user selection on every reload event instead
-    /// of only re-reading the org file. `None` when no `--manifest`/`BROWSER_MCP_MANIFEST` was
+    /// of only re-reading the org file. `None` when no `--manifest`/`GHOSTLIGHT_MANIFEST` was
     /// given at startup (an `env://` source is retained here too, even though it has no file to
     /// watch, since selection itself must still be re-run on every org-file change).
     user_source: Option<String>,
@@ -171,7 +171,7 @@ impl ConfigStore {
     /// preference, while a `--manifest` source is more likely an external or automated input).
     ///
     /// `user_source` (ADR-0025 Decision 1) is the SAME resolved `--manifest`/
-    /// `BROWSER_MCP_MANIFEST` source string `load_policy` above was given, retained so
+    /// `GHOSTLIGHT_MANIFEST` source string `load_policy` above was given, retained so
     /// [`Self::reresolve`] can re-run the full org+user selection on every reload event. It also
     /// sets the watcher's manifest slot to the user source's PATH whenever it resolves to a
     /// `file://` (or bare-path) source -- independent of which origin actually won selection, so
@@ -1301,7 +1301,7 @@ mod tests {
         }
 
         let path = std::env::temp_dir().join(format!(
-            "browser-mcp-t06-user-manifest-{}.json",
+            "ghostlight-t06-user-manifest-{}.json",
             std::process::id()
         ));
         std::fs::write(

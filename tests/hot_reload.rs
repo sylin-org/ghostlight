@@ -36,7 +36,7 @@ static SEQ: AtomicU32 = AtomicU32::new(0);
 
 /// Kills and reaps the child on drop unless [`Self::wait_normally`] already consumed it (the
 /// success path). Without this, a mid-test panic (a `wait_for`/`assert_eq!` failure) leaks the
-/// spawned `browser-mcp.exe` process -- `std::process::Child` does not kill on drop.
+/// spawned `ghostlight.exe` process -- `std::process::Child` does not kill on drop.
 struct ChildGuard {
     child: Option<Child>,
 }
@@ -75,7 +75,7 @@ struct AuditFileGuard {
 
 impl AuditFileGuard {
     fn take_over() -> Self {
-        let path = browser_mcp::governance::audit::destinations::default_audit_path()
+        let path = ghostlight::governance::audit::destinations::default_audit_path()
             .expect("a local-data directory is resolvable on this machine");
         let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
         let backup = path.with_file_name(format!("{file_name}.t06-bak"));
@@ -204,9 +204,9 @@ fn org_policy_hot_swap_end_to_end() {
     let pid = std::process::id();
 
     let program_data_dir =
-        std::env::temp_dir().join(format!("browser-mcp-t06-program-data-{pid}-{seq}"));
-    let policy_dir = program_data_dir.join("browser-mcp");
-    std::fs::create_dir_all(&policy_dir).expect("create fake ProgramData\\browser-mcp");
+        std::env::temp_dir().join(format!("ghostlight-t06-program-data-{pid}-{seq}"));
+    let policy_dir = program_data_dir.join("ghostlight");
+    std::fs::create_dir_all(&policy_dir).expect("create fake ProgramData\\ghostlight");
     let policy_path = policy_dir.join("policy.json");
 
     // See the module doc's DEVIATION note: the default audit path is not env-var redirectable
@@ -220,20 +220,20 @@ fn org_policy_hot_swap_end_to_end() {
     )
     .expect("write the initial org policy file");
 
-    let endpoint = format!("browser-mcp-t06-{pid}-{seq}");
-    let mut child: Child = Command::new(env!("CARGO_BIN_EXE_browser-mcp"))
-        .env("BROWSER_MCP_ENDPOINT", &endpoint)
+    let endpoint = format!("ghostlight-t06-{pid}-{seq}");
+    let mut child: Child = Command::new(env!("CARGO_BIN_EXE_ghostlight"))
+        .env("GHOSTLIGHT_ENDPOINT", &endpoint)
         .env("ProgramData", &program_data_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn browser-mcp");
+        .expect("spawn ghostlight");
 
     let mut stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
     // From here on, any panic (a failed assertion/timeout) force-kills the child instead of
-    // leaking an orphaned browser-mcp.exe process (`std::process::Child` does not kill on drop).
+    // leaking an orphaned ghostlight.exe process (`std::process::Child` does not kill on drop).
     let child = ChildGuard::new(child);
 
     let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));

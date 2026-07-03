@@ -6,8 +6,8 @@
 //! real example files on disk, the one thing inline unit tests cannot do without reaching
 //! outside the crate.
 
-use browser_mcp::browser::pattern;
-use browser_mcp::governance::manifest::document::parse_manifest;
+use ghostlight::browser::pattern;
+use ghostlight::governance::manifest::document::parse_manifest;
 
 fn read_example(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -105,7 +105,7 @@ fn research_read_only_example_parses() {
 /// assertion is never a false failure caused by unrelated local machine state.
 #[test]
 fn no_manifest_sources_yields_all_open() {
-    let org_path = browser_mcp::governance::config::load::org_policy_path();
+    let org_path = ghostlight::governance::config::load::org_policy_path();
     if org_path.exists() {
         eprintln!(
             "skipping the strict all-open assertion: a real org policy file exists at {}",
@@ -115,7 +115,7 @@ fn no_manifest_sources_yields_all_open() {
     }
 
     let loaded =
-        browser_mcp::governance::manifest::source::load_policy(None, pattern::is_valid_pattern)
+        ghostlight::governance::manifest::source::load_policy(None, pattern::is_valid_pattern)
             .expect("no sources present: loading must not fail");
     assert_eq!(loaded.manifest, None);
     assert_eq!(loaded.origin, None);
@@ -141,12 +141,12 @@ fn org_policy_file_with_config_boots_the_server() {
     let pid = std::process::id();
 
     let program_data_dir =
-        std::env::temp_dir().join(format!("browser-mcp-t01-program-data-{pid}-{seq}"));
-    let policy_dir = program_data_dir.join("browser-mcp");
-    std::fs::create_dir_all(&policy_dir).expect("create fake ProgramData\\browser-mcp");
+        std::env::temp_dir().join(format!("ghostlight-t01-program-data-{pid}-{seq}"));
+    let policy_dir = program_data_dir.join("ghostlight");
+    std::fs::create_dir_all(&policy_dir).expect("create fake ProgramData\\ghostlight");
     let policy_path = policy_dir.join("policy.json");
 
-    let audit_path = std::env::temp_dir().join(format!("browser-mcp-t01-audit-{pid}-{seq}.jsonl"));
+    let audit_path = std::env::temp_dir().join(format!("ghostlight-t01-audit-{pid}-{seq}.jsonl"));
     // Windows JSON string values need forward slashes or escaped backslashes; forward slashes
     // are accepted as path separators on Windows and need no escaping here.
     let audit_path_str = audit_path.to_string_lossy().replace('\\', "/");
@@ -166,15 +166,15 @@ fn org_policy_file_with_config_boots_the_server() {
     std::fs::write(&policy_path, serde_json::to_vec(&manifest).unwrap())
         .expect("write the org policy file");
 
-    let endpoint = format!("browser-mcp-t01-{pid}-{seq}");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_browser-mcp"))
-        .env("BROWSER_MCP_ENDPOINT", &endpoint)
+    let endpoint = format!("ghostlight-t01-{pid}-{seq}");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ghostlight"))
+        .env("GHOSTLIGHT_ENDPOINT", &endpoint)
         .env("ProgramData", &program_data_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn browser-mcp");
+        .expect("spawn ghostlight");
 
     {
         let mut stdin = child.stdin.take().expect("stdin");

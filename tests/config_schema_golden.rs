@@ -4,8 +4,8 @@
 //! `tests/golden/config-keys.md` are regenerated and reviewed deliberately -- that review is
 //! what keeps the schema, the docs, and the code from drifting apart.
 
-use browser_mcp::governance::config::schema::{render_config_schema, render_key_reference};
-use browser_mcp::governance::config::KEYS;
+use ghostlight::governance::config::schema::{render_config_schema, render_key_reference};
+use ghostlight::governance::config::KEYS;
 use serde_json::Value;
 use std::collections::HashSet;
 

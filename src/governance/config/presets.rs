@@ -1,4 +1,4 @@
-//! `browser-mcp config preset <name>` (G18, ADR-0019 decision 3: "presets are UX, not
+//! `ghostlight config preset <name>` (G18, ADR-0019 decision 3: "presets are UX, not
 //! machinery"). Selecting a preset writes ONLY the `preset` field of the user config file --
 //! never a per-key value -- so it populates layer 4 (shared format doc section 2) and nothing
 //! else: the user's own explicit edits (layer 2) and any org policy (layer 1/3) always keep
@@ -133,7 +133,7 @@ fn resolve_current_and_candidate(
     domain_pattern_valid: fn(&str) -> bool,
     new_preset: Preset,
 ) -> crate::Result<(layers::Resolution, layers::Resolution, Option<String>)> {
-    let user_manifest_source = std::env::var("BROWSER_MCP_MANIFEST").ok();
+    let user_manifest_source = std::env::var("GHOSTLIGHT_MANIFEST").ok();
     let loaded_policy = crate::governance::manifest::source::load_policy(
         user_manifest_source.as_deref(),
         domain_pattern_valid,
@@ -194,7 +194,7 @@ fn write_preset_at(path: &std::path::Path, preset: Preset) -> crate::Result<()> 
         .map_err(|e| crate::Error::Config(format!("cannot update {}: {e}", path.display())))
 }
 
-/// `browser-mcp config preset <name> [--dry-run]` (Required behavior section 1). Prints the
+/// `ghostlight config preset <name> [--dry-run]` (Required behavior section 1). Prints the
 /// diff, then -- unless `dry_run` -- writes the preset and confirms.
 pub fn run_preset(
     preset: Preset,
@@ -339,7 +339,7 @@ mod tests {
 
     fn with_temp_file<F: FnOnce(&std::path::Path)>(name: &str, initial: Option<&str>, f: F) {
         let dir = std::env::temp_dir().join(format!(
-            "browser-mcp-g18-presets-{}-{}",
+            "ghostlight-g18-presets-{}-{}",
             std::process::id(),
             name
         ));

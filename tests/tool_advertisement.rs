@@ -23,7 +23,7 @@ fn file_uri(path: &Path) -> String {
 
 fn write_manifest(tag: &str, value: &Value) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
-        "browser-mcp-tool-advertisement-{}-{tag}-{}.json",
+        "ghostlight-tool-advertisement-{}-{tag}-{}.json",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     ));
@@ -33,19 +33,19 @@ fn write_manifest(tag: &str, value: &Value) -> PathBuf {
 
 fn drive(manifest_path: &Path, requests: &[Value]) -> Vec<Value> {
     let endpoint = format!(
-        "browser-mcp-ad-{}-{}",
+        "ghostlight-ad-{}-{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_browser-mcp"))
-        .env("BROWSER_MCP_ENDPOINT", &endpoint)
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ghostlight"))
+        .env("GHOSTLIGHT_ENDPOINT", &endpoint)
         .arg("--manifest")
         .arg(file_uri(manifest_path))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn browser-mcp");
+        .expect("spawn ghostlight");
 
     let mut stdin = child.stdin.take().expect("stdin");
     for req in requests {

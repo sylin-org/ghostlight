@@ -1,4 +1,4 @@
-// Browser MCP -- agent visual indicator (content script).
+// Ghostlight -- agent visual indicator (content script).
 //
 // User-facing "watching" affordance (mechanism, not policy): a phantom cursor showing where the
 // agent's pointer is about to act, plus a subtle "agent active" glow while a tool runs. Both are
@@ -10,9 +10,9 @@
   if (window.__browserMcpIndicator) return;
   window.__browserMcpIndicator = true;
 
-  const CURSOR_ID = "browser-mcp-cursor";
-  const GLOW_ID = "browser-mcp-active";
-  const STYLE_ID = "browser-mcp-indicator-styles";
+  const CURSOR_ID = "ghostlight-cursor";
+  const GLOW_ID = "ghostlight-active";
+  const STYLE_ID = "ghostlight-indicator-styles";
   const ORANGE = "#D97757";
   const FADE_MS = 4000;
 
@@ -27,8 +27,8 @@
     const s = document.createElement("style");
     s.id = STYLE_ID;
     s.textContent =
-      "@keyframes browser-mcp-pulse{0%,100%{opacity:.5}50%{opacity:.9}}" +
-      "#" + GLOW_ID + "{animation:browser-mcp-pulse 2s ease-in-out infinite}" +
+      "@keyframes ghostlight-pulse{0%,100%{opacity:.5}50%{opacity:.9}}" +
+      "#" + GLOW_ID + "{animation:ghostlight-pulse 2s ease-in-out infinite}" +
       "@media (prefers-reduced-motion:reduce){#" + GLOW_ID + "{animation:none}#" + CURSOR_ID + "{transition:none}}";
     (document.head || document.documentElement).appendChild(s);
   }

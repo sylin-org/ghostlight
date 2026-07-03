@@ -5,7 +5,7 @@
 
 use thiserror::Error;
 
-/// Errors surfaced by the Browser MCP engine.
+/// Errors surfaced by the Ghostlight engine.
 #[derive(Debug, Error)]
 pub enum Error {
     /// The MCP JSON-RPC layer received or produced something malformed.
@@ -20,8 +20,8 @@ pub enum Error {
     #[error("ipc error: {0}")]
     Ipc(String),
 
-    /// Another Browser MCP session already owns the browser (single-session policy, v1.0).
-    #[error("another Browser MCP session already owns the browser")]
+    /// Another Ghostlight session already owns the browser (single-session policy, v1.0).
+    #[error("another Ghostlight session already owns the browser")]
     SessionBusy,
 
     /// JSON (de)serialization failure.
@@ -152,7 +152,7 @@ impl ToolError {
     pub fn ipc(message: impl Into<String>) -> Self {
         Self::Ipc {
             message: message.into(),
-            next_step: "restart the MCP client so both browser-mcp processes restart and reconnect"
+            next_step: "restart the MCP client so both ghostlight processes restart and reconnect"
                 .into(),
         }
     }
@@ -263,7 +263,7 @@ mod tool_error_tests {
         let err = ToolError::ipc("IPC transport failed: broken pipe");
         assert_eq!(
             err.to_string(),
-            "[hop: ipc] IPC transport failed: broken pipe. Next step: restart the MCP client so both browser-mcp processes restart and reconnect."
+            "[hop: ipc] IPC transport failed: broken pipe. Next step: restart the MCP client so both ghostlight processes restart and reconnect."
         );
     }
 

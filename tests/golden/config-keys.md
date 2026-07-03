@@ -1,6 +1,6 @@
 # Configuration key reference
 
-Generated from the typed key registry in src/policy/mod.rs by `browser-mcp config docs`.
+Generated from the typed key registry in src/policy/mod.rs by `ghostlight config docs`.
 Do not edit by hand; change the registry and regenerate.
 
 Layer resolution: org-mandatory > user > org-recommended > preset default > built-in

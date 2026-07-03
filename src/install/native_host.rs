@@ -176,7 +176,7 @@ pub fn win_reg_key(spec: &BrowserSpec) -> String {
 /// The (Windows) shared host-manifest file path -- one file, referenced by every browser's key.
 pub fn win_manifest_path(ctx: &PlanCtx) -> PathBuf {
     ctx.local
-        .join("browser-mcp")
+        .join("ghostlight")
         .join("NativeMessagingHosts")
         .join(format!("{HOST_NAME}.json"))
 }
@@ -377,7 +377,7 @@ mod tests {
 
     fn ctx() -> PlanCtx {
         PlanCtx {
-            current_exe: PathBuf::from("/abs/browser-mcp"),
+            current_exe: PathBuf::from("/abs/ghostlight"),
             home: PathBuf::from("/home/u"),
             config: PathBuf::from("/home/u/.config"),
             local: PathBuf::from(r"C:\Users\u\AppData\Local"),
@@ -386,8 +386,7 @@ mod tests {
 
     #[test]
     fn host_manifest_json_has_type_stdio_and_exact_origin() {
-        let m =
-            HostManifest::resolve(Path::new("/abs/browser-mcp"), Some(&"a".repeat(32))).unwrap();
+        let m = HostManifest::resolve(Path::new("/abs/ghostlight"), Some(&"a".repeat(32))).unwrap();
         let v: serde_json::Value = serde_json::from_str(&m.to_json()).unwrap();
         assert_eq!(v["name"], HOST_NAME);
         assert_eq!(v["type"], "stdio");
@@ -420,12 +419,12 @@ mod tests {
     #[test]
     fn normalize_strips_windows_verbatim_prefixes() {
         assert_eq!(
-            normalize_exe_path(Path::new(r"\\?\C:\x\browser-mcp.exe")),
-            PathBuf::from(r"C:\x\browser-mcp.exe")
+            normalize_exe_path(Path::new(r"\\?\C:\x\ghostlight.exe")),
+            PathBuf::from(r"C:\x\ghostlight.exe")
         );
         assert_eq!(
-            normalize_exe_path(Path::new(r"\\?\UNC\srv\share\browser-mcp.exe")),
-            PathBuf::from(r"\\srv\share\browser-mcp.exe")
+            normalize_exe_path(Path::new(r"\\?\UNC\srv\share\ghostlight.exe")),
+            PathBuf::from(r"\\srv\share\ghostlight.exe")
         );
     }
 
@@ -463,9 +462,9 @@ mod tests {
 
     #[test]
     fn write_atomic_creates_parents_overwrites_and_removes_only_ours() {
-        let dir = std::env::temp_dir().join(format!("browser-mcp-it-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ghostlight-it-{}", std::process::id()));
         let path = dir.join("nested").join(format!("{HOST_NAME}.json"));
-        let ours = HostManifest::resolve(Path::new("/abs/browser-mcp"), Some(&"a".repeat(32)))
+        let ours = HostManifest::resolve(Path::new("/abs/ghostlight"), Some(&"a".repeat(32)))
             .unwrap()
             .to_json();
 

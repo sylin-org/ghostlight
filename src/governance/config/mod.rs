@@ -32,7 +32,7 @@
 //! [`Config::from_resolution`] builds the typed session `Config` from a [`layers::Resolution`].
 //! [`reload`] holds the in-force snapshot behind an atomic swap and re-resolves it live on a
 //! debounced file-watch, so config and org-policy changes take effect with no restart.
-//! [`cli`] is the `browser-mcp config list/get/set` presentation surface over this registry.
+//! [`cli`] is the `ghostlight config list/get/set` presentation surface over this registry.
 //! [`schema`] generates the JSON Schema and markdown key reference (`config schema`/`docs`).
 //! [`presets`] is `config preset` (G18, ADR-0019 decision 3): selecting a named bundle of
 //! layer-4 defaults, shown as a plain-language diff before it writes anything.

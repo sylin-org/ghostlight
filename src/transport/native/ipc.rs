@@ -21,14 +21,14 @@ use crate::transport::native::host;
 use crate::{Error, Result};
 use tokio::time::{sleep, Duration};
 
-/// Default endpoint base name; override with `BROWSER_MCP_ENDPOINT` (used by tests and advanced
+/// Default endpoint base name; override with `GHOSTLIGHT_ENDPOINT` (used by tests and advanced
 /// deployments that run more than one isolated instance on a host). Each platform derives the real
-/// path from it: `\\.\pipe\<name>` on Windows, `<runtime-dir>/browser-mcp/<name>.sock` on Unix.
-const DEFAULT_ENDPOINT: &str = "org.sylin.browser_mcp.v1";
+/// path from it: `\\.\pipe\<name>` on Windows, `<runtime-dir>/ghostlight/<name>.sock` on Unix.
+const DEFAULT_ENDPOINT: &str = "org.sylin.ghostlight.v1";
 
-/// The endpoint name both roles use: the `BROWSER_MCP_ENDPOINT` env override, else the default.
+/// The endpoint name both roles use: the `GHOSTLIGHT_ENDPOINT` env override, else the default.
 pub fn default_endpoint() -> String {
-    std::env::var("BROWSER_MCP_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_string())
+    std::env::var("GHOSTLIGHT_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_string())
 }
 
 /// native-host role: connect to the mcp-server endpoint and relay frames between Chrome native
@@ -43,7 +43,7 @@ pub fn default_endpoint() -> String {
 ///
 /// `debug` is env-gated (see `main::run_native_host_role`): Chrome inherits its own environment
 /// when it launches this process and never passes `--debug`, so a native-host debug snapshot only
-/// exists when Chrome itself was started with `BROWSER_MCP_DEBUG=1`. Its absence is normal.
+/// exists when Chrome itself was started with `GHOSTLIGHT_DEBUG=1`. Its absence is normal.
 pub async fn relay_native_host(endpoint: &str, debug: &crate::debug::DebugSink) -> Result<()> {
     let stream = connect(endpoint).await?;
     debug.ipc_note("connected to mcp-server endpoint");
@@ -96,7 +96,7 @@ fn pipe_path(endpoint: &str) -> String {
     format!(r"\\.\pipe\{endpoint}")
 }
 
-/// Synchronously probe the named pipe (no tokio; used by `browser-mcp doctor`, which runs with no
+/// Synchronously probe the named pipe (no tokio; used by `ghostlight doctor`, which runs with no
 /// async runtime). Opens the pipe for read+write and immediately drops the handle -- no bytes are
 /// written or read. Known, harmless side effect: probing a live *idle* server briefly wins the accept
 /// slot, logging one phantom connect/disconnect pair in *that* server's own debug state. It never
@@ -123,7 +123,7 @@ pub fn probe_endpoint(endpoint: &str) -> EndpointProbe {
     }
 }
 
-/// Human-readable display of the endpoint's OS-level path (for `browser-mcp doctor`'s report).
+/// Human-readable display of the endpoint's OS-level path (for `ghostlight doctor`'s report).
 #[cfg(windows)]
 pub fn endpoint_display(endpoint: &str) -> String {
     pipe_path(endpoint)
@@ -288,7 +288,7 @@ mod win_security {
 
 // --- Unix: domain sockets ---
 
-/// The Unix socket path: a user-owned `<runtime-or-cache-dir>/browser-mcp/<endpoint>.sock`. The
+/// The Unix socket path: a user-owned `<runtime-or-cache-dir>/ghostlight/<endpoint>.sock`. The
 /// parent dir is created 0700 and the socket 0600, so only the current user can reach it (unlike the
 /// abstract namespace, which carries no filesystem permissions).
 #[cfg(unix)]
@@ -296,10 +296,10 @@ fn socket_path(endpoint: &str) -> Result<std::path::PathBuf> {
     let base = dirs::runtime_dir()
         .or_else(dirs::cache_dir)
         .ok_or_else(|| Error::Ipc("no user runtime/cache directory for the socket".into()))?;
-    Ok(base.join("browser-mcp").join(format!("{endpoint}.sock")))
+    Ok(base.join("ghostlight").join(format!("{endpoint}.sock")))
 }
 
-/// Synchronously probe the Unix domain socket (no tokio; used by `browser-mcp doctor`, which runs
+/// Synchronously probe the Unix domain socket (no tokio; used by `ghostlight doctor`, which runs
 /// with no async runtime). Connects and immediately drops the stream -- no bytes are written or
 /// read. Known, harmless side effect: probing a live *idle* server briefly wins the accept slot,
 /// logging one phantom connect/disconnect pair in *that* server's own debug state. It never disturbs
@@ -327,7 +327,7 @@ pub fn probe_endpoint(endpoint: &str) -> EndpointProbe {
     }
 }
 
-/// Human-readable display of the endpoint's OS-level path (for `browser-mcp doctor`'s report), or
+/// Human-readable display of the endpoint's OS-level path (for `ghostlight doctor`'s report), or
 /// `(unresolvable: <error>)` when the socket path itself cannot be computed.
 #[cfg(unix)]
 pub fn endpoint_display(endpoint: &str) -> String {
@@ -423,7 +423,7 @@ mod tests {
 
     #[tokio::test]
     async fn serve_bridges_a_tool_call_over_the_real_ipc() {
-        let endpoint = "browser-mcp-test-serve-bridge";
+        let endpoint = "ghostlight-test-serve-bridge";
         let browser = Browser::new();
         let serving = browser.clone();
         tokio::spawn(async move {
@@ -458,13 +458,13 @@ mod tests {
 
     #[test]
     fn probe_reports_absent_for_an_unused_endpoint() {
-        let endpoint = format!("browser-mcp-test-probe-absent-{}", std::process::id());
+        let endpoint = format!("ghostlight-test-probe-absent-{}", std::process::id());
         assert_eq!(probe_endpoint(&endpoint), EndpointProbe::Absent);
     }
 
     #[tokio::test]
     async fn probe_reports_accepts_against_a_live_server() {
-        let endpoint = format!("browser-mcp-test-probe-accepts-{}", std::process::id());
+        let endpoint = format!("ghostlight-test-probe-accepts-{}", std::process::id());
         let browser = Browser::new();
         let serving_endpoint = endpoint.clone();
         tokio::spawn(async move {

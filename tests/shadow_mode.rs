@@ -30,7 +30,7 @@ fn file_uri(path: &Path) -> String {
 
 fn temp_path(tag: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "browser-mcp-shadow-mode-{}-{tag}-{}.tmp",
+        "ghostlight-shadow-mode-{}-{tag}-{}.tmp",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     ))
@@ -75,19 +75,19 @@ fn read_audit_lines(path: &Path) -> Vec<Value> {
 
 fn drive(manifest_path: &Path, requests: &[Value]) -> Vec<Value> {
     let endpoint = format!(
-        "browser-mcp-shadow-{}-{}",
+        "ghostlight-shadow-{}-{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_browser-mcp"))
-        .env("BROWSER_MCP_ENDPOINT", &endpoint)
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ghostlight"))
+        .env("GHOSTLIGHT_ENDPOINT", &endpoint)
         .arg("--manifest")
         .arg(file_uri(manifest_path))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn browser-mcp");
+        .expect("spawn ghostlight");
 
     let mut stdin = child.stdin.take().expect("stdin");
     for req in requests {

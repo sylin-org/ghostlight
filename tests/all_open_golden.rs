@@ -11,12 +11,12 @@
 //!   3. `read_page` secret redaction is still wired at the chokepoint (governed by the
 //!      unchanged `content.security.secrets.redact` key), exercised end-to-end over stdio.
 
-use browser_mcp::browser::directory::descriptor;
-use browser_mcp::governance::dispatch::Governance;
-use browser_mcp::governance::ports::{
+use ghostlight::browser::directory::descriptor;
+use ghostlight::governance::dispatch::Governance;
+use ghostlight::governance::ports::{
     AuditRecord, AuditSink, Decision, EffectiveMode, GoverningResource,
 };
-use browser_mcp::transport::mcp::tools::TOOLS_JSON;
+use ghostlight::transport::mcp::tools::TOOLS_JSON;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -71,7 +71,7 @@ fn tools_list_is_byte_stable_through_the_move() {
 struct NullAuditSink;
 impl AuditSink for NullAuditSink {
     fn record(&self, _record: &AuditRecord) {}
-    fn record_session_event(&self, _record: &browser_mcp::governance::ports::SessionEventRecord) {}
+    fn record_session_event(&self, _record: &ghostlight::governance::ports::SessionEventRecord) {}
 }
 
 #[test]
@@ -101,17 +101,17 @@ fn facade_decide_is_all_open_after_the_move() {
 #[test]
 fn read_page_redaction_is_still_wired_at_the_chokepoint() {
     let endpoint = format!(
-        "browser-mcp-golden-{}-{}",
+        "ghostlight-golden-{}-{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_browser-mcp"))
-        .env("BROWSER_MCP_ENDPOINT", &endpoint)
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ghostlight"))
+        .env("GHOSTLIGHT_ENDPOINT", &endpoint)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn browser-mcp");
+        .expect("spawn ghostlight");
 
     let mut stdin = child.stdin.take().expect("stdin");
     let requests = [
@@ -130,11 +130,11 @@ fn read_page_redaction_is_still_wired_at_the_chokepoint() {
         let rt = tokio::runtime::Runtime::new().expect("build a tokio runtime");
         rt.block_on(async move {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            let stream = browser_mcp::native::ipc::connect(&fake_endpoint)
+            let stream = ghostlight::native::ipc::connect(&fake_endpoint)
                 .await
                 .expect("fake extension connects to the real IPC endpoint");
             let (mut read_half, mut write_half) = tokio::io::split(stream);
-            let req = browser_mcp::native::host::read_message(&mut read_half)
+            let req = ghostlight::native::host::read_message(&mut read_half)
                 .await
                 .unwrap()
                 .expect("one framed tool_request");
@@ -147,7 +147,7 @@ fn read_page_redaction_is_still_wired_at_the_chokepoint() {
                     "text": "textbox \"Password\" [ref_3] secret_value=\"hunter2\" type=\"password\""
                 } ] },
             });
-            browser_mcp::native::host::write_message(
+            ghostlight::native::host::write_message(
                 &mut write_half,
                 &serde_json::to_vec(&reply).unwrap(),
             )

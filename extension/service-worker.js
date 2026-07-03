@@ -1,4 +1,4 @@
-// Browser MCP -- background service worker.
+// Ghostlight -- background service worker.
 //
 // Policy-free CDP executor + native-messaging endpoint + tab-group manager. It holds MECHANISM
 // only; all governance (domains, tool classification, audit) lives in the Rust binary. It receives
@@ -12,8 +12,8 @@
 // { id, type: "tab_url_response", result: { url } }, reporting chrome.tabs.get(tabId).url (or
 // null) with no matching or interpretation -- the binary's grant enforcement decides.
 
-const NATIVE_HOST = "org.sylin.browser_mcp";
-const GROUP_TITLE = "Browser MCP";
+const NATIVE_HOST = "org.sylin.ghostlight";
+const GROUP_TITLE = "Ghostlight";
 
 let nativePort = null;
 let groupId = null;
@@ -1109,7 +1109,7 @@ async function computer(a) {
 const handlers = {
   async tabs_context_mcp(a) {
     await ensureGroup(a.createIfEmpty);
-    if (groupId === null) return text("No Browser MCP tab group. Call with createIfEmpty: true.");
+    if (groupId === null) return text("No Ghostlight tab group. Call with createIfEmpty: true.");
     return tabContext(await groupTabs());
   },
   async tabs_create_mcp() {

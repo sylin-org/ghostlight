@@ -104,7 +104,7 @@ pub fn detect(spec: &ClientSpec, ctx: &PlanCtx) -> bool {
 /// The server entry we register: absolute binary path, never npx (doc 11 B.7/C.4).
 pub fn server_entry(exe: &Path) -> ServerEntry {
     ServerEntry {
-        name: "browser-mcp".into(),
+        name: "ghostlight".into(),
         command: super::native_host::normalize_exe_path(exe)
             .to_string_lossy()
             .into_owned(),

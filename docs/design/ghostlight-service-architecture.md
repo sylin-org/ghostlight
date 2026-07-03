@@ -8,7 +8,7 @@ graduate into numbered ADRs (this document points out which).
 
 ## Why this document exists
 
-The trigger was an IPC bug (`browser-mcp doctor` reporting a pipe-busy error during a live session).
+The trigger was an IPC bug (`ghostlight doctor` reporting a pipe-busy error during a live session).
 The question quickly grew past the bug into an architecture question: should the browser session
 state live in its own persistent process, decoupled from the ephemeral MCP-client process? And past
 that, into the real ask: a meaningful architecture baseline for the whole Ghostlight family that

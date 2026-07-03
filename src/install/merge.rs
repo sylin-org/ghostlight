@@ -1,4 +1,4 @@
-//! Pure JSON merge for adding/removing the `browser-mcp` server entry in an MCP client's config.
+//! Pure JSON merge for adding/removing the `ghostlight` server entry in an MCP client's config.
 //!
 //! No I/O -- the whole point is a unit-testable core. `serde_json`'s `preserve_order` feature keeps
 //! sibling servers and key order intact across a merge. Never clobbers: a non-object root or a
@@ -132,8 +132,8 @@ mod tests {
 
     fn entry() -> ServerEntry {
         ServerEntry {
-            name: "browser-mcp".into(),
-            command: "/abs/browser-mcp".into(),
+            name: "ghostlight".into(),
+            command: "/abs/ghostlight".into(),
             args: vec![],
             env: BTreeMap::new(),
         }
@@ -146,8 +146,8 @@ mod tests {
     fn creates_from_empty() {
         let out = parse(&merge_server("", Dialect::McpServers, &entry()).unwrap());
         assert_eq!(
-            out["mcpServers"]["browser-mcp"]["command"],
-            "/abs/browser-mcp"
+            out["mcpServers"]["ghostlight"]["command"],
+            "/abs/ghostlight"
         );
         assert_eq!(out.as_object().unwrap().len(), 1);
     }
@@ -158,18 +158,18 @@ mod tests {
         let out = parse(&merge_server(existing, Dialect::McpServers, &entry()).unwrap());
         assert_eq!(out["mcpServers"]["other"]["command"], "x");
         assert_eq!(
-            out["mcpServers"]["browser-mcp"]["command"],
-            "/abs/browser-mcp"
+            out["mcpServers"]["ghostlight"]["command"],
+            "/abs/ghostlight"
         );
     }
 
     #[test]
     fn updates_our_entry_not_duplicate() {
-        let existing = r#"{"mcpServers":{"browser-mcp":{"command":"/old"}}}"#;
+        let existing = r#"{"mcpServers":{"ghostlight":{"command":"/old"}}}"#;
         let out = parse(&merge_server(existing, Dialect::McpServers, &entry()).unwrap());
         assert_eq!(
-            out["mcpServers"]["browser-mcp"]["command"],
-            "/abs/browser-mcp"
+            out["mcpServers"]["ghostlight"]["command"],
+            "/abs/ghostlight"
         );
         assert_eq!(out["mcpServers"].as_object().unwrap().len(), 1);
     }
@@ -178,7 +178,7 @@ mod tests {
     fn servers_dialect_adds_type_stdio() {
         let existing = r#"{"servers":{"foo":{"command":"y"}}}"#;
         let out = parse(&merge_server(existing, Dialect::Servers, &entry()).unwrap());
-        assert_eq!(out["servers"]["browser-mcp"]["type"], "stdio");
+        assert_eq!(out["servers"]["ghostlight"]["type"], "stdio");
         assert_eq!(out["servers"]["foo"]["command"], "y");
     }
 
@@ -188,8 +188,8 @@ mod tests {
         let out = parse(&merge_server(existing, Dialect::McpServers, &entry()).unwrap());
         assert_eq!(out["someTop"], true);
         assert_eq!(
-            out["mcpServers"]["browser-mcp"]["command"],
-            "/abs/browser-mcp"
+            out["mcpServers"]["ghostlight"]["command"],
+            "/abs/ghostlight"
         );
     }
 
@@ -219,11 +219,11 @@ mod tests {
 
     #[test]
     fn has_server_detects_presence() {
-        let with = r#"{"mcpServers":{"browser-mcp":{"command":"x"}}}"#;
+        let with = r#"{"mcpServers":{"ghostlight":{"command":"x"}}}"#;
         let without = r#"{"mcpServers":{"other":{}}}"#;
-        assert!(has_server(with, Dialect::McpServers, "browser-mcp").unwrap());
-        assert!(!has_server(without, Dialect::McpServers, "browser-mcp").unwrap());
-        assert!(!has_server("", Dialect::McpServers, "browser-mcp").unwrap());
+        assert!(has_server(with, Dialect::McpServers, "ghostlight").unwrap());
+        assert!(!has_server(without, Dialect::McpServers, "ghostlight").unwrap());
+        assert!(!has_server("", Dialect::McpServers, "ghostlight").unwrap());
     }
 
     #[test]
@@ -232,7 +232,7 @@ mod tests {
         let written = merge_server("", Dialect::McpServers, &entry()).unwrap();
         assert!(server_matches(&written, Dialect::McpServers, &entry()).unwrap());
         // Present but different command -> not a match (we should rewrite).
-        let stale = r#"{"mcpServers":{"browser-mcp":{"command":"/old","args":[],"env":{}}}}"#;
+        let stale = r#"{"mcpServers":{"ghostlight":{"command":"/old","args":[],"env":{}}}}"#;
         assert!(!server_matches(stale, Dialect::McpServers, &entry()).unwrap());
         // Absent -> not a match.
         assert!(!server_matches("", Dialect::McpServers, &entry()).unwrap());
@@ -240,20 +240,20 @@ mod tests {
 
     #[test]
     fn remove_drops_only_our_entry() {
-        let existing = r#"{"mcpServers":{"browser-mcp":{"command":"x"},"other":{"command":"y"}}}"#;
-        let out = parse(&remove_server(existing, Dialect::McpServers, "browser-mcp").unwrap());
-        assert!(out["mcpServers"].get("browser-mcp").is_none());
+        let existing = r#"{"mcpServers":{"ghostlight":{"command":"x"},"other":{"command":"y"}}}"#;
+        let out = parse(&remove_server(existing, Dialect::McpServers, "ghostlight").unwrap());
+        assert!(out["mcpServers"].get("ghostlight").is_none());
         assert_eq!(out["mcpServers"]["other"]["command"], "y");
     }
 
     #[test]
     fn remove_is_noop_when_absent() {
         let existing = r#"{"mcpServers":{"other":{}}}"#;
-        let out = parse(&remove_server(existing, Dialect::McpServers, "browser-mcp").unwrap());
+        let out = parse(&remove_server(existing, Dialect::McpServers, "ghostlight").unwrap());
         assert!(out["mcpServers"]["other"].is_object());
         // empty input round-trips to an empty object without panic
         assert_eq!(
-            parse(&remove_server("", Dialect::McpServers, "browser-mcp").unwrap()),
+            parse(&remove_server("", Dialect::McpServers, "ghostlight").unwrap()),
             json!({})
         );
     }

@@ -61,7 +61,7 @@ pub fn hold_message(tool: &str, action: Option<&str>, held_for: Duration) -> Str
         message.push(' ');
         message.push_str(
             "This session has been paused for more than 2 minutes. Only the user can resume \
-             it, from the Browser MCP extension: the popup Pause/Resume button or the toggle \
+             it, from the Ghostlight extension: the popup Pause/Resume button or the toggle \
              keyboard shortcut.",
         );
     }
@@ -85,7 +85,7 @@ pub struct GovernanceStatus {
 /// though an individual would-deny call under it would still be classified `shadow_deny` by
 /// [`crate::governance::enforcement::apply_mode`] (the badge describes whether a MEANINGFUL
 /// policy is being observed, not the literal per-call decision vocabulary). A free function
-/// (not a `Governance` method) so a standalone caller with no live session -- `browser-mcp
+/// (not a `Governance` method) so a standalone caller with no live session -- `ghostlight
 /// doctor`, which resolves its own manifest independently -- computes the identical summary
 /// [`Governance::governance_status`] does, from the same three inputs.
 pub fn governance_status(
@@ -204,7 +204,7 @@ impl Governance {
     /// under all-open; `Some(governance_status(...))` once a manifest is active, computed from
     /// this facade's own held grants and manifest-level mode. Delegates to the free function
     /// [`governance_status`] so a standalone reader with no live `Governance` instance
-    /// (`browser-mcp doctor`, which resolves its own manifest independently) computes the
+    /// (`ghostlight doctor`, which resolves its own manifest independently) computes the
     /// IDENTICAL summary from the same inputs -- the two surfaces can never disagree (g15
     /// constraint 12).
     pub fn governance_status(&self, config_mode: EffectiveMode) -> Option<GovernanceStatus> {

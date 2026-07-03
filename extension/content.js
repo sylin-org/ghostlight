@@ -1,4 +1,4 @@
-// Browser MCP -- content script.
+// Ghostlight -- content script.
 //
 // Policy-free DOM mechanism: accessibility-tree generation, element-ref mapping (WeakRef), text
 // extraction, element finding, and form input with shadow-DOM traversal. Runs in the page; the
@@ -155,7 +155,7 @@
     function measure(el, depth, indent) {
       if (depth > maxDepth || !el || el.nodeType !== 1) return null;
       if (++measured > MAX_MEASURED) return null;
-      if (el.id && el.id.indexOf("browser-mcp-") === 0) return null; // our own visual-indicator overlay
+      if (el.id && el.id.indexOf("ghostlight-") === 0) return null; // our own visual-indicator overlay
       const tag = el.tagName.toLowerCase();
       if (["script", "style", "noscript", "template"].includes(tag)) return null;
       const r = role(el);
@@ -377,7 +377,7 @@
     let more = false;
     for (const el of collectAll(document)) {
       if (!visible(el)) continue;
-      if (el.id && el.id.indexOf("browser-mcp-") === 0) continue; // our own visual-indicator overlay
+      if (el.id && el.id.indexOf("ghostlight-") === 0) continue; // our own visual-indicator overlay
       const tag = el.tagName.toLowerCase();
       if (["script", "style", "noscript", "template"].includes(tag)) continue;
       const hay = `${role(el) || ""} ${accessibleName(el) || ""} ${(el.textContent || "").slice(0, 200)} ${el.placeholder || ""} ${el.getAttribute("aria-label") || ""} ${el.title || ""} ${el.type || ""} ${tag}`.toLowerCase();

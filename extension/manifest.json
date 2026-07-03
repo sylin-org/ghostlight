@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Browser MCP",
+  "name": "Ghostlight Browser",
   "version": "0.1.0",
   "description": "Governed browser automation over your own authenticated session, for AI agents.",
   "minimum_chrome_version": "116",
@@ -19,7 +19,7 @@
   "background": {
     "service_worker": "service-worker.js"
   },
-  "action": { "default_title": "Browser MCP", "default_popup": "popup.html" },
+  "action": { "default_title": "Ghostlight Browser", "default_popup": "popup.html" },
   "commands": {
     "toggle-hold": {
       "suggested_key": { "default": "Alt+Shift+P" },

@@ -1,6 +1,6 @@
 # Tool Schemas: the sacred surface
 
-`tools.json` is the advertised MCP `tools/list` surface: the **13 tools** Browser MCP preserves at
+`tools.json` is the advertised MCP `tools/list` surface: the **13 tools** Ghostlight preserves at
 **byte-parity with the official Claude-in-Chrome extension** (the exact tool names, descriptions,
 parameter names/types/enums/constraints, and required sets the model's trained behavior depends on).
 This is the **one** thing we preserve verbatim; everything else is a clean, lean re-design (Browser

@@ -1,5 +1,5 @@
 //! Integration tests for G17 `policy simulate`: spawns the built binary
-//! (`env!("CARGO_BIN_EXE_browser-mcp")`, the pattern `tests/mcp_protocol.rs` uses) and checks
+//! (`env!("CARGO_BIN_EXE_ghostlight")`, the pattern `tests/mcp_protocol.rs` uses) and checks
 //! its stdout/stderr/exit code directly. The pure replay/report core already has its own inline
 //! unit tests in `governance::simulate`; what only an integration test can prove is the CLI
 //! wiring itself (exit codes, argument parsing, that operational errors never print a partial
@@ -9,14 +9,14 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn run_simulate(manifest: &str, replay: &str) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_browser-mcp"))
+    Command::new(env!("CARGO_BIN_EXE_ghostlight"))
         .arg("policy")
         .arg("simulate")
         .arg(manifest)
         .arg("--replay")
         .arg(replay)
         .output()
-        .expect("spawn browser-mcp")
+        .expect("spawn ghostlight")
 }
 
 const PERMISSIVE: &str = "tests/fixtures/simulate/manifest-permissive.json";
@@ -153,7 +153,7 @@ fn nonexistent_replay_path_exits_one_naming_the_path() {
 #[test]
 fn manifest_with_invalid_json_exits_one() {
     let path = std::env::temp_dir().join(format!(
-        "browser-mcp-policy-simulate-badjson-{}.json",
+        "ghostlight-policy-simulate-badjson-{}.json",
         std::process::id()
     ));
     std::fs::write(&path, "{not valid json").unwrap();
@@ -168,7 +168,7 @@ fn manifest_with_invalid_json_exits_one() {
 #[test]
 fn structurally_invalid_manifest_exits_one() {
     let path = std::env::temp_dir().join(format!(
-        "browser-mcp-policy-simulate-badgrant-{}.json",
+        "ghostlight-policy-simulate-badgrant-{}.json",
         std::process::id()
     ));
     std::fs::write(

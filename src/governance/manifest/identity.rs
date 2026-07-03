@@ -292,12 +292,12 @@ mod tests {
         );
 
         let invalid = ManifestStatus::Invalid {
-            path: PathBuf::from("/etc/browser-mcp/policy.json"),
+            path: PathBuf::from("/etc/ghostlight/policy.json"),
             error: "manifest is not valid JSON: EOF".to_string(),
         };
         let lines = manifest_section_lines(&invalid);
         assert_eq!(lines.len(), 1);
-        assert!(lines[0].contains("/etc/browser-mcp/policy.json"));
+        assert!(lines[0].contains("/etc/ghostlight/policy.json"));
         assert!(lines[0].contains("invalid ("));
         assert!(lines[0].ends_with("identity unavailable"));
     }
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn manifest_status_reads_the_org_policy_file() {
         let dir =
-            std::env::temp_dir().join(format!("browser-mcp-identity-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("ghostlight-identity-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("policy.json");
 

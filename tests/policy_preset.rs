@@ -1,10 +1,10 @@
 //! Integration tests for G18 `config preset`: spawns the built binary
-//! (`env!("CARGO_BIN_EXE_browser-mcp")`, the `tests/mcp_protocol.rs` pattern).
+//! (`env!("CARGO_BIN_EXE_ghostlight")`, the `tests/mcp_protocol.rs` pattern).
 //!
 //! Deliberately `--dry-run` ONLY: `config preset` without `--dry-run` writes to the real
 //! per-platform user config file (`load::user_config_path`, not overridable via environment for
 //! a spawned child process), so a non-dry-run integration test would mutate the operator's own
-//! `browser-mcp` configuration outside the repository -- unacceptable side effect for an
+//! `ghostlight` configuration outside the repository -- unacceptable side effect for an
 //! automated test run. The write path itself (missing/preserve/corrupt-file behavior, and that
 //! the stored value is always the underscore form) is covered by
 //! `governance::config::presets`'s own inline unit tests against temp paths, matching the
@@ -14,12 +14,12 @@
 use std::process::{Command, Output};
 
 fn run_preset(preset: &str, dry_run: bool) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_browser-mcp"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ghostlight"));
     cmd.arg("config").arg("preset").arg(preset);
     if dry_run {
         cmd.arg("--dry-run");
     }
-    cmd.output().expect("spawn browser-mcp")
+    cmd.output().expect("spawn ghostlight")
 }
 
 #[test]

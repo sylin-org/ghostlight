@@ -1,6 +1,6 @@
-//! Browser MCP -- governed browser automation over the user's own authenticated Chromium session.
+//! Ghostlight -- governed browser automation over the user's own authenticated Chromium session.
 //!
-//! This is the **library crate**; the `browser-mcp` binary (`src/main.rs`) is a thin shell over it.
+//! This is the **library crate**; the `ghostlight` binary (`src/main.rs`) is a thin shell over it.
 //!
 //! ## Layering (see `docs/research/NORTH-STAR.md`)
 //! v1.0 is the **engine only** -- full capability, no governance overlay. Governance (policy,

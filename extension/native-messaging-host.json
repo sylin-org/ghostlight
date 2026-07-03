@@ -1,7 +1,7 @@
 {
-  "name": "org.sylin.browser_mcp",
-  "description": "Browser MCP native messaging host",
-  "path": "/ABSOLUTE/PATH/TO/browser-mcp",
+  "name": "org.sylin.ghostlight",
+  "description": "Ghostlight native messaging host",
+  "path": "/ABSOLUTE/PATH/TO/ghostlight",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://YOUR_EXTENSION_ID/"]
 }

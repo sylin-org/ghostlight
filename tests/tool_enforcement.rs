@@ -2,7 +2,7 @@
 //! connected. A permitted call reaches dispatch and returns the familiar `not connected`
 //! execution error; a denied call never reaches dispatch and returns a `Denied (D-...)` text
 //! result instead -- that contrast is the test signal (mirrors `tests/mcp_protocol.rs`'s own
-//! subprocess pattern, one unique `BROWSER_MCP_ENDPOINT` per spawn).
+//! subprocess pattern, one unique `GHOSTLIGHT_ENDPOINT` per spawn).
 //!
 //! `file:///etc/passwd` is deliberately NOT used for the scheme-denial scenario (unlike the g13
 //! task doc's own worked example): the extension's `navigate` normalization -- which the g13
@@ -52,7 +52,7 @@ fn manifest_value(name: &str, grants: Value, audit_path: &Path) -> Value {
 
 fn temp_path(tag: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "browser-mcp-tool-enforcement-{}-{tag}-{}.tmp",
+        "ghostlight-tool-enforcement-{}-{tag}-{}.tmp",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     ))
@@ -77,19 +77,19 @@ fn read_audit_lines(path: &Path) -> Vec<Value> {
 /// response lines.
 fn drive(manifest_path: Option<&Path>, requests: &[Value]) -> Vec<Value> {
     let endpoint = format!(
-        "browser-mcp-ge-{}-{}",
+        "ghostlight-ge-{}-{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_browser-mcp"));
-    cmd.env("BROWSER_MCP_ENDPOINT", &endpoint)
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ghostlight"));
+    cmd.env("GHOSTLIGHT_ENDPOINT", &endpoint)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     if let Some(path) = manifest_path {
         cmd.arg("--manifest").arg(file_uri(path));
     }
-    let mut child = cmd.spawn().expect("spawn browser-mcp");
+    let mut child = cmd.spawn().expect("spawn ghostlight");
 
     let mut stdin = child.stdin.take().expect("stdin");
     for req in requests {
@@ -395,7 +395,7 @@ fn all_open_invariant_no_manifest_means_no_denials() {
         .as_array()
         .expect("tools array");
     assert_eq!(tools.len(), 14, "13 trained tools plus explain");
-    let fixture: Value = serde_json::from_str(browser_mcp::mcp::tools::TOOLS_JSON).unwrap();
+    let fixture: Value = serde_json::from_str(ghostlight::mcp::tools::TOOLS_JSON).unwrap();
     assert_eq!(responses[1]["result"], fixture, "byte-identical tools/list");
 
     let call_text = text_of(&responses[2]);

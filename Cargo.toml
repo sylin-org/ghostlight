@@ -1,5 +1,5 @@
 [package]
-name = "browser-mcp"
+name = "ghostlight"
 version = "0.1.0"
 edition = "2021"
 description = "Governed browser automation over the user's own authenticated Chromium session -- for AI coding agents."

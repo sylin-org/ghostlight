@@ -1,4 +1,4 @@
-//! The ADR-0019 CLI surface over the layered configuration registry: `browser-mcp config
+//! The ADR-0019 CLI surface over the layered configuration registry: `ghostlight config
 //! list/get/set`. Renders the resolved (value, source, locked) triple and writes the user
 //! layer only; layer resolution and value validation live in [`super::layers`] and
 //! [`super::KeyDef::parse_value`], never here.
@@ -12,7 +12,7 @@
 
 use super::{key_def, layers, load, presets, schema, KeyDef, KeyType, Preset};
 
-/// A parsed `browser-mcp config` invocation.
+/// A parsed `ghostlight config` invocation.
 pub enum ConfigCommand {
     /// Show every key: effective value, source layer, lock state, description.
     List,
@@ -65,7 +65,7 @@ pub fn run(cmd: ConfigCommand, domain_pattern_valid: fn(&str) -> bool) -> crate:
 
 fn unknown_key_error(key: &str) -> crate::Error {
     crate::Error::Config(format!(
-        "unknown config key '{key}' (run 'browser-mcp config list' to see all keys)"
+        "unknown config key '{key}' (run 'ghostlight config list' to see all keys)"
     ))
 }
 
@@ -87,7 +87,7 @@ fn resolve_with_warnings(
     Vec<String>,
     crate::governance::manifest::source::LoadedPolicy,
 )> {
-    let user_manifest_source = std::env::var("BROWSER_MCP_MANIFEST").ok();
+    let user_manifest_source = std::env::var("GHOSTLIGHT_MANIFEST").ok();
     let loaded_policy = crate::governance::manifest::source::load_policy(
         user_manifest_source.as_deref(),
         domain_pattern_valid,
@@ -139,7 +139,7 @@ fn run_list(domain_pattern_valid: fn(&str) -> bool) -> crate::Result<()> {
 /// Takes the [`LoadedPolicy`] `run_list` already resolved (via [`resolve_with_warnings`])
 /// instead of loading it again, so `config list` performs exactly one policy load per
 /// invocation (ADR-0023 Decision 6). Renders through the same shared
-/// `governance::dispatch::governance_status` resolver `browser-mcp doctor` uses, so this line
+/// `governance::dispatch::governance_status` resolver `ghostlight doctor` uses, so this line
 /// and the doctor `Governance:` section can never disagree (g15 constraint 12). Returns `None`
 /// when there is no active manifest: this addendum is a courtesy note, not this command's job
 /// to validate the manifest.
@@ -472,7 +472,7 @@ mod tests {
              (source: org_mandatory); 'config set' cannot override it"
         );
 
-        let dir = std::env::temp_dir().join(format!("browser-mcp-cli-lock-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ghostlight-cli-lock-{}", std::process::id()));
         let path = dir.join("config.json");
         assert!(!path.exists());
         // Simulate the refusal path: no write attempted.
@@ -482,7 +482,7 @@ mod tests {
 
     fn with_temp_file<F: FnOnce(&std::path::Path)>(name: &str, initial: Option<&str>, f: F) {
         let dir = std::env::temp_dir().join(format!(
-            "browser-mcp-cli-test-{}-{}",
+            "ghostlight-cli-test-{}-{}",
             std::process::id(),
             name
         ));
@@ -623,7 +623,7 @@ mod tests {
     #[test]
     fn unknown_key_message_for_get_and_set() {
         let expected =
-            "unknown config key 'no.such.key' (run 'browser-mcp config list' to see all keys)";
+            "unknown config key 'no.such.key' (run 'ghostlight config list' to see all keys)";
         assert_eq!(unknown_key_error("no.such.key").to_string(), expected);
     }
 

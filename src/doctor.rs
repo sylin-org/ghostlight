@@ -1,4 +1,4 @@
-//! `browser-mcp doctor` -- the one-shot, read-only diagnosis that fuses installer registration
+//! `ghostlight doctor` -- the one-shot, read-only diagnosis that fuses installer registration
 //! state, per-pid debug sessions, and a live probe of the IPC endpoint into a single report with
 //! a truthful exit code.
 //!
@@ -12,7 +12,7 @@ use crate::transport::native::ipc::{self, EndpointProbe};
 use crate::Result;
 use std::path::PathBuf;
 
-/// Options for `browser-mcp doctor`.
+/// Options for `ghostlight doctor`.
 pub struct DoctorOptions {
     /// Show every debug session (not just the newest few) with its per-session counters.
     pub verbose: bool,
@@ -28,7 +28,7 @@ pub struct DoctorOptions {
 pub fn run(opts: DoctorOptions) -> Result<bool> {
     let ctx = PlanCtx::resolve()?;
 
-    println!("browser-mcp doctor");
+    println!("ghostlight doctor");
     println!();
     println!("Binary:");
     println!("  {:<9}{}", "path", ctx.current_exe.display());
@@ -154,14 +154,14 @@ fn browser_rows(ctx: &PlanCtx) -> Vec<(String, bool, bool)> {
 }
 
 /// (display name, detected?, registered?) for each known MCP client (registered means the config
-/// file contains the literal substring `"browser-mcp"`, quotes included, as today).
+/// file contains the literal substring `"ghostlight"`, quotes included, as today).
 fn client_rows(ctx: &PlanCtx) -> Vec<(String, bool, bool)> {
     clients::CLIENTS
         .iter()
         .map(|c| {
             let detected = clients::detect(c, ctx);
             let registered = std::fs::read_to_string(clients::config_path(c, ctx))
-                .map(|s| s.contains("\"browser-mcp\""))
+                .map(|s| s.contains("\"ghostlight\""))
                 .unwrap_or(false);
             (c.display.to_string(), detected, registered)
         })
@@ -174,14 +174,14 @@ fn client_rows(ctx: &PlanCtx) -> Vec<(String, bool, bool)> {
 /// and no `--manifest` flag of its own (that flag is server-role only); it resolves its OWN
 /// view of the active manifest the same way a server launched in the same environment would,
 /// using the real, already-tested `governance::manifest::source::load_policy` (org policy file,
-/// else `BROWSER_MCP_MANIFEST`, else none -- the only manifest signal available without a CLI
+/// else `GHOSTLIGHT_MANIFEST`, else none -- the only manifest signal available without a CLI
 /// flag) and the real layered config resolver, then renders through the SAME pure
 /// `governance::dispatch::governance_status` function `Governance::governance_status` uses, so
 /// this section and a future `get_status` reply can never disagree (g15 constraint 12). Any
 /// resolution failure degrades to a printed line rather than propagating (doctor's own
 /// never-early-return posture).
 fn governance_section_lines() -> Vec<String> {
-    let user_manifest_source = std::env::var("BROWSER_MCP_MANIFEST").ok();
+    let user_manifest_source = std::env::var("GHOSTLIGHT_MANIFEST").ok();
     let loaded_policy = match crate::governance::manifest::source::load_policy(
         user_manifest_source.as_deref(),
         crate::browser::pattern::is_valid_pattern,
@@ -354,7 +354,7 @@ fn print_sessions(log_dir: &Option<PathBuf>, rows: &[SessionRow], verbose: bool)
     };
     println!("Debug sessions ({}):", dir.display());
     if rows.is_empty() {
-        println!("  (none found; a session run with --debug or BROWSER_MCP_DEBUG=1 writes them)");
+        println!("  (none found; a session run with --debug or GHOSTLIGHT_DEBUG=1 writes them)");
         return;
     }
 
@@ -460,44 +460,43 @@ fn findings(obs: &Observations) -> Vec<String> {
 
     if !obs.any_browser_registered {
         out.push(
-            "the native messaging host is not registered for any browser: run browser-mcp install, then reload the extension at chrome://extensions"
+            "the native messaging host is not registered for any browser: run ghostlight install, then reload the extension at chrome://extensions"
                 .to_string(),
         );
     }
     if !obs.any_client_registered {
         out.push(
-            "browser-mcp is not registered with any MCP client: run browser-mcp install"
-                .to_string(),
+            "ghostlight is not registered with any MCP client: run ghostlight install".to_string(),
         );
     }
 
     match &obs.probe {
         EndpointProbe::Absent => {
             out.push(
-                "no mcp-server is running (the IPC endpoint does not exist): start or restart your MCP client so it launches browser-mcp"
+                "no mcp-server is running (the IPC endpoint does not exist): start or restart your MCP client so it launches ghostlight"
                     .to_string(),
             );
         }
         EndpointProbe::Rejects(detail) => {
             out.push(match &obs.newest_server {
                 Some(s) => format!(
-                    "the IPC endpoint exists but rejected a connection ({detail}): a stale browser-mcp process may still hold it; try killing pid {} and restarting your MCP client",
+                    "the IPC endpoint exists but rejected a connection ({detail}): a stale ghostlight process may still hold it; try killing pid {} and restarting your MCP client",
                     s.pid
                 ),
                 None => format!(
-                    "the IPC endpoint exists but rejected a connection ({detail}): find and kill the stale browser-mcp process with your process manager, then restart your MCP client"
+                    "the IPC endpoint exists but rejected a connection ({detail}): find and kill the stale ghostlight process with your process manager, then restart your MCP client"
                 ),
             });
         }
         EndpointProbe::Accepts => match &obs.newest_server {
             None => out.push(
-                "an mcp-server is running but wrote no debug state: restart the session with --debug (or BROWSER_MCP_DEBUG=1) and re-run doctor for a full diagnosis"
+                "an mcp-server is running but wrote no debug state: restart the session with --debug (or GHOSTLIGHT_DEBUG=1) and re-run doctor for a full diagnosis"
                     .to_string(),
             ),
             Some(s) if !s.extension_connected => {
                 if s.connects == 0 {
                     out.push(format!(
-                        "the extension never connected in the newest session (pid {}): check that the extension is loaded and enabled at chrome://extensions and that the browser is running; if it persists, re-run browser-mcp install and restart the browser",
+                        "the extension never connected in the newest session (pid {}): check that the extension is loaded and enabled at chrome://extensions and that the browser is running; if it persists, re-run ghostlight install and restart the browser",
                         s.pid
                     ));
                 } else {
@@ -516,7 +515,7 @@ fn findings(obs: &Observations) -> Vec<String> {
     // covers the no-session case, so this never doubles up with it.
     if !obs.sessions_present && !matches!(obs.probe, EndpointProbe::Accepts) {
         out.push(
-            "no debug instrumentation found: run a session with --debug (or set BROWSER_MCP_DEBUG=1) and re-run doctor"
+            "no debug instrumentation found: run a session with --debug (or set GHOSTLIGHT_DEBUG=1) and re-run doctor"
                 .to_string(),
         );
     }

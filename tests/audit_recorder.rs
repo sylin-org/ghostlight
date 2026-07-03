@@ -5,15 +5,15 @@
 //! `set_client`/`record_call` live on `Governance`, not on `Recorder` directly (Recorder only
 //! implements the bare `AuditSink::record`).
 
-use browser_mcp::browser::directory;
-use browser_mcp::governance::dispatch::Governance;
-use browser_mcp::governance::ports::AuditSink;
+use ghostlight::browser::directory;
+use ghostlight::governance::dispatch::Governance;
+use ghostlight::governance::ports::AuditSink;
 use serde_json::Value;
 use std::sync::Arc;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "browser-mcp-audit-recorder-test-{}-{tag}.jsonl",
+        "ghostlight-audit-recorder-test-{}-{tag}.jsonl",
         std::process::id()
     ))
 }
@@ -23,7 +23,7 @@ fn a_recorded_call_lands_as_one_wellformed_jsonl_line() {
     let path = temp_path("one-line");
     let _ = std::fs::remove_file(&path);
 
-    let recorder = browser_mcp::governance::audit::Recorder::to_file(path.clone());
+    let recorder = ghostlight::governance::audit::Recorder::to_file(path.clone());
     let governance = Governance::all_open(Arc::new(recorder) as Arc<dyn AuditSink>);
 
     governance.set_client("claude-code", "2.1.0");
@@ -110,13 +110,13 @@ fn session_killed_writes_one_session_event_record() {
     let path = temp_path("session-killed");
     let _ = std::fs::remove_file(&path);
 
-    let recorder = browser_mcp::governance::audit::Recorder::to_file(path.clone());
+    let recorder = ghostlight::governance::audit::Recorder::to_file(path.clone());
     let governance = Arc::new(Governance::all_open(
         Arc::new(recorder) as Arc<dyn AuditSink>
     ));
     governance.set_client("claude-code", "2.1.0");
 
-    let browser = browser_mcp::transport::executor::Browser::new();
+    let browser = ghostlight::transport::executor::Browser::new();
     {
         let governance = Arc::clone(&governance);
         browser.on_session_killed(move || governance.record_session_killed());
@@ -138,7 +138,7 @@ fn session_killed_writes_one_session_event_record() {
         assert!(browser.is_connected(), "browser never reported connected");
 
         let event = serde_json::json!({ "type": "session_killed" });
-        browser_mcp::native::host::write_message(
+        ghostlight::native::host::write_message(
             &mut ext_side,
             &serde_json::to_vec(&event).unwrap(),
         )

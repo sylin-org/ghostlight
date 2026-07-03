@@ -1,5 +1,5 @@
 //! Integration tests for G18 `policy init`: spawns the built binary
-//! (`env!("CARGO_BIN_EXE_browser-mcp")`, the `tests/mcp_protocol.rs` pattern) with `--out`
+//! (`env!("CARGO_BIN_EXE_ghostlight")`, the `tests/mcp_protocol.rs` pattern) with `--out`
 //! pointed at a per-test temp directory, so nothing outside the repository is ever touched.
 
 use std::path::Path;
@@ -10,7 +10,7 @@ fn repo_root() -> &'static Path {
 }
 
 fn run_init(template: &str, out: &Path, force: bool) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_browser-mcp"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ghostlight"));
     cmd.arg("policy")
         .arg("init")
         .arg("--template")
@@ -19,12 +19,12 @@ fn run_init(template: &str, out: &Path, force: bool) -> Output {
     if force {
         cmd.arg("--force");
     }
-    cmd.output().expect("spawn browser-mcp")
+    cmd.output().expect("spawn ghostlight")
 }
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "browser-mcp-g18-policy-init-{}-{}",
+        "ghostlight-g18-policy-init-{}-{}",
         std::process::id(),
         tag
     ));
@@ -46,10 +46,10 @@ fn create_creates_a_file_byte_identical_to_the_embedded_template() {
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.starts_with(&format!("Wrote {} (template 'qa-staging').", out.display())));
-    assert!(stdout.contains("Windows  %ProgramData%\\browser-mcp\\policy.json"));
-    assert!(stdout.contains("macOS    /Library/Application Support/browser-mcp/policy.json"));
-    assert!(stdout.contains("Linux    /etc/browser-mcp/policy.json"));
-    assert!(stdout.contains("browser-mcp --manifest file:///absolute/path/to/policy.json"));
+    assert!(stdout.contains("Windows  %ProgramData%\\ghostlight\\policy.json"));
+    assert!(stdout.contains("macOS    /Library/Application Support/ghostlight/policy.json"));
+    assert!(stdout.contains("Linux    /etc/ghostlight/policy.json"));
+    assert!(stdout.contains("ghostlight --manifest file:///absolute/path/to/policy.json"));
 
     let written = std::fs::read_to_string(&out).unwrap();
     let example =

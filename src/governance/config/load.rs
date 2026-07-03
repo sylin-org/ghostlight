@@ -19,7 +19,7 @@ use crate::{Error, Result};
 
 /// Path of the user config file; `None` when the platform config dir is unavailable.
 pub fn user_config_path() -> Option<std::path::PathBuf> {
-    Some(dirs::config_dir()?.join("browser-mcp").join("config.json"))
+    Some(dirs::config_dir()?.join("ghostlight").join("config.json"))
 }
 
 /// Path of the org policy file (fixed per platform; shared format section 1.2). No flag,
@@ -33,13 +33,13 @@ pub fn org_policy_path() -> std::path::PathBuf {
         let program_data =
             std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".to_string());
         std::path::PathBuf::from(program_data)
-            .join("browser-mcp")
+            .join("ghostlight")
             .join("policy.json")
     };
     #[cfg(target_os = "macos")]
-    let path = std::path::PathBuf::from("/Library/Application Support/browser-mcp/policy.json");
+    let path = std::path::PathBuf::from("/Library/Application Support/ghostlight/policy.json");
     #[cfg(all(unix, not(target_os = "macos")))]
-    let path = std::path::PathBuf::from("/etc/browser-mcp/policy.json");
+    let path = std::path::PathBuf::from("/etc/ghostlight/policy.json");
 
     path
 }
@@ -499,9 +499,9 @@ mod tests {
     #[test]
     fn paths_follow_the_shared_format_locations() {
         let user = user_config_path().expect("config dir resolvable in CI/dev");
-        assert!(user.to_string_lossy().ends_with(r"browser-mcp\config.json"));
+        assert!(user.to_string_lossy().ends_with(r"ghostlight\config.json"));
         let org = org_policy_path();
-        assert!(org.to_string_lossy().ends_with(r"browser-mcp\policy.json"));
+        assert!(org.to_string_lossy().ends_with(r"ghostlight\policy.json"));
     }
 
     #[cfg(target_os = "macos")]
@@ -510,7 +510,7 @@ mod tests {
         let org = org_policy_path();
         assert_eq!(
             org,
-            std::path::PathBuf::from("/Library/Application Support/browser-mcp/policy.json")
+            std::path::PathBuf::from("/Library/Application Support/ghostlight/policy.json")
         );
     }
 
@@ -518,9 +518,6 @@ mod tests {
     #[test]
     fn paths_follow_the_shared_format_locations() {
         let org = org_policy_path();
-        assert_eq!(
-            org,
-            std::path::PathBuf::from("/etc/browser-mcp/policy.json")
-        );
+        assert_eq!(org, std::path::PathBuf::from("/etc/ghostlight/policy.json"));
     }
 }

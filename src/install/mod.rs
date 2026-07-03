@@ -1,7 +1,7 @@
-//! Self-registering installer: `browser-mcp install` / `uninstall` / `doctor`.
+//! Self-registering installer: `ghostlight install` / `uninstall` / `doctor`.
 //!
 //! Registers the native-messaging host (Windows registry / macOS+Linux file drop) for detected
-//! Chromium browsers, and adds the `browser-mcp` server to detected MCP clients (CLI where a safe
+//! Chromium browsers, and adds the `ghostlight` server to detected MCP clients (CLI where a safe
 //! one exists, else a careful JSON merge). Idempotent; `--dry-run` writes nothing; every failure is
 //! independent and prints exact manual steps. This is engine packaging, not governance.
 
@@ -45,7 +45,7 @@ pub struct InstallOptions {
     pub system: bool,
     pub browsers: Selection,
     pub clients: Selection,
-    /// Register the server to run in debug mode (adds `BROWSER_MCP_DEBUG=1` to its env).
+    /// Register the server to run in debug mode (adds `GHOSTLIGHT_DEBUG=1` to its env).
     pub debug: bool,
 }
 #[derive(Debug, Clone)]
@@ -306,7 +306,7 @@ fn plan_install(opts: &InstallOptions, ctx: &PlanCtx) -> Result<Vec<Action>> {
     if opts.debug {
         entry
             .env
-            .insert("BROWSER_MCP_DEBUG".to_string(), "1".to_string());
+            .insert("GHOSTLIGHT_DEBUG".to_string(), "1".to_string());
     }
     for c in selected_clients(&opts.clients, ctx) {
         actions.push(plan_client_install(c, ctx, &entry));
@@ -464,7 +464,7 @@ fn plan_client_uninstall(c: &clients::ClientSpec, ctx: &PlanCtx) -> Action {
             label,
             detail: "manual".into(),
             noop: None,
-            manual: "remove the \"browser-mcp\" entry from the VS Code mcp.json 'servers' block"
+            manual: "remove the \"ghostlight\" entry from the VS Code mcp.json 'servers' block"
                 .into(),
             op: Op::Manual,
         };
@@ -473,15 +473,15 @@ fn plan_client_uninstall(c: &clients::ClientSpec, ctx: &PlanCtx) -> Action {
     // single idempotent value-level merge -- no subprocess, and a semantic no-op when absent.
     let path = clients::config_path(c, ctx);
     let target = path.display().to_string();
-    let manual = format!("remove \"browser-mcp\" from {target}");
+    let manual = format!("remove \"ghostlight\" from {target}");
     // Missing config => empty (nothing to remove); an unreadable *existing* file blocks this client.
     let existing = match read_config_or_empty(&path) {
         Ok(s) => s,
         Err(e) => return blocked(label, target, format!("cannot read config: {e}"), manual),
     };
     // Validate now (a non-object root errors here, at dry-run) and compute the no-op state.
-    match merge::remove_server(&existing, c.dialect, "browser-mcp")
-        .and_then(|_| merge::has_server(&existing, c.dialect, "browser-mcp"))
+    match merge::remove_server(&existing, c.dialect, "ghostlight")
+        .and_then(|_| merge::has_server(&existing, c.dialect, "ghostlight"))
     {
         Ok(present) => Action {
             label,
@@ -491,7 +491,7 @@ fn plan_client_uninstall(c: &clients::ClientSpec, ctx: &PlanCtx) -> Action {
             op: Op::Merge {
                 path,
                 dialect: c.dialect,
-                change: MergeChange::Remove("browser-mcp".into()),
+                change: MergeChange::Remove("ghostlight".into()),
             },
         },
         Err(e) => blocked(label, target, e.to_string(), manual),
@@ -524,7 +524,7 @@ fn plan_host_removal(label: String, path: PathBuf) -> Action {
             detail: format!("{detail} (not ours -- left untouched)"),
             noop: None,
             manual: format!(
-                "a native-messaging manifest not owned by browser-mcp exists at {detail}; \
+                "a native-messaging manifest not owned by ghostlight exists at {detail}; \
                  remove it manually if you intended to"
             ),
             op: Op::Manual,
@@ -671,7 +671,7 @@ fn apply_merge(
 
 // --- Entry points ---
 
-/// `browser-mcp install`
+/// `ghostlight install`
 pub fn run_install(opts: InstallOptions) -> Result<()> {
     validate_selection(&opts.browsers, &known_browser_ids(), "browser")?;
     validate_selection(&opts.clients, &known_client_ids(), "client")?;
@@ -679,7 +679,7 @@ pub fn run_install(opts: InstallOptions) -> Result<()> {
     let scope = scope_of(opts.system);
     let actions = plan_install(&opts, &ctx)?;
     println!(
-        "browser-mcp install ({})",
+        "ghostlight install ({})",
         if scope == Scope::System {
             "system-wide"
         } else {
@@ -698,13 +698,13 @@ pub fn run_install(opts: InstallOptions) -> Result<()> {
     exit_result(&tally)
 }
 
-/// `browser-mcp uninstall`
+/// `ghostlight uninstall`
 pub fn run_uninstall(opts: UninstallOptions) -> Result<()> {
     validate_selection(&opts.browsers, &known_browser_ids(), "browser")?;
     validate_selection(&opts.clients, &known_client_ids(), "client")?;
     let ctx = PlanCtx::resolve()?;
     let actions = plan_uninstall(&opts, &ctx)?;
-    println!("browser-mcp uninstall");
+    println!("ghostlight uninstall");
     let tally = apply(&actions, opts.dry_run);
     finish(opts.dry_run, &tally);
     exit_result(&tally)
@@ -749,8 +749,8 @@ mod tests {
 
     fn entry() -> ServerEntry {
         ServerEntry {
-            name: "browser-mcp".into(),
-            command: "/abs/browser-mcp".into(),
+            name: "ghostlight".into(),
+            command: "/abs/ghostlight".into(),
             args: vec![],
             env: BTreeMap::new(),
         }
@@ -764,10 +764,10 @@ mod tests {
         );
         assert_eq!(
             append_extension(
-                std::path::Path::new("/x/org.sylin.browser_mcp.json"),
+                std::path::Path::new("/x/org.sylin.ghostlight.json"),
                 "bak-9"
             ),
-            PathBuf::from("/x/org.sylin.browser_mcp.json.bak-9")
+            PathBuf::from("/x/org.sylin.ghostlight.json.bak-9")
         );
     }
 
@@ -796,7 +796,7 @@ mod tests {
 
     #[test]
     fn apply_merge_is_idempotent_backs_up_only_on_change_and_preserves_siblings() {
-        let dir = std::env::temp_dir().join(format!("browser-mcp-merge-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ghostlight-merge-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".claude.json");
         std::fs::write(&path, r#"{"mcpServers":{"other":{"command":"x"}}}"#).unwrap();
@@ -805,10 +805,7 @@ mod tests {
         apply_merge(&path, Dialect::McpServers, &MergeChange::Add(entry())).unwrap();
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(
-            v["mcpServers"]["browser-mcp"]["command"],
-            "/abs/browser-mcp"
-        );
+        assert_eq!(v["mcpServers"]["ghostlight"]["command"], "/abs/ghostlight");
         assert_eq!(v["mcpServers"]["other"]["command"], "x");
         assert_eq!(bak_count(&dir), 1);
 
@@ -820,12 +817,12 @@ mod tests {
         apply_merge(
             &path,
             Dialect::McpServers,
-            &MergeChange::Remove("browser-mcp".into()),
+            &MergeChange::Remove("ghostlight".into()),
         )
         .unwrap();
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert!(v["mcpServers"].get("browser-mcp").is_none());
+        assert!(v["mcpServers"].get("ghostlight").is_none());
         assert_eq!(v["mcpServers"]["other"]["command"], "x");
         assert_eq!(bak_count(&dir), 2);
 
@@ -833,7 +830,7 @@ mod tests {
         apply_merge(
             &path,
             Dialect::McpServers,
-            &MergeChange::Remove("browser-mcp".into()),
+            &MergeChange::Remove("ghostlight".into()),
         )
         .unwrap();
         assert_eq!(bak_count(&dir), 2);
@@ -843,18 +840,14 @@ mod tests {
 
     #[test]
     fn apply_merge_add_to_absent_file_creates_it_without_backup() {
-        let dir =
-            std::env::temp_dir().join(format!("browser-mcp-merge-new-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ghostlight-merge-new-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("mcp.json");
 
         apply_merge(&path, Dialect::McpServers, &MergeChange::Add(entry())).unwrap();
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(
-            v["mcpServers"]["browser-mcp"]["command"],
-            "/abs/browser-mcp"
-        );
+        assert_eq!(v["mcpServers"]["ghostlight"]["command"], "/abs/ghostlight");
         assert_eq!(
             bak_count(&dir),
             0,
@@ -866,7 +859,7 @@ mod tests {
 
     #[test]
     fn read_config_or_empty_maps_missing_to_empty_but_surfaces_bad_bytes() {
-        let dir = std::env::temp_dir().join(format!("browser-mcp-rc-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ghostlight-rc-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         // Missing file -> empty (a legitimate new-config case).
         assert_eq!(read_config_or_empty(&dir.join("nope.json")).unwrap(), "");
@@ -879,8 +872,7 @@ mod tests {
 
     #[test]
     fn apply_merge_refuses_to_clobber_an_unreadable_existing_file() {
-        let dir =
-            std::env::temp_dir().join(format!("browser-mcp-noclobber-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ghostlight-noclobber-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".claude.json");
         // Real bytes that are not valid UTF-8: read_to_string fails, but the file is NOT empty.
@@ -900,13 +892,13 @@ mod tests {
 
     #[test]
     fn plan_client_install_blocks_a_malformed_config_without_aborting() {
-        let dir = std::env::temp_dir().join(format!("browser-mcp-blocked-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ghostlight-blocked-{}", std::process::id()));
         let home = dir.join("home");
         std::fs::create_dir_all(home.join(".cursor")).unwrap();
         // Cursor's config with an array root is un-mergeable (must not be clobbered).
         std::fs::write(home.join(".cursor").join("mcp.json"), "[]").unwrap();
         let ctx = PlanCtx {
-            current_exe: PathBuf::from("/abs/browser-mcp"),
+            current_exe: PathBuf::from("/abs/ghostlight"),
             home,
             config: dir.join("config"),
             local: dir.join("local"),

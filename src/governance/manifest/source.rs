@@ -30,7 +30,7 @@ pub enum SourceError {
     UnsupportedScheme(String),
 }
 
-/// Parse the `--manifest` / `BROWSER_MCP_MANIFEST` source-string grammar (shared format doc
+/// Parse the `--manifest` / `GHOSTLIGHT_MANIFEST` source-string grammar (shared format doc
 /// section 1.3): `env://NAME`, `file://<path>` (with the Windows drive-letter convenience),
 /// `managed://` (a precise unsupported error), any other `<scheme>://` (an error naming the
 /// scheme), or a bare string (a filesystem path).
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn load_org_manifest_at_absent_file_is_ok_none() {
         let path = std::env::temp_dir().join(format!(
-            "browser-mcp-manifest-source-test-{}-absent.json",
+            "ghostlight-manifest-source-test-{}-absent.json",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);
@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn load_org_manifest_at_reads_and_parses_a_real_file() {
         let path = std::env::temp_dir().join(format!(
-            "browser-mcp-manifest-source-test-{}-present.json",
+            "ghostlight-manifest-source-test-{}-present.json",
             std::process::id()
         ));
         std::fs::write(&path, minimal_manifest("org-file")).unwrap();
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn load_org_manifest_at_invalid_file_is_fatal() {
         let path = std::env::temp_dir().join(format!(
-            "browser-mcp-manifest-source-test-{}-invalid.json",
+            "ghostlight-manifest-source-test-{}-invalid.json",
             std::process::id()
         ));
         std::fs::write(&path, "not json").unwrap();

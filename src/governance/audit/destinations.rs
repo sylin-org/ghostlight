@@ -1,14 +1,14 @@
 //! Where audit lines go: the default file path and the two write primitives (file, stderr).
 
 /// Default audit file path (shared format doc section 1.4): `dirs::data_local_dir()` joined
-/// with `browser-mcp` then `audit.jsonl`. `dirs::data_local_dir()` maps exactly to the
+/// with `ghostlight` then `audit.jsonl`. `dirs::data_local_dir()` maps exactly to the
 /// section-1.4 table: `%LOCALAPPDATA%` on Windows, `~/Library/Application Support` on macOS,
 /// `~/.local/share` (or `XDG_DATA_HOME`) on Linux. `None` when the platform data directory
 /// cannot be resolved.
 pub fn default_audit_path() -> Option<std::path::PathBuf> {
     Some(
         dirs::data_local_dir()?
-            .join("browser-mcp")
+            .join("ghostlight")
             .join("audit.jsonl"),
     )
 }

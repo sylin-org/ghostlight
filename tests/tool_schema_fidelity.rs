@@ -10,7 +10,7 @@
 //! `src/transport/mcp/schemas/tools.json`, is UNSANCTIONED -- s07 is the only task ever
 //! authorized to touch either.
 
-use browser_mcp::mcp::tools::TOOLS_JSON;
+use ghostlight::mcp::tools::TOOLS_JSON;
 use serde_json::{json, Value};
 
 /// The 13 trained tools, in order. Changing this array is changing the sacred contract.

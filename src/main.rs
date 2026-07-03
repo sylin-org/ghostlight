@@ -1,4 +1,4 @@
-//! Browser MCP binary -- a thin shell over the `browser_mcp` library crate.
+//! Ghostlight binary -- a thin shell over the `ghostlight` library crate.
 //!
 //! Governed browser automation over the user's **own authenticated Chromium session**. In v1.0
 //! this is the unconstrained engine (all-open); the governance overlay is a v1.5 addition.
@@ -7,7 +7,7 @@
 //! - **mcp-server** (default, no subcommand) -- launched by the MCP client over stdio. Owns the
 //!   browser IPC endpoint, serves the native-host, and runs the JSON-RPC loop, forwarding tool
 //!   calls to the extension via a shared
-//!   [`Browser`](browser_mcp::transport::executor::Browser) handle.
+//!   [`Browser`](ghostlight::transport::executor::Browser) handle.
 //! - **native-host** -- launched by Chrome via `connectNative` (Chrome passes the calling
 //!   extension's origin, `chrome-extension://<id>/`, as an argument). Connects to the mcp-server
 //!   endpoint and relays native-messaging frames to/from the extension.
@@ -17,18 +17,18 @@
 //! and the installer needs none.
 
 use anyhow::{Context, Result};
-use browser_mcp::browser::pattern;
-use browser_mcp::debug::DebugSink;
-use browser_mcp::doctor::DoctorOptions;
-use browser_mcp::governance::manifest::source;
-use browser_mcp::install::{InstallOptions, Selection, UninstallOptions};
-use browser_mcp::native::ipc;
-use browser_mcp::transport::executor::Browser;
 use clap::{Args, Parser, Subcommand};
+use ghostlight::browser::pattern;
+use ghostlight::debug::DebugSink;
+use ghostlight::doctor::DoctorOptions;
+use ghostlight::governance::manifest::source;
+use ghostlight::install::{InstallOptions, Selection, UninstallOptions};
+use ghostlight::native::ipc;
+use ghostlight::transport::executor::Browser;
 
-/// Browser MCP -- the user's own authenticated browser, for AI agents.
+/// Ghostlight -- the user's own authenticated browser, for AI agents.
 #[derive(Debug, Parser)]
-#[command(name = "browser-mcp", version, about, long_about = None)]
+#[command(name = "ghostlight", version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -39,7 +39,7 @@ struct Cli {
     manifest: Option<String>,
 
     /// (server role) Enable observability: verbose tracing + a live state/event log that
-    /// `browser-mcp status` reads. Equivalent to setting `BROWSER_MCP_DEBUG=1`.
+    /// `ghostlight status` reads. Equivalent to setting `GHOSTLIGHT_DEBUG=1`.
     #[arg(long)]
     debug: bool,
 }
@@ -157,9 +157,9 @@ enum CliPreset {
     Restricted,
 }
 
-impl From<CliPreset> for browser_mcp::governance::config::Preset {
+impl From<CliPreset> for ghostlight::governance::config::Preset {
     fn from(p: CliPreset) -> Self {
-        use browser_mcp::governance::config::Preset;
+        use ghostlight::governance::config::Preset;
         match p {
             CliPreset::FullyOpen => Preset::FullyOpen,
             CliPreset::Safe => Preset::Safe,
@@ -168,9 +168,9 @@ impl From<CliPreset> for browser_mcp::governance::config::Preset {
     }
 }
 
-impl From<ConfigArgs> for browser_mcp::governance::config::cli::ConfigCommand {
+impl From<ConfigArgs> for ghostlight::governance::config::cli::ConfigCommand {
     fn from(a: ConfigArgs) -> Self {
-        use browser_mcp::governance::config::cli::ConfigCommand;
+        use ghostlight::governance::config::cli::ConfigCommand;
         match a.action {
             ConfigAction::List => ConfigCommand::List,
             ConfigAction::Get { key } => ConfigCommand::Get { key },
@@ -208,7 +208,7 @@ struct InstallArgs {
     /// Add only to this client id (repeatable): claude-code, claude-desktop, cursor, vscode.
     #[arg(long = "client", value_name = "ID", conflicts_with = "all_clients")]
     clients: Vec<String>,
-    /// Register the server to run in debug mode (sets BROWSER_MCP_DEBUG=1 in its env).
+    /// Register the server to run in debug mode (sets GHOSTLIGHT_DEBUG=1 in its env).
     #[arg(long)]
     debug: bool,
 }
@@ -293,9 +293,9 @@ impl From<DoctorArgs> for DoctorOptions {
 fn main() -> Result<()> {
     // Debug mode can come from the flag (any position) or the env; detect it before clap so tracing
     // verbosity is set for every role, including the native-host relay.
-    let debug_env = std::env::var_os("BROWSER_MCP_DEBUG").is_some();
+    let debug_env = std::env::var_os("GHOSTLIGHT_DEBUG").is_some();
     let debug = debug_env || std::env::args().any(|a| a == "--debug");
-    browser_mcp::init_tracing(debug);
+    ghostlight::init_tracing(debug);
 
     // Role detection must precede clap: Chrome launches the native-messaging host with an extra
     // positional arg (the calling extension origin) that clap would reject.
@@ -307,16 +307,16 @@ fn main() -> Result<()> {
         Cli {
             command: Some(Command::Install(args)),
             ..
-        } => browser_mcp::install::run_install(args.into())?,
+        } => ghostlight::install::run_install(args.into())?,
         Cli {
             command: Some(Command::Uninstall(args)),
             ..
-        } => browser_mcp::install::run_uninstall(args.into())?,
+        } => ghostlight::install::run_uninstall(args.into())?,
         Cli {
             command: Some(Command::Doctor(args)),
             ..
         } => {
-            if !browser_mcp::doctor::run(args.into())? {
+            if !ghostlight::doctor::run(args.into())? {
                 std::process::exit(1);
             }
         }
@@ -327,9 +327,9 @@ fn main() -> Result<()> {
         Cli {
             command: Some(Command::Config(args)),
             ..
-        } => browser_mcp::governance::config::cli::run(
+        } => ghostlight::governance::config::cli::run(
             args.into(),
-            browser_mcp::browser::pattern::is_valid_pattern,
+            ghostlight::browser::pattern::is_valid_pattern,
         )?,
         Cli {
             command:
@@ -338,9 +338,9 @@ fn main() -> Result<()> {
                 })),
             ..
         } => {
-            let text = browser_mcp::governance::explain::explain_file(
+            let text = ghostlight::governance::explain::explain_file(
                 &file,
-                browser_mcp::browser::pattern::is_valid_pattern,
+                ghostlight::browser::pattern::is_valid_pattern,
             )?;
             print!("{text}");
         }
@@ -352,12 +352,12 @@ fn main() -> Result<()> {
             ..
         } => {
             use std::io::Write;
-            let outcome = browser_mcp::governance::simulate::run_simulate(
+            let outcome = ghostlight::governance::simulate::run_simulate(
                 &manifest,
                 &replay,
-                browser_mcp::browser::pattern::is_valid_pattern,
-                browser_mcp::browser::directory::requires,
-                browser_mcp::browser::polarity::evaluate_host,
+                ghostlight::browser::pattern::is_valid_pattern,
+                ghostlight::browser::directory::requires,
+                ghostlight::browser::polarity::evaluate_host,
             )?;
             print!("{}", outcome.report);
             std::io::stdout().flush().ok();
@@ -376,11 +376,10 @@ fn main() -> Result<()> {
             ..
         } => {
             let out_path = out.unwrap_or_else(|| std::path::PathBuf::from("policy.json"));
-            let outcome =
-                browser_mcp::governance::templates::run_init(&template, &out_path, force)?;
+            let outcome = ghostlight::governance::templates::run_init(&template, &out_path, force)?;
             print!(
                 "{}",
-                browser_mcp::governance::templates::render_orientation(&outcome)
+                ghostlight::governance::templates::render_orientation(&outcome)
             );
         }
         Cli {
@@ -392,15 +391,15 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// `browser-mcp status`: read and print the running server's live inner state.
+/// `ghostlight status`: read and print the running server's live inner state.
 fn run_status(args: StatusArgs) {
     if args.json {
-        match browser_mcp::debug::raw_state() {
+        match ghostlight::debug::raw_state() {
             Some(s) => print!("{s}"),
             None => println!("no debug state found (start the server with --debug)"),
         }
     } else {
-        println!("{}", browser_mcp::debug::status_report());
+        println!("{}", ghostlight::debug::status_report());
     }
 }
 
@@ -409,10 +408,10 @@ fn run_status(args: StatusArgs) {
 /// `debug` comes from the same detection `main` uses for every role (env var or `--debug`
 /// argument), but Chrome itself never passes `--debug` when it launches this process -- it only
 /// inherits whatever environment Chrome was started with. So a native-host debug snapshot exists
-/// only when Chrome's own launching environment had `BROWSER_MCP_DEBUG=1` set; its absence in a
+/// only when Chrome's own launching environment had `GHOSTLIGHT_DEBUG=1` set; its absence in a
 /// normal launch is expected, not a problem (see `doctor`'s wording).
 fn run_native_host_role(debug: bool) -> Result<()> {
-    tracing::info!("browser-mcp starting (native-host role, launched by the browser)");
+    tracing::info!("ghostlight starting (native-host role, launched by the browser)");
     let sink = build_debug_sink(debug, "native-host");
     let rt = tokio::runtime::Runtime::new()?;
     let result =
@@ -434,11 +433,11 @@ fn run_native_host_role(debug: bool) -> Result<()> {
 /// stdio MCP JSON-RPC loop in the foreground. Both share the [`Browser`] handle.
 fn run_server(manifest: Option<String>, debug_on: bool) -> Result<()> {
     // Resolve the user-supplied manifest source (G12, shared format doc section 1.3): the
-    // --manifest flag wins when both it and BROWSER_MCP_MANIFEST are set. Plain synchronous
+    // --manifest flag wins when both it and GHOSTLIGHT_MANIFEST are set. Plain synchronous
     // I/O, before the async runtime starts: a source that is SELECTED but cannot be read,
     // parsed, or validated is a fatal startup error (an org policy that fails open is worse
     // than a crash), so this must happen before a single JSON-RPC line is served.
-    let user_source = manifest.or_else(|| std::env::var("BROWSER_MCP_MANIFEST").ok());
+    let user_source = manifest.or_else(|| std::env::var("GHOSTLIGHT_MANIFEST").ok());
     let loaded_policy = source::load_policy(user_source.as_deref(), pattern::is_valid_pattern)
         .with_context(|| "loading the governance manifest")?;
 
@@ -450,11 +449,11 @@ fn run_server(manifest: Option<String>, debug_on: bool) -> Result<()> {
             mode = ?m.mode,
             origin = ?origin,
             debug_mode = debug_on,
-            "browser-mcp starting (mcp-server role; governance overlay active)"
+            "ghostlight starting (mcp-server role; governance overlay active)"
         ),
         _ => tracing::info!(
             debug_mode = debug_on,
-            "browser-mcp starting (mcp-server role; no manifest: all-open)"
+            "ghostlight starting (mcp-server role; no manifest: all-open)"
         ),
     }
 
@@ -468,15 +467,15 @@ fn run_server(manifest: Option<String>, debug_on: bool) -> Result<()> {
             async move {
                 match ipc::serve(browser, &endpoint).await {
                     Ok(()) => {}
-                    Err(browser_mcp::Error::SessionBusy) => tracing::warn!(
-                        "another browser-mcp session already owns the browser; tool calls in this \
+                    Err(ghostlight::Error::SessionBusy) => tracing::warn!(
+                        "another ghostlight session already owns the browser; tool calls in this \
                          session will report the extension as unavailable"
                     ),
                     Err(e) => tracing::error!(error = %e, "browser IPC endpoint failed"),
                 }
             }
         });
-        let result = browser_mcp::mcp::server::run(browser, loaded_policy, user_source).await;
+        let result = ghostlight::mcp::server::run(browser, loaded_policy, user_source).await;
         sink.flush(); // final snapshot after stdin closes
         result
     })?;
@@ -490,7 +489,7 @@ fn build_debug_sink(debug: bool, role: &'static str) -> DebugSink {
     if !debug {
         return DebugSink::disabled();
     }
-    let Some(dir) = browser_mcp::debug::log_dir() else {
+    let Some(dir) = ghostlight::debug::log_dir() else {
         tracing::warn!("no log directory available; running without debug observability");
         return DebugSink::disabled();
     };

@@ -17,17 +17,17 @@ static SEQ: AtomicU32 = AtomicU32::new(0);
 /// collect the response lines.
 fn drive(requests: &[Value]) -> Vec<Value> {
     let endpoint = format!(
-        "browser-mcp-it-{}-{}",
+        "ghostlight-it-{}-{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_browser-mcp"))
-        .env("BROWSER_MCP_ENDPOINT", &endpoint)
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ghostlight"))
+        .env("GHOSTLIGHT_ENDPOINT", &endpoint)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn browser-mcp");
+        .expect("spawn ghostlight");
 
     let mut stdin = child.stdin.take().expect("stdin");
     for req in requests {
@@ -65,7 +65,7 @@ fn initialize_tools_list_and_tool_call_over_stdio() {
     let init = &responses[0];
     assert_eq!(init["id"], 1);
     assert_eq!(init["result"]["protocolVersion"], "2024-11-05");
-    assert_eq!(init["result"]["serverInfo"]["name"], "browser-mcp");
+    assert_eq!(init["result"]["serverInfo"]["name"], "ghostlight");
 
     let list = &responses[1];
     assert_eq!(list["id"], 2);
@@ -77,7 +77,7 @@ fn initialize_tools_list_and_tool_call_over_stdio() {
     );
     assert_eq!(tools[0]["name"], "tabs_context_mcp");
     // The advertised surface must equal the embedded sacred fixture, byte for byte.
-    let fixture: Value = serde_json::from_str(browser_mcp::mcp::tools::TOOLS_JSON).unwrap();
+    let fixture: Value = serde_json::from_str(ghostlight::mcp::tools::TOOLS_JSON).unwrap();
     assert_eq!(
         list["result"], fixture,
         "tools/list must equal the sacred fixture"
@@ -148,15 +148,15 @@ fn explain_is_advertised_last_and_answers_with_no_extension_attached() {
 /// temp file and cleaned up after). `None` is the all-open posture (no `--manifest` argument).
 fn drive_with_manifest(manifest: Option<&str>, requests: &[Value]) -> Vec<Value> {
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let endpoint = format!("browser-mcp-it-{}-{}", std::process::id(), seq);
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_browser-mcp"));
-    cmd.env("BROWSER_MCP_ENDPOINT", &endpoint)
+    let endpoint = format!("ghostlight-it-{}-{}", std::process::id(), seq);
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ghostlight"));
+    cmd.env("GHOSTLIGHT_ENDPOINT", &endpoint)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     let manifest_path = manifest.map(|body| {
         let path = std::env::temp_dir().join(format!(
-            "browser-mcp-mcp-protocol-{}-{}.json",
+            "ghostlight-mcp-protocol-{}-{}.json",
             std::process::id(),
             seq
         ));
@@ -172,7 +172,7 @@ fn drive_with_manifest(manifest: Option<&str>, requests: &[Value]) -> Vec<Value>
         };
         cmd.arg("--manifest").arg(uri);
     }
-    let mut child = cmd.spawn().expect("spawn browser-mcp");
+    let mut child = cmd.spawn().expect("spawn ghostlight");
 
     let mut stdin = child.stdin.take().expect("stdin");
     for req in requests {
@@ -319,17 +319,17 @@ fn malformed_method_and_null_id_follow_jsonrpc_rules() {
 #[test]
 fn tools_call_waits_for_a_late_extension_and_notes_the_wait() {
     let endpoint = format!(
-        "browser-mcp-it-{}-{}",
+        "ghostlight-it-{}-{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_browser-mcp"))
-        .env("BROWSER_MCP_ENDPOINT", &endpoint)
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ghostlight"))
+        .env("GHOSTLIGHT_ENDPOINT", &endpoint)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn browser-mcp");
+        .expect("spawn ghostlight");
 
     // Unlike `drive`, stdin is kept open for the whole test: the tools/call response only
     // arrives after the fake extension below connects, several hundred ms into the test.
@@ -355,11 +355,11 @@ fn tools_call_waits_for_a_late_extension_and_notes_the_wait() {
         let rt = tokio::runtime::Runtime::new().expect("build a tokio runtime");
         rt.block_on(async move {
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-            let stream = browser_mcp::native::ipc::connect(&fake_endpoint)
+            let stream = ghostlight::native::ipc::connect(&fake_endpoint)
                 .await
                 .expect("fake extension connects to the real IPC endpoint");
             let (mut read_half, mut write_half) = tokio::io::split(stream);
-            let req = browser_mcp::native::host::read_message(&mut read_half)
+            let req = ghostlight::native::host::read_message(&mut read_half)
                 .await
                 .unwrap()
                 .expect("one framed tool_request");
@@ -369,7 +369,7 @@ fn tools_call_waits_for_a_late_extension_and_notes_the_wait() {
                 "type": "tool_response",
                 "result": { "content": [ { "type": "text", "text": "navigated" } ] },
             });
-            browser_mcp::native::host::write_message(
+            ghostlight::native::host::write_message(
                 &mut write_half,
                 &serde_json::to_vec(&reply).unwrap(),
             )

@@ -348,7 +348,7 @@ pub(super) async fn handle_line(
     match method {
         "initialize" => {
             // Record the MCP client's self-reported identity (clientInfo.name [+ version]), if it
-            // sent one, for `browser-mcp doctor`/`status` to display. Missing params/clientInfo, or
+            // sent one, for `ghostlight doctor`/`status` to display. Missing params/clientInfo, or
             // non-string fields, are silently fine: this is best-effort observability, not part of
             // the protocol contract, and the response below never depends on it.
             if let Some(client_info) = raw.get("params").and_then(|p| p.get("clientInfo")) {
@@ -431,7 +431,7 @@ fn initialize_result() -> Value {
     json!({
         "protocolVersion": PROTOCOL_VERSION,
         "capabilities": { "tools": {} },
-        "serverInfo": { "name": "browser-mcp", "version": env!("CARGO_PKG_VERSION") },
+        "serverInfo": { "name": "ghostlight", "version": env!("CARGO_PKG_VERSION") },
     })
 }
 

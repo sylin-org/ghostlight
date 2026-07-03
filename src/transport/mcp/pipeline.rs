@@ -524,7 +524,7 @@ mod tests {
 
     fn temp_audit_path(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
-            "browser-mcp-server-audit-test-{}-{tag}.jsonl",
+            "ghostlight-server-audit-test-{}-{tag}.jsonl",
             std::process::id()
         ))
     }

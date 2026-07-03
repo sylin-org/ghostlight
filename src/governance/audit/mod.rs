@@ -185,7 +185,7 @@ mod tests {
 
     fn temp_path(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "browser-mcp-audit-test-{}-{tag}.jsonl",
+            "ghostlight-audit-test-{}-{tag}.jsonl",
             std::process::id()
         ))
     }
@@ -234,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn default_audit_path_ends_with_browser_mcp_audit_jsonl() {
+    fn default_audit_path_ends_with_ghostlight_audit_jsonl() {
         if let Some(p) = destinations::default_audit_path() {
             let components: Vec<_> = p
                 .components()
@@ -243,7 +243,7 @@ mod tests {
                 .map(|c| c.as_os_str().to_string_lossy().to_string())
                 .collect();
             assert_eq!(components[0], "audit.jsonl");
-            assert_eq!(components[1], "browser-mcp");
+            assert_eq!(components[1], "ghostlight");
         }
     }
 

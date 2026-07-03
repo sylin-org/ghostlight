@@ -1,5 +1,5 @@
 //! Integration tests for G16 `policy explain`: spawns the built binary
-//! (`env!("CARGO_BIN_EXE_browser-mcp")`, the pattern `tests/mcp_protocol.rs` line 22 uses) and
+//! (`env!("CARGO_BIN_EXE_ghostlight")`, the pattern `tests/mcp_protocol.rs` line 22 uses) and
 //! checks its stdout/stderr/exit code directly, since the renderer's own byte-for-byte
 //! correctness is already pinned by `governance::explain`'s inline unit tests and this file's
 //! golden comparison; what only an integration test can prove is the CLI wiring itself (exit
@@ -18,12 +18,12 @@ fn strip_cr(s: &str) -> String {
 }
 
 fn run_explain(file: &Path) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_browser-mcp"))
+    Command::new(env!("CARGO_BIN_EXE_ghostlight"))
         .arg("policy")
         .arg("explain")
         .arg(file)
         .output()
-        .expect("spawn browser-mcp")
+        .expect("spawn ghostlight")
 }
 
 /// Golden equality, one case per committed example (Required behavior section 6 / Verification
@@ -63,7 +63,7 @@ fn golden_equality_for_every_committed_example() {
 #[test]
 fn invalid_manifest_exits_nonzero_with_nothing_on_stdout() {
     let path = std::env::temp_dir().join(format!(
-        "browser-mcp-policy-explain-invalid-{}.json",
+        "ghostlight-policy-explain-invalid-{}.json",
         std::process::id()
     ));
     std::fs::write(
@@ -84,7 +84,7 @@ fn invalid_manifest_exits_nonzero_with_nothing_on_stdout() {
 #[test]
 fn missing_file_exits_nonzero_with_nothing_on_stdout() {
     let path = std::env::temp_dir().join(format!(
-        "browser-mcp-policy-explain-missing-{}.json",
+        "ghostlight-policy-explain-missing-{}.json",
         std::process::id()
     ));
     let _ = std::fs::remove_file(&path); // ensure it does not exist
