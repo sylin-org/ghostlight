@@ -20,6 +20,99 @@ Keep steps concrete and self-contained (name the tool, the URL, the manifest/con
 checks that are unambiguous to eyeball. Note when a check depends on a specific manifest or config
 posture (all-open vs a restrictive manifest vs observe/shadow mode).
 
+## Live verification log
+
+Entries here record checks actually run against a live browser, with the date, the posture,
+and the outcome, so a later human knows what is already covered. This does NOT replace
+re-running them after further code changes; it records what was observed at a point in time.
+
+### 2026-07-02: all-open engine + g08 sacred domains -- PASS (live Chrome + Claude Code)
+Posture: no manifest (all-open); built-in Minimal config; extension connected on a fresh
+mcp-server started after an IPC-pipe reset cleared a stale two-instance split (an old server
+owned the pipe while the live client was bound to a pipe-less one; killed all browser-mcp
+processes, reconnected the MCP server, reloaded the extension).
+
+Covered live:
+- All-open engine end to end (the all-open half of g13-3): tabs_context, navigate (with
+  scheme defaulting), computer screenshot (JPEG, ADR-0010 downscale/compression), read_page
+  (accessibility tree + element refs + viewport), get_page_text, computer left_click
+  (returned a TEXT confirmation, not a screenshot -- the mutate screenshot-behavior
+  optimization), and cross-domain navigation via a clicked link (example.com -> iana.org).
+  No denial ever appeared.
+- g08-1 sacred domains, driven entirely by hot-reload (NO client restart, which also proves
+  the a5 substrate live in both directions): wrote a user config.json with
+  content.security.sacred_domains ["iana.org","*.iana.org"], waited for the watcher, then:
+  (A) read_page on a tab showing www.iana.org -> Denied (D-f66bdca0), names www.iana.org
+      (matched via *.iana.org).
+  (A') computer screenshot on the same tab -> Denied, IDENTICAL D-f66bdca0 (deterministic;
+      every tool on a sacred tab is denied).
+  (B) navigate that same sacred tab to a CLEAN target (example.org) -> Denied (D-f66bdca0):
+      a sacred tab cannot be moved away, not just read.
+  (C) navigate a separate CLEAN tab (chrome://newtab) to https://iana.org/ -> Denied
+      (D-3905b751), names the TARGET host iana.org (the navigate-target check).
+  (D) navigate that clean tab to example.org -> allowed (enforcement is selective, not
+      blanket).
+  Then deleted config.json; the watcher re-resolved and the once-denied www.iana.org tab
+  read succeeded again (bidirectional hot-reload, no restart).
+- Audit recorder live (g06/g08 audit path): with audit.enabled and audit.file.path pointed
+  at a scratch file (the path change itself hot-reloaded the sink), every call above was
+  recorded: the 4 sacred denies each decision=deny, grant_id=null, a stable denial_id,
+  duration_ms=0 (blocked before any browser work); the 2 allows with non-zero duration
+  (65 ms tabs_create, 190 ms navigate). Covers the audit-shape half of g13-2 for the sacred
+  path (stable denial_id, grant_id null).
+
+Observation (NOT a defect; enforcement was correct): for the navigate-TARGET denial (C), the
+audit record's `domain` field was null -- it recorded the CURRENT tab context
+(chrome://newtab, no host) rather than the sacred target (iana.org) that triggered the
+denial. The denial message and the deterministic denial_id both name the target, so it stays
+traceable, but consider whether the audit `domain` should carry the target host for a
+target-triggered denial.
+
+Still pending (need a human-driven setup this session could not perform):
+- g10-1..5, g11-1..4: require clicking Chrome's own extension popup / toolbar and firing a
+  keyboard shortcut. The `computer` tool dispatches CDP Input into PAGE content, not Chrome's
+  browser chrome, so the extension popup cannot be driven from an MCP session.
+- g13-1..3, g15-1..2: require the mcp-server to be started with a restrictive `--manifest`
+  (or BROWSER_MCP_MANIFEST) active. Manifest grants are fixed at server startup (the manifest
+  watch-slot is not wired to hot-reload), and a session cannot restart its own MCP client, so
+  these need a human to relaunch the server with a manifest. The all-open half of g13-3 is
+  covered above. UPDATE, same day, later session: most of g13 was subsequently covered live;
+  see the next entry.
+
+### 2026-07-02 (later session): g13 grant enforcement live -- PASS, and the finding that produced ADR-0022
+Posture: discovered mid-session that the org policy path (`%ProgramData%\browser-mcp\policy.json`)
+is auto-loaded at server startup and wins over everything, so a governed restart needs NO client
+config change: wrote a restrictive schema-2 manifest there (grants: `example-full` =
+example.com/*.example.com access all; `net-readonly` = example.net access read), killed the
+running mcp-server, and the next tool call respawned a governed server automatically (extension
+re-handshake took 0.4 s, no manual reconnect needed). The policy file was REMOVED after the
+session and all-open restored (verified via doctor); nothing machine-wide remains.
+
+Covered live (g13-1 steps 1-3 equivalents, g13-2 audit shapes):
+- Unmatched domain: `read_page` on example.org (no grant) -> `Denied (D-04ede48d): no grant
+  covers example.org...`; audit line decision=deny, grant=null, denial=D-04ede48d.
+- Full grant: navigate + read_page + `computer left_click` on example.com all allowed;
+  audit lines carry grant_id=example-full.
+- Access rule: `navigate` to example.net (read-only grant) -> `Denied (D-b81ab772): 'navigate'
+  needs write access on example.net, and grant 'net-readonly' allows read only...`; audit line
+  decision=deny, grant=net-readonly, denial=D-b81ab772.
+
+NOT covered live: g13-1 steps 4-5 (hand-navigation drift re-check; redirect parking) -- the
+session pivoted to the design finding below before running them. g13-3's governed half (debug
+frame-count) and g15-1/2 (mode switch) also remain pending.
+
+FINDING (the reason steps 4-5 were not finished): the access-rule denial above exposed that
+`navigate` was classified mutate, so a read-only grant could not navigate to its own granted
+domains -- contradicting this file's own g13-1 script (which assumes step-2's navigate succeeds)
+and the shipped read-only example grants. Root-caused in design review to a category error
+(classifying by unknowable page effect instead of by what the governor can prove; "a navigate
+to a logout page is an intent problem, not a write"). Outcome: ADR-0022 (intent-calibrated
+capabilities: read/action/write/execute, per-action requirement directory, host polarity),
+implemented as the stage-3 task batch (`docs/tasks/stage-3/`). Under ADR-0022 the g13-1 script
+becomes correct as written (navigate succeeds on a read grant; the on-page click is what gets
+denied). The g13/g15 checks below should be re-run against the stage-3 tree with a schema-3
+manifest; the s08 task adds the capability-model live checks.
+
 ## Checks
 
 ## g08-1: sacred domains deny the agent live, and the audit log records it
