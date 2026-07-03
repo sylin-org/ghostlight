@@ -13,34 +13,3 @@
 /// (a const literal, per CLAUDE.md, to prevent accidental drift). Provenance and fidelity notes
 /// are in `schemas/README.md`; `tests/tool_schema_fidelity.rs` guards it.
 pub const TOOLS_JSON: &str = include_str!("schemas/tools.json");
-
-/// True when `name` is one of the advertised tool names in the sacred fixture. Read-only use of
-/// [`TOOLS_JSON`]: the fixture itself is never edited (see `tests/tool_schema_fidelity.rs`).
-pub fn is_known_tool(name: &str) -> bool {
-    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(TOOLS_JSON) else {
-        return false;
-    };
-    parsed["tools"]
-        .as_array()
-        .map(|tools| {
-            tools
-                .iter()
-                .any(|t| t.get("name").and_then(serde_json::Value::as_str) == Some(name))
-        })
-        .unwrap_or(false)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn is_known_tool_recognizes_advertised_names() {
-        assert!(is_known_tool("navigate"));
-    }
-
-    #[test]
-    fn is_known_tool_rejects_unknown_names() {
-        assert!(!is_known_tool("bogus_tool"));
-    }
-}

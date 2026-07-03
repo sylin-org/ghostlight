@@ -24,8 +24,26 @@ then continue. Never rely on remembering earlier work; re-read files.
   the pipeline extraction). The sanctioned delta lands: a GOVERNED directory miss (known tool,
   unknown sub-action) now denies `unknown_action` through the mode switch instead of
   dispatching ungoverned. `Config.governance_mode` is now a typed `EffectiveMode`. `call_label`
-  (`ports.rs`) is the one label formatter; `enforcement::tool_label` is deleted.
-- NEXT TASK: `t04` (`docs/tasks/stage-4/t04-generic-ingest-pipeline.md`).
+  (`ports.rs`) is the one label formatter; `enforcement::tool_label` is deleted. t04 landed:
+  ADR-0024 Decision 2's generic ingest pipeline. `transport::mcp::pipeline` is a new module
+  holding the dispatch chokepoint (`handle_tools_call`, now `pub(crate)`) plus every helper it
+  calls (`sacred_check`, `resolve_governing_resource`, `post_navigate_landing_check`,
+  `resolve_tab_host`, `append_wait_note`, `error_result`) and the entire chokepoint inline test
+  module (moved by transcription, plus 4 new tests and 1 new pinned test); `server.rs` keeps
+  only the JSON-RPC protocol loop, `tools/list`, and the composition root (293 lines). Every
+  per-tool `if name == ...` branch is now a registry read: stage 3 validity is
+  `directory::descriptor(name)` (replacing `is_known_tool`, deleted along with its two unit
+  tests); stage 4 action extraction is `descriptor.action_key`; stage 7 STEP C is
+  `descriptor.resource == ResourceShape::TargetArg`; stage 8's `Handler::Local(f)` replaces
+  `name == "explain"`; stage 9's `resolve_governing_resource` is shape-driven
+  (`DomainLess`/`TargetArg`/`TabScoped`) instead of a name match, and its post-dispatch flag is
+  `descriptor.post_dispatch == PostDispatch::NavigateLanding`; stage 12's postprocess is
+  `descriptor.postprocess` replacing `name == "read_page"`. `tests/all_open_golden.rs`'s
+  `is_known_tool` uses are the one sanctioned guard retype, onto
+  `browser::directory::descriptor`. Behavior is byte-identical (every moved test, plus the
+  black-box suites, pass unchanged); `resolve_tab_host` stays in the pipeline module (t05 owns
+  its deletion).
+- NEXT TASK: `t05` (`docs/tasks/stage-4/t05-tab-url-unification.md`).
 - Authority: ADR-0023/0024/0025 (each in its own scope) over task prompts over ADR-0022 over
   the stage-2 shared-format doc over SPEC.
 - Invariants after every task: tree green (`cargo test`, `clippy -D warnings`, `fmt --check`),
@@ -325,3 +343,121 @@ then continue. Never rely on remembering earlier work; re-read files.
 - Browser checks queued: none (behavior identical to the pre-ADR-0024 tree except the one
   sanctioned miss->deny delta, itself covered by the new black-box test; the stage-3 s-live
   backlog already covers the observable surface, per the task's own Verification section).
+
+### t04 the generic ingest pipeline -- 2026-07-03
+- Commit: (see this task's commit)
+- Files touched: `src/transport/mcp/pipeline.rs` (new), `src/transport/mcp/server.rs`,
+  `src/transport/mcp/tools.rs`, `src/transport/mcp/mod.rs`, `src/browser/directory.rs`,
+  `tests/all_open_golden.rs`, this file.
+- Summary: implemented ADR-0024 Decision 2 in full. `handle_tools_call`, `sacred_check`,
+  `resolve_governing_resource`, `post_navigate_landing_check`, `resolve_tab_host`,
+  `append_wait_note`, `error_result`, and the ENTIRE chokepoint inline test module (including
+  `pinned_explain_text` and its drift-guard test, and every shared test helper --
+  `attach_fake_extension`, `attach_fake_extension_with_tab_urls`, `temp_audit_path`,
+  `read_lines`, `config_with_sacred_domains`, `wait_connected`, `full_grant`,
+  `governed_with_grants*`) MOVED by transcription from `server.rs` into the new
+  `src/transport/mcp/pipeline.rs` module, registered via `pub mod pipeline;` in
+  `transport/mcp/mod.rs`. `handle_tools_call` is now `pub(crate)`; `server::handle_line` is now
+  `pub(super)` (a compile-necessary visibility widening: the moved
+  `tools_call_produces_one_audit_record_with_client_identity` test, now in `pipeline::tests`,
+  drives both functions, which now live in sibling modules under `transport::mcp`). `server.rs`
+  shrank to 293 lines (protocol loop, `tools_list_result`, `initialize`/`ping` handling, the
+  composition root); its `"tools/call"` arm now calls `pipeline::handle_tools_call`. Every
+  per-tool `if name == ...` branch in the moved function became a registry read: stage 3
+  validity is `directory::descriptor(name)` (a miss still returns the byte-identical
+  "Unknown tool: {name}" result) -- `is_known_tool` is DELETED from `tools.rs` along with its
+  two unit tests (`is_known_tool_recognizes_advertised_names`,
+  `is_known_tool_rejects_unknown_names`); their intent is covered by t02's
+  `registry_covers_the_sacred_surface_exactly` plus this task's new
+  `unknown_tool_is_a_registry_miss`. Stage 4 action extraction is
+  `descriptor.action_key.and_then(|key| args.get(key)).and_then(Value::as_str)`, replacing
+  `name == "computer"`. Stage 7 STEP C now fires iff
+  `descriptor.resource == ResourceShape::TargetArg` (STEP B stays argument-driven, unchanged,
+  independent of shape). Stage 8's `if let Handler::Local(f) = descriptor.handler { ... }`
+  replaces `name == "explain"`, same position (after the sacred-domain seeding, before grant
+  enforcement) and same hold/sacred interaction. Stage 9's `resolve_governing_resource` is
+  reshaped to take `&directory::ToolDescriptor` and match on `descriptor.resource`
+  (`DomainLess` -> `Some((GoverningResource::None, None))`; `TargetArg` -> today's navigate arm
+  verbatim, including the back/forward/missing-url union-rule gloss and the
+  unparseable-url-is-Rust-`None` fall-through; `TabScoped` -> today's tabId arm verbatim,
+  including the missing-tabId-is-Indeterminate fail-closed branch) instead of a `match tool`
+  name arm; the post-dispatch flag is now
+  `resolved.is_some() && descriptor.post_dispatch == PostDispatch::NavigateLanding`, replacing
+  `name == "navigate"` while preserving the exact same gating (only set when the pre-check
+  actually ran). `post_navigate_landing_check` gained a `tool: &str` parameter (the pipeline
+  passes `descriptor.tool`); its `governance.decide` call uses `tool` instead of the hardcoded
+  `"navigate"` literal; the about:blank park keeps the literal `"navigate"` string verbatim (a
+  synthesized call, sanctioned by the `NavigateLanding` marker, not a lookup of the triggering
+  tool's name). Stage 12 postprocess is
+  `if let Some(f) = descriptor.postprocess { f(&mut result, config.secrets_redact()); }`,
+  replacing `name == "read_page"`. `tests/all_open_golden.rs`'s three `is_known_tool` uses (the
+  import and the two assertion sites inside `tools_list_is_byte_stable_through_the_move`) are
+  the one BOOTSTRAP-rule-8-sanctioned guard retype, onto
+  `browser_mcp::browser::directory::descriptor(name).is_some()` /
+  `descriptor("bogus_tool").is_none()` -- assertion meaning and `GOLDEN_TOOL_NAMES` are
+  byte-identical; its module-doc sentence naming `is_known_tool` is reworded to name
+  `directory::descriptor`. Added tests (all in `pipeline::tests`, per the task's Tests
+  section): `unknown_tool_is_a_registry_miss` (a bogus name yields the pinned
+  `[hop: invalid-request] ... Unknown tool: bogus_tool` text and produces NO audit file;
+  `explain`, a registry hit with a `Handler::Local`, still answers); `postprocess_fires_only_where_the_registry_says`
+  (a fake-extension `read_page` result carrying a `secret_value=` marker, transcribed from
+  `redact.rs`'s own fixture text, is redacted; the identical payload via `find`, whose
+  descriptor carries no `postprocess`, survives untouched); `resource_shape_drives_resolution`
+  (a governed `tabs_context_mcp` call, `DomainLess`, resolves the union rule with NO
+  `tab_url_request` frame even with a fake extension registering none; a governed `read_page`
+  call with no `tabId`, `TabScoped`, denies fail-closed with the transcribed
+  `no grant covers (unknown)` `Indeterminate` denial text); and the Verification section's
+  pinned addition, `governed_navigate_back_consults_the_union_rule_resource` (a governed
+  `navigate` with `{"url":"back","tabId":5}` resolves the union-rule resource pre-dispatch,
+  allowed by the grant's read capability, and the point-5 landing re-check still probes the
+  final `tab_url`, matching the `[navigate, tab_url_request:5]` seen-order the ADR's back/forward
+  gloss predicts).
+- Deviations from the prompt/ADR:
+  1. `src/browser/directory.rs`'s `descriptor()` doc comment (authored in t02) named
+     `is_known_tool` in prose ("the validity check the pipeline uses (replacing
+     `is_known_tool`'s per-call fixture re-parse)"). The prompt's own Required Behavior section
+     2 says "add nothing to directory.rs (its diff stays empty this task)", but the same
+     prompt's Post-move hygiene section pins `rg -n "is_known_tool" src/ tests/` -> nothing,
+     which the live tree could not satisfy without touching that one comment line -- a prompt
+     self-inconsistency the "verified 2026-07-03" survey did not anticipate (it predates t02's
+     landed doc-comment wording). Per BOOTSTRAP rule 4 (conflicting statements within scope,
+     resolve toward fewer moving parts / behavior preservation; record as a numbered deviation):
+     reworded the one line to "the transport layer's former per-call fixture re-parse" (same
+     meaning, no function name). No new functionality was added to `directory.rs`; `REGISTRY`,
+     `requires()`, `explain_text()`, and every test in that file are byte-unchanged. This is the
+     only line touched in `directory.rs` this task.
+  2. `server.rs`'s own module-doc paragraph (not itself pinned by the prompt) was reworded to
+     name `pipeline::handle_tools_call` instead of the deleted description of the dispatch
+     chokepoint living inline, since the prompt's own Required Behavior section 1 explicitly
+     asks for a pipeline module doc but is silent on whether `server.rs`'s doc needs a matching
+     update; done for accuracy (the old doc's "routes through the Governance facade" prose would
+     otherwise silently describe code that no longer lives in this file). No pinned string,
+     test, or behavior is affected; plain code-span (not an intra-doc link) used deliberately to
+     avoid a new `rustdoc::private_intra_doc_links` warning against the `pub(crate)`
+     `handle_tools_call` (not a required verification gate in this stage, but zero-cost to
+     avoid).
+- Deletions performed: `transport::mcp::tools::is_known_tool` and its two unit tests
+  (`is_known_tool_recognizes_advertised_names`, `is_known_tool_rejects_unknown_names`); the
+  `#[cfg(test)] mod tests` block in `tools.rs` (empty after those two deletions, so removed
+  rather than left as a vestigial `use super::*;`-only module). `resolve_tab_host` MOVED into
+  `pipeline.rs` unchanged; it is NOT deleted this task (t05 owns that deletion per the task's
+  own Out of scope section).
+- Verification: `cargo fmt` (applied) then `cargo fmt --check` clean; `cargo clippy
+  --all-targets -- -D warnings` clean; `cargo test` fully green, 463 -> 465 (net +2: -2 deleted
+  `is_known_tool` tests, +4 new pipeline tests
+  (`unknown_tool_is_a_registry_miss`, `postprocess_fires_only_where_the_registry_says`,
+  `resource_shape_drives_resolution`, `governed_navigate_back_consults_the_union_rule_resource`);
+  every moved inline test passes unchanged under `transport::mcp::pipeline::tests::`).
+  `tests/architecture.rs` (4 tests), `tests/all_open_golden.rs` (3 tests), `tests/mcp_protocol.rs`
+  (6 tests), and `tests/tool_schema_fidelity.rs` (7 tests) all pass unchanged. `git diff HEAD --
+  src/transport/mcp/schemas/tools.json tests/tool_schema_fidelity.rs` and `git diff HEAD --
+  Cargo.toml Cargo.lock` both empty. Post-move hygiene: `rg -n
+  '"computer"|"explain"|"navigate"|"read_page"' src/transport/mcp/pipeline.rs` hits only the
+  about:blank park's synthesized navigate call (production code, before the `#[cfg(test)]`
+  boundary) plus doc comments and test code; `rg -n "is_known_tool" src/ tests/` -> no hits.
+  `server.rs` after the move is 293 lines (well under the ~700-line target). ASCII scan on all
+  6 touched/created files (`pipeline.rs`, `server.rs`, `tools.rs`, `mod.rs`, `directory.rs`,
+  `tests/all_open_golden.rs`) clean.
+- Browser checks queued: none (behavior identical to the pre-move tree by construction and by
+  the full unchanged test wall; the task's own Verification section states no browser check is
+  needed).

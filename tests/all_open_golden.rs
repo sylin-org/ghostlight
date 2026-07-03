@@ -3,7 +3,7 @@
 //! facade at the dispatch chokepoint (A3) may change anything observable. Invariants, reached
 //! through the NEW module locations:
 //!   1. tools/list byte-stability -- the advertised tool surface is the same 13 tools in
-//!      the same order, and `is_known_tool` still resolves them.
+//!      the same order, and `directory::descriptor` still resolves them.
 //!   2. facade decide round-trip -- `Governance::all_open()` resolves every call to
 //!      `Decision::Allow { grant_id: None }` without touching any decision port (audit is
 //!      orthogonal to all-open, shared format doc section 4.5, so the facade still carries an
@@ -11,11 +11,12 @@
 //!   3. `read_page` secret redaction is still wired at the chokepoint (governed by the
 //!      unchanged `content.security.secrets.redact` key), exercised end-to-end over stdio.
 
+use browser_mcp::browser::directory::descriptor;
 use browser_mcp::governance::dispatch::Governance;
 use browser_mcp::governance::ports::{
     AuditRecord, AuditSink, Decision, EffectiveMode, GoverningResource,
 };
-use browser_mcp::transport::mcp::tools::{is_known_tool, TOOLS_JSON};
+use browser_mcp::transport::mcp::tools::TOOLS_JSON;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -57,9 +58,12 @@ fn tools_list_is_byte_stable_through_the_move() {
             tools[i]["name"], *name,
             "tool #{i} name and order preserved"
         );
-        assert!(is_known_tool(name), "{name} must be a known tool");
+        assert!(descriptor(name).is_some(), "{name} must be a known tool");
     }
-    assert!(!is_known_tool("bogus_tool"), "unknown tools stay unknown");
+    assert!(
+        descriptor("bogus_tool").is_none(),
+        "unknown tools stay unknown"
+    );
 }
 
 /// A sink that drops every record; enough to construct an all-open facade for this test

@@ -367,7 +367,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
 ];
 
 /// Look up a tool's registry row by name. Linear scan over 14 rows; the validity check the
-/// pipeline uses (replacing `is_known_tool`'s per-call fixture re-parse).
+/// pipeline uses (replacing the transport layer's former per-call fixture re-parse).
 pub fn descriptor(tool: &str) -> Option<&'static ToolDescriptor> {
     REGISTRY.iter().find(|row| row.tool == tool)
 }
