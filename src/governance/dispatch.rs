@@ -29,6 +29,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::governance::manifest::document::Grant;
+use crate::governance::manifest::identity::ManifestIdentity;
 use crate::governance::ports::{
     AuditRecord, AuditSink, Capability, ClientInfo, Decision, DecisionRequest, Denial,
     EffectiveMode, GoverningResource, PolicyDecisionPoint, SessionEventRecord,
@@ -391,7 +392,13 @@ impl Governance {
         }
     }
 
-    fn current_client(&self) -> Option<ClientInfo> {
+    /// The MCP client identity captured from `initialize`, if any. `pub(crate)` (ADR-0025
+    /// Decision 2/6): the manifest hot-reload policy-subscription task
+    /// (`transport::mcp::server`) reads this off the OUTGOING `Governance` snapshot before a
+    /// swap and re-applies it to the rebuilt instance via [`Self::set_client`], so client
+    /// identity survives every swap even though a rebuilt `Governance` otherwise starts with
+    /// none.
+    pub(crate) fn current_client(&self) -> Option<ClientInfo> {
         self.client
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -413,6 +420,40 @@ impl Governance {
             identity: None,
             client: self.current_client(),
             event: "session_killed",
+            manifest: None,
+        };
+        self.audit.record_session_event(&record);
+    }
+
+    /// Record the manifest hot-reload session event (ADR-0025 Decision 5): on every successful
+    /// swap, `manifest` carries the NEW manifest's identity (`None` for a swap to all-open). A
+    /// failed reload records nothing (the ERROR log carries it; the audit stream records what IS
+    /// in force, not what failed to be) -- callers only invoke this on a successful swap.
+    pub fn record_manifest_reload(&self, manifest: Option<ManifestIdentity>) {
+        let record = SessionEventRecord {
+            event_id: uuid::Uuid::new_v4().to_string(),
+            ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            identity: None,
+            client: self.current_client(),
+            event: "manifest_reload",
+            manifest,
+        };
+        self.audit.record_session_event(&record);
+    }
+
+    /// Record the `user_manifest_ignored` session event (ADR-0025 Decision 5): an org policy
+    /// file displaced a user-supplied manifest's grants. Callers record this once at startup
+    /// when the condition already holds, and again only on a TRANSITION (the condition newly
+    /// re-establishing itself after it had lapsed) -- never on a repeat while it stays true
+    /// across consecutive reloads (see [`crate::governance::ports::
+    /// user_manifest_ignored_transitioned`], the pure gate callers apply before calling this).
+    pub fn record_user_manifest_ignored(&self) {
+        let record = SessionEventRecord {
+            event_id: uuid::Uuid::new_v4().to_string(),
+            ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            identity: None,
+            client: self.current_client(),
+            event: "user_manifest_ignored",
             manifest: None,
         };
         self.audit.record_session_event(&record);
@@ -1049,6 +1090,59 @@ mod tests {
         assert_eq!(rec.client.as_ref().unwrap().name, "claude-code");
         assert_eq!(rec.identity, None);
         assert_eq!(rec.manifest, None);
+    }
+
+    /// ADR-0025 Decision 5: both new producers emit the frozen `SessionEventRecord` shape (same
+    /// key order as `session_killed`'s own pin) with their pinned event strings;
+    /// `record_manifest_reload` carries the given identity (`None` for a swap to all-open).
+    /// Plus the transition gate itself (`ports::user_manifest_ignored_transitioned`): a reload
+    /// that keeps `user_manifest_ignored` true must NOT be treated as a fresh transition.
+    #[test]
+    fn manifest_reload_and_user_manifest_ignored_events_are_shaped() {
+        let sink = Arc::new(CapturingAuditSink::default());
+        let g = Governance::all_open(sink.clone());
+        g.set_client("claude-code", "2.1.0");
+
+        let identity = ManifestIdentity {
+            name: "acme".to_string(),
+            version: "1".to_string(),
+            hash: "deadbeef".to_string(),
+        };
+        g.record_manifest_reload(Some(identity.clone()));
+        let rec = sink.last_session_event();
+        assert_eq!(rec.event, "manifest_reload");
+        assert_eq!(rec.client.as_ref().unwrap().name, "claude-code");
+        assert_eq!(rec.identity, None);
+        assert_eq!(rec.manifest.as_ref().unwrap().name, "acme");
+
+        g.record_manifest_reload(None);
+        let rec2 = sink.last_session_event();
+        assert_eq!(rec2.event, "manifest_reload");
+        assert_eq!(
+            rec2.manifest, None,
+            "a swap to all-open carries manifest: null"
+        );
+
+        g.record_user_manifest_ignored();
+        let rec3 = sink.last_session_event();
+        assert_eq!(rec3.event, "user_manifest_ignored");
+        assert_eq!(rec3.manifest, None);
+        assert_eq!(rec3.client.as_ref().unwrap().name, "claude-code");
+
+        // Key order matches session_killed's own pin (same shared, frozen record shape).
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&rec3).unwrap()).unwrap();
+        let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys,
+            vec!["event_id", "ts", "identity", "client", "event", "manifest"]
+        );
+
+        // ADR-0025 Decision 5: transition gate, not a repeat.
+        assert!(crate::governance::ports::user_manifest_ignored_transitioned(false, true));
+        assert!(!crate::governance::ports::user_manifest_ignored_transitioned(true, true));
+        assert!(!crate::governance::ports::user_manifest_ignored_transitioned(false, false));
+        assert!(!crate::governance::ports::user_manifest_ignored_transitioned(true, false));
     }
 
     // --- g15: the governance_status badge resolver ---

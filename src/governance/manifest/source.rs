@@ -79,8 +79,9 @@ pub struct LoadedPolicy {
     /// Where the active manifest came from, when there is one.
     pub origin: Option<ManifestOrigin>,
     /// `true` when an org policy file displaced a user-supplied manifest's grants (shared
-    /// format doc section 1.3 rule 1). A future audit task notes this in the session's first
-    /// record.
+    /// format doc section 1.3 rule 1). The `user_manifest_ignored` session-event audit note
+    /// (ADR-0025 Decision 5) is recorded by `transport::mcp::server`'s startup and
+    /// policy-subscription logic, not here: this module stays domain-agnostic and audit-free.
     pub user_manifest_ignored: bool,
 }
 

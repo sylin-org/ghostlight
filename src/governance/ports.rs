@@ -63,6 +63,14 @@ pub fn call_label(tool: &str, action: Option<&str>) -> String {
     }
 }
 
+/// The `user_manifest_ignored` session-event TRANSITION gate (ADR-0025 Decision 5): true only
+/// when the condition NEWLY holds (it was false and is now true), never on a repeat while it
+/// stays true across consecutive reloads. Pure so the gating rule is testable independent of
+/// the manifest-reload subscription task that calls it (`transport::mcp::server`).
+pub fn user_manifest_ignored_transitioned(previously_ignored: bool, now_ignored: bool) -> bool {
+    !previously_ignored && now_ignored
+}
+
 /// One capability primitive of the ADR-0022 Decision 1 taxonomy. Capabilities categorize
 /// an operation by EPISTEMIC STATUS -- what the governor can PROVE about it -- never by
 /// its (unknowable) downstream effect. `Read` is provably retrieval/observation only;
@@ -255,8 +263,10 @@ pub struct SessionEventRecord {
     /// MCP client identity from the `initialize` request's `clientInfo`; `None` if the client
     /// did not provide it. Captured once per session.
     pub client: Option<ClientInfo>,
-    /// The event discriminator. Always the literal `"session_killed"` today (g11); later
-    /// session events, if any, would add their own string here, never a new record shape.
+    /// The event discriminator: `"session_killed"` (g11, the panic kill switch), or, as of
+    /// ADR-0025, `"manifest_reload"` (a successful manifest hot-reload swap) and
+    /// `"user_manifest_ignored"` (an org policy file displaces a user-supplied manifest's
+    /// grants). Each new session event adds its own string here, never a new record shape.
     pub event: &'static str,
     /// Active manifest identity; always `None` until the manifest task (g12) wires it in.
     pub manifest: Option<crate::governance::manifest::identity::ManifestIdentity>,
@@ -759,5 +769,25 @@ mod tests {
             &[Capability::Read],
             &[Capability::Read, Capability::Read]
         ));
+    }
+
+    #[test]
+    fn user_manifest_ignored_transition_gate() {
+        assert!(
+            user_manifest_ignored_transitioned(false, true),
+            "newly true"
+        );
+        assert!(
+            !user_manifest_ignored_transitioned(true, true),
+            "a repeat, not a transition"
+        );
+        assert!(
+            !user_manifest_ignored_transitioned(false, false),
+            "stays false"
+        );
+        assert!(
+            !user_manifest_ignored_transitioned(true, false),
+            "lapsing is not itself a transition into true"
+        );
     }
 }

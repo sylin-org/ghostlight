@@ -57,7 +57,25 @@ then continue. Never rely on remembering earlier work; re-read files.
   expectation changed from `vec!["tabs_context_mcp"; 4]` to `vec!["tab_url_request:5"; 4]` (the
   sanctioned ADR-0024 Decision 4 frame-traffic change); every other assertion in every reworked
   test (denial text, denial id, audit bytes, which calls are denied) is byte-unchanged.
-- NEXT TASK: `t06` (`docs/tasks/stage-4/t06-manifest-hot-reload.md`).
+- Progress (continued): t06 landed: ADR-0025 manifest hot-reload in full. `ConfigStore` (`reload.rs`)
+  gained `user_source: Option<String>` (retained from `load_initial_with_policy`'s new third
+  parameter), a `policy_snapshot`/`policy_tx` pair mirroring the existing `snapshot`/`tx` idiom,
+  and `pub fn policy() -> watch::Receiver<Arc<LoadedPolicy>>`. `reresolve()` now performs the
+  FULL org+user manifest re-selection via `source::load_policy` (one parse feeds both the org
+  config layers and the published policy, replacing the deleted `read_and_parse_org`), publishing
+  the new `LoadedPolicy` only when its identity (name/version/hash/origin) actually changed
+  (`manifest_identity_changed`), with the same keep-last-good/fail-closed posture the config
+  layers already had (a `load_policy` failure -- an invalid org file OR a configured user
+  `file://` source gone missing -- keeps last-good for both). `server.rs` holds `Governance`
+  behind `Arc<Mutex<Arc<Governance>>>`; every call snapshots it once at the top of the main read
+  loop (torn never); a new policy-subscription task rebuilds `Governance` on every publish,
+  carries the retained client identity forward (`Governance::current_client`, now `pub(crate)`),
+  swaps it in, records the `manifest_reload` session event (`Governance::record_manifest_reload`),
+  emits `notifications/tools/list_changed` (a new `Outbound` enum wrapping the writer channel)
+  iff the advertised set changed, and records `user_manifest_ignored` on a transition
+  (`ports::user_manifest_ignored_transitioned`, `Governance::record_user_manifest_ignored`).
+  `docs/tasks/stage-2/BROWSER-TESTS.md` gained t06-1/t06-2 (verbatim from the task prompt).
+- NEXT TASK: `t07` (`docs/tasks/stage-4/t07-dead-seam-deletions.md`).
 - Authority: ADR-0023/0024/0025 (each in its own scope) over task prompts over ADR-0022 over
   the stage-2 shared-format doc over SPEC.
 - Invariants after every task: tree green (`cargo test`, `clippy -D warnings`, `fmt --check`),
@@ -548,3 +566,128 @@ then continue. Never rely on remembering earlier work; re-read files.
   file) clean.
 - Browser checks queued: 1 (`t05-1`, appended to `docs/tasks/stage-2/BROWSER-TESTS.md`: a
   single-tab-URL-probe live check against a granted tab under an active sacred list).
+
+### t06 manifest hot-reload -- 2026-07-03
+- Commit: (see this task's commit)
+- Files touched: `src/governance/config/reload.rs`, `src/governance/dispatch.rs`,
+  `src/governance/manifest/source.rs`, `src/governance/ports.rs`, `src/doctor.rs`, `src/main.rs`,
+  `src/transport/mcp/pipeline.rs`, `src/transport/mcp/server.rs`, `tests/hot_reload.rs` (new),
+  `docs/tasks/stage-2/BROWSER-TESTS.md`, this file.
+- Summary: implemented ADR-0025 in full, the stage's second sanctioned behavioral addition.
+  `reload.rs`: `ConfigStore` gained `user_source: Option<String>` (a new third parameter on
+  `load_initial_with_policy`, threaded from `main.rs::run_server`'s own already-resolved
+  `user_source` through `server::run`'s new parameter, and from `doctor.rs`'s already-resolved
+  `user_manifest_source`; `load_initial`/the `reload.rs` inline test pass `None`), which also
+  sets `sources.manifest` to the user source's resolved `file://`/bare path (via
+  `source::parse_source_string`), independent of which origin won selection (ADR-0025 Decision
+  1). A `policy_snapshot: Mutex<Arc<LoadedPolicy>>` / `policy_tx: watch::Sender<Arc<LoadedPolicy>>`
+  pair mirrors `Config`'s own `snapshot`/`tx` idiom exactly; `pub fn policy()` subscribes.
+  `reresolve()` now calls the ADR-0023 single loader (`source::load_policy`) for the FULL org+user
+  re-selection every settled change, deriving the org config layers from that SAME result
+  (`load::org_config_from_policy`, replacing the deleted `read_and_parse_org`) and additionally
+  folding a user-sourced manifest's own config entries into the user layer via
+  `manifest_config_as_user_layer` (mirroring the startup merge, so an edit to a watched user
+  manifest's config entries takes effect on reload too, not just at startup -- deviation 1
+  below). A `load_policy` failure (invalid org file, or a CONFIGURED user file:// source gone
+  missing) is treated uniformly as an org-slot failure (keep-last-good + ERROR, extending
+  `plan_reload`'s existing org slot per the prompt's own instruction; `plan_reload`'s own
+  signature and pure-function testability are unchanged). `maybe_publish_policy` publishes the
+  new `LoadedPolicy` on the channel only when `manifest_identity_changed` (a new pure
+  name/version/hash/origin comparison, present<->absent counted as changed) says so -- ORG-file
+  deletion is a legitimate transition (publishes an all-open policy); a missing CONFIGURED user
+  file:// source is a load error, never a transition (the pinned edge, proven against the REAL
+  `source::load_policy` call in the new `user_manifest_deletion_keeps_last_good` test).
+  `server.rs`: `build_governance` extracts the all-open/governed construction `run` used to do
+  inline; `Governance` now lives behind `governance_slot: Arc<Mutex<Arc<Governance>>>`, snapshotted
+  ONCE per JSON-RPC line in the main read loop (torn never, ADR-0025 Decision 6) and passed through
+  exactly as before. A new policy-subscription task (spawned once at startup) awaits
+  `store.policy()`: on each publish it snapshots the outgoing `Governance`'s advertised set and
+  client identity, builds the new one via `build_governance`, re-applies the retained client
+  (`Governance::current_client`, widened to `pub(crate)`, plus `set_client`) so identity survives
+  every swap, swaps it into the slot, records `manifest_reload`
+  (`Governance::record_manifest_reload`, a new session-event producer alongside
+  `record_session_killed`, same frozen `SessionEventRecord` shape, `manifest: None` for a swap to
+  all-open), sends `Outbound::ToolsListChanged` (the writer channel's type, widened from a bare
+  `JsonRpcResponse` to the pinned `enum Outbound { Response(JsonRpcResponse), ToolsListChanged }`)
+  iff the advertised set actually changed, and records `user_manifest_ignored`
+  (`Governance::record_user_manifest_ignored`) iff `ports::user_manifest_ignored_transitioned`
+  says the condition newly holds (never on a repeat). At startup, an already-true
+  `loaded_policy.user_manifest_ignored` records the event once (implementing the promised note
+  `source.rs`'s doc comment used to defer to "a future audit task"). The writer task's loop
+  branches on `Outbound`, emitting the exact pinned `{"jsonrpc":"2.0","method":"notifications/
+  tools/list_changed"}` line for the notification variant. `dispatch.rs`/`ports.rs`: the two new
+  session-event producers and the pure transition-gate function, plus the `SessionEventRecord.
+  event` field's doc-list update naming both new strings.
+- Deviations from the prompt/ADR:
+  1. `apply_policy_and_config` (the shared core of `reresolve`/the test-only
+     `reload_with_policy`) additionally folds a user-sourced manifest's `config` entries into the
+     user layer on every reload (via `manifest_config_as_user_layer` + the existing
+     `merge_manifest_user_config`), not just at startup. The prompt's Required Behavior 1 literally
+     names only "derive the org config layers from it (t01 path)" for the reload path; this extra
+     fold is not literally pinned there. Added per BOOTSTRAP rule 4 (behavior preservation) and
+     ADR-0025 Decision 3's own words ("re-derive the config layers from the same parse (one parse
+     feeds both consumers)"): since Decision 1 now WATCHES a user file:// source, an edit to its
+     config entries must actually take effect on reload, not only at the startup that predates
+     this task -- otherwise the watched-user-source half of Decision 1 would be observably inert
+     for config (only its grants would ever update). No pinned string or test assertion is
+     affected; `plan_reload`'s own signature and every one of its pre-existing tests are
+     unchanged.
+  2. `#[allow(clippy::large_enum_variant)]` added to the pinned `Outbound` enum rather than boxing
+     `JsonRpcResponse` (clippy's `large_enum_variant`, not itself pinned, fires on the literal
+     pinned shape under `-D warnings`). Per BOOTSTRAP rule 14 (a byte-pinned shape moves by
+     transcription, never re-derivation) the enum is kept exactly as written in the prompt; same
+     resolution style t02 used for an analogous `type_complexity` clash.
+  3. While authoring the flagship test, discovered and fixed a real shutdown bug: the
+     policy-subscription task holds a permanent `Outbound` sender clone (needed to ever send
+     `ToolsListChanged`), and its `while policy_changes.changed().await.is_ok()` loop has no
+     natural end under the existing ADR-0019 watcher substrate (the sender side, `policy_tx`,
+     lives inside `ConfigStore`, itself kept alive forever by the pre-existing watcher task) --
+     so the writer task's "all `Outbound` senders dropped" shutdown detection could never fire,
+     and `server::run` (and therefore the whole mcp-server process) would never return/exit on
+     stdin close. Fixed by retaining the policy-subscription task's own `JoinHandle`
+     (`policy_subscription`) and calling `.abort()` plus awaiting the cancellation immediately
+     after the main read loop ends, before `drop(tx)` and `writer.await`. This is a correctness
+     fix required for ADR-0025's own design to be able to shut down at all (the pre-existing
+     watcher/audit-reload tasks never touched the `Outbound` channel, so this class of bug did
+     not exist before this task); it changes no hot-reload SEMANTIC, only that the process now
+     actually exits. Verified directly: before the fix, the flagship test's child process needed
+     to be force-killed externally to ever return from `wait()`; after the fix, the same test
+     completes in ~7.8s with a clean process exit.
+  4. The flagship test's isolation mechanism deviates from the task prompt's literal instruction
+     to override `LOCALAPPDATA` to redirect the default audit path. On this tree,
+     `governance::audit::destinations::default_audit_path` resolves via the `dirs` crate, whose
+     Windows backend (`dirs-sys` 0.5) calls `SHGetKnownFolderPath` rather than reading the
+     `LOCALAPPDATA` environment variable, so an env-var override of the CHILD process has zero
+     effect on it -- confirmed empirically: the first, prompt-literal version of this test (which
+     also overrode `LOCALAPPDATA`) produced a completely empty audit file at the faked path, only
+     the real, unfaked default path had the records. Since manifest config entries for audit are
+     explicitly out of bounds (the very reason the prompt gives for the "no audit config
+     entries" pin: they would vanish mid-test), and no other redirection mechanism exists for the
+     BUILT-IN default without touching an ALSO-not-env-redirectable, higher-risk real file (the
+     user config file), the test instead takes over the REAL resolved default audit path for its
+     own duration: it backs up any pre-existing file there and restores it (or removes a
+     freshly-created one) via a `Drop` guard (`AuditFileGuard`) that runs even on a mid-test
+     panic. Documented in full in the test file's own module doc comment. Also added a
+     `ChildGuard` (kills+reaps the spawned server on any early return or panic) since
+     `std::process::Child` does not kill on drop -- discovered necessary after an earlier
+     iteration of this test left orphaned `browser-mcp.exe` processes behind on a failed
+     assertion.
+- Deletions performed: `governance::config::reload::read_and_parse_org` (the org-only file
+  read+parse; superseded by `apply_policy_and_config`'s single `source::load_policy` call, which
+  now covers both org and user manifest sources in one parse per reload event).
+- Verification: `cargo fmt` (applied) then `cargo fmt --check` clean; `cargo clippy --all-targets
+  -- -D warnings` clean; `cargo test` fully green, 467 -> 475 (net +8:
+  `manifest_identity_changed_detects_change_appearance_and_removal`,
+  `keep_last_good_org_failure_does_not_publish_the_policy`,
+  `org_removal_publishes_an_all_open_policy`, `user_manifest_deletion_keeps_last_good` in
+  `reload.rs`; `user_manifest_ignored_transition_gate` in `ports.rs`;
+  `manifest_reload_and_user_manifest_ignored_events_are_shaped` in `dispatch.rs`;
+  `advertised_set_diff_gates_the_notification` in `server.rs`; the new integration test
+  `tests/hot_reload.rs::org_policy_hot_swap_end_to_end`, the stage's flagship, 7.76s).
+  `tests/architecture.rs` (4 tests), `tests/all_open_golden.rs` (3 tests), `tests/mcp_protocol.rs`
+  (6 tests), and `tests/tool_schema_fidelity.rs` (7 tests) all pass unchanged. `git diff HEAD --
+  src/transport/mcp/schemas/tools.json tests/tool_schema_fidelity.rs` and `git diff HEAD --
+  Cargo.toml Cargo.lock` both empty. ASCII scan on all 9 touched/created files clean. The full
+  `cargo test` run (475 tests across 17 binaries) is fully green.
+- Browser checks queued: 2 (`t06-1`, `t06-2`, appended verbatim from the task prompt's
+  Verification section to `docs/tasks/stage-2/BROWSER-TESTS.md`).

@@ -532,3 +532,22 @@ Steps: with a sacred list configured and a governed manifest active, run read_pa
 a granted tab while watching the extension service-worker console (frame logging on).
 Expect: exactly one tab_url_request per read_page call; sacred and grant outcomes
 unchanged from s-live-1/g08 expectations.
+
+## t06-1: policy edit applies live (no restart)
+Changed: t06 added manifest hot-reload (ADR-0025); grants/mode swap on org-file change.
+Steps: with a governed org policy active and a live client session, edit the policy
+file to add the "action" capability to the active grant; within a few seconds run a
+computer left_click that was previously denied; then delete the policy file and
+re-run any denied call.
+Expect: the click flips from Denied (capability) to executing, with audit lines
+showing the new manifest hash and a manifest_reload session event; after deletion the
+session is all-open (14 tools; a client that honors list_changed refreshes its tool
+list) and a second manifest_reload event carries manifest null.
+
+## t06-2: broken mid-edit policy never weakens the session
+Changed: t06 keep-last-good on reload (fail-closed org matrix extended to grants).
+Steps: with a governed session, save the policy file mid-edit as invalid JSON; run a
+call outside the grants; then fix the file.
+Expect: enforcement continues on the last-good manifest (same denials, same hash) with
+an ERROR in the server log and NO manifest_reload event until the fixed save, which
+swaps normally.

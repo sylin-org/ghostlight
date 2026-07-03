@@ -965,7 +965,8 @@ mod tests {
         let store =
             crate::governance::config::reload::ConfigStore::for_test_with_config(Config::minimal());
         let browser = Browser::new();
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<JsonRpcResponse>();
+        let (tx, _rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::transport::mcp::server::Outbound>();
 
         let init_line = json!({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",

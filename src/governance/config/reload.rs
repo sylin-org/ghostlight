@@ -5,6 +5,17 @@
 //! user, fail-closed org) is a SECURITY rule, not a preference: a malformed org push never
 //! drops an org lock or relaxes a value to a weaker layer.
 //!
+//! ADR-0025 extends this same substrate to the MANIFEST: [`ConfigStore::reresolve`] now also
+//! performs a full org+user manifest re-selection on every settled change
+//! ([`crate::governance::manifest::source::load_policy`], ADR-0023's single loader), publishing
+//! the result on its own `watch::channel<Arc<LoadedPolicy>>` ([`ConfigStore::policy`]) using the
+//! exact same keep-last-good, fail-closed-on-error posture the config layers already have. One
+//! `load_policy` result feeds BOTH consumers: the org config layers (as before) and the
+//! published policy (new). The subscription that turns a published policy into a live
+//! `Governance` swap, a `list_changed` notification, and the two new session events lives in
+//! `transport::mcp::server` (constraint 3: this module stays domain-agnostic and holds only the
+//! channel and the store).
+//!
 //! The swap slot is `Mutex<Arc<Config>>`, not `ArcSwap`: the read is a per-call event on the
 //! dispatch chokepoint, not a hot inner loop, and the critical section is a single `Arc` clone
 //! (an atomic refcount bump) followed by an immediate unlock, so reads never contend for more
@@ -57,6 +68,20 @@ pub struct ConfigStore {
     /// browser plugin directly (the a7 arch-test forbids a `governance -> browser` edge; see
     /// RECONCILIATION.md section 2, the same integration point G01/G02 resolved).
     domain_pattern_valid: fn(&str) -> bool,
+    /// The resolved user-supplied manifest source string (ADR-0025 Decision 1), retained so
+    /// [`Self::reresolve`] can re-run the FULL org+user selection on every reload event instead
+    /// of only re-reading the org file. `None` when no `--manifest`/`BROWSER_MCP_MANIFEST` was
+    /// given at startup (an `env://` source is retained here too, even though it has no file to
+    /// watch, since selection itself must still be re-run on every org-file change).
+    user_source: Option<String>,
+    /// The in-force resolved policy snapshot (ADR-0025 Decision 2): mirrors `snapshot`'s
+    /// `Mutex<Arc<T>>` idiom exactly, so a policy swap is decided and applied the same way a
+    /// config swap is (`apply_plan`'s `changed` check, transposed to manifest identity).
+    policy_snapshot: Mutex<Arc<crate::governance::manifest::source::LoadedPolicy>>,
+    /// Broadcasts the new policy on every successful publish. `transport::mcp::server`'s
+    /// policy-subscription task subscribes here to rebuild `Governance`, emit `list_changed`
+    /// when the advertised set changed, and record the two ADR-0025 session events.
+    policy_tx: watch::Sender<Arc<crate::governance::manifest::source::LoadedPolicy>>,
 }
 
 /// The last-good layer inputs, per source. On a reload where one source fails to load or
@@ -75,16 +100,16 @@ struct LastGoodInputs {
     preset: Option<String>,
 }
 
-/// The fixed source paths the watcher polls. The manifest slot is an integration point for
-/// G12: today it is `None` (no manifest engine); when G12 lands a file:// manifest source, its
-/// path is set here so an edit triggers a re-resolve. An env:// or in-memory manifest source
-/// has no file to watch and is left `None`.
+/// The fixed source paths the watcher polls. The manifest slot (ADR-0025 Decision 1) is the
+/// user-supplied `file://` manifest path, set at construction whenever one was given at
+/// startup -- INDEPENDENT of whether that source actually won selection (org always wins when
+/// both are present, but an ignored user file must still be watched so the org-deletion
+/// fallback stays live and a later edit to the user file reloads). An `env://` source, or no
+/// user source at all, has no file to watch and leaves this `None`.
 #[derive(Debug, Clone)]
 struct WatchSources {
     user_config: Option<PathBuf>,
     org_policy: PathBuf,
-    // INTEGRATION POINT (G12): set to the active file:// manifest path so an edit triggers a
-    // re-resolve and the G14 list_changed signal.
     manifest: Option<PathBuf>,
 }
 
@@ -115,15 +140,15 @@ impl ConfigStore {
     }
 
     /// [`Self::load_initial_with_policy`] with an all-open policy (no manifest from any
-    /// origin). Kept as a zero-argument-beyond-checker convenience for callers with no manifest
-    /// to thread through.
+    /// origin) and no user manifest source to watch. Kept as a zero-argument-beyond-checker
+    /// convenience for callers with no manifest to thread through.
     pub fn load_initial(domain_pattern_valid: fn(&str) -> bool) -> crate::Result<Arc<ConfigStore>> {
         let all_open = crate::governance::manifest::source::LoadedPolicy {
             manifest: None,
             origin: None,
             user_manifest_ignored: false,
         };
-        Self::load_initial_with_policy(domain_pattern_valid, &all_open)
+        Self::load_initial_with_policy(domain_pattern_valid, &all_open, None)
     }
 
     /// Build the store from the initial layered load, called once at mcp-server startup.
@@ -144,14 +169,29 @@ impl ConfigStore {
     /// declared `level`), merged UNDER the user config FILE's own values so the file wins on a
     /// key collision (`config.json` is the user's own direct, immediate expression of
     /// preference, while a `--manifest` source is more likely an external or automated input).
+    ///
+    /// `user_source` (ADR-0025 Decision 1) is the SAME resolved `--manifest`/
+    /// `BROWSER_MCP_MANIFEST` source string `load_policy` above was given, retained so
+    /// [`Self::reresolve`] can re-run the full org+user selection on every reload event. It also
+    /// sets the watcher's manifest slot to the user source's PATH whenever it resolves to a
+    /// `file://` (or bare-path) source -- independent of which origin actually won selection, so
+    /// an ignored user file is still watched. `None` when no user source was given at all;
+    /// callers with nothing to watch (the CLI, `doctor`, `load_initial`) pass `None`.
     pub fn load_initial_with_policy(
         domain_pattern_valid: fn(&str) -> bool,
         loaded_policy: &crate::governance::manifest::source::LoadedPolicy,
+        user_source: Option<String>,
     ) -> crate::Result<Arc<ConfigStore>> {
+        let manifest_watch_path = user_source.as_deref().and_then(|s| {
+            match crate::governance::manifest::source::parse_source_string(s) {
+                Ok(crate::governance::manifest::source::UserSource::FilePath(path)) => Some(path),
+                _ => None,
+            }
+        });
         let sources = WatchSources {
             user_config: load::user_config_path(),
             org_policy: load::org_policy_path(),
-            manifest: None,
+            manifest: manifest_watch_path,
         };
 
         let org: crate::Result<OrgConfig> = Ok(load::org_config_from_policy(loaded_policy));
@@ -171,6 +211,8 @@ impl ConfigStore {
         let config = Arc::new(Config::from_resolution(&resolution));
 
         let (tx, _rx) = watch::channel(config.clone());
+        let policy_snapshot = Arc::new(loaded_policy.clone());
+        let (policy_tx, _policy_rx) = watch::channel(policy_snapshot.clone());
         Ok(Arc::new(ConfigStore {
             snapshot: Mutex::new(config),
             generation: AtomicU64::new(0),
@@ -178,7 +220,24 @@ impl ConfigStore {
             last_good: Mutex::new(last_good),
             sources,
             domain_pattern_valid,
+            user_source,
+            policy_snapshot: Mutex::new(policy_snapshot),
+            policy_tx,
         }))
+    }
+
+    /// Subscribe to policy changes (ADR-0025 Decision 2): the receiver observes the new
+    /// `Arc<LoadedPolicy>` after every successful publish (a settled, identity-changing reload
+    /// of the org policy file or a watched user `file://` manifest source). A subscriber
+    /// created before any reload sees the startup policy as its current value and only wakes on
+    /// subsequent publishes. `transport::mcp::server`'s policy-subscription task uses this to
+    /// rebuild `Governance`, emit `list_changed` when the advertised set changed, and record the
+    /// two ADR-0025 session events; this store never emits any MCP notification or audit record
+    /// itself.
+    pub fn policy(
+        &self,
+    ) -> watch::Receiver<Arc<crate::governance::manifest::source::LoadedPolicy>> {
+        self.policy_tx.subscribe()
     }
 
     /// Re-run the layered load and resolver and, only if a full candidate parses and
@@ -188,22 +247,93 @@ impl ConfigStore {
     /// org source keeps the last-good org layer (ERROR, fail-closed). Returns a report for
     /// logging, the control-plane, and tests. Never returns an error: a running server is never
     /// taken down by a reload; it keeps its last-good snapshot.
+    ///
+    /// ADR-0025 Decision 3: this now also performs the FULL manifest re-selection (org file +
+    /// the watched user `file://` source, exactly the same [`crate::governance::manifest::
+    /// source::load_policy`] the startup path uses), re-evaluating the org-wins rule on every
+    /// call so an org-file creation/deletion mid-session transitions exactly as startup would.
+    /// One `load_policy` result feeds BOTH the org config layers (as before, via
+    /// [`load::org_config_from_policy`]) and the published policy: a failure of that single
+    /// call -- an invalid org file, OR a configured user `file://` source that has gone missing
+    /// -- is treated as an org-slot failure (keep-last-good, ERROR), never a transition; only an
+    /// actual `Ok` result (including a resolved all-open `LoadedPolicy` after an org-file
+    /// deletion) can change what is published.
     pub fn reresolve(&self) -> ReloadReport {
-        let org = read_and_parse_org(&self.sources.org_policy, self.domain_pattern_valid)
-            .map_err(|e| e.to_string());
+        let policy_result = crate::governance::manifest::source::load_policy(
+            self.user_source.as_deref(),
+            self.domain_pattern_valid,
+        )
+        .map_err(|e| e.to_string());
         let user = read_and_parse_user(
             self.sources.user_config.as_deref(),
             self.domain_pattern_valid,
         )
         .map_err(|e| e.to_string());
 
+        self.apply_policy_and_config(policy_result, user)
+    }
+
+    /// The shared core of [`Self::reresolve`] and the test-only [`Self::reload_with_policy`]:
+    /// given a (possibly injected) `load_policy` result and user-config result, derive the org
+    /// config layers from the SAME policy result (one parse feeds both consumers, ADR-0025
+    /// Decision 3), fold in a user-sourced manifest's own config entries (mirroring
+    /// [`Self::load_initial_with_policy`]'s startup merge, so an edit to a watched user
+    /// manifest's config entries takes effect on reload too), apply the config swap via the
+    /// existing [`plan_reload`]/[`Self::apply_plan`] machinery, and -- only on a successful
+    /// policy result -- publish it if its manifest identity changed.
+    fn apply_policy_and_config(
+        &self,
+        policy_result: Result<crate::governance::manifest::source::LoadedPolicy, String>,
+        user: Result<(UserConfig, Vec<String>), String>,
+    ) -> ReloadReport {
+        let org = policy_result
+            .as_ref()
+            .map(load::org_config_from_policy)
+            .map_err(Clone::clone);
+
         let last_good = self
             .last_good
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        let plan = plan_reload(org, user, &last_good);
-        self.apply_plan(plan)
+        let mut plan = plan_reload(org, user, &last_good);
+
+        if let Ok(loaded_policy) = &policy_result {
+            let manifest_user =
+                crate::governance::manifest::source::manifest_config_as_user_layer(loaded_policy);
+            plan.inputs.user = merge_manifest_user_config(manifest_user.clone(), plan.inputs.user);
+            plan.new_last_good.user =
+                merge_manifest_user_config(manifest_user, plan.new_last_good.user);
+        }
+
+        let report = self.apply_plan(plan);
+
+        if let Ok(loaded_policy) = policy_result {
+            self.maybe_publish_policy(loaded_policy);
+        }
+
+        report
+    }
+
+    /// Publish `loaded_policy` on the policy channel iff its manifest IDENTITY differs from
+    /// what is currently in force (ADR-0025 Decision 3/4). A `load_policy` failure never reaches
+    /// here: [`Self::apply_policy_and_config`] only calls this on `Ok`, so a failed reload keeps
+    /// the last-good published policy exactly like it keeps the last-good config layers.
+    fn maybe_publish_policy(
+        &self,
+        loaded_policy: crate::governance::manifest::source::LoadedPolicy,
+    ) {
+        let mut guard = self
+            .policy_snapshot
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if manifest_identity_changed(&guard, &loaded_policy) {
+            let new = Arc::new(loaded_policy);
+            *guard = Arc::clone(&new);
+            drop(guard);
+            // watch::send only errs if there are no receivers, which is fine.
+            let _ = self.policy_tx.send(new);
+        }
     }
 
     /// Trigger an immediate re-resolve now, bypassing the poll interval. This is the hook for
@@ -394,7 +524,11 @@ struct ReloadPlan {
 pub struct ReloadReport {
     /// True if a new, different snapshot was swapped in.
     pub swapped: bool,
-    /// True if the org policy source failed to load/validate (last-good kept).
+    /// True if the org+user manifest re-selection ([`crate::governance::manifest::source::
+    /// load_policy`]) failed to load/validate (last-good config layers AND last-good published
+    /// policy both kept). Covers an invalid org file, a broken user-supplied manifest, or a
+    /// configured user `file://` source that has gone missing (ADR-0025 Decision 1: a missing
+    /// CONFIGURED source is a load error, not a transition to all-open).
     pub org_failed: bool,
     /// True if the user config source failed structurally (last-good kept).
     pub user_failed: bool,
@@ -452,32 +586,22 @@ fn compose_initial(
     Ok((last_good, warnings))
 }
 
-/// Read and parse the org policy file via the single loader
-/// ([`crate::governance::manifest::document::parse_manifest`], ADR-0023 Decision 1).
-/// `ErrorKind::NotFound` is normal (absence yields the empty default); any other I/O error is a
-/// hard error (an org file that exists but is unreadable must not yield a weaker posture). A
-/// `ManifestError` is mapped via `Display` alone -- `parse_manifest`'s `source_label` already
-/// carries the path, so wrapping it again here would double it. Consequence, intended and
-/// sanctioned (ADR-0023, BOOTSTRAP rule 8): an org file whose GRANTS are invalid now also fails
-/// a config reload (keep-last-good + ERROR) -- it already failed startup fatally via
-/// `load_policy`.
-fn read_and_parse_org(
-    path: &Path,
-    domain_pattern_valid: fn(&str) -> bool,
-) -> crate::Result<OrgConfig> {
-    match std::fs::read_to_string(path) {
-        Ok(content) => {
-            let manifest = crate::governance::manifest::document::parse_manifest(
-                &content,
-                &path.display().to_string(),
-                domain_pattern_valid,
-            )
-            .map_err(|e| crate::Error::Config(e.to_string()))?;
-            Ok(load::org_config_from_entries(&manifest.config))
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(OrgConfig::default()),
-        Err(e) => Err(crate::Error::Config(format!("{}: {e}", path.display()))),
-    }
+/// Pure comparison of two [`LoadedPolicy`](crate::governance::manifest::source::LoadedPolicy)
+/// values' manifest IDENTITY (ADR-0025 Decision 3/4): name, version, hash, and origin together.
+/// A present<->absent transition on either side always counts as changed (an absent manifest
+/// has no name/version/hash/origin to compare, so it is its own distinct identity). Used by
+/// [`ConfigStore::maybe_publish_policy`] to decide whether a re-selected policy is actually a
+/// NEW state worth publishing, versus e.g. the same org file re-read byte-identical.
+fn manifest_identity_changed(
+    old: &crate::governance::manifest::source::LoadedPolicy,
+    new: &crate::governance::manifest::source::LoadedPolicy,
+) -> bool {
+    let key = |p: &crate::governance::manifest::source::LoadedPolicy| {
+        p.manifest
+            .as_ref()
+            .map(|m| (m.name.clone(), m.version.clone(), m.hash.clone(), p.origin))
+    };
+    key(old) != key(new)
 }
 
 /// Read and parse the user config file. `None` path, or `ErrorKind::NotFound`, is normal
@@ -567,10 +691,18 @@ impl ConfigStore {
         )
     }
 
-    /// Test-only constructor: seeds the store without touching the filesystem.
+    /// Test-only constructor: seeds the store without touching the filesystem. The policy
+    /// channel seeds at all-open (no manifest from any origin), matching `load_initial`'s own
+    /// convenience default.
     fn for_test(initial: Config, last_good: LastGoodInputs) -> Arc<ConfigStore> {
         let config = Arc::new(initial);
         let (tx, _rx) = watch::channel(config.clone());
+        let all_open = Arc::new(crate::governance::manifest::source::LoadedPolicy {
+            manifest: None,
+            origin: None,
+            user_manifest_ignored: false,
+        });
+        let (policy_tx, _policy_rx) = watch::channel(all_open.clone());
         Arc::new(ConfigStore {
             snapshot: Mutex::new(config),
             generation: AtomicU64::new(0),
@@ -582,6 +714,40 @@ impl ConfigStore {
                 manifest: None,
             },
             domain_pattern_valid: |_| true,
+            user_source: None,
+            policy_snapshot: Mutex::new(all_open),
+            policy_tx,
+        })
+    }
+
+    /// Test-only constructor that ALSO seeds `user_source`, for the one ADR-0025 test
+    /// (`user_manifest_deletion_keeps_last_good`) that needs `reresolve` to perform a REAL
+    /// `source::load_policy` call against a controllable user `file://` path, rather than the
+    /// fully injected [`Self::reload_with_policy`] seam every other test in this module uses.
+    /// Otherwise identical to [`Self::for_test`] with `Config::minimal()` and empty last-good.
+    fn for_test_with_user_source(user_source: String) -> Arc<ConfigStore> {
+        let config = Arc::new(Config::minimal());
+        let (tx, _rx) = watch::channel(config.clone());
+        let all_open = Arc::new(crate::governance::manifest::source::LoadedPolicy {
+            manifest: None,
+            origin: None,
+            user_manifest_ignored: false,
+        });
+        let (policy_tx, _policy_rx) = watch::channel(all_open.clone());
+        Arc::new(ConfigStore {
+            snapshot: Mutex::new(config),
+            generation: AtomicU64::new(0),
+            tx,
+            last_good: Mutex::new(LastGoodInputs::default()),
+            sources: WatchSources {
+                user_config: None,
+                org_policy: load::org_policy_path(),
+                manifest: None,
+            },
+            domain_pattern_valid: |_| true,
+            user_source: Some(user_source),
+            policy_snapshot: Mutex::new(all_open),
+            policy_tx,
         })
     }
 
@@ -599,6 +765,19 @@ impl ConfigStore {
             .clone();
         let plan = plan_reload(org, user, &last_good);
         self.apply_plan(plan)
+    }
+
+    /// Test-only: drive the FULL ADR-0025 reload flow (config layers derived from the SAME
+    /// `load_policy` result, plus the policy-channel publish decision) with an injected result,
+    /// bypassing the real `source::load_policy` call (which reads the fixed platform org-policy
+    /// path) so tests can exercise keep-last-good/publish decisions without touching real files
+    /// or environment state shared across the whole test binary.
+    fn reload_with_policy(
+        &self,
+        policy: Result<crate::governance::manifest::source::LoadedPolicy, String>,
+        user: Result<(UserConfig, Vec<String>), String>,
+    ) -> ReloadReport {
+        self.apply_policy_and_config(policy, user)
     }
 }
 
@@ -936,7 +1115,8 @@ mod tests {
             user_manifest_ignored: false,
         };
 
-        let store = ConfigStore::load_initial_with_policy(always_valid, &loaded_policy).unwrap();
+        let store =
+            ConfigStore::load_initial_with_policy(always_valid, &loaded_policy, None).unwrap();
         assert!(store.current().audit_enabled());
 
         let last_good = store
@@ -973,6 +1153,196 @@ mod tests {
         assert_eq!(
             inputs.preset,
             super::super::preset_layer(super::super::Preset::Restricted)
+        );
+    }
+
+    // --- t06 (ADR-0025): manifest hot-reload ---
+
+    fn all_open_policy() -> crate::governance::manifest::source::LoadedPolicy {
+        crate::governance::manifest::source::LoadedPolicy {
+            manifest: None,
+            origin: None,
+            user_manifest_ignored: false,
+        }
+    }
+
+    fn loaded_policy_with(
+        name: &str,
+        version: &str,
+        origin: crate::governance::manifest::source::ManifestOrigin,
+    ) -> crate::governance::manifest::source::LoadedPolicy {
+        let json = format!(r#"{{"schema":3,"name":"{name}","version":"{version}","grants":[]}}"#);
+        let manifest =
+            crate::governance::manifest::document::parse_manifest(&json, "test", always_valid)
+                .unwrap();
+        crate::governance::manifest::source::LoadedPolicy {
+            manifest: Some(manifest),
+            origin: Some(origin),
+            user_manifest_ignored: false,
+        }
+    }
+
+    /// Pure identity diffing (ADR-0025 Decision 3/4): both absent is unchanged; identical
+    /// name/version/hash/origin is unchanged; an appear or a removal is always changed; a
+    /// different version (a different hash too) is changed.
+    #[test]
+    fn manifest_identity_changed_detects_change_appearance_and_removal() {
+        use crate::governance::manifest::source::ManifestOrigin;
+
+        let none = all_open_policy();
+        let a = loaded_policy_with("acme", "1", ManifestOrigin::OrgPolicyFile);
+        let a_same = loaded_policy_with("acme", "1", ManifestOrigin::OrgPolicyFile);
+        let a_v2 = loaded_policy_with("acme", "2", ManifestOrigin::OrgPolicyFile);
+
+        assert!(
+            !manifest_identity_changed(&none, &none),
+            "both absent: unchanged"
+        );
+        assert!(
+            !manifest_identity_changed(&a, &a_same),
+            "identical name/version/hash/origin: unchanged"
+        );
+        assert!(manifest_identity_changed(&none, &a), "appeared");
+        assert!(manifest_identity_changed(&a, &none), "removed");
+        assert!(
+            manifest_identity_changed(&a, &a_v2),
+            "a different version (and hash) is changed"
+        );
+    }
+
+    /// ADR-0025 Decision 3: a `load_policy` failure (here injected as the org slot's `Err`,
+    /// exactly as a real invalid org file or a missing configured user file:// source would
+    /// surface) keeps the last-good published policy -- the policy channel does NOT publish.
+    #[test]
+    fn keep_last_good_org_failure_does_not_publish_the_policy() {
+        use crate::governance::manifest::source::ManifestOrigin;
+
+        // Subscribe BEFORE any reload (the real production usage: `transport::mcp::server`'s
+        // policy-subscription task subscribes once at startup, well before the watcher's first
+        // real settled change). `watch::Sender::send` is a documented no-op on the shared value
+        // when it has zero receivers (the same reason `ConfigStore::subscribe`'s own existing
+        // config tests all subscribe before the reload they observe), so a receiver created
+        // AFTER a publish would see a stale baseline -- not a production concern (a real
+        // settled change needs two poll intervals to settle, ample time for the one, ever
+        // subscriber to already exist), but this test must subscribe first to observe it.
+        let store = ConfigStore::for_test(Config::minimal(), LastGoodInputs::default());
+        let mut rx = store.policy();
+        assert!(rx.borrow_and_update().manifest.is_none(), "seeded all-open");
+
+        let governed = loaded_policy_with("acme", "1", ManifestOrigin::OrgPolicyFile);
+        store.reload_with_policy(Ok(governed), Ok((UserConfig::default(), Vec::new())));
+        assert!(rx.has_changed().unwrap(), "the first load publishes acme");
+        assert_eq!(
+            rx.borrow_and_update().manifest.as_ref().unwrap().name,
+            "acme"
+        );
+
+        let report = store.reload_with_policy(
+            Err("bad org".to_string()),
+            Ok((UserConfig::default(), Vec::new())),
+        );
+        assert!(report.org_failed);
+        assert!(
+            !rx.has_changed().unwrap(),
+            "a load_policy failure must not publish a new policy"
+        );
+        assert_eq!(
+            rx.borrow().manifest.as_ref().unwrap().name,
+            "acme",
+            "last-good manifest still in force"
+        );
+    }
+
+    /// ADR-0025 Decision 1: org-file removal is a legitimate, first-class transition -- a
+    /// resolved all-open `LoadedPolicy` (a successful `load_policy` result) DOES publish.
+    #[test]
+    fn org_removal_publishes_an_all_open_policy() {
+        use crate::governance::manifest::source::ManifestOrigin;
+
+        // Subscribe BEFORE any reload; see the comment in
+        // `keep_last_good_org_failure_does_not_publish_the_policy` for why.
+        let store = ConfigStore::for_test(Config::minimal(), LastGoodInputs::default());
+        let mut rx = store.policy();
+
+        let governed = loaded_policy_with("acme", "1", ManifestOrigin::OrgPolicyFile);
+        store.reload_with_policy(Ok(governed), Ok((UserConfig::default(), Vec::new())));
+        assert!(rx.has_changed().unwrap());
+        rx.borrow_and_update();
+
+        let report = store.reload_with_policy(
+            Ok(all_open_policy()),
+            Ok((UserConfig::default(), Vec::new())),
+        );
+        assert!(!report.org_failed);
+        assert!(
+            rx.has_changed().unwrap(),
+            "org-file removal must publish the new all-open policy"
+        );
+        assert_eq!(rx.borrow_and_update().manifest, None);
+    }
+
+    /// ADR-0025 Decision 1 (pinned edge): a CONFIGURED user file:// source that goes missing is
+    /// a load error, not a transition to all-open -- unlike org-file removal above. Drives the
+    /// REAL `source::load_policy` call (via `reresolve`) against a real, controllable temp file
+    /// so this proves the actual `load_user_manifest` I/O-error path, not just the injected
+    /// keep-last-good machinery every other test in this module exercises.
+    #[test]
+    fn user_manifest_deletion_keeps_last_good() {
+        use crate::governance::manifest::source::ManifestOrigin;
+
+        let org_path = load::org_policy_path();
+        if org_path.exists() {
+            eprintln!(
+                "skipping the strict assertion: a real org policy file exists at {} on this \
+                 machine",
+                org_path.display()
+            );
+            return;
+        }
+
+        let path = std::env::temp_dir().join(format!(
+            "browser-mcp-t06-user-manifest-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            r#"{"schema":3,"name":"user-file","version":"1","grants":[]}"#,
+        )
+        .unwrap();
+
+        let store = ConfigStore::for_test_with_user_source(path.display().to_string());
+        let mut rx = store.policy();
+        assert!(rx.borrow_and_update().manifest.is_none(), "seeded all-open");
+
+        let report = store.reresolve();
+        assert!(
+            !report.org_failed,
+            "the file exists: load_policy must succeed"
+        );
+        assert!(
+            rx.has_changed().unwrap(),
+            "the first real load publishes the user-sourced policy"
+        );
+        assert_eq!(
+            rx.borrow_and_update().origin,
+            Some(ManifestOrigin::UserFile)
+        );
+
+        std::fs::remove_file(&path).unwrap();
+        let report2 = store.reresolve();
+        assert!(
+            report2.org_failed,
+            "a missing CONFIGURED user file:// source is a load error, not a transition to \
+             all-open"
+        );
+        assert!(
+            !rx.has_changed().unwrap(),
+            "a load-error reresolve must not publish anything on the policy channel"
+        );
+        assert_eq!(
+            rx.borrow().origin,
+            Some(ManifestOrigin::UserFile),
+            "the last-good (user-sourced) policy survives the missing-file reload"
         );
     }
 }

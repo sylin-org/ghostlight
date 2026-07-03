@@ -476,7 +476,7 @@ fn run_server(manifest: Option<String>, debug_on: bool) -> Result<()> {
                 }
             }
         });
-        let result = browser_mcp::mcp::server::run(browser, loaded_policy).await;
+        let result = browser_mcp::mcp::server::run(browser, loaded_policy, user_source).await;
         sink.flush(); // final snapshot after stdin closes
         result
     })?;
