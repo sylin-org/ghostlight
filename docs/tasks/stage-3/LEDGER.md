@@ -704,3 +704,13 @@ Verification: `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings
 `tests/tool_schema_fidelity.rs` (7) all green; `src/transport/mcp/schemas/tools.json` and
 `tests/tool_schema_fidelity.rs` byte-untouched (`git diff --stat` shows only server.rs,
 mcp_protocol.rs, and this ledger). ASCII scan clean on all touched files.
+
+ERRATUM (found 2026-07-03 by the stage-4 batch red-team, recorded here for honesty):
+Gap A's `unwrap_or(&[])` plus the `!requires.is_empty()` guard flattened a directory
+MISS into a free action, so a GOVERNED `computer` call with an unknown `action` string
+now dispatches ungoverned instead of denying -- a fail-open regression of ADR-0022's
+absent-means-DENY invariant (`decide`'s `unknown_action` arm became production-dead).
+Exposure is low: the extension rejects unknown action strings in its own switch, and
+the sacred check still applies. The fix is owned by stage-4 task t03 (ADR-0024
+Decision 3), which restores deny-on-miss under a manifest as a named, sanctioned,
+black-box-tested change; all-open behavior was never affected.
