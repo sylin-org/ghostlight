@@ -81,10 +81,25 @@ source-available, not secrecy, is the accepted norm here (PostHog `ee/`, Cal.com
 governance is ongoing value, not a temporary head start, so a time-delayed
 converting license (BSL or FSL, which convert after a fixed period) is the wrong
 mechanism and is rejected for this module. To reduce legal risk the license text
-is adapted from a proven base (the n8n Sustainable Use License or the Elastic
-License 2.0 mechanism) rather than drafted from scratch. Repo-root
-`LICENSE-GOVERNANCE` carries the text, referenced by SPDX id
-`LicenseRef-Ghostlight-Commercial`.
+is adapted from a proven base rather than drafted from scratch: the GitLab
+Enterprise Edition license template, as instantiated by the n8n Enterprise
+License (`LICENSE_EE.md`), the authentik Enterprise Edition License, and the
+Infisical Enterprise License. That template is the family that natively encodes
+this module's boundary (free for development, testing, and personal use; paid for
+production or organizational use), and it is what this ADR's own cited precedents
+(PostHog, Cal.com, n8n) actually run on their commercial directory. A verified
+license catalog (2026-07-03) rejected the two bases an earlier draft named, the
+n8n Sustainable Use License and the Elastic License 2.0: both gate only competing
+use (reselling or hosting the software to third parties), which a self-hosted tool
+with no hosted service never triggers, so they would leave all organizational
+production use free and monetize no one. The chosen skeleton needs one intentional
+widening (the EE templates exempt only dev and test, so graft the explicit
+personal / non-production / evaluation free carve-out this module grants) and two
+trims for a solo-dev self-hosted tool (drop per-user seat metering in favor of a
+per-organization or per-instance trigger, and drop the vendor-owns-your-
+modifications clause). Repo-root `LICENSE-GOVERNANCE` carries the text, referenced
+by SPDX id `LicenseRef-Ghostlight-Commercial` (the EE-template licenses have no
+SPDX-list id, so a `LicenseRef-` is correct).
 
 Two sub-choices in this decision, recorded with their alternatives so they are not
 silently re-litigated: (a) personal use of governance is free rather than the
