@@ -29,6 +29,10 @@ history live here.
 | [0019](0019-layered-configuration-model.md) | Layered configuration: typed key registry, presets, org locks | Accepted |
 | [0020](0020-org-policy-experience.md) | Org policy experience: policy as code with explain, simulate, shadow | Accepted |
 | [0021](0021-ghostlight-brand-and-family.md) | Ghostlight brand and product family | Accepted |
+| [0022](0022-intent-calibrated-capabilities.md) | Intent-calibrated capabilities: epistemic classification, per-action requirements, host polarity | Accepted |
+| [0023](0023-one-loader-for-the-policy-file.md) | One loader for the policy file | Accepted |
+| [0024](0024-tool-registry-and-generic-ingest-pipeline.md) | Tool registry and the generic ingest pipeline | Accepted |
+| [0025](0025-manifest-hot-reload.md) | Manifest hot-reload | Accepted |
 
 ## Conventions
 

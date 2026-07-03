@@ -1,0 +1,15 @@
+Policy 'research-read-only', version 1.
+Content hash: ec836a03e1eece4455a498c0e77664705f4d5710723ce5c9756a3893563e62a6.
+
+No identity block: this policy does not name a principal.
+
+Mode: enforce. Calls the grants below do not permit are blocked. This policy sets no mode; the built-in default applies.
+
+Where agents may read and write, in match order (the first matching domain wins):
+(a pattern like 'example.com' matches only that exact host; '*.example.com' matches its subdomains and never example.com itself)
+  1. Allowed on *.arxiv.org, scholar.google.com: read pages.
+Any domain not matched above is denied.
+
+This policy locks no settings and sets no defaults; users keep control of every setting.
+
+On a denial the agent receives a plain-text message with a stable denial id, in the form 'Denied (D-xxxxxxxx): ...'. Hand that id to the policy administrator: it identifies the exact rule and policy version that produced the denial.

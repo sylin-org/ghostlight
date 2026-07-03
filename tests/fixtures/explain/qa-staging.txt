@@ -1,0 +1,20 @@
+Policy 'qa-staging', version 2026.07.1.
+Content hash: 0472b25094361aadea69c5b2af7e4cbdaa27e03b367297920df6b9d393e56022.
+
+Prepared for 'ci-runner', resolved by environment. Groups: QA-Automation.
+
+Mode: observe (shadow). Nothing is blocked by this policy: would-deny events are recorded to the audit log and the calls proceed. Observation is not protection.
+
+Where agents may read and write, in match order (the first matching domain wins):
+(a pattern like 'example.com' matches only that exact host; '*.example.com' matches its subdomains and never example.com itself)
+  1. Allowed on *.staging.geisinger.org: read pages, operate page controls (clicks and typing; this can trigger writes), submit forms and structured writes. Purpose: Full automation on staging.
+  2. Allowed on geisinger.org, *.geisinger.org: read pages. This grant always enforces: its denials block even when the policy mode is observe. Purpose: Read-only verification on production.
+  3. Allowed on forms.staging.geisinger.org: submit forms and structured writes. Purpose: Submit test forms only.
+Any domain not matched above would be denied; in this mode that denial is recorded, not blocked.
+
+This policy locks no settings and sets no defaults; users keep control of every setting.
+
+On a would-deny the agent sees the ordinary tool result and no denial text. The denial id appears only in the audit record, as decision 'shadow_deny'.
+
+Warnings:
+  - grant 'form-writer': allowed includes acting capabilities without 'read'; agents can act on pages they cannot see.

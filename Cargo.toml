@@ -16,6 +16,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 anyhow = "1"
 dirs = "6"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# WHATWG URL parser -- domain matching must never hand-roll URL/host parsing (CVE-2025-47241 class).
+url = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"

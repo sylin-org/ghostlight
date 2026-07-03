@@ -1,0 +1,22 @@
+{
+  "schema": 3,
+  "name": "simulate-restrictive",
+  "version": "1",
+  "grants": [
+    {
+      "id": "docs-read",
+      "hosts": { "allow": ["docs.example.com"] },
+      "allowed": ["read"]
+    },
+    {
+      "id": "wiki-wildcard",
+      "hosts": { "allow": ["*.wiki.example.org"] },
+      "allowed": ["read", "action", "write"]
+    },
+    {
+      "id": "forms-noscript",
+      "hosts": { "allow": ["forms.example.net"] },
+      "allowed": ["read", "action", "write"]
+    }
+  ]
+}

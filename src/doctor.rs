@@ -8,7 +8,7 @@
 
 use crate::install::native_host::WowView;
 use crate::install::{clients, host_file_path, native_host, Hive, PlanCtx};
-use crate::native::ipc::{self, EndpointProbe};
+use crate::transport::native::ipc::{self, EndpointProbe};
 use crate::Result;
 use std::path::PathBuf;
 
@@ -49,6 +49,19 @@ pub fn run(opts: DoctorOptions) -> Result<bool> {
         print_row(display, *detected, *registered);
     }
     let any_client_registered = mcp_clients.iter().any(|(_, _, registered)| *registered);
+
+    let manifest_status = crate::governance::manifest::identity::manifest_status();
+    println!();
+    println!("Policy manifest:");
+    for line in crate::governance::manifest::identity::manifest_section_lines(&manifest_status) {
+        println!("{line}");
+    }
+
+    println!();
+    println!("Governance:");
+    for line in governance_section_lines() {
+        println!("{line}");
+    }
 
     let endpoint = ipc::default_endpoint();
     let endpoint_display = ipc::endpoint_display(&endpoint);
@@ -153,6 +166,70 @@ fn client_rows(ctx: &PlanCtx) -> Vec<(String, bool, bool)> {
             (c.display.to_string(), detected, registered)
         })
         .collect()
+}
+
+/// Body lines of the doctor "Governance:" section (g15, shared format doc section 9.2).
+///
+/// Doctor is a standalone, one-shot CLI invocation with no live `Governance`/session state
+/// and no `--manifest` flag of its own (that flag is server-role only); it resolves its OWN
+/// view of the active manifest the same way a server launched in the same environment would,
+/// using the real, already-tested `governance::manifest::source::load_policy` (org policy file,
+/// else `BROWSER_MCP_MANIFEST`, else none -- the only manifest signal available without a CLI
+/// flag) and the real layered config resolver, then renders through the SAME pure
+/// `governance::dispatch::governance_status` function `Governance::governance_status` uses, so
+/// this section and a future `get_status` reply can never disagree (g15 constraint 12). Any
+/// resolution failure degrades to a printed line rather than propagating (doctor's own
+/// never-early-return posture).
+fn governance_section_lines() -> Vec<String> {
+    let user_manifest_source = std::env::var("BROWSER_MCP_MANIFEST").ok();
+    let loaded_policy = match crate::governance::manifest::source::load_policy(
+        user_manifest_source.as_deref(),
+        crate::browser::pattern::is_valid_pattern,
+    ) {
+        Ok(loaded) => loaded,
+        Err(e) => return vec![format!("  manifest source is broken: {e}")],
+    };
+
+    let config_store = crate::governance::config::reload::ConfigStore::load_initial_with_policy(
+        crate::browser::pattern::is_valid_pattern,
+        &loaded_policy,
+        user_manifest_source,
+    );
+    let config = match config_store {
+        Ok(store) => store.current(),
+        Err(e) => return vec![format!("  config resolution is broken: {e}")],
+    };
+    let config_mode = config.governance_mode();
+
+    let Some(manifest) = &loaded_policy.manifest else {
+        return render_governance_status(None);
+    };
+    let status = crate::governance::dispatch::governance_status(
+        &manifest.grants,
+        manifest.mode,
+        config_mode,
+    );
+    render_governance_status(Some(status))
+}
+
+/// The pure rendering half of [`governance_section_lines`] (g15): the exact three wordings
+/// the task doc specifies, keyed off the already-resolved [`GovernanceStatus`]. Factored out
+/// so the exact line text is unit-testable without touching the filesystem or environment.
+fn render_governance_status(
+    status: Option<crate::governance::dispatch::GovernanceStatus>,
+) -> Vec<String> {
+    match status {
+        None => vec!["  no manifest active (all-open); no grant-based denials".to_string()],
+        Some(s) if s.shadow => vec![
+            "  mode  observe (SHADOW: would-deny events are recorded to the audit log but are \
+             NOT blocked; this is observation, not protection)"
+                .to_string(),
+        ],
+        Some(s) => vec![format!(
+            "  mode  {} (denied calls are blocked)",
+            s.mode.as_str()
+        )],
+    }
 }
 
 fn state_line(probe: &EndpointProbe) -> String {
@@ -450,6 +527,39 @@ fn findings(obs: &Observations) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_governance_status_none_is_the_all_open_line() {
+        assert_eq!(
+            render_governance_status(None),
+            vec!["  no manifest active (all-open); no grant-based denials".to_string()]
+        );
+    }
+
+    #[test]
+    fn render_governance_status_shadow_true_prints_the_shadow_line() {
+        let lines = render_governance_status(Some(crate::governance::dispatch::GovernanceStatus {
+            mode: crate::governance::ports::EffectiveMode::Observe,
+            shadow: true,
+        }));
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("mode  observe"));
+        assert!(lines[0].contains("SHADOW"));
+        assert!(lines[0].contains("NOT blocked"));
+        assert!(lines[0].contains("observation, not protection"));
+    }
+
+    #[test]
+    fn render_governance_status_enforce_prints_the_plain_line() {
+        let lines = render_governance_status(Some(crate::governance::dispatch::GovernanceStatus {
+            mode: crate::governance::ports::EffectiveMode::Enforce,
+            shadow: false,
+        }));
+        assert_eq!(
+            lines,
+            vec!["  mode  enforce (denied calls are blocked)".to_string()]
+        );
+    }
 
     fn healthy_obs() -> Observations {
         Observations {

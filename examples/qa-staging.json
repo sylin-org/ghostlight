@@ -1,0 +1,33 @@
+{
+  "schema": 3,
+  "name": "qa-staging",
+  "version": "2026.07.1",
+  "mode": "observe",
+  "identity": {
+    "resolved_by": "environment",
+    "principal": "ci-runner",
+    "groups": ["QA-Automation"],
+    "resolved_at": "2026-07-01T10:00:00Z"
+  },
+  "grants": [
+    {
+      "id": "staging",
+      "hosts": { "allow": ["*.staging.geisinger.org"] },
+      "allowed": ["read", "action", "write"],
+      "description": "Full automation on staging"
+    },
+    {
+      "id": "production-readonly",
+      "hosts": { "allow": ["geisinger.org", "*.geisinger.org"] },
+      "allowed": ["read"],
+      "mode": "enforce",
+      "description": "Read-only verification on production"
+    },
+    {
+      "id": "form-writer",
+      "hosts": { "allow": ["forms.staging.geisinger.org"] },
+      "allowed": ["write"],
+      "description": "Submit test forms only"
+    }
+  ]
+}

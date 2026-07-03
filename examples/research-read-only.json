@@ -1,0 +1,12 @@
+{
+  "schema": 3,
+  "name": "research-read-only",
+  "version": "1",
+  "grants": [
+    {
+      "id": "research",
+      "hosts": { "allow": ["*.arxiv.org", "scholar.google.com"] },
+      "allowed": ["read"]
+    }
+  ]
+}

@@ -6,7 +6,8 @@
 //! The same executable runs in several roles, selected at startup:
 //! - **mcp-server** (default, no subcommand) -- launched by the MCP client over stdio. Owns the
 //!   browser IPC endpoint, serves the native-host, and runs the JSON-RPC loop, forwarding tool
-//!   calls to the extension via a shared [`Browser`](browser_mcp::browser::Browser) handle.
+//!   calls to the extension via a shared
+//!   [`Browser`](browser_mcp::transport::executor::Browser) handle.
 //! - **native-host** -- launched by Chrome via `connectNative` (Chrome passes the calling
 //!   extension's origin, `chrome-extension://<id>/`, as an argument). Connects to the mcp-server
 //!   endpoint and relays native-messaging frames to/from the extension.
@@ -15,12 +16,14 @@
 //! `main` deliberately has no `#[tokio::main]`: the two async roles each build their own runtime,
 //! and the installer needs none.
 
-use anyhow::Result;
-use browser_mcp::browser::Browser;
+use anyhow::{Context, Result};
+use browser_mcp::browser::pattern;
 use browser_mcp::debug::DebugSink;
 use browser_mcp::doctor::DoctorOptions;
+use browser_mcp::governance::manifest::source;
 use browser_mcp::install::{InstallOptions, Selection, UninstallOptions};
 use browser_mcp::native::ipc;
+use browser_mcp::transport::executor::Browser;
 use clap::{Args, Parser, Subcommand};
 
 /// Browser MCP -- the user's own authenticated browser, for AI agents.
@@ -51,6 +54,135 @@ enum Command {
     Doctor(DoctorArgs),
     /// Show the running server's live inner state (needs a server started with --debug).
     Status(StatusArgs),
+    /// Inspect and edit the layered configuration (list / get / set / schema / docs).
+    Config(ConfigArgs),
+    /// Inspect and preview policy files.
+    Policy(PolicyArgs),
+}
+
+#[derive(Debug, Args)]
+struct PolicyArgs {
+    #[command(subcommand)]
+    command: PolicyCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum PolicyCommand {
+    /// Render a policy manifest or config file as plain sentences.
+    Explain(ExplainArgs),
+    /// Replay recorded audit events through a candidate manifest.
+    Simulate(SimulateArgs),
+    /// Write an embedded example manifest as a starting point.
+    Init(InitArgs),
+}
+
+#[derive(Debug, Args)]
+struct ExplainArgs {
+    /// Path to a policy manifest or a user configuration file.
+    #[arg(value_name = "FILE")]
+    file: std::path::PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct SimulateArgs {
+    /// Path to the candidate policy manifest.
+    #[arg(value_name = "MANIFEST")]
+    manifest: std::path::PathBuf,
+    /// Path to the audit JSON Lines file to replay.
+    #[arg(long, value_name = "FILE")]
+    replay: std::path::PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct InitArgs {
+    /// Embedded template name: enterprise-healthcare, developer-unrestricted, or qa-staging.
+    #[arg(long, value_name = "NAME")]
+    template: String,
+    /// Output path. Defaults to policy.json in the current working directory.
+    #[arg(long, value_name = "PATH")]
+    out: Option<std::path::PathBuf>,
+    /// Overwrite an existing output file.
+    #[arg(long)]
+    force: bool,
+}
+
+#[derive(Debug, Args)]
+struct ConfigArgs {
+    #[command(subcommand)]
+    action: ConfigAction,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigAction {
+    /// Show every key: effective value, source layer, lock state, description.
+    List,
+    /// Show one key's effective value, source layer, and lock state.
+    Get {
+        /// The dotted key name (see 'config list').
+        key: String,
+    },
+    /// Set a key in the user layer. Refused when the organization locks the key.
+    Set {
+        /// The dotted key name.
+        key: String,
+        /// The raw value (bool: true/false; uint: digits; enum/string: verbatim;
+        /// string list: a JSON array, e.g. ["example.com","*.example.com"]).
+        value: String,
+    },
+    /// Print the JSON Schema (draft 2020-12) for the user configuration file.
+    Schema,
+    /// Print the markdown key reference generated from the key registry.
+    Docs,
+    /// Select a named bundle of layer-4 defaults, after previewing what changes.
+    Preset(PresetArgs),
+}
+
+#[derive(Debug, Args)]
+struct PresetArgs {
+    /// The preset to select.
+    #[arg(value_enum)]
+    preset: CliPreset,
+    /// Print the diff and write nothing.
+    #[arg(long)]
+    dry_run: bool,
+}
+
+/// The CLI-facing spelling of a preset (hyphenated). The underscore alias on `FullyOpen` lets
+/// `fully_open` (the wire form written to the user config file) also be typed directly.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum CliPreset {
+    #[value(name = "fully-open", alias = "fully_open")]
+    FullyOpen,
+    Safe,
+    Restricted,
+}
+
+impl From<CliPreset> for browser_mcp::governance::config::Preset {
+    fn from(p: CliPreset) -> Self {
+        use browser_mcp::governance::config::Preset;
+        match p {
+            CliPreset::FullyOpen => Preset::FullyOpen,
+            CliPreset::Safe => Preset::Safe,
+            CliPreset::Restricted => Preset::Restricted,
+        }
+    }
+}
+
+impl From<ConfigArgs> for browser_mcp::governance::config::cli::ConfigCommand {
+    fn from(a: ConfigArgs) -> Self {
+        use browser_mcp::governance::config::cli::ConfigCommand;
+        match a.action {
+            ConfigAction::List => ConfigCommand::List,
+            ConfigAction::Get { key } => ConfigCommand::Get { key },
+            ConfigAction::Set { key, value } => ConfigCommand::Set { key, value },
+            ConfigAction::Schema => ConfigCommand::Schema,
+            ConfigAction::Docs => ConfigCommand::Docs,
+            ConfigAction::Preset(PresetArgs { preset, dry_run }) => ConfigCommand::Preset {
+                preset: preset.into(),
+                dry_run,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -193,6 +325,65 @@ fn main() -> Result<()> {
             ..
         } => run_status(args),
         Cli {
+            command: Some(Command::Config(args)),
+            ..
+        } => browser_mcp::governance::config::cli::run(
+            args.into(),
+            browser_mcp::browser::pattern::is_valid_pattern,
+        )?,
+        Cli {
+            command:
+                Some(Command::Policy(PolicyArgs {
+                    command: PolicyCommand::Explain(ExplainArgs { file }),
+                })),
+            ..
+        } => {
+            let text = browser_mcp::governance::explain::explain_file(
+                &file,
+                browser_mcp::browser::pattern::is_valid_pattern,
+            )?;
+            print!("{text}");
+        }
+        Cli {
+            command:
+                Some(Command::Policy(PolicyArgs {
+                    command: PolicyCommand::Simulate(SimulateArgs { manifest, replay }),
+                })),
+            ..
+        } => {
+            use std::io::Write;
+            let outcome = browser_mcp::governance::simulate::run_simulate(
+                &manifest,
+                &replay,
+                browser_mcp::browser::pattern::is_valid_pattern,
+                browser_mcp::browser::directory::requires,
+                browser_mcp::browser::polarity::evaluate_host,
+            )?;
+            print!("{}", outcome.report);
+            std::io::stdout().flush().ok();
+            std::process::exit(if outcome.would_deny == 0 { 0 } else { 2 });
+        }
+        Cli {
+            command:
+                Some(Command::Policy(PolicyArgs {
+                    command:
+                        PolicyCommand::Init(InitArgs {
+                            template,
+                            out,
+                            force,
+                        }),
+                })),
+            ..
+        } => {
+            let out_path = out.unwrap_or_else(|| std::path::PathBuf::from("policy.json"));
+            let outcome =
+                browser_mcp::governance::templates::run_init(&template, &out_path, force)?;
+            print!(
+                "{}",
+                browser_mcp::governance::templates::render_orientation(&outcome)
+            );
+        }
+        Cli {
             command: None,
             manifest,
             debug: debug_flag,
@@ -242,11 +433,31 @@ fn run_native_host_role(debug: bool) -> Result<()> {
 /// mcp-server role: own the browser IPC endpoint + serve the native-host in the background, run the
 /// stdio MCP JSON-RPC loop in the foreground. Both share the [`Browser`] handle.
 fn run_server(manifest: Option<String>, debug_on: bool) -> Result<()> {
-    tracing::info!(
-        ?manifest,
-        debug_mode = debug_on,
-        "browser-mcp starting (mcp-server role; v1.0 engine -- all-open, no governance overlay)"
-    );
+    // Resolve the user-supplied manifest source (G12, shared format doc section 1.3): the
+    // --manifest flag wins when both it and BROWSER_MCP_MANIFEST are set. Plain synchronous
+    // I/O, before the async runtime starts: a source that is SELECTED but cannot be read,
+    // parsed, or validated is a fatal startup error (an org policy that fails open is worse
+    // than a crash), so this must happen before a single JSON-RPC line is served.
+    let user_source = manifest.or_else(|| std::env::var("BROWSER_MCP_MANIFEST").ok());
+    let loaded_policy = source::load_policy(user_source.as_deref(), pattern::is_valid_pattern)
+        .with_context(|| "loading the governance manifest")?;
+
+    match (&loaded_policy.manifest, &loaded_policy.origin) {
+        (Some(m), Some(origin)) => tracing::info!(
+            name = %m.name,
+            version = %m.version,
+            hash = %m.hash,
+            mode = ?m.mode,
+            origin = ?origin,
+            debug_mode = debug_on,
+            "browser-mcp starting (mcp-server role; governance overlay active)"
+        ),
+        _ => tracing::info!(
+            debug_mode = debug_on,
+            "browser-mcp starting (mcp-server role; no manifest: all-open)"
+        ),
+    }
+
     let sink = build_debug_sink(debug_on, "mcp-server");
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
@@ -265,7 +476,7 @@ fn run_server(manifest: Option<String>, debug_on: bool) -> Result<()> {
                 }
             }
         });
-        let result = browser_mcp::mcp::server::run(browser).await;
+        let result = browser_mcp::mcp::server::run(browser, loaded_policy, user_source).await;
         sink.flush(); // final snapshot after stdin closes
         result
     })?;

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Browser MCP</title>
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    width: 260px;
+    margin: 0;
+    padding: 12px;
+    color: #1a1a1a;
+  }
+  h1 {
+    font-size: 14px;
+    margin: 0 0 8px 0;
+  }
+  #status {
+    font-size: 13px;
+    margin-bottom: 10px;
+  }
+  #toggle {
+    width: 100%;
+    padding: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #toggle:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+  #shortcut-note {
+    font-size: 11px;
+    color: #666;
+    margin-top: 10px;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 14px 0;
+  }
+  #session-status {
+    font-size: 13px;
+    margin-bottom: 10px;
+  }
+  #session-button {
+    width: 100%;
+    padding: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #session-button.kill {
+    background: #b91c1c;
+    color: #fff;
+    border: 1px solid #7f1d1d;
+  }
+</style>
+</head>
+<body>
+  <h1>Browser MCP</h1>
+  <div id="status">Loading...</div>
+  <button id="toggle" disabled>Loading...</button>
+  <div id="shortcut-note">
+    Keyboard shortcut: Alt+Shift+P by default; change it at chrome://extensions/shortcuts
+  </div>
+  <hr>
+  <div id="session-status">Loading...</div>
+  <button id="session-button" disabled>Loading...</button>
+  <script src="popup.js"></script>
+</body>
+</html>

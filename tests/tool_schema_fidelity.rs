@@ -1,14 +1,20 @@
 //! Fidelity guard for the sacred `tools/list` surface (`src/mcp/schemas/tools.json`).
 //!
-//! Ensures the embedded schema fixture stays intact: exactly the 13 preserved tools, in order,
-//! each with a non-empty description and an object inputSchema. Once `tools/list` is implemented
-//! (Phase 1), this is extended to byte-compare the emitted output against the fixture.
+//! Ensures the embedded schema fixture stays intact: exactly the 13 trained tools, byte-identical
+//! and in order, each with a non-empty description and an object inputSchema, PLUS exactly one
+//! sanctioned addition: `explain` (ADR-0022 Decision 7), positioned last. This file was amended
+//! ONCE, in stage-3 task s07, to pin that 13-plus-1 invariant; ADR-0022 Decision 7 explicitly
+//! relaxes ADR-0007's byte-parity story from "byte-identical to the official extension" to "the
+//! 13 trained tool schemas are byte-identical; exactly one additive, argument-less governance
+//! tool is sanctioned on top." Any further change to this file, or to
+//! `src/transport/mcp/schemas/tools.json`, is UNSANCTIONED -- s07 is the only task ever
+//! authorized to touch either.
 
 use browser_mcp::mcp::tools::TOOLS_JSON;
-use serde_json::Value;
+use serde_json::{json, Value};
 
-/// The exact advertised surface, in order. Changing this array is changing the sacred contract.
-const EXPECTED: [&str; 13] = [
+/// The 13 trained tools, in order. Changing this array is changing the sacred contract.
+const EXPECTED_TRAINED: [&str; 13] = [
     "tabs_context_mcp",
     "tabs_create_mcp",
     "navigate",
@@ -24,6 +30,13 @@ const EXPECTED: [&str; 13] = [
     "update_plan",
 ];
 
+/// The `explain` tool's exact, pinned description string (ADR-0022 Decision 7).
+const EXPLAIN_DESCRIPTION: &str = "Returns this server's action directory: every available \
+action, the capability it requires (read, action, write, or execute; some require none), and a \
+short description of what it does, plus definitions of the capability vocabulary. Use it to \
+learn what you are allowed to do in this session. It does not read, summarize, or explain web \
+pages.";
+
 fn tools() -> Vec<Value> {
     let v: Value = serde_json::from_str(TOOLS_JSON).expect("tools.json must be valid JSON");
     v["tools"]
@@ -33,7 +46,7 @@ fn tools() -> Vec<Value> {
 }
 
 #[test]
-fn advertises_exactly_the_thirteen_preserved_tools_in_order() {
+fn advertises_exactly_the_thirteen_trained_tools_plus_explain_positioned_last() {
     let names: Vec<String> = tools()
         .iter()
         .map(|t| {
@@ -44,8 +57,58 @@ fn advertises_exactly_the_thirteen_preserved_tools_in_order() {
         })
         .collect();
     assert_eq!(
-        names, EXPECTED,
-        "the advertised tool set/order must match the sacred surface"
+        names.len(),
+        14,
+        "13 trained tools plus exactly one addition"
+    );
+    assert_eq!(
+        names[..13],
+        EXPECTED_TRAINED,
+        "the 13 trained tools must stay byte-identical and in order"
+    );
+    assert_eq!(
+        names[13], "explain",
+        "the 14th (and only sanctioned addition) must be named explain, positioned last"
+    );
+}
+
+/// The `explain` tool's own object matches ADR-0022 Decision 7 exactly: name, the pinned
+/// description string, and the no-argument inputSchema shape (byte-for-byte the same shape as
+/// `tabs_create_mcp`'s, the house style for a no-argument tool). No other tool was added: this
+/// is checked separately from position/count above so a future stray addition fails loudly here
+/// too, not just via the length assertion.
+#[test]
+fn explain_tool_object_matches_the_pinned_adr_0022_decision_7_shape() {
+    let all = tools();
+    let explain = all
+        .iter()
+        .find(|t| t["name"] == "explain")
+        .expect("explain tool present");
+    assert_eq!(explain["description"], EXPLAIN_DESCRIPTION);
+    assert_eq!(
+        explain["inputSchema"],
+        json!({
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+        }),
+        "explain's inputSchema must match tabs_create_mcp's no-argument shape exactly"
+    );
+
+    let tabs_create_mcp = all
+        .iter()
+        .find(|t| t["name"] == "tabs_create_mcp")
+        .expect("tabs_create_mcp tool present");
+    assert_eq!(
+        explain["inputSchema"], tabs_create_mcp["inputSchema"],
+        "explain's inputSchema shape must be byte-for-byte identical to tabs_create_mcp's"
+    );
+
+    assert_eq!(
+        all.len(),
+        14,
+        "no tool other than explain was added to the sacred fixture"
     );
 }
 

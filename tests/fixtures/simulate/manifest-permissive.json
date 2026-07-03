@@ -1,0 +1,12 @@
+{
+  "schema": 3,
+  "name": "simulate-permissive",
+  "version": "1",
+  "grants": [
+    {
+      "id": "all-access",
+      "hosts": { "allow": ["docs.example.com", "*.wiki.example.org", "forms.example.net", "unknown.example"] },
+      "allowed": ["read", "action", "write", "execute"]
+    }
+  ]
+}

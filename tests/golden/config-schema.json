@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "browser-mcp user configuration file",
+  "description": "User-level configuration for browser-mcp. Both fields are optional; an absent file means no user layer.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "preset": {
+      "description": "Preset supplying the preset-default layer. When absent, the built-in Minimal defaults (equal to safe) apply.",
+      "type": "string",
+      "enum": [
+        "fully_open",
+        "safe",
+        "restricted"
+      ]
+    },
+    "config": {
+      "description": "Flat map of dotted key name to value. Each entry sets the user layer for that key.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "engine.connection.first_call_wait_ms": {
+          "description": "Upper bound on the first-call wait for the extension handshake.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 5000
+        },
+        "content.security.secrets.redact": {
+          "description": "Redact values of secret fields (password/OTP/payment) in read_page output.",
+          "type": "boolean",
+          "default": true
+        },
+        "content.security.sacred_domains": {
+          "description": "Domains the agent must never touch: any tool call on a tab showing one of these domains, and any navigation targeting one, is denied. Always enforced.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "audit.enabled": {
+          "description": "Record one audit line per tool call (the flight recorder).",
+          "type": "boolean",
+          "default": true
+        },
+        "audit.destination": {
+          "description": "Where audit records are written.",
+          "type": "string",
+          "enum": [
+            "file",
+            "stderr"
+          ],
+          "default": "file"
+        },
+        "audit.file.path": {
+          "description": "Audit file path; empty means the platform default location.",
+          "type": "string",
+          "default": ""
+        },
+        "governance.mode": {
+          "description": "Default enforcement mode when the active manifest does not set one: observe records shadow denials, enforce blocks.",
+          "type": "string",
+          "enum": [
+            "observe",
+            "enforce"
+          ],
+          "default": "enforce"
+        }
+      }
+    }
+  }
+}

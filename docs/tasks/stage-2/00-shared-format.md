@@ -88,6 +88,12 @@ Config entries inside a user-supplied manifest apply at the user layer (never lo
 warning. Only the org policy file can populate the org-mandatory and org-recommended
 layers.
 
+NOTE (ADR-0025, docs/adr/0025-manifest-hot-reload.md): as of stage 4 the active manifest
+hot-reloads. The org policy path and a file:// user source are watched; the selection
+rule above is re-evaluated on every change (including file creation and deletion); an
+invalid edit keeps the last-good manifest (fail closed). The startup-fixed description
+below this point is retained as history for the stage-2 implementation record.
+
 ### 1.4. Default audit file path
 
 Used when `audit.file.path` resolves to the empty string (section 3.4):
@@ -279,6 +285,11 @@ JSON document. Delivered as the org policy file (section 1.2) or user-supplied
 
 Field rules:
 
+SUPERSEDED by ADR-0022 (docs/adr/0022-intent-calibrated-capabilities.md): the schema
+version is 3; schema 2 never shipped and is rejected. Additionally, per ADR-0023
+(docs/adr/0023-one-loader-for-the-policy-file.md), duplicate config keys in one manifest
+are a validation error. The text below is retained as history.
+
 - `schema`: integer, required. Stage 2 defines schema `2`. The binary rejects unknown
   schema versions with a clear error.
 - `name`: string, required. Manifest identity (ADR-0020 commitment 5). Stamped into every
@@ -318,6 +329,8 @@ This makes the hash insensitive to whitespace, line endings, and BOM, and sensit
 content and key order. The same manifest shipped with CRLF or LF hashes identically.
 
 ### 4.3. Grants
+
+SUPERSEDED by ADR-0022 (docs/adr/0022-intent-calibrated-capabilities.md): the grant fields `domains`, `access`, `tools`, and `exclude_tools` are replaced in manifest schema 3 by `hosts` (allow/deny polarity, ADR Decision 4) and `allowed` (capability sets, ADR Decision 3). The text below is retained as history for the stage-2 implementation record.
 
 Each grant object:
 
@@ -452,6 +465,8 @@ and reused by `policy simulate`, the local activity ledger, and session recap
 
 ### 6.1. Fields
 
+SUPERSEDED by ADR-0022 (docs/adr/0022-intent-calibrated-capabilities.md): the `rw` row of the table below is replaced by a `capability` field whose value is one of `read`, `action`, `write`, `execute`, or `none` (ADR Decision 8); every other row is unchanged. The text below is retained as history for the stage-2 implementation record.
+
 | Field | Type | Meaning |
 |---|---|---|
 | `event_id` | string | UUID v4, lowercase, hyphenated. Unique per record. |
@@ -467,6 +482,7 @@ and reused by `policy simulate`, the local activity ledger, and session recap
 | `denial_id` | string or null | The stable denial id (section 7) for `deny` and `shadow_deny`; `null` for `allow`. |
 | `duration_ms` | unsigned integer | Wall time from dispatch entry to result, in milliseconds. `0` for calls denied before dispatch. |
 | `manifest` | object or null | `{ "name": string, "version": string, "hash": string }` of the active manifest (`hash` per section 4.2, 64 lowercase hex chars); `null` when no manifest is active. |
+| `held` | boolean | `true` when the call was answered with the take-the-wheel pause text instead of executing (user hold, G10); on held records `decision` is `"allow"` and `duration_ms` is `0`. `false` on all other records. |
 
 Example (one line on disk):
 
@@ -554,6 +570,8 @@ observing must never present as protection (ADR-0020).
 ---
 
 ## 8. Read/write classification table
+
+SUPERSEDED by ADR-0022 (docs/adr/0022-intent-calibrated-capabilities.md): the observe/mutate classification in this whole section is replaced by the four-capability action directory (`read`, `action`, `write`, `execute`) with per-action requirement sets (ADR Decisions 1 and 2). The text below is retained as history for the stage-2 implementation record.
 
 Authoritative classification of the full tool surface. Tool names verified against
 `src/mcp/schemas/tools.json` (13 tools; note the `_mcp` suffixes on the tab tools, which
@@ -784,3 +802,34 @@ SPEC text. Amend the SPEC accordingly.
 13. **Settings surface (new SPEC section or 2.4 extension).** The native-messaging
     settings protocol of section 9 (get_status / get_config / set_config_key, locked-key
     rejection), extension as policy-free presentation (ADR-0019 commitment 5).
+14. **Manifest schema 3 grant shape (ADR-0022 Decisions 3, 4, 6; supersedes item 2 above).**
+    Grants drop `domains`, `access`, `tools`, and `exclude_tools` in favor of
+    `hosts: { "allow": [...], "deny": [...] }` (default deny; `*` is the explicit everything
+    token; most-specific match wins, exact tie goes to deny; per-grant scope only) and
+    `allowed: [capability, ...]` with subset-containment enforcement. `schema` bumps to 3;
+    schema 2 never shipped and is rejected.
+15. **Capability classification (ADR-0022 Decisions 1, 2; SPEC 3.1, 3.3, 5.4; supersedes
+    item 1 above).** The observe/mutate/manage tiering is replaced by four capabilities
+    (`read`, `action`, `write`, `execute`) and a per-action requirement table compiled into
+    the binary; no directory entry means deny, `requires: []` means unconditionally allowed.
+16. **Audit `capability` field (ADR-0022 Decision 8; SPEC 7.1, 7.2; amends item 9 above).**
+    The audit record's `rw` field is replaced by `capability`, a string: `read`, `action`,
+    `write`, `execute`, or `none`.
+17. **Advertised surface is 13 plus 1 (ADR-0022 Decision 7; SPEC 3, 5.1).** The 13 trained
+    tool schemas remain byte-identical; exactly one additive, argument-less governance tool
+    named `explain` is sanctioned on top, advertised under every manifest and always allowed.
+18. **One loader for the policy file (ADR-0023; SPEC 4.4).** The policy file has exactly
+    one parser and one schema authority (the manifest parser, schema 3); org config
+    layers derive from the parsed manifest's `config` entries; duplicate config keys are
+    a validation error; every load path performs one parse per invocation or change.
+19. **Tool registry and generic ingest pipeline (ADR-0024; SPEC 3, 5).** One per-tool
+    descriptor table (capability variants, resource shape, handler kind, hooks) drives
+    validity, classification, enforcement input, advertisement, explain, and result
+    post-processing; governance owns audit-record selection through a per-call scope;
+    the sacred check and grant path share one tab-URL resolution per call. The 13
+    trained tool schemas plus `explain` remain byte-identical (ADR-0022 Decision 7).
+20. **Manifest hot-reload (ADR-0025; SPEC 4.4, 2).** The org policy path and a file://
+    user manifest source are watched; grants/mode/hash swap atomically per call
+    snapshot; an advertised-set change emits `notifications/tools/list_changed`; policy
+    transitions record `manifest_reload` / `user_manifest_ignored` session events;
+    invalid edits keep the last-good manifest.

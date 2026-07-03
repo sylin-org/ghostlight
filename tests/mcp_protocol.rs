@@ -70,7 +70,11 @@ fn initialize_tools_list_and_tool_call_over_stdio() {
     let list = &responses[1];
     assert_eq!(list["id"], 2);
     let tools = list["result"]["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 13, "all 13 tools advertised");
+    assert_eq!(
+        tools.len(),
+        14,
+        "13 trained tools plus the ADR-0022 Decision 7 explain addition"
+    );
     assert_eq!(tools[0]["name"], "tabs_context_mcp");
     // The advertised surface must equal the embedded sacred fixture, byte for byte.
     let fixture: Value = serde_json::from_str(browser_mcp::mcp::tools::TOOLS_JSON).unwrap();
@@ -97,6 +101,161 @@ fn initialize_tools_list_and_tool_call_over_stdio() {
         "[hop: extension] Browser extension not connected. \
          Next step: check chrome://extensions and that Chrome is running.",
         "exact message: {text}"
+    );
+}
+
+/// ADR-0022 Decision 7: `explain` appears in `tools/list` last (the one sanctioned addition to
+/// the sacred surface) and `tools/call explain` returns the directory text without ever needing
+/// an extension attached -- proving the tool is handled entirely server-side, with zero
+/// native-messaging traffic.
+#[test]
+fn explain_is_advertised_last_and_answers_with_no_extension_attached() {
+    let responses = drive(&[
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"explain","arguments":{}}}),
+    ]);
+    assert_eq!(responses.len(), 3, "got {responses:?}");
+
+    let list = &responses[1];
+    let tools = list["result"]["tools"].as_array().expect("tools array");
+    assert_eq!(
+        tools.last().expect("at least one tool")["name"],
+        "explain",
+        "explain must be the last advertised tool"
+    );
+
+    let call = &responses[2];
+    assert_eq!(call["id"], 3);
+    assert_ne!(call["result"]["isError"], true, "explain must never error");
+    let text = call["result"]["content"][0]["text"]
+        .as_str()
+        .expect("text content block");
+    assert!(
+        text.starts_with("Capabilities: read = "),
+        "explain's response opens with the capability vocabulary: {text}"
+    );
+    assert!(
+        text.trim_end().ends_with(
+            "explain: requires nothing. Show every action available here and the capability \
+             each one requires."
+        ),
+        "explain's response lists its own row last: {text}"
+    );
+}
+
+/// Like [`drive`], but optionally launches the server under a schema-3 `--manifest` (written to a
+/// temp file and cleaned up after). `None` is the all-open posture (no `--manifest` argument).
+fn drive_with_manifest(manifest: Option<&str>, requests: &[Value]) -> Vec<Value> {
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let endpoint = format!("browser-mcp-it-{}-{}", std::process::id(), seq);
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_browser-mcp"));
+    cmd.env("BROWSER_MCP_ENDPOINT", &endpoint)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let manifest_path = manifest.map(|body| {
+        let path = std::env::temp_dir().join(format!(
+            "browser-mcp-mcp-protocol-{}-{}.json",
+            std::process::id(),
+            seq
+        ));
+        std::fs::write(&path, body).unwrap();
+        path
+    });
+    if let Some(path) = &manifest_path {
+        // `file://` source form: forward slashes, and a leading `/` before a Windows drive letter.
+        let forward = path.to_string_lossy().replace('\\', "/");
+        let uri = match forward.strip_prefix('/') {
+            Some(rest) => format!("file:///{rest}"),
+            None => format!("file:///{forward}"),
+        };
+        cmd.arg("--manifest").arg(uri);
+    }
+    let mut child = cmd.spawn().expect("spawn browser-mcp");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    for req in requests {
+        stdin
+            .write_all(serde_json::to_string(req).unwrap().as_bytes())
+            .unwrap();
+        stdin.write_all(b"\n").unwrap();
+    }
+    drop(stdin); // EOF -> the server loop ends
+
+    let stdout = child.stdout.take().expect("stdout");
+    let responses: Vec<Value> = BufReader::new(stdout)
+        .lines()
+        .map(|l| serde_json::from_str(&l.unwrap()).expect("each stdout line is JSON"))
+        .collect();
+    child.wait().expect("wait for child");
+    if let Some(path) = &manifest_path {
+        std::fs::remove_file(path).ok();
+    }
+    responses
+}
+
+/// Run `explain` under a given manifest posture and return its response text, asserting along the
+/// way that it is advertised last and never errors regardless of posture.
+fn explain_text_under_manifest(manifest: Option<&str>) -> String {
+    let responses = drive_with_manifest(
+        manifest,
+        &[
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"explain","arguments":{}}}),
+        ],
+    );
+    assert_eq!(responses.len(), 3, "got {responses:?}");
+    let list = responses
+        .iter()
+        .find(|r| r["id"] == 2)
+        .expect("tools/list reply");
+    let tools = list["result"]["tools"].as_array().expect("tools array");
+    assert_eq!(
+        tools.last().expect("at least one tool")["name"],
+        "explain",
+        "explain must be advertised (last) under every posture"
+    );
+    let call = responses
+        .iter()
+        .find(|r| r["id"] == 3)
+        .expect("explain tools/call reply");
+    assert_ne!(
+        call["result"]["isError"], true,
+        "explain must never error under any posture: {call:?}"
+    );
+    call["result"]["content"][0]["text"]
+        .as_str()
+        .expect("explain text content block")
+        .to_string()
+}
+
+/// ADR-0022 Decision 7 (the map is always the same map): `explain` returns byte-identical output
+/// regardless of manifest posture. It requires nothing and is answered server-side before any
+/// grant machinery, so a locked-down session sees the identical directory an all-open one does.
+/// Pins the actual invariant (same output everywhere), not merely that `explain` is present.
+#[test]
+fn explain_output_is_byte_identical_across_manifest_postures() {
+    let open = explain_text_under_manifest(None);
+    let empty_grants = explain_text_under_manifest(Some(
+        r#"{"schema":3,"name":"empty","version":"1","grants":[]}"#,
+    ));
+    let read_only = explain_text_under_manifest(Some(
+        r#"{"schema":3,"name":"ro","version":"1","grants":[{"id":"read-only","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+    ));
+
+    assert!(
+        open.starts_with("Capabilities: read = "),
+        "sanity: explain opens with the vocabulary block: {open}"
+    );
+    assert_eq!(
+        open, empty_grants,
+        "explain output must not change under an empty-grants manifest"
+    );
+    assert_eq!(
+        open, read_only,
+        "explain output must not change under a restrictive read-only manifest"
     );
 }
 

@@ -1,0 +1,16 @@
+{
+  "schema": 3,
+  "name": "developer-unrestricted",
+  "version": "2026.07.0",
+  "identity": {
+    "resolved_by": "local_file",
+    "principal": "local-user",
+    "groups": [],
+    "resolved_at": "2026-07-01T14:00:00Z"
+  },
+  "grants": [],
+  "config": [
+    { "key": "audit.enabled", "value": true, "level": "recommended" },
+    { "key": "audit.destination", "value": "stderr", "level": "recommended" }
+  ]
+}
