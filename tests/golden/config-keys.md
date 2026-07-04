@@ -51,7 +51,7 @@ Record one audit line per tool call (the flight recorder).
 Where audit records are written.
 
 - Type: enum
-- Constraints: one of: file, stderr
+- Constraints: one of: file, stderr, syslog, none
 - Default (fully_open): "file"
 - Default (safe, = built-in Minimal): "file"
 - Default (restricted): "file"
@@ -65,6 +65,16 @@ Audit file path; empty means the platform default location.
 - Default (fully_open): ""
 - Default (safe, = built-in Minimal): ""
 - Default (restricted): ""
+
+## `audit.syslog.address`
+
+UDP target for the syslog audit destination, as host:port.
+
+- Type: string
+- Constraints: none
+- Default (fully_open): "127.0.0.1:514"
+- Default (safe, = built-in Minimal): "127.0.0.1:514"
+- Default (restricted): "127.0.0.1:514"
 
 ## `governance.mode`
 

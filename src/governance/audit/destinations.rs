@@ -37,3 +37,17 @@ pub fn append_line_to_file(path: &std::path::Path, line: &str) -> std::io::Resul
 pub fn write_line_to_stderr(line: &str) {
     eprintln!("{line}");
 }
+
+/// Send one RFC 5424 syslog datagram to `addr` over UDP, carrying `line` (the serialized JSONL
+/// audit record, unchanged) as MSG. PRI 134 = facility 16 (local0) * 8 + severity 6 (info);
+/// HOSTNAME, MSGID, and STRUCTURED-DATA are the RFC NILVALUE `-`; APP-NAME is `ghostlight`;
+/// PROCID is this process's id. One socket per call, mirroring the open-per-record file
+/// destination.
+pub fn send_line_to_syslog(addr: std::net::SocketAddr, line: &str) -> std::io::Result<()> {
+    let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let pid = std::process::id();
+    let datagram = format!("<134>1 {ts} - ghostlight {pid} - - {line}");
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    socket.send_to(datagram.as_bytes(), addr)?;
+    Ok(())
+}

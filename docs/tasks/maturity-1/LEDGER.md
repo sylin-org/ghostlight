@@ -11,8 +11,8 @@ that task's single commit.
   f66fbf02ae4a3b54c8b9cf92a8f448519be0662a)
 - Baseline: `cargo test` (via `CARGO_TARGET_DIR=target/it`, see deviation in
   m01 entry) = 475 passed, 0 failed
-- Progress: m01, m02, m03 done
-- NEXT TASK: m04 (docs/tasks/maturity-1/m04-audit-syslog-none.md)
+- Progress: m01, m02, m03, m04 done
+- NEXT TASK: m05 (docs/tasks/maturity-1/m05-extension-lib-extraction.md)
 - Authority: BOOTSTRAP.md, then the task prompt, then 00-design.md, then
   ADR-0026/0027
 - Invariants: tree green and clean between tasks; no push; ASCII diff scan per
@@ -102,6 +102,51 @@ that task's single commit.
   it is confirmed live on the first push per the prompt.
 - Notes for the reviewer: the two workflow files are unvalidated by GitHub's
   own YAML parser until the first push to a remote that runs Actions.
+
+### m04 audit destinations syslog (RFC 5424/UDP) and none -- 2026-07-03
+- Commit: (see this task's commit)
+- Files touched: src/governance/config/mod.rs, src/governance/audit/mod.rs,
+  src/governance/audit/destinations.rs, tests/golden/config-schema.json,
+  tests/golden/config-keys.md, README.md (one line), docs/tasks/maturity-1/LEDGER.md.
+- Summary: Both STOP preconditions verified before editing. Added
+  `AUDIT_SYSLOG_ADDRESS` const + KeyDef (KeyConstraint::None, Str default
+  "127.0.0.1:514" in all three presets) directly after AUDIT_FILE_PATH;
+  widened AUDIT_DESTINATION's EnumVariants to
+  `["file", "stderr", "syslog", "none"]` and updated its doc comment; added
+  the Config field, from_preset/from_resolution population, and
+  audit_syslog_address() accessor mirroring audit_file_path() exactly. Added
+  `destinations::send_line_to_syslog` (binds 0.0.0.0:0, one socket per call,
+  formats `<134>1 {ts} - ghostlight {pid} - - {line}` with chrono
+  to_rfc3339_opts(Millis, true)). `Inner` gained `Syslog(SocketAddr)`;
+  `resolve_inner` gained "none" -> None and "syslog" -> ToSocketAddrs
+  resolution (warn+None on failure), with the `_ =>` file fallback kept
+  last and unchanged; `write_serialized` gained the Syslog arm
+  (warn-and-swallow on send failure, same as the File arm). Updated
+  `enum_key_parse_value` to the four-variant set, "syslog"/"none" now Ok,
+  "smoke-signals" as the new invalid probe, and the updated pinned error
+  message. Regenerated both goldens via the sanctioned Git Bash commands
+  (`cargo run --quiet -- config schema`/`config docs`); hand-reviewed diffs
+  matched exactly what 00-design.md predicted (enum gains two variants, one
+  new key block). Made the single pinned README.md edit.
+- Deviations from the prompt/design: 1. `cargo fmt` reformatted the
+  `enum_key_parse_value` assertion (`assert_eq!(err.to_string(), "...")`)
+  onto multiple lines after the string grew past rustfmt's line-width
+  threshold; this is rustfmt's own formatting, not a hand edit, and
+  `cargo fmt --check` is green. 2. All `cargo`/goldens commands in this task
+  continue to use `CARGO_TARGET_DIR=target/it` per the ground-rule-4
+  deviation recorded in m01 (ghostlight.exe processes still running).
+- Verification: `cargo fmt --check` clean (after the rustfmt pass above);
+  `cargo clippy --all-targets -- -D warnings` clean; `cargo test` -- 479
+  passed, 0 failed (baseline 475 + 4 new named tests). The four named tests
+  (`syslog_destination_sends_one_rfc5424_datagram_per_record`,
+  `none_destination_discards_records_and_reports_disabled`,
+  `invalid_syslog_address_disables_audit_with_a_warning`,
+  `reload_switches_file_to_syslog`) all pass. `config_schema_golden` test
+  binary: 5/5 pass (goldens byte-match). `rg -c "syslog"
+  tests/golden/config-keys.md` = 3 (>= 2, satisfies the pinned assertion).
+  `git status --short` showed exactly the six allowed files plus this
+  ledger. ASCII diff scan on staged changes: empty (clean).
+- Notes for the reviewer: none.
 
 ## RUN SUMMARY
 

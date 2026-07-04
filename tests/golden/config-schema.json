@@ -50,7 +50,9 @@
           "type": "string",
           "enum": [
             "file",
-            "stderr"
+            "stderr",
+            "syslog",
+            "none"
           ],
           "default": "file"
         },
@@ -58,6 +60,11 @@
           "description": "Audit file path; empty means the platform default location.",
           "type": "string",
           "default": ""
+        },
+        "audit.syslog.address": {
+          "description": "UDP target for the syslog audit destination, as host:port.",
+          "type": "string",
+          "default": "127.0.0.1:514"
         },
         "governance.mode": {
           "description": "Default enforcement mode when the active manifest does not set one: observe records shadow denials, enforce blocks.",

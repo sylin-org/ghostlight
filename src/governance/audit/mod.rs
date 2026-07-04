@@ -14,6 +14,7 @@
 
 pub mod destinations;
 
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
 
@@ -25,6 +26,7 @@ use crate::governance::ports::{AuditRecord, AuditSink, SessionEventRecord};
 enum Inner {
     File(PathBuf),
     Stderr,
+    Syslog(SocketAddr),
 }
 
 /// The audit flight recorder. Cheap to share by reference from the server loop. A disabled
@@ -42,6 +44,27 @@ fn resolve_inner(config: &Config) -> Option<Inner> {
     }
     match config.audit_destination() {
         "stderr" => Some(Inner::Stderr),
+        "none" => None,
+        "syslog" => match config.audit_syslog_address().to_socket_addrs() {
+            Ok(mut addrs) => match addrs.next() {
+                Some(addr) => Some(Inner::Syslog(addr)),
+                None => {
+                    tracing::warn!(
+                        address = config.audit_syslog_address(),
+                        "syslog address resolved to no addresses; audit disabled"
+                    );
+                    None
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    address = config.audit_syslog_address(),
+                    error = %e,
+                    "invalid syslog address; audit disabled"
+                );
+                None
+            }
+        },
         _ => {
             let path = if !config.audit_file_path().is_empty() {
                 Some(PathBuf::from(config.audit_file_path()))
@@ -136,6 +159,16 @@ impl Recorder {
                 }
             }
             Inner::Stderr => destinations::write_line_to_stderr(&line),
+            Inner::Syslog(addr) => {
+                if let Err(e) = destinations::send_line_to_syslog(*addr, &line) {
+                    tracing::warn!(
+                        error = %e,
+                        addr = %addr,
+                        kind,
+                        "failed to write audit record"
+                    );
+                }
+            }
         }
     }
 }
@@ -293,6 +326,169 @@ mod tests {
 
         recorder.record(&sample_record("navigate", None, "read"));
         assert!(file_path.exists());
+        std::fs::remove_file(&file_path).ok();
+    }
+
+    #[test]
+    fn syslog_destination_sends_one_rfc5424_datagram_per_record() {
+        use crate::governance::config::layers::{self, LayerInputs};
+        use serde_json::json;
+
+        let listener = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        listener
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let inputs = LayerInputs {
+            user: serde_json::Map::from_iter([
+                (
+                    crate::governance::config::AUDIT_ENABLED.to_string(),
+                    json!(true),
+                ),
+                (
+                    crate::governance::config::AUDIT_DESTINATION.to_string(),
+                    json!("syslog"),
+                ),
+                (
+                    crate::governance::config::AUDIT_SYSLOG_ADDRESS.to_string(),
+                    json!(addr.to_string()),
+                ),
+            ]),
+            ..Default::default()
+        };
+        let config = Config::from_resolution(&layers::resolve(&inputs));
+        let recorder = Recorder::from_config(&config);
+        assert!(recorder.is_enabled());
+
+        recorder.record(&sample_record("navigate", None, "read"));
+
+        let mut buf = [0u8; 4096];
+        let (n, _) = listener.recv_from(&mut buf).expect("expected one datagram");
+        let payload = String::from_utf8_lossy(&buf[..n]).to_string();
+        assert!(payload.starts_with("<134>1 "), "payload: {payload}");
+        assert!(payload.contains(" ghostlight "), "payload: {payload}");
+        assert!(payload.contains("\"event_id\""), "payload: {payload}");
+    }
+
+    #[test]
+    fn none_destination_discards_records_and_reports_disabled() {
+        use crate::governance::config::layers::{self, LayerInputs};
+        use serde_json::json;
+
+        let inputs = LayerInputs {
+            user: serde_json::Map::from_iter([
+                (
+                    crate::governance::config::AUDIT_ENABLED.to_string(),
+                    json!(true),
+                ),
+                (
+                    crate::governance::config::AUDIT_DESTINATION.to_string(),
+                    json!("none"),
+                ),
+            ]),
+            ..Default::default()
+        };
+        let config = Config::from_resolution(&layers::resolve(&inputs));
+        let recorder = Recorder::from_config(&config);
+        assert!(!recorder.is_enabled());
+
+        let path = temp_path("none-destination");
+        let _ = std::fs::remove_file(&path);
+        recorder.record(&sample_record("navigate", None, "read"));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn invalid_syslog_address_disables_audit_with_a_warning() {
+        use crate::governance::config::layers::{self, LayerInputs};
+        use serde_json::json;
+
+        let inputs = LayerInputs {
+            user: serde_json::Map::from_iter([
+                (
+                    crate::governance::config::AUDIT_ENABLED.to_string(),
+                    json!(true),
+                ),
+                (
+                    crate::governance::config::AUDIT_DESTINATION.to_string(),
+                    json!("syslog"),
+                ),
+                (
+                    crate::governance::config::AUDIT_SYSLOG_ADDRESS.to_string(),
+                    json!("not an address"),
+                ),
+            ]),
+            ..Default::default()
+        };
+        let config = Config::from_resolution(&layers::resolve(&inputs));
+        let recorder = Recorder::from_config(&config);
+        assert!(!recorder.is_enabled());
+    }
+
+    #[test]
+    fn reload_switches_file_to_syslog() {
+        use crate::governance::config::layers::{self, LayerInputs};
+        use serde_json::json;
+
+        let file_path = temp_path("reload-to-syslog");
+        let _ = std::fs::remove_file(&file_path);
+
+        let file_inputs = LayerInputs {
+            user: serde_json::Map::from_iter([
+                (
+                    crate::governance::config::AUDIT_ENABLED.to_string(),
+                    json!(true),
+                ),
+                (
+                    crate::governance::config::AUDIT_DESTINATION.to_string(),
+                    json!("file"),
+                ),
+                (
+                    crate::governance::config::AUDIT_FILE_PATH.to_string(),
+                    json!(file_path.to_string_lossy()),
+                ),
+            ]),
+            ..Default::default()
+        };
+        let config = Config::from_resolution(&layers::resolve(&file_inputs));
+        let recorder = Recorder::from_config(&config);
+        assert!(recorder.is_enabled());
+
+        let listener = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        listener
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let syslog_inputs = LayerInputs {
+            user: serde_json::Map::from_iter([
+                (
+                    crate::governance::config::AUDIT_ENABLED.to_string(),
+                    json!(true),
+                ),
+                (
+                    crate::governance::config::AUDIT_DESTINATION.to_string(),
+                    json!("syslog"),
+                ),
+                (
+                    crate::governance::config::AUDIT_SYSLOG_ADDRESS.to_string(),
+                    json!(addr.to_string()),
+                ),
+            ]),
+            ..Default::default()
+        };
+        let config = Config::from_resolution(&layers::resolve(&syslog_inputs));
+        recorder.reload(&config);
+        assert!(recorder.is_enabled());
+
+        recorder.record(&sample_record("navigate", None, "read"));
+
+        let mut buf = [0u8; 4096];
+        let (n, _) = listener.recv_from(&mut buf).expect("expected one datagram");
+        let payload = String::from_utf8_lossy(&buf[..n]).to_string();
+        assert!(payload.starts_with("<134>1 "), "payload: {payload}");
+
         std::fs::remove_file(&file_path).ok();
     }
 }

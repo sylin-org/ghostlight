@@ -244,7 +244,7 @@ single dispatch chokepoint inside the binary without touching any tool code.
   configuration and org policy locks; the `explain` tool; and live manifest hot-reload. Built and
   live-verified against a real browser on Windows.
 - **Packaging (partial).** Cross-platform release builds, CI, and macOS/Linux live verification are
-  still to do, along with `syslog`/`http` audit destinations.
+  still to do, along with the `http` audit destination.
 
 ## Documentation
 

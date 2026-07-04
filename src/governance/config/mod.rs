@@ -359,12 +359,15 @@ pub const CONTENT_SECURITY_SACRED_DOMAINS: &str = "content.security.sacred_domai
 /// 1).
 pub const AUDIT_ENABLED: &str = "audit.enabled";
 
-/// `audit.destination` -- where audit records are written (`file` or `stderr`; `syslog`,
-/// `http`, and `none` are deferred beyond stage 2).
+/// `audit.destination` -- where audit records are written (`file`, `stderr`, `syslog` as RFC
+/// 5424 over UDP, or `none`; `http` is deferred, ADR-0026 Decision 4).
 pub const AUDIT_DESTINATION: &str = "audit.destination";
 
 /// `audit.file.path` -- audit file path; empty means the platform default location.
 pub const AUDIT_FILE_PATH: &str = "audit.file.path";
+
+/// `audit.syslog.address` -- UDP target for the syslog audit destination, as host:port.
+pub const AUDIT_SYSLOG_ADDRESS: &str = "audit.syslog.address";
 
 /// `governance.mode` -- the manifest-level default enforcement mode when the active manifest
 /// does not set its own. Precedence for the effective mode of a decision: per-grant `mode` >
@@ -414,7 +417,7 @@ pub const KEYS: &[KeyDef] = &[
     KeyDef {
         key: AUDIT_DESTINATION,
         description: "Where audit records are written.",
-        constraint: KeyConstraint::EnumVariants(&["file", "stderr"]),
+        constraint: KeyConstraint::EnumVariants(&["file", "stderr", "syslog", "none"]),
         default_fully_open: KeyValue::Enum("file"),
         default_safe: KeyValue::Enum("file"),
         default_restricted: KeyValue::Enum("file"),
@@ -426,6 +429,14 @@ pub const KEYS: &[KeyDef] = &[
         default_fully_open: KeyValue::Str(""),
         default_safe: KeyValue::Str(""),
         default_restricted: KeyValue::Str(""),
+    },
+    KeyDef {
+        key: AUDIT_SYSLOG_ADDRESS,
+        description: "UDP target for the syslog audit destination, as host:port.",
+        constraint: KeyConstraint::None,
+        default_fully_open: KeyValue::Str("127.0.0.1:514"),
+        default_safe: KeyValue::Str("127.0.0.1:514"),
+        default_restricted: KeyValue::Str("127.0.0.1:514"),
     },
     KeyDef {
         key: GOVERNANCE_MODE,
@@ -559,6 +570,7 @@ pub struct Config {
     audit_enabled: bool,
     audit_destination: String,
     audit_file_path: String,
+    audit_syslog_address: String,
     governance_mode: EffectiveMode,
 }
 
@@ -573,6 +585,7 @@ impl Config {
             audit_enabled: preset_bool(AUDIT_ENABLED, preset),
             audit_destination: preset_string_like(AUDIT_DESTINATION, preset),
             audit_file_path: preset_string_like(AUDIT_FILE_PATH, preset),
+            audit_syslog_address: preset_string_like(AUDIT_SYSLOG_ADDRESS, preset),
             governance_mode: EffectiveMode::from_config_str(&preset_string_like(
                 GOVERNANCE_MODE,
                 preset,
@@ -601,6 +614,7 @@ impl Config {
             audit_enabled: resolved_bool(resolution, AUDIT_ENABLED),
             audit_destination: resolved_string_like(resolution, AUDIT_DESTINATION),
             audit_file_path: resolved_string_like(resolution, AUDIT_FILE_PATH),
+            audit_syslog_address: resolved_string_like(resolution, AUDIT_SYSLOG_ADDRESS),
             governance_mode: EffectiveMode::from_config_str(&resolved_string_like(
                 resolution,
                 GOVERNANCE_MODE,
@@ -638,6 +652,11 @@ impl Config {
     /// Audit file path; empty means the platform default location (`audit.file.path`).
     pub fn audit_file_path(&self) -> &str {
         &self.audit_file_path
+    }
+
+    /// UDP target for the syslog audit destination, as host:port (`audit.syslog.address`).
+    pub fn audit_syslog_address(&self) -> &str {
+        &self.audit_syslog_address
     }
 
     /// The default enforcement mode (`governance.mode`), parsed once at resolution time.
@@ -909,11 +928,19 @@ mod tests {
             k.parse_value(&json!("stderr"), unused_pattern_valid),
             Ok(ConfigValue::Enum("stderr".into()))
         );
-        let err = ConfigValueError::ExpectedVariant {
-            variants: &["file", "stderr"],
-        };
         assert_eq!(
             k.parse_value(&json!("syslog"), unused_pattern_valid),
+            Ok(ConfigValue::Enum("syslog".into()))
+        );
+        assert_eq!(
+            k.parse_value(&json!("none"), unused_pattern_valid),
+            Ok(ConfigValue::Enum("none".into()))
+        );
+        let err = ConfigValueError::ExpectedVariant {
+            variants: &["file", "stderr", "syslog", "none"],
+        };
+        assert_eq!(
+            k.parse_value(&json!("smoke-signals"), unused_pattern_valid),
             Err(err.clone())
         );
         assert_eq!(
@@ -924,7 +951,10 @@ mod tests {
             k.parse_value(&json!(1), unused_pattern_valid),
             Err(err.clone())
         );
-        assert_eq!(err.to_string(), "expected one of: file, stderr");
+        assert_eq!(
+            err.to_string(),
+            "expected one of: file, stderr, syslog, none"
+        );
     }
 
     #[test]
