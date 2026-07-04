@@ -11,3 +11,4 @@
 pub mod executor;
 pub mod mcp;
 pub mod native;
+pub mod watchdog;

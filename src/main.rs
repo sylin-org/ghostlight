@@ -458,11 +458,36 @@ fn run_server(manifest: Option<String>, debug_on: bool) -> Result<()> {
         ),
     }
 
+    // The MCP client that spawned us, captured before the runtime starts (ADR-0029). The
+    // parent-death watchdog below watches it; None (no resolvable parent) simply skips the
+    // watchdog and leaves stdin EOF as the sole exit trigger, as before.
+    let parent = ghostlight::proc::parent();
+
     let sink = build_debug_sink(debug_on, "mcp-server");
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let browser = Browser::with_debug(sink.clone());
         let endpoint = ipc::default_endpoint();
+
+        // Parent-death watchdog (ADR-0029): stdin EOF is the intended shutdown signal, but on
+        // Windows a killed (not cleanly closed) client can leave our stdin read parked forever, so
+        // the read loop would never end and the process would orphan, holding the IPC endpoint. If
+        // the parent exits, flush observability and exit directly -- process::exit does not join the
+        // parked stdin thread (the reason the native-host role exits the same way), and it releases
+        // the endpoint for the next session.
+        if let Some(parent) = parent {
+            let sink = sink.clone();
+            tokio::spawn(async move {
+                ghostlight::transport::watchdog::wait_until_orphaned(parent).await;
+                tracing::warn!(
+                    parent_pid = parent.pid,
+                    "MCP client exited; ghostlight mcp-server shutting down"
+                );
+                sink.flush();
+                std::process::exit(0);
+            });
+        }
+
         tokio::spawn({
             let browser = browser.clone();
             async move {
