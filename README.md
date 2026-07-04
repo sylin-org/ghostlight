@@ -5,36 +5,35 @@
 **Governed access to your own browser, for AI agents.**
 
 Ghostlight Browser is a single Rust binary plus a thin Chromium (Manifest V3) extension that gives
-an AI coding agent controlled access to your real, authenticated browser session. It drives the
+an AI agent controlled access to your real, authenticated browser session. It drives the
 browser you are already logged in to, so the agent can observe and act on the web apps you already
 use, through any MCP client (Claude Code, Cursor, and others). A separable governance layer decides,
 per call, what the agent is allowed to do.
 
-## Status
+## What it does
 
-Both halves are built: the automation engine and the governance layer. All of this runs today and
-has been verified against a real browser:
+Two concerns, one binary: a full browser-automation engine, and a governance layer that decides,
+per call, what the agent may do.
 
 - **The full tool surface.** The 13 trained tools at byte-parity with the official Claude-in-Chrome
-  schemas, plus one additive governance tool, `explain`. Screenshots with coordinate mapping, an
+  schemas, plus one additive governance tool, `explain`: screenshots with coordinate mapping, an
   on-page agent cursor, accessibility-tree and text reads, form input (including shadow DOM),
   in-page JavaScript, console and network inspection, and tab management.
 - **The governance layer.** Capability-based policy manifests (per-call `read` / `action` / `write`
   / `execute` classification), identity-bound domain grants with allow/deny host polarity, sacred
-  never-touch domains, a take-the-wheel pause and a panic kill switch, `observe` / `enforce` modes
+  never-touch domains, a take-the-wheel pause and a panic kill switch, `observe` and `enforce` modes
   (observe records shadow denials without blocking), and structured JSON-Lines audit to file,
   stderr, or RFC 5424 syslog. Layered configuration with organization policy locks, and live
-  manifest hot-reload (edit the policy file and the running session re-resolves with no restart,
-  failing closed on a bad edit).
-- **All-open is first-class.** With no manifest, the engine runs unrestricted: the agent has the
-  full capability surface with no access decisions beyond secret-field redaction. Governance is an
+  manifest hot-reload: edit the policy file and the running session re-resolves with no restart,
+  failing closed on a bad edit.
+- **All-open is first-class.** With no manifest, the engine runs unrestricted -- the agent has the
+  full capability surface, with no access decisions beyond secret-field redaction. Governance is an
   overlay you opt into, not a stripped-down build.
-- **Operability.** Single portable binary with a built-in installer, a `doctor` diagnostic, a
+- **Operability.** A single portable binary with a built-in installer, a `doctor` diagnostic, a
   layered `config` CLI, and a `policy` CLI (explain / simulate / init).
 
-Maturity: this is a developer setup. The extension is loaded unpacked, and Windows is the platform
-it has been verified on end to end. The macOS and Linux code paths exist but are not yet verified
-against a live browser. There is no published package or cross-platform release build yet.
+Windows, macOS, and Linux all build and pass the full test suite in CI; end-to-end browser use is
+verified on Windows.
 
 ## What makes it different
 
@@ -45,7 +44,7 @@ against a live browser. There is no published package or cross-platform release 
   browser to gain a technical property.
 - **Governance fused with the engine, not bolted on.** Access control, capability classification,
   and audit live at a single dispatch chokepoint in the binary. A governed client only sees the
-  tools its grants permit, and every call is checked and recorded. All-open remains a first-class
+  tools its grants permit, and every call is checked and recorded. All-open is a first-class
   supported mode.
 - **Single portable binary, zero runtime dependencies.** No Node.js, no `npx`, no separate servers
   to babysit. The class of install failures that affects Node-based browser MCPs does not exist.
@@ -239,18 +238,13 @@ single dispatch chokepoint inside the binary without touching any tool code.
 
 ## Roadmap
 
-- **Engine (done).** The 13-tool automation surface, hardened and live-verified.
-- **Governance (done).** The audit flight recorder; sacred never-touch domains with a take-the-wheel
-  pause and panic kill switch; the full manifest engine (identity-bound grants, capability
-  enforcement, tool-advertisement filtering, `observe` / `enforce` modes) with layered
-  configuration and org policy locks; the `explain` tool; and live manifest hot-reload. Built and
-  live-verified against a real browser on Windows.
-- **CI (done).** A three-OS gate (fmt, clippy `-D warnings`, the full test suite on Ubuntu, macOS,
-  and Windows) plus extension unit tests on every push, and a tag-triggered release workflow that
-  builds the four shipping targets.
-- **Packaging (partial).** Still to do: macOS/Linux live verification against a real browser, a
-  first tagged release, the Chrome Web Store listing, offline license keys (see
-  [PRICING.md](PRICING.md)), and the `http` audit destination.
+- Live browser verification on macOS and Linux, and a first tagged release with prebuilt binaries
+  for all four targets.
+- A Chrome Web Store listing, so the extension installs without developer mode.
+- Offline license keys for organizations (see [PRICING.md](PRICING.md)), and an `http` audit
+  destination alongside file, stderr, and syslog.
+- `managed://` policy distribution for MDM and Group Policy fleets.
+- More adapters on the same governance spine -- the browser is the first.
 
 ## Direction
 
@@ -285,7 +279,7 @@ This is a clean-room Rust rewrite informed by
 [open-claude-in-chrome](https://github.com/noemica-io/open-claude-in-chrome), a Node.js
 reimplementation of the Claude-in-Chrome extension. Prior art is studied as a concern surface (the
 hazards and questions others hit), not as a feature catalog to copy. The tool schemas are preserved
-verbatim so a trained agent behaves as expected; everything behind them is rebuilt.
+verbatim so a trained agent behaves as expected; everything behind them is our own.
 
 ## The name
 
