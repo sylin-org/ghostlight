@@ -11,8 +11,9 @@ Ghostlight is new, and the first ten organizations get the best deal it will eve
 
 - **12 months of enterprise-equivalent licensing, free.**
 - After the free year, renewal at **50% of the then-current list price, permanently**.
-- In exchange: one 30-minute feedback call per quarter, and one reference (a named case
-  study if your policies allow it; an anonymized-but-quotable reference is fine too).
+- In exchange: reply to a short emailed questionnaire (5-8 topics) once a quarter, and
+  give one reference (a named case study if your policies allow it; an
+  anonymized-but-quotable reference is fine too). No calls, no meetings.
 
 Apply: email **hello@sylin.org** with the subject "Founding org", a sentence about your
 use case, and rough seat count. There is a one-page agreement; no procurement gymnastics.

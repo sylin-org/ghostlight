@@ -1,10 +1,15 @@
 # L06: business operation templates (transcription only)
 
+AMENDED 2026-07-04 (by the batch author, before execution): the founding-program ask
+changed from a quarterly call to a quarterly email questionnaire (ADR-0028 Decision 7,
+revised); the agreement's clause 2a below reflects it, and a fifth template
+(founding-questionnaire.md) is added.
+
 ## Goal
 
 The license-operations templates ADR-0028 Decision 8 names: two renewal emails, the
-founding-org agreement, and the private-repo expiry-reminder workflow. Pure
-transcription; every byte is pinned below.
+founding-org agreement, the founding questionnaire, and the private-repo
+expiry-reminder workflow. Pure transcription; every byte is pinned below.
 
 ## Authority
 
@@ -17,7 +22,7 @@ docs/business/templates/ does not exist. If it exists, STOP.
 
 ## Required behavior
 
-Create docs/business/templates/ with exactly these four files.
+Create docs/business/templates/ with exactly these five files.
 
 ### 1. renewal-t30.md
 
@@ -77,7 +82,8 @@ Create docs/business/templates/ with exactly these four files.
     1. Grant. The vendor issues the member an enterprise-equivalent Ghostlight license,
        free of charge, for twelve (12) months from the effective date.
     2. In exchange, the member agrees to:
-       a. one 30-minute feedback call per quarter with the vendor, and
+       a. a written reply, by email, to the vendor's short quarterly questionnaire
+          (5-8 topics; no calls or meetings are required), and
        b. one reference: a named case study if the member's policies allow it, or an
           anonymized-but-quotable reference otherwise.
     3. Founding price lock. After the free year, the member may renew at fifty percent
@@ -94,7 +100,38 @@ Create docs/business/templates/ with exactly these four files.
     Signed,
     {founder_name} (Sylin) / {member_signatory} ({org})
 
-### 4. expiry-reminder-workflow.yml
+### 4. founding-questionnaire.md
+
+    # Founding org quarterly questionnaire (template)
+
+    Subject: Ghostlight quarterly check-in -- {org} ({quarter})
+
+    Hi {name},
+
+    The quarterly founding-org check-in, as promised: one email, reply inline,
+    as short or long as you like. No call, no meeting.
+
+    1. Usage. What did agents + Ghostlight actually get used for this quarter
+       (workflows, teams, rough volume)?
+    2. Policy. How has your manifest changed (grants added or removed, mode
+       changes)? Was there a policy you WANTED to express but could not?
+    3. Denials. Any denial id (D-...) that was wrong, confusing, or -- equally
+       useful -- one that saved you from something?
+    4. Audit. Is the stream landing where you need it (SIEM, file)? Anything
+       missing from the records?
+    5. Friction. The single most annoying thing about Ghostlight right now.
+    6. Breakage. Did anything break after a Chrome, extension, or binary update?
+    7. Value. If the free year ended today, would you renew at your locked rate?
+       If not an easy yes: what would make it one?
+    8. Wish. One thing you would have us build next.
+
+    Skip anything that does not apply. An anonymized policy pattern from your
+    answers may end up in the public examples cookbook; we will always ask first.
+
+    Thanks,
+    {founder_name}
+
+### 5. expiry-reminder-workflow.yml
 
     # Template for the PRIVATE ghostlight-licensing repo (never runs in this repo).
     # Reads issued/*.json claims files and opens a reminder issue at T-30 and T-7.
@@ -144,10 +181,14 @@ Only docs/business/templates/ is created; nothing else changes.
 
 ## Tests (from repo root)
 
-- `ls docs/business/templates` shows exactly the four file names above.
+- `ls docs/business/templates` shows exactly the five file names above.
 - `rg -c "Continuity Promise" docs/business/templates/renewal-t30.md` prints `1`.
 - `rg -c "everything keeps working" docs/business/templates/renewal-t0.md` prints >= 1.
 - `rg -c "fifty percent" docs/business/templates/founding-org-agreement.md` prints `1`.
+- `rg -c "quarterly questionnaire" docs/business/templates/founding-org-agreement.md`
+  prints `1`.
+- `rg -c "No call, no meeting" docs/business/templates/founding-questionnaire.md`
+  prints `1`.
 - `rg -n "\t" docs/business/templates/expiry-reminder-workflow.yml` prints nothing.
 - `rg -n "[^\x00-\x7F]" docs/business/templates/` prints nothing.
 

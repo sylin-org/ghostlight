@@ -43,8 +43,9 @@ docs/business/PLAN.md). Check items off in place; add dates.
 
 - [ ] Respond to hello@ founding applications; sign the one-page agreement; issue founding
       licenses (sign with the gen-1 seed; commit claims JSON to ghostlight-licensing).
-- [ ] Quarterly: one 30-minute call per founding org; harvest an anonymized policy
-      pattern from each into the examples/ cookbook.
+- [ ] Quarterly: email the founding questionnaire (docs/business/templates/
+      founding-questionnaire.md) to each founding org; harvest an anonymized policy
+      pattern from the replies into the examples/ cookbook.
 - [ ] Renewal emails when the private repo's Action opens a T-30/T-7 issue (templates:
       docs/business/templates/). Lead with the Continuity Promise, always.
 - [ ] Monthly tagged release; watch the first CI run of every new workflow

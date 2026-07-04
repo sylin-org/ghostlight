@@ -132,7 +132,7 @@ it.
 |---|---|---|
 | `development` | free, self-signed | evaluation and development, any org size; never production |
 | `community` | free, self-serve key | production use, organizations of 5 or fewer people |
-| `founding` | free 12 months, then 50% of list forever | 10 slots; quarterly feedback call + reference (named case study preferred, anonymized accepted) |
+| `founding` | free 12 months, then 50% of list forever | 10 slots; quarterly email questionnaire + reference (named case study preferred, anonymized accepted) |
 | `team` | ~$12/user/month, billed annually, 5-seat minimum | org policy at scale, email support (2-business-day response) |
 | `enterprise` | from ~$10k/year | team + procurement paperwork (questionnaires, MSA, DPA), 1-business-day support, deployment help, roadmap input |
 
@@ -154,12 +154,13 @@ Published on the pricing page, quoted in every renewal email, and binding on all
 
 ### 7. The founding program
 
-Ten slots. Twelve months of enterprise-equivalent licensing free. In exchange: one
-30-minute feedback call per quarter and a reference (named case study preferred; an
-anonymized-but-quotable reference is acceptable for teams that cannot be named). Post-year
-price locked at 50% of then-current list, forever. Applications by email
-(founding@sylin.org); a one-page agreement per org (template in
-`docs/business/templates/`).
+Ten slots. Twelve months of enterprise-equivalent licensing free. In exchange: a reply
+to a short quarterly questionnaire (5-8 topics, sent and answered by email; template in
+`docs/business/templates/`) and a reference (named case study preferred; an
+anonymized-but-quotable reference is acceptable for teams that cannot be named). No
+calls, no meetings. Post-year price locked at 50% of then-current list, forever.
+Applications by email (hello@sylin.org, the single sink address); a one-page agreement
+per org (template in `docs/business/templates/`).
 
 ### 8. License operations
 
@@ -196,6 +197,12 @@ configured audit destinations require. This decision is permanent and marketing-
   reopen without new facts.
 - Renewal-email posture ("rest assured everything keeps working") is the founder's own
   wording and is embodied in Decision 6.
+- 2026-07-04 same-week revisions, before any external party relied on the terms
+  (precedent: the in-place ADR-0026/0027 corrections): the founding-program ask was
+  reduced from a quarterly 30-minute call to a short quarterly email questionnaire (5-8
+  topics), founder's words: "we can reduce the floor even more: An email"; and the
+  operative contact address became the single sink hello@sylin.org. Decisions 5 and 7
+  updated in place.
 
 ## Consequences
 

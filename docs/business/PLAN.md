@@ -43,7 +43,7 @@ Three structural advantages no incumbent can easily copy:
 |---|---|---|
 | development | free, self-signed | evaluation anywhere, never production |
 | community | free, self-serve key | production, orgs of 5 or fewer |
-| founding | free 12 months, then 50% of list forever | 10 slots, reference + quarterly call |
+| founding | free 12 months, then 50% of list forever | 10 slots, reference + quarterly email questionnaire |
 | team | ~$12/user/month, annual, 5-seat minimum | self-serve |
 | enterprise | from ~$10k/year | procurement paperwork, SLA, deployment help |
 
@@ -141,16 +141,17 @@ All zero-dollar, all frontier-authored, all public under docs/ or the site:
 
 ## Phase 2 -- Founding organizations (months 2-6)
 
-- Publish the offer: 10 slots, 12 months enterprise-equivalent free, quarterly
-  30-minute feedback call plus a reference (named preferred, anonymized accepted),
-  post-year price locked at 50% of list forever. One-page agreement
+- Publish the offer: 10 slots, 12 months enterprise-equivalent free, a short quarterly
+  email questionnaire (5-8 topics; template in docs/business/templates/) plus a
+  reference (named preferred, anonymized accepted), post-year price locked at 50% of
+  list forever. No calls, no meetings. One-page agreement
   (docs/business/templates/founding-org-agreement.md). Applications: hello@sylin.org.
 - Sourcing: Show HN reply threads ("we need this at work" commenters), org-affiliated
   stargazers, the MCP Discord, LinkedIn, Anthropic community channels.
 - Each onboarding yields an anonymized policy pattern for an examples/ policy cookbook
   (docs and marketing in one artifact).
-- No telemetry means success is measured in conversations: ask founding orgs for their
-  own numbers in the quarterly calls. Free instrumentation that respects the
+- No telemetry means success is measured in what founding orgs tell you: the quarterly
+  questionnaire asks for their own numbers. Free instrumentation that respects the
   principles: GitHub stars/traffic, CWS install counts, listing referrers.
 
 ## Phase 3 -- Revenue (months 9-18)
