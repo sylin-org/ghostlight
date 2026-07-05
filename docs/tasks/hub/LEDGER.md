@@ -6,7 +6,7 @@ executor resumes from RESUME HERE with no other context.
 
 ## RESUME HERE
 
-**Next task: H4 (`H4-*.md`, binary-authoritative cross-session tab isolation).** H0 landed (pure
+**Next task: H5 (`H5-*.md`, reconnect grace window + honest bounded queue).** H0 landed (pure
 code move; `src/hub` composition root extracted). H1 landed (transport-generic `serve_session<S>`
 + `ServiceContext`, byte-identical single-session refactor). H2 landed (persistent SERVICE + thin
 ADAPTER + genuine multiplex over the amended two-endpoint design; the kill-hook fan-out; ADR-0004
@@ -20,12 +20,23 @@ one; `relay_adapter` mints a real GUID instead of the old `""` placeholder; `ser
 plain `guid: SessionGuid` (never `Option`) for every session, including the service's own lone
 stdio session; the dead `server::run()` 2-arg wrapper is deleted; `tests/architecture.rs`'s a7
 scanner is EXTENDED (the sanctioned H3 edit) to also reject bare `tabId`/`token`/`socket`
-identifiers in `src/governance/**`, scoped to code lines (see the H3 Log's D3 for why). PINS.md
-SS9's forward guidance for H4 (a shared `ServiceContext.owned_tabs: Arc<Mutex<HashMap<i64,
-SessionGuid>>>`, ownership = `map.get(&tab_id) == Some(&my_guid)`, adoption =
-`map.entry(tab_id).or_insert_with(|| my_guid.clone())`) is the starting point -- RE-READ it in full,
-plus PINS.md SS3 (the pinned "unknown tab" denial shape), before starting H4. Follow the per-task
-procedure in `BOOTSTRAP.md`.
+identifiers in `src/governance/**`, scoped to code lines (see the H3 Log's D3 for why). H4 landed:
+`ServiceContext` gained an `owned_tabs: Arc<Mutex<HashMap<i64, SessionGuid>>>` field
+(`src/hub/mod.rs`); `src/hub/session.rs` gained the pure `owns_or_adopts_tab` map operation;
+`src/transport/mcp/server.rs`'s `serve_session` read loop now runs a NEW `check_tab_ownership`
+pre-dispatch gate (ahead of `handle_line`/`pipeline::handle_tools_call`) that refuses a `tools/call`
+naming a `tabId` a DIFFERENT session already owns with the uniform `"unknown tab"` text, recorded as
+a deny via `Governance::begin`/`CallAudit::sacred_deny` (`domain: null`, `held: false`,
+`duration_ms: 0`, rule `cross_session/unowned_tab`); `pipeline.rs` and `src/governance/**` are
+UNTOUCHED. New `tests/hub_isolation.rs` (2 tests, both green). See the H4 Log for 3 deviations
+(D1: `tabs_create_mcp`-response adoption not implemented, no pinned extraction oracle exists --
+first-touch adoption alone covers the realistic case; D2: the test's "nonexistent" tabId is
+pre-seeded as owned by A rather than left absent from the map, since a genuinely absent tabId is
+first-touch-ADOPTED, not refused, under the pinned mechanism; D3: the test drives `serve_session`
+directly over an in-process `tokio::io::duplex`, constructing `ServiceContext` via its own pub
+fields rather than spawning the real binary, and must set the `hub::role` marker itself). RE-READ
+H5's task file plus PINS.md SS4 (the pinned grace-window/quota/chunking constants) before starting.
+Follow the per-task procedure in `BOOTSTRAP.md`.
 
 ## Status
 
@@ -35,7 +46,7 @@ procedure in `BOOTSTRAP.md`.
 | H1 | Transport-generic serve_session + ServiceContext | DONE | 4463b07 | |
 | H2 | Persistent service + thin adapter + multiplex | DONE | 96a54fb | landed on the RE-ISSUED, two-endpoint-amended task; prior BLOCKED attempt superseded, see Log |
 | H3 | Adapter-minted GUID identity + peer-cred binding | DONE | 81b3bea | RE-ISSUED after PINS.md SS9 fix; prior BLOCKED attempt superseded, see Log |
-| H4 | Binary-authoritative cross-session tab isolation | pending | -- | |
+| H4 | Binary-authoritative cross-session tab isolation | DONE | pending-hash | |
 | H5 | Reconnect grace window + honest bounded queue | pending | -- | orthogonal after H2 |
 | H6 | Detached non-admin lifecycle + anti-squat | pending | -- | job-breakaway is the acceptance gate |
 | H7 | Tab-group-per-session presentation | pending | -- | crosses the JS boundary |
@@ -511,7 +522,115 @@ one-literal fix) are the only fences touched, both as pinned.
   `target/`) for build-artifact routing only, not a source or test change.
 
 ### H4
-- (not started)
+- Verified all as-of-authoring facts in `H4-binary-authoritative-isolation.md` and PINS.md SS3/
+  SS9 against the live tree before writing any code: `src/hub/mod.rs`'s `ServiceContext` was
+  `#[derive(Clone)]` with `browser`/`store`/`recorder`/`initial_policy`/`session_registry`, all
+  `pub`, built once in `from_startup`; `src/hub/session.rs` held only the pure `SessionGuid`/
+  `PeerCred`/`PeerUser`/`SessionRegistry`/`Admission` types (no per-session record, confirmed via
+  grep); `src/transport/mcp/server.rs`'s `serve_session<S>(stream, ctx, guid: SessionGuid)` (NOT
+  `Option`) called `crate::hub::role::assert_service_role("serve_session")` as its first line and
+  held a `_guid` placeholder binding, exactly as PINS.md SS9 describes; `pipeline.rs`'s
+  `handle_tools_call` (~:50) and `LazyTabUrl::new` (~:118) matched the task's quoted line numbers
+  within a few lines; `denial.rs::denial_id` and `dispatch.rs`'s `Governance::begin`/
+  `CallAudit::sacred_deny` (the public API used to record the refusal) matched their quoted
+  shapes. No STOP precondition fired.
+- Implemented per the task's Required Behavior, entirely inside `src/hub/mod.rs`,
+  `src/hub/session.rs`, and `src/transport/mcp/server.rs` (no edit to `src/governance/**` or
+  `src/transport/mcp/pipeline.rs`):
+  - `ServiceContext` (`src/hub/mod.rs`) gained `owned_tabs: Arc<Mutex<HashMap<i64,
+    session::SessionGuid>>>`, built once in `from_startup` alongside `session_registry`.
+  - `src/hub/session.rs` gained `owns_or_adopts_tab(owned_tabs, guid, tab_id) -> bool`: the ONE
+    pinned map operation (PINS.md SS9 forward guidance) --
+    `map.entry(tab_id).or_insert_with(|| guid.clone()) == guid` -- answering both "do I own it"
+    and "can I adopt it" with no per-session record. Plus its own `#[cfg(test)]` unit test.
+  - `src/transport/mcp/server.rs`: `serve_session`'s read loop gained a NEW
+    `check_tab_ownership(line, &owned_tabs, &guid, &governance)` call, run BEFORE
+    `handle_line` (hence before `pipeline::handle_tools_call`'s own `LazyTabUrl` probe). It
+    re-parses the raw line itself (a separate, cheap `Value` parse, deliberately NOT threaded
+    through `handle_line`'s own parse -- see D shape note below) to read `method`/`params.name`/
+    `params.arguments.tabId`; for a `tools/call` naming a numeric `tabId` a DIFFERENT guid
+    already owns, it records the refusal as a deny via `Governance::begin` +
+    `CallAudit::sacred_deny(&denial, None)` (domain `None` per the call site, matching PINS.md
+    SS3's `domain: null`/`held: false`/`duration_ms: 0` shape exactly, since `sacred_deny`
+    already builds a zero-duration, non-held deny record) with a `Denial { rule:
+    "cross_session/unowned_tab", grant_id: None, denial_id: denial::denial_id("", "", rule),
+    domain: String::new(), message: "unknown tab".to_string() }`, then returns the uniform
+    `text_content("unknown tab")` success result immediately -- never entering `handle_line` or
+    `pipeline::handle_tools_call` for that line. Every other line (not `tools/call`, unparseable,
+    no numeric `tabId`, or a `tabId` this session already owns/first-touch-adopts) falls through
+    unchanged. The `guid: SessionGuid` parameter (H3's placeholder) is now genuinely consumed;
+    its doc comment on `serve_session` was updated accordingly.
+  - New `tests/hub_isolation.rs` (2 tests, both from the task's named list, both green):
+    `unowned_tab_is_refused_before_any_tab_url_probe` and
+    `unknown_tab_result_leaks_no_host_or_existence`. Both drive a real `serve_session` session
+    (B) over an in-process `tokio::io::duplex`, sharing one `Browser` with a fake extension
+    double mirroring `pipeline.rs::attach_fake_extension_with_tab_urls` (panics on any
+    unregistered `tab_url_request`/`tool_request`, proving a leaked probe/dispatch fails loudly).
+- D1: Required Behavior item 1 names TWO ownership-map insertion paths -- "(a) `tabs_create_mcp`
+  returns it successfully to this session, or (b) this session issues a tab-scoped call naming a
+  tabId that no OTHER live session owns (first-touch adoption)" -> implemented ONLY path (b); no
+  code parses `tabs_create_mcp`'s response to eagerly register its newly created tabId. Because:
+  no oracle exists anywhere (PINS.md, the task file, or any Rust-side type) for HOW to extract the
+  created tabId from that call's free-text MCP result (the only signal is the extension's OWN JS
+  string, `"Created tab ${tab.id}.\n"` in `extension/service-worker.js`, which is not a frozen
+  Rust string, not part of any named test's fixture, and not reachable from a Rust-side fake
+  extension test double without inventing a text-parsing convention the ORACLE RULE forbids
+  deriving); and the task's own test-setup note explicitly sanctions bypassing a live
+  `tabs_create_mcp` round trip ("via `tabs_create_mcp` returning tabId 5, OR the H3-established
+  ownership path"), which is the latitude this deviation uses. Path (b) alone covers the
+  realistic case: whichever session creates a tab is the only one who initially knows its tabId,
+  so its own next reference to that tabId first-touch-adopts it before any other session could
+  plausibly name the same number. Impact on later tasks: H7 (tab-group-per-session, PINS.md SS6)
+  sends a `group_request` for a session's owned tabs -- RE-READ H7's own live tree state before
+  assuming a tab is already in `owned_tabs` immediately after `tabs_create_mcp` returns and before
+  any other call references it; if H7 needs that guarantee, it must add the
+  `tabs_create_mcp`-response adoption path itself, with its own pinned extraction oracle.
+- D2: the task's test-setup prose for `unknown_tab_result_leaks_no_host_or_existence` describes
+  the second case as "a tabId that no session owns and no extension knows (does NOT exist)" ->
+  implemented it as a tabId (999) pre-seeded as owned by session A (the SAME owner as the
+  existing-tab case), not left absent from `owned_tabs`. Because: under the pinned first-touch-
+  adoption mechanism (Required Behavior item 2's own words, "first-touch always succeeds for an
+  unowned tabId"), a tabId genuinely ABSENT from the map is ADOPTED and ALLOWED for whichever
+  session names it first -- it is NOT refused. If B were the first to name tabId 999, B's own
+  call would first-touch-adopt it and dispatch for real, which cannot produce the pinned uniform
+  `"unknown tab"` text (the two pinned assertions require `text_for_existing_other_session_tab ==
+  text_for_nonexistent_tab`, both equal to `"unknown tab"` -- only achievable if BOTH calls are
+  refused by the SAME cross-session-ownership mechanism). Pre-seeding tab 999 as owned by A (a
+  guid other than B) makes both cases refused identically, while "no extension knows [it]" is
+  still satisfied literally: the fake extension has zero configuration for tabId 999 in either
+  table, so if either refusal leaked into a real dispatch/probe, the test's panic-on-unregistered
+  fake extension would fail loudly. Impact on later tasks: none (test construction only).
+- D3: to exercise `serve_session` for two independently-identified sessions without spawning the
+  real binary (the pattern `tests/hub_multiplex.rs`/`tests/all_open_golden.rs` use for their own
+  subprocess-driven suites), `tests/hub_isolation.rs` constructs `ServiceContext` directly via its
+  own `pub` fields (`browser: Browser::new()`, `store: ConfigStore::load_initial(...)`, a disabled
+  `Recorder`, an all-open `LoadedPolicy`, a fresh `SessionRegistry`, and a fresh `owned_tabs` map
+  the test pre-seeds per scenario -- "the H3-established ownership path" the task file itself
+  sanctions) and drives session B over an in-process `tokio::io::duplex`. Because `serve_session`'s
+  first line asserts `crate::hub::role::assert_service_role`, and this test never goes through
+  `run_as_service` (which normally calls `role::set_role(Role::Service)`), the test calls
+  `hub::role::set_role(Role::Service)` itself, guarded by a `std::sync::Once` so it runs exactly
+  once for the whole test binary (multiple `#[tokio::test]` functions in one file share the same
+  process-global role marker, which panics if set twice). Impact on later tasks: H5/H7/H8's own
+  `hub_*`/`webapi_*` tests that want to drive `serve_session` in-process (rather than via a real
+  subprocess) will need the same `ensure_service_role()`-style guard; note it here rather than
+  rediscovering it.
+- Verification: all four commands passed for real. `cargo build --all-targets` clean. `cargo test
+  --test hub_isolation --test all_open_golden --test tool_enforcement --test architecture` all
+  green (2 + 3 + 10 + 5 = 20 tests); `cargo test -p ghostlight --lib transport::mcp::pipeline`
+  green (23/23, unaffected); the FULL `cargo test` is green (431 lib tests -- up from H3's 430,
+  the +1 being `hub::session::tests::owns_or_adopts_tab_first_touch_then_refuses_a_different_guid`
+  -- plus every integration suite, 0 failed). `cargo clippy --all-targets -- -D warnings` clean.
+  `cargo fmt --all -- --check` clean (after running `cargo fmt --all` once to normalize wrapping
+  in the new code -- whitespace only, no semantic change, not logged as its own numbered
+  deviation, per H0/H1/H2/H3 precedent). Sacred tests (`tests/tool_schema_fidelity.rs`,
+  `tests/all_open_golden.rs`, `tests/architecture.rs::governance_core_has_no_forbidden_back_edges`)
+  green and byte-unmodified (`git diff --stat` on all three: no output). `src/governance/**` and
+  `src/transport/mcp/pipeline.rs` are untouched (`git status --porcelain` shows only
+  `src/hub/mod.rs`, `src/hub/session.rs`, `src/transport/mcp/server.rs` modified, plus the new
+  `tests/hub_isolation.rs`). No NEVER-touch fence moved.
+- Note: as in H0-H3, `CARGO_TARGET_DIR` was pointed at a scratch directory (not the repo's
+  `target/`) for build-artifact routing only, not a source or test change.
 
 ### H5
 - (not started)

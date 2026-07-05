@@ -8,6 +8,7 @@
 //! (a7): the governance core gains no pid/ancestor/GUID concept from any of these types.
 
 use std::collections::HashMap;
+use std::sync::{Mutex, PoisonError};
 
 /// An opaque, unguessable session identity minted by the adapter and presented to the service.
 /// Canonical lowercase hyphenated UUIDv4 (36 chars). Secret material (ADR-0030 Decision 4:
@@ -62,6 +63,29 @@ impl std::fmt::Debug for SessionGuid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "SessionGuid(<redacted>)")
     }
+}
+
+/// H4 (ADR-0030 Decision 6; PINS.md SS9 forward guidance): the ONE operation on the shared,
+/// opaque-keyed owned-tab map (`ServiceContext::owned_tabs`) that answers both "do I own it" and
+/// "can I adopt it", with no per-session record and no cross-referencing between sessions' own
+/// state -- `map.entry(tab_id).or_insert_with(|| guid.clone())` (first-touch adoption always
+/// succeeds for a tabId nobody yet owns) compared against the caller's own `guid`. Lives here,
+/// alongside the other pure identity types, NEVER in `src/governance` (a7: the core stays
+/// handle-agnostic, naming no tabId type).
+///
+/// Returns `true` iff `guid` owns (or has just first-touch-adopted) `tab_id`; `false` iff a
+/// DIFFERENT guid already owns it, in which case the caller (`transport::mcp::server`) must
+/// refuse the call with the uniform, leak-free "unknown tab" result (ADR-0030 Decision 6) BEFORE
+/// ever resolving the tab's host. A lone session's own guid therefore first-touch-adopts every
+/// tab it ever names, so this is a byte-identical pass-through for a single live session
+/// (ADR-0030 "Preserved invariants": all-open byte-identity).
+pub fn owns_or_adopts_tab(
+    owned_tabs: &Mutex<HashMap<i64, SessionGuid>>,
+    guid: &SessionGuid,
+    tab_id: i64,
+) -> bool {
+    let mut map = owned_tabs.lock().unwrap_or_else(PoisonError::into_inner);
+    map.entry(tab_id).or_insert_with(|| guid.clone()) == guid
 }
 
 /// The connecting peer's OS credential, captured by the LOCAL accept layer (`ipc::serve_adapters`)
@@ -151,6 +175,29 @@ mod tests {
         };
         assert_eq!(registry.admit(&g, &a), Admission::Admitted);
         assert_eq!(registry.admit(&g, &a), Admission::Admitted);
+    }
+
+    #[test]
+    fn owns_or_adopts_tab_first_touch_then_refuses_a_different_guid() {
+        let owned_tabs = Mutex::new(HashMap::new());
+        let a = SessionGuid::mint();
+        let b = SessionGuid::mint();
+        assert!(
+            owns_or_adopts_tab(&owned_tabs, &a, 5),
+            "first-touch adoption succeeds for an unowned tabId"
+        );
+        assert!(
+            owns_or_adopts_tab(&owned_tabs, &a, 5),
+            "the SAME guid still owns the tabId it already adopted"
+        );
+        assert!(
+            !owns_or_adopts_tab(&owned_tabs, &b, 5),
+            "a DIFFERENT guid is refused; the existing binding is left untouched"
+        );
+        assert!(
+            owns_or_adopts_tab(&owned_tabs, &a, 5),
+            "the refused attempt above must not have disturbed A's ownership"
+        );
     }
 
     #[test]

@@ -24,20 +24,22 @@
 //! `notifications/tools/list_changed` through the SAME single-writer stdout task every other
 //! outbound message uses (the writer channel is now [`Outbound`], not a bare `JsonRpcResponse`).
 
-use crate::browser::{advertise, polarity};
+use crate::browser::{advertise, directory, polarity};
 use crate::governance::config::reload::ConfigStore;
 use crate::governance::dispatch::Governance;
 use crate::governance::enforcement::LocalPdp;
 use crate::governance::manifest::identity::ManifestIdentity;
 use crate::governance::manifest::source::LoadedPolicy;
-use crate::governance::ports::AuditSink;
+use crate::governance::ports::{AuditSink, Denial};
+use crate::hub::session::SessionGuid;
 use crate::hub::ServiceContext;
 use crate::transport::executor::Browser;
 use crate::transport::mcp::pipeline;
 use crate::transport::mcp::tools::TOOLS_JSON;
-use crate::transport::mcp::types::JsonRpcResponse;
+use crate::transport::mcp::types::{text_content, JsonRpcResponse};
 use crate::Result;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
@@ -112,9 +114,11 @@ pub const PROTOCOL_VERSION: &str = "2024-11-05";
 /// the policy-subscription task) and is dropped when the session ends. `guid` (H3, ADR-0030
 /// Decision 4; PINS.md SS9) is this session's opaque identity -- EVERY session carries a real
 /// one, including the SERVICE's own directly-served stdio session, never `Option<SessionGuid>`.
-/// It is inert this task (H3 does not stamp it into audit or branch dispatch on it; H4/H8
-/// consume it) and minting/threading it writes nothing to stdout or audit by itself, so this
-/// produces byte-identical output to before H3 (all-open byte-identity).
+/// H4 (ADR-0030 Decision 6) is the first task to consume it: the pre-dispatch cross-session
+/// tab-ownership gate in the read loop below keys the shared `ctx.owned_tabs` map on it. A lone
+/// session's own guid still first-touch-adopts every tab it names, so this stays a
+/// byte-identical pass-through for a single live session (ADR-0030 "Preserved invariants":
+/// all-open byte-identity).
 pub async fn serve_session<S>(
     stream: S,
     ctx: ServiceContext,
@@ -128,9 +132,6 @@ where
     // backstop when the role is already correct (as it always is by construction); see
     // `crate::hub::role`.
     crate::hub::role::assert_service_role("serve_session");
-    // `guid` is not yet consumed by this task (H4/H8 do); retained so its lifetime/ownership is
-    // established at the chokepoint from H3 onward.
-    let _guid = guid;
 
     let ServiceContext {
         browser,
@@ -138,6 +139,7 @@ where
         recorder,
         initial_policy: loaded_policy,
         session_registry: _,
+        owned_tabs,
     } = ctx;
 
     let (read_half, write_half) = tokio::io::split(stream);
@@ -291,6 +293,17 @@ where
             continue;
         }
         let governance = current_governance(&governance_slot);
+        // H4 (ADR-0030 Decision 6; PINS.md SS3): the cross-session tab-ownership gate runs
+        // BEFORE any dispatch into `handle_line`'s "tools/call" arm -- and therefore before
+        // `pipeline::handle_tools_call`'s own `LazyTabUrl` probe can ever fire for this line's
+        // tabId. A pass-through `None` for every other line (not a `tools/call`, no numeric
+        // `tabId`, or a `tabId` this session already owns/first-touch-adopts): a lone all-open
+        // session owns everything it touches, so this never disturbs that path (ADR-0030
+        // "Preserved invariants": all-open byte-identity).
+        if let Some(resp) = check_tab_ownership(line, &owned_tabs, &guid, &governance) {
+            let _ = tx.send(Outbound::Response(resp));
+            continue;
+        }
         if let Some(resp) = handle_line(&browser, &store, &governance, line, &tx).await {
             let _ = tx.send(Outbound::Response(resp));
         }
@@ -303,6 +316,70 @@ where
     drop(tx);
     let _ = writer.await;
     Ok(())
+}
+
+/// H4 (ADR-0030 Decision 6; PINS.md SS3): the pre-dispatch cross-session tab-ownership gate.
+/// Re-parses `line` itself (a separate, cheap `Value` parse from `handle_line`'s own, so this
+/// stays a standalone check ahead of it rather than widening `handle_line`'s signature or
+/// touching `pipeline.rs`'s frozen stage order) purely to read `method`/`params.name`/
+/// `params.arguments.tabId` -- the SAME fields `handle_tools_call` would read, just far enough
+/// ahead that a refusal never reaches it. Returns `None` (a pure pass-through: not a
+/// `tools/call`, unparseable, no numeric `tabId`, or a `tabId` this session already
+/// owns/first-touch-adopts) for every line that must fall through to the unchanged
+/// `handle_line`/`handle_tools_call` path; a lone all-open session's own guid first-touch-adopts
+/// every tab it ever names, so this is a byte-identical no-op for a single live session
+/// (ADR-0030 "Preserved invariants": all-open byte-identity). Returns
+/// `Some(response)` -- the uniform, leak-free `"unknown tab"` result (PINS.md SS3), recorded as a
+/// deny with `domain: null` (the host is NEVER resolved for an unowned tab) -- ONLY for a
+/// `tools/call` naming a numeric `tabId` a DIFFERENT live session already owns, and only BEFORE
+/// any dispatch, hence before `pipeline::LazyTabUrl`'s own probe could ever fire for it (Decision
+/// 6: "BEFORE any `tab_url` probe").
+fn check_tab_ownership(
+    line: &str,
+    owned_tabs: &Arc<Mutex<HashMap<i64, SessionGuid>>>,
+    guid: &SessionGuid,
+    governance: &Governance,
+) -> Option<JsonRpcResponse> {
+    let raw: Value = serde_json::from_str(line).ok()?;
+    if raw.get("method").and_then(Value::as_str) != Some("tools/call") {
+        return None;
+    }
+    let id = raw.get("id").cloned();
+    let params = raw.get("params")?;
+    let name = params.get("name").and_then(Value::as_str)?;
+    let args = params.get("arguments");
+    let tab_id = args.and_then(|a| a.get("tabId")).and_then(Value::as_i64)?;
+
+    if crate::hub::session::owns_or_adopts_tab(owned_tabs, guid, tab_id) {
+        return None;
+    }
+
+    record_unowned_tab_denial(governance, name, args);
+    Some(JsonRpcResponse::success(id, text_content("unknown tab")))
+}
+
+/// Record the H4 unowned-tab refusal as a deny (PINS.md SS3, transcribed): `decision: "deny"`,
+/// `domain: null` (never resolved -- resolving it is the very leak being closed), `held: false`,
+/// `duration_ms: 0`. Reuses `Governance::begin`/`CallAudit::sacred_deny`'s existing zero-duration,
+/// no-domain deny shape (the same public API `pipeline::sacred_check`'s own denial already uses)
+/// rather than a new recording path; the denial id follows the existing `denial::denial_id`
+/// `"D-"` + 8-lowercase-hex scheme, ruled `cross_session/unowned_tab`.
+fn record_unowned_tab_denial(governance: &Governance, name: &str, args: Option<&Value>) {
+    let action = directory::descriptor(name)
+        .and_then(|d| d.action_key)
+        .and_then(|key| args.and_then(|a| a.get(key)))
+        .and_then(Value::as_str);
+    let lookup = directory::requires(name, action);
+    let audit = governance.begin(name, action, lookup);
+    let rule = "cross_session/unowned_tab";
+    let denial = Denial {
+        rule: rule.to_string(),
+        grant_id: None,
+        denial_id: crate::governance::denial::denial_id("", "", rule),
+        domain: String::new(),
+        message: "unknown tab".to_string(),
+    };
+    audit.sacred_deny(&denial, None);
 }
 
 /// Parse and route one JSON-RPC line.

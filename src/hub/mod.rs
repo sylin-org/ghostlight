@@ -15,6 +15,7 @@ use crate::governance::manifest::source::LoadedPolicy;
 use crate::native::ipc;
 use crate::transport::executor::Browser;
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub mod handshake;
@@ -272,6 +273,13 @@ pub struct ServiceContext {
     /// re-presented GUID is checked against the SAME registry regardless of which adapter
     /// connection presents it.
     pub session_registry: Arc<std::sync::Mutex<session::SessionRegistry>>,
+    /// H4 (ADR-0030 Decision 6; PINS.md SS9 forward guidance): the shared, opaque-keyed
+    /// owned-tab map (tabId -> owning [`session::SessionGuid`]), shared by every session so
+    /// `transport::mcp::server::serve_session`'s pre-dispatch ownership gate answers "do I own
+    /// it" / "can I adopt it" from the SAME map regardless of which session asks. Owned-handle
+    /// state lives here, in `src/hub`, NEVER in `src/governance` (a7: the core stays
+    /// handle-agnostic).
+    pub owned_tabs: Arc<std::sync::Mutex<HashMap<i64, session::SessionGuid>>>,
 }
 
 impl ServiceContext {
@@ -319,6 +327,7 @@ impl ServiceContext {
             recorder,
             initial_policy: loaded_policy.clone(),
             session_registry: Arc::new(std::sync::Mutex::new(session::SessionRegistry::new())),
+            owned_tabs: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
     }
 }
