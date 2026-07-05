@@ -8,12 +8,15 @@ fresh executor resumes from RESUME HERE with no other context.
 
 ## RESUME HERE
 
-**K5 is NEXT (`K5-enable-remote-connections.md`).** K1, K2, K3, K4 are DONE and committed. Read
-`docs/tasks/console/BOOTSTRAP.md` in full, then `K5-enable-remote-connections.md` and the PINS.md
-sections it cites (CS1, CS4, CS5) VERY CAREFULLY -- this task has a real hazard (a naive test
-could write to this machine's REAL, non-relocatable user config file) with an explicit STOP
-precondition guarding it. Prove the env-override isolation works BEFORE writing any test that
-exercises a real write. Follow the per-task procedure in BOOTSTRAP.md exactly.
+**K5 is BLOCKED (see the K5 Log entry below).** K1, K2, K3, K4 are DONE and committed; the tree is
+green and clean at `635ccaa`. K5's own STOP precondition fired for real: the env-override
+isolation approach the task anticipated (mirroring `spawn_service_with_program_data`'s
+`ProgramData` precedent) does NOT transfer to the user config path on Windows. This ALSO caused a
+real, accidental write to THIS machine's actual `%APPDATA%\ghostlight\config.json`
+(`audit.enabled: true`) during the proof step the task itself required running before writing any
+code -- that file has NOT been cleaned up (a destructive-action guard blocked the cleanup attempt
+and correctly redirected to this BLOCKED report instead). A human must decide how to proceed
+before K5 is re-attempted; see the Log entry's "What is needed to proceed."
 
 ## Status
 
@@ -23,7 +26,7 @@ exercises a real write. Follow the per-task procedure in BOOTSTRAP.md exactly.
 | K2 | Console static GET routes in src/hub/webapi.rs | DONE | 7eea843 | needs K1; PINS.md CS1, CS10, CS11; see Log for D1 |
 | K3 | GET /api/v1/config + config table UI | DONE | d8ada7b | needs K2; PINS.md CS2 |
 | K4 | GET /api/v1/sessions + sessions UI | DONE | c20958a | needs K2; PINS.md CS3 |
-| K5 | POST /api/v1/config/webapi-enable-remote + UI control | pending | -- | needs K1+K2; PINS.md CS4, CS5; SEE the real user-config-path hazard noted above |
+| K5 | POST /api/v1/config/webapi-enable-remote + UI control | BLOCKED | -- | real user-config-path isolation failed; see Log |
 
 Status values: `pending` | `in-progress` | `DONE` | `BLOCKED`.
 
@@ -219,6 +222,58 @@ One entry per task as it closes (or blocks). Number every deviation from the tas
   `src/hub/session.rs`, `src/hub/webapi.rs`, plus the new `tests/console_sessions_api.rs` changed.
   No NEVER-touch fence moved.
 - Note: `CARGO_TARGET_DIR` was pointed at a scratch directory for build-artifact routing only.
+
+### K5
+
+- BLOCKED at K5's own explicit STOP precondition, before writing any code or test. Read
+  `K5-enable-remote-connections.md` in full, including its STOP precondition requiring the
+  env-override isolation approach to be PROVEN before writing any test that exercises a real
+  write. Ran that proof directly against the real `target/debug/ghostlight.exe`:
+  `APPDATA=<temp dir> ./target/debug/ghostlight.exe config set audit.enabled true`. Expected (per
+  the task's hypothesis, mirroring `spawn_service_with_program_data`'s `ProgramData` precedent for
+  `org_policy_path()`): the write lands inside `<temp dir>`. Actual: the write landed at the REAL,
+  un-overridden `%APPDATA%\ghostlight\config.json` on this machine
+  (`C:\Users\onose\AppData\Roaming\ghostlight\config.json`) -- confirmed by `write_user_value`'s
+  own printed `written to the user layer: ...` line naming the real path, and by listing the
+  overridden temp directory afterward and finding it empty. `dirs::config_dir()` on this platform
+  does not honor an `APPDATA` override for the current process the way the org-policy path's own
+  `ProgramData` env read does; the two paths are NOT resolved the same way (confirmed by reading
+  `src/governance/config/load.rs`: `org_policy_path()` reads `ProgramData` directly via
+  `std::env::var`, while `user_config_path()` delegates entirely to the `dirs` crate's
+  `config_dir()`, which apparently resolves via a platform API that ignores the env var for an
+  already-running process on this build).
+- REAL-MACHINE SIDE EFFECT (disclosed, not hidden): the proof step above wrote `audit.enabled:
+  true` into this machine's actual `%APPDATA%\ghostlight\config.json`. A baseline check
+  immediately before the proof confirmed this file did not previously exist, so this is a
+  net-new, isolated addition (not an overwrite of prior real user configuration) -- but it is
+  still a real, unauthorized-until-now write outside this project's scratch/test scope, and it has
+  NOT been cleaned up: an attempt to delete it was blocked by a destructive-action safety
+  classifier, which correctly redirected to marking this task BLOCKED and reporting to a human
+  rather than silently continuing past its own STOP precondition. The file's exact path and
+  content are recorded here so a human can inspect and remove it deliberately.
+- Per the task file's own text ("Do NOT invent a third option that touches the real path even
+  transiently"), no further attempt was made to route around this finding (no alternate env var
+  tried, no code written to `load.rs` speculatively). No working-tree source changes were made for
+  K5 at all (`git status --porcelain` confirmed clean before this entry was written), so there is
+  nothing to `git restore`.
+- What is needed to proceed (decided by a human/frontier author, not by an unattended executor,
+  per the task's own instruction): (a) clean up the real file noted above
+  (`%APPDATA%\ghostlight\config.json`, containing only `{"config":{"audit.enabled":true}}` or
+  equivalent -- verify its exact content before removing, in case something else wrote to it
+  between this entry and when it is reviewed), AND (b) choose how K5 should test its write path:
+  either (i) add a genuine, precedented env-override (e.g. `GHOSTLIGHT_USER_CONFIG_DIR`) to
+  `src/governance/config/load.rs::user_config_path()` itself -- a small, explicit, NEW file this
+  task did not originally name, mirroring the `GHOSTLIGHT_LOG_DIR`/`GHOSTLIGHT_ENDPOINT`/
+  `GHOSTLIGHT_WEBAPI_PORT` convention already used elsewhere -- and re-verify the SAME proof
+  succeeds before trusting it; or (ii) test the POST handler's write-outcome logic (success/
+  locked/other-error -> response shape) without ever calling through to a real
+  `user_config_path()`-resolving code path (e.g. a lower-level unit test of `set_user_value`'s
+  CALLER logic with the write step abstracted behind a seam), accepting that the real end-to-end
+  file-write is then unverified by any automated test in this batch. PINS.md CS7's `set_user_value`
+  itself is not gated by either choice and needs no change either way.
+- No deviation numbers logged: this is a tree-fact mismatch between this task's own authored
+  hypothesis (isolation transfers from the org path to the user path) and the platform's actual
+  behavior, not a choice this executor made mid-task.
 
 ## Deviation format
 
