@@ -6,7 +6,45 @@ executor resumes from RESUME HERE with no other context.
 
 ## RESUME HERE
 
-**H6 is RE-ISSUED and is NEXT (`H6-detached-lifecycle-antisquat.md`, now "always-ready service +
+**H6 is DONE (927d102). H7 (tab-group-per-session presentation) is NEXT.** H6 landed the
+always-ready-service amendment in full: `src/hub/mod.rs`'s `run_mcp_server` is now ALWAYS the thin
+ADAPTER (argv dispatch, never a claim election; role decided before anything else); the new
+`ghostlight service` subcommand (`run_service`/`run_service_loop`) is the STANDALONE SERVICE, which
+owns both endpoints for its whole life, serves NO stdio session of its own, runs NO parent-death
+watchdog, and idle-graces after `IDLE_GRACE` = 30s of continuous zero-live-sessions-AND-extension-
+gone (`ServiceContext` gained a `live_sessions: Arc<AtomicUsize>` field, counted by a new
+`LiveSessionGuard` RAII wrapper in `transport::mcp::server::serve_session`). `src/hub/supervisor.rs`
+(new) holds the OS-supervisor identifiers (`SUPERVISOR_TASK_NAME`/`SUPERVISOR_LABEL`/
+`SUPERVISOR_UNIT`) H9 will register, `supervisor_start_command()` (pure, cfg-split, unit-tested,
+never executed except by `start_service()`, which `assert_adapter_role`s first), and the
+`SELF_HEAL_RETRY_WINDOW`/`SELF_HEAL_RETRY_INTERVAL`/`SELF_HEAL_FAILURE_MESSAGE` constants
+`ipc::relay_adapter`'s new `dial_with_self_heal` uses (a single dial attempt; on failure,
+`supervisor::start_service()` once, then bounded retries; tests never exercise this path). New
+`src/hub/antisquat.rs` implements the anti-squat per-install secret (`load_or_create_hub_key`
+SERVICE-only, `read_hub_key` ADAPTER-only, both via `crate::debug::log_dir()`, PER-USER) and the
+HMAC-SHA256 proof (`compute_mac_hex`/`verify_mac_hex`, hand-rolled hex, no new hex crate); wired
+into `ipc.rs` as a THIRD framed message on the adapter/control wire (hello -> service-proof -> raw
+JSON-RPC): `handle_adapter_connection` sends the proof via `send_service_proof` AFTER admission,
+BEFORE `serve_session`; `relay_adapter` verifies it via `verify_service_proof` AFTER sending its own
+hello, BEFORE the raw relay; ANY failure collapses to the ONE pinned refusal text. `doctor.rs`'s
+reap-target filters/text (`orphan_pids`, `reap`, the run_fix report line, the module docs) re-scoped
+from `"mcp-server"` to `"adapter"`; the health-anchor/display filters (`NewestServer`, `session_row`,
+the native-host-row finder) stay `"mcp-server"`, unchanged, per PINS.md SS5.5. `src/proc.rs`/
+`src/transport/watchdog.rs` module docs updated from "the mcp-server role" to "the adapter role"
+(no API change). `src/main.rs` gained the `Service` unit subcommand + its `main()` arm;
+`docs/adr/0029-process-lifecycle-hygiene.md` gained a superseded/amended note at the top.
+
+RE-READ H7's own task file plus PINS.md SS6 before starting; H7 crosses the JS boundary
+(`extension/lib/grouping.js`) in addition to Rust. Follow the per-task procedure in `BOOTSTRAP.md`.
+
+See the H6 Log entry below for the full test-topology deviation record: a new shared
+`tests/support/mod.rs` (`spawn_service`/`spawn_service_with_manifest`/
+`spawn_service_with_program_data`/`spawn_adapter`/`log_dir_for`/`newest_state`/
+`wait_extension_connected`) now backs every integration test that spawns the binary, since EVERY
+MCP invocation is now a two-process (SERVICE + ADAPTER) pair, not one.
+
+**H6's original RE-ISSUED run text below is superseded by the DONE entry above; kept for
+provenance.** H6 is RE-ISSUED and is NEXT (`H6-detached-lifecycle-antisquat.md`, now "always-ready service +
 thin adapters + anti-squat") under the ADR-0030 Decision 8 amendment -- see the RESOLVED note lower
 in this section. H0-H5 are DONE and pushed to `origin/dev`.** H0 landed (pure
 code move; `src/hub` composition root extracted). H1 landed (transport-generic `serve_session<S>`
@@ -107,7 +145,7 @@ session carries a REAL `SessionGuid`, there is no `None` branch; new shared cros
 | H3 | Adapter-minted GUID identity + peer-cred binding | DONE | 81b3bea | RE-ISSUED after PINS.md SS9 fix; prior BLOCKED attempt superseded, see Log |
 | H4 | Binary-authoritative cross-session tab isolation | DONE | 1490951 | |
 | H5 | Reconnect grace window + honest bounded queue | DONE | 33b361d | |
-| H6 | Always-ready service + thin adapters + anti-squat | pending | -- | RE-ISSUED under the Decision 8 amendment (was BLOCKED); reshapes H2's election; see Log + RESUME HERE |
+| H6 | Always-ready service + thin adapters + anti-squat | DONE | 927d102 | RE-ISSUED run landed on the Decision 8 amendment (was BLOCKED); see Log + RESUME HERE |
 | H7 | Tab-group-per-session presentation | pending | -- | crosses the JS boundary |
 | H8 | Local web API = TCP; bind per policy | pending | -- | needs H2+H3+H4; the corrected D2/D5 |
 | H9 | Installer auto-start (register+start supervisor) | pending | -- | NEW; needs H6; mostly command/file builders + install wiring |
@@ -900,6 +938,174 @@ one-literal fix) are the only fences touched, both as pinned.
   is a requirements conflict between two of the task's own pinned requirements, discovered by
   tracing Required Behavior against the live, must-stay-green test suite before writing any code --
   not a choice this executor made under the task's own latitude.
+
+**RE-ISSUED RUN (2026-07-05, DONE, commit 927d102).** Verified all as-of-authoring facts in the
+re-authored `H6-detached-lifecycle-antisquat.md` and PINS.md SS5 (rewritten)/SS8 against the live
+tree before writing any code: `src/hub/mod.rs`'s `run_mcp_server`/`run_as_service`/`run_as_adapter`/
+`ServiceContext` matched H2-H5's landed shape exactly (still claim-then-elect, still a lone-stdio
+session on the winner); `src/hub/role.rs` (`assert_adapter_role`) matched PINS.md SS8 verbatim;
+`src/transport/native/ipc.rs`'s `relay_adapter`/`handle_adapter_connection`/`serve_adapters`/
+`claim_adapter_endpoint` were present under those exact names (SS1/SS9); `src/debug.rs::log_dir()`
+resolved the per-user `dirs::data_local_dir()/ghostlight` (`GHOSTLIGHT_LOG_DIR` override honored),
+confirming the SS5.3 STOP precondition's assumption held. No STOP precondition fired.
+
+Implemented per the re-authored task + PINS.md SS5.1-SS5.6/SS8:
+- `src/main.rs`: new `Command::Service` unit variant (doc comment PINNED verbatim by SS5.1) + one
+  new `main()` match arm calling `ghostlight::hub::run_service`; the `command: None` arm is
+  UNCHANGED (still calls `run_mcp_server`); the module doc's role list updated (adapter/service/
+  native-host/installer).
+- `src/hub/mod.rs`: `run_mcp_server` reshaped into the pure thin ADAPTER entry point (`role::set_role
+  (Role::Adapter)` first; a `--manifest`/`GHOSTLIGHT_MANIFEST` sets only the PINNED one-line warning,
+  never loads policy; `build_debug_sink(_, "adapter")`; `sweep_orphans()`; captures `parent`; calls
+  the new `run_as_adapter(endpoint, sink, parent)`). New `run_service` (the `service` subcommand's
+  entry point: `role::set_role(Role::Service)` first; resolves/loads policy exactly as the OLD
+  `run_mcp_server` did; `build_debug_sink(_, "mcp-server")`; calls the new async `run_service_loop`).
+  `run_service_loop` claims the adapter/control endpoint (SessionBusy -> log + exit 0, a
+  single-instance guard only, never an election), calls `antisquat::load_or_create_hub_key()` once
+  (best-effort; a failure degrades anti-squat rather than refusing to start), spawns the UNCHANGED
+  extension `ipc::serve`, builds `ServiceContext::from_startup` ONCE, spawns `ipc::serve_adapters`,
+  and returns the new `idle_grace_watch(ctx)` future as its own return value -- NEVER serves its own
+  stdio as a session (the OLD lone-stdio-session branch is deleted entirely, per the amendment).
+  `idle_grace_watch` implements PINS.md SS5.4's pinned loop verbatim (`IDLE_POLL` = 1s poll,
+  `IDLE_GRACE` = 30s). `run_as_adapter` (new) mirrors the OLD `run_as_service`'s exact
+  Notify+`tokio::select!` shape, relocated: spawns the ADR-0029 watchdog only if `Some(parent)`,
+  then races `ipc::relay_adapter` against the shutdown notify. `ServiceContext` gained
+  `live_sessions: Arc<AtomicUsize>` (PINS.md SS5.4, built as `AtomicUsize::new(0)` in
+  `from_startup`). New `pub mod antisquat;`/`pub mod supervisor;` declarations; `IDLE_GRACE`/
+  `IDLE_POLL` consts.
+- `src/hub/supervisor.rs` (new): `SUPERVISOR_TASK_NAME`/`SUPERVISOR_LABEL`/`SUPERVISOR_UNIT` (PINNED
+  verbatim, SS5.2); `supervisor_start_command()` (PINNED program+args per platform, cfg-split, pure,
+  unit-tested, NEVER executed by that test); `SELF_HEAL_RETRY_WINDOW`/`SELF_HEAL_RETRY_INTERVAL`/
+  `SELF_HEAL_FAILURE_MESSAGE` (PINNED verbatim); `start_service()` (`assert_adapter_role("start_service")`
+  first, per SS8, then best-effort spawns the platform command, ignoring any failure).
+- `src/hub/antisquat.rs` (new): `REFUSAL_MESSAGE` (PINNED verbatim, SS5.3); `load_or_create_hub_key`
+  (SERVICE-only: reads an existing 32-byte `hub-key` under `debug::log_dir()`, else creates one via
+  `getrandom::getrandom`, `0600` on Unix); `read_hub_key` (ADAPTER-only: errors on a missing or
+  wrong-length file, never creates one -- the adapter does not own the secret's lifecycle);
+  `compute_mac_hex`/`verify_mac_hex` (HMAC-SHA256 via the `hmac`/`sha2` crates, `Mac::verify_slice`
+  for constant-time comparison; hex encode/decode hand-rolled, no new hex crate, per the project's
+  own "hand-rolled when simple enough" style).
+- `src/transport/native/ipc.rs`: `ROLE_SERVICE_PROOF` added to `src/hub/handshake.rs` (PINNED,
+  SS5.3). The adapter/control wire gained a THIRD framed message (SS5.3's two-phase-plus-proof):
+  `handle_adapter_connection`'s `Admission::Admitted` arm now calls the new `send_service_proof`
+  (computes the HMAC over the EXACT hello bytes already read, keyed by `load_or_create_hub_key()`,
+  sends `{"hub":1,"role":"service-proof","mac":"<hex>"}`) BEFORE calling `serve_session`; a proof
+  send failure refuses the connection cleanly, never reaching the chokepoint. `relay_adapter`'s
+  dial is now the new `dial_with_self_heal` (a single `dial_once` attempt; on failure,
+  `supervisor::start_service()` once, then bounded retries per SS5.2) instead of the always-retrying
+  `connect()`; after sending its own hello, it calls the new `verify_service_proof` (reads the framed
+  proof via `read_hub_key()`, recomputes the HMAC over its OWN sent hello bytes, verifies via
+  `hmac::Mac::verify_slice`) BEFORE the raw relay; ANY failure (missing/unreadable key, unreachable
+  peer, malformed frame, wrong role, MAC mismatch) logs the ONE pinned `REFUSAL_MESSAGE` and returns
+  an `Err`, never relaying. Two new private per-platform `dial_once` fns (a single, non-retrying dial
+  attempt, cfg-split like `connect`/`serve`). The module doc's endpoint description updated for the
+  new anti-squat step.
+- `src/doctor.rs` (SS5.5, re-scoped ONLY the reap-target filters/text, per the pin's own scoping):
+  `orphan_pids`'s and `reap`'s role filters changed from `"mcp-server"` to `"adapter"`; the run_fix
+  report line ("reaped N orphaned adapter session(s)"); the `DoctorOptions::fix`/`orphan_pids`/
+  `reap`/`sweep_orphans` doc comments and the `Observations::orphans`/`findings`'s orphan-count
+  comment updated to say "adapter" for consistency. The HEALTH-anchor (`NewestServer` at the
+  `role == "mcp-server"` filter) and the DISPLAY filters (`session_row`, the native-host-row finder)
+  are UNTOUCHED, staying `"mcp-server"`, exactly as SS5.5 pins.
+- `src/proc.rs`/`src/transport/watchdog.rs`: ONLY the module-doc narrative changed ("the mcp-server
+  role" -> "the adapter role"); zero API change; every existing inline test green and unmodified.
+- `docs/adr/0029-process-lifecycle-hygiene.md`: a short "Superseded/amended by ADR-0030 Decision 8"
+  blockquote appended right after the header, before `## Context`; the historical body is untouched.
+- `Cargo.toml`: added `hmac = "0.12"` and `getrandom = "0.2"` (additive; `sha2` was already present).
+  NO `windows-sys` job-object/breakaway feature added, per the amendment.
+
+D1 (PINS.md SS5.4's own forced-deviation note, transcribed): `ServiceContext` gaining
+  `live_sessions` broke `tests/hub_isolation.rs`'s and `tests/hub_queue.rs`'s own `build_ctx`
+  (missing-field compile errors) -> added one line to each (`live_sessions:
+  Arc::new(AtomicUsize::new(0))`), the exact same category as H5's own D1. Impact on later tasks:
+  none -- H7/H8's own `ServiceContext` constructions must include it too, alongside
+  `session_registry`/`owned_tabs`/`mint_quota`.
+D2: `tests/hub_multiplex.rs::adapter_endpoint_two_phase_wire_round_trips` is not named by this task
+  and is not on any sanctioned-exception list, but it directly assumed a bare `ghostlight`
+  invocation could win the adapter/control claim and become the service (H2/H3-era behavior) --
+  H6's argv-dispatch reshape makes that assumption categorically false (a bare invocation is ALWAYS
+  the adapter now), and separately, the NEW framed anti-squat proof message (SS5.3) sits on the
+  same wire this test hand-walks byte-by-byte -> updated it to spawn `ghostlight service`
+  (`support::spawn_service`, below) and to read-and-discard one extra framed message (asserting only
+  its `role` field, `"service-proof"`) before the raw phase, preserving every original assertion
+  verbatim. Impact on later tasks: H7/H8's own low-level wire tests should follow the same
+  `support::spawn_service` pattern and expect the proof frame between the hello and the raw phase.
+D3: six further pre-existing integration tests, none named by this task and none on any sanctioned
+  list, each spawned ONE bare `ghostlight` invocation with `--manifest`/`ProgramData` set directly on
+  it and expected THAT process to load policy and serve the governed session itself
+  (`tests/hot_reload.rs::org_policy_hot_swap_end_to_end`,
+  `tests/manifest_validation.rs::org_policy_file_with_config_boots_the_server`,
+  `tests/shadow_mode.rs::enforce_blocks_observe_dispatches_and_records_shadow_deny`,
+  `tests/tool_advertisement.rs`'s two tests, `tests/tool_enforcement.rs`'s ten tests) -> this is a
+  direct, mechanical consequence of this task's OWN Required Behavior item 1 (SS5.1: "It NEVER
+  claims the endpoint, loads policy, builds a Browser, or builds a ServiceContext" -- a bare
+  invocation ignores `--manifest`/never reads `ProgramData` at all now), not a choice made under
+  latitude, and it broke every one of these pre-existing tests identically, not just the ones this
+  task happens to name. Rewired each `drive()`-style helper to spawn `ghostlight service` (carrying
+  the manifest/`ProgramData`) plus a thin adapter dialing it, preserving every existing assertion
+  verbatim. While doing so, ALSO fixed each helper to read exactly its expected `id`-bearing replies
+  BEFORE closing the adapter's stdin (rather than dropping stdin immediately then reading to EOF):
+  `relay_adapter`'s two copy directions are RACED via `tokio::select!` (PINS.md SS1 pin 3's
+  lifecycle-shape mirror of `relay_native_host`), so an early stdin close can win the race and tear
+  the whole relay down before a still-in-flight reply (in the OLD single-process model this never
+  mattered, since the read loop ending never stopped the independent writer task from draining every
+  spawned tool-call's reply first). No test in this batch happened to exercise a multi-request,
+  early-stdin-close pattern against a REAL adapter relay before H6 made the adapter the ONLY path,
+  so this is a newly-exposed hazard, not a regression this task introduced by choice. Impact on
+  later tasks: H7/H8's own subprocess-driven tests should read all expected `id`-bearing replies
+  before ever closing a client-side write half against an adapter connection.
+D4 (test-support infra, not itself a deviation from a pinned value but load-bearing for D2/D3 and
+  for this task's own named tests): created `tests/support/mod.rs` (the task's own suggested
+  module), exposing `spawn_service`/`spawn_service_with_manifest`/`spawn_adapter` (PINNED
+  signatures, transcribed) plus `spawn_service_with_program_data`/`log_dir_for`/`newest_state`/
+  `wait_extension_connected` (author's own latitude, needed by D3's `ProgramData`-carrying tests and
+  by `peer_death.rs`/`hub_lifecycle.rs`'s own debug-state polling). Included via `mod support;` in
+  every rewired file: `tests/mcp_protocol.rs`, `tests/all_open_golden.rs`, `tests/peer_death.rs`,
+  `tests/hub_lifecycle.rs` (new), `tests/hub_multiplex.rs`, `tests/hot_reload.rs`,
+  `tests/manifest_validation.rs`, `tests/shadow_mode.rs`, `tests/tool_advertisement.rs`,
+  `tests/tool_enforcement.rs`. `#![allow(dead_code)]` at the module's top since not every including
+  binary uses every helper (a `pub fn` unused in one bin-crate integration-test binary is still dead
+  code under `-D warnings`, unlike in a lib crate).
+
+New `tests/hub_lifecycle.rs` (3 tests, all named by the task, all green):
+`service_survives_the_spawning_adapter_exit` (kills the spawning adapter, asserts
+`ghostlight::proc::pid_exists(service_pid)` stays true well within `IDLE_GRACE`);
+`adapter_cannot_complete_handshake_with_an_impostor_service` (the adapter is pointed at a
+genuinely-empty `GHOSTLIGHT_LOG_DIR` distinct from the real service's, so `read_hub_key()` fails --
+PINS.md SS5.3's "missing/unreadable key" failure mode -- asserting the adapter aborts within
+seconds, never relays, and surfaces the PINNED refusal text verbatim on stderr);
+`supervisor_start_asserts_adapter_role` (text-scan, mirrors `tests/hub_role_wiring.rs`'s own
+pattern). `src/hub/supervisor.rs`'s own `#[cfg(test)]` module additionally carries
+`supervisor_start_command_is_pinned_for_this_platform` (the task's "Unit-test
+`supervisor::supervisor_start_command()`" item, matching the task's own
+`cargo test --lib -- hub::supervisor` verification command) and a self-heal-window sanity check.
+
+Verification: all four commands passed for real. `cargo build --all-targets` clean.
+`cargo test --test hub_lifecycle` (3/3); `cargo test --test peer_death` (1/1); `cargo test --test
+mcp_protocol` (6/6); `cargo test --test all_open_golden --test tool_schema_fidelity --test
+architecture` (3 + 7 + 5 = 15, all green); `cargo test --lib proc` (10/10, including the pre-existing
+`proc::tests::*`); `cargo test --lib watchdog` (2/2); `cargo test --lib -- hub::supervisor` (2/2).
+`cargo clippy --all-targets -- -D warnings` clean (two lints fixed along the way:
+`clippy::io_other_error` in `antisquat::load_or_create_hub_key`, `clippy::manual_is_multiple_of` in
+`antisquat::hex_decode`). `cargo fmt --all -- --check` clean (after one `cargo fmt --all` pass to
+normalize wrapping in the new code, per H0-H5 precedent -- whitespace only). The FULL `cargo test` is
+green (442 lib tests -- unchanged from H5, since H6 added no new lib-level assertions beyond the
+antisquat/supervisor/role modules' own inline tests, which the 442 total already includes -- plus
+every integration suite, 0 failed): this run ALSO caught and fixed 6 collateral test-topology breaks
+NOT named by this task (D2/D3 above) before declaring the FULL suite green, since the task's own
+completion criterion is literally "the FULL cargo test must be green," not merely the named
+suites. Sacred tests (`tests/tool_schema_fidelity.rs`, `tests/all_open_golden.rs`'s CLIENT-VISIBLE
+assertions, `tests/architecture.rs::governance_core_has_no_forbidden_back_edges`) green and
+byte-unmodified (`git diff --stat` on `tests/tool_schema_fidelity.rs`, `src/transport/mcp/tools.rs`,
+`src/transport/native/host.rs`, `tests/architecture.rs`, `src/transport/executor.rs`: no output).
+`git status --porcelain` after staging shows exactly the files this entry names (26 total: 4 new,
+22 modified); no NEVER-touch fence moved -- the only sanctioned exceptions touched are the
+`tests/all_open_golden.rs`/`tests/peer_death.rs`/`tests/mcp_protocol.rs` spawn-choreography ones this
+task itself grants.
+- Note: as in H0-H5, `CARGO_TARGET_DIR` was pointed at a scratch directory (not the repo's
+  `target/`) because four live `ghostlight.exe` processes (this environment's own dogfooded
+  MCP/native-host session) held the repo's `target/debug/ghostlight.exe`; build-artifact routing
+  only, not a source or test change.
 
 ### H7
 - (not started)
