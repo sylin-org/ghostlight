@@ -388,6 +388,22 @@ async fn route_console_request(
 /// registry order. A READ of `layers::Resolution` (CS6) only; never a manifest document.
 async fn write_config_response(stream: &mut TcpStream, ctx: &ServiceContext) -> crate::Result<()> {
     let resolution = ctx.store.current_resolution();
+    let payload = config_payload(&resolution).to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
+        payload.len()
+    );
+    stream.write_all(response.as_bytes()).await?;
+    Ok(())
+}
+
+/// The pure `Resolution` -> JSON transform behind `GET /api/v1/config` (ADR-0032 Decision 1):
+/// per registered key, its resolved value, source layer, lock state, and description, in `KEYS`
+/// registry order. Split out from the socket-writing handler so the JSON contract is unit-testable
+/// against a hand-built `Resolution` (via the pure `layers::resolve`) with no spawned service and
+/// no policy file -- the assertion that used to require a `ProgramData`-isolated org policy file
+/// on Windows only (`tests/console_config_api.rs`) is now a platform-independent unit test.
+fn config_payload(resolution: &crate::governance::config::layers::Resolution) -> serde_json::Value {
     let keys: Vec<serde_json::Value> = resolution
         .iter()
         .map(|(key, resolved)| {
@@ -403,13 +419,7 @@ async fn write_config_response(stream: &mut TcpStream, ctx: &ServiceContext) -> 
             })
         })
         .collect();
-    let payload = serde_json::json!({ "keys": keys }).to_string();
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
-        payload.len()
-    );
-    stream.write_all(response.as_bytes()).await?;
-    Ok(())
+    serde_json::json!({ "keys": keys })
 }
 
 /// `GET /api/v1/sessions` (PINS.md CS3, `docs/tasks/console`): the live-sessions/groups view --
@@ -424,8 +434,25 @@ async fn write_sessions_response(
     let live_session_count = ctx.live_sessions.load(std::sync::atomic::Ordering::Relaxed);
     let summaries =
         crate::hub::session::live_session_summaries(&ctx.session_registry, &ctx.owned_tabs);
+    let payload = sessions_payload(&summaries, live_session_count).to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
+        payload.len()
+    );
+    stream.write_all(response.as_bytes()).await?;
+    Ok(())
+}
+
+/// The pure summaries -> JSON transform behind `GET /api/v1/sessions` (ADR-0032 Decision 1): the
+/// live-session count plus, per adapter binding, a TRUNCATED guid, pid, and owned tabs. Split out
+/// from the socket-writing handler so the JSON contract is unit-testable against hand-built
+/// summaries with no spawned adapter/service.
+fn sessions_payload(
+    summaries: &[crate::hub::session::SessionSummary],
+    live_session_count: usize,
+) -> serde_json::Value {
     let adapter_bindings: Vec<serde_json::Value> = summaries
-        .into_iter()
+        .iter()
         .map(|s| {
             serde_json::json!({
                 "guid": s.guid,
@@ -434,20 +461,13 @@ async fn write_sessions_response(
             })
         })
         .collect();
-    let payload = serde_json::json!({
+    serde_json::json!({
         "live_session_count": live_session_count,
         "adapter_bindings": adapter_bindings,
         "note": "adapter_bindings lists sessions admitted since the service started; a listed \
                  binding may no longer be currently connected. Web/Console HTTP sessions are not \
                  yet individually tracked.",
     })
-    .to_string();
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
-        payload.len()
-    );
-    stream.write_all(response.as_bytes()).await?;
-    Ok(())
 }
 
 /// `POST /api/v1/config/webapi-enable-remote` (PINS.md CS4/CS5, `docs/tasks/console`): the
@@ -1090,5 +1110,81 @@ mod tests {
             Some("evil.example.com".to_string())
         );
         assert_eq!(origin_hostname("not-a-url"), None);
+    }
+
+    use crate::governance::config::layers::{resolve, LayerInputs};
+
+    /// ADR-0032 Decision 1: `config_payload` emits every registered key, in registry order, each
+    /// with the five contracted fields. A pure test over the builtin-only resolution -- no service,
+    /// no file, every platform.
+    #[test]
+    fn config_payload_emits_every_registered_key_in_registry_order() {
+        let resolution = resolve(&LayerInputs::default());
+        let payload = config_payload(&resolution);
+        let keys = payload["keys"].as_array().expect("keys array");
+
+        let expected: Vec<&str> = crate::governance::config::KEYS
+            .iter()
+            .map(|d| d.key)
+            .collect();
+        assert_eq!(keys.len(), expected.len());
+        for (entry, key) in keys.iter().zip(expected.iter()) {
+            assert_eq!(entry["key"], *key);
+            assert!(entry.get("value").is_some(), "{key}: value present");
+            assert!(entry["source"].is_string(), "{key}: source string");
+            assert!(entry["locked"].is_boolean(), "{key}: locked bool");
+            assert!(
+                entry["description"].is_string(),
+                "{key}: description string"
+            );
+        }
+    }
+
+    /// ADR-0032 Decision 1: an org-mandatory entry serialises as `source: "org_mandatory"`,
+    /// `locked: true`. This REPLACES `tests/console_config_api.rs::
+    /// config_api_reflects_a_locked_org_mandatory_key`, which asserted the same fact by spawning a
+    /// real service and isolating an org policy file via the `ProgramData` env var -- an isolation
+    /// that only works on Windows and so failed the Linux/macOS release gate (ADR-0032 Context).
+    #[test]
+    fn config_payload_reflects_an_org_mandatory_key_as_locked() {
+        let mut inputs = LayerInputs::default();
+        inputs
+            .org_mandatory
+            .insert("audit.enabled".to_string(), serde_json::json!(true));
+        let resolution = resolve(&inputs);
+
+        let payload = config_payload(&resolution);
+        let entry = payload["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|k| k["key"] == "audit.enabled")
+            .expect("audit.enabled is registered");
+        assert_eq!(entry["source"], "org_mandatory");
+        assert_eq!(entry["locked"], true);
+        assert_eq!(entry["value"], true);
+    }
+
+    /// ADR-0032 Decision 1: `sessions_payload` serialises the live count, each binding's truncated
+    /// guid/pid/owned tabs, and the tracking-scope note -- a pure test over hand-built summaries.
+    #[test]
+    fn sessions_payload_serialises_count_bindings_and_note() {
+        let summaries = vec![crate::hub::session::SessionSummary {
+            guid: "abcd1234".to_string(),
+            pid: 4242,
+            owned_tab_ids: vec![7, 9],
+        }];
+        let payload = sessions_payload(&summaries, 3);
+
+        assert_eq!(payload["live_session_count"], 3);
+        let bindings = payload["adapter_bindings"].as_array().unwrap();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0]["guid"], "abcd1234");
+        assert_eq!(bindings[0]["pid"], 4242);
+        assert_eq!(bindings[0]["owned_tab_ids"], serde_json::json!([7, 9]));
+        assert!(payload["note"]
+            .as_str()
+            .unwrap()
+            .contains("admitted since the service started"));
     }
 }

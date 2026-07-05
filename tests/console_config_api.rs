@@ -94,58 +94,11 @@ fn config_api_returns_every_registered_key_in_registry_order() {
     let _ = service.wait();
 }
 
-/// PINS.md CS2: an org-mandatory override is reflected as `source: "org_mandatory"`,
-/// `locked: true`. Uses a real org-policy-file override (the same shape
-/// `tests/manifest_validation.rs::org_policy_file_with_config_boots_the_server` uses), which is
-/// SAFE regardless of this machine's own real user config state: org-mandatory always outranks
-/// the user layer in the resolution precedence, so this assertion cannot be defeated by an
-/// unrelated pre-existing user config file.
-#[test]
-fn config_api_reflects_a_locked_org_mandatory_key() {
-    let pid = std::process::id();
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let program_data_dir =
-        std::env::temp_dir().join(format!("ghostlight-console-config-org-{pid}-{seq}"));
-    let policy_dir = program_data_dir.join("ghostlight");
-    std::fs::create_dir_all(&policy_dir).expect("create fake ProgramData\\ghostlight");
-    let policy_path = policy_dir.join("policy.json");
-
-    let manifest = serde_json::json!({
-        "schema": 3,
-        "name": "console-k3-org-mandatory",
-        "version": "1",
-        "grants": [],
-        "config": [
-            { "key": "audit.enabled", "value": true, "level": "mandatory" },
-        ],
-    });
-    std::fs::write(&policy_path, serde_json::to_vec(&manifest).unwrap())
-        .expect("write the org policy file");
-
-    let endpoint = format!("ghostlight-console-config-org-{pid}-{seq}");
-    let port = test_webapi_port(11);
-    let mut service = support::spawn_service_with_program_data_and_webapi_port(
-        &endpoint,
-        &program_data_dir,
-        port,
-    );
-
-    let response = http_get(port, "/api/v1/config", None);
-    assert_eq!(status_line(&response), "HTTP/1.1 200 OK");
-    let parsed: serde_json::Value = serde_json::from_str(body(&response)).expect("valid JSON");
-    let keys = parsed["keys"].as_array().expect("keys array");
-    let entry = keys
-        .iter()
-        .find(|k| k["key"] == "audit.enabled")
-        .expect("audit.enabled is registered");
-    assert_eq!(entry["source"], "org_mandatory");
-    assert_eq!(entry["locked"], true);
-    assert_eq!(entry["value"], true);
-
-    let _ = service.kill();
-    let _ = service.wait();
-    std::fs::remove_dir_all(&program_data_dir).ok();
-}
+// NOTE (ADR-0032 Decision 1): the org-mandatory serialisation assertion that used to live here
+// (`config_api_reflects_a_locked_org_mandatory_key`) required a real spawned service with a
+// `ProgramData`-isolated org policy file -- an isolation only possible on Windows, which failed the
+// Linux/macOS release gate. It now lives as a pure, platform-independent unit test:
+// `src/hub/webapi.rs::tests::config_payload_reflects_an_org_mandatory_key_as_locked`.
 
 /// PINS.md CS1.3: `/api/v1/config` is gated by the SAME `channels.webapi.from` decision every
 /// other Console route uses -- a source outside the default `["localhost"]` allowlist (forced via
