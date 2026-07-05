@@ -18,9 +18,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 anyhow = "1"
 dirs = "6"
-sha2 = "0.10"
-hmac = "0.12"
-getrandom = "0.2"
+sha2 = "0.11"
+hmac = "0.13"
+getrandom = "0.4"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # WHATWG URL parser -- domain matching must never hand-roll URL/host parsing (CVE-2025-47241 class).

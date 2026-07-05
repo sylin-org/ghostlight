@@ -8,7 +8,7 @@
 //! of its stdio. This is defense-in-depth, not a same-user sandbox: a determined same-user process
 //! can read any same-user file (Decision 8).
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -69,7 +69,7 @@ pub fn load_or_create_hub_key() -> std::io::Result<[u8; 32]> {
         return Ok(key);
     }
     let mut key = [0u8; 32];
-    getrandom::getrandom(&mut key).map_err(|e| std::io::Error::other(e.to_string()))?;
+    getrandom::fill(&mut key).map_err(|e| std::io::Error::other(e.to_string()))?;
     let mut file = std::fs::File::create(&path)?;
     file.write_all(&key)?;
     #[cfg(unix)]
@@ -90,7 +90,8 @@ pub fn read_hub_key() -> std::io::Result<[u8; 32]> {
 
 /// The lowercase-hex HMAC-SHA256 of `message` keyed by `key` (PINS.md SS5.3).
 pub fn compute_mac_hex(key: &[u8], message: &[u8]) -> String {
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(key).expect("HMAC accepts any key length");
+    let mut mac =
+        <HmacSha256 as KeyInit>::new_from_slice(key).expect("HMAC accepts any key length");
     mac.update(message);
     hex_encode(&mac.finalize().into_bytes())
 }
