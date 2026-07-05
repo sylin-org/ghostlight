@@ -57,6 +57,13 @@ once `ServiceContext` gained the field; D2: the grace-window mechanism has no ta
 literals). RE-READ H6's task file plus PINS.md SS5 (idle-grace, anti-squat) before starting.
 Follow the per-task procedure in `BOOTSTRAP.md`.
 
+**H6 is now BLOCKED (see the H6 Log entry below) on a genuine requirements conflict discovered
+before any code was written**: ADR-0030 Decision 8's detached, job-breakaway-verified SERVICE
+process is structurally incompatible with `tests/peer_death.rs::native_host_exits_when_server_dies`
+staying green unmodified, per this task's own "Keep green (do not modify)" list. The frontier
+author must reconcile the two (see the H6 Log's "What is needed to proceed") before H6 can be
+re-issued and re-attempted. No working-tree changes were made or reverted.
+
 ## Status
 
 | Task | Title | Status | Commit | Notes |
@@ -67,7 +74,7 @@ Follow the per-task procedure in `BOOTSTRAP.md`.
 | H3 | Adapter-minted GUID identity + peer-cred binding | DONE | 81b3bea | RE-ISSUED after PINS.md SS9 fix; prior BLOCKED attempt superseded, see Log |
 | H4 | Binary-authoritative cross-session tab isolation | DONE | 1490951 | |
 | H5 | Reconnect grace window + honest bounded queue | DONE | 33b361d | |
-| H6 | Detached non-admin lifecycle + anti-squat | pending | -- | job-breakaway is the acceptance gate |
+| H6 | Detached non-admin lifecycle + anti-squat | BLOCKED | -- | conflicts with tests/peer_death.rs; see Log |
 | H7 | Tab-group-per-session presentation | pending | -- | crosses the JS boundary |
 | H8 | Local web API = TCP; bind per policy | pending | -- | needs H2+H3+H4; the corrected D2/D5 |
 
@@ -767,7 +774,98 @@ one-literal fix) are the only fences touched, both as pinned.
   test change.
 
 ### H6
-- (not started)
+- BLOCKED at the per-task procedure's step 2 (RE-READ every source file the task names; verify
+  each as-of-authoring fact; trace Required Behavior against the live tree AND the existing test
+  suite before writing any test or implementation code) -- no working-tree changes exist to
+  revert.
+- Re-verified the as-of-authoring facts that still hold: `src/hub/mod.rs` exists with
+  `run_mcp_server`/`run_as_service`/`run_as_adapter`/`ServiceContext` exactly as H2-H5 landed them;
+  `run_as_service` (src/hub/mod.rs, current `run_as_service`) still spawns
+  `transport::watchdog::wait_until_orphaned(parent)` against the captured MCP-client parent and
+  serves this process's OWN stdio as the first session over the SAME `ServiceContext` every other
+  adapter session clones (its own doc comment says so verbatim: "SERVICE role only -- ADR-0030
+  Decision 8 re-scopes the reaper to the ADAPTER at H6; until then a lone-client SERVICE keeps
+  today's behavior"); `src/hub/role.rs` (H3) exists with `assert_adapter_role` exactly as PINS.md
+  SS8 pins it; `src/proc.rs`/`src/transport/watchdog.rs` are unchanged from their as-of-authoring
+  shape; `src/transport/native/ipc.rs`'s `DEFAULT_ENDPOINT`/`default_endpoint()` and the
+  claim/serve_adapters/relay_adapter/handle_adapter_connection shape match PINS.md SS9's corrected
+  description. `src/debug.rs`'s `log_dir()` resolves to `dirs::data_local_dir()/ghostlight`
+  (`%LOCALAPPDATA%\ghostlight` on Windows), NOT the task's stated `%ProgramData%\ghostlight` (a
+  machine-wide dir) -- a minor, easily-resolved mismatch (the task's own parenthetical says "RE-READ
+  src/debug.rs ... do not invent a new dir", so the per-user dir debug.rs actually uses would have
+  been the one to reuse; not what blocked this task). No dependency (`hmac`/`rand`/the
+  `Win32_Security_Cryptography` / `Win32_System_JobObjects` windows-sys features) exists yet for
+  the anti-squat HMAC or the job-breakaway verification, but that too is not what blocked this task
+  -- ordinary additive Cargo.toml work the executor could have done.
+- STOP precondition triggered (transcribed verbatim from `H6-detached-lifecycle-antisquat.md`):
+  "If, after H2, the persistent SERVICE still wires `transport::watchdog::wait_until_orphaned` to a
+  client parent, STOP and resolve that FIRST -- a persistent service must not exit on client death
+  (ADR-0030 Decision 8; task NEVER-touch below). Do not layer H6 on top of a service that still
+  dies with a client." This is confirmed true of the live tree (see above). Attempting to
+  "resolve that FIRST" surfaced a genuine, irreconcilable requirements conflict rather than a
+  mechanical fix, which also trips the second STOP precondition: "If detached-spawn cannot
+  GUARANTEE the service escapes the Chrome job object on Windows (breakaway cannot be verified),
+  STOP and mark BLOCKED in the ledger with reasoning."
+- The conflict, traced by actually reasoning through both the required end-state and the existing,
+  must-stay-green test suite (not merely a hunch):
+  - ADR-0030 Decision 1 requires the persistent SERVICE to sit "in neither the adapter's nor
+    Chrome's job object", and Decision 8 requires it "spawned DETACHED and unparented (Windows: no
+    job inheritance / verified breakaway; Unix: setsid)" and that it "shuts down on an idle-grace
+    window ... never on parent-death." Required Behavior item 1 in this task's own file says "The
+    adapter, on finding the service absent, spawns the SAME binary in the service role DETACHED."
+  - Windows job-object semantics make this unavoidably a TWO-PROCESS design: a process cannot
+    retroactively leave a job object it was created into -- only a freshly `CreateProcess`'d CHILD
+    with `CREATE_BREAKAWAY_FROM_JOB` can escape one. So the process an MCP client (or a test
+    harness) directly launches can NEVER itself become "the detached service" after the fact; a
+    faithful implementation must make EVERY normal invocation a thin ADAPTER that either connects to
+    an already-running SERVICE or spawns a SEPARATE, distinct, always-detached SERVICE process.
+  - This directly contradicts `tests/peer_death.rs::native_host_exits_when_server_dies`
+    (tests/peer_death.rs:19-81), which this task's own "Tests (BY NAME; assertions pinned)" section
+    lists under "Keep green (do not modify)". That test spawns ONE plain `ghostlight` invocation
+    (named "server" in the test, with no service/adapter marker of any kind -- none exists in the
+    tree; confirmed via a repo-wide grep for `GHOSTLIGHT_HUB`/`service_role`/`CREATE_BREAKAWAY`/
+    `DETACHED_PROCESS`, zero hits), waits for its debug snapshot to show the native-host connected,
+    force-KILLS THAT SAME DIRECTLY-SPAWNED PROCESS, and asserts the native-host relay exits within
+    5s because its peer died. Under a faithful Decision-8 implementation, "server" is the ADAPTER,
+    and the actual extension-endpoint owner the native-host is peered to is a DIFFERENT, separately
+    spawned, always-detached SERVICE process -- which by design (and by this SAME task's own NEW
+    named test `tests/hub_lifecycle.rs::service_survives_the_spawning_adapter_exit`, pinned to
+    prove exactly this) MUST NOT die when the spawning adapter dies. Killing "server" would then
+    kill only the adapter half; the native-host's true peer (the SERVICE) stays alive, so the
+    native-host would never observe its peer dying, `exited` would stay `false` past the 5s
+    deadline, and `native_host_exits_when_server_dies` would go from green to permanently red.
+  - The narrower alternative (keep H2's "whichever process wins `claim_adapter_endpoint` becomes
+    the in-process service, exactly as landed; only strip the parent-watchdog and add idle-grace")
+    preserves `peer_death.rs` (the single spawned process still owns the extension link and dies
+    with itself), but then NEVER exercises a genuinely detached, job-breakaway-verified spawn for
+    ANY scenario in the existing test suite: `tests/all_open_golden.rs`, `tests/mcp_protocol.rs`,
+    `tests/hub_multiplex.rs`, and `tests/peer_death.rs` itself all spawn exactly one `ghostlight`
+    instance against a fresh, uncontested endpoint, so that one instance always just wins the claim
+    outright under the narrower model -- "spawn-on-demand" and "verified job-object breakaway"
+    (Required Behavior item 1; the second STOP precondition explicitly calls this "the whole point
+    of Decision 8" and "an explicit acceptance gate") would have NO exercised code path anywhere
+    the existing suite reaches, which is the STOP precondition's own failure mode ("cannot
+    GUARANTEE the service escapes ... breakaway cannot be verified" -- here because the mechanism
+    is never even invoked in the scenarios that must stay green).
+  - These two readings are mutually exclusive; there is no third design available to a literal
+    executor without inventing a resolution the task does not pin (e.g., which test's premise
+    yields). Per BOOTSTRAP's Failure protocol and the standing instruction to prefer BLOCKED over
+    improvising, no code or test was written, and nothing was reverted (there was nothing to
+    revert).
+- What is needed to proceed (decided by the frontier author, not by this executor): reconcile the
+  two pinned requirements, e.g. (i) amend `tests/peer_death.rs` (lift it off the "keep green, do
+  not modify" list for this task and rewrite its scenario -- e.g. spawn with an explicit
+  service-only marker this task would introduce, or add a second scenario that kills the actual
+  SERVICE process and asserts the native-host dies with IT, leaving the adapter-death case to
+  `tests/hub_lifecycle.rs::service_survives_the_spawning_adapter_exit`'s existing coverage instead);
+  or (ii) re-scope H6's Required Behavior so a lone MCP-client invocation is NOT required to spawn a
+  truly separate detached service (accept the narrower, winner-becomes-in-process-service model for
+  the common case), and correspondingly re-word the job-breakaway STOP precondition so it is
+  satisfied by a dedicated new unit test rather than by the existing integration suite; or (iii)
+  some other explicit resolution naming which requirement yields. No deviation numbers logged: this
+  is a requirements conflict between two of the task's own pinned requirements, discovered by
+  tracing Required Behavior against the live, must-stay-green test suite before writing any code --
+  not a choice this executor made under the task's own latitude.
 
 ### H7
 - (not started)
