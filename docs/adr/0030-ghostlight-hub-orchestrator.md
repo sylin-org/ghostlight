@@ -13,7 +13,12 @@
   idle-grace, not parent-death.
 - BUILDS ON ADR-0019/0020 (layered configuration + org policy locks), ADR-0022/0024/0025
   (capabilities, one-loader pipeline, hot-reload), and ADR-0027/0028 (open-core + tripwire
-  licensing, zero behavioral gating).
+  licensing, zero behavioral gating). RECONCILES ADR-0020's "no web console" non-goal (2026-07-05
+  amendment on that ADR) with Decision 9's local, loopback-pinned Console: that non-goal rejected a
+  remote/hosted organization-policy-authoring portal, which stays rejected; the Console is a
+  single-machine, read-mostly operational view, never an authoring or deployment surface for org
+  policy. Decision 9's embedded HTTP server is also the revisit ADR-0019 Decision 5 anticipated
+  ("if the product family needs a shared local dashboard"; see that ADR's matching amendment).
 - Supersedes the "persistent service = deferred Phase B, single-session lease" stance in
   `docs/design/ghostlight-service-architecture.md` and resolves its open decisions (section 9).
 - Preserves the sacred invariants (see "Preserved invariants").

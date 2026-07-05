@@ -77,3 +77,36 @@ building a portal.
   pin sentences to decisions.
 - Follow-up: implement inside stage 2 (ADR-0018): the audit record shape must
   carry manifest identity from its first version so simulate has stable input.
+
+## Amendment (2026-07-05, ADR-0030)
+
+ADR-0030 (Ghostlight Hub) Decision 9 introduces "the Console": a loopback-pinned static site,
+embedded in the binary and served from the local web API's own HTTP stack, showing live
+sessions/groups and a provenance-aware, read-mostly config view (per key: value, which of the five
+ADR-0019 layers set it, whether an org-mandatory lock renders it read-only). This is a
+documentation cross-reference clarifying scope, not a reversal of this ADR's non-goal, which
+remains in force UNCHANGED for what it actually rejected.
+
+This ADR's "no web console, no remote policy service, no SaaS control plane" line was written
+about the ORGANIZATION policy experience specifically (this ADR's title): a hosted or
+network-reachable surface for AUTHORING or DEPLOYING organization policy in place of
+file-over-MDM. That rejection stands. The Console is categorically different on every axis that
+mattered to the original decision:
+
+- **Local, not remote.** Loopback-pinned by default (`127.0.0.1`); it becomes reachable off-box
+  only if the machine owner deliberately flips a user-layer policy key from inside it (Decision 5),
+  and an org-mandatory lock on that key renders the control read-only and shuts remote down
+  immediately -- the org retains the last word, exactly as this ADR's layered-lock model requires.
+- **A view, not an authoring surface.** The config panel renders the ALREADY-RESOLVED effective
+  value/layer/lock per key -- the `chrome://policy` analog ADR-0019 named outright (see that ADR's
+  own amendment below) -- never a manifest editor. Organization policy is still authored and
+  deployed exclusively as a file over the org's existing channel (GPO/Intune/Jamf); the Console
+  cannot write, edit, or push a manifest, mandatory layer, or org-recommended default. `policy
+  explain`, `policy simulate`, shadow enforcement, manifest identity, and structured denials are
+  all unaffected and remain the CLI/file-based surfaces this ADR specifies.
+- **Single-machine, not a control plane.** The Console has no concept of fleets, deployment, or
+  cross-machine state; it shows one local Hub's own sessions, config, and web-API tokens. There is
+  still no remote policy service and no SaaS control plane.
+
+Follow-up: `docs/tasks/console/` (a task batch in the same BOOTSTRAP/LEDGER/PINS shape as
+`docs/tasks/hub/`) implements the Console against ADR-0030 Decision 9's description.

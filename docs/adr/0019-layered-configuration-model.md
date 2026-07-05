@@ -80,3 +80,15 @@ the intent, not the code:
 - Follow-up: implement resolution and the CLI in stage 2 step 1 (alongside the
   audit recorder, ADR-0018), since audit destinations are the first keys an
   organization will want to lock.
+
+## Amendment (2026-07-05, ADR-0030)
+
+This is the anticipated revisit, not a reversal: ADR-0030 (Ghostlight Hub) is the "product family"
+ADR this decision's Decision 5 named as the precondition ("Revisit only if the product family...
+needs a shared local dashboard; Syncthing is the precedent to study then"). Its Decision 9
+introduces a loopback-pinned embedded HTTP server (the local web API) and, on top of it, "the
+Console" -- a read-mostly, provenance-aware view of exactly the effective-value/source/lock data
+this ADR's Decision 2 already models, the `chrome://policy` analog this ADR's Decision 5 named as
+the CLI's own point of comparison. `config list | get | set` remains the source of truth; the
+Console renders the same registry, never a second one. See ADR-0020's own amendment for why this
+does not reopen that ADR's "no web console" non-goal for organization policy authoring.
