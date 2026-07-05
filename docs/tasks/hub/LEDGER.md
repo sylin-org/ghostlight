@@ -40,9 +40,37 @@ TCP peer has no OS credential to bind). See the H8 Log for the full scope-limita
 trip above; D2: full `ConfigStore`-driven `channels.webapi.from`/`webapi.bind` layering is deferred,
 so the running service always resolves to the builtin default today).
 
-H9 (installer auto-start) needs H6 (DONE). RE-READ H9's own task file plus PINS.md SS5 (the
-supervisor identifiers H9 registers) before starting. Follow the per-task procedure in
-`BOOTSTRAP.md`.
+**H9 is DONE (375810a). The H0-H9 batch is now COMPLETE.** H9 landed the per-user, zero-admin OS
+supervisor registration for the always-ready service (ADR-0030 Decision 8 amendment). New
+`src/install/supervisor.rs`: a `SupervisorStep` enum (`WriteFile`/`RemoveFile`/`Run`) built by
+three cfg-split PURE builder pairs (`register_steps(exe, ctx)`/`unregister_steps(ctx)`), one per
+platform, all reusing `crate::hub::supervisor::{SUPERVISOR_TASK_NAME, SUPERVISOR_LABEL,
+SUPERVISOR_UNIT}` (H6's constants, imported cfg-gated per platform to avoid an unused-import
+warning on the other two) so the installer and the adapter's self-heal always name the identical
+per-platform supervisor. Windows: `schtasks /create /tn "Ghostlight Service" /tr "\"<exe>\"
+service" /sc onlogon /rl limited /f` then `schtasks /run /tn "Ghostlight Service"`; unregister is
+`schtasks /delete /tn "Ghostlight Service" /f`. macOS: writes the pinned plist to
+`~/Library/LaunchAgents/org.sylin.ghostlight.service.plist`, then `launchctl bootstrap gui/<uid>
+<plist-path>` + `launchctl kickstart -k gui/<uid>/org.sylin.ghostlight.service`; unregister is
+`launchctl bootout gui/<uid>/org.sylin.ghostlight.service` then removes the plist. Linux: writes
+the pinned unit to `~/.config/systemd/user/ghostlight.service`, then `systemctl --user
+daemon-reload` + `systemctl --user enable --now ghostlight.service`; unregister is `systemctl
+--user disable --now ghostlight.service` then removes the unit file. The exe path is resolved via
+the EXISTING `native_host::normalize_exe_path` (Required behavior's mandated reuse -- no new path
+resolution invented). A new `apply_steps` function applies these steps BEST-EFFORT (`[ok]`/`[warn]`/
+`[plan]`/`[noop]` printed in the installer's existing style): it NEVER returns an error and is
+called OUTSIDE the existing `Action`/`Op`/`Tally`/`exit_result` pipeline in `run_install`/
+`run_uninstall` (`src/install/mod.rs`, the ONLY file this task modified), so a supervisor failure
+can never turn an otherwise-successful install/uninstall into a failed exit code (Required behavior
+item 4) while the existing native-host/client registration pipeline is completely untouched
+(byte-identical `Action`/`Op`/`Tally` types and control flow). The supervisor is registered
+unconditionally on every install (both `--system` and per-user), since Decision 8 requires it to
+stay per-user regardless of the browser/client registration scope. New `tests/install_supervisor.rs`
+holds the 3 task-named pure-builder tests (`windows_task_register_command_is_pinned` /
+`macos_plist_names_the_service_subcommand` / `linux_unit_names_the_service_subcommand`, each
+`#[cfg]`-gated to its own platform per the task); none of them ever executes `schtasks`/`launchctl`/
+`systemctl` (per the task's explicit scope: real OS registration is manual smoke, not a cargo
+gate). No deviations.
 
 **H7 is DONE (f12a728).** (Superseded by the H8-DONE block above; kept for provenance.) H7 landed the additive
 `group_request`/`group_response` native-messaging pair (ADR-0030 Decision 6/7; PINS.md SS6): the
@@ -216,7 +244,7 @@ session carries a REAL `SessionGuid`, there is no `None` branch; new shared cros
 | H6 | Always-ready service + thin adapters + anti-squat | DONE | 927d102 | RE-ISSUED run landed on the Decision 8 amendment (was BLOCKED); see Log + RESUME HERE |
 | H7 | Tab-group-per-session presentation | DONE | f12a728 | crossed the JS boundary; see Log |
 | H8 | Local web API = TCP; bind per policy | DONE | af1d0f8 | channels.rs is the sole sanctioned governance addition; a7 needed no edit; see Log |
-| H9 | Installer auto-start (register+start supervisor) | pending | -- | NEW; needs H6; mostly command/file builders + install wiring |
+| H9 | Installer auto-start (register+start supervisor) | DONE | 375810a | best-effort, outside the existing Tally/exit_result pipeline; see Log |
 
 Status values: `pending` | `in-progress` | `DONE` | `BLOCKED`.
 
@@ -1433,6 +1461,91 @@ moved; the sanctioned a7 exception for this task was available but never needed.
 - Note: as in H0-H7, `CARGO_TARGET_DIR` was pointed at a scratch directory (not the repo's
   `target/`) because a live dogfooded `ghostlight.exe`/native-host session held the repo's
   `target/debug/ghostlight.exe`; build-artifact routing only, not a source or test change.
+
+### H9
+- Verified all as-of-authoring facts in `H9-installer-autostart.md` against the live tree before
+  writing any code: `src/hub/supervisor.rs` (H6) defines `SUPERVISOR_TASK_NAME`/`SUPERVISOR_LABEL`/
+  `SUPERVISOR_UNIT` exactly as PINS.md SS5.2 pins them (confirmed by reading the file directly);
+  `src/install/native_host.rs::normalize_exe_path` is the existing exe-path resolution already
+  reused by both `HostManifest::resolve` and `clients::server_entry`; `src/install/mod.rs` hosts
+  `run_install`/`run_uninstall` with the existing `Action`/`Op`/`Tally`/`exit_result` pipeline
+  exactly as described; `libc` is already an unconditional `[target.'cfg(unix)'.dependencies]`
+  entry (needed for macOS's `libc::getuid()`, already used the same way in
+  `src/hub/supervisor.rs`). No STOP precondition fired: a real exe-path resolution exists, no
+  register/start action requires elevation (Task Scheduler `/rl limited`, launchd `gui/<uid>`,
+  systemd `--user` are all per-user), and no NEVER-touch fence needed to move.
+- Implemented per the task's pinned oracles and PINS.md SS5.2, all inside two new files plus one
+  edited file (`src/install/mod.rs`, the only pre-existing file this task touches):
+  - `src/install/supervisor.rs` (new): `SupervisorCommand` (`program`/`args`) and `SupervisorStep`
+    (`WriteFile`/`RemoveFile`/`Run`) as the shared vocabulary; three cfg-split
+    `register_steps(exe: &Path, ctx: &PlanCtx) -> Vec<SupervisorStep>` /
+    `unregister_steps(ctx: &PlanCtx) -> Vec<SupervisorStep>` pairs (`#[cfg(windows)]`,
+    `#[cfg(target_os = "macos")]`, `#[cfg(all(unix, not(target_os = "macos")))]`), each
+    transcribing its platform's pinned oracle verbatim (argv, plist XML, unit INI). Windows'
+    `register_steps` normalizes `exe` via `native_host::normalize_exe_path` before building the
+    `/tr` string; macOS/Linux normalize it the same way before rendering the plist/unit. A single
+    `apply_steps(label, steps, dry_run)` applies any platform's steps, printing `[plan]`/`[ok]`/
+    `[warn]`/`[noop]` in the installer's existing visual style, NEVER returning an error (Required
+    behavior item 4: a failed step WARNS, is logged, and is skipped -- it never aborts the caller).
+  - `src/install/mod.rs`: added `pub mod supervisor;`; `run_install` now calls
+    `supervisor::apply_steps("Ghostlight Service", &supervisor::register_steps(&ctx.current_exe,
+    &ctx), opts.dry_run)` AFTER the existing `apply(&actions, opts.dry_run)` call and BEFORE
+    `finish`; `run_uninstall` symmetrically calls `unregister_steps`. Both calls are OUTSIDE the
+    existing `tally`/`exit_result` computation, so a supervisor failure can never change the
+    install's exit code or its `Done: N applied, N unchanged, N failed` summary line -- the
+    existing native-host/MCP-client registration behavior (idempotent value-level JSON merge) is
+    completely unmodified, satisfying the task's explicit "regress nothing" instruction. The
+    supervisor is registered/unregistered UNCONDITIONALLY (both `--system` and per-user installs),
+    since Decision 8 pins it as always per-user regardless of `opts.system` (that flag only scopes
+    the native-host/client registration, an orthogonal axis).
+  - `tests/install_supervisor.rs` (new; the 3 task-named tests, each `#[cfg]`-gated to its own
+    platform exactly as named): `windows_task_register_command_is_pinned` (asserts the `schtasks
+    /create` step's argv contains `/tn`, `Ghostlight Service`, `/rl`, `limited`, `/sc`, `onlogon`,
+    and that the `/tr` value names the `service` subcommand); `macos_plist_names_the_service_
+    subcommand` (asserts the rendered plist contains `<string>service</string>` and
+    `org.sylin.ghostlight.service`); `linux_unit_names_the_service_subcommand` (asserts the
+    rendered unit contains `ExecStart=`, `service`, and `Restart=on-failure`). None ever executes
+    `schtasks`/`launchctl`/`systemctl`, per the task's explicit scope. A supplementary (not
+    task-named) `#[cfg(windows)]` unit test was also added directly in `supervisor.rs`'s own
+    `#[cfg(test)]` module (`windows_register_steps_never_elevate`), asserting no `/ru` (run-as)
+    argument is present and `limited` is, reinforcing STOP precondition 3 (no elevation) the same
+    way earlier tasks added supplementary tests alongside task-named ones.
+- No deviations from the task file.
+- Verification: all four commands from BOOTSTRAP plus the task's own literal block passed for
+  real, on this Windows dev box. `cargo build --all-targets` clean (one intermediate unused-import
+  warning on `SUPERVISOR_LABEL`/`SUPERVISOR_UNIT` under `#[cfg(windows)]` was fixed by cfg-gating
+  each import to the platform that uses it, before the final clean build -- not logged as a
+  numbered deviation since it never touched a pinned assertion or oracle, only import visibility).
+  `cargo test --test install_supervisor` (1/1 on this Windows host --
+  `windows_task_register_command_is_pinned`; the macOS/Linux tests are compiled out here by their
+  own `#[cfg]`, exactly as the task specifies, and were not executed on this run). `cargo test
+  --test all_open_golden --test tool_schema_fidelity --test architecture` all green (15 tests
+  across the three suites). The FULL `cargo test` was also run: 461 lib tests + every integration
+  suite green (0 failed), including every sacred/named suite plus
+  `hub_multiplex`/`hub_isolation`/`hub_lifecycle`/`hub_queue`/`hub_identity`/`hub_role_wiring`/
+  `mcp_protocol`/`peer_death`/`webapi_auth`/`channels_policy`/`config_schema_golden`/
+  `install_supervisor` and every other existing suite, all green. `cargo clippy --all-targets --
+  -D warnings` clean. `cargo fmt --all -- --check` clean (after one `cargo fmt --all` pass to
+  reorder the cfg-gated imports and wrap a `for` loop in the new test file -- whitespace/import-
+  order only, no semantic change, not logged as its own numbered deviation, matching every prior
+  task's precedent for this exact kind of fmt-only fixup). Sacred tests
+  (`tests/tool_schema_fidelity.rs`, `tests/all_open_golden.rs`,
+  `tests/architecture.rs::governance_core_has_no_forbidden_back_edges`) green and byte-unmodified;
+  `git diff --stat` (pre-commit) showed exactly `src/install/mod.rs` modified (18 insertions, 0
+  deletions) plus 2 new files (`src/install/supervisor.rs`, `tests/install_supervisor.rs`) -- no
+  NEVER-touch fence moved; this task named no sanctioned exception and needed none.
+- Manual smoke (NOT a cargo gate, per the task's own framing -- recorded here for the frontier
+  author, not executed on this run): on each platform, run `ghostlight install`, confirm
+  `ghostlight service` is running (Task Scheduler / `launchctl print` / `systemctl --user status`),
+  open an editor and confirm it connects with no manual start, then `ghostlight uninstall` and
+  confirm the supervisor is gone. NOT performed in this run (this box has no packaged installer
+  build to smoke against yet; the pure builders are verified, the real OS registration commands
+  themselves are unexercised end-to-end). Flagged for the frontier author before shipping H9 to
+  real users.
+- Note: as in H0-H8, `CARGO_TARGET_DIR` was pointed at a scratch directory (not the repo's
+  `target/`) because four live dogfooded `ghostlight.exe` processes (this environment's own
+  MCP/native-host session) held the repo's `target/debug/ghostlight.exe`; build-artifact routing
+  only, not a source or test change.
 
 ## Deviation format
 
