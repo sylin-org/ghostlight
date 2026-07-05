@@ -1,4 +1,4 @@
-# Ghostlight Browser: Extension (Manifest V3)
+# Ghostlight in Browser: Extension (Manifest V3)
 
 The thin, **policy-free** Chromium extension: a CDP executor + native-messaging endpoint. It holds
 mechanism only; all governance lives in the `ghostlight` binary. Not a port: a clean

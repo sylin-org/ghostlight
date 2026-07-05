@@ -17,15 +17,11 @@
 //! `main` deliberately has no `#[tokio::main]`: the two async roles each build their own runtime,
 //! and the installer needs none.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use ghostlight::browser::pattern;
-use ghostlight::debug::DebugSink;
 use ghostlight::doctor::DoctorOptions;
-use ghostlight::governance::manifest::source;
 use ghostlight::install::{InstallOptions, Selection, UninstallOptions};
 use ghostlight::native::ipc;
-use ghostlight::transport::executor::Browser;
 
 /// Ghostlight -- the user's own authenticated browser, for AI agents.
 #[derive(Debug, Parser)]
@@ -241,6 +237,10 @@ struct DoctorArgs {
     /// Print extra detail.
     #[arg(long)]
     verbose: bool,
+    /// Repair, not just report: reap orphaned mcp-server sessions (alive process, exited client)
+    /// and clear stale state files. The only doctor mode that kills or deletes anything (ADR-0029).
+    #[arg(long)]
+    fix: bool,
 }
 
 #[derive(Debug, Args)]
@@ -287,7 +287,10 @@ impl From<UninstallArgs> for UninstallOptions {
 
 impl From<DoctorArgs> for DoctorOptions {
     fn from(a: DoctorArgs) -> Self {
-        DoctorOptions { verbose: a.verbose }
+        DoctorOptions {
+            verbose: a.verbose,
+            fix: a.fix,
+        }
     }
 }
 
@@ -387,7 +390,7 @@ fn main() -> Result<()> {
             command: None,
             manifest,
             debug: debug_flag,
-        } => run_server(manifest, debug_flag || debug_env)?,
+        } => ghostlight::hub::run_mcp_server(manifest, debug_flag || debug_env)?,
     }
     Ok(())
 }
@@ -413,7 +416,7 @@ fn run_status(args: StatusArgs) {
 /// normal launch is expected, not a problem (see `doctor`'s wording).
 fn run_native_host_role(debug: bool) -> Result<()> {
     tracing::info!("ghostlight starting (native-host role, launched by the browser)");
-    let sink = build_debug_sink(debug, "native-host");
+    let sink = ghostlight::hub::build_debug_sink(debug, "native-host");
     let rt = tokio::runtime::Runtime::new()?;
     let result =
         rt.block_on(async { ipc::relay_native_host(&ipc::default_endpoint(), &sink).await });
@@ -428,80 +431,4 @@ fn run_native_host_role(debug: bool) -> Result<()> {
     // Chrome observe the disconnect and reconnect to the next mcp-server session (no zombie).
     tracing::info!("native-host relay ended; exiting");
     std::process::exit(0);
-}
-
-/// mcp-server role: own the browser IPC endpoint + serve the native-host in the background, run the
-/// stdio MCP JSON-RPC loop in the foreground. Both share the [`Browser`] handle.
-fn run_server(manifest: Option<String>, debug_on: bool) -> Result<()> {
-    // Resolve the user-supplied manifest source (G12, shared format doc section 1.3): the
-    // --manifest flag wins when both it and GHOSTLIGHT_MANIFEST are set. Plain synchronous
-    // I/O, before the async runtime starts: a source that is SELECTED but cannot be read,
-    // parsed, or validated is a fatal startup error (an org policy that fails open is worse
-    // than a crash), so this must happen before a single JSON-RPC line is served.
-    let user_source = manifest.or_else(|| std::env::var("GHOSTLIGHT_MANIFEST").ok());
-    let loaded_policy = source::load_policy(user_source.as_deref(), pattern::is_valid_pattern)
-        .with_context(|| "loading the governance manifest")?;
-
-    match (&loaded_policy.manifest, &loaded_policy.origin) {
-        (Some(m), Some(origin)) => tracing::info!(
-            name = %m.name,
-            version = %m.version,
-            hash = %m.hash,
-            mode = ?m.mode,
-            origin = ?origin,
-            debug_mode = debug_on,
-            "ghostlight starting (mcp-server role; governance overlay active)"
-        ),
-        _ => tracing::info!(
-            debug_mode = debug_on,
-            "ghostlight starting (mcp-server role; no manifest: all-open)"
-        ),
-    }
-
-    let sink = build_debug_sink(debug_on, "mcp-server");
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async move {
-        let browser = Browser::with_debug(sink.clone());
-        let endpoint = ipc::default_endpoint();
-        tokio::spawn({
-            let browser = browser.clone();
-            async move {
-                match ipc::serve(browser, &endpoint).await {
-                    Ok(()) => {}
-                    Err(ghostlight::Error::SessionBusy) => tracing::warn!(
-                        "another ghostlight session already owns the browser; tool calls in this \
-                         session will report the extension as unavailable"
-                    ),
-                    Err(e) => tracing::error!(error = %e, "browser IPC endpoint failed"),
-                }
-            }
-        });
-        let result = ghostlight::mcp::server::run(browser, loaded_policy, user_source).await;
-        sink.flush(); // final snapshot after stdin closes
-        result
-    })?;
-    Ok(())
-}
-
-/// Build the observability sink for `role` ("mcp-server" or "native-host"). Debug-off yields a
-/// no-op sink; if the log directory cannot be prepared we warn and continue without observability
-/// rather than failing the process.
-fn build_debug_sink(debug: bool, role: &'static str) -> DebugSink {
-    if !debug {
-        return DebugSink::disabled();
-    }
-    let Some(dir) = ghostlight::debug::log_dir() else {
-        tracing::warn!("no log directory available; running without debug observability");
-        return DebugSink::disabled();
-    };
-    match DebugSink::enabled(&dir, role) {
-        Ok(sink) => {
-            tracing::info!(dir = %dir.display(), role, "debug mode on: state + event log under this dir");
-            sink
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "could not enable debug sink; continuing without it");
-            DebugSink::disabled()
-        }
-    }
 }

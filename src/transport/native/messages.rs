@@ -88,3 +88,25 @@
 //! reported URL to resolve the governing domain for a tab-scoped tool call; it is never trusted
 //! from tool call parameters. This reply routes through the same generic (non-`tool_error`)
 //! reply path as a `tool_response` -- no new routing logic, only a new `type` value.
+//!
+//! ## Adapter/control session-hello's `guid` member (H3, ADR-0030 Decision 4)
+//!
+//! This section documents the wire vocabulary between the binary and the extension; the
+//! adapter/control session-hello below is a DIFFERENT connection (thin ADAPTER <-> persistent
+//! SERVICE, never the extension link) that rides the SAME 4-byte-LE `host.rs` framing. H2
+//! (`src/hub/handshake.rs`) defines the hello's `hub`/`role` members and its
+//! `ROLE_ADAPTER`/`ROLE_CONTROL` constants; this is not a second or separate handshake frame, only
+//! the documentation of one more member on that existing hello:
+//!
+//! ```json
+//! { "hub": 1, "role": "adapter", "guid": "<uuid-v4>" }
+//! ```
+//!
+//! `guid` is present only for `role == "adapter"` (absent for the reserved `"control"` role): the
+//! adapter-minted session identity (`crate::hub::session::SessionGuid`), a canonical lowercase
+//! hyphenated UUIDv4. The thin ADAPTER mints it once per process (`ipc::relay_adapter`) and reuses
+//! it for the process's lifetime; the SERVICE parses it (`SessionGuid::parse`), binds it to the
+//! presenting OS peer (`crate::hub::session::SessionRegistry::admit`), and threads it into
+//! `transport::mcp::server::serve_session` as that session's opaque identity. The EXTENSION link
+//! uses NO hello at all (its own endpoint, server-speaks-first; PINS.md SS1 as amended
+//! 2026-07-04), so there is no `ext` role and nothing about the extension link to document here.

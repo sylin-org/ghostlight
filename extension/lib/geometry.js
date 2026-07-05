@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Ghostlight -- screenshot geometry: token/side budget sizing and coordinate rescaling.
-
-const PX_PER_TOKEN = 28, MAX_TOKENS = 1568, MAX_SIDE = 1568;
+//
+// IIFE-wrapped so its internal const/function bindings stay function-scoped, not global lexical
+// bindings in the service worker (importScripts shares the worker's global scope; a top-level const
+// here would collide with a re-import or a consumer's binding and fail worker registration). Only
+// the export assignment is global, and reassigning it is idempotent. The budget tunables come from
+// lib/constants.js (the single source), read here via importScripts order (worker) or require (Node).
+(function () {
+const C = (typeof module !== "undefined" && module.exports) ? require("./constants.js") : self.GhostlightConstants;
+const { PX_PER_TOKEN, MAX_TOKENS, MAX_SIDE } = C;
 
 // Target screenshot dimensions (derived from the CSS viewport) under the token + longest-side budget.
 function targetDims(vpW, vpH) {
@@ -28,9 +35,10 @@ function rescaleCtxCoord(c, x, y) {
   return [Math.round((c.offX || 0) + (x * rw) / c.shotW), Math.round((c.offY || 0) + (y * rh) / c.shotH)];
 }
 
-const GhostlightGeometry = { PX_PER_TOKEN, MAX_TOKENS, MAX_SIDE, targetDims, zoomScale, rescaleCtxCoord };
+const GhostlightGeometry = { targetDims, zoomScale, rescaleCtxCoord };
 if (typeof module !== "undefined" && module.exports) {
   module.exports = GhostlightGeometry;
 } else {
   self.GhostlightGeometry = GhostlightGeometry;
 }
+})();

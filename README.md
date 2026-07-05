@@ -1,10 +1,14 @@
-# Ghostlight Browser
+<p align="center">
+  <img src="extension/icons/icon512.png" alt="Ghostlight mascot" width="128" height="128">
+</p>
+
+# Ghostlight
 
 [![CI](https://github.com/sylin-org/ghostlight/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/sylin-org/ghostlight/actions/workflows/ci.yml)
 
 **Governed access to your own browser, for AI agents.**
 
-Ghostlight Browser is a single Rust binary plus a thin Chromium (Manifest V3) extension that gives
+Ghostlight is a single Rust binary plus a thin Chromium (Manifest V3) extension that gives
 an AI agent controlled access to your real, authenticated browser session. It drives the
 browser you are already logged in to, so the agent can observe and act on the web apps you already
 use, through any MCP client (Claude Code, Cursor, and others). A separable governance layer decides,
@@ -57,16 +61,21 @@ verified on Windows.
 
 ## Getting started
 
-### 1. Build the binary
+### 1. Get the binary
+
+Download a prebuilt archive for your platform from the
+[Releases page](https://github.com/sylin-org/ghostlight/releases/latest) and extract it, or build
+from source:
 
 ```sh
-git clone <this-repo>
+git clone https://github.com/sylin-org/ghostlight
 cd ghostlight
 cargo build --release
 ```
 
 The binary is at `target/release/ghostlight` (`ghostlight.exe` on Windows). All commands below run
-that binary.
+that binary. Every release archive carries a SHA-256 checksum and a signed build-provenance
+attestation (`gh attestation verify <archive> --repo sylin-org/ghostlight`).
 
 ### 2. Load the extension in Chrome
 
@@ -238,8 +247,8 @@ single dispatch chokepoint inside the binary without touching any tool code.
 
 ## Roadmap
 
-- Live browser verification on macOS and Linux, and a first tagged release with prebuilt binaries
-  for all four targets.
+- Live browser verification on macOS and Linux (the binary already builds and ships for all four
+  targets on the [Releases page](https://github.com/sylin-org/ghostlight/releases)).
 - A Chrome Web Store listing, so the extension installs without developer mode.
 - Offline license keys for organizations (see [PRICING.md](PRICING.md)), and an `http` audit
   destination alongside file, stderr, and syslog.

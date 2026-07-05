@@ -11,12 +11,17 @@ use crate::install::native_host::WowView;
 use crate::install::{clients, host_file_path, native_host, Hive, PlanCtx};
 use crate::transport::native::ipc::{self, EndpointProbe};
 use crate::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Options for `ghostlight doctor`.
 pub struct DoctorOptions {
     /// Show every debug session (not just the newest few) with its per-session counters.
     pub verbose: bool,
+    /// Repair instead of only reporting (ADR-0029): reap orphaned mcp-server sessions (alive
+    /// process, dead parent) and remove state files whose process has exited. This is the one
+    /// place doctor's otherwise strict "never writes, deletes, or kills anything" contract is
+    /// relaxed, and only behind this explicit flag.
+    pub fix: bool,
 }
 
 /// Run the diagnosis; prints the report and returns `Ok(true)` when healthy (no findings).
@@ -92,6 +97,7 @@ pub fn run(opts: DoctorOptions) -> Result<bool> {
         probe,
         sessions_present,
         newest_server,
+        orphans: orphan_pids(&rows).len(),
     };
     let problems = findings(&obs);
 
@@ -108,13 +114,58 @@ pub fn run(opts: DoctorOptions) -> Result<bool> {
         println!(
             "  OK: mcp-server (pid {pid}) is running, the extension is connected, and the IPC endpoint accepts connections."
         );
-        Ok(true)
     } else {
         for problem in &problems {
             println!("  problem: {problem}");
         }
-        Ok(false)
     }
+
+    // Repair pass (ADR-0029): opt-in, and the only path where doctor kills or deletes anything.
+    if opts.fix {
+        return Ok(run_fix(&log_dir, &rows));
+    }
+    Ok(problems.is_empty())
+}
+
+/// The `--fix` repair pass: reap orphaned sessions and clear stale files, then report what changed
+/// and nudge the user to re-run the plain diagnosis. Returns `true` (the repair ran without error);
+/// the user re-runs `ghostlight doctor` to confirm the resulting health, keeping this path free of a
+/// second full diagnosis.
+fn run_fix(log_dir: &Option<PathBuf>, rows: &[SessionRow]) -> bool {
+    println!();
+    println!("Repairs:");
+    let Some(dir) = log_dir else {
+        println!("  (no log directory on this platform; nothing to repair)");
+        return true;
+    };
+    let report = reap(rows, dir);
+    if report.reaped.is_empty() && report.cleared.is_empty() {
+        println!("  nothing to repair (no orphaned sessions, no stale state files)");
+    } else {
+        if !report.reaped.is_empty() {
+            println!(
+                "  reaped {} orphaned mcp-server session(s): pid {}",
+                report.reaped.len(),
+                report
+                    .reaped
+                    .iter()
+                    .map(u64::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        if !report.cleared.is_empty() {
+            println!(
+                "  cleared {} stale state file(s) from exited session(s)",
+                report.cleared.len()
+            );
+        }
+    }
+    if report.kept > 0 {
+        println!("  left {} live session(s) untouched", report.kept);
+    }
+    println!("  re-run `ghostlight doctor` to confirm.");
+    true
 }
 
 fn yn(b: bool) -> &'static str {
@@ -259,6 +310,13 @@ enum SessionRow {
 struct Session {
     role: String,
     pid: u64,
+    /// This process's own creation time and its parent (pid + creation time), for liveness
+    /// classification (ADR-0029). `0` when absent (Unix, or a state file written before these
+    /// fields existed); a `0` ppid means "parent not recorded", which [`classify`] treats as
+    /// still-served so the reaper never kills it.
+    created: u64,
+    ppid: u32,
+    parent_created: u64,
     started_ms: u64,
     updated_ms: u64,
     extension_connected: bool,
@@ -295,6 +353,9 @@ fn parse_session(raw: &str) -> Option<Session> {
     Some(Session {
         role,
         pid,
+        created: get_u64("created"),
+        ppid: get_u64("ppid") as u32,
+        parent_created: get_u64("parent_created"),
         started_ms: get_u64("started_ms"),
         updated_ms: get_u64("updated_ms"),
         extension_connected: v
@@ -377,7 +438,12 @@ fn print_sessions(log_dir: &Option<PathBuf>, rows: &[SessionRow], verbose: bool)
             }
             SessionRow::Parsed(s) => {
                 shown_parsed += 1;
-                println!("{}", session_row(s, now));
+                let tag = if s.role == "mcp-server" {
+                    liveness_tag(s)
+                } else {
+                    ""
+                };
+                println!("{}{}", session_row(s, now), tag);
                 if verbose {
                     println!(
                         "      counters: requests={} tools={} errors={} frames_out={} frames_in={} connects={} disconnects={}",
@@ -434,6 +500,150 @@ fn session_row(s: &Session, now: u128) -> String {
     }
 }
 
+// --- Liveness and repair (ADR-0029) ---
+
+/// A recorded session's liveness against the live OS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Liveness {
+    /// The process is gone (exited cleanly or was killed): its state file is stale.
+    Exited,
+    /// The process is alive and still served (parent alive, or no parent recorded).
+    Running,
+    /// The process is alive but its parent has exited: an orphan, the reaper's target.
+    Orphaned,
+}
+
+/// The pure classification decision, factored out so the ADR-0029 safety rule is unit-testable
+/// without touching the OS: a session with no recorded parent (`parent_recorded == false`, an
+/// old-format state file) is NEVER classified `Orphaned`, so the reaper cannot kill it. Only a
+/// live process whose recorded parent is provably dead is an orphan.
+fn liveness_from(process_alive: bool, parent_recorded: bool, parent_alive: bool) -> Liveness {
+    if !process_alive {
+        Liveness::Exited
+    } else if !parent_recorded || parent_alive {
+        Liveness::Running
+    } else {
+        Liveness::Orphaned
+    }
+}
+
+/// Classify a session against the OS. Uses creation-time-matched liveness (ADR-0029): a pid that is
+/// alive but carries a different creation time than recorded is a reused pid -- a different, dead
+/// process -- so this session reads as `Exited`, never mistaken for a live one to reap.
+fn classify(s: &Session) -> Liveness {
+    let process_alive = crate::proc::is_alive(crate::proc::ProcId {
+        pid: s.pid as u32,
+        created: s.created,
+    });
+    let parent_recorded = s.ppid != 0;
+    let parent_alive = parent_recorded
+        && crate::proc::is_alive(crate::proc::ProcId {
+            pid: s.ppid,
+            created: s.parent_created,
+        });
+    liveness_from(process_alive, parent_recorded, parent_alive)
+}
+
+/// A short bracketed liveness tag for an mcp-server session row, or `""` for a plainly running one.
+fn liveness_tag(s: &Session) -> &'static str {
+    match classify(s) {
+        Liveness::Exited => "  [exited]",
+        Liveness::Orphaned => "  [ORPHANED: client exited]",
+        Liveness::Running => "",
+    }
+}
+
+/// The pids of orphaned mcp-server sessions among `rows` (alive process, dead parent).
+fn orphan_pids(rows: &[SessionRow]) -> Vec<u64> {
+    rows.iter()
+        .filter_map(|r| match r {
+            SessionRow::Parsed(s)
+                if s.role == "mcp-server" && classify(s) == Liveness::Orphaned =>
+            {
+                Some(s.pid)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// What a repair pass did (ADR-0029).
+struct ReapReport {
+    /// Orphan pids terminated.
+    reaped: Vec<u64>,
+    /// Exited sessions whose stale state files were removed.
+    cleared: Vec<u64>,
+    /// Live, still-served sessions left untouched.
+    kept: usize,
+}
+
+/// Remove a session's `debug-state-<pid>.json` and `debug-events-<pid>.jsonl` under `dir`. Returns
+/// true if at least one existed and was removed.
+fn remove_session_files(dir: &Path, pid: u64) -> bool {
+    let mut removed = false;
+    for name in [
+        format!("debug-state-{pid}.json"),
+        format!("debug-events-{pid}.jsonl"),
+    ] {
+        if std::fs::remove_file(dir.join(name)).is_ok() {
+            removed = true;
+        }
+    }
+    removed
+}
+
+/// Reap orphaned mcp-server sessions and clear stale (exited) session files under `dir`.
+///
+/// SAFETY (ADR-0029): only parent-dead orphans are terminated. A session with a live parent, an
+/// unrecorded parent, or a mismatched creation time (a reused pid) is never killed; the current
+/// process is excluded; native-host rows are left alone (that relay exits promptly by design).
+fn reap(rows: &[SessionRow], dir: &Path) -> ReapReport {
+    let me = std::process::id() as u64;
+    let mut report = ReapReport {
+        reaped: Vec::new(),
+        cleared: Vec::new(),
+        kept: 0,
+    };
+    for row in rows {
+        let SessionRow::Parsed(s) = row else { continue };
+        if s.role != "mcp-server" || s.pid == me {
+            continue;
+        }
+        match classify(s) {
+            Liveness::Orphaned => {
+                if crate::proc::terminate(s.pid as u32) {
+                    remove_session_files(dir, s.pid);
+                    report.reaped.push(s.pid);
+                }
+            }
+            Liveness::Exited => {
+                if remove_session_files(dir, s.pid) {
+                    report.cleared.push(s.pid);
+                }
+            }
+            Liveness::Running => report.kept += 1,
+        }
+    }
+    report
+}
+
+/// Startup self-heal (ADR-0029 part 4): reap orphaned mcp-server sessions a predecessor left behind
+/// before this server begins serving. Best-effort; a no-op in a release build (no session registry)
+/// and when nothing is orphaned. Returns the number of orphans terminated. Logs what it reaped.
+pub fn sweep_orphans() -> usize {
+    let (Some(dir), rows) = gather_sessions() else {
+        return 0;
+    };
+    let report = reap(&rows, &dir);
+    if !report.reaped.is_empty() {
+        tracing::warn!(
+            reaped = ?report.reaped,
+            "startup sweep reaped orphaned ghostlight session(s) whose MCP client had exited"
+        );
+    }
+    report.reaped.len()
+}
+
 // --- Verdict ---
 
 /// Everything [`findings`] needs, gathered once so the rule evaluation itself is a pure function.
@@ -445,6 +655,8 @@ struct Observations {
     sessions_present: bool,
     /// The newest parsed mcp-server session, if any.
     newest_server: Option<NewestServer>,
+    /// How many mcp-server sessions are orphaned (alive process, dead parent) -- reap targets.
+    orphans: usize,
 }
 
 struct NewestServer {
@@ -511,6 +723,16 @@ fn findings(obs: &Observations) -> Vec<String> {
         },
     }
 
+    // Orphaned sessions: alive mcp-server processes whose MCP client has exited. These are the
+    // zombies ADR-0029 targets; the watchdog now prevents them, but a pre-watchdog process or one
+    // killed uncleanly can still be present. Point at the repair, not a manual process hunt.
+    if obs.orphans > 0 {
+        out.push(format!(
+            "{} orphaned ghostlight session(s) are still running after their MCP client exited: run `ghostlight doctor --fix` to reap them",
+            obs.orphans
+        ));
+    }
+
     // Fires in addition to rule 3 or 4 (an Absent/Rejects endpoint with no debug instrumentation
     // at all is two distinct, independently actionable problems); Accepts already implies rule 5
     // covers the no-session case, so this never doubles up with it.
@@ -572,6 +794,7 @@ mod tests {
                 extension_connected: true,
                 connects: 2,
             }),
+            orphans: 0,
         }
     }
 
@@ -605,6 +828,7 @@ mod tests {
             probe: EndpointProbe::Absent,
             sessions_present: false,
             newest_server: None,
+            orphans: 0,
         };
         let f = findings(&obs);
         assert_eq!(f.len(), 2, "{f:?}");
@@ -626,6 +850,7 @@ mod tests {
             probe: EndpointProbe::Rejects("boom".into()),
             sessions_present: false,
             newest_server: None,
+            orphans: 0,
         };
         let f2 = findings(&obs2);
         assert!(f2[0].contains("process manager"), "{f2:?}");
@@ -639,6 +864,7 @@ mod tests {
             probe: EndpointProbe::Accepts,
             sessions_present: false,
             newest_server: None,
+            orphans: 0,
         };
         let f = findings(&obs);
         assert_eq!(f.len(), 1, "{f:?}");
@@ -711,5 +937,56 @@ mod tests {
     fn parse_session_returns_none_for_garbage_or_a_missing_pid() {
         assert!(parse_session("not json").is_none());
         assert!(parse_session(r#"{"started_ms": 1, "role": "mcp-server"}"#).is_none());
+    }
+
+    #[test]
+    fn parse_session_extracts_process_identity_fields() {
+        let raw = r#"{
+            "pid": 42, "created": 99, "ppid": 7, "parent_created": 55,
+            "role": "mcp-server", "started_ms": 1, "updated_ms": 2,
+            "extension_connected": true, "counters": {}
+        }"#;
+        let s = parse_session(raw).unwrap();
+        assert_eq!(s.created, 99);
+        assert_eq!(s.ppid, 7);
+        assert_eq!(s.parent_created, 55);
+    }
+
+    #[test]
+    fn parse_session_defaults_identity_fields_for_old_files() {
+        // Files written before ADR-0029 have no created/ppid/parent_created; they must default to 0,
+        // and a 0 ppid is what makes `classify` treat the session as un-reapable.
+        let raw = r#"{ "pid": 7, "started_ms": 1, "updated_ms": 2,
+                       "extension_connected": false, "counters": {} }"#;
+        let s = parse_session(raw).unwrap();
+        assert_eq!(s.created, 0);
+        assert_eq!(s.ppid, 0);
+        assert_eq!(s.parent_created, 0);
+    }
+
+    /// The ADR-0029 safety rule, exhaustively: a session is `Orphaned` (and thus reapable) ONLY
+    /// when it is alive AND its parent was recorded AND that parent is dead. Every other row --
+    /// dead process, live parent, or no recorded parent -- must NOT be an orphan.
+    #[test]
+    fn liveness_from_covers_the_full_matrix() {
+        assert_eq!(liveness_from(false, true, false), Liveness::Exited);
+        assert_eq!(liveness_from(false, false, false), Liveness::Exited);
+        assert_eq!(liveness_from(true, true, true), Liveness::Running);
+        assert_eq!(
+            liveness_from(true, false, false),
+            Liveness::Running,
+            "an unrecorded parent is never treated as orphaned -- the reaper must not kill it"
+        );
+        assert_eq!(liveness_from(true, true, false), Liveness::Orphaned);
+    }
+
+    #[test]
+    fn orphaned_sessions_point_to_doctor_fix() {
+        let mut obs = healthy_obs();
+        obs.orphans = 3;
+        let f = findings(&obs);
+        let orphan = f.iter().find(|s| s.contains("orphaned")).expect("finding");
+        assert!(orphan.contains("3 orphaned"), "{orphan}");
+        assert!(orphan.contains("doctor --fix"), "{orphan}");
     }
 }

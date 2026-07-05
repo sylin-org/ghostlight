@@ -51,7 +51,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: node --test tests/extension/geometry.test.js tests/extension/keys.test.js
+      - run: node --test tests/extension/constants.test.js tests/extension/geometry.test.js tests/extension/keys.test.js
 
   e2e-smoke:
     runs-on: ubuntu-latest

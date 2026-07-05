@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Ghostlight Browser</title>
+<title>Ghostlight in Browser</title>
 <style>
   body {
     font-family: system-ui, sans-serif;
@@ -13,8 +13,15 @@
   }
   h1 {
     font-size: 14px;
+    margin: 0;
+  }
+  #brand {
+    display: flex;
+    align-items: center;
+    gap: 7px;
     margin: 0 0 8px 0;
   }
+  #brand img { flex: none; }
   #status {
     font-size: 13px;
     margin-bottom: 10px;
@@ -54,10 +61,40 @@
     color: #fff;
     border: 1px solid #7f1d1d;
   }
+  #captions-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #captions-row input {
+    cursor: pointer;
+    margin: 0;
+  }
+  #captions-note {
+    font-size: 11px;
+    color: #666;
+    margin-top: 6px;
+  }
+  #open-options {
+    display: inline-block;
+    margin-top: 10px;
+    font-size: 12px;
+    color: #2563eb;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  #open-options:hover {
+    text-decoration: underline;
+  }
 </style>
 </head>
 <body>
-  <h1>Ghostlight Browser</h1>
+  <header id="brand">
+    <img src="icons/icon48.png" alt="" width="22" height="22">
+    <h1>Ghostlight in Browser</h1>
+  </header>
   <div id="status">Loading...</div>
   <button id="toggle" disabled>Loading...</button>
   <div id="shortcut-note">
@@ -66,6 +103,10 @@
   <hr>
   <div id="session-status">Loading...</div>
   <button id="session-button" disabled>Loading...</button>
+  <hr>
+  <label id="captions-row"><input type="checkbox" id="captions-toggle"> Show action captions</label>
+  <div id="captions-note">A subtitle naming each agent action. Off by default; handy when recording a demo.</div>
+  <a id="open-options">More settings</a>
   <script src="popup.js"></script>
 </body>
 </html>

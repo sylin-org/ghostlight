@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Ghostlight -- keyboard/mouse tables: key name maps, virtual key codes, and modifier bits.
-
+//
+// IIFE-wrapped so its internal const/function bindings stay function-scoped, not global lexical
+// bindings in the service worker (see lib/geometry.js for the full rationale: importScripts shares
+// the worker global scope, so top-level consts here collide with service-worker.js's destructure
+// and with a re-import). Only the export assignment is global.
+(function () {
 const KEY_MAP = {
   enter: "Enter", return: "Enter", tab: "Tab", escape: "Escape", esc: "Escape",
   backspace: "Backspace", delete: "Delete", space: " ",
@@ -83,3 +88,4 @@ if (typeof module !== "undefined" && module.exports) {
 } else {
   self.GhostlightKeys = GhostlightKeys;
 }
+})();

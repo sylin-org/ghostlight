@@ -1,10 +1,10 @@
-# Ghostlight Browser: Permission Justifications
+# Ghostlight in Browser: Permission Justifications
 
 Last updated: 2026-07-03
 
-This document gives one paragraph per permission requested by the Ghostlight Browser
+This document gives one paragraph per permission requested by the Ghostlight in Browser
 extension, written to be pasted directly into the corresponding justification text box in the
-Chrome Web Store developer dashboard. Ghostlight Browser is the browser-side half of a governed
+Chrome Web Store developer dashboard. Ghostlight in Browser is the browser-side half of a governed
 browser-automation system: a local native application (installed separately, not distributed
 through the Chrome Web Store) drives this extension over Chrome's native messaging protocol so
 that a connected AI agent (through a local MCP client such as Claude Code) can read and act on
@@ -27,7 +27,7 @@ and titles back to the connected agent.
 
 ## debugger
 
-The `debugger` permission is required because Ghostlight Browser attaches the Chrome DevTools
+The `debugger` permission is required because Ghostlight in Browser attaches the Chrome DevTools
 Protocol (CDP, version 1.3) to the single tab it is automating, via
 `chrome.debugger.attach`. This is the only mechanism that gives the extension a single,
 unified session for the three capabilities the tool depends on together: (1) dispatching
@@ -100,7 +100,7 @@ attached to a tab with no controlling process.
 
 ## host_permissions: <all_urls>
 
-The broad `<all_urls>` host permission is required because Ghostlight Browser is a
+The broad `<all_urls>` host permission is required because Ghostlight in Browser is a
 general-purpose browser automation tool: it has to be able to operate on whatever site the
 connected AI agent or the user navigates the automated tab to, and that set of sites is not
 known in advance. The extension itself deliberately has no per-domain allowlist or blocklist

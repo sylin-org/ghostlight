@@ -27,11 +27,32 @@ docs/business/PLAN.md). Check items off in place; add dates.
 
 ## Launch window (Phase 1)
 
+- [x] First tagged release -- **v0.1.0 shipped 2026-07-04**
+      (https://github.com/sylin-org/ghostlight/releases/tag/v0.1.0): 4 platform binaries
+      + extension zip, checksums, signed build-provenance. CI/release infra harvested
+      from Koi. (Agent-driven; listed here only as the milestone marker.)
 - [ ] GitHub Pages site skeleton + sylin.org DNS (half a day; content arrives from the
       frontier queue).
 - [ ] Stripe account; draft (unpublished) payment links for team and enterprise.
-- [ ] Chrome Web Store developer account ($5 one-time) and submit the prepared CWS
-      package (scripts/package-extension.ps1 output).
+- [ ] **Chrome Web Store listing (IN PROGRESS, step by step).** Account created
+      (hello@sylin.org, non-trader, $5 paid, individual identity verification pending). Item
+      created as a DRAFT named **"Ghostlight in Browser"**; store-assigned id
+      **lejccfmoeogmhemakeknjjdhkfkgncdl**. Renamed package uploaded and its name verified in the
+      dashboard. Remaining founder steps:
+      >=1 screenshot at exactly 1280x800 (capture recipe + shot list now in
+      docs/legal/STORE_LISTING.md "Graphic assets checklist": Chrome DevTools device mode, NOT the
+      agent screenshot tool, which hides the effects and mis-sizes); fill the Privacy tab (also
+      paste-ready in that file); submit. Screenshots must be the REAL extension, not the
+      FX-dictionary Artifact.
+- [ ] **Verified CRX uploads -- future hardening, NOT at launch.** The CWS "Verified CRX
+      uploads" opt-in ties item updates to a private signing key you hold (blocks account-
+      takeover -> poisoned update). Deferred deliberately: it forces signed-CRX uploads from
+      the next upload on, and losing the key locks you out of updating your own item. Turn it
+      on once the release cadence is stable, paired with the same offline key-management
+      discipline as the licensing signing seed above.
+- [ ] **Version bump + re-release (0.1.1/0.2.0).** GitHub v0.1.0 shipped the pre-fix extension
+      (SW registration failed) and pre-ADR-0029 binary. Bump both artifacts, re-cut the GitHub
+      release with the fixes + FX + options page, and keep the CWS package in step.
 - [ ] Record the demo: scripts/live-demo.ps1 under OBS, cut to ~90 seconds, export GIF
       for the README and MP4 for the site. (1 evening.)
 - [ ] Write the Show HN post yourself (founder voice; HN detects ghostwriting). Post
@@ -67,3 +88,19 @@ docs/business/PLAN.md). Check items off in place; add dates.
   ADR-0028 initial prices as list), SECURITY.md, three guides, COMPARISON.md, README
   refresh. First live CI run: core suite green on all three OSes; extension-unit fixed
   forward; e2e-smoke quarantined (continue-on-error) pending log access via gh auth.
+- 2026-07-04: **v0.1.0 SHIPPED.** gh CLI authenticated (via Ghostlight dogfooding the
+  browser to mint a token). CI hardened (least-privilege, --locked, cargo-audit, per-OS
+  cache) + dependabot; release.yml overhauled (dry-run, archives, checksums, provenance,
+  GitHub Release) -- all harvested from Koi. main reconciled with dev and is now the
+  release branch; dev is trunk. e2e-smoke stays quarantined (native-messaging in headless
+  Playwright, a design question). NEXT: Chrome Web Store listing, step by step.
+- 2026-07-04: CWS dashboard account created; draft item created; store id
+  lejccfmoeogmhemakeknjjdhkfkgncdl. Extension renamed **"Ghostlight Browser" ->
+  "Ghostlight in Browser"** (it read like a browser). Decided to DEFER "Verified CRX uploads"
+  (launch-day complexity + key-loss lockout) and to leave it as a hardening objective. Also
+  shipped (dev): ADR-0029 process-lifecycle fix, the extension SW-registration fix +
+  lib/constants.js, the per-action visual feedback vocabulary, the options page + captions.
+  Product and project name simplified from "Ghostlight Browser" to **"Ghostlight"** (extension
+  stays "Ghostlight in Browser"); README / CLAUDE.md / extension README / script synopses swept and
+  ADR-0021 amended. The Visual Feedback Dictionary design artifact was preserved verbatim into
+  docs/design/visual-feedback-dictionary.html.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Ghostlight -- popup. Renders binary/worker-reported state and submits user gestures.
-// Caches nothing (no chrome.storage, no persisted state) and decides nothing: the service
+// Caches no session state (the worker holds it) and decides nothing: the service
 // worker holds the state and answers every render() call fresh. Two independent controls,
 // each its own section: take-the-wheel pause (g10) and the panic kill switch (g11). They
 // never share a control.
@@ -78,3 +78,19 @@ sessionButtonEl.addEventListener("click", () => {
 });
 
 refreshSession();
+
+// --- Action captions (visual feedback dictionary): a persisted, off-by-default UI preference the
+// content-script indicator reads on every page. The one bit this popup persists; all session state
+// stays with the worker. ---
+
+const captionsToggle = document.getElementById("captions-toggle");
+chrome.storage.local.get("ghostlight_captions", (r) => {
+  captionsToggle.checked = !!(r && r.ghostlight_captions);
+});
+captionsToggle.addEventListener("change", () => {
+  chrome.storage.local.set({ ghostlight_captions: captionsToggle.checked });
+});
+
+document.getElementById("open-options").addEventListener("click", () => {
+  chrome.runtime.openOptionsPage();
+});

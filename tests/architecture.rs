@@ -21,6 +21,26 @@ const FORBIDDEN_CRATE_EDGES: &[&str] = &[
     "crate::native",
 ];
 
+/// H3 (ADR-0030 "Preserved invariants" as amended; PINS.md-adjacent, the sanctioned scanner
+/// extension): bare identifiers a `governance/` source may never name, on top of the crate-edge
+/// and `url` checks above. Matched the same way as a crate edge (leading AND trailing identifier
+/// boundary), so e.g. `tabIdString` or `fetch_token` do not false-positive.
+const FORBIDDEN_IDENTIFIERS: &[&str] = &["tabId", "token", "socket"];
+
+/// True when `line` (after trimming leading whitespace) is a rustdoc comment (`///` or `//!`).
+/// H3's [`FORBIDDEN_IDENTIFIERS`] check is scoped to CODE lines only (unlike the pre-existing
+/// crate-edge/`url` checks above, which intentionally scan doc comments too): `tabId`/`token`/
+/// `socket` are ordinary English words that already appear, incidentally and correctly, in
+/// unrelated governance prose (e.g. a grammar/HTML "token", or a network "socket" in an unrelated
+/// doc comment) -- the concern this check exists for (ADR-0030: "the core additionally names no
+/// tabId/token/socket TYPE") is a code-level fact, and a bare-word prose scan cannot distinguish
+/// that from incidental English vocabulary the way the rare, specific `crate::` qualified paths
+/// can.
+fn is_doc_comment(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("///") || trimmed.starts_with("//!")
+}
+
 /// True when `b` is an ASCII identifier character (`[A-Za-z0-9_]`).
 fn is_ident_char(b: u8) -> bool {
     b == b'_' || b.is_ascii_alphanumeric()
@@ -79,6 +99,15 @@ fn scan_line(line: &str) -> Vec<String> {
     }
     if references_url_crate(line) {
         hits.push("url".to_string());
+    }
+    // H3 (sanctioned addition): bare tabId/token/socket identifiers, same boundary matching,
+    // scoped to code lines only (see `is_doc_comment`).
+    if !is_doc_comment(line) {
+        for ident in FORBIDDEN_IDENTIFIERS {
+            if contains_path_token(line, ident, true) {
+                hits.push((*ident).to_string());
+            }
+        }
     }
     hits
 }
@@ -166,6 +195,24 @@ fn scanner_detects_forbidden_crate_edges() {
         scan_line("crate::native::host::send();"),
         vec!["crate::native".to_string()]
     );
+}
+
+/// H3 (`docs/tasks/hub/H3-session-identity-guid.md` item 5, ADR-0030 "Preserved invariants" as
+/// amended): proves the `tabId`/`token`/`socket` extension is live, not dead code, without
+/// weakening any existing rule -- a synthetic source naming each is flagged, and one naming none
+/// of the three passes.
+#[test]
+fn governance_core_rejects_tabid_token_socket_identifiers() {
+    assert_eq!(scan_line("let tabId: i64 = 12;"), vec!["tabId".to_string()]);
+    assert_eq!(
+        scan_line("let token = fetch_token();"),
+        vec!["token".to_string()]
+    );
+    assert_eq!(
+        scan_line("let socket = accept();"),
+        vec!["socket".to_string()]
+    );
+    assert!(scan_line("use crate::config::registry::KeyDef;").is_empty());
 }
 
 #[test]

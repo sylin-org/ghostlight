@@ -1,0 +1,632 @@
+<!doctype html>
+<!--
+  Ghostlight Visual Feedback Dictionary. Preserved design artifact.
+
+  This is a verbatim capture of the interactive preview in which the per-action
+  visual-feedback vocabulary (docs/design/visual-feedback.md) was designed and
+  approved. It plays each treatment on a mock browser stage: click rings and
+  target glow, keystroke lozenges, scroll chevrons, the navigate pill, the
+  screenshot file-away frame, the zoom magnifier, and the read scan-line.
+
+  Source: Claude artifact 73996361-1d1a-4319-a52c-8e9a5b58201f, captured
+  2026-07-04. The claude.ai iframe-runtime preamble was stripped; the design
+  markup, styles, and script are otherwise unaltered (its typographic entities
+  are part of the original and are kept as-is). Self-contained: open this file
+  directly in a browser, or click an entry to replay a single effect.
+
+  This is a marketing and design reference. The Chrome Web Store screenshots
+  must show the REAL extension, not this mock (see visual-feedback.md).
+-->
+<html>
+<head>
+<meta charset=utf8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style>
+<title>Ghostlight Visual Feedback Dictionary</title>
+</head>
+<body>
+<div id="app">
+  <header class="masthead">
+    <div class="brand">
+      <span class="ghost" aria-hidden="true">&#128123;</span>
+      <div>
+        <h1>Visual Feedback Dictionary</h1>
+        <p class="thesis">Every agent action, made visible &mdash; the vocabulary a phantom cursor speaks while it drives your browser.</p>
+      </div>
+    </div>
+    <div class="masthead-actions">
+      <button id="run-tour" class="btn btn-primary" type="button">Run the tour</button>
+      <button id="stage-light" class="btn btn-ghost" type="button" title="Preview the effects on a light page">On a light page</button>
+    </div>
+  </header>
+
+  <main class="workbench">
+    <!-- STAGE: a faux browser the effects play inside -->
+    <section class="stage" aria-label="Preview stage">
+      <div class="browser" id="browser">
+        <div class="tabstrip">
+          <div class="tab">docs</div>
+          <div class="tab tab-group" title="the agent works inside its own labelled tab group">
+            <span class="ghost-sm" aria-hidden="true">&#128123;</span>Ghostlight
+          </div>
+          <div class="tab-new" aria-hidden="true">+</div>
+        </div>
+        <div class="omnibar">
+          <span class="lock" aria-hidden="true">&#9679;</span>
+          <span class="url" id="omnibar-url">github.com/sylin-org/ghostlight</span>
+          <span class="omni-spin" id="omni-spin" aria-hidden="true"></span>
+        </div>
+        <div class="viewport" id="viewport">
+          <div class="page" id="page">
+            <h2 id="pg-title">Ghostlight for the solo developer</h2>
+            <p>Ten minutes from clone to an agent driving your real browser, plus the optional personal safety rails. Everything on this page is free, forever, with no key and no registration.</p>
+            <div class="row">
+              <button class="pg-btn" id="pg-btn" type="button">Get the binary</button>
+              <a class="pg-link" id="pg-link" href="#" onclick="return false">Read the guide</a>
+            </div>
+            <label class="pg-field-label" for="pg-input">First prompt to your agent</label>
+            <input class="pg-input" id="pg-input" type="text" placeholder="the agent will type here" readonly />
+            <h3>What you get</h3>
+            <p>Your AI agent gets a real browser: your cookies, your logins, your tabs. Fourteen tools &mdash; navigate, click, type, screenshot, read the page &mdash; at byte-parity with the schemas the model was trained on.</p>
+            <p>By default Ghostlight is all-open: no policy, no restrictions, no audit. Governance is an overlay you opt into later, one setting at a time.</p>
+            <div class="drag-strip" id="drag-strip">drag across me</div>
+            <p>The agent works inside its own tab group, labelled with a ghost, so its activity stays visually separate from yours.</p>
+          </div>
+          <!-- effects overlay (never part of the agent's own screenshot) -->
+          <div class="fx" id="fx" aria-hidden="true"></div>
+          <div class="caption" id="caption" aria-hidden="true"></div>
+        </div>
+      </div>
+      <p class="stage-note">Every effect here is <strong>hidden from the agent's own screenshots</strong> &mdash; the model's image stays clean; these are for the human watching.</p>
+    </section>
+
+    <!-- RAIL: the dictionary -->
+    <aside class="rail" aria-label="The dictionary">
+      <div class="rail-group">
+        <h4>Pointer</h4>
+        <button class="entry" data-fx="click"><span class="k">click</span><span class="d">expanding ring + the target element glows</span></button>
+        <button class="entry" data-fx="multiclick"><span class="k">double / triple</span><span class="d">two or three rings, staggered as a rhythm</span></button>
+        <button class="entry" data-fx="rightclick"><span class="k">right&#8209;click</span><span class="d">a dashed ring &mdash; a secondary action</span></button>
+        <button class="entry" data-fx="drag"><span class="k">drag</span><span class="d">a comet trail along the path</span></button>
+        <button class="entry" data-fx="hover"><span class="k">hover</span><span class="d">the cursor glides in, a soft glow, no ring</span></button>
+      </div>
+      <div class="rail-group">
+        <h4>Input</h4>
+        <button class="entry" data-fx="type"><span class="k">type</span><span class="d">field shimmer + a keystroke lozenge</span></button>
+        <button class="entry" data-fx="key"><span class="k">key / shortcut</span><span class="d">a lozenge: <code>Ctrl</code>+<code>A</code></span></button>
+      </div>
+      <div class="rail-group">
+        <h4>Motion</h4>
+        <button class="entry" data-fx="scroll"><span class="k">scroll</span><span class="d">directional chevrons + a soft streak</span></button>
+        <button class="entry" data-fx="navigate"><span class="k">navigate</span><span class="d">a destination pill + a loading sweep</span></button>
+      </div>
+      <div class="rail-group">
+        <h4>Capture</h4>
+        <button class="entry" data-fx="screenshot"><span class="k">screenshot</span><span class="d">a sky flash + a camera badge, bottom&#8209;right</span></button>
+        <button class="entry" data-fx="zoom"><span class="k">zoom</span><span class="d">a magnifier frame closes on the region</span></button>
+      </div>
+      <div class="rail-group">
+        <h4>Reading</h4>
+        <button class="entry" data-fx="read"><span class="k">read page / find</span><span class="d">a scan&#8209;line sweeps down &mdash; "the agent is reading"</span></button>
+        <button class="entry" data-fx="wait"><span class="k">wait</span><span class="d">a breathing dot while it thinks</span></button>
+      </div>
+      <div class="rail-foot">
+        <p>Drawn from the recording &amp; demo craft of
+          <a href="https://screen.studio/" target="_blank" rel="noopener">Screen Studio</a> (spring glide, click rings),
+          <a href="https://keycastr.com/" target="_blank" rel="noopener">KeyCastr</a> /
+          <a href="https://keyviz.org/" target="_blank" rel="noopener">Keyviz</a> (keystroke lozenges, directional cues), and
+          <a href="https://playwright.dev/" target="_blank" rel="noopener">Playwright</a>'s <code>.highlight()</code> (confirm the target, not just the gesture).</p>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<style>
+  :root {
+    --ground: #0a0e17;
+    --chrome: #161d2b;
+    --chrome-2: #1f2a3d;
+    --page: #0f1623;
+    --panel: #0d1420;
+    --ink: #e6edf6;
+    --muted: #93a3ba;
+    --faint: #62728c;
+    --line: #223049;
+    --sky: #38bdf8;
+    --sky-rgb: 56,189,248;
+    --page-ink: #d7e2f0;
+    --radius: 14px;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  /* Light-page preview toggles only the mock page surface, not the app. */
+  .browser.light-page { --page: #f4f7fb; --page-ink: #16202e; }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background:
+      radial-gradient(1100px 620px at 78% -8%, rgba(var(--sky-rgb), .10), transparent 60%),
+      radial-gradient(900px 500px at 0% 108%, rgba(var(--sky-rgb), .06), transparent 55%),
+      var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app { max-width: 1220px; margin: 0 auto; padding: 30px 26px 56px; }
+  a { color: var(--sky); }
+
+  /* ---- masthead ---- */
+  .masthead {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 24px; flex-wrap: wrap; padding-bottom: 22px; margin-bottom: 24px;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; gap: 16px; align-items: flex-start; }
+  .ghost { font-size: 34px; line-height: 1; filter: drop-shadow(0 0 12px rgba(var(--sky-rgb), .55)); }
+  .ghost-sm { margin-right: 5px; }
+  h1 {
+    margin: 2px 0 6px; font-size: 25px; letter-spacing: -.01em; font-weight: 640;
+    text-wrap: balance;
+  }
+  .thesis { margin: 0; color: var(--muted); max-width: 56ch; font-size: 14.5px; }
+  .masthead-actions { display: flex; gap: 10px; align-items: center; }
+
+  .btn {
+    font-family: var(--mono); font-size: 12.5px; letter-spacing: .02em;
+    padding: 9px 15px; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); cursor: pointer;
+    transition: border-color .18s, background .18s, transform .06s;
+  }
+  .btn:hover { border-color: rgba(var(--sky-rgb), .55); }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary {
+    background: linear-gradient(180deg, rgba(var(--sky-rgb), .22), rgba(var(--sky-rgb), .10));
+    border-color: rgba(var(--sky-rgb), .5); color: #eaf6ff;
+    box-shadow: 0 0 0 1px rgba(var(--sky-rgb), .12), 0 8px 22px -12px rgba(var(--sky-rgb), .7);
+  }
+  .btn:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+
+  /* ---- workbench layout ---- */
+  .workbench { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 26px; align-items: start; }
+  @media (max-width: 880px) { .workbench { grid-template-columns: 1fr; } }
+
+  /* ---- stage / browser mock ---- */
+  .stage { min-width: 0; }
+  .browser {
+    border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+    background: var(--chrome); box-shadow: 0 30px 80px -40px rgba(0,0,0, .9), 0 0 0 1px rgba(255,255,255,.02) inset;
+  }
+  .tabstrip { display: flex; align-items: center; gap: 4px; padding: 8px 10px 0; background: var(--chrome); }
+  .tab {
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    padding: 7px 14px; border-radius: 8px 8px 0 0; background: transparent;
+  }
+  .tab-group {
+    color: #dff2ff; background: var(--page);
+    border: 1px solid var(--line); border-bottom: none;
+    box-shadow: inset 0 2px 0 var(--sky); display: flex; align-items: center;
+  }
+  .tab-new { color: var(--faint); padding: 0 8px; font-size: 15px; }
+  .omnibar {
+    display: flex; align-items: center; gap: 9px; padding: 9px 14px;
+    background: var(--chrome-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    position: relative;
+  }
+  .lock { color: var(--sky); font-size: 8px; }
+  .url { font-family: var(--mono); font-size: 12.5px; color: var(--muted); letter-spacing: -.005em; }
+  .omni-spin {
+    position: absolute; left: 0; bottom: -1px; height: 2px; width: 0;
+    background: linear-gradient(90deg, transparent, var(--sky), transparent);
+    opacity: 0;
+  }
+  .omni-spin.go { animation: omni-load 900ms ease-in-out; }
+  @keyframes omni-load { 0% { width: 0; opacity: 1; } 80% { width: 100%; opacity: 1; } 100% { width: 100%; opacity: 0; } }
+
+  .viewport { position: relative; height: 500px; overflow: hidden; background: var(--page); }
+  .page {
+    position: absolute; inset: 0; padding: 26px 30px; overflow: hidden;
+    color: var(--page-ink); transition: transform .5s cubic-bezier(.22,1,.36,1);
+  }
+  .page h2 { margin: 4px 0 14px; font-size: 24px; letter-spacing: -.01em; color: var(--page-ink); }
+  .page h3 { margin: 22px 0 8px; font-size: 16px; color: var(--page-ink); }
+  .page p { margin: 0 0 13px; font-size: 13.5px; max-width: 62ch; color: color-mix(in srgb, var(--page-ink) 82%, transparent); }
+  .row { display: flex; align-items: center; gap: 16px; margin: 18px 0; }
+  .pg-btn {
+    font-family: var(--sans); font-size: 13.5px; font-weight: 560; color: #eaf6ff;
+    padding: 10px 18px; border-radius: 10px; cursor: pointer;
+    background: linear-gradient(180deg, rgba(var(--sky-rgb),.24), rgba(var(--sky-rgb),.12));
+    border: 1px solid rgba(var(--sky-rgb), .45);
+  }
+  .pg-link { font-size: 13.5px; color: var(--sky); text-decoration: none; border-bottom: 1px solid rgba(var(--sky-rgb),.35); }
+  .pg-field-label { display: block; font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 16px 0 7px; }
+  .pg-input {
+    width: min(380px, 100%); font-family: var(--sans); font-size: 13.5px;
+    padding: 11px 14px; border-radius: 10px; background: color-mix(in srgb, var(--page) 60%, #000 12%);
+    border: 1.5px solid var(--line); color: var(--page-ink);
+  }
+  .light-page .pg-input { background: #fff; border-color: #cfd9e6; }
+  .drag-strip {
+    margin: 20px 0; height: 82px; border: 1.5px dashed color-mix(in srgb, var(--page-ink) 34%, transparent);
+    border-radius: 12px; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: var(--muted);
+  }
+
+  /* ---- fx overlay ---- */
+  .fx { position: absolute; inset: 0; pointer-events: none; z-index: 40; }
+  .caption {
+    position: absolute; left: 50%; bottom: 16px; transform: translate(-50%, 8px);
+    z-index: 60; pointer-events: none; opacity: 0;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .01em; color: #eaf6ff;
+    background: rgba(10, 16, 26, .82); border: 1px solid rgba(var(--sky-rgb), .4);
+    padding: 6px 13px; border-radius: 999px; backdrop-filter: blur(6px);
+    box-shadow: 0 8px 26px -12px rgba(var(--sky-rgb), .6);
+    transition: opacity .2s ease, transform .2s cubic-bezier(.22,1,.36,1);
+  }
+  .caption.on { opacity: 1; transform: translate(-50%, 0); }
+
+  /* phantom cursor */
+  .cursor {
+    position: absolute; top: 0; left: 0; width: 22px; height: 28px; z-index: 55;
+    transform: translate3d(60px, 60px, 0);
+    transition: transform 620ms cubic-bezier(.22, 1, .36, 1);
+    filter: drop-shadow(0 0 3px rgba(var(--sky-rgb), .9)) drop-shadow(0 0 9px rgba(var(--sky-rgb), .5));
+  }
+  .cursor svg { position: absolute; top: 0; left: 0; overflow: visible; }
+  .glow {
+    position: absolute; inset: 0; z-index: 30; opacity: 0; pointer-events: none;
+    transition: opacity .3s ease-in-out;
+    box-shadow: inset 0 0 16px rgba(var(--sky-rgb), .55), inset 0 0 30px rgba(var(--sky-rgb), .28);
+    animation: glow-pulse 2s ease-in-out infinite;
+  }
+  @keyframes glow-pulse { 0%,100% { filter: brightness(.85); } 50% { filter: brightness(1.15); } }
+
+  .ripple {
+    position: absolute; width: 36px; height: 36px; border-radius: 50%; box-sizing: border-box;
+    transform: translate(-50%, -50%) scale(.3);
+    box-shadow: 0 0 14px rgba(var(--sky-rgb), .55), inset 0 0 9px rgba(var(--sky-rgb), .35);
+    animation: ripple 640ms ease-out forwards;
+  }
+  @keyframes ripple { 0% { opacity: .9; transform: translate(-50%,-50%) scale(.3); } 100% { opacity: 0; transform: translate(-50%,-50%) scale(2.9); } }
+
+  .target-glow {
+    position: absolute; border-radius: 10px; pointer-events: none;
+    box-shadow: 0 0 0 2px rgba(var(--sky-rgb), .9), 0 0 20px rgba(var(--sky-rgb), .55);
+    animation: target-glow 720ms ease-out forwards;
+  }
+  @keyframes target-glow { 0% { opacity: 0; } 22% { opacity: 1; } 100% { opacity: 0; } }
+
+  .trail-dot {
+    position: absolute; width: 15px; height: 15px; border-radius: 50%; transform: translate(-50%,-50%);
+    background: radial-gradient(circle, rgba(var(--sky-rgb), .95) 0%, rgba(var(--sky-rgb), 0) 70%);
+    animation: trail 560ms ease-out forwards;
+  }
+  @keyframes trail { to { opacity: 0; } }
+
+  .shimmer {
+    position: absolute; border-radius: 10px; box-sizing: border-box;
+    border: 1.5px solid rgba(var(--sky-rgb), .9);
+    box-shadow: 0 0 12px rgba(var(--sky-rgb), .5), inset 0 0 9px rgba(var(--sky-rgb), .25);
+    animation: shimmer 1100ms ease-in-out forwards;
+  }
+  @keyframes shimmer { 0% { opacity: 0; } 25% { opacity: 1; } 60% { opacity: .7; } 100% { opacity: 0; } }
+
+  .lozenge {
+    position: absolute; z-index: 58; transform: translate(-50%, 6px);
+    font-family: var(--mono); font-size: 14px; font-weight: 600; letter-spacing: .02em; color: #eaf6ff;
+    padding: 8px 14px; border-radius: 10px; white-space: nowrap;
+    background: rgba(12, 20, 32, .9); border: 1px solid rgba(var(--sky-rgb), .55);
+    box-shadow: 0 10px 30px -12px rgba(var(--sky-rgb), .8), inset 0 0 0 1px rgba(255,255,255,.03);
+    opacity: 0; animation: lozenge 1200ms cubic-bezier(.22,1,.36,1) forwards;
+  }
+  .lozenge .cap { color: var(--sky); }
+  @keyframes lozenge { 0% { opacity: 0; transform: translate(-50%, 12px); } 16% { opacity: 1; transform: translate(-50%, 0); } 78% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, -6px); } }
+
+  .chevrons {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    display: flex; flex-direction: column; align-items: center; gap: 2px; z-index: 56;
+  }
+  .chevrons svg { width: 40px; height: 24px; opacity: 0; }
+  .chevrons.up { flex-direction: column-reverse; }
+  .chevrons svg:nth-child(1) { animation: chev 900ms ease-out .00s forwards; }
+  .chevrons svg:nth-child(2) { animation: chev 900ms ease-out .10s forwards; }
+  .chevrons svg:nth-child(3) { animation: chev 900ms ease-out .20s forwards; }
+  @keyframes chev { 0% { opacity: 0; transform: translateY(-8px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(10px); } }
+  .streak {
+    position: absolute; left: 0; right: 0; height: 160px; z-index: 34;
+    background: linear-gradient(180deg, transparent, rgba(var(--sky-rgb), .12), transparent);
+    opacity: 0; animation: streak 700ms ease-out forwards;
+  }
+  @keyframes streak { 0% { opacity: 0; } 40% { opacity: 1; } 100% { opacity: 0; } }
+
+  .flash { position: absolute; inset: 0; z-index: 62; background: rgba(var(--sky-rgb), .45); opacity: 0; animation: flash 260ms ease-out forwards; }
+  @keyframes flash { 0% { opacity: .45; } 100% { opacity: 0; } }
+  /* the capture is framed, then "filed": a sky frame that shrinks into the bottom-right corner */
+  .capframe {
+    position: absolute; inset: 7px; z-index: 61; border-radius: 8px;
+    border: 2px solid rgba(var(--sky-rgb), .9); background: rgba(var(--sky-rgb), .08);
+    box-shadow: 0 0 26px rgba(var(--sky-rgb), .45), inset 0 0 30px rgba(var(--sky-rgb), .14);
+    transform-origin: 100% 100%;
+    animation: capframe 1500ms cubic-bezier(.5, 0, .2, 1) forwards;
+  }
+  @keyframes capframe {
+    0%   { opacity: 0; transform: scale(1.03); }
+    9%   { opacity: 1; transform: scale(1); }
+    34%  { opacity: 1; transform: scale(1); }
+    60%  { opacity: 1; transform: scale(.17); border-radius: 16px; }
+    88%  { opacity: 1; transform: scale(.17); border-radius: 16px; }
+    100% { opacity: 0; transform: scale(.17); border-radius: 16px; }
+  }
+  .camera {
+    position: absolute; right: 16px; bottom: 16px; z-index: 63;
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 11px; color: #eaf6ff;
+    padding: 8px 12px 8px 10px; border-radius: 12px;
+    background: rgba(10, 16, 26, .85); border: 1px solid rgba(var(--sky-rgb), .5);
+    box-shadow: 0 10px 30px -12px rgba(var(--sky-rgb), .8);
+    opacity: 0; animation: camera 1500ms ease-out forwards;
+  }
+  .camera svg { width: 20px; height: 20px; }
+  @keyframes camera { 0% { opacity: 0; transform: scale(.7); } 10% { opacity: 1; transform: scale(1); } 66% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.98); } }
+
+  .zoomframe {
+    position: absolute; z-index: 57; border: 2px solid rgba(var(--sky-rgb), .9); border-radius: 8px;
+    box-shadow: 0 0 22px rgba(var(--sky-rgb), .5), 0 0 0 2000px rgba(6, 10, 18, .32);
+    opacity: 0; animation: zoomframe 1100ms cubic-bezier(.22,1,.36,1) forwards;
+  }
+  .zoomframe svg { position: absolute; right: -11px; top: -11px; width: 26px; height: 26px; filter: drop-shadow(0 0 6px rgba(var(--sky-rgb), .8)); }
+  @keyframes zoomframe { 0% { opacity: 0; transform: scale(1.35); } 22% { opacity: 1; } 70% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
+
+  .scanline {
+    position: absolute; left: 0; right: 0; top: 0; height: 78px; z-index: 52;
+    background: linear-gradient(180deg, transparent, rgba(var(--sky-rgb), .16) 62%, rgba(var(--sky-rgb), .9));
+    box-shadow: 0 6px 20px rgba(var(--sky-rgb), .35);
+    opacity: 0; animation: scanline 1400ms cubic-bezier(.4,0,.5,1) forwards;
+  }
+  @keyframes scanline { 0% { opacity: 0; transform: translateY(-78px); } 12% { opacity: 1; } 90% { opacity: 1; } 100% { opacity: .9; transform: translateY(500px); } }
+
+  .urlpill {
+    position: absolute; left: 50%; top: 16px; transform: translate(-50%, -14px); z-index: 60;
+    font-family: var(--mono); font-size: 12px; color: #eaf6ff; white-space: nowrap;
+    padding: 8px 15px; border-radius: 999px;
+    background: rgba(10, 16, 26, .9); border: 1px solid rgba(var(--sky-rgb), .5);
+    box-shadow: 0 12px 30px -12px rgba(var(--sky-rgb), .8);
+    opacity: 0; animation: urlpill 1400ms ease-out forwards;
+  }
+  .urlpill .arrow { color: var(--sky); margin-right: 7px; }
+  @keyframes urlpill { 0% { opacity: 0; transform: translate(-50%, -14px); } 14% { opacity: 1; transform: translate(-50%, 0); } 82% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, -8px); } }
+
+  .breath {
+    position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; border-radius: 50%;
+    transform: translate(-50%,-50%); z-index: 56; background: var(--sky);
+    box-shadow: 0 0 18px rgba(var(--sky-rgb), .8);
+    animation: breath 1600ms ease-in-out 2; opacity: 0;
+  }
+  @keyframes breath { 0%,100% { opacity: .35; transform: translate(-50%,-50%) scale(.7); } 50% { opacity: 1; transform: translate(-50%,-50%) scale(1.2); } }
+
+  /* ---- rail ---- */
+  .rail { display: flex; flex-direction: column; gap: 20px; position: sticky; top: 22px; }
+  @media (max-width: 880px) { .rail { position: static; } }
+  .rail-group { display: flex; flex-direction: column; gap: 7px; }
+  .rail-group h4 {
+    margin: 0 0 3px; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .14em; color: var(--faint);
+  }
+  .entry {
+    display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer;
+    padding: 11px 14px; border-radius: 11px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink);
+    transition: border-color .16s, background .16s, transform .06s;
+  }
+  .entry:hover { border-color: rgba(var(--sky-rgb), .5); background: color-mix(in srgb, var(--panel) 80%, rgba(var(--sky-rgb), .06)); }
+  .entry:active { transform: translateY(1px); }
+  .entry.playing { border-color: var(--sky); box-shadow: 0 0 0 1px rgba(var(--sky-rgb), .35), 0 0 24px -8px rgba(var(--sky-rgb), .7); }
+  .entry:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+  .entry .k { font-family: var(--mono); font-size: 13.5px; color: #eaf6ff; letter-spacing: .01em; }
+  .entry .d { font-size: 12px; color: var(--muted); line-height: 1.4; }
+  .entry code, .rail-foot code { font-family: var(--mono); font-size: 11px; padding: 1px 5px; border-radius: 5px; background: rgba(var(--sky-rgb), .12); color: var(--sky); }
+  .rail-foot { font-size: 11.5px; color: var(--faint); line-height: 1.55; border-top: 1px solid var(--line); padding-top: 14px; }
+  .rail-foot a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+
+  .stage-note { margin: 14px 2px 0; font-size: 12px; color: var(--muted); }
+  .stage-note strong { color: #cfe6f6; font-weight: 600; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cursor { transition: none; }
+    .ripple, .trail-dot, .chevrons svg, .zoomframe, .scanline, .streak, .flash { animation-duration: 1ms; }
+    .glow { animation: none; }
+  }
+</style>
+
+<script>
+(function () {
+  "use strict";
+  var fx = document.getElementById("fx");
+  var viewport = document.getElementById("viewport");
+  var page = document.getElementById("page");
+  var caption = document.getElementById("caption");
+  var browser = document.getElementById("browser");
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // sky arrow cursor + ambient glow, persistent on the stage
+  var glow = document.createElement("div"); glow.className = "glow"; viewport.appendChild(glow);
+  var cursor = document.createElement("div"); cursor.className = "cursor";
+  cursor.innerHTML = "<svg width='22' height='28' viewBox='0 0 22 28'><path d='M0 0 L0 19 L5 14.5 L8.2 22 L11.4 20.6 L8.3 13.5 L14.5 13.5 Z' fill='#38bdf8' stroke='#fff' stroke-width='1.5' stroke-linejoin='round'/></svg>";
+  viewport.appendChild(cursor);
+
+  function vpRect() { return viewport.getBoundingClientRect(); }
+  // center of an element, in viewport-local coords
+  function center(el) {
+    var r = el.getBoundingClientRect(), v = vpRect();
+    return { x: r.left - v.left + r.width / 2, y: r.top - v.top + r.height / 2 };
+  }
+  function localRect(el) {
+    var r = el.getBoundingClientRect(), v = vpRect();
+    return { x: r.left - v.left, y: r.top - v.top, w: r.width, h: r.height };
+  }
+  function ephemeral(el, ms) { fx.appendChild(el); setTimeout(function () { el.remove(); }, ms); }
+
+  function moveCursor(x, y) {
+    glow.style.opacity = "1";
+    clearTimeout(moveCursor._t);
+    moveCursor._t = setTimeout(function () { glow.style.opacity = "0"; }, 2600);
+    cursor.style.transform = "translate3d(" + Math.round(x) + "px," + Math.round(y) + "px,0)";
+  }
+  function toEl(el) { var c = center(el); moveCursor(c.x, c.y); return c; }
+
+  function showCaption(text) {
+    caption.textContent = text;
+    caption.classList.add("on");
+    clearTimeout(showCaption._t);
+    showCaption._t = setTimeout(function () { caption.classList.remove("on"); }, 1500);
+  }
+
+  function ripple(x, y, dashed) {
+    var el = document.createElement("div");
+    el.className = "ripple";
+    el.style.left = x + "px"; el.style.top = y + "px";
+    el.style.border = "2px " + (dashed ? "dashed" : "solid") + " rgba(56,189,248,.9)";
+    ephemeral(el, 700);
+  }
+  function targetGlow(el) {
+    var r = localRect(el), g = document.createElement("div");
+    g.className = "target-glow";
+    g.style.left = (r.x - 4) + "px"; g.style.top = (r.y - 4) + "px";
+    g.style.width = (r.w + 8) + "px"; g.style.height = (r.h + 8) + "px";
+    ephemeral(g, 760);
+  }
+  function lozenge(x, y, html) {
+    var el = document.createElement("div"); el.className = "lozenge"; el.innerHTML = html;
+    el.style.left = x + "px"; el.style.top = y + "px";
+    ephemeral(el, 1250);
+  }
+
+  var CHEV_DOWN = "<svg viewBox='0 0 40 24' fill='none'><path d='M6 6 L20 18 L34 6' stroke='#38bdf8' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+  var CHEV_UP = "<svg viewBox='0 0 40 24' fill='none'><path d='M6 18 L20 6 L34 18' stroke='#38bdf8' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+  var CAMERA = "<svg viewBox='0 0 24 24' fill='none'><rect x='2.5' y='6.5' width='19' height='13' rx='2.5' stroke='#38bdf8' stroke-width='1.7'/><path d='M8.5 6.5 L9.6 4.5 H14.4 L15.5 6.5' stroke='#38bdf8' stroke-width='1.7' stroke-linejoin='round'/><circle cx='12' cy='13' r='3.4' stroke='#38bdf8' stroke-width='1.7'/></svg>";
+  var LENS = "<svg viewBox='0 0 24 24' fill='none'><circle cx='10' cy='10' r='6.5' stroke='#38bdf8' stroke-width='2'/><path d='M15 15 L21 21' stroke='#38bdf8' stroke-width='2.4' stroke-linecap='round'/></svg>";
+
+  var pgBtn = document.getElementById("pg-btn");
+  var pgInput = document.getElementById("pg-input");
+  var pgLink = document.getElementById("pg-link");
+  var dragStrip = document.getElementById("drag-strip");
+
+  var FX = {
+    click: function () {
+      showCaption("Click"); var c = toEl(pgBtn);
+      setTimeout(function () { ripple(c.x, c.y, false); targetGlow(pgBtn); }, reduce ? 0 : 360);
+    },
+    multiclick: function () {
+      showCaption("Triple-click"); var c = toEl(pgBtn);
+      var n = 3;
+      setTimeout(function () { for (var i = 0; i < n; i++) (function (i) { setTimeout(function () { ripple(c.x, c.y, false); }, i * 150); })(i); targetGlow(pgBtn); }, reduce ? 0 : 360);
+    },
+    rightclick: function () {
+      showCaption("Right-click"); var c = toEl(pgLink);
+      setTimeout(function () { ripple(c.x, c.y, true); }, reduce ? 0 : 360);
+    },
+    drag: function () {
+      showCaption("Drag"); var r = localRect(dragStrip);
+      var y = r.y + r.h / 2, x0 = r.x + 42, x1 = r.x + r.w - 42;
+      moveCursor(x0, y);
+      setTimeout(function () {
+        moveCursor(x1, y);
+        var steps = 11;
+        for (var i = 0; i <= steps; i++) (function (i) {
+          setTimeout(function () {
+            var d = document.createElement("div"); d.className = "trail-dot";
+            d.style.left = (x0 + (x1 - x0) * (i / steps)) + "px"; d.style.top = y + "px";
+            ephemeral(d, 600);
+          }, i * 34);
+        })(i);
+      }, reduce ? 0 : 360);
+    },
+    hover: function () { showCaption("Hover"); toEl(pgLink); },
+    type: function () {
+      showCaption("Type"); var c = toEl(pgInput); var r = localRect(pgInput);
+      setTimeout(function () {
+        var s = document.createElement("div"); s.className = "shimmer";
+        s.style.left = (r.x - 3) + "px"; s.style.top = (r.y - 3) + "px";
+        s.style.width = (r.w + 6) + "px"; s.style.height = (r.h + 6) + "px";
+        ephemeral(s, 1150);
+        lozenge(c.x, r.y - 22, "go to example.com and read it back");
+      }, reduce ? 0 : 380);
+    },
+    key: function () {
+      showCaption("Key"); var c = toEl(pgInput);
+      setTimeout(function () { lozenge(c.x, c.y - 10, "<span class='cap'>Ctrl</span> + <span class='cap'>A</span>"); }, reduce ? 0 : 300);
+    },
+    scroll: function () {
+      showCaption("Scroll down");
+      var ch = document.createElement("div"); ch.className = "chevrons";
+      ch.innerHTML = CHEV_DOWN + CHEV_DOWN + CHEV_DOWN; ephemeral(ch, 1200);
+      var st = document.createElement("div"); st.className = "streak"; st.style.top = "170px"; ephemeral(st, 750);
+      page.style.transform = "translateY(-70px)";
+      setTimeout(function () { page.style.transform = "translateY(0)"; }, 1300);
+    },
+    navigate: function () {
+      showCaption("Navigate");
+      var p = document.createElement("div"); p.className = "urlpill";
+      p.innerHTML = "<span class='arrow'>&#8594;</span>github.com/sylin-org/ghostlight/blob/main/README.md";
+      ephemeral(p, 1450);
+      var spin = document.getElementById("omni-spin"); spin.classList.remove("go"); void spin.offsetWidth; spin.classList.add("go");
+    },
+    screenshot: function () {
+      showCaption("Screenshot");
+      var f = document.createElement("div"); f.className = "flash"; ephemeral(f, 300);
+      // the shot is framed, then "filed" -- the frame shrinks into the bottom-right corner
+      var cf = document.createElement("div"); cf.className = "capframe"; ephemeral(cf, 1600);
+    },
+    zoom: function () {
+      showCaption("Zoom"); var r = localRect(pgBtn);
+      var z = document.createElement("div"); z.className = "zoomframe";
+      z.style.left = (r.x - 14) + "px"; z.style.top = (r.y - 12) + "px";
+      z.style.width = (r.w + 28) + "px"; z.style.height = (r.h + 24) + "px";
+      z.innerHTML = LENS; ephemeral(z, 1150);
+    },
+    read: function () {
+      showCaption("Reading page");
+      var s = document.createElement("div"); s.className = "scanline"; ephemeral(s, 1450);
+    },
+    wait: function () {
+      showCaption("Waiting");
+      var b = document.createElement("div"); b.className = "breath"; ephemeral(b, 3300);
+    }
+  };
+
+  function play(name, entry) {
+    if (!FX[name]) return;
+    if (entry) { entry.classList.add("playing"); setTimeout(function () { entry.classList.remove("playing"); }, 1400); }
+    FX[name]();
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".entry"), function (el) {
+    el.addEventListener("click", function () { play(el.getAttribute("data-fx"), el); });
+  });
+
+  // The tour: the sequence the real capture script runs, self-narrating.
+  var TOUR = ["navigate", "read", "click", "type", "key", "scroll", "zoom", "screenshot"];
+  document.getElementById("run-tour").addEventListener("click", function () {
+    var i = 0;
+    (function step() {
+      if (i >= TOUR.length) return;
+      var name = TOUR[i++];
+      var entry = document.querySelector('.entry[data-fx="' + name + '"]');
+      play(name, entry);
+      setTimeout(step, 1750);
+    })();
+  });
+
+  document.getElementById("stage-light").addEventListener("click", function () {
+    var on = browser.classList.toggle("light-page");
+    this.textContent = on ? "On a dark page" : "On a light page";
+  });
+
+  // opening flourish
+  setTimeout(function () { moveCursor(120, 90); }, 250);
+})();
+</script>
+
+</body>
+</html>

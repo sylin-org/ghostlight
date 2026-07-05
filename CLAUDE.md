@@ -1,9 +1,11 @@
-# Ghostlight Browser: Governed Browser Automation
+# Ghostlight: Governed Browser Automation
 
 ## Current status (updated at the Ghostlight rename, 2026-07)
 
-The project is named **Ghostlight** (family brand); this product is **Ghostlight Browser**, and the
-crate, binary, and MCP server id are `ghostlight` (ADR-0021). Both the **automation engine** and the
+The project and product are both named **Ghostlight** (the family brand and its first product;
+ADR-0021 as amended 2026-07-04, which simplified the earlier "Ghostlight Browser" product name to
+just "Ghostlight"). The browser-side extension is published as **"Ghostlight in Browser"**. The
+crate, binary, and MCP server id are `ghostlight`. Both the **automation engine** and the
 **full governance layer** are implemented and verified against a real browser on Windows: capability
 manifests (read/action/write/execute), identity-bound grants with host polarity, sacred never-touch
 domains, a take-the-wheel pause and panic kill switch, observe/shadow/enforce modes, structured

@@ -33,8 +33,10 @@
 //! (an event, no `id`) once it has severed its own debugger attachments and is tearing down the
 //! native port. [`Browser`] latches a `killed` flag (idempotent: only the false-to-true
 //! transition acts), fails every pending and future call with the truthful
-//! `"The user ended the browser session (kill switch)"` [`ToolError`], and invokes a
-//! once-per-kill hook so the mcp-server can write the audit session-event record. A fresh
+//! `"The user ended the browser session (kill switch)"` [`ToolError`], and invokes every
+//! registered kill hook exactly once per transition (a fan-out registry, ADR-0030 Decision 7: one
+//! `session_killed` audit record per LIVE session's subject, since `held`/`killed`/`connected`
+//! stay global on this one shared handle while sessions multiplex over it). A fresh
 //! [`Browser::attach`] (only reachable after the extension's own storage-marker gate lets it
 //! reconnect) clears the flag: a fresh session begins only on the user's explicit reconnect.
 
@@ -55,6 +57,13 @@ use tokio::sync::{mpsc, oneshot, watch};
 /// flag). The false-to-true transition guard in [`Browser::route_reply`] is what makes each
 /// individual kill fire it exactly once.
 type KillHook = Box<dyn Fn() + Send + Sync>;
+
+/// The kill-hook fan-out registry (ADR-0030 Decision 7): every live session's subject gets
+/// exactly one `session_killed` audit record, keyed by an opaque monotonic id so a session-scoped
+/// registration ([`Browser::register_session_kill_hook`]) can remove exactly its own entry when
+/// its [`KillHookHandle`] drops. A permanent hook registered via [`Browser::on_session_killed`]
+/// is never removed.
+type KillHooks = Arc<Mutex<Vec<(u64, KillHook)>>>;
 
 /// How long to wait for the extension to answer a single tool call before giving up.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -82,6 +91,25 @@ pub enum AttachOutcome {
     AlreadyAttached,
 }
 
+/// A session-scoped kill-hook registration (ADR-0030 Decision 7). Dropping the handle
+/// unregisters the session's hook, so a session that has already ended records nothing on a
+/// later kill. Returned by [`Browser::register_session_kill_hook`]; a live session holds it for
+/// its whole lifetime.
+#[must_use = "dropping the handle immediately unregisters the session kill hook"]
+pub struct KillHookHandle {
+    kill_hooks: KillHooks,
+    id: u64,
+}
+
+impl Drop for KillHookHandle {
+    fn drop(&mut self) {
+        self.kill_hooks
+            .lock()
+            .unwrap()
+            .retain(|(id, _)| *id != self.id);
+    }
+}
+
 /// A cloneable handle the mcp-server uses to call tools on the extension.
 #[derive(Clone)]
 pub struct Browser {
@@ -100,9 +128,13 @@ pub struct Browser {
     /// Panic kill switch (g11): `true` once the extension has reported the user ended the
     /// session, until the next [`Browser::attach`] (a fresh, explicit reconnect) clears it.
     killed: Arc<AtomicBool>,
-    /// The kill hook (g11), invoked exactly once per false-to-true `killed` transition. `None`
-    /// until [`Browser::on_session_killed`] registers one.
-    kill_hook: Arc<Mutex<Option<KillHook>>>,
+    /// The kill-hook fan-out registry (ADR-0030 Decision 7): every entry fires exactly once per
+    /// false-to-true `killed` transition. Starts empty until [`Browser::on_session_killed`] or
+    /// [`Browser::register_session_kill_hook`] appends one.
+    kill_hooks: KillHooks,
+    /// Monotonic id source for `kill_hooks` entries (ADR-0030 Decision 7), so a
+    /// [`KillHookHandle`] can remove exactly its own registration.
+    next_hook_id: Arc<AtomicU64>,
 }
 
 impl Browser {
@@ -123,7 +155,8 @@ impl Browser {
             debug,
             held: Arc::new(Mutex::new(None)),
             killed: Arc::new(AtomicBool::new(false)),
-            kill_hook: Arc::new(Mutex::new(None)),
+            kill_hooks: Arc::new(Mutex::new(Vec::new())),
+            next_hook_id: Arc::new(AtomicU64::new(1)),
         }
     }
 
@@ -174,12 +207,33 @@ impl Browser {
         self.killed.load(Ordering::SeqCst)
     }
 
-    /// Register the hook invoked exactly once each time the extension reports the user ended
-    /// the session (the `session_killed` event, g11). The mcp-server role uses this to write
-    /// the kill audit session-event record. Registering a second hook replaces the first
-    /// (single-consumer by construction: one `Governance` per session).
+    /// Register a PERMANENT hook invoked exactly once each time the extension reports the user
+    /// ended the session (the `session_killed` event, g11): appended to the fan-out registry and
+    /// never removed (ADR-0030 Decision 7, converting this from the pre-H2 single-consumer
+    /// "registering a second hook replaces the first" behavior). Use
+    /// [`Browser::register_session_kill_hook`] for a session-scoped registration that
+    /// deregisters when the session ends.
     pub fn on_session_killed(&self, hook: impl Fn() + Send + Sync + 'static) {
-        *self.kill_hook.lock().unwrap() = Some(Box::new(hook));
+        let id = self.next_hook_id.fetch_add(1, Ordering::Relaxed);
+        self.kill_hooks.lock().unwrap().push((id, Box::new(hook)));
+    }
+
+    /// Register a REMOVABLE, session-scoped kill hook (ADR-0030 Decision 7): fires exactly once
+    /// per false-to-true `killed` transition, same as [`Browser::on_session_killed`], but is
+    /// deregistered as soon as the returned [`KillHookHandle`] drops -- so a session that has
+    /// already ended records nothing on a later kill. `hold`/`killed`/`connected` stay GLOBAL
+    /// (latched on this one shared `Browser`, never per session); only the audit-writing hook
+    /// itself is session-scoped. A live session holds its handle for its whole lifetime.
+    pub fn register_session_kill_hook(
+        &self,
+        hook: impl Fn() + Send + Sync + 'static,
+    ) -> KillHookHandle {
+        let id = self.next_hook_id.fetch_add(1, Ordering::Relaxed);
+        self.kill_hooks.lock().unwrap().push((id, Box::new(hook)));
+        KillHookHandle {
+            kill_hooks: Arc::clone(&self.kill_hooks),
+            id,
+        }
     }
 
     /// True while a native-host / extension is connected.
@@ -490,8 +544,11 @@ impl Browser {
 
     /// Handle the `session_killed` event (g11): exactly once per false-to-true transition
     /// (`swap` makes duplicate frames on the same connection harmless), fail every pending
-    /// call with the kill error, then invoke the registered hook. Handling still sets the flag
-    /// and drains pending calls even if no hook is registered.
+    /// call with the kill error, then invoke EVERY registered hook -- permanent and
+    /// session-scoped alike -- exactly once (ADR-0030 Decision 7: "every live session's subject
+    /// gets exactly one `session_killed` audit record"). The per-transition `swap` guard above is
+    /// what makes each individual kill fan out once per hook, never twice. Handling still sets
+    /// the flag and drains pending calls even if no hook is registered.
     fn handle_session_killed(&self) {
         if self.killed.swap(true, Ordering::SeqCst) {
             return; // already handled; a duplicate frame is a no-op
@@ -499,7 +556,7 @@ impl Browser {
         for (_, tx) in self.pending.lock().unwrap().drain() {
             let _ = tx.send(Err(kill_error()));
         }
-        if let Some(hook) = self.kill_hook.lock().unwrap().as_ref() {
+        for (_, hook) in self.kill_hooks.lock().unwrap().iter() {
             hook();
         }
     }

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Live end-to-end demo / smoke test for Ghostlight Browser (Windows).
+  Live end-to-end demo / smoke test for Ghostlight (Windows).
 
 .DESCRIPTION
   Spawns the ghostlight mcp-server, speaks MCP (newline-delimited JSON-RPC) to it

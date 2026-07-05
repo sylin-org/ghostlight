@@ -299,6 +299,17 @@ struct Counters {
 #[derive(Serialize)]
 struct Snapshot<'a> {
     pid: u32,
+    /// This process's own creation time (ADR-0029), so a reader (`doctor`, its `--fix` reaper) can
+    /// tell this session apart from a later process that reuses the pid: a pid that is alive but
+    /// carries a different creation time is a different, unrelated process, never this session. `0`
+    /// when the platform does not record it (Unix). Absent in state files written before this field.
+    created: u64,
+    /// The parent (MCP client) pid at startup, and its creation time (`0` when unknown). Together
+    /// they let a reader decide whether this session has been orphaned (parent gone) without any
+    /// pid-reuse false positive. `0` ppid means "not recorded" (old files): a reader must then treat
+    /// the session as still-served, never reap it (ADR-0029 safety default).
+    ppid: u32,
+    parent_created: u64,
     /// "mcp-server" or "native-host". Absent in state files written before this field existed;
     /// consumers (see `doctor` / `status_report`) treat a missing field as `"mcp-server"`.
     role: &'static str,
@@ -317,6 +328,11 @@ struct Snapshot<'a> {
 struct Inner {
     role: &'static str,
     client: Option<String>,
+    /// Process-identity fields (ADR-0029), captured once at [`DebugSink::enabled`]: this process's
+    /// creation time, and the parent pid + its creation time.
+    created: u64,
+    ppid: u32,
+    parent_created: u64,
     started_ms: u128,
     last_state_ms: u128,
     extension_connected: bool,
@@ -362,6 +378,9 @@ impl Inner {
     fn write_state(&self) {
         let snapshot = Snapshot {
             pid: std::process::id(),
+            created: self.created,
+            ppid: self.ppid,
+            parent_created: self.parent_created,
             role: self.role,
             client: self.client.as_deref(),
             started_ms: self.started_ms,
@@ -411,9 +430,17 @@ impl DebugSink {
             .truncate(true)
             .open(dir.join(format!("debug-events-{pid}.jsonl")))?;
         let now = now_ms();
+        let created = crate::proc::creation_time(pid).unwrap_or(0);
+        let (ppid, parent_created) = match crate::proc::parent() {
+            Some(p) => (p.pid, p.created),
+            None => (0, 0),
+        };
         let inner = Inner {
             role,
             client: None,
+            created,
+            ppid,
+            parent_created,
             started_ms: now,
             last_state_ms: now,
             extension_connected: false,

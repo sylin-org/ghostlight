@@ -13,7 +13,14 @@
 // { id, type: "tab_url_response", result: { url } }, reporting chrome.tabs.get(tabId).url (or
 // null) with no matching or interpretation -- the binary's grant enforcement decides.
 
-importScripts("lib/geometry.js", "lib/keys.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js");
+
+// Operational tunables (lib/constants.js), destructured once for use throughout this worker.
+const {
+  MAX_SCREENSHOT_B64, JPEG_QUALITY, JPEG_QUALITY_FALLBACK, JPEG_QUALITY_FULL,
+  KEEPALIVE_PERIOD_MINUTES, RECONNECT_DELAY_MS, HOLD_REQUEST_TIMEOUT_MS,
+  CAPTURE_SETTLE_MS, CLICK_GAP_MS, NAV_SETTLE_TIMEOUT_MS,
+} = self.GhostlightConstants;
 
 const NATIVE_HOST = "org.sylin.ghostlight";
 // The MCP tab group label shown in Chrome: a ghost emoji (U+1F47B) followed by the brand
@@ -50,7 +57,7 @@ let networkResetNotice = false;
 self.addEventListener("unhandledrejection", (e) => e.preventDefault());
 
 // --- Native messaging + Manifest V3 keepalive ---
-chrome.alarms.create("keepalive", { periodInMinutes: 0.4 });
+chrome.alarms.create("keepalive", { periodInMinutes: KEEPALIVE_PERIOD_MINUTES });
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === "keepalive" && !nativePort) connect();
 });
@@ -103,11 +110,11 @@ async function connect() {
     nativePort.onDisconnect.addListener(() => {
       nativePort = null;
       updateHoldBadge(null); // state unknown without a session
-      setTimeout(connect, 2000);
+      setTimeout(connect, RECONNECT_DELAY_MS);
     });
   } catch {
     nativePort = null;
-    setTimeout(connect, 2000);
+    setTimeout(connect, RECONNECT_DELAY_MS);
   }
 }
 
@@ -132,7 +139,7 @@ function holdRequest(payload) {
     const timer = setTimeout(() => {
       holdPending.delete(id);
       resolve(null);
-    }, 1500);
+    }, HOLD_REQUEST_TIMEOUT_MS);
     holdPending.set(id, {
       resolve: (result) => {
         clearTimeout(timer);
@@ -315,8 +322,7 @@ async function ensureAttached(tabId) {
 // records a per-tab ScreenshotContext. Model coordinates (read off that downscaled image) are then
 // rescaled back to CSS viewport pixels before Input dispatch. ref-derived coordinates are already
 // CSS px and are NOT rescaled.
-const { PX_PER_TOKEN, MAX_TOKENS, MAX_SIDE, targetDims, zoomScale, rescaleCtxCoord } = self.GhostlightGeometry;
-const MAX_SCREENSHOT_B64 = 1100000;
+const { targetDims, zoomScale, rescaleCtxCoord } = self.GhostlightGeometry;
 
 async function probeViewport(tabId) {
   const r = await cdp(tabId, "Runtime.evaluate", {
@@ -618,7 +624,7 @@ async function screenshot(tabId) {
   const { w, h } = targetDims(vpW, vpH);
   // Hide the phantom cursor / glow so they never appear in the model's screenshot.
   await sendToTab(tabId, { type: "HIDE_FOR_TOOL_USE" });
-  await sleep(40);
+  await sleep(CAPTURE_SETTLE_MS);
   let cap, note = "", clipMsg = null;
   try {
     if (!visible) {
@@ -627,9 +633,9 @@ async function screenshot(tabId) {
       const scale = w / vpW; // always <= 1: targetDims never grows past the CSS viewport
       const clipParams = { clip: { x: 0, y: 0, width: vpW, height: vpH, scale }, fromSurface: true, captureBeyondViewport: false };
       try {
-        cap = await cdp(tabId, "Page.captureScreenshot", { format: "jpeg", quality: 55, ...clipParams });
+        cap = await cdp(tabId, "Page.captureScreenshot", { format: "jpeg", quality: JPEG_QUALITY, ...clipParams });
         if (cap.data.length > MAX_SCREENSHOT_B64) {
-          cap = await cdp(tabId, "Page.captureScreenshot", { format: "jpeg", quality: 30, ...clipParams });
+          cap = await cdp(tabId, "Page.captureScreenshot", { format: "jpeg", quality: JPEG_QUALITY_FALLBACK, ...clipParams });
         }
         // The encoded image may differ from w x h by at most one rounding pixel per axis; recording
         // w/h (not the decoded bitmap) keeps rescaleCoord's mapping exact without a canvas pass.
@@ -640,7 +646,7 @@ async function screenshot(tabId) {
       }
     }
     try {
-      cap = await cdp(tabId, "Page.captureScreenshot", { format: "jpeg", quality: 80, captureBeyondViewport: false });
+      cap = await cdp(tabId, "Page.captureScreenshot", { format: "jpeg", quality: JPEG_QUALITY_FULL, captureBeyondViewport: false });
     } catch (e) {
       if (clipMsg === null) throw e; // visible tab: propagate the standard-capture failure unchanged
       const fbMsg = (e && e.message) || String(e);
@@ -656,8 +662,8 @@ async function screenshot(tabId) {
   let base64 = cap.data, shotW = Math.round(vpW * dpr), shotH = Math.round(vpH * dpr);
   try {
     const bitmap = await createImageBitmap(new Blob([bytesFromBase64(cap.data)], { type: "image/jpeg" }));
-    base64 = await encodeJpeg(bitmap, w, h, 0.55);
-    if (base64.length > MAX_SCREENSHOT_B64) base64 = await encodeJpeg(bitmap, w, h, 0.3);
+    base64 = await encodeJpeg(bitmap, w, h, JPEG_QUALITY / 100);
+    if (base64.length > MAX_SCREENSHOT_B64) base64 = await encodeJpeg(bitmap, w, h, JPEG_QUALITY_FALLBACK / 100);
     shotW = w; shotH = h;
     if (bitmap.close) bitmap.close();
   } catch { /* OffscreenCanvas/createImageBitmap unavailable: keep the raw native capture */ }
@@ -687,11 +693,11 @@ async function zoomScreenshot(tabId, region) {
   if (w < 1 || h < 1) return { error: "zoom region is empty or entirely outside the visible viewport." };
   const s = zoomScale(w, h);
   await sendToTab(tabId, { type: "HIDE_FOR_TOOL_USE" });
-  await sleep(40);
+  await sleep(CAPTURE_SETTLE_MS);
   let cap;
   try {
     cap = await cdp(tabId, "Page.captureScreenshot", {
-      format: "jpeg", quality: 80,
+      format: "jpeg", quality: JPEG_QUALITY_FULL,
       // clip is document-relative CSS pixels, not viewport-relative, so the scroll offset is added.
       // captureBeyondViewport must be true for CDP to actually honor that: with it false, Chrome
       // treats clip as viewport-relative and the scroll offset added above gets double-counted,
@@ -706,8 +712,8 @@ async function zoomScreenshot(tabId, region) {
   let base64 = cap.data;
   try {
     const bitmap = await createImageBitmap(new Blob([bytesFromBase64(cap.data)], { type: "image/jpeg" }));
-    base64 = await encodeJpeg(bitmap, bitmap.width, bitmap.height, 0.55);
-    if (base64.length > MAX_SCREENSHOT_B64) base64 = await encodeJpeg(bitmap, bitmap.width, bitmap.height, 0.3);
+    base64 = await encodeJpeg(bitmap, bitmap.width, bitmap.height, JPEG_QUALITY / 100);
+    if (base64.length > MAX_SCREENSHOT_B64) base64 = await encodeJpeg(bitmap, bitmap.width, bitmap.height, JPEG_QUALITY_FALLBACK / 100);
     shotW = bitmap.width; shotH = bitmap.height;
     if (bitmap.close) bitmap.close();
   } catch { /* OffscreenCanvas/createImageBitmap unavailable: keep the raw native capture */ }
@@ -733,14 +739,24 @@ function clickRipple(tabId, x, y, count, button) { sendToTab(tabId, { type: "AGE
 // A comet-trail dot along a drag path, and a soft shimmer on the focused field when typing.
 function dragTrail(tabId, x, y) { sendToTab(tabId, { type: "AGENT_DRAG_TRAIL", x, y }); }
 function typeShimmer(tabId) { sendToTab(tabId, { type: "AGENT_TYPE_SHIMMER" }); }
+// Extended vocabulary (the visual feedback dictionary): one treatment per action, all rendered by
+// agent-visual-indicator.js and all hidden from the agent's own screenshots.
+function targetGlow(tabId, x, y) { sendToTab(tabId, { type: "AGENT_TARGET_GLOW", x, y }); }
+function keystrokeCue(tabId, text, kind) { sendToTab(tabId, { type: "AGENT_KEYSTROKE", text, kind }); }
+function scrollCue(tabId, direction) { sendToTab(tabId, { type: "AGENT_SCROLL_CUE", direction }); }
+function readScan(tabId) { sendToTab(tabId, { type: "AGENT_READ_SCAN" }); }
+function navigatePill(tabId, url) { sendToTab(tabId, { type: "AGENT_NAVIGATE_PILL", url }); }
+function screenshotFx(tabId) { sendToTab(tabId, { type: "AGENT_SCREENSHOT_FX" }); }
+function zoomFrameCue(tabId, x0, y0, x1, y1) { sendToTab(tabId, { type: "AGENT_ZOOM_FRAME", x0, y0, x1, y1 }); }
+function waitPulse(tabId) { sendToTab(tabId, { type: "AGENT_WAIT_PULSE" }); }
 const { KEY_MAP, BUTTON_BITS, modifierBits, keyCode, VK_NAMED, VK_PUNCT, CODE_PUNCT, vkCode, SHIFT_BASE, charKeyInfo } = self.GhostlightKeys;
-// Delay between press and release, and between click iterations, matching this file's rhythm.
-const CLICK_GAP_MS = 40;
+// CLICK_GAP_MS (press/release + inter-click spacing) comes from lib/constants.js.
 async function click(tabId, x, y, opts) {
   const modifiers = opts.modifiers || 0, button = opts.button || "left", clickCount = opts.clickCount || 1;
   const bit = BUTTON_BITS[button] || 0;
   await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, modifiers, buttons: 0, force: 0 });
   clickRipple(tabId, x, y, clickCount, button);
+  targetGlow(tabId, x, y); // glow the element under the point -- confirm WHAT was acted on
   await sleep(CLICK_GAP_MS);
   // Real N-clicks are N press/release pairs with clickCount incrementing 1..N, not one pair with
   // clickCount set to N.
@@ -864,7 +880,7 @@ function waitForLoad(tabId) {
       }
     };
     chrome.tabs.onUpdated.addListener(listener);
-    setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(); }, 10000);
+    setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(); }, NAV_SETTLE_TIMEOUT_MS);
   });
 }
 
@@ -878,6 +894,7 @@ async function computer(a) {
     case "screenshot": {
       const caption = "Screenshot captured (jpeg).";
       const shot = await screenshot(tabId);
+      screenshotFx(tabId); // shutter flash + viewfinder, AFTER the capture (never in the image)
       return textImage(shot.note ? caption + " " + shot.note : caption, shot.base64);
     }
     case "zoom": {
@@ -888,9 +905,11 @@ async function computer(a) {
         return text("zoom region is empty: x1 must be greater than x0 and y1 must be greater than y0.");
       const z = await zoomScreenshot(tabId, r);
       if (z.error) return text(z.error);
+      zoomFrameCue(tabId, z.x0, z.y0, z.x1, z.y1); // magnifier frame on the region, AFTER the capture
       return textImage(`Zoom region (${z.x0}, ${z.y0}) -> (${z.x1}, ${z.y1}) captured (jpeg${z.clamped ? "; clamped to the visible viewport" : ""}).`, z.base64);
     }
     case "wait": {
+      waitPulse(tabId);
       const s = Math.min(a.duration || 1, 30);
       await sleep(s * 1000);
       return text(`Waited ${s}s.`);
@@ -916,6 +935,7 @@ async function computer(a) {
       if (!a.text) return text("text is required for type.");
       await ensureAttached(tabId);
       typeShimmer(tabId);
+      keystrokeCue(tabId, a.text, "type");
       const chars = Array.from(a.text);
       for (let i = 0; i < chars.length; i++) {
         const ch = chars[i];
@@ -941,6 +961,7 @@ async function computer(a) {
     case "key": {
       if (!a.text) return text("text is required for key.");
       await ensureAttached(tabId);
+      keystrokeCue(tabId, a.text, "key");
       const repeat = Math.min(a.repeat || 1, 100);
       for (let i = 0; i < repeat; i++) {
         for (const combo of a.text.split(" ").filter(Boolean)) await pressKey(tabId, combo);
@@ -955,6 +976,7 @@ async function computer(a) {
       const deltaY = dir === "up" ? -amount * 100 : dir === "down" ? amount * 100 : 0;
       const before = await probeScrollState(tabId, c[0], c[1]);
       await moveCursor(tabId, c[0], c[1]);
+      scrollCue(tabId, dir);
       await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseWheel", x: c[0], y: c[1], deltaX, deltaY, modifiers });
       const scrolled = `Scrolled ${dir} by ${amount}.`;
       if (before === null) {
@@ -1013,9 +1035,9 @@ async function computer(a) {
       const [ex, ey] = rescaleCoord(tabId, a.coordinate[0], a.coordinate[1]);
       await moveCursor(tabId, sx, sy);
       await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: sx, y: sy, modifiers, buttons: 0, force: 0 });
-      await sleep(40);
+      await sleep(CAPTURE_SETTLE_MS);
       await cdp(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x: sx, y: sy, button: "left", modifiers, buttons: BUTTON_BITS.left, force: 0.5 });
-      await sleep(40);
+      await sleep(CAPTURE_SETTLE_MS);
       for (let i = 1; i <= 10; i++) {
         const tx = sx + ((ex - sx) * i) / 10, ty = sy + ((ey - sy) * i) / 10;
         await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: tx, y: ty, modifiers, buttons: BUTTON_BITS.left, force: 0.5 });
@@ -1063,21 +1085,25 @@ const handlers = {
     }
     await waitForLoad(tabId);
     const tab = await chrome.tabs.get(tabId);
+    navigatePill(tabId, tab.url); // destination pill on the freshly loaded page
     return text(`Navigated to ${tab.url}${tab.status !== "complete" ? " (still loading)" : ""}.`);
   },
   computer,
   async read_page(a) {
     const tabId = await effectiveTabId(a.tabId);
+    readScan(tabId);
     const r = await content(tabId, { type: "accessibilityTree", options: a });
     return text((r && r.result) || "Could not read the page.");
   },
   async get_page_text(a) {
     const tabId = await effectiveTabId(a.tabId);
+    readScan(tabId);
     const r = await content(tabId, { type: "pageText", max_chars: a.max_chars });
     return text((r && r.result) || "Could not extract page text.");
   },
   async find(a) {
     const tabId = await effectiveTabId(a.tabId);
+    readScan(tabId);
     const r = await content(tabId, { type: "find", query: a.query });
     const data = (r && r.result) || { results: [] };
     const results = data.results || [];

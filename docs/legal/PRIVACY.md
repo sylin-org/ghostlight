@@ -1,14 +1,14 @@
-# Ghostlight Browser: Privacy Policy
+# Ghostlight in Browser: Privacy Policy
 
 Last updated: 2026-07-03
 
-This document covers the "Ghostlight Browser" Chrome extension (Manifest V3), published by
+This document covers the "Ghostlight in Browser" Chrome extension (Manifest V3), published by
 Sylin (github.com/sylin-org). It explains what data the extension can access, why, and where
 that data goes and does not go.
 
-## What Ghostlight Browser is
+## What Ghostlight in Browser is
 
-Ghostlight Browser is one half of a two-part system:
+Ghostlight in Browser is one half of a two-part system:
 
 1. A local native application (a Rust binary) that runs on the user's own machine. This is the
    MCP server that an AI coding tool (for example Claude Code) talks to, and it is also the

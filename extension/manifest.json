@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Ghostlight Browser",
+  "name": "Ghostlight in Browser",
   "version": "0.1.0",
   "description": "Governed browser automation over your own authenticated session, for AI agents.",
   "minimum_chrome_version": "116",
@@ -26,7 +26,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "Ghostlight Browser",
+    "default_title": "Ghostlight in Browser",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
@@ -34,6 +34,10 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
   },
   "commands": {
     "toggle-hold": {

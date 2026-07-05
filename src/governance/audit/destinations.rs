@@ -47,7 +47,7 @@ pub fn send_line_to_syslog(addr: std::net::SocketAddr, line: &str) -> std::io::R
     let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let pid = std::process::id();
     let datagram = format!("<134>1 {ts} - ghostlight {pid} - - {line}");
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
-    socket.send_to(datagram.as_bytes(), addr)?;
+    let udp_socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    udp_socket.send_to(datagram.as_bytes(), addr)?;
     Ok(())
 }

@@ -70,3 +70,33 @@ switch to Genkan.
   and docs; sequence it as its own change after the current doc and prompt work
   settles, and update the sacred-schema fidelity test only where names are
   cosmetic (tool schemas themselves never change).
+
+## Amendment (2026-07-04): product name simplified to "Ghostlight"
+
+Status: Accepted. Supersedes the product-naming portion of the Decision above;
+the family brand, metaphor, crate/binary/server-id, and namespace choices are
+unchanged.
+
+The first product's name is simplified from "Ghostlight Browser" to just
+**Ghostlight**. "Ghostlight Browser" read like a standalone web browser (the
+Brave / Arc / Tor class), which this is not: it is a governed automation engine
+plus a thin browser adapter, driven by an MCP client. Collapsing the product
+name into the family name removes that misread and matches the `ghostlight`
+crate, binary, and MCP server id already in use.
+
+The browser-side extension keeps a distinct, descriptive name, **"Ghostlight in
+Browser"**. It echoes "Claude in Chrome" (the product this is a clean-room
+rewrite of) and reads as "Ghostlight, in the browser" rather than as the name of
+a browser. That string is the extension's manifest `name` and its Chrome Web
+Store listing title; it is not the product or project name.
+
+Scope of this amendment:
+- Product and project name in prose (README, CLAUDE.md, script synopses) becomes
+  "Ghostlight".
+- The extension manifest `name` and the store listing stay "Ghostlight in
+  Browser".
+- The crate, binary, MCP server id (`ghostlight`), org namespace, and file paths
+  are unchanged, so there is no code, installer-id, or schema change.
+- Historical records that quote the old product name (this ADR's Decision
+  section above, prior dated log entries) are left as-is; they document what was
+  decided when.
