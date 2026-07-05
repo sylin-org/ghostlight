@@ -30,7 +30,31 @@ async function loadConfig() {
   }
 }
 
+async function loadSessions() {
+  const el = document.getElementById("sessions-placeholder");
+  try {
+    const res = await fetch("/api/v1/sessions");
+    if (!res.ok) {
+      el.textContent = "Could not load sessions (" + res.status + ").";
+      return;
+    }
+    const data = await res.json();
+    const rows = data.adapter_bindings.map((b) => {
+      return "<tr><td>" + escapeHtml(b.guid) + "</td><td>" + escapeHtml(b.pid) +
+        "</td><td>" + escapeHtml(b.owned_tab_ids.join(", ")) + "</td></tr>";
+    }).join("");
+    const summary = "<p>Live sessions: " + escapeHtml(data.live_session_count) + "</p>";
+    const table = "<table><thead><tr><th>Session</th><th>PID</th><th>Tabs</th></tr></thead>" +
+      "<tbody>" + rows + "</tbody></table>";
+    const note = "<p class=\"note\">" + escapeHtml(data.note) + "</p>";
+    el.outerHTML = summary + table + note;
+  } catch (e) {
+    el.textContent = "Could not load sessions.";
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   loadConfig();
-  // Filled in by K4 (sessions section), K5 (enable-remote control).
+  loadSessions();
+  // Filled in by K5 (enable-remote control).
 });

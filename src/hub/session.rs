@@ -232,7 +232,6 @@ pub struct SessionSummary {
 /// long enough to clone the (guid, PeerCred) pairs out, then drops it before acquiring
 /// `owned_tabs`'s SEPARATE lock per entry (via the existing [`owned_tab_ids`]), so the two locks
 /// are never held simultaneously.
-#[allow(dead_code)] // consumed at K4 (docs/tasks/console/K4-live-sessions-api.md)
 pub fn live_session_summaries(
     registry: &Mutex<SessionRegistry>,
     owned_tabs: &Mutex<HashMap<i64, SessionGuid>>,

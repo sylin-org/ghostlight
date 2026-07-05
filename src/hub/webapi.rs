@@ -316,7 +316,7 @@ fn strip_query(path: &str) -> &str {
 fn is_known_console_path(stripped_path: &str) -> bool {
     matches!(
         stripped_path,
-        "/" | "/console.css" | "/console.js" | "/api/v1/config"
+        "/" | "/console.css" | "/console.js" | "/api/v1/config" | "/api/v1/sessions"
     )
 }
 
@@ -368,6 +368,7 @@ async fn route_console_request(
             .await
         }
         ("GET", "/api/v1/config") => write_config_response(stream, ctx).await,
+        ("GET", "/api/v1/sessions") => write_sessions_response(stream, ctx).await,
         _ if is_known_console_path(stripped_path) => {
             write_plain_error(stream, 405, "Method Not Allowed", "method not allowed").await
         }
@@ -396,6 +397,44 @@ async fn write_config_response(stream: &mut TcpStream, ctx: &ServiceContext) -> 
         })
         .collect();
     let payload = serde_json::json!({ "keys": keys }).to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
+        payload.len()
+    );
+    stream.write_all(response.as_bytes()).await?;
+    Ok(())
+}
+
+/// `GET /api/v1/sessions` (PINS.md CS3, `docs/tasks/console`): the live-sessions/groups view --
+/// the current live-session COUNT (every source, adapter or web) plus, for adapter sessions
+/// admitted since the service started, a TRUNCATED (never full) guid, pid, and owned tabs (H8's
+/// own forward guidance: a web/WS session never calls `SessionRegistry::admit`, so it never
+/// appears in `adapter_bindings`).
+async fn write_sessions_response(
+    stream: &mut TcpStream,
+    ctx: &ServiceContext,
+) -> crate::Result<()> {
+    let live_session_count = ctx.live_sessions.load(std::sync::atomic::Ordering::Relaxed);
+    let summaries =
+        crate::hub::session::live_session_summaries(&ctx.session_registry, &ctx.owned_tabs);
+    let adapter_bindings: Vec<serde_json::Value> = summaries
+        .into_iter()
+        .map(|s| {
+            serde_json::json!({
+                "guid": s.guid,
+                "pid": s.pid,
+                "owned_tab_ids": s.owned_tab_ids,
+            })
+        })
+        .collect();
+    let payload = serde_json::json!({
+        "live_session_count": live_session_count,
+        "adapter_bindings": adapter_bindings,
+        "note": "adapter_bindings lists sessions admitted since the service started; a listed \
+                 binding may no longer be currently connected. Web/Console HTTP sessions are not \
+                 yet individually tracked.",
+    })
+    .to_string();
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
         payload.len()
