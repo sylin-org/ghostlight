@@ -45,6 +45,7 @@ pub mod handshake;
 pub mod role;
 pub mod session;
 pub mod supervisor;
+pub mod webapi;
 
 /// Idle-grace shutdown window (ADR-0030 Decision 8; PINNED, PINS.md SS5.4): the SERVICE exits only
 /// after zero live sessions AND the extension link gone, CONTINUOUSLY, for this long. Never a
@@ -281,6 +282,11 @@ async fn run_service_loop(
             }
         }
     });
+
+    // The local web API (ADR-0030 Decision 9; H8): a SECOND, optional session source, exposed
+    // only through the service. A bind failure (e.g. the port is already in use) is logged and
+    // never fatal -- see `webapi::run`'s own doc comment.
+    tokio::spawn(webapi::run(ctx.clone()));
 
     // Idle-grace shutdown (ADR-0030 Decision 8; PINS.md SS5.4): the ONLY shutdown trigger. Never
     // parent-death -- this process has no client parent to watch.
