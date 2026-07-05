@@ -6,7 +6,45 @@ executor resumes from RESUME HERE with no other context.
 
 ## RESUME HERE
 
-**H7 is DONE (f12a728). H8 (local web API; loopback policy) is NEXT.** H7 landed the additive
+**H8 is DONE (af1d0f8). H9 (installer auto-start) is NEXT.** H8 landed the local web API's
+`channels.webapi.from` policy in full, plus a real (if deliberately minimal) HTTP/1.1 + WebSocket
+listener wired into the standalone service. Governance side (the single sanctioned
+`src/governance/**` addition): new `src/governance/channels.rs` owns the flat
+`channels.webapi.from` allowlist type, its exact-match `is_member`/`decide_webapi_from` (rule
+`channel/webapi_from`, `denial_id` via the existing `denial::denial_id` scheme), fail-closed
+`validate_webapi_from` (rejects any non-flat-string-array shape), and `ChannelsPdp` -- a
+`PolicyDecisionPoint` impl deciding ONLY the resolved `DecisionRequest.channel_source` axis (a
+NEW `Option<String>` field on `DecisionRequest`, `ports.rs`, stamped `None` at dispatch.rs's one
+production call site and every existing test construction -- byte-identical for every non-web
+session). `ChannelsPdp` never touches the tool/resource axes, so it structurally cannot gate which
+tools exist (ADR-0030 Decision 6 preserved). `tests/architecture.rs`'s a7 scanner needed NO edit at
+all: `channels.rs` was written to name no forbidden crate edge or bare tabId/token/socket
+identifier in the first place (one early doc-comment draft literally spelled out
+`crate::browser`/`crate::transport`/`crate::mcp`/`crate::native` in prose and tripped the
+doc-comment-scanning crate-edge check; reworded to describe the boundary without spelling out the
+forbidden paths -- see the H8 Log's D1). Hub side: new `src/hub/webapi.rs` owns
+`builtin_webapi_from()` (`["localhost"]`), the pure one-argument `resolve_bind(allowlist) ->
+"127.0.0.1" | "0.0.0.0"` (PINS.md SS7), `classify_source` (peer IP -> the channels vocabulary), the
+real TCP accept loop (`run`, spawned from `run_service_loop` alongside the extension/adapter
+endpoints; a bind failure is logged and non-fatal, exactly like the extension endpoint's
+`SessionBusy` handling, since concurrent test-spawned services must never crash over a shared TCP
+port), the HTTP/1.1 upgrade parse + `Host`/`Origin` validation (DNS-rebind defense + the channels
+decision) + hand-rolled RFC 6455 handshake (SHA-1 + base64, no new crate -- a published standard's
+fixed algorithm, not a project decision; self-verified against the RFC's own worked example), and a
+`WsStream` `AsyncRead`/`AsyncWrite` adapter tunneling raw bytes through minimal (unfragmented,
+no ping/pong reply) WS data frames so the UNCHANGED `serve_session` -- the SAME chokepoint every
+MCP adapter session calls -- needs no changes at all; a web session mints its own `SessionGuid`
+exactly as `PINS.md` SS9's forward guidance describes (no `SessionRegistry::admit`, since a remote
+TCP peer has no OS credential to bind). See the H8 Log for the full scope-limitation rationale
+(no pinned test exercises the wire past the handshake) and its 2 deviations (D1: the a7 doc-comment
+trip above; D2: full `ConfigStore`-driven `channels.webapi.from`/`webapi.bind` layering is deferred,
+so the running service always resolves to the builtin default today).
+
+H9 (installer auto-start) needs H6 (DONE). RE-READ H9's own task file plus PINS.md SS5 (the
+supervisor identifiers H9 registers) before starting. Follow the per-task procedure in
+`BOOTSTRAP.md`.
+
+**H7 is DONE (f12a728).** (Superseded by the H8-DONE block above; kept for provenance.) H7 landed the additive
 `group_request`/`group_response` native-messaging pair (ADR-0030 Decision 6/7; PINS.md SS6): the
 service's SHARED `check_tab_ownership` gate (`src/transport/mcp/server.rs`, H4's own pre-dispatch
 chokepoint) now switches on a NEW `crate::hub::session::TabClaim` (`Owned`/`Adopted`/`Refused`, new
@@ -35,9 +73,6 @@ deliberately NOT unified with the new per-session `sessionGroups` map, because t
 structurally cannot become session-aware, and the task names no test exercising it. Flagged as a
 real (untested, out of this task's named scope) production interaction for the frontier author's
 awareness, not solved here.
-
-RE-READ H8's own task file plus PINS.md SS7 before starting; H8 needs H2+H3+H4 (all DONE) and adds
-the local web API's `channels.webapi.from` policy. Follow the per-task procedure in `BOOTSTRAP.md`.
 
 **H6 is DONE (927d102). H7 (tab-group-per-session presentation) is NEXT.** H6 landed the
 always-ready-service amendment in full: `src/hub/mod.rs`'s `run_mcp_server` is now ALWAYS the thin
@@ -180,7 +215,7 @@ session carries a REAL `SessionGuid`, there is no `None` branch; new shared cros
 | H5 | Reconnect grace window + honest bounded queue | DONE | 33b361d | |
 | H6 | Always-ready service + thin adapters + anti-squat | DONE | 927d102 | RE-ISSUED run landed on the Decision 8 amendment (was BLOCKED); see Log + RESUME HERE |
 | H7 | Tab-group-per-session presentation | DONE | f12a728 | crossed the JS boundary; see Log |
-| H8 | Local web API = TCP; bind per policy | pending | -- | needs H2+H3+H4; the corrected D2/D5 |
+| H8 | Local web API = TCP; bind per policy | DONE | af1d0f8 | channels.rs is the sole sanctioned governance addition; a7 needed no edit; see Log |
 | H9 | Installer auto-start (register+start supervisor) | pending | -- | NEW; needs H6; mostly command/file builders + install wiring |
 
 Status values: `pending` | `in-progress` | `DONE` | `BLOCKED`.
@@ -1266,7 +1301,138 @@ wire, and `Browser::attach`'s single-link rejection are all byte-identical to be
   only, not a source or test change.
 
 ### H8
-- (not started)
+- Verified all as-of-authoring facts in `H8-web-api-loopback-policy.md` against the live tree
+  before writing any code: H2/H3/H4 all landed (Status table above, all DONE); `serve_session<S>`
+  (`src/transport/mcp/server.rs`) takes a plain `guid: SessionGuid` (never `Option`), exactly as
+  PINS.md SS9 describes; `ServiceContext` (`src/hub/mod.rs`) holds `session_registry`/`owned_tabs`/
+  `mint_quota`/`live_sessions` as plain fields, built once in `from_startup`; `DecisionRequest`
+  (`src/governance/ports.rs`, around the task's cited line range) had no `channel_source`-shaped
+  field yet; `Grant` (`src/governance/manifest/document.rs`) has no `channels` field, confirming
+  the task's own framing that this batch realizes only the minimal flat allowlist, never the full
+  recursive grammar; `tests/architecture.rs`'s a7 scanner (`FORBIDDEN_CRATE_EDGES`,
+  `FORBIDDEN_IDENTIFIERS = ["tabId", "token", "socket"]`) matched the task's description exactly.
+  No STOP precondition fired.
+- Implemented per the task's Required behavior items 1-6 and PINS.md SS7/SS2/SS9:
+  - `src/governance/channels.rs` (new; the ONE sanctioned `src/governance/**` addition): PINNED
+    rule label `RULE_WEBAPI_FROM = "channel/webapi_from"`; `is_member` (exact match, or `"*"`);
+    `validate_webapi_from` (fail-closed on anything but a flat JSON array of non-empty strings);
+    `decide_webapi_from` (the pure Allow/Deny decision, denial via the existing
+    `denial::denial_id` scheme); `ChannelsPdp`, a `PolicyDecisionPoint` impl constructed with the
+    resolved allowlist and deciding ONLY `DecisionRequest.channel_source` -- it never reads
+    `tool`/`resource`/`requires`, so it structurally cannot gate which tools exist (the STOP
+    precondition on this point never had a code path to trigger). `pub mod channels;` added to
+    `src/governance/mod.rs`.
+  - `src/governance/ports.rs`: `DecisionRequest` gains `pub channel_source: Option<String>` (the
+    ONE resolved field the task's Required behavior item 4 describes; the allowlist itself is
+    held by `ChannelsPdp`, not the request, mirroring how `LocalPdp` holds its own `evaluate_host`
+    fn rather than the request). All 3 existing test constructions in `ports.rs` updated with
+    `channel_source: None`.
+  - `src/governance/dispatch.rs`: the ONE production `DecisionRequest` construction (inside
+    `Governance::decide`) stamps `channel_source: None` -- the tool-call chokepoint never carries
+    a connecting-source axis; byte-identical for every existing caller.
+  - `src/hub/webapi.rs` (new): `builtin_webapi_from()` (`["localhost"]`, the web adapter's own
+    builtin default fragment, ADR-0030 Decision 5); `resolve_bind(allowlist: &[String]) ->
+    &'static str` (the pure, ONE-argument "resolved allowlist -> bind address" function PINS.md
+    SS7/the task's pinned tests require -- `DEFAULT_WEBAPI_BIND = "127.0.0.1"` unless the
+    allowlist names anything other than `"localhost"`, in which case `REMOTE_WEBAPI_BIND =
+    "0.0.0.0"`); `DEFAULT_WEBAPI_PORT = 4180` (PINS.md SS7); `classify_source` (loopback peer IP
+    -> `"localhost"`, else the literal address -- the channels vocabulary). The real listener:
+    `run(ctx)` binds per `resolve_bind`, and on ANY bind failure LOGS and returns rather than
+    panicking or propagating (spawned fire-and-forget from `run_service_loop`, exactly like the
+    extension endpoint's `SessionBusy` handling, since `tests/support::spawn_service` spawns the
+    real `ghostlight service` binary in several existing suites and a fixed TCP port cannot be
+    made per-test-unique the way the named-pipe/UDS endpoint already is -- this task introduces NO
+    risk of a second bind attempt ever aborting a test's service process). `handle_connection`
+    parses the HTTP/1.1 request line + headers (own minimal parser, no new crate), validates
+    `Host` against the resolved bind (`host_is_expected`, the DNS-rebind defense, Required
+    behavior item 5) and the connecting source's `Origin` (falling back to the classified peer
+    address when absent -- Required behavior item 3, anonymous is a first-class principal, no
+    hardcoded auth gate) against `ChannelsPdp::decide`, completes the RFC 6455 handshake
+    (`compute_accept_key` via hand-rolled SHA-1 + base64 -- a well-defined public standard's fixed
+    algorithm, not a project decision requiring a pin; self-verified against RFC 6455 section
+    1.3's own worked example, `dGhlIHNhbXBsZSBub25jZQ==` -> `s3pPLMBiTxaQ9kYGzzhZRbK+xOo=`), then
+    mints a `SessionGuid` (no `SessionRegistry::admit` -- PINS.md SS9's forward guidance for H8:
+    a remote TCP peer has no OS credential to bind) and calls the UNCHANGED
+    `transport::mcp::server::serve_session` -- the SAME chokepoint every MCP adapter session
+    enters, with NO changes to that function's signature or body (Required behavior item 1;
+    "do NOT modify serve_session; add the web listener as a SECOND caller only"). `WsStream`
+    (an `AsyncRead + AsyncWrite` adapter) tunnels raw bytes through minimal, unfragmented RFC 6455
+    data frames (own hand-rolled `encode_frame`/`decode_frame`, masked-client-frame enforcement,
+    close-frame-as-EOF, ping/pong parsed and discarded) so `serve_session`'s existing
+    `BufReader::lines()` read loop and `write_chunked` writer need no awareness that the stream is
+    WS-framed underneath -- see the module doc and the Log's scope-limitation note below for why
+    this subset is sufficient and deliberate, not an oversight. `src/hub/mod.rs`: `pub mod
+    webapi;` added; `run_service_loop` spawns `webapi::run(ctx.clone())` alongside the existing
+    extension/adapter endpoint spawns (H8's only edit to this file).
+  - `tests/channels_policy.rs` (new; the ONE task-named test):
+    `webapi_from_is_decided_in_the_pdp_on_the_subject`, driving `ChannelsPdp::decide` directly (no
+    listener) for both the Allow and Deny cases, asserting the PINNED rule label and the `"D-"` +
+    8-lowercase-hex `denial_id` shape.
+  - `tests/webapi_auth.rs` (new; the 3 task-named tests):
+    `webapi_builtin_default_is_loopback_only_with_no_overlay` (asserts the builtin resolves to
+    `["localhost"]` and `resolve_bind` returns `127.0.0.1`, never `0.0.0.0`);
+    `enabling_remote_is_a_user_policy_change_not_a_code_gate` (models the resolved allowlist a
+    user-layer `[allow: "*"]` overlay would produce, `vec!["*".to_string()]`, and asserts the SAME
+    one-argument `resolve_bind` now returns the remote bind -- proving there is no separate
+    boolean/flag/env input); `anonymous_is_a_valid_principal_under_all_open` (asserts
+    `ChannelsPdp::decide` allows an anonymous loopback source under the builtin default with no
+    denial, THEN reproduces `tests/audit_recorder.rs`'s own pinned 14-key-order/`identity: null`
+    assertion directly against a lone all-open `Governance` + file-backed `Recorder`, proving H8
+    introduced no drift to the frozen `AuditRecord` shape or the all-open byte-identity invariant,
+    per PINS.md SS2's resolution: no 15th audit key, ever).
+  - Supplementary (not task-named) unit tests added directly in `channels.rs`'s and `webapi.rs`'s
+    own `#[cfg(test)]` modules (mirroring H5's precedent of adding a few unpinned-but-valuable
+    tests alongside the task-named ones): `is_member`/`validate_webapi_from` cases in `channels.rs`;
+    `resolve_bind`/`classify_source`/the RFC 6455 accept-key worked example/a masked-frame
+    encode-decode round trip/`decode_frame`'s incomplete- and unmasked-frame handling/
+    `host_is_expected`/`origin_hostname` in `webapi.rs`.
+
+D1: one early doc-comment draft in `channels.rs`'s module doc literally spelled out
+`crate::browser`/`crate::transport`/`crate::mcp`/`crate::native` in descriptive prose (explaining
+which crate edges the module avoids) -> `tests/architecture.rs::governance_core_has_no_forbidden_back_edges`
+FAILED on first run: the crate-edge/`url` checks scan doc comments too (unlike the
+`FORBIDDEN_IDENTIFIERS` check, which is code-line-only), so naming the forbidden paths even in
+prose trips the scanner. Reworded the doc comment to describe the boundary without spelling out
+the forbidden paths ("names none of the forbidden crate edges the architecture test guards").
+`tests/architecture.rs` itself was NOT edited -- confirming the task's own framing that the
+sanctioned a7 exception was available if needed, but this task's actual code (and now its doc
+comments) never triggers it. Impact on later tasks: none; a reminder for any future
+`src/governance/**` doc comment that wants to describe what it avoids.
+D2: PINS.md SS7 describes `channels.webapi.from`/`webapi.bind`/`webapi.port` as "a resolved config
+value," implying eventual `ConfigStore`-layered resolution (the ADR-0019 five-layer system), but no
+task-named test drives that layering, and `ConfigStore`'s typed key registry
+(`src/governance/config/schema.rs`, `KEYS`) is pinned by its own golden tests
+(`tests/config_schema_golden.rs`), a file this task does not name -> deferred full `ConfigStore`
+wiring for `channels.webapi.from`/`webapi.bind`/`webapi.port`; the running service always resolves
+to `builtin_webapi_from()` (never reading a user/org overlay) when it spawns `webapi::run` from
+`run_service_loop`. The pure `resolve_bind`/`ChannelsPdp`/`validate_webapi_from` machinery fully
+supports a resolved override once one is wired in; only the "read it from `ConfigStore`" wiring
+itself is deferred. Impact on later tasks: none named by this batch (H9 does not touch the web
+API), but a future task adding a real `channels.webapi.from`/`webapi.bind` config key should route
+it through `ConfigStore` exactly as every other layered key is, then pass the resolved allowlist
+into `webapi::run` instead of the hardcoded builtin default.
+
+Verification: all commands from the task's literal block, plus the full suite, passed for real.
+`cargo build --all-targets` clean. `cargo test --test channels_policy` (1/1), `cargo test --test
+webapi_auth` (3/3), `cargo test --test architecture governance_core_has_no_forbidden_back_edges`
+(green, UNMODIFIED file), `cargo test --test all_open_golden` (3/3, byte-unmodified),
+`cargo test --test tool_enforcement` (10/10), `cargo test --test tool_schema_fidelity` (7/7) all
+green. The FULL `cargo test` (not just the task's named targets) was also run: 460 lib tests +
+every integration suite green (0 failed), including every sacred/named suite above plus
+`hub_multiplex`/`hub_isolation`/`hub_lifecycle`/`hub_queue`/`hub_identity`/`hub_role_wiring`/
+`mcp_protocol`/`peer_death`/`audit_recorder`/`config_schema_golden` and every other existing suite,
+all green and byte-unmodified. `cargo clippy --all-targets -- -D warnings` clean. `cargo fmt --all
+-- --check` clean (after one `cargo fmt --all` pass to wrap a handful of lines in `channels.rs`/
+`webapi.rs` -- whitespace only, no semantic change, not logged as its own numbered deviation).
+Sacred tests (`tests/tool_schema_fidelity.rs`, `tests/all_open_golden.rs`,
+`tests/architecture.rs::governance_core_has_no_forbidden_back_edges`) green and byte-unmodified;
+`git diff --stat` (pre-commit) showed exactly `src/governance/dispatch.rs`, `src/governance/mod.rs`,
+`src/governance/ports.rs`, `src/hub/mod.rs` modified plus 4 new files (`src/governance/channels.rs`,
+`src/hub/webapi.rs`, `tests/channels_policy.rs`, `tests/webapi_auth.rs`) -- no NEVER-touch fence
+moved; the sanctioned a7 exception for this task was available but never needed.
+- Note: as in H0-H7, `CARGO_TARGET_DIR` was pointed at a scratch directory (not the repo's
+  `target/`) because a live dogfooded `ghostlight.exe`/native-host session held the repo's
+  `target/debug/ghostlight.exe`; build-artifact routing only, not a source or test change.
 
 ## Deviation format
 
