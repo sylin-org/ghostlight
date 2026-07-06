@@ -26,10 +26,10 @@
 use ghostlight::governance::audit::Recorder;
 use ghostlight::governance::config::reload::ConfigStore;
 use ghostlight::governance::manifest::source::LoadedPolicy;
+use ghostlight::hub::outbound::browser::Browser;
 use ghostlight::hub::session::{SessionGuid, SessionRegistry};
 use ghostlight::hub::ServiceContext;
 use ghostlight::native::host;
-use ghostlight::transport::executor::Browser;
 use ghostlight::transport::mcp::server::serve_session;
 use serde_json::{json, Value};
 use std::collections::HashMap;

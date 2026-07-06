@@ -37,7 +37,7 @@ use crate::browser::{directory, pattern, resource, sacred};
 use crate::governance::config::reload::ConfigStore;
 use crate::governance::dispatch::{hold_message, Gate, Governance};
 use crate::governance::ports::{Capability, Decision, Denial, EffectiveMode, GoverningResource};
-use crate::transport::executor::Browser;
+use crate::hub::outbound::browser::Browser;
 use crate::transport::mcp::types::{text_content, JsonRpcResponse};
 use crate::ToolError;
 use serde_json::{json, Value};
@@ -586,7 +586,7 @@ mod tests {
     }
 
     /// Attach a fake extension over an in-memory duplex pipe (the same pattern
-    /// `transport::executor`'s own tests use). Answers a `tool_request` for any tool name found
+    /// `hub::outbound::browser`'s own tests use). Answers a `tool_request` for any tool name found
     /// in `responses` with that canned result and records the tool names seen, in arrival order,
     /// into the returned `Arc<Mutex<Vec<String>>>`. Panics if a `tool_request` arrives for a
     /// tool not in `responses` -- tests use this to prove a denied call never reaches the real

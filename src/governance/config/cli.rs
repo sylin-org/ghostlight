@@ -276,7 +276,7 @@ fn write_user_value(key: &str, value: &serde_json::Value) -> crate::Result<std::
 }
 
 /// Lock-check, validate, and write ONE key to the user layer (PINS.md CS7, `docs/tasks/console`):
-/// the shared body of [`run_set`], pulled out so the Console (`src/hub/webapi.rs`, K5) writes
+/// the shared body of [`run_set`], pulled out so the Console (`src/hub/inbound/web.rs`, K5) writes
 /// through the IDENTICAL path the CLI does -- never a second implementation of "write one key to
 /// the user layer". Behavior is byte-identical to what `run_set` did inline before this
 /// extraction: look up the key, re-resolve current state, refuse a locked key before any parsing

@@ -9,7 +9,7 @@
 //! - **adapter** (default, no subcommand) -- launched by the MCP client over stdio. A THIN relay:
 //!   connects to the already-running SERVICE (self-healing an OS-supervisor start if it is down,
 //!   `ghostlight::hub::supervisor`), relays its stdio, and dies with its editor. Never loads
-//!   policy, never builds a [`Browser`](ghostlight::transport::executor::Browser), never runs
+//!   policy, never builds a [`Browser`](ghostlight::hub::outbound::browser::Browser), never runs
 //!   governance.
 //! - **service** (`ghostlight service`) -- the STANDALONE, persistent Hub. Owns the browser IPC
 //!   endpoint and the adapter/control endpoint for its whole life, multiplexes any number of

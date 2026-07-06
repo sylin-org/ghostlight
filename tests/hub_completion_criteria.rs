@@ -6,11 +6,11 @@
 //!
 //! This is NOT one of the pinned H0-H9 batch tasks -- there is no task file to cite and no
 //! author-pinned oracle here. Every assertion below is grounded directly in the CURRENT shipped
-//! implementation (not invented): the wire shapes in `src/transport/executor.rs`
+//! implementation (not invented): the wire shapes in `src/hub/outbound/browser.rs`
 //! (`tool_request`/`tool_response`/`group_request`, all doc-commented at that module's top), the
 //! tab-claim/group-emit logic in `src/hub/session.rs` (`claim_tab`/`owned_tab_ids`) and
 //! `src/transport/mcp/server.rs` (`check_tab_ownership`/`emit_group_request`), and the global
-//! kill-fan-out semantics in `src/transport/executor.rs::handle_session_killed` (ADR-0030
+//! kill-fan-out semantics in `src/hub/outbound/browser.rs::handle_session_killed` (ADR-0030
 //! Decision 7: `killed`/`held`/`connected` stay GLOBAL on the one shared browser link, since
 //! there is exactly one physical extension attachment multiplexed by many sessions -- a single
 //! `session_killed` event therefore ends every live session at once, each getting its own

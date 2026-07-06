@@ -61,7 +61,7 @@ function wireEnableRemote() {
     button.disabled = true;
     status.textContent = "Enabling...";
     try {
-      const res = await fetch("/api/v1/config/webapi-enable-remote", { method: "POST" });
+      const res = await fetch("/api/v1/config/inbound-web-enable-remote", { method: "POST" });
       const data = await res.json();
       if (res.ok) {
         status.textContent = "Enabled: inbound.web.from = " + JSON.stringify(data.value) +

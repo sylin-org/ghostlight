@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Transport infra -- the composition-root I/O and protocol layer.
+//! The protocol-plumbing layer: the MCP JSON-RPC session ([`mcp`]), the native-messaging wire
+//! and inter-instance IPC ([`native`]), and the parent-death [`watchdog`].
 //!
-//! This bounded context (see docs/design/ghostlight-service-architecture.md section 3)
-//! wires the outside world to the domain: the MCP JSON-RPC session ([`mcp`]), native
-//! messaging and inter-instance IPC ([`native`]), and the [`executor`] handle the
-//! mcp-server uses to call tools on the connected extension. It depends on both the
-//! [`crate::governance`] core and the [`crate::browser`] domain plugin; neither of those
-//! may depend back on this module.
+//! This is the wire level -- framed bytes and protocol state -- distinct from the role zones in
+//! [`crate::hub::inbound`] (per-channel ingestors that converge on the pipeline) and
+//! [`crate::hub::outbound`] (per-capability executors). The browser-executor handle that used to
+//! live here moved to [`crate::hub::outbound::browser`]; this module keeps the framing and the
+//! protocol state it speaks over. It depends on [`crate::governance`] and [`crate::browser`];
+//! neither depends back.
 
-pub mod executor;
 pub mod mcp;
 pub mod native;
 pub mod watchdog;

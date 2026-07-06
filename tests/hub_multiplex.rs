@@ -26,8 +26,8 @@ mod support;
 use ghostlight::governance::audit::Recorder;
 use ghostlight::governance::dispatch::Governance;
 use ghostlight::governance::ports::AuditSink;
+use ghostlight::hub::outbound::browser::Browser;
 use ghostlight::native::host;
-use ghostlight::transport::executor::Browser;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -59,7 +59,7 @@ async fn two_sessions_route_replies_independently() {
 
     // Fake extension: reads TWO framed requests (in whichever order they arrive on the one
     // shared physical link) and replies to each by id, echoing its own tool name back -- the
-    // exact pattern `executor.rs::call_round_trips_a_tool_response` uses for a single session.
+    // exact pattern `browser.rs::call_round_trips_a_tool_response` uses for a single session.
     let fake_ext = tokio::spawn(async move {
         for _ in 0..2 {
             let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
@@ -168,7 +168,7 @@ async fn one_kill_emits_one_audit_record_per_live_session() {
     assert!(browser.is_killed(), "the kill event was never routed");
     // The hook fan-out runs synchronously inside the false->true transition, on the same task
     // that routed the event; give it a moment to finish writing all three files before reading
-    // them back (the same grace `executor.rs::kill_hook_fires_exactly_once_per_transition` gives
+    // them back (the same grace `browser.rs::kill_hook_fires_exactly_once_per_transition` gives
     // a possible second invocation before asserting).
     tokio::time::sleep(Duration::from_millis(50)).await;
 

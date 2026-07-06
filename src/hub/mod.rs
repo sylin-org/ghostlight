@@ -18,7 +18,7 @@
 //! ADR-0030 Decision 3 ("D1 -- the honest singleton queue"): the single MV3 service worker plus
 //! the single native port is an ACCEPTED, TRUTHFUL serialization bottleneck -- fair ordering and
 //! truthful failure on a real drop, never a hidden work-around. H5 lands the three properties
-//! Decision 3 names: a bounded reconnect grace window (`transport::executor::Browser::attach`,
+//! Decision 3 names: a bounded reconnect grace window (`hub::outbound::browser::Browser::attach`,
 //! `GRACE_WINDOW`, strictly less than `TOOL_TIMEOUT`), a per-peer (never global) mint quota
 //! (below, [`try_mint`]/[`PER_PEER_MINT_CAP`]), and mandatory oversize-reply chunking on the
 //! service<->adapter/web hop (`transport::mcp::server::write_chunked`,
@@ -32,8 +32,8 @@ use crate::governance::audit::Recorder;
 use crate::governance::config::reload::ConfigStore;
 use crate::governance::manifest::source;
 use crate::governance::manifest::source::LoadedPolicy;
+use crate::hub::outbound::browser::Browser;
 use crate::native::ipc;
-use crate::transport::executor::Browser;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
@@ -43,10 +43,12 @@ use std::time::Duration;
 pub mod antisquat;
 pub mod console_assets;
 pub mod handshake;
+pub mod inbound;
+pub mod manage;
+pub mod outbound;
 pub mod role;
 pub mod session;
 pub mod supervisor;
-pub mod webapi;
 
 /// Idle-grace shutdown window (ADR-0030 Decision 8; PINNED, PINS.md SS5.4): the SERVICE exits only
 /// after zero live sessions AND the extension link gone, CONTINUOUSLY, for this long. Never a
@@ -284,13 +286,13 @@ async fn run_service_loop(
         }
     });
 
-    // The local inbound.web adapter (ADR-0030 Decision 9; H8): a SECOND, optional session
-    // source, exposed only through the service. Policy-gated bind (Decision 5: "deny the web
-    // adapter"): `inbound.web.enabled = false` (set by an org-mandatory layer) means the listener
-    // never stands up, so there is no surface to connect to. A bind failure (e.g. the port is
-    // already in use) is logged and never fatal -- see `webapi::run`'s own doc comment.
-    if webapi::inbound_web_enabled(&ctx.store) {
-        tokio::spawn(webapi::run(ctx.clone()));
+    // The inbound.web adapter (ADR-0030 Decision 9; H8): a SECOND, optional session source,
+    // exposed only through the service. Policy-gated bind (Decision 5: "deny the web adapter"):
+    // `inbound.web.enabled = false` (set by an org-mandatory layer) means the listener never
+    // stands up, so there is no surface to connect to. A bind failure (e.g. the port is already
+    // in use) is logged and never fatal -- see `inbound::web::run`'s own doc comment.
+    if inbound::web::enabled(&ctx.store) {
+        tokio::spawn(inbound::web::run(ctx.clone()));
     } else {
         tracing::info!(
             "inbound.web adapter disabled by policy (inbound.web.enabled = false); not binding"

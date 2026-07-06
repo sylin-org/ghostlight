@@ -8,21 +8,21 @@ use ghostlight::governance::inbound::InboundPdp;
 use ghostlight::governance::ports::{
     AuditSink, Decision, DecisionRequest, EffectiveMode, GoverningResource, PolicyDecisionPoint,
 };
-use ghostlight::hub::webapi::{
-    builtin_inbound_web_from, resolve_bind, DEFAULT_WEBAPI_BIND, REMOTE_WEBAPI_BIND,
+use ghostlight::hub::inbound::web::{
+    builtin_inbound_web_from, resolve_bind, DEFAULT_BIND, REMOTE_BIND,
 };
 use serde_json::Value;
 use std::sync::Arc;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "ghostlight-webapi-auth-test-{}-{tag}.jsonl",
+        "ghostlight-inbound-web-auth-test-{}-{tag}.jsonl",
         std::process::id()
     ))
 }
 
 #[test]
-fn webapi_builtin_default_is_loopback_only_with_no_overlay() {
+fn inbound_web_builtin_default_is_loopback_only_with_no_overlay() {
     // With NO user/org overlay, the resolved inbound.web.from equals the inbound.web adapter's
     // builtin fragment (PINS.md SS7: `[allow: "localhost"]`).
     let resolved = builtin_inbound_web_from();
@@ -32,7 +32,7 @@ fn webapi_builtin_default_is_loopback_only_with_no_overlay() {
     // loopback (127.0.0.1, bound explicitly, never 0.0.0.0)".
     let bind = resolve_bind(&resolved);
     assert_eq!(bind, "127.0.0.1");
-    assert_eq!(bind, DEFAULT_WEBAPI_BIND);
+    assert_eq!(bind, DEFAULT_BIND);
     assert_ne!(bind, "0.0.0.0");
 }
 
@@ -49,15 +49,12 @@ fn enabling_remote_is_a_user_policy_change_not_a_code_gate() {
     // allowlist -- there is no separate boolean/flag/env parameter to pass, so remote is
     // reachable ONLY because the policy layer changed.
     let bind = resolve_bind(&resolved);
-    assert_ne!(bind, DEFAULT_WEBAPI_BIND);
-    assert_eq!(bind, REMOTE_WEBAPI_BIND);
+    assert_ne!(bind, DEFAULT_BIND);
+    assert_eq!(bind, REMOTE_BIND);
 
     // The builtin default, unaffected by this overlay's own resolved value, is still loopback --
     // proving the two are decided independently by the same one-argument function.
-    assert_eq!(
-        resolve_bind(&builtin_inbound_web_from()),
-        DEFAULT_WEBAPI_BIND
-    );
+    assert_eq!(resolve_bind(&builtin_inbound_web_from()), DEFAULT_BIND);
 }
 
 #[test]

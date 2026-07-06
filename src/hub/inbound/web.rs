@@ -1,31 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! The local inbound.web adapter (ADR-0030 Decision 9): HTTP/1.1 + WebSocket over TCP, a SECOND
-//! session SOURCE into the same Hub a local app drives the browser through. It reuses the
-//! UNCHANGED multiplex (Decision 2), identity (Decision 4), and isolation (Decision 6) by
-//! calling the SAME `transport::mcp::server::serve_session` every MCP adapter session calls --
-//! it invents no parallel dispatch path. It has its OWN non-sacred, versioned REST/WS vocabulary
-//! and NEVER re-serializes the 13 trained schemas (`transport::mcp::tools::TOOLS_JSON`).
-//!
-//! NOTE: this single module currently fuses two bounded contexts -- the WS/JSON-RPC
-//! tool-ingestion data plane (this module's WS path) and the management-UI routes (the Console's
-//! static + JSON API). The inbound/outbound/manage split separates these into `inbound/web.rs`
-//! and `manage/web.rs`; until then, both halves live here.
+//! The inbound.web adapter -- HTTP/1.1 + WebSocket over TCP, a session SOURCE into the same Hub
+//! a local app drives the browser through. It reuses the UNCHANGED multiplex (ADR-0030 Decision
+//! 2), identity (Decision 4), and isolation (Decision 6) by calling the SAME
+//! `transport::mcp::server::serve_session` every MCP adapter session calls -- it invents no
+//! parallel dispatch path. It has its OWN non-sacred, versioned REST/WS vocabulary and NEVER
+//! re-serializes the 13 trained schemas (`transport::mcp::tools::TOOLS_JSON`).
 //!
 //! The listener BINDS PER RESOLVED POLICY (Decision 9 + Decision 5): the inbound.web adapter's
 //! builtin default policy fragment is `inbound.web.from: [allow: "localhost"]` (the ADR-0019
 //! builtin layer, contributed per-adapter), so with no overlay it binds `127.0.0.1` explicitly,
 //! never `0.0.0.0`; a remote bind happens ONLY because a user/org layer opened it
 //! ([`resolve_bind`] is a PURE function of the resolved allowlist -- no other input). The bind
-//! address is resolved ONCE at startup from the live `ConfigStore` (`live_inbound_web_from`,
-//! PINS.md CS8.2, `docs/tasks/console`); per-connection AUTHORIZATION re-reads it fresh on every
-//! accepted connection, so a policy edit takes effect without a service restart even though the
-//! TCP bind itself does not move until the next restart.
+//! address is resolved ONCE at startup from the live `ConfigStore`; per-connection AUTHORIZATION
+//! re-reads it fresh on every accepted connection, so a policy edit takes effect without a
+//! service restart even though the TCP bind itself does not move until the next restart.
 //!
-//! The Console (PINS.md CS1/CS10, `docs/tasks/console`) is served from this SAME listener: a
-//! strictly additive router ahead of the WS-upgrade handshake below answers the Console's own
-//! non-sacred GET/POST routes (an embedded static page plus a small JSON API), gated by the SAME
-//! `inbound.web.from` decision. A request that IS a WS-upgrade attempt is completely
-//! unaffected by this router.
+//! Listener enablement is ALSO policy-controlled: `inbound.web.enabled = false` (set by an
+//! org-mandatory layer) means the listener never stands up -- the "deny the web adapter" case
+//! (ADR-0030 Decision 5). [`run_enabled`] is the gate the composition root consults before
+//! spawning this listener.
 //!
 //! Authorization is the `inbound.web.from` policy, decided by
 //! [`crate::governance::inbound::InboundPdp`] on the connecting SOURCE (Origin, or the peer's
@@ -33,17 +26,21 @@
 //! a first-class principal (Decision 5). The WS upgrade also rejects an unexpected `Host` header
 //! (DNS-rebind defense, Decision 9).
 //!
-//! The WebSocket framing here is a deliberately minimal RFC 6455 subset: unfragmented text/binary
-//! data frames are tunneled as a raw byte stream (message boundaries carry no meaning -- exactly
-//! like the stdio/pipe streams `serve_session` already speaks over), close frames end the read
-//! side cleanly, and ping/pong control frames are parsed and discarded rather than answered. This
-//! is sufficient for a governed JSON-RPC tool-call channel; no pinned test in this batch
-//! exercises the wire beyond the handshake, so this scope is a deliberate, documented
-//! limitation, not a gap discovered later.
+//! One loopback listener, two gated routing contexts (ADR-0033 Decision 7): a request read on
+//! each accepted connection is classified here. A WS-upgrade attempt is handled by this module
+//! (the data plane); a plain-HTTP request in the management route scope is delegated to
+//! [`crate::hub::manage::web::route`] (the management plane), which runs its OWN capability
+//! decision. The two planes are separately enableable and separately authorized.
+//!
+//! The WebSocket framing is a deliberately minimal RFC 6455 subset: unfragmented text/binary data
+//! frames are tunneled as a raw byte stream (message boundaries carry no meaning -- exactly like
+//! the stdio/pipe streams `serve_session` already speaks over), close frames end the read side
+//! cleanly, and ping/pong control frames are parsed and discarded rather than answered. This is
+//! sufficient for a governed JSON-RPC tool-call channel.
 
 use crate::governance::inbound::InboundPdp;
-use crate::governance::ports::{AuditSink, Decision, PolicyDecisionPoint, SessionEventRecord};
-use crate::hub::console_assets;
+use crate::governance::ports::{Decision, PolicyDecisionPoint};
+use crate::hub::manage;
 use crate::hub::session::SessionGuid;
 use crate::hub::ServiceContext;
 use std::net::{IpAddr, SocketAddr};
@@ -61,41 +58,41 @@ pub fn builtin_inbound_web_from() -> Vec<String> {
 
 /// Loopback bind (PINNED default, `docs/tasks/hub/PINS.md` SS7): bound EXPLICITLY, never
 /// `0.0.0.0`.
-pub const DEFAULT_WEBAPI_BIND: &str = "127.0.0.1";
+pub const DEFAULT_BIND: &str = "127.0.0.1";
 
-/// The remote-open bind this batch uses once the resolved allowlist opens beyond `"localhost"`.
-pub const REMOTE_WEBAPI_BIND: &str = "0.0.0.0";
+/// The remote-open bind this adapter uses once the resolved allowlist opens beyond `"localhost"`.
+pub const REMOTE_BIND: &str = "0.0.0.0";
 
 /// PINNED default port, `docs/tasks/hub/PINS.md` SS7.
-pub const DEFAULT_WEBAPI_PORT: u16 = 4180;
+pub const DEFAULT_PORT: u16 = 4180;
 
-/// The web API TCP port: the `GHOSTLIGHT_WEBAPI_PORT` env override (PINS.md CS11,
+/// The inbound.web TCP port: the `GHOSTLIGHT_WEBAPI_PORT` env override (PINS.md CS11,
 /// `docs/tasks/console` -- tests and advanced deployments that run more than one isolated
-/// instance on a host), else [`DEFAULT_WEBAPI_PORT`]. Mirrors
-/// `native::ipc::default_endpoint`'s exact override convention.
-pub fn resolve_webapi_port() -> u16 {
+/// instance on a host), else [`DEFAULT_PORT`]. Mirrors `native::ipc::default_endpoint`'s exact
+/// override convention.
+pub fn resolve_port() -> u16 {
     std::env::var("GHOSTLIGHT_WEBAPI_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_WEBAPI_PORT)
+        .unwrap_or(DEFAULT_PORT)
 }
 
 /// The pure "resolved allowlist -> bind address" function (ADR-0030 Decision 9, H8 Required
-/// behavior item 2; `tests/webapi_auth.rs`). Its ONLY input is the resolved `inbound.web.from`
+/// behavior item 2; `tests/inbound_web_auth.rs`). Its ONLY input is the resolved `inbound.web.from`
 /// allowlist -- there is no separate boolean/flag/env gate: a remote bind happens only because
 /// the policy layer changed (Decision 5).
 pub fn resolve_bind(allowlist: &[String]) -> &'static str {
     let opens_remote = allowlist.iter().any(|pattern| pattern != "localhost");
     if opens_remote {
-        REMOTE_WEBAPI_BIND
+        REMOTE_BIND
     } else {
-        DEFAULT_WEBAPI_BIND
+        DEFAULT_BIND
     }
 }
 
 /// Classify a connecting peer's address into the `inbound.web.from` source vocabulary
 /// (`"localhost"` for a loopback peer, else its literal address) -- the same vocabulary
-/// `builtin_inbound_web_from`'s `"localhost"` member matches against.
+/// [`builtin_inbound_web_from`]'s `"localhost"` member matches against.
 pub fn classify_source(addr: IpAddr) -> String {
     if addr.is_loopback() {
         "localhost".to_string()
@@ -107,10 +104,9 @@ pub fn classify_source(addr: IpAddr) -> String {
 const MAX_HANDSHAKE_BYTES: usize = 16 * 1024;
 
 /// The live `inbound.web.from` allowlist (PINS.md CS8, `docs/tasks/console`), read from the
-/// store's current resolution (CS6). Every registered key always resolves (`layers::resolve` is
+/// store's current resolution. Every registered key always resolves (`layers::resolve` is
 /// infallible), so this never falls back to [`builtin_inbound_web_from`] in practice; `expect`
-/// matches the existing idiom in `governance::config::mod` (`resolution.get(key).expect
-/// ("registered key")`).
+/// matches the existing idiom in `governance::config::mod`.
 fn live_inbound_web_from(store: &crate::governance::config::reload::ConfigStore) -> Vec<String> {
     let resolution = store.current_resolution();
     let resolved = resolution
@@ -130,7 +126,7 @@ fn live_inbound_web_from(store: &crate::governance::config::reload::ConfigStore)
 /// The live `inbound.web.enabled` resolution: `false` means the adapter is denied by policy and
 /// MUST NOT bind (the "deny the web adapter" decision, ADR-0030 Decision 5). Bind-time only: a
 /// change takes effect on the next service restart, like the bind address itself.
-pub fn inbound_web_enabled(store: &crate::governance::config::reload::ConfigStore) -> bool {
+pub fn enabled(store: &crate::governance::config::reload::ConfigStore) -> bool {
     let resolution = store.current_resolution();
     let resolved = resolution
         .get(crate::governance::config::INBOUND_WEB_ENABLED)
@@ -138,20 +134,19 @@ pub fn inbound_web_enabled(store: &crate::governance::config::reload::ConfigStor
     resolved.value.as_bool().unwrap_or(true)
 }
 
-/// Run the local web API listener for the life of the service (ADR-0030 Decision 9). Binds per
-/// [`resolve_bind`] over the STARTUP-resolved live allowlist (PINS.md CS8.2): the bind address is
-/// decided ONCE, at process start (a live policy edit takes effect on the next service restart,
-/// per the Console's own disclaimer text); PER-CONNECTION authorization, however, re-reads the
-/// live allowlist fresh (below), so narrowing or widening WHO may connect takes effect
-/// immediately without a restart. A bind failure (e.g. the port is already in use by another
-/// process, or by another Ghostlight service instance in a test run) is LOGGED, never fatal: the
-/// web API is simply unavailable for this service instance, exactly like the extension endpoint's
-/// `SessionBusy` handling in `run_service_loop` -- MCP/adapter multiplexing must never be affected
-/// by this second, optional session source.
+/// Run the inbound.web listener for the life of the service (ADR-0030 Decision 9). Binds per
+/// [`resolve_bind`] over the STARTUP-resolved live allowlist: the bind address is decided ONCE,
+/// at process start (a live policy edit takes effect on the next service restart); per-connection
+/// AUTHORIZATION, however, re-reads the live allowlist fresh (below), so narrowing or widening WHO
+/// may connect takes effect immediately without a restart. A bind failure (e.g. the port is
+/// already in use by another process, or by another Ghostlight service instance in a test run) is
+/// LOGGED, never fatal: the inbound.web adapter is simply unavailable for this service instance,
+/// exactly like the extension endpoint's `SessionBusy` handling in `run_service_loop` -- MCP
+/// multiplexing must never be affected by this second, optional session source.
 pub async fn run(ctx: ServiceContext) {
     let allowlist = live_inbound_web_from(&ctx.store);
     let bind = resolve_bind(&allowlist);
-    let port = resolve_webapi_port();
+    let port = resolve_port();
     let addr = format!("{bind}:{port}");
     let listener = match TcpListener::bind(&addr).await {
         Ok(listener) => listener,
@@ -159,38 +154,39 @@ pub async fn run(ctx: ServiceContext) {
             tracing::warn!(
                 error = %e,
                 addr,
-                "local web API TCP listener failed to bind; the web API is unavailable for this \
+                "inbound.web TCP listener failed to bind; the adapter is unavailable for this \
                  service instance"
             );
             return;
         }
     };
-    tracing::info!(addr, "local web API listening");
+    tracing::info!(addr, "inbound.web listening");
     loop {
         let (stream, peer_addr) = match listener.accept().await {
             Ok(pair) => pair,
             Err(e) => {
-                tracing::warn!(error = %e, "local web API accept failed");
+                tracing::warn!(error = %e, "inbound.web accept failed");
                 continue;
             }
         };
         let ctx = ctx.clone();
-        // PINS.md CS8.2: re-read the live allowlist per accepted connection (never the
-        // loop-hoisted startup value) so a policy edit is honored without a service restart.
+        // Re-read the live allowlist per accepted connection so a policy edit is honored without
+        // a service restart.
         let allowlist = live_inbound_web_from(&ctx.store);
         tokio::spawn(async move {
             if let Err(e) = handle_connection(stream, peer_addr, ctx, allowlist, bind).await {
-                tracing::debug!(error = %e, "local web API connection ended with an error");
+                tracing::debug!(error = %e, "inbound.web connection ended with an error");
             }
         });
     }
 }
 
-/// One accepted TCP connection: read and validate the HTTP/1.1 WebSocket upgrade request,
-/// authorize its connecting source against `inbound.web.from` (Decision 5), validate `Host`
-/// (DNS-rebind defense, Decision 9), complete the handshake, then hand off to the UNCHANGED
-/// `serve_session` -- the SAME governance chokepoint every MCP adapter session enters (Decision
-/// 2/4/6; H8 Required behavior item 1).
+/// One accepted TCP connection: read and parse the HTTP/1.1 request head, classify it as a
+/// WS-upgrade attempt or a management-plane route, and dispatch accordingly. A WS-upgrade is
+/// authorized against `inbound.web.from` (Decision 5), validated for `Host` (DNS-rebind defense),
+/// upgraded, and handed off to `serve_session` -- the SAME governance chokepoint every MCP
+/// adapter session enters. A plain-HTTP request in the management route scope is delegated to
+/// [`manage::web::route`], which runs its OWN capability decision.
 async fn handle_connection(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
@@ -214,30 +210,26 @@ async fn handle_connection(
         }
     };
 
-    // PINS.md CS1 (`docs/tasks/console`): the Console's own router runs BEFORE the
-    // Sec-WebSocket-Key-required check below, and claims a request only when it is NOT a
-    // WS-upgrade attempt (no `Upgrade: websocket` header) and either matches a known Console
-    // route or falls under `/` or `/api/v1/**` (the 404/405 fallback scope). Anything it does not
-    // claim -- a WS-upgrade attempt, or any other plain HTTP path -- falls through completely
-    // unchanged to the EXISTING logic below.
+    // Classification: a WS-upgrade attempt is the inbound.web data plane; anything else in the
+    // management route scope is delegated to the management plane, which runs its OWN gate.
     let is_ws_attempt = header(&request.headers, "Upgrade")
         .map(|v| v.eq_ignore_ascii_case("websocket"))
         .unwrap_or(false);
     let stripped_path = strip_query(&request.path);
-    let in_console_scope = stripped_path == "/" || stripped_path.starts_with("/api/v1/");
-    if !is_ws_attempt && (in_console_scope || is_known_console_path(stripped_path)) {
-        return route_console_request(
+    let in_manage_scope = stripped_path == "/" || stripped_path.starts_with("/api/v1/");
+    if !is_ws_attempt && (in_manage_scope || manage::web::is_known_path(stripped_path)) {
+        return manage::web::route(
             &mut stream,
             &request.method,
             stripped_path,
             &request.headers,
             &ctx,
-            &allowlist,
             peer_addr,
         )
         .await;
     }
 
+    // WS-upgrade path (the inbound.web data plane).
     let Some(client_key) = header(&request.headers, "Sec-WebSocket-Key") else {
         write_http_error(&mut stream, 400, "Bad Request").await?;
         return Ok(());
@@ -259,11 +251,11 @@ async fn handle_connection(
         return Ok(());
     }
 
-    // Origin validated against the resolved inbound.web.from policy (Required behavior item
-    // 5); a non-browser caller with no Origin falls back to the classified peer source so the
-    // inbound decision still runs (Required behavior item 3: anonymous is a first-class
-    // principal, never a hardcoded gate).
-    let (decision, source) = inbound_web_from_decide(&request.headers, peer_addr, &allowlist, &ctx);
+    // Origin validated against the resolved inbound.web.from policy (Required behavior item 5); a
+    // non-browser caller with no Origin falls back to the classified peer source so the inbound
+    // decision still runs (Required behavior item 3: anonymous is a first-class principal, never a
+    // hardcoded gate).
+    let (decision, source) = decide_inbound_web_from(&request.headers, peer_addr, &allowlist, &ctx);
     match decision {
         Decision::Allow { .. } => {}
         other => {
@@ -290,12 +282,12 @@ async fn handle_connection(
     crate::transport::mcp::server::serve_session(ws, ctx, guid).await
 }
 
-/// The `inbound.web.from` decision (ADR-0030 Decision 5), shared by the
-/// WS-upgrade handshake and the Console's own routes (PINS.md CS1, `docs/tasks/console`): the
-/// connecting source is the `Origin` header when present, else the classified peer address
-/// (anonymous is a first-class principal, never a hardcoded gate). Returns the full [`Decision`]
-/// (not just a bool) so a caller can log the SAME detail the original WS-upgrade path always has.
-fn inbound_web_from_decide(
+/// The `inbound.web.from` decision (ADR-0030 Decision 5), shared by the WS-upgrade handshake and
+/// the management plane's own routes: the connecting source is the `Origin` header when present,
+/// else the classified peer address (anonymous is a first-class principal, never a hardcoded
+/// gate). Returns the full [`Decision`] (not just a bool) so a caller can log the SAME detail the
+/// original WS-upgrade path always has.
+pub(crate) fn decide_inbound_web_from(
     headers: &[(String, String)],
     peer_addr: SocketAddr,
     allowlist: &[String],
@@ -314,263 +306,6 @@ fn inbound_web_from_decide(
     let pdp = InboundPdp::new(allowlist.to_vec());
     let decision_req = inbound_decision_request(source.clone(), manifest_hash);
     (pdp.decide(&decision_req), source)
-}
-
-/// The portion of `path` before an optional `?` query string (PINS.md CS1.4): every Console route
-/// match strips it exactly once, here, so a query string never affects routing.
-fn strip_query(path: &str) -> &str {
-    path.split('?').next().unwrap_or(path)
-}
-
-/// PINS.md CS1: every path THIS batch's Console router recognizes, regardless of method --
-/// distinguishes a 404 ("no such path") from a 405 ("wrong method on a path that exists"). Grows
-/// as later tasks (K3/K4/K5) add their own routes.
-fn is_known_console_path(stripped_path: &str) -> bool {
-    matches!(
-        stripped_path,
-        "/" | "/console.css"
-            | "/console.js"
-            | "/api/v1/config"
-            | "/api/v1/sessions"
-            | "/api/v1/config/webapi-enable-remote"
-    )
-}
-
-/// PINS.md CS1/CS10: the Console's own router. Authorizes the connecting source against
-/// `inbound.web.from` (the SAME decision the WS-upgrade path uses, CS1.3's 403), then serves a
-/// known static asset, or answers 404/405 per CS1.1/CS1.2. Reached only for a request
-/// `handle_connection` determined is NOT a WS-upgrade attempt and IS in the Console's route scope.
-async fn route_console_request(
-    stream: &mut TcpStream,
-    method: &str,
-    stripped_path: &str,
-    headers: &[(String, String)],
-    ctx: &ServiceContext,
-    allowlist: &[String],
-    peer_addr: SocketAddr,
-) -> crate::Result<()> {
-    // CS1.3: identical shape to the existing WS-upgrade 403 -- the SAME `write_http_error` call,
-    // no JSON body.
-    let (decision, source) = inbound_web_from_decide(headers, peer_addr, allowlist, ctx);
-    if !matches!(decision, Decision::Allow { .. }) {
-        tracing::info!(source = %source, decision = ?decision, "Console request refused by inbound.web.from");
-        write_http_error(stream, 403, "Forbidden").await?;
-        return Ok(());
-    }
-
-    match (method, stripped_path) {
-        ("GET", "/") => {
-            write_asset(
-                stream,
-                "text/html; charset=utf-8",
-                console_assets::INDEX_HTML,
-            )
-            .await
-        }
-        ("GET", "/console.css") => {
-            write_asset(
-                stream,
-                "text/css; charset=utf-8",
-                console_assets::CONSOLE_CSS,
-            )
-            .await
-        }
-        ("GET", "/console.js") => {
-            write_asset(
-                stream,
-                "application/javascript; charset=utf-8",
-                console_assets::CONSOLE_JS,
-            )
-            .await
-        }
-        ("GET", "/api/v1/config") => write_config_response(stream, ctx).await,
-        ("GET", "/api/v1/sessions") => write_sessions_response(stream, ctx).await,
-        ("POST", "/api/v1/config/webapi-enable-remote") => {
-            write_enable_remote_response(stream, ctx).await
-        }
-        _ if is_known_console_path(stripped_path) => {
-            write_plain_error(stream, 405, "Method Not Allowed", "method not allowed").await
-        }
-        _ => write_plain_error(stream, 404, "Not Found", "not found").await,
-    }
-}
-
-/// `GET /api/v1/config` (PINS.md CS2, `docs/tasks/console`): the provenance-aware config view --
-/// per registered key, its resolved value, source layer, lock state, and description, in `KEYS`
-/// registry order. A READ of `layers::Resolution` (CS6) only; never a manifest document.
-async fn write_config_response(stream: &mut TcpStream, ctx: &ServiceContext) -> crate::Result<()> {
-    let resolution = ctx.store.current_resolution();
-    let payload = config_payload(&resolution).to_string();
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
-        payload.len()
-    );
-    stream.write_all(response.as_bytes()).await?;
-    Ok(())
-}
-
-/// The pure `Resolution` -> JSON transform behind `GET /api/v1/config` (ADR-0032 Decision 1):
-/// per registered key, its resolved value, source layer, lock state, and description, in `KEYS`
-/// registry order. Split out from the socket-writing handler so the JSON contract is unit-testable
-/// against a hand-built `Resolution` (via the pure `layers::resolve`) with no spawned service and
-/// no policy file -- the assertion that used to require a `ProgramData`-isolated org policy file
-/// on Windows only (`tests/console_config_api.rs`) is now a platform-independent unit test.
-fn config_payload(resolution: &crate::governance::config::layers::Resolution) -> serde_json::Value {
-    let keys: Vec<serde_json::Value> = resolution
-        .iter()
-        .map(|(key, resolved)| {
-            let description = crate::governance::config::key_def(key)
-                .map(|def| def.description)
-                .unwrap_or_default();
-            serde_json::json!({
-                "key": key,
-                "value": resolved.value,
-                "source": resolved.source.as_str(),
-                "locked": resolved.locked,
-                "description": description,
-            })
-        })
-        .collect();
-    serde_json::json!({ "keys": keys })
-}
-
-/// `GET /api/v1/sessions` (PINS.md CS3, `docs/tasks/console`): the live-sessions/groups view --
-/// the current live-session COUNT (every source, adapter or web) plus, for adapter sessions
-/// admitted since the service started, a TRUNCATED (never full) guid, pid, and owned tabs (H8's
-/// own forward guidance: a web/WS session never calls `SessionRegistry::admit`, so it never
-/// appears in `adapter_bindings`).
-async fn write_sessions_response(
-    stream: &mut TcpStream,
-    ctx: &ServiceContext,
-) -> crate::Result<()> {
-    let live_session_count = ctx.live_sessions.load(std::sync::atomic::Ordering::Relaxed);
-    let summaries =
-        crate::hub::session::live_session_summaries(&ctx.session_registry, &ctx.owned_tabs);
-    let payload = sessions_payload(&summaries, live_session_count).to_string();
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
-        payload.len()
-    );
-    stream.write_all(response.as_bytes()).await?;
-    Ok(())
-}
-
-/// The pure summaries -> JSON transform behind `GET /api/v1/sessions` (ADR-0032 Decision 1): the
-/// live-session count plus, per adapter binding, a TRUNCATED guid, pid, and owned tabs. Split out
-/// from the socket-writing handler so the JSON contract is unit-testable against hand-built
-/// summaries with no spawned adapter/service.
-fn sessions_payload(
-    summaries: &[crate::hub::session::SessionSummary],
-    live_session_count: usize,
-) -> serde_json::Value {
-    let adapter_bindings: Vec<serde_json::Value> = summaries
-        .iter()
-        .map(|s| {
-            serde_json::json!({
-                "guid": s.guid,
-                "pid": s.pid,
-                "owned_tab_ids": s.owned_tab_ids,
-            })
-        })
-        .collect();
-    serde_json::json!({
-        "live_session_count": live_session_count,
-        "adapter_bindings": adapter_bindings,
-        "note": "adapter_bindings lists sessions admitted since the service started; a listed \
-                 binding may no longer be currently connected. Web/Console HTTP sessions are not \
-                 yet individually tracked.",
-    })
-}
-
-/// `POST /api/v1/config/webapi-enable-remote` (PINS.md CS4/CS5, `docs/tasks/console`): the
-/// Console's ONE write action. The request body is NEVER read -- the written value is the ONE
-/// pinned literal below, never caller-supplied. Writes the single user-layer
-/// `inbound.web.from` key via K1's `set_user_value` (the SAME path `ghostlight config set`
-/// uses), refusing cleanly under an org-mandatory lock (or any other failure) with a uniform 409,
-/// and records exactly one `config_changed` session-event audit record on success.
-async fn write_enable_remote_response(
-    stream: &mut TcpStream,
-    ctx: &ServiceContext,
-) -> crate::Result<()> {
-    let key = crate::governance::config::INBOUND_WEB_FROM;
-    let value = serde_json::json!(["*"]);
-    let outcome = crate::governance::config::cli::set_user_value(
-        key,
-        value.clone(),
-        crate::browser::pattern::is_valid_pattern,
-    );
-    match outcome {
-        Ok(path) => {
-            record_config_changed(ctx);
-            let payload = serde_json::json!({
-                "key": key,
-                "value": value,
-                "written_to": path.display().to_string(),
-                "note": "takes effect the next time the Ghostlight service restarts",
-            })
-            .to_string();
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
-                payload.len()
-            );
-            stream.write_all(response.as_bytes()).await?;
-        }
-        Err(e) => {
-            let payload = serde_json::json!({ "error": e.to_string() }).to_string();
-            let response = format!(
-                "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
-                payload.len()
-            );
-            stream.write_all(response.as_bytes()).await?;
-        }
-    }
-    Ok(())
-}
-
-/// PINS.md CS4: record ONE `config_changed` session-event audit record on a SUCCESSFUL write
-/// (mirroring `Governance::record_manifest_reload`'s own "callers only invoke this on a
-/// successful swap" rule). The Console's POST handler has no per-session `Governance` (it is a
-/// plain HTTP action on the shared service, never a tool-call dispatch through `serve_session`),
-/// so it calls the underlying `AuditSink` directly -- the SAME sink every
-/// `Governance::record_session_killed`/`record_manifest_reload` ultimately writes to
-/// (`self.audit.record_session_event(&record)`), one call frame shallower.
-fn record_config_changed(ctx: &ServiceContext) {
-    let record = SessionEventRecord {
-        event_id: uuid::Uuid::new_v4().to_string(),
-        ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        identity: None,
-        client: None,
-        event: "config_changed",
-        manifest: None,
-    };
-    ctx.recorder.record_session_event(&record);
-}
-
-/// Serve one embedded Console asset (PINS.md CS10) verbatim, with a `Content-Length` computed
-/// from its actual UTF-8 byte length.
-async fn write_asset(stream: &mut TcpStream, content_type: &str, body: &str) -> crate::Result<()> {
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(response.as_bytes()).await?;
-    Ok(())
-}
-
-/// A plain-text error response for the Console's own routes (PINS.md CS1.1/CS1.2): the exact
-/// literal ASCII body, no trailing newline.
-async fn write_plain_error(
-    stream: &mut TcpStream,
-    status: u16,
-    reason: &str,
-    body: &str,
-) -> crate::Result<()> {
-    let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(response.as_bytes()).await?;
-    Ok(())
 }
 
 /// Build the minimal [`crate::governance::ports::DecisionRequest`] an inbound decision needs
@@ -594,11 +329,17 @@ fn inbound_decision_request(
     }
 }
 
+/// The portion of `path` before an optional `?` query string: every route match strips it exactly
+/// once, here, so a query string never affects routing.
+fn strip_query(path: &str) -> &str {
+    path.split('?').next().unwrap_or(path)
+}
+
 /// `true` iff `host_header`'s hostname (the part before an optional trailing `:port`) is an
 /// expected loopback alias when `bind` is the loopback default; a remote bind imposes no further
 /// restriction here (an operator already opened remote deliberately, Decision 5).
 fn host_is_expected(host_header: &str, bind: &str) -> bool {
-    if bind != DEFAULT_WEBAPI_BIND {
+    if bind != DEFAULT_BIND {
         return true;
     }
     let hostname = host_header.rsplit_once(':').map_or(host_header, |(h, _)| h);
@@ -623,20 +364,19 @@ fn origin_hostname(origin: &str) -> Option<String> {
     }
 }
 
-struct HttpRequest {
-    method: String,
-    /// The request line's raw target (PINS.md CS1.4, `docs/tasks/console`), e.g.
-    /// `/api/v1/config` or `/api/v1/config?x=1`. NOT stripped of a query string here -- the
-    /// Console router (`route_console_request`) strips it once, consistently, for every route.
-    path: String,
-    headers: Vec<(String, String)>,
+/// A parsed HTTP/1.1 request head: the method, the raw request target (NOT stripped of a query
+/// string -- callers strip it once, consistently, for routing), and the header block.
+pub(crate) struct HttpRequest {
+    pub method: String,
+    pub path: String,
+    pub headers: Vec<(String, String)>,
 }
 
 /// Parse the request line + headers of an HTTP/1.1 request out of `buf`. Returns `None` until a
 /// full `\r\n\r\n` header terminator has been received. The returned `usize` is the number of
 /// bytes the header block consumed (any trailing bytes in `buf` belong to the next protocol
 /// layer -- WS frames, once upgraded).
-fn parse_http_request(buf: &[u8]) -> Option<(HttpRequest, usize)> {
+pub(crate) fn parse_http_request(buf: &[u8]) -> Option<(HttpRequest, usize)> {
     let text = std::str::from_utf8(buf).ok()?;
     let header_end = text.find("\r\n\r\n")?;
     let head = &text[..header_end];
@@ -659,14 +399,14 @@ fn parse_http_request(buf: &[u8]) -> Option<(HttpRequest, usize)> {
     ))
 }
 
-fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+pub(crate) fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case(name))
         .map(|(_, v)| v.as_str())
 }
 
-async fn write_http_error(
+pub(crate) async fn write_http_error(
     stream: &mut TcpStream,
     status: u16,
     reason: &str,
@@ -785,7 +525,7 @@ const OP_PONG: u8 = 0xA;
 
 /// Cap on a single declared frame payload length, guarding against a hostile/garbled length
 /// field forcing an unbounded allocation. Well under `native::host::MAX_MESSAGE_LEN`; this is the
-/// web API's own vocabulary, never the frozen extension wire.
+/// inbound.web adapter's own vocabulary, never the frozen extension wire.
 const MAX_FRAME_LEN: u64 = 64 * 1024 * 1024;
 
 /// Decode one frame from the front of `buf`. `Ok(None)` means "not enough bytes yet"; `Err(())`
@@ -1033,14 +773,14 @@ mod tests {
     fn builtin_default_is_loopback_only() {
         let allowlist = builtin_inbound_web_from();
         assert_eq!(allowlist, vec!["localhost".to_string()]);
-        assert_eq!(resolve_bind(&allowlist), DEFAULT_WEBAPI_BIND);
-        assert_ne!(resolve_bind(&allowlist), REMOTE_WEBAPI_BIND);
+        assert_eq!(resolve_bind(&allowlist), DEFAULT_BIND);
+        assert_ne!(resolve_bind(&allowlist), REMOTE_BIND);
     }
 
     #[test]
     fn a_remote_allowlist_resolves_to_a_remote_bind() {
         let allowlist = vec!["*".to_string()];
-        assert_eq!(resolve_bind(&allowlist), REMOTE_WEBAPI_BIND);
+        assert_eq!(resolve_bind(&allowlist), REMOTE_BIND);
     }
 
     #[test]
@@ -1053,8 +793,8 @@ mod tests {
         );
     }
 
-    /// RFC 6455 section 1.3's own worked example: pinned by the published standard, not
-    /// authored by this batch.
+    /// RFC 6455 section 1.3's own worked example: pinned by the published standard, not authored
+    /// by this batch.
     #[test]
     fn accept_key_matches_the_rfc6455_worked_example() {
         assert_eq!(
@@ -1066,8 +806,8 @@ mod tests {
     #[test]
     fn ws_frame_round_trips_through_encode_and_decode() {
         let payload = b"hello ghostlight";
-        // A masked "client" frame: reuse encode_frame's length-prefix logic, then mask it by
-        // hand (encode_frame itself only ever emits UNMASKED server frames).
+        // A masked "client" frame: reuse encode_frame's length-prefix logic, then mask it by hand
+        // (encode_frame itself only ever emits UNMASKED server frames).
         let mut framed = encode_frame(OP_TEXT, payload);
         // framed[0] = FIN|opcode, framed[1] = length byte (payload is short, no extended length).
         let header_len = 2;
@@ -1101,10 +841,10 @@ mod tests {
 
     #[test]
     fn host_is_expected_accepts_loopback_aliases_and_rejects_others_under_the_default_bind() {
-        assert!(host_is_expected("127.0.0.1:4180", DEFAULT_WEBAPI_BIND));
-        assert!(host_is_expected("localhost:4180", DEFAULT_WEBAPI_BIND));
-        assert!(!host_is_expected("evil.example.com", DEFAULT_WEBAPI_BIND));
-        assert!(host_is_expected("evil.example.com", REMOTE_WEBAPI_BIND));
+        assert!(host_is_expected("127.0.0.1:4180", DEFAULT_BIND));
+        assert!(host_is_expected("localhost:4180", DEFAULT_BIND));
+        assert!(!host_is_expected("evil.example.com", DEFAULT_BIND));
+        assert!(host_is_expected("evil.example.com", REMOTE_BIND));
     }
 
     #[test]
@@ -1122,81 +862,5 @@ mod tests {
             Some("evil.example.com".to_string())
         );
         assert_eq!(origin_hostname("not-a-url"), None);
-    }
-
-    use crate::governance::config::layers::{resolve, LayerInputs};
-
-    /// ADR-0032 Decision 1: `config_payload` emits every registered key, in registry order, each
-    /// with the five contracted fields. A pure test over the builtin-only resolution -- no service,
-    /// no file, every platform.
-    #[test]
-    fn config_payload_emits_every_registered_key_in_registry_order() {
-        let resolution = resolve(&LayerInputs::default());
-        let payload = config_payload(&resolution);
-        let keys = payload["keys"].as_array().expect("keys array");
-
-        let expected: Vec<&str> = crate::governance::config::KEYS
-            .iter()
-            .map(|d| d.key)
-            .collect();
-        assert_eq!(keys.len(), expected.len());
-        for (entry, key) in keys.iter().zip(expected.iter()) {
-            assert_eq!(entry["key"], *key);
-            assert!(entry.get("value").is_some(), "{key}: value present");
-            assert!(entry["source"].is_string(), "{key}: source string");
-            assert!(entry["locked"].is_boolean(), "{key}: locked bool");
-            assert!(
-                entry["description"].is_string(),
-                "{key}: description string"
-            );
-        }
-    }
-
-    /// ADR-0032 Decision 1: an org-mandatory entry serialises as `source: "org_mandatory"`,
-    /// `locked: true`. This REPLACES `tests/console_config_api.rs::
-    /// config_api_reflects_a_locked_org_mandatory_key`, which asserted the same fact by spawning a
-    /// real service and isolating an org policy file via the `ProgramData` env var -- an isolation
-    /// that only works on Windows and so failed the Linux/macOS release gate (ADR-0032 Context).
-    #[test]
-    fn config_payload_reflects_an_org_mandatory_key_as_locked() {
-        let mut inputs = LayerInputs::default();
-        inputs
-            .org_mandatory
-            .insert("audit.enabled".to_string(), serde_json::json!(true));
-        let resolution = resolve(&inputs);
-
-        let payload = config_payload(&resolution);
-        let entry = payload["keys"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|k| k["key"] == "audit.enabled")
-            .expect("audit.enabled is registered");
-        assert_eq!(entry["source"], "org_mandatory");
-        assert_eq!(entry["locked"], true);
-        assert_eq!(entry["value"], true);
-    }
-
-    /// ADR-0032 Decision 1: `sessions_payload` serialises the live count, each binding's truncated
-    /// guid/pid/owned tabs, and the tracking-scope note -- a pure test over hand-built summaries.
-    #[test]
-    fn sessions_payload_serialises_count_bindings_and_note() {
-        let summaries = vec![crate::hub::session::SessionSummary {
-            guid: "abcd1234".to_string(),
-            pid: 4242,
-            owned_tab_ids: vec![7, 9],
-        }];
-        let payload = sessions_payload(&summaries, 3);
-
-        assert_eq!(payload["live_session_count"], 3);
-        let bindings = payload["adapter_bindings"].as_array().unwrap();
-        assert_eq!(bindings.len(), 1);
-        assert_eq!(bindings[0]["guid"], "abcd1234");
-        assert_eq!(bindings[0]["pid"], 4242);
-        assert_eq!(bindings[0]["owned_tab_ids"], serde_json::json!([7, 9]));
-        assert!(payload["note"]
-            .as_str()
-            .unwrap()
-            .contains("admitted since the service started"));
     }
 }

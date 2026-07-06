@@ -117,7 +117,7 @@ fn session_killed_writes_one_session_event_record() {
     ));
     governance.set_client("claude-code", "2.1.0");
 
-    let browser = ghostlight::transport::executor::Browser::new();
+    let browser = ghostlight::hub::outbound::browser::Browser::new();
     {
         let governance = Arc::clone(&governance);
         browser.on_session_killed(move || governance.record_session_killed());

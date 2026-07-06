@@ -9,8 +9,8 @@
 //! shared port and starve honest sessions. We do not engineer around the singleton; we queue
 //! honestly."
 //!
-//! The bounded reconnect grace window itself (`transport::executor::Browser::attach`,
-//! `GRACE_WINDOW`) is exercised by `src/transport/executor.rs`'s own inline tests (not named by
+//! The bounded reconnect grace window itself (`hub::outbound::browser::Browser::attach`,
+//! `GRACE_WINDOW`) is exercised by `src/hub/outbound/browser.rs`'s own inline tests (not named by
 //! the task file for this integration suite); this file covers the two tests the task file DOES
 //! name by their exact names:
 //!
@@ -22,10 +22,10 @@
 
 use ghostlight::governance::audit::Recorder;
 use ghostlight::governance::manifest::source::LoadedPolicy;
+use ghostlight::hub::outbound::browser::Browser;
 use ghostlight::hub::session::{PeerUser, SessionGuid, SessionRegistry};
 use ghostlight::hub::{try_mint, ServiceContext, MINT_QUOTA_EXCEEDED, PER_PEER_MINT_CAP};
 use ghostlight::native::host;
-use ghostlight::transport::executor::Browser;
 use ghostlight::transport::mcp::server::serve_session;
 use serde_json::{json, Value};
 use std::collections::HashMap;

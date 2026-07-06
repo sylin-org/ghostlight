@@ -35,7 +35,7 @@
 //!   ([`crate::hub::supervisor`]), sends the hello, verifies the service's proof
 //!   ([`verify_service_proof`]), then raw-relays its stdio, never re-framing the data phase.
 
-use crate::transport::executor::{AttachOutcome, Browser};
+use crate::hub::outbound::browser::{AttachOutcome, Browser};
 use crate::transport::native::host;
 use crate::{Error, Result};
 use serde_json::{json, Value};
@@ -390,7 +390,7 @@ fn pipe_path(endpoint: &str) -> String {
 /// written or read. Known, harmless side effect: probing a live *idle* server briefly wins the accept
 /// slot, logging one phantom connect/disconnect pair in *that* server's own debug state. It never
 /// disturbs an already-attached native-host: [`serve`] accepts ahead on a spare instance, so the
-/// probe connects to the spare and [`crate::transport::executor::Browser::attach`] rejects it (AlreadyAttached)
+/// probe connects to the spare and [`crate::hub::outbound::browser::Browser::attach`] rejects it (AlreadyAttached)
 /// and drops it without touching the live session.
 #[cfg(windows)]
 pub fn probe_endpoint(endpoint: &str) -> EndpointProbe {
@@ -786,7 +786,7 @@ fn socket_path(endpoint: &str) -> Result<std::path::PathBuf> {
 /// read. Known, harmless side effect: probing a live *idle* server briefly wins the accept slot,
 /// logging one phantom connect/disconnect pair in *that* server's own debug state. It never disturbs
 /// an already-attached native-host: [`serve`] spawns a handler per accepted connection and
-/// [`crate::transport::executor::Browser::attach`] rejects a stray (AlreadyAttached), dropping it without
+/// [`crate::hub::outbound::browser::Browser::attach`] rejects a stray (AlreadyAttached), dropping it without
 /// touching the live session.
 #[cfg(unix)]
 pub fn probe_endpoint(endpoint: &str) -> EndpointProbe {

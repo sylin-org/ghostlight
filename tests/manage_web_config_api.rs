@@ -98,7 +98,7 @@ fn config_api_returns_every_registered_key_in_registry_order() {
 // (`config_api_reflects_a_locked_org_mandatory_key`) required a real spawned service with a
 // `ProgramData`-isolated org policy file -- an isolation only possible on Windows, which failed the
 // Linux/macOS release gate. It now lives as a pure, platform-independent unit test:
-// `src/hub/webapi.rs::tests::config_payload_reflects_an_org_mandatory_key_as_locked`.
+// `src/hub/inbound/web.rs::tests::config_payload_reflects_an_org_mandatory_key_as_locked`.
 
 /// PINS.md CS1.3: `/api/v1/config` is gated by the SAME `inbound.web.from` decision every
 /// other Console route uses -- a source outside the default `["localhost"]` allowlist (forced via

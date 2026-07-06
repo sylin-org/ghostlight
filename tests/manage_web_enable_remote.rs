@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! K5 (`docs/tasks/console/K5-enable-remote-connections.md`; PINS.md CS1, CS4, CS5): `POST
-//! /api/v1/config/webapi-enable-remote`, the Console's ONE write action.
+//! /api/v1/config/inbound-web-enable-remote`, the Console's ONE write action.
 //!
 //! Uses the `GHOSTLIGHT_USER_CONFIG_DIR` env override (`src/governance/config/load.rs`, added
 //! during this task after `dirs::config_dir()` was found NOT to honor a platform env var
@@ -43,7 +43,7 @@ fn body(response: &str) -> &str {
     response.split("\r\n\r\n").nth(1).unwrap_or_default()
 }
 
-const ROUTE: &str = "/api/v1/config/webapi-enable-remote";
+const ROUTE: &str = "/api/v1/config/inbound-web-enable-remote";
 
 /// PINS.md CS5: a successful write returns the pinned `key`/`value`/`note` literals, and the
 /// isolated user config file (never the real machine path) actually contains

@@ -3,7 +3,7 @@
 //!
 //! Both directions carry UTF-8 JSON, one object per native message (Chrome frames each with a
 //! 4-byte little-endian length prefix; see [`super::host`]). The native-host relays these objects
-//! verbatim; only the mcp-server (in [`crate::transport::executor`]) constructs and parses them, so
+//! verbatim; only the mcp-server (in [`crate::hub::outbound::browser`]) constructs and parses them, so
 //! they are documented here rather than modeled as types.
 //!
 //! ## binary -> extension
@@ -24,7 +24,7 @@
 //! `"page"` -- the extension tags mechanism (which layer threw), never policy; an absent `hop`
 //! means the binary attributes the failure to the extension itself (see
 //! [`crate::ToolError::from_extension_wire`]). `detail` is debug-log-only material (logged with
-//! `tracing::debug!` in [`crate::transport::executor`]) and must never appear in a tool result
+//! `tracing::debug!` in [`crate::hub::outbound::browser`]) and must never appear in a tool result
 //! surfaced to the MCP client.
 //!
 //! ## Take-the-wheel hold (g10, ADR-0018 step 2)
@@ -54,7 +54,7 @@
 //! boolean gets the `hold_error` reply above and changes nothing. Request/reply only: the
 //! binary never pushes an unsolicited `hold_state` or `hold_error`. The native-host relays these
 //! messages verbatim, exactly like every other frame; only the mcp-server
-//! ([`crate::transport::executor::Browser`]) interprets them.
+//! ([`crate::hub::outbound::browser::Browser`]) interprets them.
 //!
 //! ## Panic kill switch (g11, ADR-0018 step 2)
 //!
@@ -84,7 +84,7 @@
 //!
 //! Mechanism only: the extension reports `chrome.tabs.get(tabId).url` verbatim (`null` for an
 //! unknown/closed tab or a lookup failure) and makes no policy decision about it. The
-//! mcp-server's dispatch chokepoint ([`crate::transport::executor::Browser::tab_url`]) uses the
+//! mcp-server's dispatch chokepoint ([`crate::hub::outbound::browser::Browser::tab_url`]) uses the
 //! reported URL to resolve the governing domain for a tab-scoped tool call; it is never trusted
 //! from tool call parameters. This reply routes through the same generic (non-`tool_error`)
 //! reply path as a `tool_response` -- no new routing logic, only a new `type` value.
@@ -129,7 +129,7 @@
 //! ADR-0030 Decision 6: "The extension's per-group checks remain defense-in-depth only"). No
 //! `id` member on either side: this is fire-and-forget presentation, never correlated back to a
 //! waiting caller the way a `tool_request`/`tab_url_request` reply is (an incoming
-//! `group_response` is simply an id-less event to [`crate::transport::executor::Browser`], same
+//! `group_response` is simply an id-less event to [`crate::hub::outbound::browser::Browser`], same
 //! as `session_killed`). The service tracks which tabIds belong to which session
 //! (`crate::hub::session`, ADR-0030 Decision 6); this message is how it tells the extension to
 //! reflect that in a visible Chrome tab group. Same GUID reuses its existing group; a different
