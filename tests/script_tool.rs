@@ -194,3 +194,65 @@ fn script_reports_step_error_and_not_run_with_correlated_audit() {
     std::fs::remove_file(&audit_path).ok();
     std::fs::remove_file(&manifest).ok();
 }
+
+/// A dry run evaluates every step's verdict through the REAL governance decision but dispatches
+/// nothing: no extension frame, no step audit records. The audit log carries exactly ONE record --
+/// the parent `script` call with `dry_run: true`. Under all-open, both find and navigate are
+/// `would_allow` (the real authorize verdict, not a guess).
+#[test]
+fn dry_run_verdicts_without_step_records() {
+    let audit_path = temp_path("script-dry-audit");
+    let _ = std::fs::remove_file(&audit_path);
+    let manifest = write_manifest(
+        "script-dry",
+        &manifest_with_audit("script-dry", &audit_path),
+    );
+
+    let requests = [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"script","arguments":{
+            "tabId": 0,
+            "dry_run": true,
+            "steps": [
+                {"tool":"find","args":{"query":"x"}},
+                {"tool":"navigate","args":{"url":"https://example.com"}}
+            ]
+        }}}),
+    ];
+    let responses = drive(Some(&manifest), &requests);
+    let call = by_id(&responses, 2);
+    assert_ne!(
+        call["result"]["isError"], true,
+        "dry run succeeds: {call:?}"
+    );
+
+    let text = call["result"]["content"][0]["text"]
+        .as_str()
+        .expect("compact result text");
+    let compact: Value = serde_json::from_str(text).expect("compact result is JSON");
+    let status: Vec<&str> = compact["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        status,
+        vec!["would_deny", "would_allow"],
+        "the real authorize verdict per step: got {status:?}"
+    );
+
+    // Exactly one audit record: the parent script call, marked dry_run. No step records (nothing
+    // dispatched -- the audit scopes for steps dropped without complete()).
+    let lines = read_audit_lines(&audit_path);
+    assert_eq!(
+        lines.len(),
+        1,
+        "dry run writes only the parent record: {lines:?}"
+    );
+    assert_eq!(lines[0]["tool"], "script");
+    assert_eq!(lines[0]["dry_run"], true, "parent is marked dry_run");
+
+    std::fs::remove_file(&audit_path).ok();
+    std::fs::remove_file(&manifest).ok();
+}

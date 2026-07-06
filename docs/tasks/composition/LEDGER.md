@@ -5,8 +5,8 @@ A fresh executor resumes from RESUME HERE with no other context.
 
 ## RESUME HERE
 
-**C8 is NEXT.** Baseline: dev @ 6c5d351 + this batch through C7. C1..C7 committed. C8 is HALT
-(script dry_run + idempotency cache; replaces C7's corrective stub). C9/C10 depend on C7+C8.
+**C9 is NEXT.** Baseline: dev @ 6c5d351 + this batch through C8. C1..C8 committed. C9 is HALT
+(formStructure content-script read; C10's form_fill depends on it).
 
 ## Log
 
@@ -299,4 +299,59 @@ Template per task:
     empty-grants, and full sets). The empty-grants list (`advertise.rs`, `tool_advertisement.rs`)
     gained `script` because it requires nothing, unlike wait_for (Read). All mechanically forced.
   - D6: gate commands run with `CARGO_TARGET_DIR` pointed at an isolated scratch directory (same
+    reason as C1's D3). No source/test content changed by this.
+
+### C8: script dry_run verdicts (idempotency dropped) -- DONE (pending commit)
+- Baseline 615 -> 617 (cargo); node gate unchanged at 30.
+- **Design departure from ADR-0035 D8/D9 and PINS SS8:** the idempotency cache was dropped entirely,
+  and dry_run was re-grounded as a pipeline-level parameter rather than a script-layer guess. The
+  reasoning, recorded for a future executor: (1) the cache's hazard (concurrent double-submit of a
+  long script) is narrow for stdio MCP and partly self-inflicted; (2) it guarded only two tools
+  (script/form_fill) while every direct `computer(left_click)`/`form_input` remained unprotected --
+  a false sense of safety worse than an honest "fires once"; (3) its correct placement (a pre-`begin`
+  gate with in-flight join semantics) was the hardest concurrency problem in the batch for the least
+  certain value. `idempotency_key` is removed from the schema entirely (no no-ops shipped); the
+  action is atomic and fires once; a re-fire is the user's explicit choice.
+- **Dry_run is now a pipeline parameter (`run_tool_call(..., dry_run: bool)`), not a script-internal
+  evaluator.** A dry-run call runs the REAL decision path -- registry lookup, schema validation, hold,
+  sacred check, and the governance verdict (via the audit-free `governance.decide` rather than
+  `governance.authorize`, so no step audit record is written; the `CallAudit` scope drops without
+  `complete()`) -- then at the dispatch boundary returns a verdict `CallOutcome` instead of
+  dispatching. The verdict is the same decision a live call would get, by construction: a step the
+  authorize gate would deny returns the real denial text. `script_handler` reads `args.dry_run`,
+  threads it through `interpret` -> `StepRunner::run` -> `run_tool_call(dry_run=true)`, and under
+  dry_run the interpreter never halts on a non-ok step (every step's verdict is recorded, since the
+  point is the full pre-flight map). The status mapping gains `would_allow`/`would_deny`
+  (Success/Denied under dry_run). The parent record is marked dry_run via a `_dry_run` side channel
+  (the same arm-strip pattern as `_batch_id`); the free-action arm calls `audit.mark_dry_run()`.
+  `handle_tools_call` always passes `dry_run=false` -- the flag originates from the script tool's
+  own args and flows to its steps, not from a top-level call.
+- `src/transport/mcp/pipeline.rs`: `run_tool_call` gained `dry_run: bool`; the three audit-write
+  terminal sites (hold, sacred, the `authorize`/`decide` fork) are gated on `!dry_run`; the
+  post-`Gate::Proceed` dispatch boundary returns a `"would be accepted"` verdict when dry.
+  `take_dry_run` helper + free-action arm wiring. `src/transport/mcp/script.rs`: `interpret` and
+  `StepRunner::run` gained `dry_run`; `status_of` maps dry verdicts; the halt-on-non-ok and
+  halt-on-ref-error branches skip under dry_run. `src/browser/directory.rs`: `idempotency_key`
+  removed from the script inputSchema; `dry_run` description updated to the real semantics.
+- Tests: `dry_run_maps_step_outcomes_to_would_allow_and_would_deny` (unit, stub runner); integration
+  `dry_run_verdicts_without_step_records` (real pipeline, audit-enabled manifest, no extension ->
+  find `would_deny` because its tab-URL resource is unresolvable, navigate `would_allow` against its
+  target arg; exactly one parent audit record marked `dry_run: true`, no step records). The old C7
+  stub test (`dry_run/idempotency_key land in next release`) is gone with the stub.
+- Deviations:
+  - D1: ADR-0035 D9 (idempotency cache) and the `idempotency_key` schema property are dropped, not
+    deferred. This is a deliberate product call (recorded above), not a scope deferral. ADR-0035 D8
+    (dry_run) is implemented but re-grounded on the pipeline layer rather than the script-internal
+    guessing evaluator PINS SS8 described.
+  - D2: `dry_run` is honored by every tool at the pipeline layer (a model could send
+    `computer(left_click, dry_run: true)` directly and get the verdict), but it is advertised only on
+    `script`'s inputSchema -- adding it to the 13 trained schemas is forbidden by the BOOTSTRAP NEVER
+    list. The flag is a pipeline-level passthrough, not in any tool's declared `additionalProperties`
+    set, so the validator does not reject it.
+  - D3: under a governed manifest with no extension connected, a tab-scoped tool's verdict is
+    `would_deny` (honest: the governing tab URL cannot be resolved without an extension round-trip).
+    The integration test asserts exactly this -- the value of dry-run is that the model learns the
+    step cannot be authorized before burning a real call. Under all-open (no manifest), every step is
+    `would_allow`.
+  - D4: gate commands run with `CARGO_TARGET_DIR` pointed at an isolated scratch directory (same
     reason as C1's D3). No source/test content changed by this.

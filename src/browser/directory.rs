@@ -926,11 +926,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 },
                 "dry_run": {
                     "type": "boolean",
-                    "description": "When true, validate and authorize every step without dispatching. (Lands in the next engine release.)"
-                },
-                "idempotency_key": {
-                    "type": "string",
-                    "description": "Optional key for retry-safe replay. (Lands in the next engine release.)"
+                    "description": "When true, run every step through the real governance decision (registry, schema, sacred, authorize) but do not dispatch. Each step reports would_allow or would_deny with the reason a live run would produce; no mutations, no step audit records."
                 },
                 "budget_ms": {
                     "type": "number",

@@ -33,13 +33,15 @@ struct StepRecord {
 }
 
 /// The testability seam: run one resolved step through the governance chokepoint and return its
-/// outcome. The production impl re-enters `run_tool_call`; tests supply fixed outcomes.
+/// outcome. `dry_run` forwards to `run_tool_call` so a dry-run step gets the real verdict without
+/// dispatch. The production impl re-enters `run_tool_call`; tests supply fixed outcomes.
 trait StepRunner {
     fn run(
         &mut self,
         name: &str,
         args: &Value,
         orchestration: Option<(&'static str, &str, u32)>,
+        dry_run: bool,
     ) -> CallOutcome;
 }
 
@@ -56,6 +58,7 @@ impl<'a> StepRunner for PipelineRunner<'a> {
         name: &str,
         args: &Value,
         orchestration: Option<(&'static str, &str, u32)>,
+        dry_run: bool,
     ) -> CallOutcome {
         // Safety: the future returned by run_tool_call is awaited synchronously here via the
         // interpreter's tokio handle. The interpreter itself runs inside a LocalFuture (boxed),
@@ -65,6 +68,7 @@ impl<'a> StepRunner for PipelineRunner<'a> {
             name,
             args,
             orchestration,
+            dry_run,
             self.browser,
             self.store,
             self.governance,
@@ -102,12 +106,25 @@ fn step_structured(outcome: &CallOutcome) -> Option<Value> {
 
 /// Map a step's outcome to its honest status string (the load-bearing fix: a denial or hold is a
 /// successful MCP text result on the wire, so envelope sniffing would lie; the structured outcome
-/// is the only honest source).
-fn status_of(outcome: &CallOutcome) -> &'static str {
+/// is the only honest source). Under `dry_run`, an allowed step reports `would_allow` and a denied
+/// one `would_deny` (ADR-0035 Decision 8): the verdict, not the execution.
+fn status_of(outcome: &CallOutcome, dry_run: bool) -> &'static str {
     match outcome {
-        CallOutcome::Success { .. } => "ok",
+        CallOutcome::Success { .. } => {
+            if dry_run {
+                "would_allow"
+            } else {
+                "ok"
+            }
+        }
         CallOutcome::Failure { .. } => "error",
-        CallOutcome::Denied { .. } => "denied",
+        CallOutcome::Denied { .. } => {
+            if dry_run {
+                "would_deny"
+            } else {
+                "denied"
+            }
+        }
         CallOutcome::Held { .. } => "held",
     }
 }
@@ -117,7 +134,12 @@ const COMPACT_BUDGET: usize = 25000;
 
 /// Drive the interpreter over `args.steps` with `runner`, returning the compact result object.
 /// Pure over the runner: the production handler wires `run_tool_call`, tests wire a stub.
-fn interpret<R: StepRunner>(args: &Value, runner: &mut R, config_budget_ms: u64) -> Value {
+fn interpret<R: StepRunner>(
+    args: &Value,
+    runner: &mut R,
+    config_budget_ms: u64,
+    dry_run: bool,
+) -> Value {
     let started = Instant::now();
     let tab_id = args.get("tabId").cloned();
     let on_error = args
@@ -226,7 +248,7 @@ fn interpret<R: StepRunner>(args: &Value, runner: &mut R, config_budget_ms: u64)
                     structured: None,
                 });
                 structured.push(None);
-                if on_continue {
+                if dry_run || on_continue {
                     continue;
                 }
                 stopped_at = Some(step_no);
@@ -235,8 +257,13 @@ fn interpret<R: StepRunner>(args: &Value, runner: &mut R, config_budget_ms: u64)
             }
         };
 
-        let outcome = runner.run(&tool, &step_args, Some(("script", &batch_id, step_no)));
-        let status = status_of(&outcome);
+        let outcome = runner.run(
+            &tool,
+            &step_args,
+            Some(("script", &batch_id, step_no)),
+            dry_run,
+        );
+        let status = status_of(&outcome, dry_run);
 
         // A held step stops the script UNCONDITIONALLY, regardless of onError: the user grabbed the
         // wheel; burning through more steps that each answer "held" would be technically correct and
@@ -265,8 +292,9 @@ fn interpret<R: StepRunner>(args: &Value, runner: &mut R, config_budget_ms: u64)
         });
         structured.push(structured_for_ref);
 
-        // onError "stop": any non-ok step halts the chain.
-        if status != "ok" && !on_continue {
+        // onError "stop": any non-ok step halts the chain. Under dry_run the chain always runs to
+        // completion -- the point is to see EVERY step's verdict, not stop at the first denial.
+        if !dry_run && status != "ok" && !on_continue {
             stopped_at = Some(step_no);
             stop_reason = StopReason::from_status(status);
             break;
@@ -446,29 +474,25 @@ fn error_compact(msg: &str) -> Value {
 /// chokepoint per step and returns a `Success` whose result is the compact JSON rendered as text,
 /// carrying the SAME object as `structuredContent`. The `_batch_id` side channel is embedded at the
 /// result's top level for the free-action arm to strip and stamp onto the parent audit record.
+///
+/// `dry_run` (ADR-0035 Decision 8): when true, each step is dispatched through `run_tool_call` with
+/// `dry_run=true`, which runs the REAL decision path (registry, schema, hold, sacred, authorize)
+/// but returns the verdict without dispatching and writes no step audit record. The parent record
+/// is marked dry-run via the `_dry_run` side channel.
 pub(crate) fn script_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
     Box::pin(async move {
-        // dry_run and idempotency_key are accepted by the schema but answered with a corrective note
-        // until C8 implements their execution semantics; the full schema is stable from day one.
-        if ctx.args.get("dry_run").and_then(Value::as_bool) == Some(true)
-            || ctx
-                .args
-                .get("idempotency_key")
-                .and_then(Value::as_str)
-                .is_some()
-        {
-            let note = "dry_run and idempotency_key land in the next engine release";
-            return CallOutcome::Success {
-                result: crate::transport::mcp::types::text_content(note),
-            };
-        }
-
+        let dry_run = ctx.args.get("dry_run").and_then(Value::as_bool) == Some(true);
         let mut runner = PipelineRunner {
             browser: ctx.browser,
             store: ctx.store,
             governance: ctx.governance,
         };
-        let mut compact = interpret(ctx.args, &mut runner, ctx.config.script_budget_ms());
+        let mut compact = interpret(
+            ctx.args,
+            &mut runner,
+            ctx.config.script_budget_ms(),
+            dry_run,
+        );
 
         // The `_batch_id` side channel (PINS.md SS7): pulled out of the compact and placed at the
         // result's TOP LEVEL (not inside structuredContent) so the free-action arm's take_batch_id
@@ -491,6 +515,10 @@ pub(crate) fn script_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
             obj.insert("structuredContent".to_string(), compact);
             // The side channel lives at the top level, where take_batch_id looks for it.
             obj.insert("_batch_id".to_string(), Value::String(batch_id));
+            if dry_run {
+                // Signals the free-action arm to call audit.mark_dry_run() on the parent record.
+                obj.insert("_dry_run".to_string(), Value::Bool(true));
+            }
         }
         CallOutcome::Success { result }
     })
@@ -503,6 +531,7 @@ fn futures_await_block(
     name: &str,
     args: &Value,
     orchestration: Option<(&'static str, &str, u32)>,
+    dry_run: bool,
     browser: &Browser,
     store: &Arc<ConfigStore>,
     governance: &Governance,
@@ -516,6 +545,7 @@ fn futures_await_block(
             name,
             args,
             orchestration,
+            dry_run,
         ))
     })
 }
@@ -556,6 +586,7 @@ mod tests {
             name: &str,
             args: &Value,
             orchestration: Option<(&'static str, &str, u32)>,
+            _dry_run: bool,
         ) -> CallOutcome {
             let i = self.calls.len();
             self.calls.push(RecordedCall {
@@ -636,7 +667,7 @@ mod tests {
             {"tool":"c","args":{}}
         ], "onError":"continue"});
         let mut runner = StubRunner::new(vec![ok("a"), held(), ok("c")]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         assert_eq!(statuses(&compact), vec!["ok", "held", "not_run"]);
         assert_eq!(
             compact["summary"], "1/3 steps completed; held at step 2",
@@ -649,7 +680,7 @@ mod tests {
     fn denied_step_reports_denied_not_ok() {
         let args = json!({"steps":[{"tool":"a","args":{}},{"tool":"b","args":{}}]});
         let mut runner = StubRunner::new(vec![ok("a"), denied()]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         assert_eq!(statuses(&compact), vec!["ok", "denied"]);
         assert_eq!(compact["summary"], "1/2 steps completed; step 2 denied");
     }
@@ -663,7 +694,7 @@ mod tests {
             {"tool":"c","args":{}}
         ], "budget_ms":0});
         let mut runner = StubRunner::new(vec![ok("a")]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         assert_eq!(statuses(&compact), vec!["ok", "not_run", "not_run"]);
         assert_eq!(
             compact["summary"], "1/3 steps completed; budget exhausted after step 1",
@@ -676,7 +707,7 @@ mod tests {
     fn nested_script_step_errors() {
         let args = json!({"steps":[{"tool":"script","args":{}}]});
         let mut runner = StubRunner::new(vec![]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         assert_eq!(statuses(&compact), vec!["error"]);
         let text = compact["results"][0]["result"].as_str().unwrap_or("");
         assert!(
@@ -690,7 +721,7 @@ mod tests {
         let big = "x".repeat(3000);
         let args = json!({"steps":[{"tool":"a","args":{}}]});
         let mut runner = StubRunner::new(vec![ok(&big)]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         let text = compact["results"][0]["result"].as_str().unwrap_or("");
         assert!(
             text.ends_with("(truncated)"),
@@ -708,7 +739,7 @@ mod tests {
     fn all_ok_summary_is_n_of_n() {
         let args = json!({"steps":[{"tool":"a","args":{}},{"tool":"b","args":{}}]});
         let mut runner = StubRunner::new(vec![ok("a"), ok("b")]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         assert_eq!(statuses(&compact), vec!["ok", "ok"]);
         assert_eq!(compact["summary"], "2/2 steps completed");
     }
@@ -722,7 +753,7 @@ mod tests {
             {"tool":"c","args":{}}
         ]});
         let mut runner = StubRunner::new(vec![ok("a"), ok("b"), ok("c")]);
-        let _ = interpret(&args, &mut runner, 120000);
+        let _ = interpret(&args, &mut runner, 120000, false);
         assert_eq!(runner.calls.len(), 3, "all three steps ran");
         assert_eq!(
             runner.calls[0].args["tabId"], 7,
@@ -753,7 +784,7 @@ mod tests {
             },
             ok("clicked"),
         ]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         assert_eq!(statuses(&compact), vec!["ok", "ok"]);
         // Step 2 was dispatched with the resolved ref, not the literal "$prev..." string.
         assert_eq!(
@@ -790,7 +821,7 @@ mod tests {
             {"tool":"b","args":{"ref":"$2.x"}}
         ]});
         let mut runner = StubRunner::new(vec![ok("a")]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         assert_eq!(statuses(&compact), vec!["ok", "error"]);
         assert_eq!(
             runner.calls.len(),
@@ -813,7 +844,7 @@ mod tests {
             {"tool":"c","args":{}}
         ], "onError":"continue"});
         let mut runner = StubRunner::new(vec![ok("a"), denied(), ok("c")]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         assert_eq!(statuses(&compact), vec!["ok", "denied", "ok"]);
         assert_eq!(runner.calls.len(), 3, "continue ran all three steps");
         assert_eq!(
@@ -832,7 +863,7 @@ mod tests {
             {"tool":"b","args":{}}
         ], "budget_ms":999999});
         let mut runner = StubRunner::new(vec![ok("a")]);
-        let compact = interpret(&args, &mut runner, 0);
+        let compact = interpret(&args, &mut runner, 0, false);
         assert_eq!(statuses(&compact), vec!["ok", "not_run"]);
         assert_eq!(
             compact["summary"], "1/2 steps completed; budget exhausted after step 1",
@@ -847,7 +878,7 @@ mod tests {
         let big = "y".repeat(20000);
         let args = json!({"steps":[{"tool":"a","args":{}},{"tool":"b","args":{}}]});
         let mut runner = StubRunner::new(vec![ok(&big), ok(&big)]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         let serialized = serde_json::to_string(&compact).unwrap();
         assert!(
             serialized.len() <= 25000,
@@ -863,8 +894,28 @@ mod tests {
         // correlatable.
         let args = json!({"steps":[{"tool":"a","args":{}}]});
         let mut runner = StubRunner::new(vec![ok("a")]);
-        let compact = interpret(&args, &mut runner, 120000);
+        let compact = interpret(&args, &mut runner, 120000, false);
         let batch_id = compact["_batch_id"].as_str().expect("_batch_id present");
         assert!(!batch_id.is_empty(), "batch_id is a non-empty string");
+    }
+
+    #[test]
+    fn dry_run_maps_step_outcomes_to_would_allow_and_would_deny() {
+        // Under dry_run, a step the pipeline would allow reports "would_allow"; a step it would
+        // deny reports "would_deny". The runner is invoked with dry_run=true (it records it, though
+        // the stub does not branch on it -- the status mapping is what's under test here).
+        let args = json!({"steps":[
+            {"tool":"find","args":{}},
+            {"tool":"navigate","args":{}}
+        ], "dry_run":true});
+        let mut runner = StubRunner::new(vec![ok("would allow"), denied()]);
+        let compact = interpret(&args, &mut runner, 120000, true);
+        let status: Vec<&str> = compact["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["status"].as_str().unwrap())
+            .collect();
+        assert_eq!(status, vec!["would_allow", "would_deny"]);
     }
 }

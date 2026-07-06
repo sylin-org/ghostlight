@@ -67,7 +67,7 @@ pub(crate) async fn handle_tools_call(
         .cloned()
         .unwrap_or(Value::Null);
 
-    let outcome = run_tool_call(browser, store, governance, name, &args, None).await;
+    let outcome = run_tool_call(browser, store, governance, name, &args, None, false).await;
     render_outcome(id, outcome)
 }
 
@@ -96,6 +96,21 @@ fn take_batch_id(outcome: &mut CallOutcome) -> Option<String> {
     };
     let obj = result.as_object_mut()?;
     obj.remove("_batch_id")?.as_str().map(str::to_string)
+}
+
+/// ADR-0035 Decision 8: a dry-run script handler sets `_dry_run: true` at its `Success` result's
+/// top level so the free-action arm can call `audit.mark_dry_run()` on the parent record before
+/// completing it. The handler cannot reach the audit directly (the borrow-tangle note, SS7). Strips
+/// the key in place; the client never sees it on the wire.
+fn take_dry_run(outcome: &mut CallOutcome) -> bool {
+    let CallOutcome::Success { result } = outcome else {
+        return false;
+    };
+    result
+        .as_object_mut()
+        .and_then(|obj| obj.remove("_dry_run"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 /// SS2's free-action dispatch guard: true for a [`directory::Handler::Local`] tool whose
@@ -143,6 +158,7 @@ pub(crate) async fn run_tool_call(
     name: &str,
     args: &Value,
     orchestration: Option<(&'static str, &str, u32)>,
+    dry_run: bool,
 ) -> CallOutcome {
     // One snapshot for the whole call, taken once at entry: a reload mid-call must not tear
     // the snapshot the call already started with.
@@ -203,7 +219,9 @@ pub(crate) async fn run_tool_call(
     // resuming affects only future calls. Held calls still produce one audit record
     // (`decision: "allow"`, `held: true`, `duration_ms: 0`).
     if let Some(held_for) = browser.held_for() {
-        audit.held();
+        if !dry_run {
+            audit.held();
+        }
         return CallOutcome::Held {
             message: hold_message(name, action, held_for),
         };
@@ -233,7 +251,9 @@ pub(crate) async fn run_tool_call(
         sacred_check(&mut tab_url, sacred_domains, descriptor.resource, args).await
     };
     if let Some(denial) = denial {
-        audit.sacred_deny(&denial, tab_domain.as_deref());
+        if !dry_run {
+            audit.sacred_deny(&denial, tab_domain.as_deref());
+        }
         return CallOutcome::Denied {
             message: denial.message,
             source: DenialSource::Sacred,
@@ -278,6 +298,9 @@ pub(crate) async fn run_tool_call(
         if let Some(batch_id) = take_batch_id(&mut outcome) {
             audit.set_batch_id(&batch_id);
         }
+        if take_dry_run(&mut outcome) {
+            audit.mark_dry_run();
+        }
         audit.complete();
         return outcome;
     }
@@ -307,7 +330,32 @@ pub(crate) async fn run_tool_call(
     let navigate_post_check =
         resolved.is_some() && descriptor.post_dispatch == directory::PostDispatch::NavigateLanding;
     let resource = resolved.map(|(r, _)| r);
-    match governance.authorize(&mut audit, resource, config_mode) {
+    // dry-run evaluates the REAL governance verdict but writes no audit record: it uses the
+    // audit-free `governance.decide` (the same decision `authorize` calls internally) and returns
+    // the verdict CallOutcome directly, so the `CallAudit` scope drops without `complete()`. A live
+    // call uses `governance.authorize`, which instruments the audit (grant attribution, denials).
+    let gate = if dry_run {
+        // dry-run evaluates the REAL governance verdict but writes no audit record: it uses the
+        // audit-free `governance.decide` (the same decision `authorize` calls internally). No
+        // resolved resource (ungoverned, free-action, empty requires) -> Proceed, matching the live
+        // path's `authorize` which returns Proceed when reqs are empty or the resource is None.
+        match resource {
+            None => Gate::Proceed,
+            Some(resource) => {
+                match governance.decide(name, action, lookup.unwrap_or(&[]), resource, config_mode)
+                {
+                    crate::governance::ports::Decision::Allow { .. } => Gate::Proceed,
+                    crate::governance::ports::Decision::ShadowDeny(_) => Gate::Proceed,
+                    crate::governance::ports::Decision::Deny(d) => {
+                        Gate::Deny { message: d.message }
+                    }
+                }
+            }
+        }
+    } else {
+        governance.authorize(&mut audit, resource, config_mode)
+    };
+    match gate {
         Gate::Deny { message } => {
             return CallOutcome::Denied {
                 message,
@@ -315,6 +363,20 @@ pub(crate) async fn run_tool_call(
             }
         }
         Gate::Proceed => {}
+    }
+
+    // dry-run short-circuit: the call passed every pre-dispatch gate (registry, schema, hold,
+    // sacred, authorize). Instead of dispatching, return the verdict -- "this call would be
+    // accepted" -- and drop the audit scope without `complete()` (no step record: nothing ran).
+    // The verdict text names the tool and action so the model can read the pre-flight map.
+    if dry_run {
+        let label = match action {
+            Some(a) => format!(r#"{} ({}) would be accepted"#, descriptor.tool, a),
+            None => format!("{} would be accepted", descriptor.tool),
+        };
+        return CallOutcome::Success {
+            result: crate::transport::mcp::types::text_content(label),
+        };
     }
 
     // Bounded first-call wait: the first call of a session races the extension handshake.
