@@ -726,6 +726,10 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 "max_chars": {
                     "type": "number",
                     "description": "Maximum characters for output (default: 50000). Set to a higher value if your client can handle large outputs."
+                },
+                "diff": {
+                    "type": "boolean",
+                    "description": "Return only changes since your previous read_page on this tab (+ added, - removed, ~ changed)."
                 }
             },
             "required": ["tabId"],

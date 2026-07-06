@@ -5,8 +5,8 @@ A fresh executor resumes from RESUME HERE with no other context.
 
 ## RESUME HERE
 
-**C6 is NEXT.** Baseline: dev @ 6c5d351 + this batch through C5. C1..C5 committed. C6 is
-SKIP-allowed; if it lands, read_page gains `diff` + stale-ref enrichment, else those stay deferred.
+**C7 is NEXT.** Baseline: dev @ 6c5d351 + this batch through C6. C1..C6 committed. C7 is HALT (the
+script tool: resolver + interpreter + budget). C8/C9/C10 depend on it.
 
 ## Log
 
@@ -152,7 +152,7 @@ Template per task:
     from a prior session; verified they match PINS SS9's oracles verbatim and pass (6/6) before
     building the rest of the task on top of them, rather than re-creating them.
 
-### C5: consequence digests on mutating actions -- DONE (<commit>)
+### C5: consequence digests on mutating actions -- DONE (acb39d1)
 - Baseline 592 -> 592 (cargo); node gate 23 -> 27 (observation.test.js adds 4).
 - `extension/lib/observation.js` (pure IIFE, exposes `self.GhostlightObservation`; `formatObservation`
   per PINS SS10 -- segment order url/title/mutations/focus/alert/status/dialog, `"; "` join,
@@ -190,4 +190,46 @@ Template per task:
     action's own result. This is the existing `content()` `hopError` discipline inverted for a
     best-effort read; no test pins the degraded path (chrome.* is untestable from node).
   - D3: gate commands run with `CARGO_TARGET_DIR` pointed at an isolated scratch directory (same
+    reason as C1's D3). No source/test content changed by this.
+
+### C6: read_page diff mode + stale-ref render-serial errors -- DONE (<commit>)
+- Baseline 592 -> 592 (cargo); node gate 27 -> 30 (treediff.test.js adds 3).
+- `extension/lib/treediff.js` (pure IIFE, exposes `self.GhostlightTreeDiff`; `diffLines(old, new)`
+  per PINS SS11 -- `ref_\d+` token keying else whole-line, changed/removed/added, render order
+  `~ `/`- `/`+ `, new-tree order for changed/added and old-tree order for removed). Keyless lines
+  diff as a multiset by whole-line identity. `extension/content.js`: refs now stamp the current
+  `renderSerial` at mint time (`refToSerial`); a render serial bumps once per 500ms window with
+  >= 3 mutations (a `setInterval` started alongside the shared observer); a per-instance
+  `lastTreeLines` baseline holds the last full read's element lines. `accessibilityTree` with
+  `options.diff` and a baseline returns the rendered diff (no changes -> `(no changes since your
+  last read)`); no baseline -> full tree prefixed `(no baseline; full tree)`; a `ref_id`-rooted
+  read never establishes/refreshes a baseline (it is a subtree expansion). Deref misses where the
+  ref's mint serial is older than the current serial get SS11's exact corrective string via
+  `staleRefMessage`; a never-minted ref keeps today's wording (the serial entry is preserved across
+  GC so the diagnosis still works). Wired into setFormValue, refCoordinates, scrollToRef, and the
+  ref_id error; `refCoordinates`/`scrollToRef` now return `{error}` on a stale miss and the SW's
+  `resolveCoords` and `scroll_to` surface it verbatim. `src/browser/directory.rs`: added ONLY the
+  `diff` boolean property to read_page's inputSchema properties (SS11 exact description); no other
+  schema byte changed. SW `read_page` already forwards args wholesale as `options`, so `diff`
+  flows through with no SW change beyond the stale-ref error surfacing. manifest.json
+  content_scripts js = `["lib/settle.js", "lib/observation.js", "lib/treediff.js", "content.js"]`;
+  ci.yml node line appends `treediff.test.js`; on-demand injection list grew to match (PINS SS15
+  after-C6 values).
+- Deviations:
+  - D1: `tool_schema_fidelity.rs` pins no read_page property-name set (it checks computer/navigate/
+    get_page_text specific properties, and read_page only by name in arrays), so adding `diff`
+    needed no test extension. Logged either way per the task's instruction.
+  - D2: a diff read with zero changes returns `(no changes since your last read)` rather than an
+    empty body, so the model can distinguish "nothing changed" from a malformed response. SS11 does
+    not pin the empty-diff body; this is the honest, ADR-0031-corrective rendering.
+  - D3: `refCoordinates`/`scrollToRef` now return `{error: <stale string>}` (an object) on a stale
+    miss where they previously returned `null`/`false`; the SW consumers (`resolveCoords`,
+    `scroll_to`) were updated to detect `r.result.error` and surface it verbatim before falling back
+    to the generic "not found" message. A plain (non-stale) miss is unchanged (`null`/`false`).
+  - D4: the render serial's 500ms windowing runs on a `setInterval` started lazily inside
+    `ensureRootObserver` (the first mutation read starts it), rather than a dedicated observer. This
+    reuses the C4/C5 shared counter; the serial is a derivative of it, not a second observation
+    path. chrome.* timers are untestable from node; the logic is straightforward and the
+    treediff/settle oracles cover the derivable parts.
+  - D5: gate commands run with `CARGO_TARGET_DIR` pointed at an isolated scratch directory (same
     reason as C1's D3). No source/test content changed by this.

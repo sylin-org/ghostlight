@@ -16,14 +16,20 @@
   window.__browserMcpLoaded = true;
 
   // --- Element refs (persist across calls; WeakRef so the page can still GC) ---
+  // Each ref also remembers the render serial at which it was minted (ADR-0037 D4): a deref miss on
+  // a ref whose serial is older than the current one is a stale ref (the page re-rendered), which
+  // gets a corrective error naming the re-render; a ref that was never minted keeps today's message.
   let refSeq = 0;
+  let renderSerial = 0;
   const refToEl = {}; // ref -> WeakRef<Element>
+  const refToSerial = {}; // ref -> render serial at mint time
   const elToRef = new WeakMap();
   function refFor(el) {
     const existing = elToRef.get(el);
     if (existing && refToEl[existing] && refToEl[existing].deref() === el) return existing;
     const ref = "ref_" + ++refSeq;
     refToEl[ref] = new WeakRef(el);
+    refToSerial[ref] = renderSerial;
     elToRef.set(el, ref);
     return ref;
   }
@@ -31,8 +37,18 @@
     const wr = refToEl[ref];
     if (!wr) return null;
     const el = wr.deref();
-    if (!el) { delete refToEl[ref]; return null; }
+    if (!el) { delete refToEl[ref]; return null; } // serial kept for stale-ref diagnosis below
     return el;
+  }
+  // ADR-0037 D4 / PINS.md SS11: when a ref no longer resolves because the page re-rendered since
+  // the read that minted it (the ref's mint serial is older than the current render serial), the
+  // failure is corrective -- it names the re-render and the fix. A ref that was never minted (or
+  // minted in this same not-yet-re-rendered serial) keeps today's "not found" wording: there is no
+  // re-render to blame. Returns null when the plain message should stand.
+  function staleRefMessage(ref) {
+    const s = refToSerial[ref];
+    if (s === undefined || s >= renderSerial) return null;
+    return `${ref} no longer resolves: the page re-rendered since your last read (render serial ${s} -> ${renderSerial}). Call read_page (or read_page with diff: true) and use a fresh ref.`;
   }
 
   // --- Subtree mutation counter (shared by wait_for's settle detector and the consequence-digest
@@ -45,11 +61,29 @@
     if (rootObserver) return;
     rootObserver = new MutationObserver(() => { mutationCounter += 1; });
     rootObserver.observe(document, { childList: true, subtree: true, attributes: true, characterData: true });
+    // The render serial (ADR-0037 D3/D4) bumps once per 500ms window with >= 3 mutations, so a
+    // re-render large enough to invalidate prior refs is detectable. Lazy-started alongside the
+    // observer so the windowing begins the first time anything reads mutations.
+    let windowStart = Date.now();
+    let windowCount = 0;
+    let lastRead = 0;
+    setInterval(() => {
+      const cur = mutationCounter;
+      windowCount += cur - lastRead;
+      lastRead = cur;
+      if (windowCount >= 3) renderSerial += 1;
+      windowCount = 0;
+    }, 500);
   }
   function readMutations() {
     ensureRootObserver();
     return mutationCounter;
   }
+
+  // --- read_page diff baseline (ADR-0037 D3): the last full-tree render's lines, kept per
+  // content-script instance (one per tab document). A read_page with diff:true diffs against this;
+  // the first read, or one after reinjection, has no baseline and falls back to a full tree. ---
+  let lastTreeLines = null;
 
   // --- Role / name / interactivity / visibility ---
   const TAG_ROLE = {
@@ -243,7 +277,10 @@
     let root = document.body;
     if (options.ref_id) {
       const el = deref(options.ref_id);
-      if (!el) return `Error: ref_id "${options.ref_id}" not found or was garbage-collected.`;
+      if (!el) {
+        const stale = staleRefMessage(options.ref_id);
+        return stale || `Error: ref_id "${options.ref_id}" not found or was garbage-collected.`;
+      }
       root = el;
     }
     const rootRecord = measure(root, 0, "");
@@ -308,6 +345,33 @@
       stopped = true;
     }
     if (rootRecord) emit(rootRecord, true);
+
+    // The diffable lines are the element/structure lines emitted above -- everything in `out`
+    // before the trailing summary and viewport footer. Split on "\n" and drop the empty tail.
+    const treeLines = out.split("\n").filter((l) => l.length > 0);
+
+    // read_page diff mode (ADR-0037 D3, PINS.md SS11): when diff:true and a baseline from a prior
+    // full read on this tab exists, answer with only the changed/removed/added lines (render order
+    // ~ / - / +) instead of the whole tree. The baseline is the prior full read's treeLines; this
+    // read's treeLines become the next baseline regardless (a diff read still refreshes it). A
+    // ref_id-rooted read does not establish a baseline (it is a subtree expansion, not the page).
+    // No baseline yet (first read, or the content script was reinjected): fall back to a full tree
+    // prefixed with the marker line so the model knows this is not a diff.
+    if (options.diff && !options.ref_id) {
+      if (lastTreeLines) {
+        const d = (self.GhostlightTreeDiff || GhostlightTreeDiff).diffLines(lastTreeLines, treeLines);
+        const diffOut = [];
+        for (const l of d.changed) diffOut.push("~ " + l);
+        for (const l of d.removed) diffOut.push("- " + l);
+        for (const l of d.added) diffOut.push("+ " + l);
+        if (!diffOut.length) diffOut.push("(no changes since your last read)");
+        lastTreeLines = treeLines;
+        return diffOut.join("\n") + `\n\nViewport: ${window.innerWidth}x${window.innerHeight}`;
+      }
+      lastTreeLines = treeLines;
+      return "(no baseline; full tree)\n" + out + `\nViewport: ${window.innerWidth}x${window.innerHeight}`;
+    }
+    if (!options.ref_id) lastTreeLines = treeLines;
 
     const omitted = total - shown;
     if (capped && omitted > 0) {
@@ -429,7 +493,10 @@
   }
   function setFormValue(ref, value) {
     const el = deref(ref);
-    if (!el) return { error: `Element ${ref} not found or was garbage-collected.` };
+    if (!el) {
+      const stale = staleRefMessage(ref);
+      return { error: stale || `Element ${ref} not found or was garbage-collected.` };
+    }
     el.scrollIntoView({ block: "center", behavior: "instant" });
     const target = innerInput(el) || el;
     const tag = target.tagName.toLowerCase();
@@ -463,7 +530,10 @@
 
   function refCoordinates(ref) {
     const el = deref(ref);
-    if (!el) return null;
+    if (!el) {
+      const stale = staleRefMessage(ref);
+      return stale ? { error: stale } : null;
+    }
     const rect = el.getBoundingClientRect();
     return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
   }
@@ -639,8 +709,13 @@
       case "refCoordinates": sendResponse({ result: refCoordinates(msg.ref) }); return true;
       case "scrollToRef": {
         const el = deref(msg.ref);
-        if (el) el.scrollIntoView({ block: "center", behavior: "instant" });
-        sendResponse({ result: Boolean(el) });
+        if (!el) {
+          const stale = staleRefMessage(msg.ref);
+          sendResponse({ result: stale ? { error: stale } : false });
+          return true;
+        }
+        el.scrollIntoView({ block: "center", behavior: "instant" });
+        sendResponse({ result: true });
         return true;
       }
       case "waitFor": {

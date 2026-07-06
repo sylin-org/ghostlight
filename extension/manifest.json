@@ -48,7 +48,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["lib/settle.js", "lib/observation.js", "content.js"],
+      "js": ["lib/settle.js", "lib/observation.js", "lib/treediff.js", "content.js"],
       "run_at": "document_idle",
       "all_frames": false
     },

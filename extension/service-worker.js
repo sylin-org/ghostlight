@@ -642,7 +642,7 @@ async function content(tabId, message) {
     return await chrome.tabs.sendMessage(tabId, message);
   } catch {
     try {
-      await chrome.scripting.executeScript({ target: { tabId }, files: ["lib/settle.js", "lib/observation.js", "content.js"] });
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["lib/settle.js", "lib/observation.js", "lib/treediff.js", "content.js"] });
       return await chrome.tabs.sendMessage(tabId, message);
     } catch (e) {
       throw hopError(
@@ -846,8 +846,11 @@ async function resolveCoords(tabId, args) {
   // ref coordinates come from getBoundingClientRect (already CSS viewport px) -> do NOT rescale.
   if (args.ref) {
     const r = await content(tabId, { type: "refCoordinates", ref: args.ref });
-    if (r && r.result) return [r.result.x, r.result.y];
-    // The engine is truthful: a stale ref is a failure, never a silent [0, 0] substitution.
+    if (r && r.result && !r.result.error) return [r.result.x, r.result.y];
+    // The engine is truthful: a stale ref is a failure, never a silent [0, 0] substitution. A
+    // stale-ref corrective message (render serial moved) is surfaced verbatim; a plain miss keeps
+    // the generic wording.
+    if (r && r.result && r.result.error) throw hopError("page", r.result.error);
     throw hopError("page", `Element ${args.ref} not found; the page may have changed since it was read`);
   }
   return null;
@@ -1101,7 +1104,9 @@ async function computer(a) {
         if (a.ref) {
           const r = await content(tabId, { type: "scrollToRef", ref: a.ref });
           // The engine is truthful: a stale ref is a failure, never a false "Scrolled to target.".
-          if (!(r && r.result)) {
+          // A stale-ref corrective message (render serial moved) is surfaced verbatim.
+          if (r && r.result && r.result.error) throw hopError("page", r.result.error);
+          if (!(r && r.result === true)) {
             throw hopError("page", `Element ${a.ref} not found; the page may have changed since it was read`);
           }
         } else if (a.coordinate) {
