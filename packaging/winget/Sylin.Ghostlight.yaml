@@ -1,0 +1,45 @@
+# winget manifest TEMPLATE (portable zip). Submission: fork microsoft/winget-pkgs, place the
+# three sections below as separate files under manifests/s/Sylin/Ghostlight/<version>/
+# (version manifest, installer manifest, defaultLocale manifest), fill the sha256 from the
+# release's .sha256 asset, validate with `winget validate`, and open the PR.
+# Kept as one annotated file here so the repo carries a single source to copy from.
+---
+# Sylin.Ghostlight.yaml (version manifest)
+PackageIdentifier: Sylin.Ghostlight
+PackageVersion: 0.3.0
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0
+---
+# Sylin.Ghostlight.installer.yaml
+PackageIdentifier: Sylin.Ghostlight
+PackageVersion: 0.3.0
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: ghostlight-v0.3.0-x86_64-pc-windows-msvc\ghostlight.exe
+    PortableCommandAlias: ghostlight
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/sylin-org/ghostlight/releases/download/v0.3.0/ghostlight-v0.3.0-x86_64-pc-windows-msvc.zip
+    InstallerSha256: TODO-SHA256-FROM-RELEASE-ASSET
+ManifestType: installer
+ManifestVersion: 1.6.0
+---
+# Sylin.Ghostlight.locale.en-US.yaml
+PackageIdentifier: Sylin.Ghostlight
+PackageVersion: 0.3.0
+PackageLocale: en-US
+Publisher: Sylin
+PublisherUrl: https://sylin-org.github.io/ghostlight/
+PackageName: Ghostlight
+PackageUrl: https://github.com/sylin-org/ghostlight
+License: Apache-2.0 OR MIT (engine); source-available governance module
+ShortDescription: Governed browser automation over your own authenticated browser, for AI coding agents (MCP).
+Moniker: ghostlight
+Tags:
+  - mcp
+  - browser-automation
+  - ai-agent
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

@@ -65,6 +65,45 @@ verified on Windows.
 
 ## Getting started
 
+### Quick install (two minutes)
+
+One command downloads the latest release, registers the browser connection, and adds Ghostlight
+to every MCP client it finds (idempotent value-level merge; it never clobbers your config):
+
+```sh
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1 | iex
+```
+
+Then add the **"Ghostlight in Browser"** extension
+([Chrome Web Store](https://chromewebstore.google.com/detail/lejccfmoeogmhemakeknjjdhkfkgncdl), or
+load the release zip unpacked) and restart your MCP client. Verify with `ghostlight doctor`.
+
+No install at all: any MCP client can launch Ghostlight via npx --
+
+```json
+{ "command": "npx", "args": ["-y", "ghostlight"] }
+```
+
+[![Add to Cursor](https://img.shields.io/badge/Cursor-Add_MCP_server-38BDF8?style=flat-square)](cursor://anysphere.cursor-deeplink/mcp/install?name=ghostlight&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImdob3N0bGlnaHQiXX0=)
+[![Add to VS Code](https://img.shields.io/badge/VS_Code-Add_MCP_server-38BDF8?style=flat-square)](vscode:mcp/install?%7B%22name%22%3A%22ghostlight%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22ghostlight%22%5D%7D)
+
+```sh
+# Claude Code
+claude mcp add ghostlight -- npx -y ghostlight
+```
+
+(after adding via npx, run `npx ghostlight install` once to connect the browser extension).
+Rust users: `cargo binstall --git https://github.com/sylin-org/ghostlight ghostlight`. The
+walkthrough with all paths: https://sylin-org.github.io/ghostlight/install.html
+
+The manual, inspect-everything route:
+
 ### 1. Get the binary
 
 Download a prebuilt archive for your platform from the
@@ -297,6 +336,13 @@ This is a clean-room Rust rewrite informed by
 reimplementation of the Claude-in-Chrome extension. Prior art is studied as a concern surface (the
 hazards and questions others hit), not as a feature catalog to copy. The tool schemas are preserved
 verbatim so a trained agent behaves as expected; everything behind them is our own.
+
+Anthropic now ships a first-party Claude Code + Chrome integration, and generic agent-governance
+toolkits are emerging; we treat both as validation and meet them with alternatives and open
+standards, not rivalry ([ADR-0041](docs/adr/0041-post-evaluation-response.md)).
+[docs/COMPARISON.md](docs/COMPARISON.md) is the honest decision guide, including when the
+first-party path is the better choice; [docs/research/14](docs/research/14-post-evaluation-2026-07.md)
+carries the current landscape evidence.
 
 ## The name
 

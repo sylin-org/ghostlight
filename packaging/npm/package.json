@@ -1,0 +1,35 @@
+{
+  "name": "ghostlight",
+  "version": "0.3.0",
+  "description": "Governed browser automation over your own authenticated Chromium session, for AI coding agents. Thin npm launcher for the ghostlight binary.",
+  "bin": {
+    "ghostlight": "bin/ghostlight.js"
+  },
+  "files": [
+    "bin/ghostlight.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "browser",
+    "automation",
+    "chrome",
+    "governance",
+    "audit",
+    "ai-agent"
+  ],
+  "homepage": "https://sylin-org.github.io/ghostlight/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sylin-org/ghostlight.git",
+    "directory": "packaging/npm"
+  },
+  "bugs": {
+    "url": "https://github.com/sylin-org/ghostlight/issues"
+  },
+  "license": "(Apache-2.0 OR MIT)"
+}

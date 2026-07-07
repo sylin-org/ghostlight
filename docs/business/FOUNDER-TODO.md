@@ -50,9 +50,23 @@ docs/business/PLAN.md). Check items off in place; add dates.
       the next upload on, and losing the key locks you out of updating your own item. Turn it
       on once the release cadence is stable, paired with the same offline key-management
       discipline as the licensing signing seed above.
-- [ ] **Version bump + re-release (0.1.1/0.2.0).** GitHub v0.1.0 shipped the pre-fix extension
-      (SW registration failed) and pre-ADR-0029 binary. Bump both artifacts, re-cut the GitHub
-      release with the fixes + FX + options page, and keep the CWS package in step.
+- [ ] **v0.3.0 release (supersedes the v0.2.0-release item, post-eval P1).** The v0.2.0 tag's
+      release run FAILED on a known flaky test (rewritten under ADR-0032; the tag predates the
+      fix) and the tag also predates the 17-tool composition surface the docs advertise. The
+      2026-07-07 distribution session fixed dev CI (proc.rs/supervisor.rs cross-platform
+      compile, console truncation lingering-close, e2e-smoke 6h-hang cap) and cut v0.3.0 from
+      dev instead. Verify the release run went green end to end, then work
+      **docs/business/DISTRIBUTION.md** top to bottom (npm name claim FIRST -- `ghostlight`
+      was unclaimed on npm as of 2026-07-07).
+- [ ] **Post-eval verification debts (P10; these gate the credibility of the claims above).**
+      Run docs/tasks/composition/LIVE-VERIFY.md (13 pinned observations); live-verify macOS and
+      Linux; unquarantine e2e-smoke or record the design decision; the LICENSE-GOVERNANCE
+      legal skim is already listed under Phase 0 above.
+- [ ] **Official-extension re-baseline (P7, operator-assisted).** Research 12 pinned
+      v1.0.78; the official surface has since added browser_batch, GIF recording, scheduled
+      tasks, and escalating flags. Update the installed extension, let an agent session re-run
+      the research-12 harvest against it, and confirm the fidelity snapshot still passes.
+      Output: a delta note in docs/research/, before any harvest ADR (ADR-0041 D2).
 - [ ] Record the demo: scripts/live-demo.ps1 under OBS, cut to ~90 seconds, export GIF
       for the README and MP4 for the site. (1 evening.)
 - [ ] Write the Show HN post yourself (founder voice; HN detects ghostwriting). Post

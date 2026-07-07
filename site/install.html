@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Ghostlight</title>
+<meta name="description" content="Install Ghostlight in two minutes: one command, one browser extension, any MCP client.">
+<link rel="icon" type="image/png" href="mascot.png">
+<style>
+  :root {
+    --accent: #38BDF8;
+    --bg: #0B1220; --panel: #111A2E; --ink: #E6EDF6; --muted: #9FB0C7;
+    --line: #22314D; --code-bg: #0A0F1C; --ok: #4ADE80;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #F7FAFD; --panel: #FFFFFF; --ink: #16233A; --muted: #51647F;
+            --line: #DCE6F2; --code-bg: #EEF4FB; --ok: #16A34A; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 17px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 24px 64px; }
+  header { text-align: center; padding: 48px 0 8px; }
+  header img { width: 84px; height: 84px; }
+  h1 { font-size: 34px; margin: 12px 0 6px; letter-spacing: -0.02em; }
+  .tag { color: var(--muted); margin: 0 auto; max-width: 560px; }
+  h2 { font-size: 22px; margin: 40px 0 10px; }
+  .step { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+          padding: 20px 22px; margin: 16px 0; }
+  .step .n { display: inline-block; background: var(--accent); color: #06121F; font-weight: 700;
+             border-radius: 999px; width: 28px; height: 28px; text-align: center;
+             line-height: 28px; margin-right: 10px; }
+  .step h3 { display: inline; font-size: 19px; }
+  .step p { color: var(--muted); font-size: 15.5px; }
+  code, pre { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 14px; }
+  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px;
+        padding: 12px 14px; overflow-x: auto; margin: 10px 0; }
+  .os { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .btnrow { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+  .btn { display: inline-block; padding: 10px 18px; border-radius: 10px; font-weight: 600;
+         border: 1px solid var(--line); color: var(--ink); }
+  .btn.primary { background: var(--accent); color: #06121F; border-color: transparent; }
+  .btn:hover { text-decoration: none; filter: brightness(1.08); }
+  details { margin: 10px 0; }
+  summary { cursor: pointer; color: var(--accent); }
+  .ok { color: var(--ok); font-weight: 600; }
+  .note { font-size: 14.5px; color: var(--muted); }
+  #ext-first { display: none; border-color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <a href="index.html"><img src="mascot.png" alt="Ghostlight mascot"></a>
+  <h1>Install Ghostlight</h1>
+  <p class="tag">Two pieces: a single binary (the brain) and a thin browser extension (the
+  hands). Two minutes, no admin rights, uninstalls cleanly.</p>
+</header>
+
+<div class="step" id="ext-first">
+  <p><span class="ok">Extension installed -- one step left.</span> Run the command in step 1
+  below and you are done: it registers the binary the extension talks to and configures your
+  MCP clients automatically.</p>
+</div>
+
+<div class="step">
+  <span class="n">1</span><h3>Get the binary (one command)</h3>
+  <p class="os">macOS / Linux</p>
+  <pre>curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | sh</pre>
+  <p class="os">Windows (PowerShell)</p>
+  <pre>irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1 | iex</pre>
+  <p>This downloads the latest release, registers the browser connection (native messaging),
+  and adds Ghostlight to every MCP client it can find on your machine -- idempotently, by
+  merging config values, never overwriting your file. Prefer to preview first? Append
+  <code>GHOSTLIGHT_NO_REGISTER=1</code> and run <code>ghostlight install --dry-run</code>.</p>
+  <details>
+    <summary>Other ways: npx, cargo, manual download</summary>
+    <p>Any MCP client can launch Ghostlight with no install at all:</p>
+    <pre>{ "command": "npx", "args": ["-y", "ghostlight"] }</pre>
+    <p>then run <code>npx ghostlight install</code> once to connect the extension. Rust users:
+    <code>cargo binstall --git https://github.com/sylin-org/ghostlight ghostlight</code>. Or
+    grab a binary from the
+    <a href="https://github.com/sylin-org/ghostlight/releases/latest">latest release</a> and
+    run <code>ghostlight install</code> yourself.</p>
+  </details>
+</div>
+
+<div class="step">
+  <span class="n">2</span><h3>Add the browser extension</h3>
+  <div class="btnrow">
+    <a class="btn primary" href="https://chromewebstore.google.com/detail/lejccfmoeogmhemakeknjjdhkfkgncdl">Add "Ghostlight in Browser" to Chrome / Edge</a>
+  </div>
+  <details>
+    <summary>Store listing not available yet, or want the zip?</summary>
+    <p>Download <code>ghostlight-extension-*.zip</code> from the
+    <a href="https://github.com/sylin-org/ghostlight/releases/latest">latest release</a>,
+    unzip it, open <code>chrome://extensions</code>, enable Developer mode, and choose
+    "Load unpacked" on the unzipped folder.</p>
+  </details>
+</div>
+
+<div class="step">
+  <span class="n">3</span><h3>Point your agent at it</h3>
+  <p>If step 1 found your client, you are already done -- restart the client and look for the
+  <code>ghostlight</code> server. One-click and manual options:</p>
+  <div class="btnrow">
+    <a class="btn" href="cursor://anysphere.cursor-deeplink/mcp/install?name=ghostlight&amp;config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImdob3N0bGlnaHQiXX0=">Add to Cursor</a>
+    <a class="btn" href="vscode:mcp/install?%7B%22name%22%3A%22ghostlight%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22ghostlight%22%5D%7D">Add to VS Code</a>
+  </div>
+  <p class="os">Claude Code</p>
+  <pre>claude mcp add ghostlight -- npx -y ghostlight</pre>
+  <p class="os">Any other MCP client (stdio)</p>
+  <pre>{ "command": "npx", "args": ["-y", "ghostlight"] }</pre>
+  <p class="note">Installed the binary in step 1? Use <code>"command": "ghostlight"</code>
+  (or its full path) instead of npx.</p>
+</div>
+
+<div class="step">
+  <span class="n">4</span><h3>Verify</h3>
+  <pre>ghostlight doctor</pre>
+  <p>One read-only command that checks the whole chain -- registration, IPC, extension link --
+  and tells you exactly what to fix if anything is off. Then ask your agent to open a page:
+  watch for the <span style="color:#38BDF8">sky-blue ripple</span> when it clicks.</p>
+</div>
+
+<h2>What you just installed</h2>
+<p class="note">One Rust binary (MCP server + native messaging host + optional background
+service) and one policy-free extension. By default everything is open: your agent can browse
+as you. When you want guardrails, a single policy file adds capability grants per domain,
+never-touch domains, and an audit log -- see the
+<a href="https://github.com/sylin-org/ghostlight#governance">governance quickstart</a>.
+Uninstall: <code>ghostlight uninstall</code>, then remove the extension.</p>
+
+<script>
+  // Extension-first arrivals (the extension's first-run tab): surface the "one step left"
+  // banner. No tracking; the query param only reorders the page's emphasis.
+  if (new URLSearchParams(location.search).get("from") === "extension") {
+    document.getElementById("ext-first").style.display = "block";
+  }
+</script>
+
+</div>
+</body>
+</html>

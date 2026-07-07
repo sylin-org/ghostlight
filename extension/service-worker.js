@@ -259,6 +259,18 @@ async function killSession() {
   updateHoldBadge(null); // the session (and any hold state) is gone; render it as unknown
 }
 
+// First install: open the install walkthrough so whichever half the user found first
+// (extension or binary) leads them to the other. Fires ONLY on reason "install" -- never on
+// updates or browser restarts -- and holds no state. Mechanism only; no policy, no phoning
+// home (a static page on the project's GitHub Pages).
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "install") {
+    chrome.tabs.create({
+      url: "https://sylin-org.github.io/ghostlight/install.html?from=extension",
+    });
+  }
+});
+
 // Popup messages. Returns true to answer asynchronously; false for unrecognized types (the
 // popup treats a false/undefined response the same as "no active session").
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghostlight -- governed browser automation for AI agents</title>
+<meta name="description" content="Let any AI coding agent use your real, logged-in browser. Any MCP client, one Rust binary, a thin extension. All-open by default; capability grants, sacred domains, and a structured audit trail when you want them.">
+<link rel="icon" type="image/png" href="mascot.png">
+<style>
+  :root {
+    --accent: #38BDF8;
+    --bg: #0B1220; --panel: #111A2E; --ink: #E6EDF6; --muted: #9FB0C7;
+    --line: #22314D; --code-bg: #0A0F1C;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #F7FAFD; --panel: #FFFFFF; --ink: #16233A; --muted: #51647F;
+            --line: #DCE6F2; --code-bg: #EEF4FB; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 17px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+  header.hero { text-align: center; padding: 72px 0 40px; }
+  .hero img { width: 120px; height: 120px; image-rendering: auto;
+              filter: drop-shadow(0 6px 24px rgba(56, 189, 248, .35)); }
+  h1 { font-size: 44px; margin: 18px 0 8px; letter-spacing: -0.02em; }
+  .tag { color: var(--muted); font-size: 20px; max-width: 640px; margin: 0 auto; }
+  .cta { margin-top: 30px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: 12px 22px; border-radius: 10px; font-weight: 600; }
+  .btn.primary { background: var(--accent); color: #06121F; }
+  .btn.ghost { border: 1px solid var(--line); color: var(--ink); }
+  .btn:hover { text-decoration: none; filter: brightness(1.08); }
+  section { padding: 34px 0; }
+  h2 { font-size: 26px; margin: 0 0 14px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  .card h3 { margin: 0 0 8px; font-size: 18px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+  code, pre { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 14.5px; }
+  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px;
+        padding: 14px 16px; overflow-x: auto; }
+  .quiet { color: var(--muted); font-size: 15px; }
+  footer { border-top: 1px solid var(--line); margin-top: 40px; padding: 26px 0 48px;
+           color: var(--muted); font-size: 15px; }
+  footer .wrap { display: flex; gap: 18px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<header class="hero wrap">
+  <img src="mascot.png" alt="The Ghostlight mascot: a small sky-blue ghost holding a glowing lantern">
+  <h1>Ghostlight</h1>
+  <p class="tag">Let your AI agent use <em>your</em> browser -- the real one, with your logins,
+  your tabs, your sessions -- from any MCP client. Governed when you want it, wide open when you
+  don't.</p>
+  <div class="cta">
+    <a class="btn primary" href="install.html">Install in 2 minutes</a>
+    <a class="btn ghost" href="https://github.com/sylin-org/ghostlight">GitHub</a>
+  </div>
+</header>
+
+<section class="wrap">
+  <div class="cards">
+    <div class="card">
+      <h3>Your real browser</h3>
+      <p>A thin extension drives the Chrome or Edge you already use. Real cookies, real SSO,
+      real tabs -- never a fresh profile, a profile copy, or someone's cloud browser.</p>
+    </div>
+    <div class="card">
+      <h3>Any MCP client</h3>
+      <p>Claude Code, Cursor, VS Code, Zed, Cline -- anything that speaks MCP. One portable Rust
+      binary, zero runtime dependencies, works with Claude on Bedrock or Vertex too.</p>
+    </div>
+    <div class="card">
+      <h3>Governed, honestly</h3>
+      <p>Capability grants (read / action / write / execute), never-touch domains, a pause
+      button and a panic switch, and a structured audit trail. All-open is the first-class
+      default; policy is opt-in.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Watch it work</h2>
+  <p>Every action the agent takes is visible in the browser: click ripples, a comet trail on
+  drags, a shimmer while it types, captions narrating each step. You always know what your
+  agent is doing, and you can grab the wheel at any moment.</p>
+  <p class="quiet">The tool surface preserves the schemas Claude was trained on, byte for byte,
+  and adds composition tools on top: multi-step scripts with dry-run, semantic form filling,
+  and page-state awareness.</p>
+</section>
+
+<section class="wrap">
+  <h2>When you should use something else</h2>
+  <p class="quiet">If you use Claude Code on a direct Anthropic plan, it ships its own Chrome
+  integration and it is good -- <code>claude --chrome</code> may be all you need. Ghostlight is
+  for everyone that path excludes: other MCP clients, Claude via cloud providers, and anyone
+  who wants policy as code, an audit trail, or a self-hosted stack. The
+  <a href="https://github.com/sylin-org/ghostlight/blob/main/docs/COMPARISON.md">honest
+  comparison</a> is part of the docs.</p>
+</section>
+
+<section class="wrap">
+  <h2>Two minutes to running</h2>
+  <pre>curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | sh</pre>
+  <p class="quiet">Windows: <code>irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1 | iex</code>
+  &nbsp;-- then add the browser extension. The <a href="install.html">install page</a> has
+  one-click buttons for Cursor and VS Code, the npx path, and the manual route.</p>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a href="https://github.com/sylin-org/ghostlight">Source</a>
+    <a href="https://github.com/sylin-org/ghostlight/blob/main/docs/SPEC.md">Spec</a>
+    <a href="https://github.com/sylin-org/ghostlight/tree/main/open-spec">Open specs (RAWX)</a>
+    <a href="https://github.com/sylin-org/ghostlight/blob/main/PRICING.md">Pricing</a>
+    <span>hello@sylin.org</span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -5,11 +5,35 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-07-07
 
 The composition batch (ADR-0035 through ADR-0038): sequential multi-step scripting, semantic form
 filling, page-state awareness, and structured results -- the tools that collapse multi-round-trip
-browser workflows into a single call.
+browser workflows into a single call. Plus the distribution push: one-line installers, the npm
+launcher, the landing/install pages, and the extension's first-run walkthrough tab.
+
+### Distribution (2026-07-07 session)
+
+- One-line installers `scripts/get.sh` / `scripts/get.ps1` (download latest release, run the
+  idempotent `ghostlight install`). Release assets now include RAW per-target binaries
+  (version-less names) so `releases/latest/download/...` works with no API parsing.
+- `ghostlight` npm launcher (`npx -y ghostlight`): fetches the version-matched binary on first
+  run; stderr-only chatter so MCP stdio stays clean.
+- cargo-binstall metadata; winget/scoop/Homebrew manifest templates under `packaging/`.
+- Landing + install pages under `site/` (GitHub Pages); the extension opens the install
+  walkthrough on first install (reason "install" only, no state, no tracking).
+- README quick-install block with Cursor / VS Code one-click deeplinks and the npx snippet;
+  `server.json` for the official MCP registry.
+
+### Fixed (distribution session)
+
+- Cross-platform test-profile compile errors (`proc.rs` cfg-gated `Stdio` import,
+  `supervisor.rs` cfg-gated test helper) that failed the macOS/Linux CI gate.
+- Console index truncation on hosted Windows runners: the management web server now performs a
+  bounded lingering close (drain to client EOF) after `flush` + `shutdown`.
+- The quarantined `e2e-smoke` CI job is capped at 15 minutes (it previously hung to the
+  6-hour runner ceiling on every push).
+- CI now runs `tests/extension/grouping.test.js` (it existed but was not in the test line).
 
 ### Added
 

@@ -1,12 +1,24 @@
 [package]
 name = "ghostlight"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Governed browser automation over the user's own authenticated Chromium session -- for AI coding agents."
 publish = false
 # Open-core (ADR-0027): engine is Apache-2.0 OR MIT; src/governance/ is the Ghostlight
 # Commercial License. LICENSE at the repo root holds the split notice.
 license-file = "LICENSE"
+
+# cargo-binstall support: `cargo binstall --git https://github.com/sylin-org/ghostlight ghostlight`
+# fetches the prebuilt release archives instead of building from source. Naming matches
+# release.yml's Package step: ghostlight-v<version>-<target>.{zip|tar.gz} with the binary
+# inside a same-named directory.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }{ archive-suffix }"
+bin-dir = "{ name }-v{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "net", "sync", "time", "process"] }

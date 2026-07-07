@@ -93,16 +93,25 @@ jobs:
             echo "ASSET=${ARCHIVE_DIR}.tar.gz" >> "$GITHUB_ENV"
           fi
 
+          # The raw per-target binary, named WITHOUT the version. The npm wrapper and the
+          # get.sh/get.ps1 one-liners fetch these directly (the versioned tag lives in the
+          # download URL path, and `releases/latest/download/<raw>` needs no API parsing).
+          RAW="${BIN_NAME}-${TARGET}${BIN_SUFFIX}"
+          cp "target/${TARGET}/release/${BIN_NAME}${BIN_SUFFIX}" "$RAW"
+          echo "RAW=${RAW}" >> "$GITHUB_ENV"
+
       - name: Checksum
         shell: bash
         run: |
           set -euo pipefail
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             sha256sum "${{ env.ASSET }}" > "${{ env.ASSET }}.sha256"
+            sha256sum "${{ env.RAW }}" > "${{ env.RAW }}.sha256"
           else
             shasum -a 256 "${{ env.ASSET }}" > "${{ env.ASSET }}.sha256"
+            shasum -a 256 "${{ env.RAW }}" > "${{ env.RAW }}.sha256"
           fi
-          cat "${{ env.ASSET }}.sha256"
+          cat "${{ env.ASSET }}.sha256" "${{ env.RAW }}.sha256"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -111,6 +120,8 @@ jobs:
           path: |
             ${{ env.ASSET }}
             ${{ env.ASSET }}.sha256
+            ${{ env.RAW }}
+            ${{ env.RAW }}.sha256
           if-no-files-found: error
 
   release:
