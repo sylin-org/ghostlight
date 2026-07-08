@@ -17,6 +17,7 @@ pub mod browser;
 pub mod error;
 pub mod governance;
 pub mod hub;
+pub mod instance;
 pub mod install;
 pub mod observability;
 pub mod origin;
