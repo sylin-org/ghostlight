@@ -5,16 +5,16 @@ Durable batch progress. One task = one CODE commit + one ledger commit = one log
 
 ## RESUME HERE
 
-- Next task: **S1** (`S1-workspace-and-transport-skeleton.md`)
+- Next task: **S2** (`S2-move-leaf-utilities.md`)
 - Base commit: `fccca60` on `dev` (tree green at batch authoring; later docs-only commits carry
   the batch itself)
-- Batch state: NOT STARTED
+- Batch state: IN PROGRESS (S1 complete)
 
 ## Task table
 
 | Task | Title | Status | Commit |
 |---|---|---|---|
-| S1 | Workspace + transport crate skeleton | pending | - |
+| S1 | Workspace + transport crate skeleton | done | 14a8bd0 |
 | S2 | Move leaf utilities to transport | pending | - |
 | S3 | Move wire + handshake to transport | pending | - |
 | S4 | Create ghostlight-core; root becomes facade | pending | - |
@@ -36,6 +36,12 @@ Durable batch progress. One task = one CODE commit + one ledger commit = one log
 - Deviations:
   1. <none | numbered list, one line each>
 ```
+
+### S1 -- Workspace + transport crate skeleton
+- Commit: 14a8bd0
+- Verification: fmt OK / clippy OK / test --workspace OK (524 root unit + full integration suite pass; new ghostlight-transport crate builds, 0 tests) / linux cross-check OK
+- Deviations:
+  1. none. (Git reported routine CRLF->LF normalization on Cargo.toml; committed blobs are LF per repo convention -- no content or requirement change.)
 
 ## Blocked
 
