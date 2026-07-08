@@ -5,7 +5,7 @@ task (or block); this file is the single source of truth for batch progress.
 
 ## RESUME HERE
 
-Next task: **T4** (`T4-session-scoped-tab-operations.md`). Base: T3 landed at `fb88795`.
+Next task: **T5** (`T5-client-name-titles.md`). Base: T4 landed at `7ee9b06`.
 
 ## Task table
 
@@ -14,7 +14,7 @@ Next task: **T4** (`T4-session-scoped-tab-operations.md`). Base: T3 landed at `f
 | T1 managed-surface predicate | done | 31049f2 | |
 | T2 down-classifier | done | 293dfd1 | |
 | T3 stable session guid | done | fb88795 | build-order note (deviation 1) |
-| T4 envelope guid + session ops | pending | - | |
+| T4 envelope guid + session ops | done | 7ee9b06 | deviations 1-3 |
 | T5 client-name titles + errors | pending | - | |
 | T6 liveness + pruning + changelog | pending | - | |
 
@@ -105,3 +105,45 @@ your reasoning, then the batch HALTS per BOOTSTRAP.)
   `cargo test --workspace --no-fail-fast` = 43 `test result: ok`, 0 failed;
   `cargo check --target x86_64-unknown-linux-gnu --workspace --all-targets` OK. All three files
   pure ASCII.
+
+### T4 -- guid on the tool envelope + session-scoped tab operations (ADR-0047 D3) -- DONE
+
+- Code commit: `7ee9b06`. Nine owned source files, all pure ASCII.
+- STOP preconditions: all passed. `grep '"guid"' browser.rs` matched only `request_group`/its
+  doc + tests (the `tool_request` envelope in `call` had NO guid); `structuredContent` absent
+  from server.rs; `LocalCtx` had exactly the five listed fields; `JsonRpcResponse.result` is
+  `pub result: Option<Value>` (value-inspectable); the extension handler anchors were intact.
+- Changes per PINS P4: `Browser::call(guid, tool, args)` + `"guid"` on the envelope;
+  `run_tool_call`/`handle_tools_call` gained `guid: &str` after governance; `LocalCtx.guid`;
+  `script.rs` PipelineRunner+bridge threading; `form_fill.rs` `run(.., guid, ..)` + 3 call sites;
+  `server.rs` `SessionSeat` + `serve_session` seat + `handle_line(seat)` + the tabs_create
+  response-claim spawn; `endpoint.rs` envelope oracle (`v["guid"] == "test-guid"`);
+  `hub_multiplex.rs` `"session-a"`/`"session-b"`; extension `dispatch(.., guid)`,
+  `tabsCreateLegacy`/`tabsContextLegacy` module fns, session-scoped `tabs_create_mcp`/
+  `tabs_context_mcp`, `createTabInSessionGroup`, widened `tabContext(tabs, reportGroupId)`.
+- DEVIATION 1 (mechanically forced): adding `guid` pushed `run_tool_call` and
+  `futures_await_block` from 7 to 8 params, tripping `clippy::too_many_arguments` under
+  `-D warnings`. Added `#[allow(clippy::too_many_arguments)]` (with a citing comment) to BOTH --
+  the same sanctioned pattern the codebase already uses for `large_enum_variant` in server.rs
+  (a pinned signature moves by transcription, not reshaping). No signature reshape.
+- DEVIATION 2 (threading beyond the two explicitly-named pipeline call sites): the second
+  production `browser.call` PINS references as "the navigate-landing region" lives in the helper
+  `post_navigate_landing_check`; threaded a `guid: &str` param into it (and its run_tool_call
+  call site) to reach that call. This is the pinned "thread the real guid; the compiler finds
+  every site" path, not a new decision.
+- DEVIATION 3 (bulk test-site mechanization): the P4 BLANKET TEST RULE names `"test-guid"` for
+  every compile-flagged test `.call`/`handle_tools_call` site. pipeline.rs had 30 such
+  `handle_tools_call` test calls (2 via aliased `&enforce_governance`/`&observe_governance`
+  vars); inserted `"test-guid"` via one scripted regex pass (`&\w*governance,(\s+)Some\(` ->
+  insert `"test-guid",`), verified count == 30 and 0 remaining, and confirmed the file stayed
+  LF-only (no CRLF flip) with a localized diff. browser.rs's own 11 test sites + endpoint.rs +
+  hub_multiplex done per the pinned literals.
+- Also ran `cargo fmt` to normalize the new code (standard) and `cargo build --workspace` before
+  the integration tests (the T3 deliverable-bin lesson; the pinned `cargo test` commands do not
+  rebuild path-spawned sibling bins).
+- Verification (all green): `node --check` OK; `node --test grouping.test.js` 3 pass; `cargo fmt
+  --check` OK; clippy exit 0; `cargo test --workspace --no-fail-fast` = 43 `test result: ok`, 0
+  failed; guardrails explicitly re-run green -- `all_open_golden` 3 (byte-identity intact),
+  `tool_schema_fidelity` 10 (sacred surface intact), `serve_bridges_a_tool_call_over_the_real_ipc`
+  ok (envelope-guid oracle), `hub_multiplex` 3, `hub_isolation` 2, `hub_queue` 2; `cargo check
+  --target x86_64-unknown-linux-gnu --workspace --all-targets` OK.
