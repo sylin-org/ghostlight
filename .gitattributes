@@ -1,0 +1,18 @@
+# Normalize line endings to LF on checkout regardless of platform or the checking-out user's
+# core.autocrlf setting. Root-cause fix for a real bug: a CRLF-converted blank line inside an
+# embedded HTML asset (src/hub/manage/assets/index.html) collided with the HTTP header/body
+# delimiter on hosted Windows CI runners (Git for Windows defaults core.autocrlf=true there),
+# deterministically truncating a Console route test. Rust source, embedded web assets, and docs
+# must be byte-identical across every checkout.
+* text=auto eol=lf
+
+# Windows batch scripts want CRLF: label/GOTO parsing can misbehave with bare LF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Explicit binaries: never text-normalized, never diffed as text.
+*.png binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

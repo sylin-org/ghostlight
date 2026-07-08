@@ -42,7 +42,13 @@ fn status_line(response: &str) -> &str {
 }
 
 fn body(response: &str) -> &str {
-    response.split("\r\n\r\n").nth(1).unwrap_or_default()
+    // split_once: everything after the FIRST header/body delimiter, even when the body itself
+    // contains a blank line (a "\r\n\r\n" run). A plain split(..).nth(1) would return only the
+    // segment up to the body's first blank line and silently truncate it.
+    response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .unwrap_or_default()
 }
 
 fn header_value<'a>(response: &'a str, name: &str) -> Option<&'a str> {

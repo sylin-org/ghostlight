@@ -302,13 +302,13 @@ pub fn apply_steps(label: &str, steps: &[SupervisorStep], dry_run: bool) {
     }
 }
 
-#[cfg(test)]
+// Windows-only until macOS/Linux step tests exist: gating the whole module (not just the
+// helper) keeps the non-Windows `-D warnings` gate green (`use super::*` in an otherwise
+// empty module trips unused-imports there).
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
 
-    // Only the Windows test below consumes this today; cfg-gate it so the non-Windows
-    // `-D dead-code` gate stays green until macOS/Linux step tests exist.
-    #[cfg(windows)]
     fn test_ctx() -> PlanCtx {
         PlanCtx {
             current_exe: PathBuf::from("/abs/ghostlight"),
