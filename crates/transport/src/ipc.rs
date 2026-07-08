@@ -281,9 +281,11 @@ where
 /// desync the JSON-RPC stream); queued client lines survive a reconnect.
 ///
 /// The data phase is still newline-delimited JSON-RPC (never `host::write_message` framing) -- the
-/// hello and proof are the only framed messages (PINS.md SS1 pin 3). A fresh `SessionGuid` is
-/// minted per (re)connect: a reconnect is a NEW session to the service (the old one's slot freed
-/// when its connection dropped), which is exactly right.
+/// hello and proof are the only framed messages (PINS.md SS1 pin 3). One `SessionGuid` is minted
+/// per adapter PROCESS and re-presented on every reconnect (ADR-0047 D2, superseding the pre-0047
+/// fresh-guid-per-reconnect posture): the service's `SessionRegistry` sanctions the same user
+/// re-presenting an identity, so tab ownership and this session's Chrome tab group survive the
+/// service gap instead of being orphaned when the connection drops.
 pub async fn relay_adapter(endpoint: &str, debug: &crate::observability::DebugSink) -> Result<()> {
     use tokio::io::AsyncBufReadExt;
     let adapter_endpoint = adapter_endpoint_name(endpoint);
@@ -314,11 +316,16 @@ pub async fn relay_adapter(endpoint: &str, debug: &crate::observability::DebugSi
     let mut preamble = HandshakePreamble::default();
     let mut first = true;
 
+    // ADR-0047 D2: one identity for this adapter's whole life, re-presented on every reconnect so
+    // the service-side ownership map and the extension's per-session groups survive a restart.
+    let session_guid = crate::session_guid::SessionGuid::mint();
+    debug.ipc_note("session identity minted (stable for this adapter process)");
+
     loop {
         // Connect AND handshake with a bounded retry (see [`connect_and_handshake`]): a service
         // that is mid-startup or mid-restart (endpoint claimed but not yet serving/proving) is
         // tolerated, not a fatal exit -- the crux that makes a reconnect actually resilient.
-        let stream = connect_and_handshake(&adapter_endpoint, !first).await?;
+        let stream = connect_and_handshake(&adapter_endpoint, !first, &session_guid).await?;
         if first {
             debug.ipc_note("connected to the service's adapter/control endpoint");
         } else {
@@ -358,26 +365,34 @@ pub async fn relay_adapter(endpoint: &str, debug: &crate::observability::DebugSi
 }
 
 /// One connect + full session handshake attempt: dial the adapter/control endpoint, send the
-/// `adapter` session-hello (a fresh `SessionGuid` per attempt), and verify the SERVICE's anti-squat
-/// proof (ADR-0030 Decision 8; PINS.md SS5.3). Returns the handshake-completed stream, or an error
+/// `adapter` session-hello (the caller's stable per-process `SessionGuid`), and verify the
+/// SERVICE's anti-squat proof (ADR-0030 Decision 8; PINS.md SS5.3). Returns the handshake-completed
+/// stream, or an error
 /// if ANY step fails (a down service, a torn-down connection mid-handshake, or a failed proof).
 /// Grouping the handshake with the dial is what lets [`connect_and_handshake`] retry the WHOLE
 /// thing, not just the dial.
 async fn try_connect_once(
     adapter_endpoint: &str,
+    guid: &crate::session_guid::SessionGuid,
 ) -> Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin> {
     let mut stream = dial_once(adapter_endpoint).await?;
-    let guid = crate::session_guid::SessionGuid::mint();
-    let hello = json!({
-        "hub": crate::handshake::HUB_PROTO,
-        "role": crate::handshake::ROLE_ADAPTER,
-        "guid": guid.as_str(),
-    });
+    let hello = adapter_hello(guid);
     let hello_bytes = serde_json::to_vec(&hello)
         .map_err(|e| Error::NativeMessaging(format!("failed to encode the adapter hello: {e}")))?;
     host::write_message(&mut stream, &hello_bytes).await?;
     verify_service_proof(&mut stream, &hello_bytes).await?;
     Ok(stream)
+}
+
+/// The adapter's session-hello JSON (ADR-0047 D2): built from the caller's stable per-process
+/// `SessionGuid`. Same wire shape as before -- `{ hub, role, guid }` -- extracted so the guid
+/// threading is unit-testable in isolation.
+fn adapter_hello(guid: &crate::session_guid::SessionGuid) -> serde_json::Value {
+    json!({
+        "hub": crate::handshake::HUB_PROTO,
+        "role": crate::handshake::ROLE_ADAPTER,
+        "guid": guid.as_str(),
+    })
 }
 
 /// Connect to the SERVICE and complete the handshake, retrying the WHOLE attempt within a bounded
@@ -396,8 +411,9 @@ async fn try_connect_once(
 async fn connect_and_handshake(
     adapter_endpoint: &str,
     reconnect: bool,
+    guid: &crate::session_guid::SessionGuid,
 ) -> Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin> {
-    if let Ok(stream) = try_connect_once(adapter_endpoint).await {
+    if let Ok(stream) = try_connect_once(adapter_endpoint, guid).await {
         return Ok(stream);
     }
     crate::supervisor::start_service();
@@ -415,7 +431,7 @@ async fn connect_and_handshake(
     let deadline = tokio::time::Instant::now() + window;
     loop {
         sleep(interval).await;
-        match try_connect_once(adapter_endpoint).await {
+        match try_connect_once(adapter_endpoint, guid).await {
             Ok(stream) => return Ok(stream),
             Err(e) => {
                 if tokio::time::Instant::now() >= deadline {
@@ -688,6 +704,19 @@ mod tests {
         // Once complete, a second initialize never overwrites the captured one.
         p.observe(br#"{"jsonrpc":"2.0","id":9,"method":"initialize"}"#);
         assert_eq!(p.initialize.as_deref(), Some(&init[..]));
+    }
+
+    #[test]
+    fn hello_carries_the_caller_guid() {
+        // ADR-0047 D2 (PINS P3): the hello carries the CALLER's guid, the wire shape is unchanged
+        // (`{hub, role, guid}`), and it is deterministic for a given guid (the SAME identity is
+        // re-presented on every reconnect).
+        let guid = crate::session_guid::SessionGuid::mint();
+        let hello = adapter_hello(&guid);
+        assert_eq!(hello["guid"], guid.as_str());
+        assert_eq!(hello["role"], "adapter");
+        assert_eq!(hello["hub"], 1);
+        assert_eq!(adapter_hello(&guid), hello);
     }
 
     #[tokio::test]

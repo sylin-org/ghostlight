@@ -95,6 +95,7 @@ fn spawn_adapter(endpoint: &str, instance: &str, log_dir: &Path) -> Child {
         .env("GHOSTLIGHT_ENDPOINT", endpoint)
         .env("GHOSTLIGHT_INSTANCE", instance)
         .env("GHOSTLIGHT_LOG_DIR", log_dir)
+        .env("GHOSTLIGHT_DEBUG", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -198,6 +199,33 @@ fn adapter_reconnects_across_a_service_restart_without_a_client_reload() {
         list2["result"]["tools"].as_array().map(|t| t.len()),
         Some(17),
         "the reconnected session answered a real request: {list2:?}"
+    );
+
+    // ADR-0047 D2 (PINS P3): the adapter mints ONE session identity for its whole process and
+    // re-presents it on reconnect. Across every debug-events log this run produced, the mint note
+    // appears exactly once (never once per connect) and at least one reconnect note is present.
+    let mut events = String::new();
+    for entry in std::fs::read_dir(&log_dir).expect("read log_dir") {
+        let path = entry.expect("dir entry").path();
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with("debug-events-") && name.ends_with(".jsonl") {
+                events.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
+            }
+        }
+    }
+    assert_eq!(
+        events
+            .matches("session identity minted (stable for this adapter process)")
+            .count(),
+        1,
+        "the adapter mints its session identity exactly once per process"
+    );
+    assert!(
+        events
+            .matches("service restart detected; reconnected")
+            .count()
+            >= 1,
+        "at least one reconnect note must be present"
     );
 
     drop(stdin);

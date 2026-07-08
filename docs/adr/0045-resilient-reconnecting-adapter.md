@@ -141,3 +141,13 @@ is ClientClosed, which exits. The original arm used `tokio::io::copy` and mapped
 ERROR_BROKEN_PIPE on the READ, not the write -- the adapter exited and forced the very MCP-client
 reload this ADR exists to prevent. A hand-rolled copy loop separates the two failure sides. See
 ADR-0047 D6.
+
+## Amendment (2026-07-08, ADR-0047 D2): stable session identity across reconnects
+
+This ADR originally minted a fresh `SessionGuid` on every (re)connect, on the reasoning that a
+reconnect is a brand-new session. ADR-0047 D2 supersedes that: the adapter mints ONE guid for its
+whole process and re-presents the SAME guid on every reconnect. The service's `SessionRegistry`
+already sanctions a user re-presenting an identity, so nothing server-side changes. The reason is
+downstream of resilience: a fresh guid per reconnect orphaned that session's tab ownership and its
+Chrome tab group every time the service blinked, which is exactly the transparency this ADR set out
+to deliver. Identity is now stable for the life of the adapter process. See ADR-0047 D2.
