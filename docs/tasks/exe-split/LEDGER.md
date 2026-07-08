@@ -5,10 +5,10 @@ Durable batch progress. One task = one CODE commit + one ledger commit = one log
 
 ## RESUME HERE
 
-- Next task: **S8** (`S8-reconnect-patience.md`)
+- Next task: **S9** (`S9-no-supervisor-and-dev-loop-doc.md`)
 - Base commit: `fccca60` on `dev` (tree green at batch authoring; later docs-only commits carry
   the batch itself)
-- Batch state: IN PROGRESS (S1, S2, S3, S4, S5, S6, S7 complete)
+- Batch state: IN PROGRESS (S1..S8 complete)
 
 ## Task table
 
@@ -21,7 +21,7 @@ Durable batch progress. One task = one CODE commit + one ledger commit = one log
 | S5 | ghostlight-adapter-agent bin + rewire clients + test harness | done | a6ff4e0 |
 | S6 | ghostlight-adapter-browser bin + host install rework | done | 4a95f68 |
 | S7 | Retire roles from the ghostlight bin | done | 583a25a |
-| S8 | Reconnect patience (120s) + ADR-0045 amendment | pending | - |
+| S8 | Reconnect patience (120s) + ADR-0045 amendment | done | cbe3761 |
 | S9 | --no-supervisor + DEV-LOOP.md | pending | - |
 | S10 | Packaging + distribution sweep | pending | - |
 
@@ -91,6 +91,12 @@ Durable batch progress. One task = one CODE commit + one ledger commit = one log
   2. `doctor::sweep_orphans()` (a `pub fn`) lost its only internal caller (the deleted run_mcp_server) but was NOT removed: it is public API reachable via the facade (`ghostlight::hub::manage::doctor::sweep_orphans`), so it raises no dead_code warning; the standalone `doctor --fix` reaper is the other user of the reap machinery.
   3. Six stale doc-PROSE mentions of the retired role names survive in transport/handshake.rs, transport/ipc.rs (x2), adapter-agent/main.rs (x2, describing what it was "transcribed from"), and core/hub/mod.rs:~325 (ServiceContext doc). All are `//`/`///` prose (never `[intra-doc links]`), rustdoc-only, explicitly sanctioned by the S7 verify ("doc-comment prose mentions are acceptable"). The role-ENUMERATION docs the task named (root main.rs module doc, core hub/mod.rs module doc) WERE updated to name the two adapter executables.
   4. The bare-invocation guidance is printed as TWO `eprintln!` lines (the exact SPEC section 9 text) + `std::process::exit(2)` in the `Cli { command: None, .. }` arm.
+
+### S8 -- Reconnect patience (120s) + ADR-0045 amendment
+- Commit: cbe3761
+- Verification: fmt OK / clippy OK / test --workspace OK / linux cross-check OK. S8-specific oracle: `cargo build -p ghostlight-adapter-agent` then `cargo test --test adapter_reconnect` 3x -- each run 2 passed (restart + the new 5s-gap test), 0 failed (~5-6s per run, i.e. the 5s gap is really exercised).
+- Deviations:
+  1. none of substance. connect_and_handshake's first-connect path is byte-identical (interval/window resolve to SELF_HEAL_RETRY_INTERVAL/SELF_HEAL_RETRY_WINDOW when `reconnect == false`); relay_adapter passes `!first`. The two new pub consts sit at the top of transport/ipc.rs (module level, after the imports). The 5s-gap test was DUPLICATED from the restart test (per the task's "otherwise duplicate"; the setup was not trivial to factor without obscuring both) with the two pinned changes: a 5s `thread::sleep` between kill and respawn, and a 30s post-restart recv timeout.
 
 ## Blocked
 
