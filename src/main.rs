@@ -502,7 +502,7 @@ fn run_status(args: StatusArgs) {
 /// normal launch is expected, not a problem (see `doctor`'s wording).
 fn run_native_host_role(debug: bool) -> Result<()> {
     tracing::info!("ghostlight starting (native-host role, launched by the browser)");
-    let sink = ghostlight::hub::build_debug_sink(debug, "native-host");
+    let sink = ghostlight::observability::build_debug_sink(debug, "native-host");
     let rt = tokio::runtime::Runtime::new()?;
     let result =
         rt.block_on(async { ipc::relay_native_host(&ipc::default_endpoint(), &sink).await });

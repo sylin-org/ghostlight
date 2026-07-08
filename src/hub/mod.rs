@@ -45,7 +45,7 @@ pub mod handshake;
 pub mod inbound;
 pub mod manage;
 pub mod outbound;
-pub mod role;
+pub use ghostlight_transport::role;
 pub mod session;
 pub mod supervisor;
 
@@ -138,7 +138,7 @@ pub fn run_mcp_server(manifest: Option<String>, debug_on: bool) -> Result<()> {
         );
     }
 
-    let sink = build_debug_sink(debug_on, "adapter");
+    let sink = crate::observability::build_debug_sink(debug_on, "adapter");
     // Startup self-heal (ADR-0029 part 4; ADR-0030 Decision 8 re-scope, PINS.md SS5.5): reap any
     // orphaned predecessor ADAPTER whose editor exited but that did not terminate. The SERVICE has
     // no client parent and idle-graces instead (see `run_service_loop`), so it is never a reap
@@ -194,7 +194,7 @@ pub fn run_service(manifest: Option<String>, debug_on: bool, keep_warm: bool) ->
         ),
     }
 
-    let sink = build_debug_sink(debug_on, "mcp-server");
+    let sink = crate::observability::build_debug_sink(debug_on, "mcp-server");
     let rt = tokio::runtime::Runtime::new()?;
     let block_sink = sink.clone();
     let endpoint = ipc::default_endpoint();
@@ -362,29 +362,6 @@ async fn run_as_adapter(
             }
         }
         _ = shutdown.notified() => 0,
-    }
-}
-
-/// Build the observability sink for `role` ("mcp-server" for the standalone SERVICE, "adapter",
-/// or "native-host" -- PINS.md SS5.5). Debug-off yields a no-op sink; if the log directory cannot
-/// be prepared we warn and continue without observability rather than failing the process.
-pub fn build_debug_sink(debug: bool, role: &'static str) -> DebugSink {
-    if !debug {
-        return DebugSink::disabled();
-    }
-    let Some(dir) = crate::observability::log_dir() else {
-        tracing::warn!("no log directory available; running without debug observability");
-        return DebugSink::disabled();
-    };
-    match DebugSink::enabled(&dir, role) {
-        Ok(sink) => {
-            tracing::info!(dir = %dir.display(), role, "debug mode on: state + event log under this dir");
-            sink
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "could not enable debug sink; continuing without it");
-            DebugSink::disabled()
-        }
     }
 }
 

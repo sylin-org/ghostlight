@@ -43,7 +43,7 @@ const STATE_THROTTLE_MS: u128 = 200;
 const STALE_AFTER: Duration = Duration::from_secs(24 * 3600);
 
 /// Milliseconds since the Unix epoch (best-effort; 0 if the clock is before the epoch).
-pub(crate) fn now_ms() -> u128 {
+pub fn now_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -73,7 +73,7 @@ fn boundary_clip(s: &str, max: usize) -> &str {
 }
 
 /// Format a millisecond duration compactly ("3m 12s", "800ms").
-pub(crate) fn fmt_ms(ms: u128) -> String {
+pub fn fmt_ms(ms: u128) -> String {
     let secs = ms / 1000;
     if secs == 0 {
         return format!("{ms}ms");
@@ -87,7 +87,7 @@ pub(crate) fn fmt_ms(ms: u128) -> String {
 }
 
 /// Session `debug-state-*.json` files under `dir`, newest (by mtime) first.
-pub(crate) fn session_state_files(dir: &Path) -> Vec<PathBuf> {
+pub fn session_state_files(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -695,6 +695,29 @@ impl DebugSink {
 impl Default for DebugSink {
     fn default() -> Self {
         Self::disabled()
+    }
+}
+
+/// Build the observability sink for `role` ("mcp-server" for the standalone SERVICE, "adapter",
+/// or "native-host" -- PINS.md SS5.5). Debug-off yields a no-op sink; if the log directory cannot
+/// be prepared we warn and continue without observability rather than failing the process.
+pub fn build_debug_sink(debug: bool, role: &'static str) -> DebugSink {
+    if !debug {
+        return DebugSink::disabled();
+    }
+    let Some(dir) = log_dir() else {
+        tracing::warn!("no log directory available; running without debug observability");
+        return DebugSink::disabled();
+    };
+    match DebugSink::enabled(&dir, role) {
+        Ok(sink) => {
+            tracing::info!(dir = %dir.display(), role, "debug mode on: state + event log under this dir");
+            sink
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "could not enable debug sink; continuing without it");
+            DebugSink::disabled()
+        }
     }
 }
 

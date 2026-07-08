@@ -11,4 +11,4 @@
 
 pub mod mcp;
 pub mod native;
-pub mod watchdog;
+pub use ghostlight_transport::watchdog;

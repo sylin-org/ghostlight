@@ -14,17 +14,15 @@
 //! (launched by Chrome via `connectNative`). They bridge over a named pipe / Unix domain socket.
 
 pub mod browser;
-pub mod error;
 pub mod governance;
 pub mod hub;
 pub mod install;
-pub mod instance;
-pub mod observability;
 pub mod origin;
-pub mod proc;
 pub mod transport;
 
-pub use error::{Error, Result, ToolError};
+pub use ghostlight_transport::error::{Error, Result, ToolError};
+pub use ghostlight_transport::init_tracing;
+pub use ghostlight_transport::{error, instance, observability, proc};
 
 /// Compatibility facade: transport-owned submodules whose paths external consumers
 /// (integration tests, including the sacred `tool_schema_fidelity` guard) import at the
@@ -32,19 +30,3 @@ pub use error::{Error, Result, ToolError};
 /// exist only so the move is byte-transparent to callers outside the crate. They are
 /// public API, so they raise no unused-import warning.
 pub use transport::{mcp, native};
-
-/// Initialize operational (debug) logging to **stderr**.
-///
-/// This is `tracing`-based debug/operational logging, deliberately distinct from the audit
-/// subsystem (a v1.5 governance-overlay concern). stdout is reserved for the MCP JSON-RPC stream.
-///
-/// `verbose` (debug mode) lifts the default level to `debug`; an explicit `RUST_LOG` always wins.
-pub fn init_tracing(verbose: bool) {
-    use tracing_subscriber::EnvFilter;
-    let default = if verbose { "debug" } else { "info" };
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default));
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .try_init();
-}
