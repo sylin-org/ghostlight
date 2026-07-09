@@ -1414,8 +1414,23 @@ const handlers = {
       case "export": {
         const frames = rec.frames(gifRecordings, tabId);
         if (frames.length === 0) return text("No frames to export. Start a recording first with action=start_recording.");
+        const gifFilename = (typeof a.filename === "string" && a.filename.length > 0) ? a.filename : "recording.gif";
         if (a.coordinate) {
-          return text("Drag-drop export at a coordinate is not yet supported (Phase 2). Provide download:true to get the GIF file instead.");
+          // Phase 2 (ADR-0050 D5): drag-drop the encoded GIF onto a page element at the coordinate,
+          // reusing T3's setImage DragEvent path (content.js) with the GIF File.
+          const gif = await encodeRecording(frames, 500);
+          const r = await content(tabId, {
+            type: "setImage",
+            coordinate: a.coordinate,
+            data: base64FromBytes(gif),
+            filename: gifFilename,
+            mimeType: "image/gif",
+          });
+          if (r && r.result && r.result.error) {
+            const msg = r.result.error.endsWith(".") ? r.result.error.slice(0, -1) : r.result.error;
+            throw hopError("page", msg);
+          }
+          return text(r.result.output + " (" + frames.length + " frame(s), " + Math.round(gif.length / 1024) + " KB).");
         }
         if (a.download === true) {
           const gif = await encodeRecording(frames, 500);
@@ -1426,7 +1441,7 @@ const handlers = {
             ],
           };
         }
-        return text("export not yet supported: provide download:true, or a coordinate (Phase 2).");
+        return text("export requires either download:true (return/download the GIF) or a coordinate [x, y] (drag-drop it onto a page element).");
       }
       default:
         return text("Unknown gif_creator action: " + a.action + ".");

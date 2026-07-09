@@ -5,8 +5,10 @@ task (or when marking BLOCKED). A human reads RESUME HERE to pick up.
 
 ## RESUME HERE
 
-- Status: T1..T5 DONE (batch body complete, count 21). **NOW IN PROGRESS: T4 Phase 2 -- coordinate
-  drag-drop GIF export.** Plan (docs/tasks/official-rebaseline/T4-gif-creator.md "Phase 2"): the
+- Status: **BATCH FULLY COMPLETE** -- T1..T5 + T4 Phase 2 all DONE (count 21). The ONLY remaining
+  gif_creator deferrals are visual OVERLAYS (click cues/labels/watermark/progress) and richer color
+  QUANTIZATION (Phase 1 uses a fixed 3-3-2 palette). Everything else in ADR-0050 is shipped.
+- (Historical) T4 Phase 2 plan, now done: the
   `gif_creator` `export` handler's `coordinate` branch (currently returns the Phase-1 "not yet
   supported (Phase 2)" text at service-worker.js) must instead ENCODE the GIF (`encodeRecording`)
   and drag-drop it as an `image/gif` File at the coordinate by REUSING T3's `content(tabId,
@@ -180,8 +182,16 @@ task (or when marking BLOCKED). A human reads RESUME HERE to pick up.
   (requires Write). `computer` INPUT schema + descriptor row UNCHANGED (only the output gains the
   trailing imageId text block, ADR-0050 D4's one sanctioned trained-output change).
 
-### T4 -- gif_creator (phased; Phase 1 floor)
-- Status: PHASE 1 DONE (Phase 2 drag-drop DEFERRED). One commit.
+### T4 -- gif_creator (phased; Phase 1 + Phase 2 done)
+- Status: PHASE 1 + PHASE 2 DONE. (Overlays + richer color quantization still DEFERRED.)
+- Phase 2 commit: (filled at commit). Phase 2 = the `export` `coordinate` branch in
+  service-worker.js now ENCODES the GIF and drag-drops it as an `image/gif` File at the coordinate
+  via T3's `content(tabId, {type:"setImage", coordinate, data, filename, mimeType})` path
+  (content.js `setImage`, already the DragEvent drop). EXTENSION-ONLY: no Rust/schema/pin change (the
+  `coordinate` param + `export`=Write were declared in Phase 1). Verified: `node --check` on all four
+  extension files + extension node --test 12/12; the Rust suite is untouched (44/44 stands). The
+  drag-drop DragEvent itself is live-verified (not node-testable, same as T3's setImage coordinate
+  branch). Original Phase-1 status/deviations below.
 - Commit(s): (filled at commit)
 - V-ALL: pass (isolated CARGO_TARGET_DIR). fmt --check + clippy --all-targets -D warnings clean;
   core lib 487; extension node --test 12/12 (incl. the new gifenc 4 + recbuffer 4); full workspace
