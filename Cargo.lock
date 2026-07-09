@@ -399,6 +399,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostlight-relay"
+version = "0.4.1"
+dependencies = [
+ "ghostlight-transport",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ghostlight-transport"
 version = "0.4.1"
 dependencies = [
