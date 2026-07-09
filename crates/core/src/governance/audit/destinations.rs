@@ -6,7 +6,21 @@
 /// section-1.4 table: `%LOCALAPPDATA%` on Windows, `~/Library/Application Support` on macOS,
 /// `~/.local/share` (or `XDG_DATA_HOME`) on Linux. `None` when the platform data directory
 /// cannot be resolved.
+///
+/// ADR-0051 Phase 1: a `GHOSTLIGHT_AUDIT_DIR` env override redirects the default path to
+/// `<GHOSTLIGHT_AUDIT_DIR>/audit.jsonl`, making it test-isolable. `dirs::data_local_dir()` ignores
+/// env, so without this a spawned service writes to the machine's REAL audit file and parallel E2E
+/// tests contend on it. This matches the existing `GHOSTLIGHT_LOG_DIR` / `GHOSTLIGHT_USER_CONFIG_DIR`
+/// / `ProgramData` override precedent. The pure resolver `default_audit_path_from` is split out so it
+/// unit-tests without racing the process-global env.
 pub fn default_audit_path() -> Option<std::path::PathBuf> {
+    default_audit_path_from(std::env::var_os("GHOSTLIGHT_AUDIT_DIR"))
+}
+
+fn default_audit_path_from(override_dir: Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
+    if let Some(dir) = override_dir {
+        return Some(std::path::PathBuf::from(dir).join("audit.jsonl"));
+    }
     Some(
         dirs::data_local_dir()?
             .join(ghostlight_transport::instance::Instance::resolve().dir_leaf())
@@ -50,4 +64,33 @@ pub fn send_line_to_syslog(addr: std::net::SocketAddr, line: &str) -> std::io::R
     let udp_socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
     udp_socket.send_to(datagram.as_bytes(), addr)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audit_dir_override_redirects_to_that_dir_plus_audit_jsonl() {
+        // ADR-0051 Phase 1: an explicit GHOSTLIGHT_AUDIT_DIR value yields <dir>/audit.jsonl,
+        // bypassing the platform default -- tested through the pure resolver so no env race.
+        let got = default_audit_path_from(Some(std::ffi::OsString::from("/tmp/ghostlight-test")))
+            .expect("override always resolves");
+        assert_eq!(
+            got,
+            std::path::PathBuf::from("/tmp/ghostlight-test").join("audit.jsonl")
+        );
+    }
+
+    #[test]
+    fn no_override_falls_back_to_the_platform_default_ending_in_audit_jsonl() {
+        // With no override, the resolver uses dirs::data_local_dir(); when that resolves, the path
+        // still ends in the ghostlight instance leaf + audit.jsonl.
+        if let Some(p) = default_audit_path_from(None) {
+            assert!(
+                p.ends_with("audit.jsonl"),
+                "default path ends in audit.jsonl: {p:?}"
+            );
+        }
+    }
 }

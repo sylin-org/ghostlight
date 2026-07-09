@@ -54,6 +54,15 @@ pub fn log_dir_for(endpoint: &str) -> PathBuf {
     std::env::temp_dir().join(format!("ghostlight-test-logdir-{endpoint}"))
 }
 
+/// The isolated audit file a given test's service writes to (ADR-0051 Phase 1): every `spawn_service*`
+/// helper sets `GHOSTLIGHT_AUDIT_DIR` to the endpoint's [`log_dir_for`], so audit lands in the test's
+/// own dir instead of the machine's REAL default audit path (which `dirs::data_local_dir()` resolves
+/// ignoring env, and which parallel E2E tests would otherwise contend on). A test that inspects the
+/// audit stream reads it here.
+pub fn audit_path_for(endpoint: &str) -> PathBuf {
+    log_dir_for(endpoint).join("audit.jsonl")
+}
+
 /// Connect to a service's TCP web API. No retry is needed: the `port` comes from
 /// [`wait_for_webapi_port`], which the spawn helpers call before returning it, and the service
 /// publishes that port only AFTER its listener has bound -- so by the time a caller holds a port,
@@ -112,6 +121,7 @@ pub fn spawn_service_with_manifest(endpoint: &str, manifest: Option<&str>) -> Ch
         .env("GHOSTLIGHT_ENDPOINT", endpoint)
         .env("GHOSTLIGHT_DEBUG", "1")
         .env("GHOSTLIGHT_LOG_DIR", &log_dir)
+        .env("GHOSTLIGHT_AUDIT_DIR", &log_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -135,6 +145,7 @@ pub fn spawn_service_with_program_data(endpoint: &str, program_data_dir: &Path) 
         .env("ProgramData", program_data_dir)
         .env("GHOSTLIGHT_DEBUG", "1")
         .env("GHOSTLIGHT_LOG_DIR", &log_dir)
+        .env("GHOSTLIGHT_AUDIT_DIR", &log_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -159,6 +170,7 @@ pub fn spawn_service_with_webapi_port(endpoint: &str) -> (Child, u16) {
         .env("GHOSTLIGHT_WEBAPI_PORT", "0")
         .env("GHOSTLIGHT_DEBUG", "1")
         .env("GHOSTLIGHT_LOG_DIR", &log_dir)
+        .env("GHOSTLIGHT_AUDIT_DIR", &log_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -185,6 +197,7 @@ pub fn spawn_service_with_program_data_and_webapi_port(
         .env("GHOSTLIGHT_WEBAPI_PORT", "0")
         .env("GHOSTLIGHT_DEBUG", "1")
         .env("GHOSTLIGHT_LOG_DIR", &log_dir)
+        .env("GHOSTLIGHT_AUDIT_DIR", &log_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -212,6 +225,7 @@ pub fn spawn_service_with_user_config_dir_and_webapi_port(
         .env("GHOSTLIGHT_WEBAPI_PORT", "0")
         .env("GHOSTLIGHT_DEBUG", "1")
         .env("GHOSTLIGHT_LOG_DIR", &log_dir)
+        .env("GHOSTLIGHT_AUDIT_DIR", &log_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -241,6 +255,7 @@ pub fn spawn_service_with_program_data_user_config_dir_and_webapi_port(
         .env("GHOSTLIGHT_WEBAPI_PORT", "0")
         .env("GHOSTLIGHT_DEBUG", "1")
         .env("GHOSTLIGHT_LOG_DIR", &log_dir)
+        .env("GHOSTLIGHT_AUDIT_DIR", &log_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

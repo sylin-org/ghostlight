@@ -10,18 +10,12 @@
 //! `audit.enabled: true`, `audit.destination: "file"`, empty `audit.file.path`), stable across
 //! the governed -> all-open transition.
 //!
-//! DEVIATION from the task prompt's literal isolation pin: the prompt also directs overriding
-//! `LOCALAPPDATA` to redirect the DEFAULT audit path. On this tree, `governance::audit::
-//! destinations::default_audit_path` resolves via the `dirs` crate, whose Windows backend calls
-//! `SHGetKnownFolderPath` (`dirs-sys` 0.5) rather than reading the `LOCALAPPDATA` environment
-//! variable -- an env-var override of the CHILD process has no effect on it (confirmed: the
-//! first version of this test, following the prompt literally, wrote no audit file at the
-//! faked path at all). Since the audit destination is genuinely the real per-user default no
-//! matter what env vars this test sets, and this file cannot add manifest config entries for it
-//! (the whole point of the "no audit config" pin) or redirect it any other way, this test
-//! instead takes over the REAL resolved default path for its own duration: it backs up any
-//! pre-existing file there, restores it (or removes a freshly-created one) via a `Drop` guard
-//! that runs even on a mid-test panic, and reads audit lines from that real path.
+//! AUDIT PATH ISOLATION (ADR-0051 Phase 1): `default_audit_path` now honors a `GHOSTLIGHT_AUDIT_DIR`
+//! override, which the `spawn_service*` helpers set to the endpoint's isolated log dir. So the
+//! spawned service writes audit to a per-test file (`support::audit_path_for(endpoint)`) and this
+//! test reads it there -- it no longer takes over the machine's REAL default audit path. (The
+//! earlier version had to, because `dirs::data_local_dir()` resolves via `SHGetKnownFolderPath` and
+//! ignored env; the new override is the surgical fix for exactly that.)
 
 #![cfg(windows)]
 
@@ -74,40 +68,6 @@ impl Drop for ChildGuard {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
-        }
-    }
-}
-
-/// Takes over the REAL default audit path for the duration of one test (see the module doc's
-/// DEVIATION note): backs up any pre-existing file there, and restores it (or removes a
-/// freshly-created test file) on drop -- including on a mid-test panic, so a failed run never
-/// leaves the developer's real audit history altered or a stray backup file behind.
-struct AuditFileGuard {
-    path: std::path::PathBuf,
-    backup: Option<std::path::PathBuf>,
-}
-
-impl AuditFileGuard {
-    fn take_over() -> Self {
-        let path = ghostlight::governance::audit::destinations::default_audit_path()
-            .expect("a local-data directory is resolvable on this machine");
-        let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let backup = path.with_file_name(format!("{file_name}.t06-bak"));
-        let _ = std::fs::remove_file(&backup);
-        let backup = if path.exists() && std::fs::rename(&path, &backup).is_ok() {
-            Some(backup)
-        } else {
-            None
-        };
-        Self { path, backup }
-    }
-}
-
-impl Drop for AuditFileGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-        if let Some(backup) = &self.backup {
-            let _ = std::fs::rename(backup, &self.path);
         }
     }
 }
@@ -223,11 +183,6 @@ fn org_policy_hot_swap_end_to_end() {
     std::fs::create_dir_all(&policy_dir).expect("create fake ProgramData\\ghostlight");
     let policy_path = policy_dir.join("policy.json");
 
-    // See the module doc's DEVIATION note: the default audit path is not env-var redirectable
-    // on this tree, so this test takes over the REAL one for its duration instead.
-    let audit_guard = AuditFileGuard::take_over();
-    let audit_path = audit_guard.path.clone();
-
     std::fs::write(
         &policy_path,
         serde_json::to_vec(&manifest_json(&["read"])).unwrap(),
@@ -235,6 +190,10 @@ fn org_policy_hot_swap_end_to_end() {
     .expect("write the initial org policy file");
 
     let endpoint = format!("ghostlight-t06-{pid}-{seq}");
+    // ADR-0051 Phase 1: the service writes audit to its isolated GHOSTLIGHT_AUDIT_DIR (set by the
+    // spawn helper to the endpoint's log dir), so this test reads the audit stream from there instead
+    // of taking over the machine's REAL default audit path.
+    let audit_path = support::audit_path_for(&endpoint);
     let mut service = support::spawn_service_with_program_data(&endpoint, &program_data_dir);
     let mut adapter: Child = support::spawn_adapter(&endpoint);
 
@@ -420,5 +379,4 @@ fn org_policy_hot_swap_end_to_end() {
 
     std::fs::remove_file(&policy_path).ok();
     std::fs::remove_dir_all(&program_data_dir).ok();
-    drop(audit_guard);
 }
