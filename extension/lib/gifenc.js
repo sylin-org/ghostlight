@@ -68,13 +68,24 @@
   }
 
   // Map a whole RGBA frame (Uint8Array/Uint8ClampedArray, length w*h*4) to palette indices via the
-  // NeuQuant nearest-color search built by buildGlobalPalette.
+  // NeuQuant nearest-color search built by buildGlobalPalette. Lookups are memoized per distinct
+  // color: screenshots hold thousands of distinct colors, not millions, so the cache converts the
+  // dominant per-pixel network search into a map hit -- measured ~34x faster with byte-identical
+  // output, the difference between a service worker that stalls mid-export and one that breathes
+  // (ADR-0052 Decision 3).
   function quantizeFrame(rgba, width, height, lookup) {
     var n = width * height;
     var out = new Uint8Array(n);
+    var cache = new Map();
     for (var i = 0; i < n; i++) {
       var s = i * 4;
-      out[i] = lookup(rgba[s], rgba[s + 1], rgba[s + 2]);
+      var key = (rgba[s] << 16) | (rgba[s + 1] << 8) | rgba[s + 2];
+      var v = cache.get(key);
+      if (v === undefined) {
+        v = lookup(rgba[s], rgba[s + 1], rgba[s + 2]);
+        cache.set(key, v);
+      }
+      out[i] = v;
     }
     return out;
   }
@@ -151,14 +162,20 @@
     arr.push(0x00);
   }
 
-  // encodeGif(frames, {width, height, delayMs, sampleFac}) -> Uint8Array.
+  // encodeGif(frames, {width, height, delayMs, delays, sampleFac}) -> Uint8Array.
   //   frames: array of RGBA byte arrays, each of length width*height*4.
-  //   delayMs: per-frame delay in milliseconds (GIF stores centiseconds; min 2cs like most encoders).
+  //   delayMs: uniform per-frame delay in milliseconds (GIF stores centiseconds; min 2cs like most
+  //     encoders).
+  //   delays: optional per-frame delay array in ms (ADR-0052 D3: real capture timing); each index
+  //     overrides delayMs for that frame.
   //   sampleFac: optional NeuQuant quality/sampling factor (default 10; 1=best/slow, 30=coarse/fast).
   // Returns a complete animated GIF89a (looping forever) as a Uint8Array.
   function encodeGif(frames, opts) {
     var width = opts.width, height = opts.height;
-    var delayCs = Math.max(2, Math.round((opts.delayMs || 100) / 10));
+    function delayCsFor(f) {
+      var ms = opts.delays && opts.delays[f] !== undefined ? opts.delays[f] : opts.delayMs || 100;
+      return Math.max(2, Math.round(ms / 10));
+    }
     var bytes = [];
 
     // Learn one adaptive 256-color global palette from all frames' pixels.
@@ -181,9 +198,9 @@
     bytes.push(0x03, 0x01, 0x00, 0x00, 0x00); // sub-block: loop count 0 (infinite), terminator
 
     for (var f = 0; f < frames.length; f++) {
-      // Graphic Control Extension: disposal=1 (leave in place), no transparency, delay.
+      // Graphic Control Extension: disposal=1 (leave in place), no transparency, per-frame delay.
       bytes.push(0x21, 0xf9, 0x04, 0x04);
-      pushU16LE(bytes, delayCs);
+      pushU16LE(bytes, delayCsFor(f));
       bytes.push(0x00, 0x00); // transparent color index (unused), block terminator
 
       // Image Descriptor: full frame, no local color table.

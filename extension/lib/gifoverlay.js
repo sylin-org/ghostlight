@@ -127,6 +127,26 @@
     };
   }
 
+  // Per-frame GIF delays from real capture timestamps (ADR-0052 D3). Frame i plays for the time
+  // that actually elapsed until frame i+1, clamped to [100, 4000] ms (a stuck clock or an hour-long
+  // pause must not freeze the GIF); the last frame holds 800 + 2000 ms -- the official extension's
+  // end-of-animation viewing pause.
+  var MIN_FRAME_DELAY_MS = 100;
+  var MAX_FRAME_DELAY_MS = 4000;
+  var LAST_FRAME_DELAY_MS = 800 + 2000;
+  function computeFrameDelays(timestamps) {
+    var out = [];
+    for (var i = 0; i < timestamps.length; i++) {
+      if (i + 1 < timestamps.length) {
+        var d = timestamps[i + 1] - timestamps[i];
+        out.push(Math.min(MAX_FRAME_DELAY_MS, Math.max(MIN_FRAME_DELAY_MS, d)));
+      } else {
+        out.push(LAST_FRAME_DELAY_MS);
+      }
+    }
+    return out;
+  }
+
   // Decide WHICH overlays a frame gets, mirroring the reference applyActionIndicators routing:
   //   click/scroll with a coordinate -> ring (+ label near it);
   //   left_click_drag with both coords -> drag path (+ label near the end);
@@ -173,6 +193,7 @@
     labelBox: labelBox,
     progressBarRect: progressBarRect,
     overlayPlan: overlayPlan,
+    computeFrameDelays: computeFrameDelays,
   };
   if (typeof module !== "undefined" && module.exports) {
     module.exports = GhostlightGifoverlay;

@@ -136,6 +136,49 @@ test("round-trips a table-growth gradient frame through an independent decoder",
   assert.deepStrictEqual(indices, expected, "the decoded indices equal the encoder's quantized input indices");
 });
 
+// Walk the GIF block structure and collect each frame's Graphic Control Extension delay (in
+// centiseconds). Structure-aware (skips the GCT, other extensions, and LZW sub-blocks), so a delay
+// byte pattern inside image data cannot be misread.
+function readGceDelaysCs(gif) {
+  let pos = 6;
+  const packed = gif[pos + 4];
+  pos += 7; // logical screen descriptor
+  if (packed & 0x80) pos += 3 * (1 << ((packed & 0x07) + 1)); // global color table
+  const delays = [];
+  for (;;) {
+    const b = gif[pos++];
+    if (b === 0x3b) return delays;
+    if (b === 0x21) {
+      const label = gif[pos++];
+      // GCE sub-block layout at pos: size=0x04, packed, delayLo, delayHi, transparent index.
+      if (label === 0xf9) delays.push(gif[pos + 2] | (gif[pos + 3] << 8));
+      for (let n = gif[pos++]; n !== 0; n = gif[pos++]) pos += n;
+      continue;
+    }
+    if (b === 0x2c) {
+      const lp = gif[pos + 8];
+      pos += 9; // image descriptor
+      if (lp & 0x80) pos += 3 * (1 << ((lp & 0x07) + 1)); // local color table
+      pos++; // LZW minimum code size
+      for (let n = gif[pos++]; n !== 0; n = gif[pos++]) pos += n;
+      continue;
+    }
+    throw new Error("unexpected block 0x" + b.toString(16));
+  }
+}
+
+test("per-frame delays land in each frame's graphic control extension", () => {
+  const f1 = frame(4, 4, () => [255, 0, 0]);
+  const f2 = frame(4, 4, () => [0, 255, 0]);
+  const f3 = frame(4, 4, () => [0, 0, 255]);
+  // ADR-0052 D3: delays[i] overrides delayMs per frame; ms -> centiseconds.
+  const gif = encodeGif([f1, f2, f3], { width: 4, height: 4, delayMs: 100, delays: [250, 100, 2800] });
+  assert.deepStrictEqual(readGceDelaysCs(gif), [25, 10, 280]);
+  // Without delays, the uniform delayMs applies to every frame.
+  const uni = encodeGif([f1, f2], { width: 4, height: 4, delayMs: 500 });
+  assert.deepStrictEqual(readGceDelaysCs(uni), [50, 50]);
+});
+
 test("encodes multiple frames (animation) with a global color table of 256 entries", () => {
   const f1 = frame(4, 4, () => [255, 0, 0]);
   const f2 = frame(4, 4, () => [0, 255, 0]);

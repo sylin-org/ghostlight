@@ -517,8 +517,17 @@ async function encodeRecording(frames, delayMs, options) {
     compositeOverlays(ctx, frame, options, (i + 1) / frames.length);
     rgbaFrames.push(ctx.getImageData(0, 0, w, h).data);
     if (bmp.close) bmp.close();
+    // Yield to the event loop between frames so keepalives and native messaging stay serviced
+    // during a long export (ADR-0052 D3): the encode must never stall the worker into a kill.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  return (self.GhostlightGifenc || GhostlightGifenc).encodeGif(rgbaFrames, { width: w, height: h, delayMs });
+  // Real per-frame timing when every frame carries a capture timestamp (ADR-0052 D3); otherwise the
+  // uniform delayMs fallback.
+  const stamps = frames.map((f) => (typeof f === "object" && f.ts) || 0);
+  const delays = stamps.length > 0 && stamps.every((t) => t > 0)
+    ? (self.GhostlightGifoverlay || GhostlightGifoverlay).computeFrameDelays(stamps)
+    : undefined;
+  return (self.GhostlightGifenc || GhostlightGifenc).encodeGif(rgbaFrames, { width: w, height: h, delayMs, delays });
 }
 // Capture a frame for an active recording on `tabId`, best-effort (no-op when not recording or a
 // screenshot fails). Called after a mutating tool while recording (ADR-0050 D5). `meta` carries the
@@ -532,7 +541,7 @@ async function maybeCaptureGifFrame(tabId, meta) {
     const prev = screenshotCtx.get(tabId);
     const vpW = prev && prev.vpW;
     const shot = await screenshot(tabId);
-    const frame = Object.assign({ base64: shot.base64 }, vpW ? { vpW } : {}, meta || {});
+    const frame = Object.assign({ base64: shot.base64, ts: Date.now() }, vpW ? { vpW } : {}, meta || {});
     self.GhostlightRecbuffer.capture(gifRecordings, tabId, frame);
   } catch (e) {
     /* best-effort: a failed frame never breaks the tool that triggered it */
@@ -1515,7 +1524,7 @@ const handlers = {
           const vpW = prev && prev.vpW;
           const shot = await screenshot(tabId);
           // Seed frame is the initial state -- base64 + viewport width, but no action metadata.
-          seeded = rec.start(gifRecordings, tabId, Object.assign({ base64: shot.base64 }, vpW ? { vpW } : {}));
+          seeded = rec.start(gifRecordings, tabId, Object.assign({ base64: shot.base64, ts: Date.now() }, vpW ? { vpW } : {}));
         } catch (e) {
           rec.start(gifRecordings, tabId);
         }

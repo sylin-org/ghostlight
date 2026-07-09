@@ -83,6 +83,16 @@ test("clickRadii scales the reference radii", () => {
   assert.deepStrictEqual(O.clickRadii(2), { outer: 30, inner: 22, border: 22, lineWidth: 4 });
 });
 
+test("computeFrameDelays clamps real deltas and holds the last frame", () => {
+  // Deltas: 250 kept as-is; 50 clamps up to 100; 7700 clamps down to 4000; the last frame always
+  // plays 800 + 2000 = 2800 ms (the official extension's end-of-animation hold).
+  assert.deepStrictEqual(O.computeFrameDelays([1000, 1250, 1300, 9000]), [250, 100, 4000, 2800]);
+  assert.deepStrictEqual(O.computeFrameDelays([5000]), [2800], "single frame gets the hold");
+  assert.deepStrictEqual(O.computeFrameDelays([]), []);
+  // A non-monotonic clock (negative delta) clamps up to the minimum instead of going backwards.
+  assert.deepStrictEqual(O.computeFrameDelays([2000, 1500]), [100, 2800]);
+});
+
 test("overlayPlan routes each action type to the right overlays", () => {
   // Click -> ring + label near it.
   const click = O.overlayPlan({ type: "left_click", coordinate: [50, 60], description: "left_click" }, {});
