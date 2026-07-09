@@ -190,8 +190,17 @@ fn current_governance(slot: &Arc<Mutex<Arc<Governance>>>) -> Arc<Governance> {
     slot.lock().unwrap_or_else(PoisonError::into_inner).clone()
 }
 
-/// MCP protocol version this server speaks.
-pub const PROTOCOL_VERSION: &str = "2024-11-05";
+/// MCP revisions this server implements, oldest first (ADR-0041 D5; latest bumped to 2025-11-25 by
+/// ADR-0049). The advertised surface uses only features present in ALL of them beyond
+/// capability-gated additions (structuredContent / outputSchema entered 2025-06-18); optional
+/// features are declared via `capabilities`, so claiming a revision never claims its optional
+/// features.
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
+    &["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+
+/// The newest supported revision (ADR-0049): offered when the client requests nothing or something
+/// unknown, per the spec's version-negotiation rule.
+pub const LATEST_PROTOCOL_VERSION: &str = "2025-11-25";
 
 /// The manifest resolved at startup (G12, shared format doc sections 1.2-1.3): `None` manifest
 /// means all-open. G12 itself only feeds a user-supplied manifest's `config` entries into the
@@ -591,10 +600,37 @@ pub(super) async fn handle_line(
     let raw: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!(error = %e, "dropping unparseable JSON-RPC line");
-            return None;
+            // A blank / whitespace-only line is a benign keepalive, never a request: stay silent.
+            if line.trim().is_empty() {
+                return None;
+            }
+            // ADR-0049: a malformed but non-empty frame gets an addressable JSON-RPC parse error
+            // (`id: null`, per the spec, since a broken frame carries no recoverable id) instead
+            // of a silent drop, so a broken client fails fast rather than hanging on a reply that
+            // never arrives.
+            tracing::warn!(error = %e, "replying -32700 to an unparseable JSON-RPC line");
+            return Some(JsonRpcResponse::error(
+                Some(Value::Null),
+                -32700,
+                "Parse error: the line is not valid JSON-RPC 2.0",
+            ));
         }
     };
+
+    // ADR-0049: JSON-RPC batching (a top-level array of messages) was removed from MCP in the
+    // 2025-06-18 revision. Reject a batch frame loudly with a teaching message -- one that points
+    // the model at the two supported ways to do several things -- instead of dropping it silently
+    // (having no id or method, it would otherwise look like a malformed notification and hang the
+    // client waiting for responses that never come).
+    if raw.is_array() {
+        return Some(JsonRpcResponse::error(
+            Some(Value::Null),
+            -32600,
+            "Batching (a JSON-RPC array of requests) is not supported -- MCP removed it in the \
+             2025-06-18 revision. Send one JSON-RPC message per line. To run several browser \
+             actions in a single call, use the `script` tool.",
+        ));
+    }
 
     let is_notification = raw.get("id").is_none();
     let id = raw.get("id").cloned();
@@ -657,9 +693,14 @@ pub(super) async fn handle_line(
                     }
                 }
             });
+            // ADR-0041 D5 / ADR-0049: negotiate the protocol revision from the client's request.
+            let requested = raw
+                .get("params")
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(Value::as_str);
             Some(JsonRpcResponse::success(
                 id,
-                initialize_result(capabilities),
+                initialize_result(requested, capabilities),
             ))
         }
         "tools/list" => Some(JsonRpcResponse::success(id, tools_list_result(governance))),
@@ -746,7 +787,22 @@ fn capture_client_info(governance: &Governance, params: Option<&Value>) {
     }
 }
 
-fn initialize_result(capabilities: &crate::hub::outbound::Registry) -> Value {
+/// Negotiate the MCP protocol revision (the spec's version-negotiation rule): echo the client's
+/// requested revision when this server supports it, else offer the latest supported one and let the
+/// client decide whether to proceed. Pure, so it is the unit-tested seam; `initialize_result` stays
+/// a thin renderer.
+fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
+    SUPPORTED_PROTOCOL_VERSIONS
+        .iter()
+        .find(|v| Some(**v) == requested)
+        .copied()
+        .unwrap_or(LATEST_PROTOCOL_VERSION)
+}
+
+fn initialize_result(
+    requested: Option<&str>,
+    capabilities: &crate::hub::outbound::Registry,
+) -> Value {
     // The capability manifest (ADR-0034 Decision 6): a per-capability section so the model
     // learns the landscape at handshake -- what capabilities exist, what each is for, which
     // tools each owns, and the per-capability guidance. Additive alongside the existing
@@ -773,8 +829,11 @@ fn initialize_result(capabilities: &crate::hub::outbound::Registry) -> Value {
         .collect();
 
     json!({
-        "protocolVersion": PROTOCOL_VERSION,
-        "capabilities": { "tools": {} },
+        "protocolVersion": negotiate_protocol_version(requested),
+        // ADR-0049: advertise tools.listChanged -- the server DOES emit
+        // notifications/tools/list_changed on manifest hot-reload (ADR-0025), so a
+        // capability-strict client must know to expect the notification it will receive.
+        "capabilities": { "tools": { "listChanged": true } },
         "serverInfo": { "name": ghostlight_transport::instance::Instance::resolve().mcp_server_name(), "version": env!("CARGO_PKG_VERSION") },
         // The agent onboarding guide (ADR-0031 Decision 1), composed from each capability's
         // guide (ADR-0034 Decision 6). Today only the browser capability contributes; future
@@ -799,6 +858,27 @@ mod tests {
     use super::*;
     use crate::governance::manifest::document::{Grant, HostRules};
     use crate::governance::ports::Capability;
+
+    /// ADR-0041 D5 / ADR-0049: a supported requested revision is echoed back verbatim.
+    #[test]
+    fn protocol_version_negotiation_echoes_supported() {
+        assert_eq!(negotiate_protocol_version(Some("2024-11-05")), "2024-11-05");
+        assert_eq!(negotiate_protocol_version(Some("2025-03-26")), "2025-03-26");
+        assert_eq!(negotiate_protocol_version(Some("2025-06-18")), "2025-06-18");
+        assert_eq!(negotiate_protocol_version(Some("2025-11-25")), "2025-11-25");
+    }
+
+    /// ADR-0049: an unknown/future revision falls back to the latest supported one.
+    #[test]
+    fn protocol_version_negotiation_offers_latest_for_unknown() {
+        assert_eq!(negotiate_protocol_version(Some("9999-01-01")), "2025-11-25");
+    }
+
+    /// ADR-0049: an absent requested revision falls back to the latest supported one.
+    #[test]
+    fn protocol_version_negotiation_offers_latest_when_absent() {
+        assert_eq!(negotiate_protocol_version(None), "2025-11-25");
+    }
 
     fn grant(allowed: &[Capability]) -> Grant {
         Grant {

@@ -96,6 +96,70 @@ fn drive_with_manifest(manifest: Option<&str>, requests: &[Value]) -> Vec<Value>
     responses
 }
 
+/// Like [`drive`], but sends RAW lines verbatim (so a malformed frame or a JSON-RPC array batch can
+/// be exercised) and reads EXACTLY `expected` responses. The ADR-0049 parse-error / batch rejects
+/// reply with `id: null`, so they cannot be counted by id-presence the way [`drive`] does.
+fn drive_raw(lines: &[&str], expected: usize) -> Vec<Value> {
+    let endpoint = unique_endpoint();
+    let mut service = support::spawn_service_with_manifest(&endpoint, None);
+    let mut adapter = support::spawn_adapter(&endpoint);
+
+    let mut stdin = adapter.stdin.take().expect("adapter stdin");
+    for line in lines {
+        stdin.write_all(line.as_bytes()).unwrap();
+        stdin.write_all(b"\n").unwrap();
+    }
+
+    let stdout = adapter.stdout.take().expect("adapter stdout");
+    let mut reader = BufReader::new(stdout).lines();
+    let mut responses = Vec::with_capacity(expected);
+    for _ in 0..expected {
+        let line = reader
+            .next()
+            .expect("the adapter's stdout closed before every expected reply arrived")
+            .expect("read a stdout line");
+        responses.push(serde_json::from_str(&line).expect("each stdout line is JSON"));
+    }
+
+    drop(stdin);
+    let _ = adapter.wait();
+    let _ = service.kill();
+    let _ = service.wait();
+    responses
+}
+
+/// ADR-0049: a JSON-RPC batch (a top-level array of requests) is rejected with -32600 and a
+/// teaching message (send one per line; use `script` for multi-step), not dropped silently.
+#[test]
+fn batch_array_frame_is_rejected_with_a_teaching_message() {
+    let batch =
+        r#"[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","id":2,"method":"ping"}]"#;
+    let responses = drive_raw(&[batch], 1);
+    let err = &responses[0];
+    assert_eq!(err["id"], Value::Null);
+    assert_eq!(err["error"]["code"], -32600);
+    let msg = err["error"]["message"].as_str().expect("error message");
+    assert!(
+        msg.contains("one JSON-RPC message per line"),
+        "teaches the one-per-line rule: {msg}"
+    );
+    assert!(
+        msg.contains("`script`"),
+        "teaches the script-tool alternative: {msg}"
+    );
+}
+
+/// ADR-0049: an unparseable NON-empty line gets an addressable -32700 (id:null); a blank line is a
+/// benign keepalive that draws NO response. Sending the blank first proves it is silent -- the sole
+/// reply is the malformed line's -32700, not a response to the blank.
+#[test]
+fn parse_error_answers_32700_and_blank_lines_stay_silent() {
+    let responses = drive_raw(&["", "{ this is not valid json"], 1);
+    let err = &responses[0];
+    assert_eq!(err["id"], Value::Null);
+    assert_eq!(err["error"]["code"], -32700);
+}
+
 #[test]
 fn initialize_tools_list_and_tool_call_over_stdio() {
     let responses = drive(&[
@@ -114,7 +178,9 @@ fn initialize_tools_list_and_tool_call_over_stdio() {
 
     let init = &responses[0];
     assert_eq!(init["id"], 1);
-    assert_eq!(init["result"]["protocolVersion"], "2024-11-05");
+    // ADR-0049: with no protocolVersion requested (params:{}), the latest supported is offered.
+    assert_eq!(init["result"]["protocolVersion"], "2025-11-25");
+    assert_eq!(init["result"]["capabilities"]["tools"]["listChanged"], true);
     assert_eq!(init["result"]["serverInfo"]["name"], "ghostlight");
 
     let list = &responses[1];
