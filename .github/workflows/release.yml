@@ -39,6 +39,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Build the deliverable binaries first so the spawn-based integration tests find the sibling
+      # adapter executables (see ci.yml's test job for the full rationale).
+      - run: cargo build --locked --workspace
       # --no-fail-fast: report EVERY failing test binary, not just the first (ADR-0032).
       - run: cargo test --locked --no-fail-fast --workspace
 

@@ -38,6 +38,12 @@ jobs:
         with:
           key: ${{ matrix.os }}
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Build the deliverable binaries FIRST. The integration tests spawn the sibling
+      # `ghostlight-adapter-agent` (and the service) by path; `cargo test` alone builds test
+      # harnesses + CARGO_BIN_EXE_ghostlight but NOT the sibling adapter deliverables, so the
+      # spawn-based tests would panic at spawn (ENOENT). rust-cache had masked this until a
+      # Cargo.lock change rotated the cache. (The e2e-smoke job already does this.)
+      - run: cargo build --locked --workspace
       # --no-fail-fast: report EVERY failing test binary, not just the first (ADR-0032 Context:
       # cargo's default fail-fast masked the true cross-platform scope behind the first failure).
       - run: cargo test --locked --no-fail-fast --workspace
