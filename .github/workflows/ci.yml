@@ -23,6 +23,10 @@ jobs:
           components: rustfmt
       - run: cargo fmt --check
 
+  # FAST TIER (ADR-0051 Phase 4): the default `cargo test` set -- pure, in-process
+  # (support::inproc::Harness drives the real serve_session over a duplex), and quick CLI-command
+  # tests. The ~27 tests that spawn a real service/adapter are marked `#[ignore = "e2e: ..."]` and
+  # run in the separate `e2e` job below, so this job gives quick, spawn-free feedback on every push.
   test:
     strategy:
       fail-fast: false
@@ -38,15 +42,34 @@ jobs:
         with:
           key: ${{ matrix.os }}
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # Build the deliverable binaries FIRST. The integration tests spawn the sibling
-      # `ghostlight-relay` (and the service) by path; `cargo test` alone builds test
-      # harnesses + CARGO_BIN_EXE_ghostlight but NOT the sibling relay deliverable, so the
-      # spawn-based tests would panic at spawn (ENOENT). rust-cache had masked this until a
-      # Cargo.lock change rotated the cache. (The e2e-smoke job already does this.)
+      # Build the deliverable binaries FIRST. Some tests still spawn the sibling `ghostlight`
+      # /`ghostlight-relay` by path (the CLI-command tests here, and every test in the e2e job);
+      # `cargo test` alone builds test harnesses + CARGO_BIN_EXE_ghostlight but NOT the sibling
+      # relay deliverable, so those would panic at spawn (ENOENT). rust-cache had masked this until
+      # a Cargo.lock change rotated the cache.
       - run: cargo build --locked --workspace
-      # --no-fail-fast: report EVERY failing test binary, not just the first (ADR-0032 Context:
-      # cargo's default fail-fast masked the true cross-platform scope behind the first failure).
+      # Default filter SKIPS the `#[ignore]`d spawn tests -- those run in the e2e job.
+      # --no-fail-fast: report EVERY failing test binary, not just the first (ADR-0032).
       - run: cargo test --locked --no-fail-fast --workspace
+
+  # E2E TIER (ADR-0051 Phase 4): the ~27 `#[ignore = "e2e: ..."]` tests that spawn a real
+  # `ghostlight` service + thin adapter (or the CLI) end to end. Separated from the fast `test` job
+  # so their spawn/stdio/exe-lock slowness never delays every-push feedback, but STILL REQUIRED --
+  # this job must pass. `-- --ignored` runs ONLY the ignored set.
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-e2e
+      - run: cargo build --locked --workspace
+      - run: cargo test --locked --no-fail-fast --workspace -- --ignored
 
   extension-unit:
     strategy:

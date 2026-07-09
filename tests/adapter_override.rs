@@ -180,6 +180,7 @@ fn spawn_reader(stdout: std::process::ChildStdout) -> Receiver<String> {
 /// ADR-0048 D3: with BOTH candidates live, an unpinned adapter connects to the FIRST (the dev
 /// slot); when that service dies, the reconnect episode fails over to the SECOND (the default
 /// slot) without a client reload -- and the debug events record both resolutions.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn unpinned_adapter_prefers_the_first_candidate_and_fails_over() {
     let (ep_a, ep_b, inst_a, inst_b, log_dir) = unique();
@@ -265,6 +266,7 @@ fn unpinned_adapter_prefers_the_first_candidate_and_fails_over() {
 
 /// ADR-0048 D3: when the FIRST candidate is absent, an unpinned adapter falls back to the
 /// SECOND on the fast path (an absent pipe fails the dial instantly; no retry window burned).
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn unpinned_adapter_falls_back_when_the_first_candidate_is_absent() {
     let (ep_a, ep_b, _inst_a, inst_b, log_dir) = unique();

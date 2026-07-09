@@ -113,6 +113,7 @@ async fn two_sessions_route_replies_independently() {
 /// `register_session_kill_hook` on the ONE shared `Browser`; a single `session_killed` frame must
 /// produce exactly three records, none cross-written, each with the 6-key `SessionEventRecord`
 /// order transcribed verbatim from ADR-0030 "Preserved invariants".
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[tokio::test]
 async fn one_kill_emits_one_audit_record_per_live_session() {
     let names = ["client-a", "client-b", "client-c"];
@@ -210,6 +211,7 @@ async fn one_kill_emits_one_audit_record_per_live_session() {
 /// `ghostlight service` (`support::spawn_service`) instead of a bare invocation (H6's argv dispatch
 /// makes a bare invocation ALWAYS the thin ADAPTER, never a role election); no fake extension is
 /// needed since `initialize` never calls the browser.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn adapter_endpoint_two_phase_wire_round_trips() {
     let endpoint = format!(

@@ -16,6 +16,7 @@ mod support;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn native_host_exits_when_server_dies() {
     let endpoint = format!("ghostlight-peerdeath-{}", std::process::id());

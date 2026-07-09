@@ -172,6 +172,7 @@ fn poll_tools_list_until(
 /// second with `manifest: null`), and a `tools/call` issued after the swap still carries the
 /// `initialize` request's own `clientInfo` on its audit record (client identity survives the
 /// swap, ADR-0025 Decision 2).
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn org_policy_hot_swap_end_to_end() {
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);

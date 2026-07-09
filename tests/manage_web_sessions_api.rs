@@ -42,6 +42,7 @@ fn body(response: &str) -> &str {
 /// with NO fake extension attached, since `check_tab_ownership`'s `claim_tab` gate runs
 /// synchronously BEFORE any dispatch to the browser (`src/transport/mcp/server.rs`); the
 /// underlying tool call itself is never awaited or read back here.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn sessions_api_reports_a_live_adapter_session_with_truncated_guid() {
     let endpoint = format!(

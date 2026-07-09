@@ -136,6 +136,7 @@ fn file_upload_is_all_open_allowed_and_classifies_write() {
 /// spawn choreography, BOOTSTRAP "only delight is sacred"): drives the standalone SERVICE + thin
 /// ADAPTER topology. Every assertion below is verbatim -- the redaction wiring is the invariant;
 /// only WHICH two processes are spawned changed.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn read_page_redaction_is_still_wired_at_the_chokepoint() {
     let endpoint = format!(

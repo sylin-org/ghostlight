@@ -50,6 +50,7 @@ fn read_line<R: BufRead>(reader: &mut R) -> Value {
 /// The core completion-criteria scenario, driven through the real standalone-service +
 /// two-thin-adapter topology (H6), with ONE fake extension standing in for Chrome on the ONE
 /// physical extension link both sessions multiplex over.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn two_real_adapters_multiplex_get_own_tab_groups_and_share_one_kill() {
     let endpoint = format!(

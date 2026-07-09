@@ -143,6 +143,7 @@ fn no_manifest_sources_yields_all_open() {
 /// copy directions, so an early stdin close could tear the relay down before a still-in-flight
 /// reply is delivered -- moot here (both replies are synchronous), but consistent and safe.
 #[cfg(windows)]
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn org_policy_file_with_config_boots_the_server() {
     use std::io::{BufRead, BufReader, Write};

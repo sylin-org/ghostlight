@@ -56,6 +56,7 @@ fn header_value<'a>(response: &'a str, name: &str) -> Option<&'a str> {
         .map(|(_, v)| v.trim())
 }
 
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn console_index_page_is_served_over_a_real_http_get() {
     let endpoint = format!(
@@ -85,6 +86,7 @@ fn console_index_page_is_served_over_a_real_http_get() {
     let _ = service.wait();
 }
 
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn console_css_and_js_are_served_with_correct_content_type() {
     let endpoint = format!(
@@ -112,6 +114,7 @@ fn console_css_and_js_are_served_with_correct_content_type() {
     let _ = service.wait();
 }
 
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn unknown_path_under_api_v1_is_404() {
     // PINS.md CS1's fallback scope is EXACTLY "/" or under "/api/v1/**" (CS1.1's own example is
@@ -140,6 +143,7 @@ fn unknown_path_under_api_v1_is_404() {
     let _ = service.wait();
 }
 
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn wrong_method_on_a_known_path_is_405() {
     let endpoint = format!(
@@ -157,6 +161,7 @@ fn wrong_method_on_a_known_path_is_405() {
     let _ = service.wait();
 }
 
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn a_real_ws_upgrade_request_is_unaffected() {
     let endpoint = format!(

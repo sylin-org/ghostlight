@@ -124,6 +124,7 @@ fn recv(rx: &Receiver<String>, within: Duration) -> Value {
     }
 }
 
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn adapter_reconnects_across_a_service_restart_without_a_client_reload() {
     let (endpoint, instance, log_dir) = unique();
@@ -238,6 +239,7 @@ fn adapter_reconnects_across_a_service_restart_without_a_client_reload() {
     let _ = std::fs::remove_dir_all(&log_dir);
 }
 
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn adapter_survives_a_five_second_service_gap() {
     // Identical to the restart test above, but with a 5-second gap between kill and respawn --

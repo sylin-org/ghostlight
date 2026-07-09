@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 /// the ADAPTER that spawned no one (it is not this process's child in any OS-job sense, but it IS
 /// the "spawning client" from the service's point of view) and confirm the SERVICE process is
 /// still alive shortly after -- well within `IDLE_GRACE` (30s, PINS.md SS5.4).
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn service_survives_the_spawning_adapter_exit() {
     let endpoint = format!("ghostlight-hub-lifecycle-survive-{}", std::process::id());
@@ -68,6 +69,7 @@ fn service_survives_the_spawning_adapter_exit() {
 /// proof (PINS.md SS5.3's "missing/unreadable key" failure mode collapses to the SAME refusal as
 /// a genuine cross-install mismatch). The adapter must abort past the handshake, never relay, and
 /// surface the PINNED refusal text.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn adapter_cannot_complete_handshake_with_an_impostor_service() {
     let endpoint = format!("ghostlight-hub-lifecycle-impostor-{}", std::process::id());

@@ -74,17 +74,27 @@ impact). Each sub-step leaves a green tree and its own commit.
   test genuinely-external surfaces. Bending them onto the fixture would fabricate an in-process
   router / test a different thing and LOSE coverage. They are reclassified into the P4.3 quarantine
   tier, not migrated.
-- P4.3 NOT STARTED (the well-scoped next step). DECIDED mechanism for the CI tier split: because
-  `tool_enforcement` and `mcp_protocol` are now MIXED files (mostly in-process + one spawn test each),
-  a by-file split is wrong; annotate each remaining SPAWN test with
-  `#[ignore = "e2e: spawns a real service; run in the e2e tier"]`, then `ci.yml`'s fast job runs
-  `cargo test --workspace` (skips ignored) and a separate still-required `e2e` job runs
-  `cargo test --workspace -- --ignored`. This also makes local `cargo test` fast-by-default;
-  `--include-ignored` runs everything. Sweep is broad (~30-40 spawn tests across the tree) so do it
-  focused. THEN fold former-P1.3 (structured observability): add mint-once / reconnect-count /
-  resolved-candidate-index fields to the debug snapshot in `crates/transport/src/observability.rs`
-  and switch `adapter_reconnect` / `adapter_override` off their debug-LOG-TEXT scrapes -- this is
-  polish on tests that already PASS, not load-bearing.
+- P4.3a DONE (CI tier split): the discriminator is "spawns a real SERVICE/ADAPTER" (the slow,
+  exe-lock-prone, stdio-relay tests) = the `spawn_service*`/`spawn_adapter` set -- 27 tests across 15
+  files, each marked `#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e
+  tier -- cargo test -- --ignored"]`. The MIXED files got only their spawn test(s) tagged
+  (all_open_golden 1, hub_lifecycle 2, hub_multiplex 2, manifest_validation 1, mcp_protocol 1,
+  tool_enforcement 1); the rest are whole-file. NOTE the CLI-command tests (policy_*, bare_invocation,
+  install_instance plan tests) spawn only a one-shot `ghostlight` CLI that exits immediately -- fast
+  and reliable, so they STAY in the fast tier (not ignored). `ci.yml`: the `test` job runs
+  `cargo test --workspace` (skips ignored, spawn-free feedback on every push) + a new still-required
+  `e2e` job runs `... -- --ignored`; both across the 3-OS matrix. `scripts/test-e2e.{sh,ps1}` now run
+  `-- --include-ignored` (the FULL local pass). Verified: fast tier green with exactly 27 ignored
+  (44/44 binaries); e2e tier (`-- --ignored`) green.
+- P4.3b NOT STARTED (the remaining focused follow-up; polish on PASSING tests, not load-bearing):
+  fold former-P1.3 structured observability. `adapter_reconnect` / `adapter_override` currently scrape
+  the debug-EVENTS log text (`observability.rs` Event.summary: "session identity minted (stable for
+  this adapter process)", "service restart detected; reconnected", "override resolution: connected to
+  candidate N/M"). Replace with STRUCTURED debug-STATE fields on the `Snapshot` (mint-once bool /
+  reconnect counter / resolved-candidate index) that the relay updates alongside the event, and have
+  the two tests read them via `support::newest_state` + JSON field access. Spans transport
+  observability + the relay reconnect/override emit sites + the 2 (slow, spawn) tests -- do it focused
+  with its own verify cycle.
 
 ## Guardrails
 

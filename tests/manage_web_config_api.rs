@@ -49,6 +49,7 @@ fn body(response: &str) -> &str {
 /// default for an arbitrary pre-existing key would be fragile on a machine with its own real
 /// Ghostlight configuration. Registry key COUNT and ORDER come straight from the live registry
 /// itself (`ghostlight::governance::config::KEYS`), never a hardcoded guess.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn config_api_returns_every_registered_key_in_registry_order() {
     let endpoint = format!(
@@ -103,6 +104,7 @@ fn config_api_returns_every_registered_key_in_registry_order() {
 /// PINS.md CS1.3: `/api/v1/config` is gated by the SAME `inbound.web.from` decision every
 /// other Console route uses -- a source outside the default `["localhost"]` allowlist (forced via
 /// an `Origin` header naming a non-loopback host) is refused with the SAME 403 shape.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn config_api_is_refused_when_inbound_web_from_denies_the_source() {
     let endpoint = format!(

@@ -314,6 +314,7 @@ async fn malformed_method_and_null_id_follow_jsonrpc_rules() {
 /// endpoint the SERVICE owns, then answers the one framed tool_request. This late-connect timing
 /// (and the resulting truthful "(waited Ns ...)" note) is exactly what the in-process
 /// attach-then-drive fixture cannot reproduce, so it keeps the spawn-a-service pattern.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn tools_call_waits_for_a_late_extension_and_notes_the_wait() {
     let endpoint = unique_endpoint();

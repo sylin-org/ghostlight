@@ -49,6 +49,7 @@ const ROUTE: &str = "/api/v1/config/inbound-web-enable-remote";
 /// PINS.md CS5: a successful write returns the pinned `key`/`value`/`note` literals, and the
 /// isolated user config file (never the real machine path) actually contains
 /// `inbound.web.from: ["*"]` afterward.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn enable_remote_writes_the_pinned_value() {
     let pid = std::process::id();
@@ -93,6 +94,7 @@ fn enable_remote_writes_the_pinned_value() {
 // `manifest_validation::org_policy_file_with_config_boots_the_server` and the whole
 // `hot_reload` module. The config_changed audit path itself is platform-independent.
 #[cfg(windows)]
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn enable_remote_records_one_config_changed_event() {
     let pid = std::process::id();
@@ -173,6 +175,7 @@ fn enable_remote_records_one_config_changed_event() {
 // The lock-refusal logic (config `set` vs a mandatory layer) is exercised platform-independently
 // by the `governance::config` unit tests.
 #[cfg(windows)]
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn enable_remote_refuses_cleanly_under_an_org_mandatory_lock() {
     let pid = std::process::id();
@@ -233,6 +236,7 @@ fn enable_remote_refuses_cleanly_under_an_org_mandatory_lock() {
 
 /// PINS.md CS5: the request body is NEVER read or honored -- the written value is always the
 /// ONE pinned literal, never whatever the caller sends.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn enable_remote_ignores_the_request_body() {
     let pid = std::process::id();

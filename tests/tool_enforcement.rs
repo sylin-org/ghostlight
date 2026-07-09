@@ -509,6 +509,7 @@ async fn form_fill_denied_upfront_under_write_deny() {
 /// (`Governance::all_open`). The in-process harness deliberately does not override that env var
 /// (it is process-global and would race every parallel in-process test in this binary), so this
 /// one case keeps the spawn-a-service pattern.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
 #[test]
 fn form_fill_without_extension_fails_with_parent_audit() {
     let pid = std::process::id();
