@@ -5,16 +5,14 @@ task (or block); this file is the single source of truth for batch progress.
 
 ## RESUME HERE
 
-Next task: **T2** (`T2-browser-adapter-resolution.md`). T1 landed at code commit `e80bec9`
-(base was the bundle-introducing docs commit on dev; source anchors verified at its parent,
-3928a74).
+Next task: **T3** (`T3-extension-single-host.md`). T1 landed at `e80bec9`, T2 at `ababf4a`.
 
 ## Task table
 
 | Task | Status | Code commit | Notes |
 |---|---|---|---|
 | T1 agent override resolution | done | e80bec9 | V-ALL green; adapter_override + adapter_reconnect both pass |
-| T2 browser adapter resolution | pending | - | |
+| T2 browser adapter resolution | done | ababf4a | V-ALL green; transport tests 64 -> 66 (two pick_native_host tests) |
 | T3 extension single host | pending | - | |
 | T4 installer unified surface | pending | - | |
 | T5 doctor + docs + changelog | pending | - | |
@@ -57,3 +55,24 @@ Deviations:
    printed on a single line -- the `relay_adapter` `connect_and_handshake(...)` call and the
    `relay_with_watchdog` signature -- to multi-line because they exceed the 100-column width. No
    semantic change; `cargo fmt --check` is green.
+
+### T2 -- browser-adapter candidate resolution (ADR-0048 D4)
+
+Code commit: `ababf4a`. STOP preconditions all passed (no pre-existing pick_native_host_endpoint;
+relay_native_host's first body line was `let stream = connect(endpoint).await?;`; T1's
+endpoint_candidates present). Files staged (exactly the two owned): crates/transport/src/ipc.rs,
+crates/adapter-browser/src/main.rs.
+
+Verification (all green, in the task's order):
+- cargo fmt --check: clean
+- cargo clippy --workspace --all-targets -- -D warnings: clean
+- cargo build --workspace: ok
+- cargo test -p ghostlight-transport: 66 passed (the two new pick_native_host_endpoint tests:
+  prefers-the-first-present-candidate, falls-to-the-last-when-all-are-absent)
+- cargo test --workspace: every test binary reported 0 failed
+- cargo check --target x86_64-unknown-linux-gnu --workspace --all-targets: ok
+
+Deviations:
+1. The `relay_native_host` doc paragraph PINS specifies ("APPEND this paragraph to its doc
+   comment") was added as a new trailing `///` paragraph (a blank `///` separator then the three
+   lines), matching the same rendering choice logged for T1. Semantics identical.
