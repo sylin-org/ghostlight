@@ -5,8 +5,9 @@ task (or when marking BLOCKED). A human reads RESUME HERE to pick up.
 
 ## RESUME HERE
 
-- Status: T1 + T2 + T3 + T4-Phase-1 DONE. Next task: **T5 -- re-baseline + retire reference/**
-  (independent of T4 per ADR-0050 D6; lower-risk). T4 Phase 2 (drag-drop GIF export) is DEFERRED.
+- Status: **BATCH COMPLETE** -- T1 + T2 + T3 + T4-Phase-1 + T5 all DONE. The only remaining item is
+  T4 Phase 2 (coordinate drag-drop GIF export), explicitly DEFERRED (see the T4 entry). Advertised
+  count 21; the official v1.0.80 extension is the sole reference.
 - Base commit for the batch: `d52e0df`. T2 = `72f9b8a`, T3 = `b9b5dbb`, T4 = (this commit).
 - Advertised tool count is now **21** (`file_upload`, `browser_batch`, `upload_image`, `gif_creator`,
   then `explain`); `total_variants == 37`, `with_action_key == 3`. Before T5, re-read the tree.
@@ -211,11 +212,37 @@ task (or when marking BLOCKED). A human reads RESUME HERE to pick up.
   richer color quantization; overlays (click cues/labels/watermark/progress).**
 
 ### T5 -- 13-tool re-baseline vs 1.0.80 + retire reference/
-- Status: pending
-- Commit(s):
-- V-ALL:
-- Deviations:
-- Notes:
+- Status: DONE (Half A + Half B; two commits).
+- Commit(s): Half A `fc2ed64`; Half B (this commit).
+- V-ALL: pass. fmt --check + core lib 487 + the description-sensitive integration guards
+  (tool_schema_fidelity, all_open_golden, tool_advertisement, mcp_protocol) all green. Half B is a
+  DESCRIPTION-ONLY change (no e2e/spawn assertion touches trained descriptions), so it cannot affect
+  the e2e tier (already 44/44 at T4). No non-test file references `reference/open-claude-in-chrome`.
+- Deviations / notes:
+  * Half A: the repo tracked ONLY `reference/ANALYSIS.md` (the open-claude-in-chrome clone was
+    local/untracked -- likely gitignored), so `git rm` was just ANALYSIS.md. One code comment cited
+    it (`crates/transport/src/host.rs`) -- a prose pointer, not a code dep; repointed at docs/research/12
+    + ADR-0050 D1. SPEC.md had TWO upload_image exclusions: section-4-ish (line ~206, already annotated
+    superseded) + section-10 (line ~590, annotated now). Historical Implementation-Phases / Repository-
+    Structure prose left as-is (the CLAUDE.md preamble already labels it historical, and A5 fences it).
+  * Half B re-harvested the 13 official schemas from the ON-DISK v1.0.80
+    (`.../Extensions/fcoeoabgfenejglbffodgkkbkcdhcgfn/1.0.80_0/assets/mcpPermissions-DCTt63hZ.js`,
+    `name:"<tool>",description:...,parameters:...`). APPLIED 3 DESCRIPTION-ONLY deltas, each also
+    fixing an inaccuracy (our impl already does the v1.0.80 behavior; only the prose lagged):
+      - `form_input`: "the read_page tool" -> "the read_page or find tools" (desc + `ref` param).
+      - `get_page_text`: over-limit prose "you will receive an error suggesting alternatives" ->
+        "truncated with a note giving the full size" (content.js:441 already TRUNCATES, never errored).
+      - `read_page`: over-limit prose "you will receive an error asking..." -> "truncated at a line
+        boundary with a note giving the full size; pass a larger max_chars, or use depth/ref_id to
+        focus" + the official's richer optional-filter sentence (content.js:381 already TRUNCATES with
+        a "[showing X of Y elements...]" note).
+    VERIFIED NO delta needed (already matches v1.0.80) for: navigate (`force` desc verbatim),
+    computer (action enum order + duration max 10), javascript_tool (`action`="Must be set to
+    'javascript_exec'", no const; REPL `text`), get_page_text `max_chars`, tabs_context_mcp/
+    tabs_create_mcp/find/read_console_messages/read_network_requests/resize_window/update_plan descs.
+    NO NEVER-list touch: zero renames, zero removals, zero type changes -- `EXPECTED_TRAINED` untouched.
+    The whole doc-12 section-A checklist is now either confirmed-applied or the over-limit-message
+    items updated here.
 
 ## Deviation index (cross-task, for the next-batch review)
 
