@@ -19,7 +19,11 @@
 // this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
 // ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
 
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/gifenc.js", "lib/recbuffer.js");
+
+// gif_creator recording state (ADR-0050 Decision 5): a bounded per-tab frame store (lib/recbuffer.js);
+// the encoder is lib/gifenc.js. Both are pure + unit-tested; this worker owns capture + export.
+const gifRecordings = self.GhostlightRecbuffer.createStore();
 
 // Operational tunables (lib/constants.js), destructured once for use throughout this worker.
 const {
@@ -397,6 +401,36 @@ function base64FromBytes(bytes) {
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   return btoa(bin);
+}
+// gif_creator (ADR-0050 D5): decode the captured JPEG frames to RGBA at the first frame's
+// dimensions (via OffscreenCanvas) and encode them into an animated GIF (lib/gifenc.js).
+async function encodeRecording(base64Frames, delayMs) {
+  const first = await createImageBitmap(new Blob([bytesFromBase64(base64Frames[0])], { type: "image/jpeg" }));
+  const w = first.width, h = first.height;
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const rgbaFrames = [];
+  for (let i = 0; i < base64Frames.length; i++) {
+    const bmp = i === 0 ? first
+      : await createImageBitmap(new Blob([bytesFromBase64(base64Frames[i])], { type: "image/jpeg" }));
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    rgbaFrames.push(ctx.getImageData(0, 0, w, h).data);
+    if (bmp.close) bmp.close();
+  }
+  return (self.GhostlightGifenc || GhostlightGifenc).encodeGif(rgbaFrames, { width: w, height: h, delayMs });
+}
+// Capture a frame for an active recording on `tabId`, best-effort (no-op when not recording or a
+// screenshot fails). Called after a mutating tool while recording (ADR-0050 D5, Phase 1).
+async function maybeCaptureGifFrame(tabId) {
+  const entry = gifRecordings.byTab.get(tabId);
+  if (!entry || !entry.active) return;
+  try {
+    const shot = await screenshot(tabId);
+    self.GhostlightRecbuffer.capture(gifRecordings, tabId, shot.base64);
+  } catch (e) {
+    /* best-effort: a failed frame never breaks the tool that triggered it */
+  }
 }
 async function encodeJpeg(bitmap, w, h, quality) {
   const canvas = new OffscreenCanvas(w, h);
@@ -1351,6 +1385,53 @@ const handlers = {
       return text(r.result.output);
     });
   },
+  // gif_creator (ADR-0050 Decision 5) -- Phase 1: record frames, encode + export the GIF (download).
+  // Phase 2 (coordinate drag-drop) is deferred (see the T4 LEDGER entry). Frames are captured on
+  // start and after each computer/navigate while recording (maybeCaptureGifFrame).
+  async gif_creator(a) {
+    const tabId = await effectiveTabId(a.tabId);
+    const rec = self.GhostlightRecbuffer;
+    switch (a.action) {
+      case "start_recording": {
+        let seeded = 0;
+        try {
+          const shot = await screenshot(tabId);
+          seeded = rec.start(gifRecordings, tabId, shot.base64);
+        } catch (e) {
+          rec.start(gifRecordings, tabId);
+        }
+        return text("Recording started (" + seeded + " frame(s) captured). Perform actions, then stop_recording and export with download:true.");
+      }
+      case "stop_recording": {
+        const n = rec.stop(gifRecordings, tabId);
+        if (n < 0) return text("No active recording for this tab.");
+        return text("Recording stopped; " + n + " frame(s) kept. Use export with download:true to get the GIF.");
+      }
+      case "clear": {
+        rec.clear(gifRecordings, tabId);
+        return text("Recording cleared.");
+      }
+      case "export": {
+        const frames = rec.frames(gifRecordings, tabId);
+        if (frames.length === 0) return text("No frames to export. Start a recording first with action=start_recording.");
+        if (a.coordinate) {
+          return text("Drag-drop export at a coordinate is not yet supported (Phase 2). Provide download:true to get the GIF file instead.");
+        }
+        if (a.download === true) {
+          const gif = await encodeRecording(frames, 500);
+          return {
+            content: [
+              { type: "text", text: "Exported an animated GIF: " + frames.length + " frame(s), " + Math.round(gif.length / 1024) + " KB." },
+              { type: "image", data: base64FromBytes(gif), mimeType: "image/gif" },
+            ],
+          };
+        }
+        return text("export not yet supported: provide download:true, or a coordinate (Phase 2).");
+      }
+      default:
+        return text("Unknown gif_creator action: " + a.action + ".");
+    }
+  },
   async wait_for(a) {
     // Defaults (ADR-0037 D1/D6): settle ON, state visible, timeout 10s, min 0.
     const state = a.state || "visible";
@@ -1525,6 +1606,15 @@ async function dispatch(id, tool, args, guid) {
   if (!handler) return fail(id, `Unknown tool: ${tool}`);
   try {
     reply(id, await handler(args, guid));
+    // gif_creator (ADR-0050 D5): after a mutating tool while a recording is active, capture a frame
+    // (best-effort, after the reply is already sent, so it never delays or fails the tool response).
+    if (tool === "computer" || tool === "navigate") {
+      try {
+        await maybeCaptureGifFrame(await effectiveTabId(args.tabId));
+      } catch (e) {
+        /* best-effort frame capture */
+      }
+    }
   } catch (e) {
     if (e instanceof TabAccessError) return reply(id, text(e.message));
     // Hop-tagged errors (cdp/page) pass through as-is; untagged errors keep the tool-name prefix.

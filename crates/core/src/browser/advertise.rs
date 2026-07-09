@@ -135,6 +135,7 @@ mod tests {
                 "wait_for",
                 "script",
                 "browser_batch",
+                "gif_creator",
                 "explain",
             ]
         );
@@ -157,6 +158,7 @@ mod tests {
                 "update_plan",
                 "script",
                 "browser_batch",
+                "gif_creator",
                 "explain",
             ]
         );

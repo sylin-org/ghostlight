@@ -59,6 +59,7 @@ async fn read_only_manifest_advertises_everything_except_write_and_execute_tools
             "wait_for",
             "script",
             "browser_batch",
+            "gif_creator",
             "explain",
         ]
     );
@@ -97,6 +98,7 @@ async fn empty_grants_manifest_advertises_exactly_the_requires_empty_set() {
             "update_plan",
             "script",
             "browser_batch",
+            "gif_creator",
             "explain",
         ]
     );

@@ -5,11 +5,11 @@ task (or when marking BLOCKED). A human reads RESUME HERE to pick up.
 
 ## RESUME HERE
 
-- Status: T1 + T2 + T3 DONE. Next task: **T4 -- gif_creator** (the LARGEST; phased).
-- Base commit for the batch: `d52e0df`. T2 = `72f9b8a`, T3 = `b9b5dbb`.
-- Advertised tool count is now **20** (`file_upload`, `browser_batch`, `upload_image`, then `explain`).
-  `tests/tool_schema_fidelity.rs` pins `names[16..=19] == file_upload, browser_batch, upload_image,
-  explain`. Before T4, re-read the tree.
+- Status: T1 + T2 + T3 + T4-Phase-1 DONE. Next task: **T5 -- re-baseline + retire reference/**
+  (independent of T4 per ADR-0050 D6; lower-risk). T4 Phase 2 (drag-drop GIF export) is DEFERRED.
+- Base commit for the batch: `d52e0df`. T2 = `72f9b8a`, T3 = `b9b5dbb`, T4 = (this commit).
+- Advertised tool count is now **21** (`file_upload`, `browser_batch`, `upload_image`, `gif_creator`,
+  then `explain`); `total_variants == 37`, `with_action_key == 3`. Before T5, re-read the tree.
 - **T4 PRE-FLIGHT FINDINGS (2026-07-09, before starting T4):**
   - **Part A schema source is GONE:** `scratchpad/harvest/HARVEST-1.0.80.md` (the ephemeral harvest
     that pinned gif_creator's description + params) no longer exists (a prior session's scratchpad).
@@ -171,11 +171,44 @@ task (or when marking BLOCKED). A human reads RESUME HERE to pick up.
   trailing imageId text block, ADR-0050 D4's one sanctioned trained-output change).
 
 ### T4 -- gif_creator (phased; Phase 1 floor)
-- Status: pending
-- Commit(s):
-- V-ALL:
+- Status: PHASE 1 DONE (Phase 2 drag-drop DEFERRED). One commit.
+- Commit(s): (filled at commit)
+- V-ALL: pass (isolated CARGO_TARGET_DIR). fmt --check + clippy --all-targets -D warnings clean;
+  core lib 487; extension node --test 12/12 (incl. the new gifenc 4 + recbuffer 4); full workspace
+  `cargo test -- --include-ignored --test-threads=1` = all binaries green (incl. e2e tier with
+  gif_creator's 4 variants in every advertised set).
 - Deviations:
-- Notes:
+  1. Part A schema: the harvest note is gone, but the official schema was RE-EXTRACTED VERBATIM from
+     the installed official extension (`.../Extensions/fcoeoabgfenejglbffodgkkbkcdhcgfn/1.0.80_0/
+     assets/mcpPermissions-DCTt63hZ.js`, `name:"gif_creator"`) -- the prompt's preferred fallback.
+     Initially reconstructed by hand, then corrected to the verbatim official description + parameter
+     text after the owner flagged that "approximate" was a shortcut when the real schema was on disk.
+     Structural bits (`enum`/`required`/`additionalProperties`) follow our house JSON-Schema style
+     (official uses Anthropic's `parameters` format). The official `options` is an open object there
+     too. NOTE for T5: the SAME on-disk file is the reference for re-baselining the 13 trained schemas.
+  2. `export` classified `[Write]` per the T4 prompt Part B (NOT ADR-0050 D5's "Read"): the variant
+     system keys on `action`, not the `download` flag, and Phase-2 coordinate export IS a page write,
+     so over-classifying download-export as Write is the fail-closed direction. `EXPECTED` pins it.
+  3. Re-pin: the mcp_protocol / hub-outbound / tool_enforcement count asserts DERIVE (untouched). Hand-
+     edited: directory.rs (REGISTRY + EXPECTED 4 rows + EXPECTED_TOOLS + total_variants 33->37 +
+     with_action_key 2->3 + the "exactly one variant" exemption + doc counts 21), tool_schema_fidelity,
+     all_open_golden, pipeline.rs's 4 gif_creator explain lines (prompt-omitted, oracle taken from the
+     failing test's real-formatter output), AND every advertised-SET golden -- gif_creator has
+     `[]`-requiring variants (stop/clear) so it is advertised under EVERY grant, like computer
+     (advertise.rs x2, tool_advertisement x2, hot_reload x2, manifest_validation, all_open_golden).
+  4. Test strengthened beyond the prompt's header-only oracle: `gifenc.test.js` pins a hand-computed
+     exact-LZW oracle for a 2x2 frame AND round-trips a 32x32 table-growth frame through an INDEPENDENT
+     GIF LZW decoder -- which caught the classic code-size-bump off-by-one during development (the
+     encoder follows the Poskanzer/giflib rule; the decoder lags one entry). Header-only would have
+     shipped a corrupt-but-valid-header encoder silently.
+- Notes: encoder = `extension/lib/gifenc.js` (vendored ASCII, MIT; fixed 3-3-2 uniform 256-color
+  palette -- a coarse but always-valid FLOOR; richer quantization + overlays DEFERRED). Recording
+  buffer = `extension/lib/recbuffer.js` (pure, bounded N=100, per-tab). Both loaded via the service
+  worker's `importScripts`; the `gif_creator` handler (record/stop/clear/export-download) + a
+  `maybeCaptureGifFrame` hook after computer/navigate live in service-worker.js; export decodes the
+  JPEG frames to RGBA via OffscreenCanvas and returns the GIF as an `image/gif` content block.
+  **DEFERRED to Phase 2: `export` with `coordinate` (drag-drop the GIF via T3's setImage DragEvent);
+  richer color quantization; overlays (click cues/labels/watermark/progress).**
 
 ### T5 -- 13-tool re-baseline vs 1.0.80 + retire reference/
 - Status: pending

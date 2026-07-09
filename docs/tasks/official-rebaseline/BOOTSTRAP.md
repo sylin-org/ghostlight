@@ -89,7 +89,7 @@ Do them IN ORDER. Do not start T<n+1> until T<n> is committed with a green tree.
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo build --locked --workspace
     cargo test --locked --no-fail-fast --workspace
-    node --test tests/extension/constants.test.js tests/extension/geometry.test.js tests/extension/grouping.test.js tests/extension/keys.test.js tests/extension/settle.test.js tests/extension/observation.test.js tests/extension/treediff.test.js tests/extension/fileset.test.js
+    node --test tests/extension/constants.test.js tests/extension/geometry.test.js tests/extension/grouping.test.js tests/extension/keys.test.js tests/extension/settle.test.js tests/extension/observation.test.js tests/extension/treediff.test.js tests/extension/fileset.test.js tests/extension/gifenc.test.js tests/extension/recbuffer.test.js
 
 (If a task adds an extension unit test file, the prompt adds it to the `node --test` line.)
 Note the known-flaky macOS-only `peer_death` connection race and the quarantined `e2e-smoke` job are

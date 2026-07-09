@@ -257,6 +257,7 @@ fn org_policy_hot_swap_end_to_end() {
         "wait_for",
         "script",
         "browser_batch",
+        "gif_creator",
         "explain",
     ];
     assert_eq!(tool_names(&list_resp), governed_read_only);
@@ -293,6 +294,7 @@ fn org_policy_hot_swap_end_to_end() {
         "browser_batch",
         // ADR-0050 D4: upload_image requires [write], a subset of this grant, so it unlocks here.
         "upload_image",
+        "gif_creator",
         "explain",
     ];
     let mut next_id = 3i64;

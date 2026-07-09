@@ -2000,6 +2000,13 @@ mod tests {
              each item is name+input, authorized per item.",
             "upload_image: requires write. Upload a previously captured screenshot to a file \
              input (ref) or drag-drop target (coordinate).",
+            "gif_creator (start_recording): requires read. Start recording browser actions in \
+             the tab's group as GIF frames.",
+            "gif_creator (stop_recording): requires nothing. Stop recording; keep the captured \
+             frames for export.",
+            "gif_creator (clear): requires nothing. Discard the captured recording frames.",
+            "gif_creator (export): requires write. Encode the frames to a GIF and export it \
+             (download, or drag-drop at a coordinate).",
             "explain: requires nothing. Show every action available here and the capability \
              each one requires.",
         ]

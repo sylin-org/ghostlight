@@ -143,9 +143,9 @@ pub struct ToolExample {
     pub returns: Option<&'static str>,
 }
 
-/// The tool registry: 20 descriptors (the 13 browser tools plus `wait_for`, `script`, `form_fill`,
-/// `file_upload`, `browser_batch`, `upload_image`, and `explain`), in the order they appear in
-/// `tools/list`. `computer`'s 13 variants are in the
+/// The tool registry: 21 descriptors (the 13 browser tools plus `wait_for`, `script`, `form_fill`,
+/// `file_upload`, `browser_batch`, `upload_image`, `gif_creator`, and `explain`), in the order they
+/// appear in `tools/list`. `computer`'s 13 variants are in the
 /// schema's `action` enum order, byte-for-byte, as `variants`.
 pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
@@ -1199,6 +1199,68 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         output_schema: None,
     },
     ToolDescriptor {
+        tool: "gif_creator",
+        // The description + parameter text below are TRANSCRIBED VERBATIM from the installed official
+        // Claude-in-Chrome v1.0.80 (assets/mcpPermissions-*.js `name:"gif_creator"`), the sole
+        // reference (ADR-0050 D1). gif_creator is a NEW additive tool (never trained), so this is not
+        // a sacred-surface pin, but it is the real schema, not an approximation. `enum` +
+        // `required` + `additionalProperties` follow our house JSON-Schema style (the official uses
+        // Anthropic's `parameters` format). Phase 1 produces a plain-frame GIF; the description's
+        // visual overlays are a DEFERRED extension feature (see the T4 LEDGER entry).
+        advertised_description: "Manage GIF recording and export for browser automation sessions. Control when to start/stop recording browser actions (clicks, scrolls, navigation), then export as an animated GIF with visual overlays (click indicators, action labels, progress bar, watermark). All operations are scoped to the tab's group. When starting recording, take a screenshot immediately after to capture the initial state as the first frame. When stopping recording, take a screenshot immediately before to capture the final state as the last frame. For export, either provide 'coordinate' to drag/drop upload to a page element, or set 'download: true' to download the GIF.",
+        input_schema: || json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start_recording", "stop_recording", "clear", "export"],
+                    "description": "Action to perform: 'start_recording' (begin capturing), 'stop_recording' (stop capturing but keep frames), 'export' (generate and export GIF), 'clear' (discard frames)"
+                },
+                "tabId": { "type": "number", "description": "Tab ID to identify which tab group this operation applies to" },
+                "coordinate": { "type": "array", "description": "Viewport coordinates [x, y] for drag & drop upload. Required for 'export' action unless 'download' is true." },
+                "download": { "type": "boolean", "description": "If true, download the GIF instead of drag/drop upload. For 'export' action only." },
+                "filename": { "type": "string", "description": "Optional filename for exported GIF (default: 'recording-[timestamp].gif'). For 'export' action only." },
+                "options": { "type": "object", "description": "Optional GIF enhancement options for 'export' action. All default to true." }
+            },
+            "required": ["action", "tabId"],
+            "additionalProperties": false
+        }),
+        example: Some(ToolExample {
+            call: r#"{"action":"start_recording","tabId":0}"#,
+            returns: Some("Starts capturing GIF frames for the tab; later stop_recording then export (download:true) to get the animated GIF."),
+        }),
+        action_key: Some("action"),
+        variants: &[
+            ActionVariant {
+                action: Some("start_recording"),
+                requires: &[Capability::Read],
+                directory_description:
+                    "Start recording browser actions in the tab's group as GIF frames.",
+            },
+            ActionVariant {
+                action: Some("stop_recording"),
+                requires: &[],
+                directory_description: "Stop recording; keep the captured frames for export.",
+            },
+            ActionVariant {
+                action: Some("clear"),
+                requires: &[],
+                directory_description: "Discard the captured recording frames.",
+            },
+            ActionVariant {
+                action: Some("export"),
+                requires: &[Capability::Write],
+                directory_description:
+                    "Encode the frames to a GIF and export it (download, or drag-drop at a coordinate).",
+            },
+        ],
+        resource: ResourceShape::TabScoped,
+        handler: Handler::ExtensionForward,
+        postprocess: None,
+        post_dispatch: PostDispatch::None,
+        output_schema: None,
+    },
+    ToolDescriptor {
         tool: "explain",
         advertised_description: "Returns this server's action directory: every available action, the capability it requires (read, action, write, or execute; some require none), and a short description of what it does, plus definitions of the capability vocabulary. Use it to learn what you are allowed to do in this session. It does not read, summarize, or explain web pages.",
         input_schema: || json!({
@@ -1300,7 +1362,7 @@ pub fn advertised_tools_json() -> Value {
     json!({ "tools": tools })
 }
 
-/// Look up a tool's registry row by name. Linear scan over 20 rows; the validity check the
+/// Look up a tool's registry row by name. Linear scan over 21 rows; the validity check the
 /// pipeline uses.
 pub fn descriptor(tool: &str) -> Option<&'static ToolDescriptor> {
     REGISTRY.iter().find(|row| row.tool == tool)
@@ -1424,8 +1486,8 @@ mod tests {
             .collect();
         assert_eq!(
             with_action_key.len(),
-            2,
-            "computer and form_fill (C10) are the only descriptors carrying an action_key"
+            3,
+            "computer, form_fill (C10), and gif_creator (ADR-0050 D5) carry an action_key"
         );
         let computer = with_action_key
             .iter()
@@ -1452,10 +1514,9 @@ mod tests {
         assert_eq!(computer_actions, declared_actions);
         assert_eq!(computer_actions.len(), 13);
 
-        for row in REGISTRY
-            .iter()
-            .filter(|row| row.tool != "computer" && row.tool != "form_fill")
-        {
+        for row in REGISTRY.iter().filter(|row| {
+            row.tool != "computer" && row.tool != "form_fill" && row.tool != "gif_creator"
+        }) {
             assert_eq!(
                 row.variants.len(),
                 1,
@@ -1475,7 +1536,7 @@ mod tests {
         );
 
         let total_variants: usize = REGISTRY.iter().map(|row| row.variants.len()).sum();
-        assert_eq!(total_variants, 33);
+        assert_eq!(total_variants, 37);
 
         let mut seen = HashSet::new();
         for row in REGISTRY {
@@ -1529,6 +1590,10 @@ mod tests {
             ("file_upload", None, &[Capability::Write]),
             ("browser_batch", None, &[]),
             ("upload_image", None, &[Capability::Write]),
+            ("gif_creator", Some("start_recording"), &[Capability::Read]),
+            ("gif_creator", Some("stop_recording"), &[]),
+            ("gif_creator", Some("clear"), &[]),
+            ("gif_creator", Some("export"), &[Capability::Write]),
             ("explain", None, &[]),
         ];
 
@@ -1774,6 +1839,14 @@ mod tests {
                 None,
                 ResourceShape::TabScoped,
                 true,
+                false,
+                PostDispatch::None,
+            ),
+            (
+                "gif_creator",
+                Some("action"),
+                ResourceShape::TabScoped,
+                false,
                 false,
                 PostDispatch::None,
             ),

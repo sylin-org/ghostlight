@@ -254,6 +254,7 @@ fn org_policy_file_with_config_boots_the_server() {
             "wait_for",
             "script",
             "browser_batch",
+            "gif_creator",
             "explain",
         ]
     );
