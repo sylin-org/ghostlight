@@ -8,6 +8,38 @@ task (or when marking BLOCKED). A human reads RESUME HERE to pick up.
 - Status: **BATCH FULLY COMPLETE** -- T1..T5 + T4 Phase 2 all DONE (count 21). Everything in ADR-0050
   is shipped. **gif_creator REFINEMENTS (post-batch, owner-requested): BOTH TRACKS DONE** -- TRACK 1
   (adaptive NeuQuant palette) + TRACK 2 (visual overlays) shipped, extension-only, all node-tested.
+  **ADR-0052 capture redesign EXECUTED on top (2026-07-09): see the entry below.**
+
+- **ADR-0052 -- gif_creator capture redesign: EXECUTED** (three commits, each independently landable;
+  extension-only, no Rust/schema/pin change). Origin: the FIRST LIVE 0.5.0 TEST broke export twice --
+  the synchronous encode stalled the worker (NeuQuant per-pixel lookupRGB: 790ms for 2 frames), the
+  native-messaging link dropped, Chrome restarted the worker, and the IN-MEMORY frames died with it
+  (retry found "No frames"). Owner paused the debugging and asked for "more meaningful results, less
+  moving parts" (suggested settle-driven capture + a disk cache; authorized prior-art research).
+  Research found the browser-native form of the settle idea: CDP `Page.startScreencast` emits frames
+  ONLY on visual change (Playwright video's mechanism). Owner chose screencast + all three pieces.
+  - Piece 1 (`b577307`) export fixes (D3): color-cache memoizing lookupRGB per distinct color
+    (full 6-frame encode 2830ms -> 385ms, byte-identical); event-loop yields between frames;
+    real per-frame delays via `computeFrameDelays` (deltas clamped [100,4000]ms, last frame
+    800+2000ms hold); `encodeGif` gains optional `delays` (additive). New GCE-delay pin test
+    (structure-aware parser) + delay-oracle tests.
+  - Piece 2 (`fc045f4`) durable frames (D2/D5): new `extension/lib/framestore.js` (thin IndexedDB
+    wrapper; frames as JPEG Blobs keyed [tabId,seq] + per-tab state record; seq bookkeeping DERIVES
+    from stored keys on rehydration). Worker keeps a hot-path mirror (`gifRec`, null-cached), export
+    re-reads the store (crash-retryable), tab close purges (also fixes a latent leak: gif state was
+    never cleaned on tab removal). `lib/recbuffer.js` + its tests DELETED; ci.yml + BOOTSTRAP node
+    lines updated. IndexedDB is worker-only -> framestore is live-verified, pure logic node-tested.
+  - Piece 3 (`c1c475b`) screencast capture (D1/D4): seed screenshot then `Page.startScreencast`
+    (jpeg q70, maxWidth/maxHeight MAX_SIDE); `Page.screencastFrame` joins the debugger event router
+    (ack immediately; keep <=1 frame per 200ms; cap 100); dispatch hook is METADATA-ONLY and runs
+    BEFORE the action (pendingActions queue; `takeActionForFrame` pure helper: each action tags the
+    first kept frame at-or-after its ts); stop/clear stop the screencast; per-frame vpW from
+    screencast metadata deviceWidth (probed fallback).
+  - Extension node --test green after each piece. LIVE VERIFICATION of the full loop (record ->
+    actions -> export with overlays) is the NEXT step; the loaded extension must be reloaded first.
+  - Known edges (documented, acceptable): a mid-recording debugger detach (kill switch) freezes
+    capture until stop; a pre-noted action whose handler then throws may tag a frame anyway; pending
+    action tags live in the mirror only (a worker death loses un-drained tags, never frames).
 
 - **TRACK 2 -- visual overlays: DONE.** New `extension/lib/gifoverlay.js` (pure geometry + routing:
   `describeAction`/`resolveOverlayOptions`/`scaleFactorFor`/`clickRadii`/`labelBox`/`progressBarRect`/
