@@ -5,8 +5,18 @@ task (or block); this file is the single source of truth for batch progress.
 
 ## RESUME HERE
 
-Next task: **T5** (`T5-doctor-docs-changelog.md`). T1 `e80bec9`, T2 `ababf4a`, T3 `77ad837`,
-T4 `c3e6418`.
+**COMPLETE.** All five tasks landed (10 commits: 5 code + 5 ledger). Base was the bundle-
+introducing docs commit `780adb3`; final code commit is `a406bf7` (T5). V-ALL is green at the
+final tree, and `git diff --name-only 780adb3..HEAD` touches ZERO NEVER-list file (verified: 19
+files, all within the owned sets; `src/main.rs` is only T4's one sanctioned help-comment line;
+`tests/adapter_reconnect.rs` untouched and still passing). Nothing outside each task's named set.
+
+Post-batch (user-supervised, NOT the executor): the user runs `ghostlight install --debug
+--no-supervisor` from target/debug (rewrites the client entries as unpinned + the unified host,
+which also fixes the stale cowork entry), reloads the unpacked extension, starts the dev service
+(`ghostlight --debug --instance dev service --keep-warm`), then verifies cowork + Claude Code both
+route to dev, that stopping dev falls back to the default, and that `ghostlight doctor` prints the
+"Development override:" line.
 
 ## Task table
 
@@ -16,6 +26,7 @@ T4 `c3e6418`.
 | T2 browser adapter resolution | done | ababf4a | V-ALL green; transport tests 64 -> 66 (two pick_native_host tests) |
 | T3 extension single host | done | 77ad837 | node --check x3 + grouping test pass; P3 post-grep zero; no dev-host in ext JS |
 | T4 installer unified surface | done | c3e6418 | V-ALL green; install_instance 4/4 (dev-thin + qa-full); core 472 -> 473 |
+| T5 doctor + docs + changelog | done | a406bf7 | V-ALL green; doctor override section; DEV-LOOP/README/CHANGELOG updated |
 | T4 installer unified surface | pending | - | |
 | T5 doctor + docs + changelog | pending | - | |
 
@@ -131,3 +142,35 @@ Verification (all green, in the task's order):
 Deviations: none. (`ghostlight install` was NOT run as verification, per the task; the unit +
 dry-run subprocess tests are the gate. The install_instance.rs module-doc paragraph was manually
 re-wrapped to fit the inserted pinned sentence -- rustfmt does not reflow `//!` comments.)
+
+### T5 -- doctor's override line + docs + changelog (ADR-0048 D7)
+
+Code commit: `a406bf7`. STOP preconditions all passed (doctor.rs had the in-scope `instance`
+binding and the `state_line(&probe)` insertion anchor; T1's DEV_INSTANCE present; the CHANGELOG's
+`## [Unreleased]` heading present). Files staged (exactly the four owned):
+crates/core/src/hub/manage/doctor.rs, docs/DEV-LOOP.md, README.md, CHANGELOG.md. The doctor block
+references `ipc`/`EndpointProbe` through the file's existing `use ghostlight_transport::ipc::{self,
+EndpointProbe};` import (via `ipc::EndpointProbe::Absent`), matching the pin's guidance to reuse
+that path.
+
+Verification (all green):
+- cargo fmt --check: clean
+- cargo clippy --workspace --all-targets -- -D warnings: clean
+- cargo build --workspace: ok
+- cargo test --workspace --no-fail-fast: every test binary reported 0 failed
+- cargo check --target x86_64-unknown-linux-gnu --workspace --all-targets: ok
+- node --test tests/extension/grouping.test.js: 4 pass, 0 fail
+
+Deviations: none. (The README "Useful flags" list did not mention `--extension-id` -- exactly as
+the pin predicted -- so nothing was added there; only the three pinned README replacements were
+made. README.md is CRLF in the working tree; Git normalizes to LF on commit, a pre-existing repo
+characteristic.)
+
+## Batch complete
+
+All five tasks executed in order, each with a green V-ALL and two commits (code + ledger). Base
+`780adb3` -> head (T5 code) `a406bf7`. Zero NEVER-list files touched. The dev-override design
+(ADR-0048) is fully implemented: unpinned adapters resolve dev-first per connect episode, the
+browser adapter probe-picks, the extension targets one host, the default install allows both
+shipped extension ids and dev install is thin, and `ghostlight doctor` reports the live routing.
+Handed back for the user-supervised post-batch install + verification (see RESUME HERE).
