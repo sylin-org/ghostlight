@@ -1,6 +1,6 @@
 [package]
 name = "ghostlight-core"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 description = "Ghostlight core: governance, tools, browser protocol, hub composition, and the installer (ADR-0046)."
 publish = false

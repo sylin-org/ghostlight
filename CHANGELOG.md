@@ -7,12 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-09
+
+The tool-surface release. Four new tools, harvested from the official Claude-in-Chrome v1.0.80 (now
+the sole reference), grow the advertised surface from 17 to 21; the 13 trained tools are re-baselined
+against that reference; and the role executables collapse from three to two.
+
 ### Added
 - `file_upload` tool: upload base64-encoded file bytes to a located file `<input>` on the page via
-  an in-page DataTransfer. It never reads the host filesystem -- the caller supplies the bytes.
+  an in-page DataTransfer. It never reads the host filesystem; the caller supplies the bytes.
   (ADR-0050)
+- `browser_batch` tool: a trained front door that runs a sequence of browser actions in one call over
+  the same engine as `script`, returning each step's result with images preserved. (ADR-0050)
+- `upload_image` tool: upload a previously captured screenshot (by image id) to a file `<input>`, or
+  drag-drop it onto a page element at a coordinate. (ADR-0050)
+- `gif_creator` tool: record a browser-automation session (clicks, scrolls, navigation) and export it
+  as an animated GIF, either downloaded or drag-dropped onto a page element. Frames carry visual
+  overlays (click cues, action labels, a progress bar, and a Ghostlight watermark) and use an
+  adaptive NeuQuant color palette for faithful screenshots. (ADR-0050)
 
 ### Changed
+- The 13 trained tool schemas are re-baselined against the official Claude-in-Chrome v1.0.80. Only
+  three description strings changed for accuracy (`form_input`, `get_page_text`, `read_page`); no
+  trained tool name, parameter, or enum value changed. (ADR-0050)
 - The two thin pass-through adapters (`ghostlight-adapter-agent`, `ghostlight-adapter-browser`) are
   merged into a single `ghostlight-relay` binary, role-selected at launch (`--role agent`; the
   browser role auto-detected from the Chrome extension origin, since a native-messaging manifest

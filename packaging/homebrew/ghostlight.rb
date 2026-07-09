@@ -4,7 +4,7 @@
 class Ghostlight < Formula
   desc "Governed browser automation over your own authenticated Chromium session (MCP)"
   homepage "https://sylin-org.github.io/ghostlight/"
-  version "0.4.1"
+  version "0.5.0"
   license "Apache-2.0"
 
   on_macos do
