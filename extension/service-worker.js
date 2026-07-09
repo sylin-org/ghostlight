@@ -19,11 +19,15 @@
 // this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
 // ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
 
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/neuquant.js", "lib/gifenc.js", "lib/gifoverlay.js", "lib/recbuffer.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/neuquant.js", "lib/gifenc.js", "lib/gifoverlay.js", "lib/framestore.js");
 
-// gif_creator recording state (ADR-0050 Decision 5): a bounded per-tab frame store (lib/recbuffer.js);
-// the encoder is lib/gifenc.js. Both are pure + unit-tested; this worker owns capture + export.
-const gifRecordings = self.GhostlightRecbuffer.createStore();
+// gif_creator recording state (ADR-0052 D2): frames live DURABLY in IndexedDB (lib/framestore.js),
+// so a service-worker death or export crash never destroys a recording -- export re-reads the store
+// and retry works. This map is only the hot-path mirror of each tab's state ({active, firstSeq,
+// nextSeq}, or null for "known: no recording"); it is rebuilt from the store on demand after a
+// worker restart. The encoder is lib/gifenc.js.
+const gifRec = new Map();
+const GIF_MAX_FRAMES = 100;
 
 // Operational tunables (lib/constants.js), destructured once for use throughout this worker.
 const {
@@ -497,20 +501,20 @@ function compositeOverlays(ctx, frame, opts, progress) {
   if (options.showWatermark) drawWatermark(ctx, sf);
 }
 
-// gif_creator (ADR-0050 D5): decode the captured JPEG frames to RGBA at the first frame's dimensions
-// (via OffscreenCanvas), composite the action overlays (click cues, labels, progress bar, watermark;
-// gated by `options`), and encode them into an animated GIF (lib/gifenc.js). `frames` are recbuffer
-// entries: { base64, vpW?, action metadata? }.
+// gif_creator (ADR-0050 D5 / ADR-0052): decode the recorded JPEG frames to RGBA at the first frame's
+// dimensions (via OffscreenCanvas), composite the action overlays (click cues, labels, progress bar,
+// watermark; gated by `options`), and encode them into an animated GIF (lib/gifenc.js). `frames` are
+// framestore records: { blob, ts, vpW?, action metadata? } (a base64 field is accepted as fallback).
 async function encodeRecording(frames, delayMs, options) {
-  const b64 = (f) => (typeof f === "string" ? f : f.base64);
-  const first = await createImageBitmap(new Blob([bytesFromBase64(b64(frames[0]))], { type: "image/jpeg" }));
+  const blobOf = (f) =>
+    f && f.blob ? f.blob : new Blob([bytesFromBase64(typeof f === "string" ? f : f.base64)], { type: "image/jpeg" });
+  const first = await createImageBitmap(blobOf(frames[0]));
   const w = first.width, h = first.height;
   const canvas = new OffscreenCanvas(w, h);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   const rgbaFrames = [];
   for (let i = 0; i < frames.length; i++) {
-    const bmp = i === 0 ? first
-      : await createImageBitmap(new Blob([bytesFromBase64(b64(frames[i]))], { type: "image/jpeg" }));
+    const bmp = i === 0 ? first : await createImageBitmap(blobOf(frames[i]));
     ctx.clearRect(0, 0, w, h);
     ctx.drawImage(bmp, 0, 0, w, h);
     const frame = typeof frames[i] === "string" ? { base64: frames[i] } : frames[i];
@@ -529,20 +533,52 @@ async function encodeRecording(frames, delayMs, options) {
     : undefined;
   return (self.GhostlightGifenc || GhostlightGifenc).encodeGif(rgbaFrames, { width: w, height: h, delayMs, delays });
 }
+// The tab's recording state -- the in-memory mirror, rehydrated from IndexedDB after a worker
+// restart (ADR-0052 D2). Sequence bookkeeping derives from the stored frame keys, never from a
+// state record that hot-path writes could leave stale. Caches null for "known: no recording" so
+// the per-action hook does not re-read IndexedDB on tabs that never recorded.
+async function gifState(tabId) {
+  if (gifRec.has(tabId)) return gifRec.get(tabId);
+  const stored = await self.GhostlightFramestore.getState(tabId).catch(() => undefined);
+  if (!stored) {
+    gifRec.set(tabId, null);
+    return null;
+  }
+  const seqs = await self.GhostlightFramestore.frameSeqs(tabId).catch(() => []);
+  const state = {
+    active: !!stored.active,
+    firstSeq: seqs.length ? seqs[0] : 0,
+    nextSeq: seqs.length ? seqs[seqs.length - 1] + 1 : 0,
+  };
+  gifRec.set(tabId, state);
+  return state;
+}
+// Append one frame record to the durable store, evicting the oldest past the cap. `extra` carries
+// {ts, vpW?, ...action metadata}. Returns the new frame count.
+async function gifAppendFrame(tabId, state, blob, extra) {
+  const record = Object.assign({ tabId, seq: state.nextSeq, blob }, extra || {});
+  state.nextSeq++;
+  await self.GhostlightFramestore.putFrame(record);
+  while (state.nextSeq - state.firstSeq > GIF_MAX_FRAMES) {
+    await self.GhostlightFramestore.deleteFrame(tabId, state.firstSeq);
+    state.firstSeq++;
+  }
+  return state.nextSeq - state.firstSeq;
+}
 // Capture a frame for an active recording on `tabId`, best-effort (no-op when not recording or a
-// screenshot fails). Called after a mutating tool while recording (ADR-0050 D5). `meta` carries the
-// action's overlay metadata (type/description and coordinate(s) already rescaled to CSS viewport px).
+// screenshot fails). Called after a mutating tool while recording. `meta` carries the action's
+// overlay metadata (type/description and coordinate(s) already rescaled to CSS viewport px).
 async function maybeCaptureGifFrame(tabId, meta) {
-  const entry = gifRecordings.byTab.get(tabId);
-  if (!entry || !entry.active) return;
   try {
+    const state = await gifState(tabId);
+    if (!state || !state.active) return;
     // Read the viewport width from the context the model just acted against, BEFORE this capture's
     // screenshot() overwrites it -- the overlay scaleFactor needs canvas.width / vpW.
     const prev = screenshotCtx.get(tabId);
     const vpW = prev && prev.vpW;
     const shot = await screenshot(tabId);
-    const frame = Object.assign({ base64: shot.base64, ts: Date.now() }, vpW ? { vpW } : {}, meta || {});
-    self.GhostlightRecbuffer.capture(gifRecordings, tabId, frame);
+    const blob = new Blob([bytesFromBase64(shot.base64)], { type: "image/jpeg" });
+    await gifAppendFrame(tabId, state, blob, Object.assign({ ts: Date.now() }, vpW ? { vpW } : {}, meta || {}));
   } catch (e) {
     /* best-effort: a failed frame never breaks the tool that triggered it */
   }
@@ -592,6 +628,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   consoleBuffer.delete(tabId);
   networkBuffer.delete(tabId);
   screenshotCtx.delete(tabId);
+  // A closed tab's recording is unexportable (every gif_creator call re-validates the tab), so
+  // purge its durable frames rather than leak them (ADR-0052 D2).
+  gifRec.delete(tabId);
+  self.GhostlightFramestore.clear(tabId).catch(() => {});
   tabHost.delete(tabId);
   tabUrl.delete(tabId);
   persistSessionState();
@@ -1515,32 +1555,42 @@ const handlers = {
   // (click cues, action labels, progress bar, watermark) gated by the `options` object.
   async gif_creator(a) {
     const tabId = await effectiveTabId(a.tabId);
-    const rec = self.GhostlightRecbuffer;
+    const store = self.GhostlightFramestore;
     switch (a.action) {
       case "start_recording": {
+        // A fresh recording discards any prior frames for the tab (durable-store semantics match
+        // the old in-memory start: begin-or-restart).
+        await store.clear(tabId).catch(() => {});
+        const state = { active: true, firstSeq: 0, nextSeq: 0 };
+        gifRec.set(tabId, state);
+        await store.putState({ tabId, active: true }).catch(() => {});
         let seeded = 0;
         try {
           const prev = screenshotCtx.get(tabId);
           const vpW = prev && prev.vpW;
           const shot = await screenshot(tabId);
-          // Seed frame is the initial state -- base64 + viewport width, but no action metadata.
-          seeded = rec.start(gifRecordings, tabId, Object.assign({ base64: shot.base64, ts: Date.now() }, vpW ? { vpW } : {}));
+          const blob = new Blob([bytesFromBase64(shot.base64)], { type: "image/jpeg" });
+          // Seed frame is the initial state -- pixels + viewport width, but no action metadata.
+          seeded = await gifAppendFrame(tabId, state, blob, Object.assign({ ts: Date.now() }, vpW ? { vpW } : {}));
         } catch (e) {
-          rec.start(gifRecordings, tabId);
+          /* the seed is best-effort; the recording is active either way */
         }
         return text("Recording started (" + seeded + " frame(s) captured). Perform actions, then stop_recording and export with download:true.");
       }
       case "stop_recording": {
-        const n = rec.stop(gifRecordings, tabId);
-        if (n < 0) return text("No active recording for this tab.");
-        return text("Recording stopped; " + n + " frame(s) kept. Use export with download:true to get the GIF.");
+        const state = await gifState(tabId);
+        if (!state) return text("No active recording for this tab.");
+        state.active = false;
+        await store.putState({ tabId, active: false }).catch(() => {});
+        return text("Recording stopped; " + (state.nextSeq - state.firstSeq) + " frame(s) kept. Use export with download:true to get the GIF.");
       }
       case "clear": {
-        rec.clear(gifRecordings, tabId);
+        gifRec.set(tabId, null);
+        await store.clear(tabId).catch(() => {});
         return text("Recording cleared.");
       }
       case "export": {
-        const frames = rec.frames(gifRecordings, tabId);
+        const frames = await store.frames(tabId).catch(() => []);
         if (frames.length === 0) return text("No frames to export. Start a recording first with action=start_recording.");
         const gifFilename = (typeof a.filename === "string" && a.filename.length > 0) ? a.filename : "recording.gif";
         if (a.coordinate) {
