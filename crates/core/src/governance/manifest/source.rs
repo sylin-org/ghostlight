@@ -23,8 +23,11 @@ pub enum UserSource {
 /// Why a source string could not be resolved to a [`UserSource`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SourceError {
-    /// `managed://`: deferred beyond stage 2 (shared format doc section 10 item 8).
-    #[error("managed:// manifest delivery is not supported in this release")]
+    /// `managed://` in the USER source string (`--manifest` / `GHOSTLIGHT_MANIFEST`): rejected by
+    /// design (ADR-0055). Managed governance carries a TRUST ANCHOR (the org's verifying key), so it
+    /// is never user-activatable; it is provisioned only through the admin-only `managed.json`
+    /// bootstrap ([`crate::governance::managed::bootstrap_path`]).
+    #[error("managed:// is not a user-supplied source; it is provisioned by the administrator via the managed.json bootstrap (ADR-0055)")]
     ManagedNotSupported,
     /// Any other `<scheme>://`.
     #[error("unsupported manifest source scheme '{0}://'")]
@@ -70,6 +73,11 @@ pub enum ManifestOrigin {
     OrgPolicyFile,
     UserFile,
     UserEnv,
+    /// A signed policy bundle activated via the admin-provisioned managed:// bootstrap (ADR-0055).
+    /// Org-authoritative like [`ManifestOrigin::OrgPolicyFile`]: its config entries take the org
+    /// channel and it triggers the license stamp gate (both wired in ADR-0055 Phase 4). Loading and
+    /// verification live in [`crate::governance::managed`].
+    Managed,
 }
 
 /// The result of source selection and loading (shared format doc section 1.3).

@@ -8,7 +8,8 @@
 //! ([`denial`]), the per-call grant
 //! enforcement decision core ([`enforcement`]), the deterministic plain-language policy
 //! renderer ([`explain`]), the audit-replay policy simulator ([`simulate`]), the embedded
-//! policy manifest templates ([`templates`]), the policy manifest ([`manifest`]), the audit
+//! policy manifest templates ([`templates`]), the policy manifest ([`manifest`]), the
+//! managed:// central policy distribution ([`managed`], ADR-0055), the audit
 //! flight recorder ([`audit`]), the policy-decision-point/policy-enforcement-point
 //! contract ([`ports`]), and (ADR-0030 Decision 9, H8) the `inbound.web.from`
 //! connecting-source allowlist ([`inbound`]). The dependency direction is strictly inward:
@@ -25,6 +26,7 @@ pub mod enforcement;
 pub mod explain;
 pub mod inbound;
 pub mod license;
+pub mod managed;
 pub mod manifest;
 pub mod ports;
 pub mod simulate;
