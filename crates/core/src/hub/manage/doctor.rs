@@ -289,7 +289,9 @@ fn governance_section_lines() -> Vec<String> {
     let config_store = crate::governance::config::reload::ConfigStore::load_initial_with_policy(
         crate::browser::pattern::is_valid_pattern,
         &loaded_policy,
-        user_manifest_source,
+        crate::governance::config::reload::PolicySource::SourceString {
+            user_source: user_manifest_source,
+        },
     );
     let config = match config_store {
         Ok(store) => store.current(),

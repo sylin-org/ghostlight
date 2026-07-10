@@ -41,6 +41,81 @@ use tokio::sync::watch;
 use super::load::{OrgConfig, UserConfig};
 use super::{layers, load, Config};
 
+/// How the store resolves the active policy on every (re)resolve (ADR-0056). Injected at the
+/// composition root so the file watcher and the managed:// poll timer share ONE correct resolution
+/// path: the watcher can never clobber a managed policy by falling back to the source-string loader
+/// (the live fail-open this seam fixes). A resolve `Err` is always keep-last-good, never a swap to
+/// all-open.
+pub enum PolicySource {
+    /// The default: `load_policy`'s org-policy-file + user-supplied-source (`--manifest` /
+    /// `GHOSTLIGHT_MANIFEST`) selection.
+    SourceString { user_source: Option<String> },
+    /// An admin `managed://` bootstrap is the org authority (ADR-0055): resolve via
+    /// [`crate::governance::managed::activate`]. Any unavailability (unreachable source and no fresh
+    /// bundle, or a vanished bootstrap) is keep-last-good, NEVER a fall back to unrestricted.
+    Managed {
+        paths: crate::governance::paths::GovernancePaths,
+    },
+}
+
+impl PolicySource {
+    /// Resolve the active policy. `Err(reason)` means keep-last-good: a failed resolve never
+    /// displaces the in-force policy (the exact string form [`ConfigStore::apply_policy_and_config`]
+    /// already treats as an org-slot failure).
+    fn resolve(
+        &self,
+        domain_pattern_valid: fn(&str) -> bool,
+    ) -> Result<crate::governance::manifest::source::LoadedPolicy, String> {
+        use crate::governance::manifest::source::{LoadedPolicy, ManifestOrigin};
+        match self {
+            PolicySource::SourceString { user_source } => {
+                crate::governance::manifest::source::load_policy(user_source.as_deref(), domain_pattern_valid)
+                    .map_err(|e| e.to_string())
+            }
+            PolicySource::Managed { paths } => {
+                match crate::governance::managed::activate(paths, domain_pattern_valid)
+                    .map_err(|e| e.to_string())?
+                {
+                    Some(reconciled) => match reconciled.active {
+                        Some(vm) => Ok(LoadedPolicy {
+                            manifest: Some(vm.manifest),
+                            origin: Some(ManifestOrigin::Managed),
+                            user_manifest_ignored: false,
+                        }),
+                        None => Err(
+                            "managed policy unavailable (no fresh policy and no cache); keeping \
+                             last-known-good"
+                                .to_string(),
+                        ),
+                    },
+                    None => Err(
+                        "managed bootstrap is no longer present; keeping last-known-good".to_string(),
+                    ),
+                }
+            }
+        }
+    }
+
+    /// The `file://` path to watch for change, if any. Source-string mode watches its file; managed
+    /// mode re-polls on a timer, not a file watch, so it has no path here.
+    fn manifest_watch_path(&self) -> Option<PathBuf> {
+        match self {
+            PolicySource::SourceString { user_source } => user_source.as_deref().and_then(|s| {
+                match crate::governance::manifest::source::parse_source_string(s) {
+                    Ok(crate::governance::manifest::source::UserSource::FilePath(path)) => Some(path),
+                    _ => None,
+                }
+            }),
+            PolicySource::Managed { .. } => None,
+        }
+    }
+
+    /// True for a `managed://` source: the caller spawns the poll timer for it.
+    pub fn is_managed(&self) -> bool {
+        matches!(self, PolicySource::Managed { .. })
+    }
+}
+
 /// Poll interval for the source watcher. The config files change rarely (a user edit, a
 /// `config set`, or an MDM push), so a sub-second poll on three known paths is negligible cost.
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(750);
@@ -77,12 +152,12 @@ pub struct ConfigStore {
     /// browser plugin directly (the a7 arch-test forbids a `governance -> browser` edge; see
     /// RECONCILIATION.md section 2, the same integration point G01/G02 resolved).
     domain_pattern_valid: fn(&str) -> bool,
-    /// The resolved user-supplied manifest source string (ADR-0025 Decision 1), retained so
-    /// [`Self::reresolve`] can re-run the FULL org+user selection on every reload event instead
-    /// of only re-reading the org file. `None` when no `--manifest`/`GHOSTLIGHT_MANIFEST` was
-    /// given at startup (an `env://` source is retained here too, even though it has no file to
-    /// watch, since selection itself must still be re-run on every org-file change).
-    user_source: Option<String>,
+    /// How the active policy is resolved on every reload (ADR-0056): the source-string loader
+    /// (`--manifest`/`GHOSTLIGHT_MANIFEST` + org file) or a managed:// bootstrap. Injected at the
+    /// composition root so the file watcher and the managed poll timer share ONE correct path -- a
+    /// re-resolve through it can never clobber a managed policy with all-open (the live fail-open
+    /// this replaces). Also supplies the watcher's `file://` manifest path (managed has none).
+    policy_source: PolicySource,
     /// The in-force resolved policy snapshot (ADR-0025 Decision 2): mirrors `snapshot`'s
     /// `Mutex<Arc<T>>` idiom exactly, so a policy swap is decided and applied the same way a
     /// config swap is (`apply_plan`'s `changed` check, transposed to manifest identity).
@@ -167,7 +242,11 @@ impl ConfigStore {
             origin: None,
             user_manifest_ignored: false,
         };
-        Self::load_initial_with_policy(domain_pattern_valid, &all_open, None)
+        Self::load_initial_with_policy(
+            domain_pattern_valid,
+            &all_open,
+            PolicySource::SourceString { user_source: None },
+        )
     }
 
     /// Build the store from the initial layered load, called once at mcp-server startup.
@@ -199,14 +278,9 @@ impl ConfigStore {
     pub fn load_initial_with_policy(
         domain_pattern_valid: fn(&str) -> bool,
         loaded_policy: &crate::governance::manifest::source::LoadedPolicy,
-        user_source: Option<String>,
+        policy_source: PolicySource,
     ) -> crate::Result<Arc<ConfigStore>> {
-        let manifest_watch_path = user_source.as_deref().and_then(|s| {
-            match crate::governance::manifest::source::parse_source_string(s) {
-                Ok(crate::governance::manifest::source::UserSource::FilePath(path)) => Some(path),
-                _ => None,
-            }
-        });
+        let manifest_watch_path = policy_source.manifest_watch_path();
         let sources = WatchSources {
             user_config: load::user_config_path(),
             org_policy: load::org_policy_path(),
@@ -240,7 +314,7 @@ impl ConfigStore {
             last_good: Mutex::new(last_good),
             sources,
             domain_pattern_valid,
-            user_source,
+            policy_source,
             policy_snapshot: Mutex::new(policy_snapshot),
             policy_tx,
         }))
@@ -279,11 +353,7 @@ impl ConfigStore {
     /// actual `Ok` result (including a resolved all-open `LoadedPolicy` after an org-file
     /// deletion) can change what is published.
     pub fn reresolve(&self) -> ReloadReport {
-        let policy_result = crate::governance::manifest::source::load_policy(
-            self.user_source.as_deref(),
-            self.domain_pattern_valid,
-        )
-        .map_err(|e| e.to_string());
+        let policy_result = self.policy_source.resolve(self.domain_pattern_valid);
         let user = read_and_parse_user(
             self.sources.user_config.as_deref(),
             self.domain_pattern_valid,
@@ -456,6 +526,27 @@ impl ConfigStore {
                 if trigger {
                     self.reresolve();
                 }
+            }
+        });
+    }
+
+    /// Spawn the managed:// poll timer (ADR-0055 Phase 4b): every `interval` (plus a small
+    /// per-process jitter so a fleet does not stampede), re-resolve the managed policy through the
+    /// same [`Self::reresolve`] path the file watcher uses. A newly published bundle is picked up
+    /// live; an unreachable source keeps last-known-good; a no-change poll is a cheap no-op (the
+    /// publish only fires on a manifest-identity change). Spawned only when the policy source is
+    /// managed ([`PolicySource::is_managed`]).
+    pub fn spawn_managed_poll(self: Arc<Self>, interval: std::time::Duration) {
+        // A deterministic per-process jitter in [0, 60s) spreads a fleet's polls without a RNG dep.
+        let jitter = std::time::Duration::from_secs(u64::from(std::process::id()) % 60);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval + jitter);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // The first tick fires immediately; skip it so we do not re-resolve the startup state.
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                self.reresolve();
             }
         });
     }
@@ -743,7 +834,7 @@ impl ConfigStore {
                 manifest: None,
             },
             domain_pattern_valid: |_| true,
-            user_source: None,
+            policy_source: PolicySource::SourceString { user_source: None },
             policy_snapshot: Mutex::new(all_open),
             policy_tx,
         })
@@ -775,7 +866,9 @@ impl ConfigStore {
                 manifest: None,
             },
             domain_pattern_valid: |_| true,
-            user_source: Some(user_source),
+            policy_source: PolicySource::SourceString {
+                user_source: Some(user_source),
+            },
             policy_snapshot: Mutex::new(all_open),
             policy_tx,
         })
@@ -1198,8 +1291,12 @@ mod tests {
             user_manifest_ignored: false,
         };
 
-        let store =
-            ConfigStore::load_initial_with_policy(always_valid, &loaded_policy, None).unwrap();
+        let store = ConfigStore::load_initial_with_policy(
+            always_valid,
+            &loaded_policy,
+            PolicySource::SourceString { user_source: None },
+        )
+        .unwrap();
         assert!(store.current().audit_enabled());
 
         let last_good = store

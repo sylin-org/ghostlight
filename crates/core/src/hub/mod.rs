@@ -29,7 +29,7 @@
 
 use crate::browser::pattern;
 use crate::governance::audit::Recorder;
-use crate::governance::config::reload::ConfigStore;
+use crate::governance::config::reload::{ConfigStore, PolicySource};
 use crate::governance::manifest::source;
 use crate::governance::manifest::source::LoadedPolicy;
 use crate::hub::outbound::browser::Browser;
@@ -120,6 +120,11 @@ pub fn try_mint(
     })
 }
 
+/// Default managed:// re-poll interval when the bootstrap does not set `poll_seconds` (ADR-0055
+/// Phase 4b): 15 minutes. A few-KB conditional re-fetch at this cadence is trivially cheap, and the
+/// last-known-good cache means a missed poll changes nothing.
+const MANAGED_POLL_DEFAULT_SECS: u64 = 900;
+
 /// Map a resolved managed reconciliation into a [`LoadedPolicy`] (ADR-0055 Phase 4). The
 /// last-known-good cache means an unreachable source still yields the cached policy; only a FIRST
 /// boot with the source unreachable AND no cache yields no policy, which is a FATAL startup error --
@@ -176,12 +181,29 @@ pub fn run_service(manifest: Option<String>, debug_on: bool, keep_warm: bool) ->
     // (the same fail-closed discipline the org policy file already has). `GovernancePaths::production`
     // is the sole computer of the fixed trust-anchor locations (ADR-0056).
     let paths = crate::governance::paths::GovernancePaths::production();
-    let loaded_policy = match crate::governance::managed::activate(&paths, pattern::is_valid_pattern)
-        .with_context(|| "resolving the managed policy")?
-    {
-        Some(reconciled) => managed_loaded_policy(reconciled, &paths)?,
-        None => source::load_policy(user_source.as_deref(), pattern::is_valid_pattern)
-            .with_context(|| "loading the governance manifest")?,
+    // Read the bootstrap once to decide the policy SOURCE (which the ConfigStore re-resolves through
+    // on every reload, so the file watcher can never clobber a managed policy -- ADR-0056) and the
+    // managed poll interval. The initial resolution keeps startup fail-loud semantics (a
+    // configured-but-unresolvable managed policy fails closed here, before a line is served).
+    let managed_bootstrap = crate::governance::managed::load_bootstrap_at(&paths.managed_bootstrap)
+        .with_context(|| "loading the managed policy bootstrap")?;
+    let (loaded_policy, policy_source, managed_poll) = match managed_bootstrap {
+        Some(bootstrap) => {
+            let reconciled =
+                crate::governance::managed::activate(&paths, pattern::is_valid_pattern)
+                    .with_context(|| "resolving the managed policy")?
+                    .ok_or_else(|| anyhow::anyhow!("managed bootstrap vanished during startup"))?;
+            let loaded = managed_loaded_policy(reconciled, &paths)?;
+            let poll = std::time::Duration::from_secs(
+                bootstrap.poll_seconds.unwrap_or(MANAGED_POLL_DEFAULT_SECS),
+            );
+            (loaded, PolicySource::Managed { paths }, Some(poll))
+        }
+        None => {
+            let loaded = source::load_policy(user_source.as_deref(), pattern::is_valid_pattern)
+                .with_context(|| "loading the governance manifest")?;
+            (loaded, PolicySource::SourceString { user_source }, None)
+        }
     };
 
     match (&loaded_policy.manifest, &loaded_policy.origin) {
@@ -208,7 +230,8 @@ pub fn run_service(manifest: Option<String>, debug_on: bool, keep_warm: bool) ->
         endpoint,
         block_sink,
         loaded_policy,
-        user_source,
+        policy_source,
+        managed_poll,
         keep_warm,
     ));
 
@@ -226,7 +249,8 @@ async fn run_service_loop(
     endpoint: String,
     debug_sink: DebugSink,
     loaded_policy: LoadedPolicy,
-    user_source: Option<String>,
+    policy_source: PolicySource,
+    managed_poll: Option<std::time::Duration>,
     keep_warm: bool,
 ) -> i32 {
     let adapter_listener = match endpoint::claim_adapter_endpoint(&endpoint).await {
@@ -274,7 +298,9 @@ async fn run_service_loop(
 
     // Build the SHARED ServiceContext ONCE (PINS.md SS1 pin 4); every multiplexed adapter session
     // `serve_adapters` spawns clones it.
-    let ctx = match ServiceContext::from_startup(browser, debug_sink, loaded_policy, user_source) {
+    let ctx =
+        match ServiceContext::from_startup(browser, debug_sink, loaded_policy, policy_source, managed_poll)
+        {
         Ok(ctx) => ctx,
         Err(e) => {
             tracing::error!(error = %e, "failed to build the shared service context");
@@ -384,7 +410,8 @@ impl ServiceContext {
         browser: Browser,
         debug_sink: DebugSink,
         loaded_policy: LoadedPolicy,
-        user_source: Option<String>,
+        policy_source: PolicySource,
+        managed_poll: Option<std::time::Duration>,
     ) -> crate::Result<Self> {
         if let Some(manifest) = &loaded_policy.manifest {
             tracing::debug!(
@@ -398,9 +425,14 @@ impl ServiceContext {
         let store = ConfigStore::load_initial_with_policy(
             pattern::is_valid_pattern,
             &loaded_policy,
-            user_source,
+            policy_source,
         )?;
         store.clone().spawn_watcher();
+        // managed:// (ADR-0055 Phase 4b): a timer re-resolves through the SAME reresolve path the
+        // watcher uses, so a newly published bundle is picked up live without a restart.
+        if let Some(interval) = managed_poll {
+            store.clone().spawn_managed_poll(interval);
+        }
 
         let recorder = Arc::new(Recorder::from_config(&store.current()));
         tokio::spawn({

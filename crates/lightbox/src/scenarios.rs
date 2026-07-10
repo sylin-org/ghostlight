@@ -30,6 +30,7 @@ pub fn registry() -> Vec<Scenario> {
         ("continuity-source-unreachable", continuity_source_unreachable),
         ("rollback-guardian", rollback_guardian),
         ("update-on-reresolve", update_on_reresolve),
+        ("no-clobber-on-reresolve", no_clobber_on_reresolve),
     ]
 }
 
@@ -166,6 +167,51 @@ fn update_on_reresolve() -> anyhow::Result<()> {
     ensure!(
         r.active.as_ref().map(|v| v.seq) == Some(6),
         "the newer policy should be picked up"
+    );
+    Ok(())
+}
+
+/// The fail-open fix (ADR-0056): a re-resolve under managed governance -- what a routine user
+/// `config set` triggers via the file watcher -- must NOT clobber the managed policy with all-open.
+/// The old code re-ran the source-string loader here and published unrestricted.
+fn no_clobber_on_reresolve() -> anyhow::Result<()> {
+    use ghostlight_core::governance::config::reload::{ConfigStore, PolicySource};
+    use ghostlight_core::governance::manifest::source::{LoadedPolicy, ManifestOrigin};
+
+    let tmp = TempRoot::new("no-clobber")?;
+    let paths = GovernancePaths::under(tmp.path());
+    let seed = [13u8; 32];
+    let bundle_path = tmp.path().join("policy.bundle");
+    std::fs::write(&bundle_path, support::sign(&seed, 4, support::manifest("acme-live")))?;
+    support::write_bootstrap(&paths.managed_bootstrap, &bundle_path.display().to_string(), &seed)?;
+
+    // Build the live store with the MANAGED policy source, exactly as the service does.
+    let initial = managed::activate(&paths, any_pattern)?
+        .and_then(|r| r.active)
+        .ok_or_else(|| anyhow!("initial managed activation failed"))?;
+    let loaded = LoadedPolicy {
+        manifest: Some(initial.manifest),
+        origin: Some(ManifestOrigin::Managed),
+        user_manifest_ignored: false,
+    };
+    let store = ConfigStore::load_initial_with_policy(
+        any_pattern,
+        &loaded,
+        PolicySource::Managed { paths },
+    )
+    .map_err(|e| anyhow!("build store: {e}"))?;
+
+    // A file-watch tick (what a `config set` triggers). The managed policy MUST stand.
+    store.reresolve();
+    let published = store.policy().borrow().clone();
+    let name = published.manifest.as_ref().map(|m| m.name.clone());
+    ensure!(
+        name.as_deref() == Some("acme-live"),
+        "reresolve clobbered the managed policy (got {name:?}) -- this is the fail-open"
+    );
+    ensure!(
+        matches!(published.origin, Some(ManifestOrigin::Managed)),
+        "the origin must stay Managed after reresolve"
     );
     Ok(())
 }

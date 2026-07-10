@@ -95,8 +95,14 @@ impl Harness {
     fn build(policy: LoadedPolicy) -> Self {
         ensure_service_role();
         let browser = Browser::new();
-        let ctx = ServiceContext::from_startup(browser, DebugSink::disabled(), policy, None)
-            .expect("build the in-process ServiceContext");
+        let ctx = ServiceContext::from_startup(
+            browser,
+            DebugSink::disabled(),
+            policy,
+            ghostlight::governance::config::reload::PolicySource::SourceString { user_source: None },
+            None,
+        )
+        .expect("build the in-process ServiceContext");
         Self { ctx }
     }
 

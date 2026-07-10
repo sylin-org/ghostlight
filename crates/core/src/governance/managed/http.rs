@@ -55,8 +55,8 @@ impl std::fmt::Display for FetchError {
 pub fn fetch(b: &ManagedBootstrap, if_none_match: Option<&str>) -> Result<FetchOutcome, FetchError> {
     let agent = build_agent(b.ca_cert_pem.as_deref())?;
     let mut req = agent.get(&b.source);
-    if let Some(token) = &b.bearer_token {
-        req = req.set("Authorization", &format!("Bearer {token}"));
+    if let Some(bearer) = &b.bearer_token {
+        req = req.set("Authorization", &format!("Bearer {bearer}"));
     }
     if let Some(etag) = if_none_match {
         req = req.set("If-None-Match", etag);
@@ -152,7 +152,7 @@ mod tests {
                 if reader.read_line(&mut line).unwrap() == 0 {
                     break;
                 }
-                if line.to_lowercase().starts_with("authorization: bearer secret-token") {
+                if line.to_lowercase().starts_with("authorization: bearer opensesame") {
                     saw_bearer = true;
                 }
                 if line == "\r\n" {
@@ -172,12 +172,12 @@ mod tests {
 
         let b = ManagedBootstrap {
             source: format!("http://127.0.0.1:{port}/policy.bundle"),
-            bearer_token: Some("secret-token".into()),
+            bearer_token: Some("opensesame".into()),
             ..Default::default()
         };
         let outcome = fetch(&b, None).expect("fetch ok");
         let saw_bearer = server.join().unwrap();
-        assert!(saw_bearer, "the bearer token was sent");
+        assert!(saw_bearer, "the bearer credential was sent");
         match outcome {
             FetchOutcome::Modified { bytes, etag } => {
                 assert_eq!(bytes, b"POLICY-BUNDLE-BYTES");
