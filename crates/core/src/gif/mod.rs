@@ -4,8 +4,8 @@
 //! This module is the service-side home of everything the thin-extension rule moved out of the
 //! extension (ADR-0053 Decision 5): JPEG decode (`jpeg-decoder`), overlay compositing (overlay.rs,
 //! reference geometry recolored to Ghostlight sky-blue), adaptive NeuQuant palette (quantize.rs via
-//! `color_quant`), and the GIF89a writer + variable-width LZW (writer.rs, hand-ported from the
-//! oracle-tested JS). Everything here is pure computation over byte buffers -- deterministic,
+//! `color_quant`), and the GIF89a writer (writer.rs, via the image-rs `gif`/weezl crate). Everything
+//! here is pure computation over byte buffers -- deterministic,
 //! cargo-tested, and safe to run under `spawn_blocking`; the extension's only remaining GIF role is
 //! the screencast capture relay.
 
@@ -37,6 +37,8 @@ pub enum GifError {
     Empty,
     #[error("frame {index} failed to decode: {reason}")]
     Decode { index: usize, reason: String },
+    #[error("GIF assembly failed: {0}")]
+    Encode(String),
 }
 
 /// Decode a JPEG into RGBA plus dimensions.
@@ -131,12 +133,7 @@ pub fn encode_recording(frames: &[RecordedFrame], options: &Value) -> Result<Vec
         })
         .collect();
 
-    Ok(writer::encode_gif(
-        w0 as u16,
-        h0 as u16,
-        &palette.rgb,
-        &indexed,
-    ))
+    writer::encode_gif(w0 as u16, h0 as u16, &palette.rgb, &indexed).map_err(GifError::Encode)
 }
 
 #[cfg(test)]

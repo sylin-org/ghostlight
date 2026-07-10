@@ -65,8 +65,12 @@ the framing layer caps messages at 128 MiB.
    its timestamp.
 5. **The GIF pipeline is Rust.** A `gif` module in ghostlight-core: JPEG decode via a pure-Rust
    decoder crate (`jpeg-decoder`); adaptive palette via `color_quant` (the image-rs NeuQuant -- the
-   same algorithm ADR-0050 vendored, now as a maintained dependency); the GIF89a writer and
-   variable-width LZW ported from our tested JS (they are small and fully oracle-pinned); overlay
+   same algorithm ADR-0050 vendored, now as a maintained dependency); the GIF89a writer + LZW via
+   the image-rs `gif` crate (weezl LZW). [Amended during the live test: this was first hand-ported
+   from the JS, but the port carried a latent code-width off-by-one at the first 9->10 bit
+   transition -- it round-tripped through its own matched decoder yet strict third-party decoders
+   rejected it. Replaced with the library per this ADR's own Decision 1 rationale and ADR-0008: do
+   not hand-roll a codec.] Overlay
    compositing (click ring, drag path, action label, progress bar, Ghostlight watermark pill) as
    pure RGBA-buffer drawing with the geometry ported from lib/gifoverlay.js; label/watermark text
    via an embedded ASCII bitmap font (zero-dep, deterministic; upgrade to a rasterized TTF only if
