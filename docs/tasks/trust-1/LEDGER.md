@@ -6,7 +6,7 @@ RESUME HERE with no other context.
 ## RESUME HERE
 
 Batch authored 2026-07-10 (same session as the three-lane procurement research and the ADR-0057
-Research-ratification amendment). W1-W3 DONE. Next task: W4.
+Research-ratification amendment). W1-W4 DONE. Next task: W5.
 
 ## Status
 
@@ -14,8 +14,8 @@ Research-ratification amendment). W1-W3 DONE. Next task: W4.
 | --- | --- | --- | --- | --- |
 | W1 | Trust-center skeleton: README index | DONE | af550fa | none |
 | W2 | faq.md: the 22-question front door | DONE | 19d2d40 | none |
-| W3 | security-overview.md + data-flows.md | DONE | (pending) | none |
-| W4 | sub-processors.md + continuity.md + supply-chain.md | pending | - | - |
+| W3 | security-overview.md + data-flows.md | DONE | 68db6c4 | none |
+| W4 | sub-processors.md + continuity.md + supply-chain.md | DONE | (pending) | none |
 | W5 | controls.md + questionnaire.md (CAIQ-shaped) | pending | - | - |
 | W6 | support-policy.md + tiers.md + PLAN.md 3/2 sync | pending | - | - |
 | W7 | msa.md + dpa.md (DRAFT -- pending counsel) | pending | - | - |
@@ -59,3 +59,15 @@ One entry per task as it closes (or blocks). Number every deviation from the tas
   verified on load" and the docs stay silent on at-rest encryption. ADR-0055 D5 says the cache is
   signed AND encrypted, but the BOOTSTRAP banned-claims floor forbids at-rest encryption claims;
   silence satisfies both (no false claim, no banned claim). Applied batch-wide.
+
+### W4 -- sub-processors.md + continuity.md + supply-chain.md (DONE)
+- sub-processors.md: short, states "engages no subprocessors" with reasoning + git-history/release-
+  notes change record. continuity.md: verbatim Continuity Promise blockquote from ADR-0028 D6,
+  structural explanation, exactly 3 runnable scenarios (continuity-source-unreachable,
+  fail-closed-cold-boot, rollback-guardian), and an "If the vendor ceases to exist" section that
+  makes NO future-maintenance/foundation-handoff promise. supply-chain.md: releases/SBOM/deps/
+  build sections; Socket.dev claim pinned as "scored 100/100 on all axes on Socket.dev at
+  publication (2026-07)" with the npm link; SBOM asset name matches W8.
+- Verification: no-subprocessors 1; blockquote 6 lines; continuity lightbox ==3; all H2s present;
+  em-dash 0; encrypt-at-rest 0; footers present.
+- Deviations: none.
