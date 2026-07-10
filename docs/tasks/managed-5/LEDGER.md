@@ -8,8 +8,12 @@ executor resumes from RESUME HERE with no other context.
 Batch authored 2026-07-10; red-team re-read against the live tree completed the same day (T1/T2/
 T3/T8 verified aligned; T4 caller-integration corrected -- print loop, not a lines vec; T6
 precondition corrected -- multiple denial render sites exist, append at the pipeline emission
-chokepoint; T7 anchors verified exactly and pinned). T1 DONE (5a02aaa), T2 DONE (c395c42),
-T3 DONE (3a64c8f), T4 DONE (032ec27), T5 DONE (bb17e5b), T6 DONE (07b8cbc), T7 DONE (f0cdd0f). Next task: T8.
+chokepoint; T7 anchors verified exactly and pinned). BATCH COMPLETE: T1 (5a02aaa), T2 (c395c42),
+T3 (3a64c8f), T4 (032ec27), T5 (bb17e5b), T6 (07b8cbc), T7 (f0cdd0f), T8 (2b748d2). All eight tasks
+DONE, tree clean, every global gate green (cargo test --workspace 0 failures, clippy clean, lightbox
+9/9 ok). No blocks. Only deviation: T5 dev-1 (freshness_phrase catch-all arm; harmless, unreachable
+by the pinned tests). NEXT (owner-directed): report deviations, then the ADR-0056 D3 legacy-27 e2e
+migration batch, then record the lightbox `up` demo.
 
 ## Status
 
@@ -22,7 +26,7 @@ T3 DONE (3a64c8f), T4 DONE (032ec27), T5 DONE (bb17e5b), T6 DONE (07b8cbc), T7 D
 | T5 | explain-tool Policy Passport section | DONE | bb17e5b | 1 |
 | T6 | Denials-as-doors: org contact line | DONE | 07b8cbc | none |
 | T7 | Audit provenance: policy_seq on tool-call records | DONE | f0cdd0f | none |
-| T8 | Lightbox scenarios: passport-freshness + sidecar-propagation | pending | - | - |
+| T8 | Lightbox scenarios: passport-freshness + sidecar-propagation | DONE | 2b748d2 | none |
 
 Status values: `pending` | `in-progress` | `DONE` | `BLOCKED`.
 
@@ -130,3 +134,17 @@ One entry per task as it closes (or blocks). Number every deviation from the tas
   tests pass). Global gates: workspace tests pass, clippy clean, lightbox 7/7 ok.
 - Deviations: none (the one-line concrete recorder clone in server.rs is the sanctioned addition
   named in the task precondition).
+
+### T8 -- lightbox scenarios (2b748d2)
+- Preconditions verified: T2..T7 DONE; scenarios.rs registry() + support helpers TempRoot/
+  BundleServer/sign/manifest/write_bootstrap present; all consumed core items (managed_passport,
+  status::{sidecar_path,read_sidecar,ManagedStatus}, bundle::{sign_bundle,Presentation,Contact}) are
+  already pub -- no crates/core change needed.
+- scenarios.rs: added `use ...managed::status;`; two registry entries. sidecar_propagation (serve
+  seq-5 -> sidecar fresh/seq5; set_bundle seq-6 -> sidecar seq6; drop server -> sidecar
+  last_known_good/source_unreachable/seq stays 6). passport_freshness (local presentation bundle ->
+  activate -> read sidecar -> managed_passport contains "Governed by: Acme Security.", "Policy
+  version 3,", the sacred line, and "security@acme.example").
+- Verification: lightbox run --all = 9/9 ok; clippy -p ghostlight-lightbox clean. Global gates:
+  workspace tests 0 failures, clippy clean.
+- Deviations: none.
