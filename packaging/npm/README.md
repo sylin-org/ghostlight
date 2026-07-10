@@ -1,15 +1,13 @@
 # ghostlight (npm launcher)
 
-Governed browser automation over your own authenticated Chromium session, for AI coding
-agents: any MCP client, your real logged-in browser, with capability grants, sacred domains,
+Governed browser automation for AI coding agents. Ghostlight gives any MCP client controlled
+access to your own authenticated Chromium session, with capability grants, protected domains,
 and a structured audit trail. All-open by default; governance when you want it.
 
-This npm package is a thin launcher: on first run it downloads the version-matched Ghostlight
-executables from the GitHub release and caches them under `~/.ghostlight/bin/` (zero runtime
-dependencies). Since ADR-0046 (as amended by ADR-0051 Phase 3) there are two: `ghostlight` (the CLI +
-the persistent service) plus the single thin pass-through `ghostlight-relay`, which carries both
-roles. A bare `npx ghostlight` runs `ghostlight-relay --role agent` (what your client relays
-through); `npx ghostlight install` runs the CLI installer. Everything real lives in the binaries.
+This npm package is a thin launcher. On first run it downloads the version-matched Ghostlight
+binaries from the GitHub release and caches them under `~/.ghostlight/bin/`, so there are no
+runtime dependencies. A bare `npx ghostlight` starts the MCP server your client talks to;
+`npx ghostlight install` connects the browser side.
 
 ## Quick start
 
@@ -33,5 +31,4 @@ https://sylin-org.github.io/ghostlight/install.html
 
 - Project: https://github.com/sylin-org/ghostlight
 - What it is and why: https://sylin-org.github.io/ghostlight/
-- License: engine Apache-2.0 OR MIT; the governance module's source is readable under the
-  Ghostlight Commercial License (see the repository's LICENSE for the split).
+- License: engine is Apache-2.0 OR MIT; governance module is source-available (see LICENSE).
