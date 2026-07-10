@@ -9,7 +9,7 @@ Batch authored 2026-07-10; red-team re-read against the live tree completed the 
 T3/T8 verified aligned; T4 caller-integration corrected -- print loop, not a lines vec; T6
 precondition corrected -- multiple denial render sites exist, append at the pipeline emission
 chokepoint; T7 anchors verified exactly and pinned). T1 DONE (5a02aaa), T2 DONE (c395c42),
-T3 DONE (3a64c8f), T4 DONE (032ec27), T5 DONE (bb17e5b), T6 DONE (07b8cbc). Next task: T7.
+T3 DONE (3a64c8f), T4 DONE (032ec27), T5 DONE (bb17e5b), T6 DONE (07b8cbc), T7 DONE (f0cdd0f). Next task: T8.
 
 ## Status
 
@@ -21,7 +21,7 @@ T3 DONE (3a64c8f), T4 DONE (032ec27), T5 DONE (bb17e5b), T6 DONE (07b8cbc). Next
 | T4 | doctor managed line (reads the sidecar) | DONE | 032ec27 | none |
 | T5 | explain-tool Policy Passport section | DONE | bb17e5b | 1 |
 | T6 | Denials-as-doors: org contact line | DONE | 07b8cbc | none |
-| T7 | Audit provenance: policy_seq on tool-call records | pending | - | - |
+| T7 | Audit provenance: policy_seq on tool-call records | DONE | f0cdd0f | none |
 | T8 | Lightbox scenarios: passport-freshness + sidecar-propagation | pending | - | - |
 
 Status values: `pending` | `in-progress` | `DONE` | `BLOCKED`.
@@ -111,3 +111,22 @@ One entry per task as it closes (or blocks). Number every deviation from the tas
   unchanged. tool_enforcement suite green (11 passed, denials there run with no managed bootstrap so
   strings are unchanged). Global gates: workspace tests pass, clippy clean, lightbox 7/7 ok.
 - Deviations: none.
+
+### T7 -- policy_seq audit provenance (f0cdd0f)
+- Preconditions verified: set_license_stamp def at audit/mod.rs ~127 and hub call site at
+  hub/mod.rs ~464 inside the governance_operational block; license_stamp field ~40, tool-call-only
+  gate in write_serialized, four constructors. mcp/server.rs policy-subscription task has the
+  concrete Arc<Recorder> in scope at the spawn site.
+- audit/mod.rs: policy_seq: Mutex<Option<u64>> field (init None in all four constructors);
+  set_policy_seq mirroring set_license_stamp; write_serialized now has a parallel tool-call-only seq
+  gate and appends "policy_seq":<n> (fast byte-identical path when both stamp+seq are None; only-
+  license case unchanged).
+- Hub wiring (hub/mod.rs, inside governance_operational): for ManifestOrigin::Managed, read the T2
+  sidecar and recorder.set_policy_seq(status.seq). Live wiring (server.rs policy-subscription): added
+  a concrete seq_recorder = Arc::clone(&recorder) at the spawn site; on each change, Managed re-reads
+  the sidecar and sets the seq, any other origin clears it (set_policy_seq(None)).
+- Tests: policy_seq_stamps_tool_call_records_only ("policy_seq":6 on tool-call, absent on session
+  event) + no_seq_no_field. all_open_golden + audit_recorder + every audit-shape test green (591 lib
+  tests pass). Global gates: workspace tests pass, clippy clean, lightbox 7/7 ok.
+- Deviations: none (the one-line concrete recorder clone in server.rs is the sanctioned addition
+  named in the task precondition).
