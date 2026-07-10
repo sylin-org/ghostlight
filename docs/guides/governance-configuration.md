@@ -206,6 +206,109 @@ When an org policy is present it takes precedence, and any user-supplied manifes
 displacement is itself recorded, as a `user_manifest_ignored` event, so it is visible rather than
 silent).
 
+For an organization that would rather distribute one signed policy to a whole fleet than place a
+file on every machine, there is a third path, covered next.
+
+## Central distribution: managed policy
+
+The org-policy file above has to be present on each machine. For a fleet you can instead have every
+endpoint pull one signed policy from a source you control, verify it locally, and keep enforcing the
+last good copy when that source is unreachable. This is the managed policy path. It changes how a
+policy travels, not what a policy says: the manifest inside is the same schema-3 document from the
+rest of this guide.
+
+### How trust works
+
+Your organization signs its own policy with its own key. Ghostlight embeds no policy key of its own;
+it verifies against the public key you provision. Authenticity therefore lives in the signature, not
+in the transport, so the same signed bytes verify identically whether they arrive over HTTPS, from an
+object store or file share, or on a USB stick carried into an air-gapped network.
+
+You sign with the org authoring commands (they ship in every build):
+
+    # print your public key(s) for the bootstrap
+    ghostlight policy pubkey --seed org.seed
+
+    # sign a manifest into a policy bundle at publish sequence 1
+    ghostlight policy sign --seed org.seed --seq 1 policy.json
+
+    # or do both at once and get a ready-to-paste bootstrap snippet
+    ghostlight policy publish --seed org.seed --seq 1 policy.json
+
+The seed is a 32-byte private signing seed you generate and guard (for example `openssl rand 32`).
+For a production, post-quantum-ready key add a second `--mldsa-seed` file; the bundle then carries
+two signatures and both must verify. `policy publish` is the one-command path: it signs the bundle
+and prints the `managed.json` you hand your fleet.
+
+### The bootstrap
+
+Each machine reads an admin-only `managed.json` that sits beside the org-policy file, delivered by
+your MDM exactly like the policy file:
+
+- Windows: `%ProgramData%\ghostlight\managed.json`
+- macOS: `/Library/Application Support/ghostlight/managed.json`
+- Linux: `/etc/ghostlight/managed.json`
+
+It names the source and the public key to trust:
+
+    {
+      "source": "https://policy.example.com/ghostlight.bundle",
+      "pubkey_ed25519": "b3f1...",
+      "poll_seconds": 300
+    }
+
+`source` is any location the fleet can reach: an HTTPS URL, an object store, a file share, or a
+local or USB path for an air-gapped install. Optional fields tighten the fetch: `pubkey_mldsa` (the
+second key for a composite bundle), `bearer_token` (sent as `Authorization: Bearer` on the request),
+`ca_cert_pem` (pin the source's certificate authority), and `poll_seconds` (how often to re-check
+for a new publish). Only the admin bootstrap can turn managed policy on; a user cannot self-activate
+it through `GHOSTLIGHT_MANIFEST`.
+
+### Continuity: last-known-good, never fail open
+
+The verified bundle is cached to disk, and at boot Ghostlight loads and re-verifies that cache before
+it ever touches the network. From there, two situations that would leave a lesser system unprotected
+instead keep the last good policy:
+
+- **The source is unreachable.** The cached policy keeps enforcing. Nothing falls open.
+- **The source returns a bad bundle** (wrong signature, invalid schema). The bad update is rejected
+  and the last valid policy stands.
+
+Only one case refuses to run at all: a first boot with no cache and an unreachable source. Ghostlight
+fails closed there rather than starting wide open on a policy it was told to have but cannot fetch.
+
+A third protection is the reason to bump `--seq` on every release. The publish sequence is monotonic,
+and a validly-signed bundle whose sequence is below the one already held is treated as a rollback and
+refused, so a stale mirror or a replayed old bundle cannot quietly downgrade your fleet. The cache
+stands. When `poll_seconds` is set the source is re-checked on that interval and a newer publish is
+picked up live, with no restart.
+
+### Seeing that it landed
+
+`ghostlight doctor` reports the managed state on any machine, with no live agent session, so an
+administrator can answer "did my policy reach this endpoint?" directly:
+
+    Governance:
+      mode  enforce (denied calls are blocked)
+      managed  seq 7 (fresh), fetched 2026-07-11T09:14:02+00:00
+      source   https://policy.example.com/ghostlight.bundle
+
+When the cache is standing in for an unreachable or refused update, the managed line says so
+(`last_known_good: source_unreachable`, `update_rejected`, or `rollback_refused`), which is exactly
+the guardian moment you want visible rather than silent.
+
+### What the governed session is told
+
+Under managed governance the session speaks for the policy it carries. Ask the agent to call
+`explain` and its answer gains a short Policy Passport: that managed governance is active, the policy
+version and whether it is current or standing on last-known-good, a reminder that sacred domains stay
+off-limits under any policy including this one, and, when the bundle names them, who governs the
+session and how to reach them. A denial under managed governance can likewise carry one extra line
+pointing the person to their organization's contact, so a blocked action becomes a door to a human
+rather than a dead end. These org-voice details (a name, a rationale, a contact) are part of the
+signed bundle and are held to strict display limits when it is verified, so an organization can add
+its voice but never spoof or crowd out what Ghostlight has to tell the user.
+
 ## The authoring loop
 
 You do not write a manifest from a blank page. The tooling gives you a loop:
@@ -235,8 +338,11 @@ afford.
 ## Evidence
 
 Every call, permitted or denied or shadow-denied, produces one JSON-Lines audit record: identity,
-tool, capability, host, decision, grant id, denial id, duration, and the manifest hash in force. For
-streaming it to a SIEM, see [siem-integration.md](siem-integration.md).
+tool, capability, host, decision, grant id, denial id, duration, and the manifest hash in force.
+Under managed policy each tool-call record additionally carries `policy_seq`, the org-signed publish
+sequence in force, so a decision is attributable not only to a manifest hash but to the exact
+published version your fleet was running. For streaming it to a SIEM, see
+[siem-integration.md](siem-integration.md).
 
 ## Reference, not restated
 

@@ -66,6 +66,13 @@ A `license` field may additionally be appended to records in an upcoming release
 while license state is abnormal (see [PRICING.md](../../PRICING.md); it never affects
 behavior).
 
+A `policy_seq` field (a number) is appended to tool-call records under managed policy
+(central signed-policy distribution, see the [governance configuration
+guide](governance-configuration.md)): the org-signed publish sequence the decision ran
+under. Like `license`, it appears only on tool-call records, never on session events, and
+never changes behavior. Pivot on it to tie a decision to the exact published policy
+version, not just the manifest hash.
+
 ## Splunk
 
 UDP input on the syslog port, then extract the JSON payload:

@@ -118,13 +118,26 @@ change re-advertises the tools, and an invalid edit keeps the last-good policy (
 closed) rather than falling open. `ghostlight doctor` shows the active manifest's name,
 version, and hash on any machine.
 
+For a fleet, you can distribute one signed policy centrally instead of placing a file on
+every machine. Sign it with `ghostlight policy publish` and point each endpoint's
+`managed.json` bootstrap at a source you control (an HTTPS URL, an object store, a file
+share, or a USB path for an air-gapped install). Every endpoint verifies the signature
+locally against your public key, caches the last good copy, and keeps enforcing it when
+the source is unreachable; it never falls open, and it refuses a rolled-back version.
+`ghostlight doctor` then reports the managed sequence, freshness, and source on each
+machine, so you can confirm a publish reached the fleet. The mechanics, including the
+signing commands and the bootstrap fields, are in the
+[governance configuration guide](governance-configuration.md).
+
 ## Step 6: evidence
 
 Every call -- permitted, denied, and shadow-denied alike -- produces one JSON-Lines
 audit record: identity, tool, capability, host, decision, grant id, denial id, duration,
 and the manifest hash that was in force, so any decision is attributable to the exact
-policy version that made it. Session events (the panic kill switch, manifest reloads,
-user-manifest displacement) land in the same stream.
+policy version that made it. Under managed policy each tool-call record also carries
+`policy_seq`, the org-signed publish sequence, so evidence ties a decision to the exact
+published version your fleet was running, not only its hash. Session events (the panic
+kill switch, manifest reloads, user-manifest displacement) land in the same stream.
 
 Send it to your SIEM over RFC 5424 syslog or collect the JSONL file directly: see the
 [SIEM integration guide](siem-integration.md).
