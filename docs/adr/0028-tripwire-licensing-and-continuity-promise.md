@@ -47,8 +47,8 @@ degraded, or delayed by license state, ever. The license manifests exclusively a
 - a startup `tracing::warn!` when the state warrants a stamp,
 - a `License:` section in `ghostlight doctor`,
 - a `ghostlight license status` CLI report,
-- a `license` field stamped onto audit records (tool-call and session-event lines alike)
-  while an abnormal license state holds.
+- a `license` field stamped onto TOOL-CALL audit records while an abnormal license state holds
+  (scoped to tool-call records; see the amendment note under Decision 3).
 
 This is the purest implementation of the founder's principles: nothing to fail open,
 nothing to fail closed, no failure modes at all. The pressure mechanism is that a
@@ -138,11 +138,23 @@ stamp string, resolution/decision/formatting all live in that module (SoC per th
 Resolution itself still happens once at startup; `doctor` and `license status` are separate
 read-only CLI invocations that display the resolved state and NEVER stamp or warn.
 
-The stamped `license` field is APPENDED to the serialized record (after `held` on tool-call
-records) and is entirely ABSENT when the state is normal. This deliberately diverges from
-the record convention that absent values serialize as `null`: the stamp is an
-exceptional-state marker, not a regular field, and its absence keeps licensed and personal
-audit streams byte-identical to today's format.
+The stamped `license` field is APPENDED to the serialized record (after `held`) and is
+entirely ABSENT when the state is normal. This deliberately diverges from the record
+convention that absent values serialize as `null`: the stamp is an exceptional-state marker,
+not a regular field, and its absence keeps licensed and personal audit streams byte-identical
+to today's format.
+
+AMENDMENT (2026-07-10): the stamp rides TOOL-CALL records ONLY, not session-event records.
+Decision 1 originally said "tool-call and session-event lines alike", but session-event
+records (`config_changed`, the panic kill switch, session lifecycle) carry a FROZEN shape
+(ADR-0025 / PINS.md CS4) that external audit consumers may parse positionally, and appending a
+field there breaks that contract for little gain -- the compliance signal is fully carried by
+the tool-call stream, which is where governed agent work actually appears (and session events
+are rare administrative lifecycle by comparison). So `Recorder::write_serialized` appends the
+`license` field only for `kind == "tool_call"`; session-event lines stay byte-identical to
+their frozen format. This surfaced when the licensing engine's stamp added a 7th key to the
+`config_changed` session-event in `tests/manage_web_enable_remote` (that test injects an org
+policy, making governance operational, so the stamp fired).
 
 ### 4. Surfaces: exactly four, and explicitly not `explain`
 

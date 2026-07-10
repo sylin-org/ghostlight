@@ -162,11 +162,17 @@ impl Recorder {
         // Fast path (the norm): no license stamp -> serialize directly, byte-identical to before the
         // licensing engine existed. Only an abnormal, governance-operational deployment carries a
         // stamp, and then the `"license"` key is appended LAST (serde_json is built with
-        // preserve_order), after `held` on tool-call records (ADR-0028 Decision 3).
-        let stamp = *self
-            .license_stamp
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        // preserve_order), after `held` (ADR-0028 Decision 3). The stamp rides TOOL-CALL records
+        // ONLY: session-event records keep their frozen shape (ADR-0025 / PINS.md CS4), and the
+        // compliance signal is fully carried by the tool-call stream where governed work happens.
+        let stamp = if kind == "tool_call" {
+            *self
+                .license_stamp
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+        } else {
+            None
+        };
         let serialized = match stamp {
             None => serde_json::to_string(record),
             Some(s) => match serde_json::to_value(record) {
