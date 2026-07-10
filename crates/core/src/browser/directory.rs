@@ -1301,12 +1301,18 @@ pub const REGISTRY: &[ToolDescriptor] = &[
 /// the other four (summary/workflow/flow/denials, ADR-0031 Decision 1's original set), it teaches
 /// cost discipline across several tools at once rather than the workflow contract, but composes
 /// into the exact same `initialize.instructions` string.
+///
+/// Prose revised 2026-07-10 (ergonomics pass; ADR-0031 Decision 1 field contract unchanged): the
+/// `flow` field now reveals the higher-level tools (`wait_for`, `script`, `browser_batch`,
+/// `form_fill`) and steers tool choice, and all cost guidance is consolidated into `cost_notes`
+/// (the duplicated COST DISCIPLINE clause left `workflow`). The five-field set and the non-empty,
+/// `tabId`, and `Cost notes:` guarantees the tests pin are all preserved.
 pub const AGENT_GUIDE: AgentGuide = AgentGuide {
     summary: "Ghostlight drives the user's own authenticated browser. You observe and act on the web pages they're already logged into, in an isolated Ghostlight tab group separate from their own tabs. Default (no policy) is unrestricted; a policy can scope what's allowed.",
-    workflow: "BEFORE ANYTHING ELSE: GET A tabId. Every tool below that touches a page requires a `tabId` (a number) -- it is required, not optional. Get one with tabs_context_mcp (pass createIfEmpty: true to create the group if none exists; usually your first call) or tabs_create_mcp (open a new tab). Then navigate (tabId + url) to go somewhere. COST DISCIPLINE: computer screenshot and zoom return large images costing many tokens; prefer read_page (structured tree) or get_page_text (plain text) when you only need structure or text, and screenshot only when you need to see layout.",
-    flow: "tabs_context_mcp -> navigate -> read (read_page or get_page_text or computer screenshot) -> act (computer or form_input) -> re-read.",
-    denials: "If a call is denied you'll see `Denied (D-xxxxxxxx): ...`. Call `explain` (no arguments) to see what's permitted in this session; hand the denial id to the policy administrator.",
-    cost_notes: "Cost notes: get_page_text can return tens of thousands of tokens on document-heavy pages; prefer find for targeted lookups and read_page filter interactive for form work. A screenshot costs roughly 1,600 tokens; prefer read_page or find when you need targets rather than appearance. read_page full is large on complex pages; filter interactive is dramatically smaller, and diff true returns only changes since your last read. script steps still cost a browser round-trip each; use wait_for between navigation and reads.",
+    workflow: "BEFORE ANYTHING ELSE: GET A tabId. Every tool that touches a page requires a `tabId` (a number) -- it is required, not optional. Get one with tabs_context_mcp (pass `createIfEmpty: true` to create the group if none exists; usually your first call) or tabs_create_mcp (open a new tab). Then navigate (tabId + url) to go somewhere.",
+    flow: "tabs_context_mcp -> navigate -> read (read_page for structure, get_page_text for prose, find for one element; screenshot only to see layout) -> act (form_fill for forms, computer for clicks and keys, form_input for a single field) -> re-read to confirm. On dynamic pages, use wait_for between navigating and reading so you see the settled page, not a spinner. When you can predict two or more steps ahead, run them in one call: script chains steps and passes results forward (e.g. `$prev.results.0.ref` after a find), and browser_batch runs a fixed sequence in one round-trip.",
+    denials: "If a call is denied you'll see `Denied (D-xxxxxxxx): ...`. Call explain (no arguments) to see what's permitted -- you can do this any time to plan, not just after a denial -- and hand the denial id to the policy administrator.",
+    cost_notes: "Cost notes: prefer read_page (structured tree) or get_page_text (plain text) over screenshots when you only need structure or text; a screenshot or zoom costs roughly 1,600 tokens, so capture one only when you need to see layout. read_page full is large on complex pages -- filter interactive is dramatically smaller, and diff true returns only what changed since your last read. get_page_text can return tens of thousands of tokens on document-heavy pages; prefer find for targeted lookups. Each script or browser_batch step is still one browser round-trip -- they save your tokens and turns, not the browser's work.",
 };
 
 /// The agent onboarding guide's prose fields (ADR-0031 Decision 1; `cost_notes` added by C11).
