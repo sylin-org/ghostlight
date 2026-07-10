@@ -20,7 +20,7 @@ Research-ratification amendment). W1-W9 DONE. Batch COMPLETE.
 | W6 | support-policy.md + tiers.md + PLAN.md 3/2 sync | DONE | f97ac87 | none |
 | W7 | msa.md + dpa.md (DRAFT -- pending counsel) | DONE | 3a1e7bb | none |
 | W8 | SBOM in release CI + security-insights.yml + SECURITY.md alignment | DONE | 07249f4 | 2 |
-| W9 | Red-team pass (over-claims) + cross-links | DONE | 880bf2b | none |
+| W9 | Red-team pass (over-claims) + cross-links | DONE | c6d197b | none |
 
 Status values: `pending` | `in-progress` | `DONE` | `BLOCKED`.
 
