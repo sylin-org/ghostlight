@@ -23,8 +23,9 @@ class Ghostlight < Formula
   end
 
   def install
-    # ADR-0046: three role executables ship in the archive (ghostlight + the two adapters).
-    bin.install "ghostlight", "ghostlight-adapter-agent", "ghostlight-adapter-browser"
+    # ADR-0046 as amended by ADR-0051: two executables ship in the archive
+    # (ghostlight + the single role-selected ghostlight-relay pass-through).
+    bin.install "ghostlight", "ghostlight-relay"
   end
 
   def caveats
