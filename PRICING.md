@@ -74,6 +74,9 @@ founding program; until then every documented feature works without a key, and e
 no contact with us (a public evaluation key lets you self-sign). The terms in
 [LICENSING.md](LICENSING.md) apply regardless of tooling.
 
+To install, check, or refresh a key once you have one, see
+[entering a license](docs/guides/licensing.md).
+
 ## Questions
 
 **What happens when a license expires?** Nothing stops; see the Continuity Promise. Your

@@ -241,6 +241,7 @@ first, because a running server locks the exe.
 | [docs/guides/solo-developer.md](docs/guides/solo-developer.md)      | Ten minutes from clone to a working agent, plus personal safety rails.   |
 | [docs/guides/compliance-team.md](docs/guides/compliance-team.md)    | Taking a policy from blank page to org-wide enforcement, with evidence.  |
 | [docs/guides/siem-integration.md](docs/guides/siem-integration.md)  | Audit stream schema and Splunk / Sentinel / Elastic ingestion.           |
+| [docs/guides/licensing.md](docs/guides/licensing.md)                | Entering, checking, and refreshing a license key (only the paid tier).   |
 | [docs/COMPARISON.md](docs/COMPARISON.md)                            | A candid comparison with the alternatives.                               |
 | [ROADMAP.md](ROADMAP.md)                                            | What we are building next, and the direction behind it.                  |
 | [PRICING.md](PRICING.md)                                            | Editions, the founding program, and the Continuity Promise.              |

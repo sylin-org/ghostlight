@@ -24,7 +24,8 @@ files govern. Decision record:
 
 If your row says "commercial subscription", contact hello@sylin.org. In short: exactly
 one situation pays, and everything else is free -- see [PRICING.md](PRICING.md) for the
-tiers, plus the hardship and outgrew-the-tier accommodations.
+tiers, plus the hardship and outgrew-the-tier accommodations. Once you have a license,
+[docs/guides/licensing.md](docs/guides/licensing.md) shows how to install and refresh it.
 
 ## Labels, precisely
 
