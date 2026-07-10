@@ -4,6 +4,7 @@
 //! NEVER depend on this crate (ADR-0046 Decision 2).
 
 pub mod browser;
+pub mod gif;
 pub mod governance;
 pub mod hub;
 pub mod install;

@@ -22,6 +22,10 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # WHATWG URL parser -- domain matching must never hand-roll URL/host parsing (CVE-2025-47241 class).
 url = "2"
+# gif_creator pipeline (ADR-0053 D5): pure-Rust JPEG decode + the image-rs NeuQuant quantizer.
+# The GIF89a writer/LZW themselves are hand-ported from our oracle-tested JS (src/gif/).
+jpeg-decoder = { version = "0.3", default-features = false }
+color_quant = "1.1"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
