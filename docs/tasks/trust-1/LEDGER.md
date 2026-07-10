@@ -6,15 +6,15 @@ RESUME HERE with no other context.
 ## RESUME HERE
 
 Batch authored 2026-07-10 (same session as the three-lane procurement research and the ADR-0057
-Research-ratification amendment). W1-W2 DONE. Next task: W3.
+Research-ratification amendment). W1-W3 DONE. Next task: W4.
 
 ## Status
 
 | Task | Title | Status | Commit | Deviations |
 | --- | --- | --- | --- | --- |
 | W1 | Trust-center skeleton: README index | DONE | af550fa | none |
-| W2 | faq.md: the 22-question front door | DONE | (pending) | none |
-| W3 | security-overview.md + data-flows.md | pending | - | - |
+| W2 | faq.md: the 22-question front door | DONE | 19d2d40 | none |
+| W3 | security-overview.md + data-flows.md | DONE | (pending) | none |
 | W4 | sub-processors.md + continuity.md + supply-chain.md | pending | - | - |
 | W5 | controls.md + questionnaire.md (CAIQ-shaped) | pending | - | - |
 | W6 | support-policy.md + tiers.md + PLAN.md 3/2 sync | pending | - | - |
@@ -47,3 +47,15 @@ One entry per task as it closes (or blocks). Number every deviation from the tas
   at exactly 22); (b) governance-module clause reworded so the only "open source" string is the
   engine's, satisfying the W9 red-team gate; (c) ADR-0027 link uses its real filename
   `0027-open-core-business-model-and-licensing.md`.
+
+### W3 -- security-overview.md + data-flows.md (DONE)
+- Wrote both files with all pinned H2s in order. security-overview.md includes the verbatim
+  publish-all-audits sentence and describes the cache as signed and verified-on-load with NO
+  at-rest encryption claim. data-flows.md has the "Flows that do not exist" section with per-flow
+  ADR-0028 D9 citation.
+- Verification: publish-in-full 1; encrypt-at-rest 0; "## Flows that do not exist" 1; em-dash 0;
+  no stray "open source"; footers present.
+- Deviations: none. Note: per authority-order review the managed cache is described as "signed and
+  verified on load" and the docs stay silent on at-rest encryption. ADR-0055 D5 says the cache is
+  signed AND encrypted, but the BOOTSTRAP banned-claims floor forbids at-rest encryption claims;
+  silence satisfies both (no false claim, no banned claim). Applied batch-wide.
