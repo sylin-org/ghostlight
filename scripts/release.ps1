@@ -485,10 +485,14 @@ function Step-Npm {
         Write-Skip "ghostlight@$Version already on npm; not re-publishing"
     }
     else {
-        # Guard the ordering invariant: assets MUST exist before npm (the launcher fetches them).
-        $view = & gh release view $Tag --repo $RepoSlug --json name 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            throw "release $Tag does not exist; refusing to publish npm before its assets exist (the launcher would 404)"
+        # Guard the ordering invariant: assets MUST exist before npm (the launcher fetches
+        # them). Enforced for a live publish; a dry run only reports (the release may not
+        # exist yet when previewing the whole plan up front).
+        if (-not $DryRun) {
+            & gh release view $Tag --repo $RepoSlug --json name 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "release $Tag does not exist; refusing to publish npm before its assets exist (the launcher would 404)"
+            }
         }
 
         $npmDir = Join-Path $RepoRoot 'packaging/npm'
