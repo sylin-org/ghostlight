@@ -17,40 +17,41 @@ fn test_ctx() -> PlanCtx {
     }
 }
 
-/// PINNED (H9): `schtasks /create /tn "Ghostlight Service" /tr "\"<exe>\" service" /sc onlogon
-/// /rl limited /f`.
+/// PINNED (ADR-0054, supersedes the H9 schtasks pin): registration is zero-elevation -- no
+/// scheduled-task creation anywhere (an onlogon task requires elevation, issue #17); the HKCU Run
+/// value carries the pinned name and a quoted `"<exe>" service` launch string; the service starts
+/// once, detached.
 #[cfg(windows)]
 #[test]
-fn windows_task_register_command_is_pinned() {
+fn windows_registration_is_zero_elevation_run_key() {
     let ctx = test_ctx();
     let exe = std::path::Path::new(r"C:\Program Files\Ghostlight\ghostlight.exe");
     let steps = register_steps(exe, &ctx);
-    let create = steps
+
+    assert!(
+        !steps.iter().any(|s| matches!(
+            s,
+            SupervisorStep::Run(c) if c.args.iter().any(|a| a == "/create")
+        )),
+        "no scheduled-task creation step exists"
+    );
+    let (name, data) = steps
         .iter()
         .find_map(|s| match s {
-            SupervisorStep::Run(c) if c.program == "schtasks" => Some(c),
+            SupervisorStep::SetRunValue { name, data } => Some((name.clone(), data.clone())),
             _ => None,
         })
-        .expect("a schtasks step exists");
-
-    for expected in [
-        "/tn",
-        "Ghostlight Service",
-        "/rl",
-        "limited",
-        "/sc",
-        "onlogon",
-    ] {
-        assert!(
-            create.args.iter().any(|a| a == expected),
-            "missing arg {expected:?} in {:?}",
-            create.args
-        );
-    }
+        .expect("an HKCU Run value step exists");
+    assert_eq!(name, "Ghostlight Service");
+    assert_eq!(
+        data,
+        r#""C:\Program Files\Ghostlight\ghostlight.exe" service"#
+    );
     assert!(
-        create.args.iter().any(|a| a.contains("service")),
-        "the /tr launch string must invoke the 'service' subcommand: {:?}",
-        create.args
+        steps
+            .iter()
+            .any(|s| matches!(s, SupervisorStep::StartDetached { .. })),
+        "the service starts once, detached"
     );
 }
 

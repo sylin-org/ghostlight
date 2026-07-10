@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Per-user OS supervisor registration for the always-ready Ghostlight service (ADR-0030 Decision 8
-//! amendment, H9). Registers `ghostlight service` to start at login and restart on crash, then
-//! starts it once so the first session is already up; unregisters + stops it on uninstall. Uses the
-//! SAME per-platform identifiers H6's adapter self-heal targets (`ghostlight_transport::supervisor`), so there
-//! is one source of truth for the names an installed supervisor and a self-healing adapter both
-//! address. Every mechanism is per-user, zero-admin (Task Scheduler LeastPrivilege logon task / user
-//! launchd LaunchAgent / systemd --user unit) -- NEVER elevated (Decision 8). Applying these steps is
+//! Per-user OS autostart registration for the always-ready Ghostlight service (ADR-0030 Decision 8
+//! amendment, H9; Windows mechanism replaced by ADR-0054). Registers `ghostlight service` to start
+//! at login, then starts it once so the first session is already up; unregisters + stops it on
+//! uninstall. Uses the SAME per-platform identifiers the adapter self-heal targets
+//! (`ghostlight_transport::supervisor`), so there is one source of truth for the names both sides
+//! address. Every mechanism is per-user and genuinely zero-admin -- NEVER elevated (Decision 8):
+//! an HKCU Run key + detached start on Windows (a schtasks logon task needs elevation, issue #17),
+//! a user launchd LaunchAgent on macOS, a systemd --user unit on Linux. Applying these steps is
 //! best-effort: a failure here is logged and never aborts the surrounding install/uninstall (the
 //! adapter self-heal and manual `ghostlight service` remain fallbacks).
 
@@ -18,10 +19,13 @@ use ghostlight_transport::supervisor::supervisor_task_name;
 use ghostlight_transport::supervisor::supervisor_unit;
 use std::path::{Path, PathBuf};
 
-/// One external command to run best-effort (never fatal to the caller).
+/// One external command to run best-effort (never fatal to the caller). `quiet_failure` steps
+/// report `[noop]` instead of `[warn]` on a non-zero exit -- for cleanup of things that usually do
+/// not exist (the ADR-0054 legacy scheduled task).
 pub struct SupervisorCommand {
     pub program: String,
     pub args: Vec<String>,
+    pub quiet_failure: bool,
 }
 
 impl SupervisorCommand {
@@ -29,65 +33,106 @@ impl SupervisorCommand {
         Self {
             program: program.to_string(),
             args,
+            quiet_failure: false,
+        }
+    }
+
+    #[cfg(windows)]
+    fn quiet(program: &str, args: Vec<String>) -> Self {
+        Self {
+            quiet_failure: true,
+            ..Self::new(program, args)
         }
     }
 }
 
-/// One step of registering/unregistering the supervisor: write its definition file, remove it, or
-/// run an external command. Applied in order, each best-effort.
+/// One step of registering/unregistering the supervisor: write its definition file, remove it,
+/// run an external command, or (Windows, ADR-0054) touch the HKCU Run key / start the service
+/// detached. Applied in order, each best-effort.
 pub enum SupervisorStep {
-    WriteFile { path: PathBuf, contents: String },
-    RemoveFile { path: PathBuf },
+    WriteFile {
+        path: PathBuf,
+        contents: String,
+    },
+    RemoveFile {
+        path: PathBuf,
+    },
     Run(SupervisorCommand),
+    /// Set `HKCU\...\Run\<name>` = `<data>` (ADR-0054 Decision 1).
+    #[cfg(windows)]
+    SetRunValue {
+        name: String,
+        data: String,
+    },
+    /// Delete `HKCU\...\Run\<name>` (absent is a noop).
+    #[cfg(windows)]
+    RemoveRunValue {
+        name: String,
+    },
+    /// Spawn `<exe> service` fully detached so the service is up immediately after install
+    /// (ADR-0054 Decision 2; the same helper the adapter self-heal uses).
+    #[cfg(windows)]
+    StartDetached {
+        exe: PathBuf,
+    },
 }
 
-// --- Windows: Task Scheduler (LeastPrivilege logon task) ---
+// --- Windows: HKCU Run key + detached start (ADR-0054; supersedes the schtasks logon task) ---
 
-/// PINNED (docs/tasks/hub/H9-installer-autostart.md): `schtasks /create /tn "Ghostlight Service"
-/// /tr "\"<exe>\" service" /sc onlogon /rl limited /f`, then `schtasks /run /tn "Ghostlight Service"`.
+/// The Run-key DATA for this install: `"<exe>" service`, with `--instance <n>` for a named
+/// instance. Pure, so the quoting is unit-testable.
+#[cfg(windows)]
+pub fn run_value_data(exe: &Path) -> String {
+    match ghostlight_transport::instance::Instance::resolve().name() {
+        Some(n) => format!("\"{}\" --instance {n} service", exe.display()),
+        None => format!("\"{}\" service", exe.display()),
+    }
+}
+
+/// PINNED (ADR-0054): best-effort delete the legacy <=0.5.0 scheduled task, write the HKCU Run
+/// value (name = [`supervisor_task_name`], the unchanged identity), then start the service once,
+/// detached. The Run key is the one Windows logon-start mechanism a non-admin user can always
+/// write -- `schtasks /sc onlogon` requires elevation (issue #17).
 #[cfg(windows)]
 pub fn register_steps(exe: &Path, _ctx: &PlanCtx) -> Vec<SupervisorStep> {
     let exe = native_host::normalize_exe_path(exe);
-    // A non-default instance carries `--instance <n>` so the supervisor starts the right stack.
-    let tr = match ghostlight_transport::instance::Instance::resolve().name() {
-        Some(n) => format!("\"{}\" --instance {n} service", exe.display()),
-        None => format!("\"{}\" service", exe.display()),
-    };
     vec![
-        SupervisorStep::Run(SupervisorCommand::new(
+        // Legacy migration (ADR-0054 D3): an elevated install from <=0.5.0 may hold the old task;
+        // quiet because on almost every machine there is nothing to delete.
+        SupervisorStep::Run(SupervisorCommand::quiet(
             "schtasks",
             vec![
-                "/create".into(),
+                "/delete".into(),
                 "/tn".into(),
                 supervisor_task_name(),
-                "/tr".into(),
-                tr,
-                "/sc".into(),
-                "onlogon".into(),
-                "/rl".into(),
-                "limited".into(),
                 "/f".into(),
             ],
         )),
-        SupervisorStep::Run(SupervisorCommand::new(
-            "schtasks",
-            vec!["/run".into(), "/tn".into(), supervisor_task_name()],
-        )),
+        SupervisorStep::SetRunValue {
+            name: supervisor_task_name(),
+            data: run_value_data(&exe),
+        },
+        SupervisorStep::StartDetached { exe },
     ]
 }
 
-/// PINNED: `schtasks /delete /tn "Ghostlight Service" /f`.
+/// PINNED (ADR-0054): delete the Run value; best-effort delete the legacy task too.
 #[cfg(windows)]
 pub fn unregister_steps(_ctx: &PlanCtx) -> Vec<SupervisorStep> {
-    vec![SupervisorStep::Run(SupervisorCommand::new(
-        "schtasks",
-        vec![
-            "/delete".into(),
-            "/tn".into(),
-            supervisor_task_name(),
-            "/f".into(),
-        ],
-    ))]
+    vec![
+        SupervisorStep::RemoveRunValue {
+            name: supervisor_task_name(),
+        },
+        SupervisorStep::Run(SupervisorCommand::quiet(
+            "schtasks",
+            vec![
+                "/delete".into(),
+                "/tn".into(),
+                supervisor_task_name(),
+                "/f".into(),
+            ],
+        )),
+    ]
 }
 
 // --- macOS: launchd LaunchAgent (per-user gui/<uid> domain) ---
@@ -295,13 +340,26 @@ pub fn apply_steps(label: &str, steps: &[SupervisorStep], dry_run: bool) {
                     );
                     continue;
                 }
-                match std::process::Command::new(&cmd.program)
-                    .args(&cmd.args)
-                    .status()
-                {
+                // Quiet steps suppress the command's own stderr too (schtasks prints
+                // "ERROR: ..." for an absent task, which reads like a failure).
+                let mut command = std::process::Command::new(&cmd.program);
+                command.args(&cmd.args);
+                if cmd.quiet_failure {
+                    command
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null());
+                }
+                match command.status() {
                     Ok(status) if status.success() => {
                         println!(
                             "  [ok]   {label:<28} {} {}",
+                            cmd.program,
+                            cmd.args.join(" ")
+                        );
+                    }
+                    Ok(_) if cmd.quiet_failure => {
+                        println!(
+                            "  [noop] {label:<28} {} {} (nothing to do)",
                             cmd.program,
                             cmd.args.join(" ")
                         );
@@ -314,6 +372,64 @@ pub fn apply_steps(label: &str, steps: &[SupervisorStep], dry_run: bool) {
                     Err(e) => println!(
                         "  [warn] {label:<28} could not run {}: {e} (best-effort; ignored)",
                         cmd.program
+                    ),
+                }
+            }
+            #[cfg(windows)]
+            SupervisorStep::SetRunValue { name, data } => {
+                let key_path = ghostlight_transport::supervisor::RUN_KEY_PATH;
+                if dry_run {
+                    println!("  [plan] {label:<28} HKCU\\{key_path} \"{name}\" = {data}");
+                    continue;
+                }
+                let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+                match hkcu
+                    .create_subkey(key_path)
+                    .and_then(|(key, _)| key.set_value(name, data))
+                {
+                    Ok(()) => println!("  [ok]   {label:<28} HKCU\\{key_path} \"{name}\" = {data}"),
+                    Err(e) => println!(
+                        "  [warn] {label:<28} could not write HKCU\\{key_path} \"{name}\": {e} (best-effort; ignored)"
+                    ),
+                }
+            }
+            #[cfg(windows)]
+            SupervisorStep::RemoveRunValue { name } => {
+                let key_path = ghostlight_transport::supervisor::RUN_KEY_PATH;
+                if dry_run {
+                    println!("  [plan] {label:<28} remove HKCU\\{key_path} \"{name}\"");
+                    continue;
+                }
+                let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+                match hkcu
+                    .open_subkey_with_flags(key_path, winreg::enums::KEY_SET_VALUE)
+                    .and_then(|key| key.delete_value(name))
+                {
+                    Ok(()) => println!("  [ok]   {label:<28} removed HKCU\\{key_path} \"{name}\""),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        println!("  [noop] {label:<28} HKCU\\{key_path} \"{name}\" (absent)");
+                    }
+                    Err(e) => println!(
+                        "  [warn] {label:<28} could not remove HKCU\\{key_path} \"{name}\": {e} (best-effort; ignored)"
+                    ),
+                }
+            }
+            #[cfg(windows)]
+            SupervisorStep::StartDetached { exe } => {
+                if dry_run {
+                    println!(
+                        "  [plan] {label:<28} start detached: \"{}\" service",
+                        exe.display()
+                    );
+                    continue;
+                }
+                match ghostlight_transport::supervisor::spawn_service_detached(exe) {
+                    Ok(()) => println!(
+                        "  [ok]   {label:<28} started detached: \"{}\" service",
+                        exe.display()
+                    ),
+                    Err(e) => println!(
+                        "  [warn] {label:<28} could not start the service: {e} (best-effort; ignored -- start it manually with 'ghostlight service')"
                     ),
                 }
             }
@@ -339,17 +455,58 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_register_steps_never_elevate() {
+    fn windows_register_steps_are_zero_elevation() {
+        // ADR-0054: the schtasks logon task is GONE from registration (creating one requires
+        // elevation, issue #17); what remains is the legacy-cleanup delete (quiet), the HKCU Run
+        // value, and the detached start.
         let ctx = test_ctx();
         let steps = register_steps(Path::new(r"C:\abs\ghostlight.exe"), &ctx);
-        let create = steps
+        assert!(
+            !steps.iter().any(|s| matches!(
+                s,
+                SupervisorStep::Run(c) if c.args.contains(&"/create".to_string())
+            )),
+            "no scheduled-task creation anywhere"
+        );
+        let run_value = steps
             .iter()
             .find_map(|s| match s {
-                SupervisorStep::Run(c) if c.args.contains(&"/create".to_string()) => Some(c),
+                SupervisorStep::SetRunValue { name, data } => Some((name, data)),
                 _ => None,
             })
-            .expect("a schtasks /create step exists");
-        assert!(create.args.contains(&"limited".to_string()));
-        assert!(!create.args.iter().any(|a| a.eq_ignore_ascii_case("/ru")));
+            .expect("an HKCU Run value step exists");
+        assert_eq!(run_value.0, &supervisor_task_name());
+        assert_eq!(run_value.1, r#""C:\abs\ghostlight.exe" service"#);
+        assert!(
+            steps
+                .iter()
+                .any(|s| matches!(s, SupervisorStep::StartDetached { .. })),
+            "the service starts once, detached, right after install"
+        );
+        let legacy = steps
+            .iter()
+            .find_map(|s| match s {
+                SupervisorStep::Run(c) if c.args.contains(&"/delete".to_string()) => Some(c),
+                _ => None,
+            })
+            .expect("legacy task cleanup exists");
+        assert!(
+            legacy.quiet_failure,
+            "absent legacy task reports noop, not warn"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_unregister_removes_both_mechanisms() {
+        let ctx = test_ctx();
+        let steps = unregister_steps(&ctx);
+        assert!(steps
+            .iter()
+            .any(|s| matches!(s, SupervisorStep::RemoveRunValue { name } if name == &supervisor_task_name())));
+        assert!(steps.iter().any(|s| matches!(
+            s,
+            SupervisorStep::Run(c) if c.args.contains(&"/delete".to_string()) && c.quiet_failure
+        )));
     }
 }
