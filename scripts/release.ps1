@@ -323,22 +323,25 @@ function Step-Watch {
     if ($DryRun) { Write-Would "gh run watch the Release run for $Tag (fail loudly on red)"; return }
 
     # If the release already exists with all assets, the run is done; skip.
-    $existing = & gh release view $Tag --repo $RepoSlug --json name 2>$null
+    & gh release view $Tag --repo $RepoSlug --json name 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Write-Skip "release $Tag already exists; not re-watching CI"
         return
     }
 
-    # Find the run for this tag (headBranch == tag name for a tag push). Poll for it to register.
+    # Find the run for this tag (headBranch == tag name for a tag push). Poll for it to
+    # register (GitHub can take a minute+ to create the run after the tag push).
+    # NOTE: pass a SINGLE --json field -- a comma-list with spaces would be parsed by
+    # PowerShell as an array and split into separate args, silently breaking the query.
+    $attempts = 18
     $runId = $null
-    for ($i = 0; $i -lt 12 -and -not $runId; $i++) {
-        $json = & gh run list --repo $RepoSlug --workflow Release --branch $Tag --limit 1 `
-            --json databaseId, status, headBranch 2>$null | ConvertFrom-Json
-        if ($json -and $json.Count -gt 0) { $runId = $json[0].databaseId; break }
-        Write-Info "waiting for the Release run to register ($($i + 1)/12)..."
+    for ($i = 0; $i -lt $attempts -and -not $runId; $i++) {
+        $json = & gh run list --repo $RepoSlug --workflow Release --branch $Tag --limit 1 --json databaseId 2>$null | ConvertFrom-Json
+        if ($json -and @($json).Count -gt 0) { $runId = @($json)[0].databaseId; break }
+        Write-Info "waiting for the Release run to register ($($i + 1)/$attempts)..."
         Start-Sleep -Seconds 10
     }
-    if (-not $runId) { throw "no Release run found for $Tag after ~2 min; check GitHub Actions" }
+    if (-not $runId) { throw "no Release run found for $Tag after ~$([int]($attempts * 10 / 60)) min; check GitHub Actions" }
 
     Write-Info "watching run $runId"
     & gh run watch $runId --repo $RepoSlug --exit-status
