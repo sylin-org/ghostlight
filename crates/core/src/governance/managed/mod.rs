@@ -4,8 +4,9 @@
 //!
 //! Trust model (ADR-0055 D1 / Implementation Decision 1): the org signs its policy bundle with its
 //! OWN composite keypair and provisions the endpoint with the PUBLIC key. Because that key is the
-//! trust anchor, it must be org-authoritative -- so it lives in the admin-only [`bootstrap_path`] (a
-//! `managed.json` sibling of the org policy file), NOT in any user-writable config layer. A user
+//! trust anchor, it must be org-authoritative -- so it lives in the admin-only `managed.json`
+//! (a sibling of the org policy file; located by [`crate::governance::paths::GovernancePaths`], the
+//! injectable composition root of ADR-0056), NOT in any user-writable config layer. A user
 //! cannot self-activate managed governance through `--manifest` / `GHOSTLIGHT_MANIFEST` (that path
 //! rejects `managed://`, see [`super::manifest::source::parse_source_string`]); only the admin
 //! bootstrap activates it. When active, the fetched signed policy is org-authoritative
@@ -21,7 +22,7 @@ pub mod cli;
 #[cfg(feature = "managed-fetch")]
 pub mod http;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Deserialize;
 
@@ -97,13 +98,28 @@ pub struct VerifiedManaged {
     pub presentation: Option<Presentation>,
 }
 
-/// The admin-location bootstrap path: `managed.json` beside the org policy file.
-pub fn bootstrap_path() -> PathBuf {
-    let org = crate::governance::config::load::org_policy_path();
-    match org.parent() {
-        Some(dir) => dir.join("managed.json"),
-        None => org.with_file_name("managed.json"),
-    }
+/// Resolve the managed policy for a composition (ADR-0055 Phase 4 / ADR-0056), using injected
+/// [`GovernancePaths`](crate::governance::paths::GovernancePaths). `Ok(None)` means no `managed.json`
+/// bootstrap is present (the caller falls back to the source-string loader); `Ok(Some(reconciled))`
+/// carries the last-known-good reconciled outcome (whose `Freshness::NoPolicy` tells the caller to
+/// fail closed); `Err` is a fatal bootstrap or key error. This is the single entry point both the
+/// production service and the lightbox harness call, each with its own `GovernancePaths`.
+pub fn activate(
+    paths: &crate::governance::paths::GovernancePaths,
+    domain_pattern_valid: fn(&str) -> bool,
+) -> Result<Option<cache::Reconciled>, ManagedError> {
+    let Some(bootstrap) = load_bootstrap_at(&paths.managed_bootstrap)? else {
+        return Ok(None);
+    };
+    let cache_path = paths
+        .managed_cache
+        .as_ref()
+        .ok_or_else(|| ManagedError::Bootstrap {
+            path: paths.managed_bootstrap.display().to_string(),
+            reason: "no data directory is available for the managed policy cache".to_string(),
+        })?;
+    let reconciled = cache::resolve_managed(&bootstrap, cache_path, domain_pattern_valid)?;
+    Ok(Some(reconciled))
 }
 
 /// Read and parse the bootstrap at `path`, if present. `Ok(None)` = absent (managed:// not
@@ -367,6 +383,45 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         assert!(matches!(load_bootstrap_at(&path), Ok(None)));
+    }
+
+    #[test]
+    fn activate_is_none_without_a_bootstrap() {
+        let dir = std::env::temp_dir().join(format!("gl-activate-none-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = crate::governance::paths::GovernancePaths::under(&dir);
+        let _ = std::fs::remove_file(&paths.managed_bootstrap);
+        let result = activate(&paths, ok_pattern);
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(matches!(result, Ok(None)));
+    }
+
+    #[test]
+    fn activate_resolves_a_configured_local_bundle() {
+        // The full seam payoff: a managed.json + a signed bundle under an injected temp root
+        // activates hermetically, with no fixed admin location touched.
+        let dir = std::env::temp_dir().join(format!("gl-activate-some-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = crate::governance::paths::GovernancePaths::under(&dir);
+        let ed_seed = [61u8; 32];
+        let bundle_path = dir.join("policy.bundle");
+        std::fs::write(
+            &bundle_path,
+            bundle::sign_bundle(&ed_seed, None, 4, manifest_value("acme-activate"), None),
+        )
+        .unwrap();
+        let bootstrap = serde_json::json!({
+            "source": bundle_path.display().to_string(),
+            "pubkey_ed25519": hex_encode(&crypto::admin::ed_public(&ed_seed)),
+        });
+        std::fs::write(&paths.managed_bootstrap, serde_json::to_vec(&bootstrap).unwrap()).unwrap();
+
+        let active = activate(&paths, ok_pattern)
+            .unwrap()
+            .and_then(|r| r.active)
+            .map(|vm| (vm.manifest.name, vm.seq));
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(active, Some(("acme-activate".to_string(), 4)));
     }
 
     #[cfg(not(feature = "managed-fetch"))]

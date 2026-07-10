@@ -120,29 +120,21 @@ pub fn try_mint(
     })
 }
 
-/// Resolve the managed:// policy from its bootstrap into a [`LoadedPolicy`] (ADR-0055 Phase 4). The
+/// Map a resolved managed reconciliation into a [`LoadedPolicy`] (ADR-0055 Phase 4). The
 /// last-known-good cache means an unreachable source still yields the cached policy; only a FIRST
 /// boot with the source unreachable AND no cache yields no policy, which is a FATAL startup error --
 /// a configured managed instance must never fall back to unrestricted (fail closed).
-fn activate_managed_policy(
-    bootstrap: &crate::governance::managed::ManagedBootstrap,
+fn managed_loaded_policy(
+    reconciled: crate::governance::managed::cache::Reconciled,
+    paths: &crate::governance::paths::GovernancePaths,
 ) -> Result<LoadedPolicy> {
     use crate::governance::manifest::source::ManifestOrigin;
-    if crate::governance::config::load::org_policy_path().exists() {
+    if paths.org_policy.exists() {
         tracing::warn!(
             "both a managed.json bootstrap and a local org policy file are present; the managed:// \
              policy takes precedence and the local org policy file is ignored"
         );
     }
-    let cache_path = crate::governance::managed::cache::cache_path().ok_or_else(|| {
-        anyhow::anyhow!("no data directory is available for the managed policy cache")
-    })?;
-    let reconciled = crate::governance::managed::cache::resolve_managed(
-        bootstrap,
-        &cache_path,
-        pattern::is_valid_pattern,
-    )
-    .with_context(|| "resolving the managed policy")?;
     match reconciled.active {
         Some(vm) => {
             tracing::info!(
@@ -181,13 +173,13 @@ pub fn run_service(manifest: Option<String>, debug_on: bool, keep_warm: bool) ->
     // managed:// (ADR-0055 Phase 4): if the admin `managed.json` bootstrap is present it is the org
     // authority and takes precedence over the source-string loader. Resolved here, before the async
     // runtime, so a configured-but-unresolvable managed policy fails closed BEFORE a line is served
-    // (the same fail-closed discipline the org policy file already has).
-    let loaded_policy = match crate::governance::managed::load_bootstrap_at(
-        &crate::governance::managed::bootstrap_path(),
-    )
-    .with_context(|| "loading the managed policy bootstrap")?
+    // (the same fail-closed discipline the org policy file already has). `GovernancePaths::production`
+    // is the sole computer of the fixed trust-anchor locations (ADR-0056).
+    let paths = crate::governance::paths::GovernancePaths::production();
+    let loaded_policy = match crate::governance::managed::activate(&paths, pattern::is_valid_pattern)
+        .with_context(|| "resolving the managed policy")?
     {
-        Some(bootstrap) => activate_managed_policy(&bootstrap)?,
+        Some(reconciled) => managed_loaded_policy(reconciled, &paths)?,
         None => source::load_policy(user_source.as_deref(), pattern::is_valid_pattern)
             .with_context(|| "loading the governance manifest")?,
     };

@@ -26,7 +26,7 @@ pub enum SourceError {
     /// `managed://` in the USER source string (`--manifest` / `GHOSTLIGHT_MANIFEST`): rejected by
     /// design (ADR-0055). Managed governance carries a TRUST ANCHOR (the org's verifying key), so it
     /// is never user-activatable; it is provisioned only through the admin-only `managed.json`
-    /// bootstrap ([`crate::governance::managed::bootstrap_path`]).
+    /// bootstrap (`managed.json`, located by [`crate::governance::paths::GovernancePaths`]).
     #[error("managed:// is not a user-supplied source; it is provisioned by the administrator via the managed.json bootstrap (ADR-0055)")]
     ManagedNotSupported,
     /// Any other `<scheme>://`.

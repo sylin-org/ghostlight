@@ -15,7 +15,7 @@
 //! leaves open. Machine-bound at-rest ENCRYPTION is deferred (ADR-0055 Implementation Decision 5):
 //! integrity, not confidentiality, is the security-critical half, and the policy is not secret.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::governance::crypto::GenKey;
 
@@ -118,20 +118,6 @@ pub fn reconcile(fresh: Result<VerifiedManaged, FreshError>, cached: Option<Veri
             persist_fresh: false,
         },
     }
-}
-
-/// The per-instance cache path for the last-known-good managed bundle. `None` when no data directory
-/// is available. `GHOSTLIGHT_MANAGED_CACHE_DIR` relocates it (tests, advanced deployments); this has
-/// no security implication, because the cache is verified on load regardless of where it lives.
-pub fn cache_path() -> Option<PathBuf> {
-    let base = std::env::var("GHOSTLIGHT_MANAGED_CACHE_DIR")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(dirs::data_local_dir)?;
-    Some(
-        base.join(ghostlight_transport::instance::Instance::resolve().dir_leaf())
-            .join("managed-policy.bundle"),
-    )
 }
 
 /// Read and RE-VERIFY the cached bundle. `None` when absent, unreadable, OR unverifiable: a tampered
