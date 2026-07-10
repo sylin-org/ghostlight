@@ -41,6 +41,30 @@ task (or when marking BLOCKED). A human reads RESUME HERE to pick up.
     capture until stop; a pre-noted action whose handler then throws may tag a frame anyway; pending
     action tags live in the mirror only (a worker death loses un-drained tags, never frames).
 
+- **ADR-0053 -- thin-extension rule + the GIF pipeline moves into the binary: EXECUTED** (same day,
+  before ADR-0052's live verification ever ran; the owner's review of the fat extension triggered
+  the course correction, and the v0.5.0 ship gate holds until this landed). Commits: ADR `0009955`,
+  piece A `626bd5f` (Rust pipeline: src/gif/{writer,quantize,overlay,font,mod}.rs -- LZW/GIF89a
+  hand-ported from the oracle-tested JS, color_quant NeuQuant, reference overlay geometry recolored
+  sky-blue, embedded public-domain font8x8, jpeg-decoder; 22 ported oracle tests), piece C
+  `b134bb4` (the move: hub/outbound/recording.rs per-tab sessions + disk frames w/ startup sweep;
+  Browser routes the first unsolicited ext event `gif_frame` + notes actions pre-dispatch with
+  rescale-by-QUERY (`rescale_coords` internal op -- replaces the planned ctx-mirror piece B;
+  mechanism data stays extension-side, queried not mirrored); mcp/gif_creator.rs Handler::Local
+  orchestrator (first action_key Local tool -- lands at the existing post-grant dispatch, ZERO
+  pipeline change; export under spawn_blocking; drag-drop reuses upload_image_exec); b64.rs
+  std-only base64 w/ RFC 4648 pins; directory handler flip = wiring only, schema untouched;
+  service-worker.js reduced to the capture relay: gif_capture_start/stop + ack/thin/forward +
+  rescale_coords, ZERO stored state), piece D `249e017` (deleted lib/{gifenc,neuquant,gifoverlay,
+  framestore}.js + their node tests -- oracles ported to cargo first; ci.yml + BOOTSTRAP lines
+  shrunk). **V-ALL GREEN: workspace fast tier 688/0, fmt + clippy -D warnings clean, extension
+  node 38/38.** Deliberate divergences recorded in the ADR: bitmap-font labels (upgrade only if
+  the live look disappoints), no soft label shadow. Known edges: the service cannot see tab-close
+  (dead-tab frames purge at the startup sweep or the next start_recording); recordings do not
+  survive a service restart's sweep (the service is a normal process -- ADR-0053 Consequences).
+  LIVE VERIFICATION still owed: this move CHANGES THE BINARY, so the live test needs BOTH a
+  rebuilt+reinstalled release binary AND an extension reload, then record -> actions -> export.
+
 - **TRACK 2 -- visual overlays: DONE.** New `extension/lib/gifoverlay.js` (pure geometry + routing:
   `describeAction`/`resolveOverlayOptions`/`scaleFactorFor`/`clickRadii`/`labelBox`/`progressBarRect`/
   `overlayPlan`, harvested from the reference offscreen.js). service-worker.js: added the canvas draw

@@ -21,12 +21,17 @@ against that reference; and the role executables collapse from three to two.
   the same engine as `script`, returning each step's result with images preserved. (ADR-0050)
 - `upload_image` tool: upload a previously captured screenshot (by image id) to a file `<input>`, or
   drag-drop it onto a page element at a coordinate. (ADR-0050)
-- `gif_creator` tool: record a browser-automation session (clicks, scrolls, navigation) and export it
-  as an animated GIF, either downloaded or drag-dropped onto a page element. Frames carry visual
-  overlays (click cues, action labels, a progress bar, and a Ghostlight watermark) and use an
-  adaptive NeuQuant color palette for faithful screenshots. (ADR-0050)
+- `gif_creator` tool: record a browser-automation session and export it as an animated GIF, either
+  downloaded or drag-dropped onto a page element. Capture is change-driven (a frame only when the
+  page visually changes, with real per-frame timing); frames carry visual overlays (click cues,
+  action labels, a progress bar, and a Ghostlight watermark) and use an adaptive NeuQuant color
+  palette for faithful screenshots. The encoding pipeline runs in the binary; the extension only
+  relays captured frames. (ADR-0050, ADR-0052, ADR-0053)
 
 ### Changed
+- The extension is thinner: it contains only what must touch a Chrome API (the thin-extension rule,
+  ADR-0053); pure computation and durable state -- including the whole GIF pipeline -- live in the
+  binary, where fixes ship with a release instead of a web-store review.
 - The 13 trained tool schemas are re-baselined against the official Claude-in-Chrome v1.0.80. Only
   three description strings changed for accuracy (`form_input`, `get_page_text`, `read_page`); no
   trained tool name, parameter, or enum value changed. (ADR-0050)
