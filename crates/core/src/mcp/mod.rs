@@ -7,6 +7,7 @@
 
 pub mod browser_batch;
 pub mod form_fill;
+pub mod gif_creator;
 pub mod outcome;
 pub mod pipeline;
 pub mod refs;

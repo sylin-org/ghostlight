@@ -140,6 +140,25 @@ impl Drop for KillHookHandle {
     }
 }
 
+/// Parse the extension's `rescale_coords` reply: a text content block holding
+/// `{"points": [[x, y], ...]}`. None on any shape mismatch (the caller keeps raw coordinates).
+fn parse_rescaled_points(reply: &Value) -> Option<Vec<(f64, f64)>> {
+    let text = reply
+        .get("content")?
+        .as_array()?
+        .first()?
+        .get("text")?
+        .as_str()?;
+    let parsed: Value = serde_json::from_str(text).ok()?;
+    let points = parsed.get("points")?.as_array()?;
+    let mut out = Vec::with_capacity(points.len());
+    for p in points {
+        let pair = p.as_array()?;
+        out.push((pair.first()?.as_f64()?, pair.get(1)?.as_f64()?));
+    }
+    Some(out)
+}
+
 /// A cloneable handle the mcp-server uses to call tools on the extension.
 #[derive(Clone)]
 pub struct Browser {
@@ -169,6 +188,9 @@ pub struct Browser {
     /// here under a minted `img_...` id so `upload_image` can later place it into a file input or a
     /// drag-drop target. Bounded per guid ([`SCREENSHOT_CACHE_BOUND`]), evicting the oldest.
     screenshot_cache: ScreenshotCache,
+    /// gif_creator recording sessions (ADR-0053 D3/D4): per-tab state + disk-backed frames, fed by
+    /// the extension's unsolicited `gif_frame` events and read back at export.
+    recordings: Arc<super::recording::RecordingStore>,
 }
 
 impl Browser {
@@ -192,6 +214,7 @@ impl Browser {
             kill_hooks: Arc::new(Mutex::new(Vec::new())),
             next_hook_id: Arc::new(AtomicU64::new(1)),
             screenshot_cache: Arc::new(Mutex::new(HashMap::new())),
+            recordings: Arc::new(super::recording::RecordingStore::new()),
         }
     }
 
@@ -322,6 +345,21 @@ impl Browser {
             return Err(kill_error());
         }
 
+        // gif_creator (ADR-0053 D4): while this tab records, note the action BEFORE it runs so
+        // the screencast frame its paint produces is the frame that carries its ring/label.
+        self.note_gif_action(guid, tool, args).await;
+        let result = self.raw_call(guid, tool, args).await?;
+        Ok(self.cache_and_inject_screenshot(guid, tool, result))
+    }
+
+    /// The bare envelope + dispatch of [`Browser::call`], shared with internal sends that must not
+    /// re-enter the gif action-noting or screenshot-cache layers.
+    async fn raw_call(
+        &self,
+        guid: &str,
+        tool: &str,
+        args: &Value,
+    ) -> std::result::Result<Value, ToolError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
         let request =
             json!({ "id": id, "type": "tool_request", "tool": tool, "args": args, "guid": guid });
@@ -337,8 +375,74 @@ impl Browser {
                 return Err(err);
             }
         };
-        let result = self.send_and_await(id, framed, tool).await?;
-        Ok(self.cache_and_inject_screenshot(guid, tool, result))
+        self.send_and_await(id, framed, tool).await
+    }
+
+    /// The gif_creator recording sessions (ADR-0053), for the orchestrator handler.
+    pub(crate) fn recordings(&self) -> &super::recording::RecordingStore {
+        &self.recordings
+    }
+
+    /// While `tool`'s tab is actively recording, describe the action for overlay tagging
+    /// (ADR-0052 D4 semantics, service-side per ADR-0053 D4). Model-space coordinates rescale to
+    /// CSS viewport px by ASKING the extension (`rescale_coords`, an internal op over its live
+    /// ScreenshotContext -- the mechanism data stays where Chrome produces it; querying beats
+    /// mirroring). Best-effort: on any failure the raw coordinates stand (identical in the common
+    /// unzoomed case).
+    async fn note_gif_action(&self, guid: &str, tool: &str, args: &Value) {
+        if tool != "computer" && tool != "navigate" {
+            return;
+        }
+        let Some(tab) = args.get("tabId").and_then(Value::as_i64) else {
+            return;
+        };
+        if !self.recordings.is_active(tab) {
+            return;
+        }
+        let Some(mut meta) = crate::gif::describe_action(tool, args) else {
+            return;
+        };
+        meta.ts_ms = chrono::Utc::now().timestamp_millis();
+        let mut points: Vec<Value> = Vec::new();
+        if let Some((x, y)) = meta.coordinate {
+            points.push(json!([x, y]));
+        }
+        if let Some((x, y)) = meta.start_coordinate {
+            points.push(json!([x, y]));
+        }
+        if !points.is_empty() {
+            let rescale_args = json!({ "tabId": tab, "points": points });
+            if let Ok(reply) = self.raw_call(guid, "rescale_coords", &rescale_args).await {
+                if let Some(rescaled) = parse_rescaled_points(&reply) {
+                    let mut it = rescaled.into_iter();
+                    if meta.coordinate.is_some() {
+                        meta.coordinate = it.next();
+                    }
+                    if meta.start_coordinate.is_some() {
+                        meta.start_coordinate = it.next();
+                    }
+                }
+            }
+        }
+        self.recordings.note_action(tab, meta);
+    }
+
+    /// One unsolicited `gif_frame` event from the extension's screencast relay (ADR-0053 D2):
+    /// hand the base64 JPEG to the recording store (which drops it unless the tab is actively
+    /// recording).
+    fn handle_gif_frame(&self, event: &Value) {
+        let Some(tab) = event.get("tabId").and_then(Value::as_i64) else {
+            return;
+        };
+        let Some(data) = event.get("data").and_then(Value::as_str) else {
+            return;
+        };
+        let ts = event
+            .get("ts")
+            .and_then(Value::as_i64)
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+        let device_width = event.get("deviceWidth").and_then(Value::as_f64);
+        self.recordings.on_frame(tab, data, ts, device_width);
     }
 
     /// ADR-0050 Decision 4 -- the ONE sanctioned additive change to a trained tool's OUTPUT: after a
@@ -644,6 +748,14 @@ impl Browser {
 
         if reply.get("id").is_none() && msg_type == Some("session_killed") {
             self.handle_session_killed();
+            return;
+        }
+
+        if reply.get("id").is_none() && msg_type == Some("gif_frame") {
+            // gif_creator capture (ADR-0053 D2): the first unsolicited extension event beyond the
+            // handshake. Unknown id-less event types keep falling through to the generic
+            // event/heartbeat return below, so protocol skew stays harmless.
+            self.handle_gif_frame(&reply);
             return;
         }
 

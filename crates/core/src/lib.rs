@@ -3,6 +3,7 @@
 //! installer, CLI support). Depends on ghostlight-transport; the adapter executables must
 //! NEVER depend on this crate (ADR-0046 Decision 2).
 
+pub(crate) mod b64;
 pub mod browser;
 pub mod gif;
 pub mod governance;

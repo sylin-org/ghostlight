@@ -19,20 +19,13 @@
 // this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
 // ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
 
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/neuquant.js", "lib/gifenc.js", "lib/gifoverlay.js", "lib/framestore.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js");
 
-// gif_creator recording state (ADR-0052 D2): frames live DURABLY in IndexedDB (lib/framestore.js),
-// so a service-worker death or export crash never destroys a recording -- export re-reads the store
-// and retry works. This map is only the hot-path mirror of each tab's state ({active, firstSeq,
-// nextSeq}, or null for "known: no recording"); it is rebuilt from the store on demand after a
-// worker restart. The encoder is lib/gifenc.js.
-const gifRec = new Map();
-const GIF_MAX_FRAMES = 100;
-// Keep at most one screencast frame per interval (ADR-0052 D1): the compositor can emit many frames
-// per second during animation; ~5 fps is plenty for an action GIF and bounds frames x size.
-const GIF_MIN_FRAME_INTERVAL_MS = 200;
-// Screencast JPEG quality at the source (the GIF re-quantizes to 256 colors anyway).
-const GIF_SCREENCAST_QUALITY = 70;
+// gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
+// pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
+// compositor frame, thin to the service-chosen interval, and forward kept frames as unsolicited
+// gif_frame events. This map is the relay's only state: tabId -> { minIntervalMs, lastSentTs }.
+const gifCast = new Map();
 
 // Operational tunables (lib/constants.js), destructured once for use throughout this worker.
 const {
@@ -411,212 +404,36 @@ function base64FromBytes(bytes) {
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   return btoa(bin);
 }
-// --- gif_creator visual overlays (ADR-0050 D5 refinement) ---
-// Canvas draws recolored to Ghostlight sky-blue (#38BDF8); geometry from lib/gifoverlay.js, which
-// harvests the reference offscreen.js overlay vocabulary. These are the impure (canvas) halves; the
-// pure geometry/routing is unit-tested in lib/gifoverlay.js.
-const OVERLAY = () => self.GhostlightGifoverlay;
-function brandRgba(alpha) {
-  const [r, g, b] = OVERLAY().BRAND_RGB;
-  return "rgba(" + r + ", " + g + ", " + b + ", " + alpha + ")";
-}
-function drawClickIndicator(ctx, x, y, sf) {
-  const rad = OVERLAY().clickRadii(sf);
-  ctx.save();
-  ctx.beginPath(); ctx.arc(x, y, rad.outer, 0, 2 * Math.PI); ctx.fillStyle = brandRgba(0.3); ctx.fill();
-  ctx.beginPath(); ctx.arc(x, y, rad.inner, 0, 2 * Math.PI); ctx.fillStyle = brandRgba(0.5); ctx.fill();
-  ctx.beginPath(); ctx.arc(x, y, rad.border, 0, 2 * Math.PI);
-  ctx.strokeStyle = brandRgba(1); ctx.lineWidth = rad.lineWidth; ctx.stroke();
-  ctx.restore();
-}
-function drawDragPath(ctx, sx, sy, ex, ey, sf) {
-  ctx.save();
-  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey);
-  ctx.strokeStyle = brandRgba(1); ctx.lineWidth = 3 * sf; ctx.stroke();
-  const angle = Math.atan2(ey - sy, ex - sx), arrow = 15 * sf;
-  ctx.beginPath();
-  ctx.moveTo(ex, ey);
-  ctx.lineTo(ex - arrow * Math.cos(angle - Math.PI / 6), ey - arrow * Math.sin(angle - Math.PI / 6));
-  ctx.lineTo(ex - arrow * Math.cos(angle + Math.PI / 6), ey - arrow * Math.sin(angle + Math.PI / 6));
-  ctx.closePath(); ctx.fillStyle = brandRgba(1); ctx.fill();
-  for (const [mx, my] of [[sx, sy], [ex, ey]]) {
-    ctx.beginPath(); ctx.arc(mx, my, 6 * sf, 0, 2 * Math.PI);
-    ctx.fillStyle = "#ffffff"; ctx.fill();
-    ctx.strokeStyle = brandRgba(1); ctx.lineWidth = 2 * sf; ctx.stroke();
+// Forward one captured frame to the binary as an unsolicited gif_frame event (ADR-0053 D2).
+function sendGifFrame(tabId, base64, deviceWidth) {
+  try {
+    nativePort && nativePort.postMessage({
+      type: "gif_frame",
+      tabId,
+      data: base64,
+      ts: Date.now(),
+      deviceWidth: deviceWidth || undefined,
+    });
+  } catch (e) {
+    /* port gone; this frame is lost, the stream continues */
   }
-  ctx.restore();
 }
-function roundedRectPath(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-}
-function drawActionLabel(ctx, textStr, x, y, sf) {
-  ctx.save();
-  const fontSize = 14 * sf;
-  ctx.font = fontSize + "px system-ui, -apple-system, sans-serif";
-  ctx.textAlign = "left"; ctx.textBaseline = "top";
-  const textWidth = ctx.measureText(textStr).width;
-  const box = OVERLAY().labelBox(x, y, textWidth, ctx.canvas.width, sf);
-  roundedRectPath(ctx, box.bgX, box.bgY, box.bgW, box.bgH, box.radius);
-  ctx.shadowColor = "rgba(0, 0, 0, 0.3)"; ctx.shadowBlur = 4 * sf; ctx.shadowOffsetY = 2 * sf;
-  ctx.fillStyle = "rgba(0, 0, 0, 0.85)"; ctx.fill();
-  ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-  ctx.fillStyle = "#ffffff"; ctx.fillText(textStr, box.textX, box.textY);
-  ctx.restore();
-}
-function drawProgressBar(ctx, progress, sf) {
-  const bar = OVERLAY().progressBarRect(ctx.canvas.width, ctx.canvas.height, progress, sf);
-  ctx.save();
-  ctx.fillStyle = "rgba(0, 0, 0, 0.3)"; ctx.fillRect(bar.x, bar.y, bar.width, bar.height);
-  ctx.fillStyle = brandRgba(1); ctx.fillRect(bar.x, bar.y, bar.fillWidth, bar.height);
-  ctx.restore();
-}
-// Ghostlight watermark: a compact sky-blue rounded pill with white "Ghostlight" text, bottom-right.
-// Replaces the reference's Claude-logo Path2D (we do not draw Claude's mark).
-function drawWatermark(ctx, sf) {
-  ctx.save();
-  const fontSize = 12 * sf, padX = 8 * sf, padY = 5 * sf, pad = 8 * sf;
-  ctx.font = "600 " + fontSize + "px system-ui, -apple-system, sans-serif";
-  ctx.textAlign = "left"; ctx.textBaseline = "top";
-  const label = "Ghostlight";
-  const tw = ctx.measureText(label).width;
-  const w = tw + padX * 2, h = fontSize + padY * 2, r = h / 2;
-  const x = ctx.canvas.width - pad - w, y = ctx.canvas.height - pad - h - 4 * sf;
-  roundedRectPath(ctx, x, y, w, h, r);
-  ctx.fillStyle = brandRgba(0.92); ctx.fill();
-  ctx.fillStyle = "#ffffff"; ctx.fillText(label, x + padX, y + padY);
-  ctx.restore();
-}
-// Composite the overlays for one frame onto `ctx` (already holding the base image), per the frame's
-// action metadata + resolved options + progress. scaleFactor maps CSS viewport px -> canvas px.
-function compositeOverlays(ctx, frame, opts, progress) {
-  const O = OVERLAY();
-  const sf = O.scaleFactorFor(ctx.canvas.width, frame && frame.vpW);
-  const plan = O.overlayPlan(frame, opts);
-  const options = O.resolveOverlayOptions(opts);
-  if (plan.clickRing) drawClickIndicator(ctx, plan.clickRing.x * sf, plan.clickRing.y * sf, sf);
-  if (plan.dragPath) drawDragPath(ctx, plan.dragPath.sx * sf, plan.dragPath.sy * sf, plan.dragPath.ex * sf, plan.dragPath.ey * sf, sf);
-  if (plan.label) drawActionLabel(ctx, plan.label.text, plan.label.x * sf, plan.label.y * sf, sf);
-  if (options.showProgressBar) drawProgressBar(ctx, progress, sf);
-  if (options.showWatermark) drawWatermark(ctx, sf);
-}
-
-// gif_creator (ADR-0050 D5 / ADR-0052): decode the recorded JPEG frames to RGBA at the first frame's
-// dimensions (via OffscreenCanvas), composite the action overlays (click cues, labels, progress bar,
-// watermark; gated by `options`), and encode them into an animated GIF (lib/gifenc.js). `frames` are
-// framestore records: { blob, ts, vpW?, action metadata? } (a base64 field is accepted as fallback).
-async function encodeRecording(frames, delayMs, options) {
-  const blobOf = (f) =>
-    f && f.blob ? f.blob : new Blob([bytesFromBase64(typeof f === "string" ? f : f.base64)], { type: "image/jpeg" });
-  const first = await createImageBitmap(blobOf(frames[0]));
-  const w = first.width, h = first.height;
-  const canvas = new OffscreenCanvas(w, h);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  const rgbaFrames = [];
-  for (let i = 0; i < frames.length; i++) {
-    const bmp = i === 0 ? first : await createImageBitmap(blobOf(frames[i]));
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(bmp, 0, 0, w, h);
-    const frame = typeof frames[i] === "string" ? { base64: frames[i] } : frames[i];
-    compositeOverlays(ctx, frame, options, (i + 1) / frames.length);
-    rgbaFrames.push(ctx.getImageData(0, 0, w, h).data);
-    if (bmp.close) bmp.close();
-    // Yield to the event loop between frames so keepalives and native messaging stay serviced
-    // during a long export (ADR-0052 D3): the encode must never stall the worker into a kill.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  // Real per-frame timing when every frame carries a capture timestamp (ADR-0052 D3); otherwise the
-  // uniform delayMs fallback.
-  const stamps = frames.map((f) => (typeof f === "object" && f.ts) || 0);
-  const delays = stamps.length > 0 && stamps.every((t) => t > 0)
-    ? (self.GhostlightGifoverlay || GhostlightGifoverlay).computeFrameDelays(stamps)
-    : undefined;
-  return (self.GhostlightGifenc || GhostlightGifenc).encodeGif(rgbaFrames, { width: w, height: h, delayMs, delays });
-}
-// The tab's recording state -- the in-memory mirror, rehydrated from IndexedDB after a worker
-// restart (ADR-0052 D2). Sequence bookkeeping derives from the stored frame keys, never from a
-// state record that hot-path writes could leave stale. Caches null for "known: no recording" so
-// the per-action hook does not re-read IndexedDB on tabs that never recorded.
-async function gifState(tabId) {
-  if (gifRec.has(tabId)) return gifRec.get(tabId);
-  const stored = await self.GhostlightFramestore.getState(tabId).catch(() => undefined);
-  if (!stored) {
-    gifRec.set(tabId, null);
-    return null;
-  }
-  const seqs = await self.GhostlightFramestore.frameSeqs(tabId).catch(() => []);
-  const state = {
-    active: !!stored.active,
-    firstSeq: seqs.length ? seqs[0] : 0,
-    nextSeq: seqs.length ? seqs[seqs.length - 1] + 1 : 0,
-  };
-  gifRec.set(tabId, state);
-  return state;
-}
-// Append one frame record to the durable store, evicting the oldest past the cap. `extra` carries
-// {ts, vpW?, ...action metadata}. Returns the new frame count.
-async function gifAppendFrame(tabId, state, blob, extra) {
-  const record = Object.assign({ tabId, seq: state.nextSeq, blob }, extra || {});
-  state.nextSeq++;
-  await self.GhostlightFramestore.putFrame(record);
-  while (state.nextSeq - state.firstSeq > GIF_MAX_FRAMES) {
-    await self.GhostlightFramestore.deleteFrame(tabId, state.firstSeq);
-    state.firstSeq++;
-  }
-  return state.nextSeq - state.firstSeq;
-}
-// While a recording is active, note a dispatched action: timestamp + overlay metadata, coordinates
-// already rescaled to CSS viewport px. The next kept screencast frame carries it (ADR-0052 D4).
-// Metadata-only -- frames come from the screencast stream (D1), not from per-action screenshots.
-async function recordGifAction(tabId, tool, args) {
-  const state = await gifState(tabId);
-  if (!state || !state.active) return;
-  const meta = gifFrameMeta(tool, args, tabId);
-  if (!meta) return;
-  meta.ts = Date.now();
-  if (!state.pendingActions) state.pendingActions = [];
-  state.pendingActions.push(meta);
-  // Bound the queue: an action this far behind the kept-frame stream will never tag a frame.
-  while (state.pendingActions.length > 20) state.pendingActions.shift();
-}
-// One screencast frame arrived for a tab (ADR-0052 D1). Always ack first -- unacked frames stall
-// the compositor's screencast pipeline -- then keep at most one frame per GIF_MIN_FRAME_INTERVAL_MS
-// up to the cap, tagging it with the action whose paint it shows (D4).
+// One screencast frame (ADR-0053 D2): ack immediately (unacked frames stall the compositor's
+// screencast pipeline), thin to the service-chosen minimum interval, and forward. The worker
+// stores NOTHING -- recording state and frames live in the binary.
 async function handleScreencastFrame(tabId, params) {
   try {
     await cdp(tabId, "Page.screencastFrameAck", { sessionId: params.sessionId });
   } catch (e) {
     /* ack is best-effort: a detaching tab has nothing left to stall */
   }
-  try {
-    const state = await gifState(tabId);
-    if (!state || !state.active) return;
-    const now = Date.now();
-    if (now - (state.lastKeptTs || 0) < GIF_MIN_FRAME_INTERVAL_MS) return;
-    state.lastKeptTs = now;
-    const meta = (self.GhostlightGifoverlay || GhostlightGifoverlay).takeActionForFrame(state.pendingActions, now);
-    // deviceWidth is the viewport width in CSS px per the screencast metadata; the probed width
-    // from start_recording is the fallback.
-    const vpW = (params.metadata && params.metadata.deviceWidth) || state.vpW;
-    const blob = new Blob([bytesFromBase64(params.data)], { type: "image/jpeg" });
-    await gifAppendFrame(tabId, state, blob, Object.assign({ ts: now }, vpW ? { vpW } : {}, meta || {}));
-  } catch (e) {
-    /* best-effort: a dropped frame never breaks the stream */
-  }
-}
-// Build a frame's overlay metadata from a dispatched tool call, converting model coordinates (read
-// off the screenshot the model saw) to CSS viewport px against the CURRENT context (before capture).
-function gifFrameMeta(tool, args, tabId) {
-  const meta = (self.GhostlightGifoverlay || GhostlightGifoverlay).describeAction(tool, args);
-  if (!meta) return null;
-  if (Array.isArray(meta.coordinate)) meta.coordinate = rescaleCoord(tabId, meta.coordinate[0], meta.coordinate[1]);
-  if (Array.isArray(meta.start_coordinate)) meta.start_coordinate = rescaleCoord(tabId, meta.start_coordinate[0], meta.start_coordinate[1]);
-  return meta;
+  const cast = gifCast.get(tabId);
+  if (!cast) return;
+  const now = Date.now();
+  if (now - cast.lastSentTs < cast.minIntervalMs) return;
+  cast.lastSentTs = now;
+  const deviceWidth = params.metadata && params.metadata.deviceWidth;
+  sendGifFrame(tabId, params.data, deviceWidth);
 }
 async function encodeJpeg(bitmap, w, h, quality) {
   const canvas = new OffscreenCanvas(w, h);
@@ -654,10 +471,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   consoleBuffer.delete(tabId);
   networkBuffer.delete(tabId);
   screenshotCtx.delete(tabId);
-  // A closed tab's recording is unexportable (every gif_creator call re-validates the tab), so
-  // purge its durable frames rather than leak them (ADR-0052 D2).
-  gifRec.delete(tabId);
-  self.GhostlightFramestore.clear(tabId).catch(() => {});
+  gifCast.delete(tabId);
   tabHost.delete(tabId);
   tabUrl.delete(tabId);
   persistSessionState();
@@ -1580,106 +1394,55 @@ const handlers = {
       return text(r.result.output);
     });
   },
-  // gif_creator (ADR-0050 Decision 5, capture redesigned by ADR-0052): record frames, then export
-  // the GIF (download or coordinate drag-drop). Capture is screencast-driven -- the compositor emits
-  // a frame only when the page visually changes (seeded with one screenshot at start) -- and frames
-  // persist in IndexedDB, so a worker restart never loses a recording. Dispatched computer/navigate
-  // actions tag the frame their paint produces (ring/label); export composites the visual overlays
-  // (click cues, action labels, progress bar, watermark) gated by the `options` object.
-  async gif_creator(a) {
+  // gif_creator capture relay (ADR-0053 D2/D6): internal ops the binary's orchestrator dials.
+  // NOT in the tool REGISTRY, so models cannot call them. The worker holds no recording state:
+  // the seed frame and every kept screencast frame flow to the binary as gif_frame events.
+  async gif_capture_start(a) {
     const tabId = await effectiveTabId(a.tabId);
-    const store = self.GhostlightFramestore;
-    switch (a.action) {
-      case "start_recording": {
-        // A fresh recording discards any prior frames for the tab (durable-store semantics match
-        // the old in-memory start: begin-or-restart).
-        await store.clear(tabId).catch(() => {});
-        const state = { active: true, firstSeq: 0, nextSeq: 0, lastKeptTs: 0, pendingActions: [] };
-        gifRec.set(tabId, state);
-        await store.putState({ tabId, active: true }).catch(() => {});
-        // Seed the initial state deterministically -- an idle page paints nothing, so the screencast
-        // alone might not produce a first frame. The seed screenshot also probes and records the
-        // viewport width; the min-interval filter dedups an immediate first screencast frame.
-        let seeded = 0;
-        try {
-          const shot = await screenshot(tabId);
-          const ctx2 = screenshotCtx.get(tabId);
-          if (ctx2 && ctx2.vpW) state.vpW = ctx2.vpW;
-          const blob = new Blob([bytesFromBase64(shot.base64)], { type: "image/jpeg" });
-          state.lastKeptTs = Date.now();
-          seeded = await gifAppendFrame(tabId, state, blob, Object.assign({ ts: state.lastKeptTs }, state.vpW ? { vpW: state.vpW } : {}));
-        } catch (e) {
-          /* the seed is best-effort; the recording is active either way */
-        }
-        // Change-driven capture (ADR-0052 D1): the compositor emits a frame only when the page
-        // visually changes, downscaled at the source to the screenshot token-budget cap.
-        try {
-          await ensureAttached(tabId);
-          await enableDomain(tabId, "Page");
-          await cdp(tabId, "Page.startScreencast", {
-            format: "jpeg",
-            quality: GIF_SCREENCAST_QUALITY,
-            maxWidth: MAX_SIDE,
-            maxHeight: MAX_SIDE,
-          });
-        } catch (e) {
-          return text("Recording started (" + seeded + " frame(s) captured), but live frame capture could not start: " + ((e && e.message) || e));
-        }
-        return text("Recording started (" + seeded + " frame(s) captured). Perform actions, then stop_recording and export with download:true.");
-      }
-      case "stop_recording": {
-        const state = await gifState(tabId);
-        if (!state) return text("No active recording for this tab.");
-        state.active = false;
-        if (attached.has(tabId)) {
-          try { await cdp(tabId, "Page.stopScreencast", {}); } catch (e) { /* already detached */ }
-        }
-        await store.putState({ tabId, active: false }).catch(() => {});
-        return text("Recording stopped; " + (state.nextSeq - state.firstSeq) + " frame(s) kept. Use export with download:true to get the GIF.");
-      }
-      case "clear": {
-        if (attached.has(tabId)) {
-          try { await cdp(tabId, "Page.stopScreencast", {}); } catch (e) { /* not screencasting */ }
-        }
-        gifRec.set(tabId, null);
-        await store.clear(tabId).catch(() => {});
-        return text("Recording cleared.");
-      }
-      case "export": {
-        const frames = await store.frames(tabId).catch(() => []);
-        if (frames.length === 0) return text("No frames to export. Start a recording first with action=start_recording.");
-        const gifFilename = (typeof a.filename === "string" && a.filename.length > 0) ? a.filename : "recording.gif";
-        if (a.coordinate) {
-          // Phase 2 (ADR-0050 D5): drag-drop the encoded GIF onto a page element at the coordinate,
-          // reusing T3's setImage DragEvent path (content.js) with the GIF File.
-          const gif = await encodeRecording(frames, 500, a.options);
-          const r = await content(tabId, {
-            type: "setImage",
-            coordinate: a.coordinate,
-            data: base64FromBytes(gif),
-            filename: gifFilename,
-            mimeType: "image/gif",
-          });
-          if (r && r.result && r.result.error) {
-            const msg = r.result.error.endsWith(".") ? r.result.error.slice(0, -1) : r.result.error;
-            throw hopError("page", msg);
-          }
-          return text(r.result.output + " (" + frames.length + " frame(s), " + Math.round(gif.length / 1024) + " KB).");
-        }
-        if (a.download === true) {
-          const gif = await encodeRecording(frames, 500, a.options);
-          return {
-            content: [
-              { type: "text", text: "Exported an animated GIF: " + frames.length + " frame(s), " + Math.round(gif.length / 1024) + " KB." },
-              { type: "image", data: base64FromBytes(gif), mimeType: "image/gif" },
-            ],
-          };
-        }
-        return text("export requires either download:true (return/download the GIF) or a coordinate [x, y] (drag-drop it onto a page element).");
-      }
-      default:
-        return text("Unknown gif_creator action: " + a.action + ".");
+    let seeded = 0;
+    let vpW = null;
+    try {
+      const shot = await screenshot(tabId);
+      const sctx = screenshotCtx.get(tabId);
+      vpW = (sctx && sctx.vpW) || null;
+      sendGifFrame(tabId, shot.base64, vpW);
+      seeded = 1;
+    } catch (e) {
+      /* the seed is best-effort; the screencast still starts */
     }
+    gifCast.set(tabId, { minIntervalMs: a.minIntervalMs || 200, lastSentTs: seeded ? Date.now() : 0 });
+    try {
+      await ensureAttached(tabId);
+      await enableDomain(tabId, "Page");
+      // Change-driven capture (ADR-0052 D1): the compositor emits a frame only when the page
+      // visually changes, downscaled at the source to the service-chosen cap.
+      await cdp(tabId, "Page.startScreencast", {
+        format: "jpeg",
+        quality: a.quality || 70,
+        maxWidth: a.maxSide || MAX_SIDE,
+        maxHeight: a.maxSide || MAX_SIDE,
+      });
+    } catch (e) {
+      gifCast.delete(tabId);
+      throw e;
+    }
+    return text(JSON.stringify({ seeded, vpW }));
+  },
+  async gif_capture_stop(a) {
+    const tabId = await effectiveTabId(a.tabId);
+    gifCast.delete(tabId);
+    if (attached.has(tabId)) {
+      try { await cdp(tabId, "Page.stopScreencast", {}); } catch (e) { /* already detached */ }
+    }
+    return text("Screencast stopped.");
+  },
+  // Rescale model-space points (read off the downscaled screenshot) to CSS viewport px against
+  // the tab's live ScreenshotContext (ADR-0053 D4): the binary QUERIES this mechanism data where
+  // Chrome produces it instead of mirroring it.
+  async rescale_coords(a) {
+    const tabId = await effectiveTabId(a.tabId);
+    const points = (a.points || []).map((p) => rescaleCoord(tabId, p[0], p[1]));
+    return text(JSON.stringify({ points }));
   },
   async wait_for(a) {
     // Defaults (ADR-0037 D1/D6): settle ON, state visible, timeout 10s, min 0.
@@ -1854,16 +1617,6 @@ async function dispatch(id, tool, args, guid) {
   const handler = handlers[tool];
   if (!handler) return fail(id, `Unknown tool: ${tool}`);
   try {
-    // gif_creator (ADR-0052 D4): note the action BEFORE it runs (metadata only; capture itself is
-    // screencast-driven), so the frame its paint produces is the frame that carries its ring/label.
-    // Best-effort and cheap: after the first call per tab the recording state is a Map hit.
-    if (tool === "computer" || tool === "navigate") {
-      try {
-        await recordGifAction(await effectiveTabId(args.tabId), tool, args);
-      } catch (e) {
-        /* best-effort action note */
-      }
-    }
     reply(id, await handler(args, guid));
   } catch (e) {
     if (e instanceof TabAccessError) return reply(id, text(e.message));

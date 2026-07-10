@@ -15,6 +15,7 @@
 //! composition root," not "edit four files."
 
 pub mod browser;
+pub mod recording;
 
 use crate::browser::directory::{AgentGuide, ToolDescriptor};
 use std::sync::Arc;

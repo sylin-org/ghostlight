@@ -1255,7 +1255,10 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             },
         ],
         resource: ResourceShape::TabScoped,
-        handler: Handler::ExtensionForward,
+        // ADR-0053 D6: the orchestrator lives in the binary (the form_fill precedent); the
+        // extension keeps only the thin screencast capture relay. Wiring only -- the advertised
+        // schema above is untouched.
+        handler: Handler::Local(crate::mcp::gif_creator::gif_creator_handler),
         postprocess: None,
         post_dispatch: PostDispatch::None,
         output_schema: None,
@@ -1846,7 +1849,9 @@ mod tests {
                 "gif_creator",
                 Some("action"),
                 ResourceShape::TabScoped,
-                false,
+                // Local since ADR-0053 D6: the orchestrator moved into the binary; the extension
+                // keeps only the screencast capture relay.
+                true,
                 false,
                 PostDispatch::None,
             ),
