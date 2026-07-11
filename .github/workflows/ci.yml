@@ -71,6 +71,20 @@ jobs:
       - run: cargo build --locked --workspace
       - run: cargo test --locked --no-fail-fast --workspace -- --ignored
 
+  # ADR-0056: the lightbox scenario runner is the executable governance spec (managed-policy
+  # activation, last-known-good continuity, fail-closed cold boot, anti-rollback). Blocking:
+  # a regression in governance behavior fails this job. One OS suffices -- the scenarios are
+  # platform-independent library logic over a temp root and a localhost bundle server.
+  lightbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: lightbox
+      - run: cargo run --locked -p ghostlight-lightbox -- run --all
+
   extension-unit:
     strategy:
       fail-fast: false

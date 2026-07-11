@@ -181,12 +181,14 @@ jobs:
           shasum -a 256 "$EXT_ZIP" > "${EXT_ZIP}.sha256"
           cat "${EXT_ZIP}.sha256"
 
+      # Attest EVERY release asset (archives, raw per-target binaries, checksums, the
+      # extension zip, and the SBOM), not just the packaged archives -- the npm launcher and
+      # the get.sh/get.ps1 one-liners fetch the raw binaries directly, and those deserve the
+      # same provenance story (docs/trust/supply-chain.md).
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: |
-            artifacts/*.tar.gz
-            artifacts/*.zip
+          subject-path: artifacts/*
 
       - name: Generate release notes
         shell: bash
