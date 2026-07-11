@@ -737,6 +737,30 @@ async function effectiveTabId(rawTabId) {
   }
   return best.id;
 }
+
+// Resolve the tab for a `navigate` call, auto-creating the Ghostlight tab group + a tab when there
+// is NONE yet (CAP-MED-02). navigate is the natural bootstrap action -- "go somewhere" implies
+// "make a place to go" -- so a first-time agent that calls navigate before opening a group just
+// works, instead of failing cold and having to discover tabs_create_mcp first. Bootstrap only when
+// the managed surface is genuinely empty: if managed tabs DO exist and the named tabId is not one
+// of them, effectiveTabId's helpful "not a tab Ghostlight manages" error stands -- a wrong tabId is
+// a real mistake, not a bootstrap. Session-scoped when a guid is present (ADR-0047), else the
+// legacy global group for guid-less native callers.
+async function navigateTabId(rawTabId, guid) {
+  await ensureGroup(false);
+  const tabs = await groupTabs();
+  if (tabs.length) return effectiveTabId(rawTabId);
+  if (typeof guid === "string" && guid) {
+    const { tab } = await createTabInSessionGroup(guid);
+    await persistSessionState();
+    return tab.id;
+  }
+  await ensureGroup(true);
+  const tab = await chrome.tabs.create({ active: true });
+  await chrome.tabs.group({ tabIds: [tab.id], groupId });
+  await persistSessionState();
+  return tab.id;
+}
 function tabContext(tabs, reportGroupId) {
   const gid = reportGroupId === undefined ? groupId : reportGroupId;
   const available = tabs.map((t) => ({ tabId: t.id, title: t.title || "", url: t.url || "" }));
@@ -1299,8 +1323,8 @@ const handlers = {
     r.structuredContent = { tabId: tab.id, tabs: r.structuredContent.tabs };
     return r;
   },
-  async navigate(a) {
-    const tabId = await effectiveTabId(a.tabId);
+  async navigate(a, guid) {
+    const tabId = await navigateTabId(a.tabId, guid);
     if (a.url === "back") {
       await chrome.tabs.goBack(tabId);
     } else if (a.url === "forward") {
