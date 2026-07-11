@@ -2,6 +2,11 @@
 // Headless smoke: real extension + real binary over native messaging, driven as an MCP server
 // over stdio (ADR-0026 Decision 6). See docs/tasks/maturity-1/00-design.md "Headless smoke (m06)"
 // for the pinned architecture this file implements.
+//
+// NOT wired into CI (2026-07): the former `e2e-smoke` job hung to the runner ceiling on every
+// push and was retired (see .github/workflows/ci.yml). This harness is kept for MANUAL runs
+// while the hang is diagnosed; when fixed, re-add a bounded CI job as its own reviewed commit.
+// Real end-to-end coverage currently lives in the Rust `e2e` tier and the `lightbox` job.
 
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";

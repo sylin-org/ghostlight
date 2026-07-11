@@ -98,26 +98,12 @@ jobs:
           node-version: "22"
       - run: node --test tests/extension/constants.test.js tests/extension/geometry.test.js tests/extension/grouping.test.js tests/extension/keys.test.js tests/extension/settle.test.js tests/extension/observation.test.js tests/extension/treediff.test.js tests/extension/fileset.test.js
 
-  e2e-smoke:
-    runs-on: ubuntu-latest
-    # Maiden-run failure under diagnosis (docs/tasks/maturity-1/LEDGER.md post-run note).
-    # Non-blocking until the live failure is diagnosed with log access; remove this line
-    # once the job is green.
-    continue-on-error: true
-    # The quarantined job HANGS (observed: killed at the 6-hour runner ceiling on every dev
-    # push, 2026-07-06). Cap it so a hang costs minutes, not six billable hours.
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-      - run: cargo build --locked --workspace
-      - run: npm ci --prefix tests/e2e || npm install --prefix tests/e2e
-      - run: npx --prefix tests/e2e playwright install --with-deps chromium
-      - run: node tests/e2e/run-smoke.mjs
+  # The former `e2e-smoke` Playwright job was RETIRED (2026-07): it hung to the 6-hour runner
+  # ceiling on every push and ran `continue-on-error`, so it verified nothing while costing
+  # runner minutes -- coast-rot, not coverage. Real end-to-end coverage lives in the blocking
+  # `e2e` (spawned service + thin adapter) and `lightbox` (governance spec) jobs above. The
+  # harness itself is kept at `tests/e2e/run-smoke.mjs` for manual runs; wire a fixed version
+  # back in as its own reviewed commit once the hang is diagnosed with log access.
 
   audit:
     runs-on: ubuntu-latest
@@ -129,3 +115,17 @@ jobs:
         run: cargo install cargo-audit --locked
       - name: Audit dependencies
         run: cargo audit
+
+  # Supply-chain gate (ADR-0020 spirit; SEC-LOW-07 / ARCH-LOW-01): licenses, duplicate/wildcard
+  # bans, and dependency sources. Advisories stay with the `audit` job above so vulnerability
+  # scanning is not double-gated. Config: deny.toml at the repo root.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: Check licenses, bans, and sources
+        run: cargo deny check licenses bans sources

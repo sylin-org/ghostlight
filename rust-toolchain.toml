@@ -1,0 +1,7 @@
+# Pin the toolchain so the build is reproducible during minimal-upkeep coasting: a floating
+# `@stable` is a time-bomb (a future rustc can break the build with no code change). Bump this
+# deliberately, as its own reviewed commit, not implicitly on whatever stable a machine happens to
+# have. rustup auto-installs this version and the listed components on first use.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
