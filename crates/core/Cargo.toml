@@ -33,7 +33,7 @@ gif = { version = "0.14", default-features = false, features = ["std"] }
 # post-quantum leg; Ed25519 is the classical guard (AND-composition). Both pure Rust (the four-target
 # cross-compile matrix must not grow a C toolchain). base64 is reused from crate::b64 (lean-internals
 # posture), so no base64 crate is added here.
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 fips204 = "0.4"
 # managed:// network fetch (ADR-0055 Phase 3), behind the `managed-fetch` feature: a SMALL blocking
 # HTTP client (ureq) plus rustls with a one-root pinned trust store. Optional, so
