@@ -5,9 +5,13 @@
 Email hello@sylin.org with "SECURITY" in the subject. Do not open a public issue for a
 suspected vulnerability.
 
-- Acknowledgement within 48 hours.
-- Assessment and severity triage within 7 days.
-- Fix target for confirmed critical issues: 30 days, with a coordinated release.
+Ghostlight is a solo project, so the timelines below are **best-effort targets, not contractual
+guarantees** -- a report that arrives during a quiet maintenance period may take longer, and that
+is an honest description rather than a hidden asterisk:
+
+- Acknowledgement: typically within a few days.
+- Assessment and severity triage: as soon as the issue is understood, usually within a week or two.
+- Confirmed critical issues: prioritized for a fix and a coordinated release.
 - You will be credited in the release notes unless you ask not to be.
 
 ## Scope
@@ -31,9 +35,10 @@ release notes.
 
 Because the runtime holds no customer data on the vendor side, the vendor-side incident that
 matters is a compromise of what we ship (the build, the signing keys, or the update channel).
-For that case we commit to publishing a security advisory, with the affected versions and the
-remediation, within 3 business days of confirming a vendor-side compromise. Advisories are
-published as GitHub Security Advisories on this repository and named in release notes;
+For that case the aim is to publish a security advisory, with the affected versions and the
+remediation, promptly (typically within a few business days) of confirming a vendor-side
+compromise -- again a best-effort target for a solo maintainer, not a contractual SLA. Advisories
+are published as GitHub Security Advisories on this repository and named in release notes;
 watching the repository's releases is the subscription path. The vendor-side security
 posture is documented in docs/trust/security-overview.md.
 
