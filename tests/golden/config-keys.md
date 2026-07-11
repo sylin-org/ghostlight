@@ -52,7 +52,7 @@ Record one audit line per tool call (the flight recorder).
 
 - Type: bool
 - Constraints: none
-- Default (fully_open): false
+- Default (fully_open): true
 - Default (safe, = built-in Minimal): true
 - Default (restricted): true
 
@@ -108,13 +108,13 @@ Sources allowed to connect to the local inbound.web adapter (the HTTP/WS ingesti
 
 ## `inbound.web.enabled`
 
-Whether the inbound.web adapter's TCP listener binds. An org-mandatory false denies the web adapter: no listener, no surface.
+Whether the inbound.web adapter admits web (WS) tool sessions. Off by default: web ingestion is opt-in. An org-mandatory false denies the web adapter.
 
 - Type: bool
 - Constraints: none
-- Default (fully_open): true
-- Default (safe, = built-in Minimal): true
-- Default (restricted): true
+- Default (fully_open): false
+- Default (safe, = built-in Minimal): false
+- Default (restricted): false
 
 ## `inbound.pipe.enabled`
 

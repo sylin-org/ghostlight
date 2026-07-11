@@ -94,9 +94,9 @@
           ]
         },
         "inbound.web.enabled": {
-          "description": "Whether the inbound.web adapter's TCP listener binds. An org-mandatory false denies the web adapter: no listener, no surface.",
+          "description": "Whether the inbound.web adapter admits web (WS) tool sessions. Off by default: web ingestion is opt-in. An org-mandatory false denies the web adapter.",
           "type": "boolean",
-          "default": true
+          "default": false
         },
         "inbound.pipe.enabled": {
           "description": "Whether the inbound.pipe adapter (the named-pipe/UDS listener thin MCP adapters dial into) binds.",

@@ -15,13 +15,25 @@ use std::time::Duration;
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
+/// POST carrying the `X-Ghostlight-Intent: enable-remote` consent header the write action now
+/// requires (CSRF hard-stop, SEC hardening pass 2026-07) -- the header the Console's own JS sends.
 fn http_post(port: u16, path: &str, body: &str) -> String {
+    http_post_with_intent(port, path, body, true)
+}
+
+/// POST with the consent header optionally omitted, for the CSRF negative test.
+fn http_post_with_intent(port: u16, path: &str, body: &str, intent: bool) -> String {
     let mut stream = support::connect_webapi(port);
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
+    let intent_header = if intent {
+        "X-Ghostlight-Intent: enable-remote\r\n"
+    } else {
+        ""
+    };
     let request = format!(
-        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{intent_header}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     stream.write_all(request.as_bytes()).unwrap();
@@ -261,6 +273,37 @@ fn enable_remote_ignores_the_request_body() {
         parsed["value"],
         serde_json::json!(["*"]),
         "the written value must ALWAYS be the pinned literal, never the caller's body"
+    );
+
+    let _ = service.kill();
+    let _ = service.wait();
+    std::fs::remove_dir_all(&user_config_dir).ok();
+}
+
+/// SEC hardening pass (2026-07): the write action is refused with 403 when the
+/// `X-Ghostlight-Intent: enable-remote` consent header is absent (the CSRF hard-stop), and the
+/// isolated user config file is NOT written -- a cross-origin page cannot attach the header
+/// without a CORS preflight the service never approves.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
+#[test]
+fn enable_remote_without_the_intent_header_is_refused_and_writes_nothing() {
+    let pid = std::process::id();
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let user_config_dir = std::env::temp_dir().join(format!(
+        "ghostlight-console-enable-remote-no-intent-{pid}-{seq}"
+    ));
+    std::fs::create_dir_all(&user_config_dir).unwrap();
+
+    let endpoint = format!("ghostlight-console-enable-remote-no-intent-{pid}-{seq}");
+    let (mut service, port) =
+        support::spawn_service_with_user_config_dir_and_webapi_port(&endpoint, &user_config_dir);
+
+    let response = http_post_with_intent(port, ROUTE, "", false);
+    assert_eq!(status_line(&response), "HTTP/1.1 403 Forbidden");
+
+    assert!(
+        !user_config_dir.join("ghostlight").join("config.json").exists(),
+        "a refused write must not touch the user config file"
     );
 
     let _ = service.kill();

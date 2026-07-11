@@ -238,17 +238,21 @@ mod tests {
         layers::resolve(inputs)
     }
 
-    /// Required test 5 (g18 doc, Tests item 5): an org-mandatory `audit.enabled: true` and a
+    /// Required test 5 (g18 doc, Tests item 5): an org-mandatory `audit.enabled` and a
     /// user-layer `content.security.secrets.redact: true`, switching from `safe` to
     /// `fully_open`, yields exactly: a changed row for `governance.mode`
     /// (`"enforce" -> "observe"`), a locked notice for `audit.enabled`, and a kept notice for
     /// `content.security.secrets.redact`. Every other key produces no row.
+    ///
+    /// Adapted for the SEC hardening pass (2026-07): `audit.enabled` now defaults `true` in
+    /// EVERY preset, so this scenario's org lock pins `false` -- the value that still differs
+    /// from the fully_open default, which is what makes the Locked row fire.
     #[test]
     fn diff_rows_matches_the_required_locked_kept_changed_scenario() {
         let org = super::super::load::OrgConfig {
             mandatory: serde_json::Map::from_iter([(
                 super::super::AUDIT_ENABLED.to_string(),
-                json!(true),
+                json!(false),
             )]),
             recommended: serde_json::Map::new(),
         };
@@ -274,7 +278,7 @@ mod tests {
                 },
                 DiffRow::Locked {
                     key: super::super::AUDIT_ENABLED,
-                    effective: "true".to_string(),
+                    effective: "false".to_string(),
                 },
                 DiffRow::Changed {
                     key: super::super::GOVERNANCE_MODE,

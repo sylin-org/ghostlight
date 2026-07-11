@@ -396,10 +396,13 @@ pub const GOVERNANCE_MODE: &str = "governance.mode";
 /// on the tool/resource axes).
 pub const INBOUND_WEB_FROM: &str = "inbound.web.from";
 
-/// `inbound.web.enabled` -- whether the inbound.web adapter's TCP listener binds at all. An
-/// org-mandatory `false` is the "deny the web adapter" decision (ADR-0030 Decision 5): the
-/// listener never stands up, so there is no surface to connect to. Bind-time only: a change
-/// takes effect on the next service restart, like the bind address itself.
+/// `inbound.web.enabled` -- whether the inbound.web adapter admits web (WS) tool sessions.
+/// Default FALSE in every preset (SEC hardening pass, 2026-07): driving the browser over a TCP
+/// socket is opt-in (`ghostlight config set inbound.web.enabled true`), so no local process can
+/// open a tool session out of the box. An org-mandatory `false` is the "deny the web adapter"
+/// decision (ADR-0030 Decision 5). The shared TCP listener binds at startup when this key OR
+/// `manage.web.enabled` resolves true (the two planes are independently enableable); the
+/// ingestion gate itself is re-read per connection.
 pub const INBOUND_WEB_ENABLED: &str = "inbound.web.enabled";
 
 /// `inbound.pipe.enabled` -- whether the inbound.pipe adapter (the named-pipe/UDS listener
@@ -468,7 +471,11 @@ pub const KEYS: &[KeyDef] = &[
         key: AUDIT_ENABLED,
         description: "Record one audit line per tool call (the flight recorder).",
         constraint: KeyConstraint::None,
-        default_fully_open: KeyValue::Bool(false),
+        // The flight recorder is on in EVERY preset, all-open included (SEC hardening pass,
+        // 2026-07): recording is not enforcement, and an ungoverned session that leaves no
+        // record cannot be reconstructed after an incident. All-open governs nothing; it
+        // still remembers.
+        default_fully_open: KeyValue::Bool(true),
         default_safe: KeyValue::Bool(true),
         default_restricted: KeyValue::Bool(true),
     },
@@ -514,11 +521,14 @@ pub const KEYS: &[KeyDef] = &[
     },
     KeyDef {
         key: INBOUND_WEB_ENABLED,
-        description: "Whether the inbound.web adapter's TCP listener binds. An org-mandatory false denies the web adapter: no listener, no surface.",
+        description: "Whether the inbound.web adapter admits web (WS) tool sessions. Off by default: web ingestion is opt-in. An org-mandatory false denies the web adapter.",
         constraint: KeyConstraint::None,
-        default_fully_open: KeyValue::Bool(true),
-        default_safe: KeyValue::Bool(true),
-        default_restricted: KeyValue::Bool(true),
+        // Off in EVERY preset (SEC hardening pass, 2026-07): a TCP surface any local process
+        // can reach must not drive the user's authenticated browser without an explicit
+        // opt-in. The pipe transport (OS same-user admission) remains the default path.
+        default_fully_open: KeyValue::Bool(false),
+        default_safe: KeyValue::Bool(false),
+        default_restricted: KeyValue::Bool(false),
     },
     KeyDef {
         key: INBOUND_PIPE_ENABLED,
@@ -964,7 +974,9 @@ mod tests {
     fn fully_open_preset_opens_the_governed_defaults() {
         let cfg = Config::from_preset(Preset::FullyOpen);
         assert!(!cfg.secrets_redact());
-        assert!(!cfg.audit_enabled());
+        // The flight recorder stays ON even fully open (SEC hardening pass, 2026-07):
+        // all-open governs nothing, but it still remembers.
+        assert!(cfg.audit_enabled());
         assert_eq!(cfg.governance_mode(), EffectiveMode::Observe);
         assert_eq!(cfg.first_call_wait_ms(), 5000);
     }
@@ -1170,12 +1182,15 @@ mod tests {
     }
 
     #[test]
-    fn enabled_keys_default_true_in_every_preset() {
+    fn adapter_enable_keys_default_true_in_every_preset() {
         // ADR-0030 Decision 5: "OPEN MEANS OPEN" -- the channel axis resolves to the adapter's
-        // builtin default, never to a code gate. Every adapter is enabled by default in every
-        // preset; an org-mandatory layer is what denies one.
+        // builtin default, never to a code gate. The OS-same-user adapters are enabled by default
+        // in every preset; an org-mandatory layer is what denies one.
+        //
+        // NOTE: `inbound.web.enabled` is the deliberate exception (SEC hardening pass, 2026-07):
+        // a TCP surface any local process can reach is opt-in, so it defaults false in every
+        // preset -- see `inbound_web_enabled_defaults_false_in_every_preset`.
         for key in [
-            INBOUND_WEB_ENABLED,
             INBOUND_PIPE_ENABLED,
             OUTBOUND_BROWSER_ENABLED,
             MANAGE_WEB_ENABLED,
@@ -1190,6 +1205,21 @@ mod tests {
                     ),
                 }
             }
+        }
+    }
+
+    #[test]
+    fn inbound_web_enabled_defaults_false_in_every_preset() {
+        // SEC hardening pass (2026-07): web (WS/TCP) ingestion is opt-in. Driving the user's
+        // authenticated browser over a local TCP port any process can reach must not be a
+        // default; the pipe path (OS same-user admission) remains the default entry point.
+        let k = key_def(INBOUND_WEB_ENABLED).expect("registered key");
+        for preset in [Preset::FullyOpen, Preset::Safe, Preset::Restricted] {
+            assert_eq!(
+                k.default_for(preset),
+                KeyValue::Bool(false),
+                "inbound.web.enabled ({preset:?}) must default false (opt-in ingestion)"
+            );
         }
     }
 

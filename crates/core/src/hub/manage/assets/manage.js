@@ -61,7 +61,12 @@ function wireEnableRemote() {
     button.disabled = true;
     status.textContent = "Enabling...";
     try {
-      const res = await fetch("/api/v1/config/inbound-web-enable-remote", { method: "POST" });
+      // The write action requires the consent header (CSRF hard-stop): a cross-origin page
+      // cannot attach a custom header without a CORS preflight the service never approves.
+      const res = await fetch("/api/v1/config/inbound-web-enable-remote", {
+        method: "POST",
+        headers: { "X-Ghostlight-Intent": "enable-remote" },
+      });
       const data = await res.json();
       if (res.ok) {
         status.textContent = "Enabled: inbound.web.from = " + JSON.stringify(data.value) +

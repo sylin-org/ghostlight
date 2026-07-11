@@ -15,10 +15,13 @@
 //! re-reads it fresh on every accepted connection, so a policy edit takes effect without a
 //! service restart even though the TCP bind itself does not move until the next restart.
 //!
-//! Listener enablement is ALSO policy-controlled: `inbound.web.enabled = false` (set by an
-//! org-mandatory layer) means the listener never stands up -- the "deny the web adapter" case
-//! (ADR-0030 Decision 5). [`run_enabled`] is the gate the composition root consults before
-//! spawning this listener.
+//! Ingestion enablement is ALSO policy-controlled, and OFF by default (SEC hardening pass,
+//! 2026-07): `inbound.web.enabled = false` -- the builtin default in every preset, and the
+//! "deny the web adapter" case when set org-mandatory (ADR-0030 Decision 5) -- means no WS tool
+//! session is admitted. The composition root binds the shared listener when EITHER this plane
+//! or the management plane (`manage.web.enabled`, default true) is enabled; [`enabled`] is then
+//! re-read per accepted connection as the ingestion gate, so the loopback Console works out of
+//! the box while driving the browser over TCP stays opt-in.
 //!
 //! Authorization is the `inbound.web.from` policy, decided by
 //! [`crate::governance::inbound::InboundPdp`] on the connecting SOURCE (Origin, or the peer's
@@ -123,9 +126,12 @@ fn live_inbound_web_from(store: &crate::governance::config::reload::ConfigStore)
         .unwrap_or_else(builtin_inbound_web_from)
 }
 
-/// The live `inbound.web.enabled` resolution: `false` means the adapter is denied by policy and
-/// MUST NOT bind (the "deny the web adapter" decision, ADR-0030 Decision 5). Bind-time only: a
-/// change takes effect on the next service restart, like the bind address itself.
+/// The live `inbound.web.enabled` resolution: `false` (the default in every preset since the
+/// SEC hardening pass, 2026-07) means the web ingestion plane is denied by policy -- no WS tool
+/// session is admitted (the "deny the web adapter" decision, ADR-0030 Decision 5). Consulted at
+/// startup (the shared listener binds when this key OR `manage.web.enabled` is true) and
+/// re-read per accepted connection, so enabling or disabling ingestion takes effect without a
+/// service restart whenever the listener is already up.
 pub fn enabled(store: &crate::governance::config::reload::ConfigStore) -> bool {
     let resolution = store.current_resolution();
     let resolved = resolution
@@ -234,7 +240,9 @@ async fn handle_connection(
         .await;
     }
 
-    // WS-upgrade path (the inbound.web data plane).
+    // WS-upgrade path (the inbound.web data plane). Malformed non-WS requests are rejected here
+    // (400) exactly as before, independent of ingestion policy -- the policy gate below applies
+    // only to a genuine WS tool-session admission.
     let Some(client_key) = header(&request.headers, "Sec-WebSocket-Key") else {
         write_http_error(&mut stream, 400, "Bad Request").await?;
         return Ok(());
@@ -243,6 +251,19 @@ async fn handle_connection(
     let is_upgrade = request.method.eq_ignore_ascii_case("GET") && is_ws_attempt;
     if !is_upgrade {
         write_http_error(&mut stream, 400, "Bad Request").await?;
+        return Ok(());
+    }
+
+    // Ingestion gate: policy-controlled and re-read per connection (SEC hardening pass, 2026-07).
+    // With `inbound.web.enabled = false` (the default in every preset) the shared listener may be
+    // up for the management plane, but no web tool session is admitted -- a genuine WS upgrade is
+    // refused 403 before any Host/Origin authorization.
+    if !enabled(&ctx.store) {
+        tracing::info!(
+            peer = %peer_addr,
+            "web session refused: inbound.web.enabled is false (web ingestion is opt-in)"
+        );
+        write_http_error(&mut stream, 403, "Forbidden").await?;
         return Ok(());
     }
 
@@ -290,18 +311,22 @@ async fn handle_connection(
 /// The `inbound.web.from` decision (ADR-0030 Decision 5), shared by the WS-upgrade handshake and
 /// the management plane's own routes: the connecting source is the `Origin` header when present,
 /// else the classified peer address (anonymous is a first-class principal, never a hardcoded
-/// gate). Returns the full [`Decision`] (not just a bool) so a caller can log the SAME detail the
-/// original WS-upgrade path always has.
+/// gate). A PRESENT-but-unparseable Origin (`null` from a sandboxed iframe, or any malformed
+/// value) is kept verbatim as the source, NEVER silently replaced by the peer address (SEC
+/// hardening pass, 2026-07): such a source matches no `"localhost"` allowlist member, so the
+/// browser-context request is denied instead of inheriting the loopback peer's trust. Returns
+/// the full [`Decision`] (not just a bool) so a caller can log the SAME detail the original
+/// WS-upgrade path always has.
 pub(crate) fn decide_inbound_web_from(
     headers: &[(String, String)],
     peer_addr: SocketAddr,
     allowlist: &[String],
     ctx: &ServiceContext,
 ) -> (Decision, String) {
-    let peer_source = classify_source(peer_addr.ip());
-    let source = header(headers, "Origin")
-        .and_then(origin_hostname)
-        .unwrap_or(peer_source);
+    let source = match header(headers, "Origin") {
+        Some(origin) => origin_hostname(origin).unwrap_or_else(|| origin.to_string()),
+        None => classify_source(peer_addr.ip()),
+    };
     let manifest_hash = ctx
         .initial_policy
         .manifest

@@ -161,16 +161,8 @@ fn wrong_method_on_a_known_path_is_405() {
     let _ = service.wait();
 }
 
-#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
-#[test]
-fn a_real_ws_upgrade_request_is_unaffected() {
-    let endpoint = format!(
-        "ghostlight-console-ws-unaffected-{}-{}",
-        std::process::id(),
-        SEQ.fetch_add(1, Ordering::Relaxed)
-    );
-    let (mut service, port) = support::spawn_service_with_webapi_port(&endpoint);
-
+/// Send a WS-upgrade handshake and return the raw first response chunk.
+fn ws_upgrade_response(port: u16) -> String {
     let mut stream = support::connect_webapi(port);
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
@@ -182,12 +174,60 @@ fn a_real_ws_upgrade_request_is_unaffected() {
     stream.write_all(request.as_bytes()).unwrap();
     let mut buf = [0u8; 512];
     let n = stream.read(&mut buf).unwrap();
-    let response = String::from_utf8_lossy(&buf[..n]);
+    String::from_utf8_lossy(&buf[..n]).into_owned()
+}
+
+/// SEC hardening pass (2026-07): web (WS) ingestion is OFF by default now, so a real WS upgrade
+/// is REFUSED with 403 out of the box -- the loopback Console (GET routes above) still works,
+/// but driving the browser over TCP is opt-in. The shared listener is up (the Console served the
+/// GET routes), yet the ingestion gate refuses the session.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
+#[test]
+fn a_ws_upgrade_is_refused_by_default_because_web_ingestion_is_opt_in() {
+    let endpoint = format!(
+        "ghostlight-console-ws-default-off-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    );
+    let (mut service, port) = support::spawn_service_with_webapi_port(&endpoint);
+
+    let response = ws_upgrade_response(port);
     assert!(
-        response.starts_with("HTTP/1.1 101 Switching Protocols"),
-        "a real WS upgrade must still succeed unaffected by the Console router: {response}"
+        response.starts_with("HTTP/1.1 403 Forbidden"),
+        "web ingestion is off by default; a WS upgrade must be refused: {response}"
     );
 
     let _ = service.kill();
     let _ = service.wait();
+}
+
+/// With `inbound.web.enabled = true` opted in at the user-config layer, a real WS upgrade
+/// succeeds and is unaffected by the Console router sharing the listener.
+#[ignore = "e2e: spawns a real ghostlight service/adapter; run via the e2e tier -- cargo test -- --ignored"]
+#[test]
+fn a_real_ws_upgrade_succeeds_once_web_ingestion_is_enabled() {
+    let pid = std::process::id();
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let user_config_dir =
+        std::env::temp_dir().join(format!("ghostlight-console-ws-optin-{pid}-{seq}"));
+    std::fs::create_dir_all(user_config_dir.join("ghostlight")).unwrap();
+    std::fs::write(
+        user_config_dir.join("ghostlight").join("config.json"),
+        r#"{"config":{"inbound.web.enabled":true}}"#,
+    )
+    .unwrap();
+
+    let endpoint = format!("ghostlight-console-ws-optin-{pid}-{seq}");
+    let (mut service, port) =
+        support::spawn_service_with_user_config_dir_and_webapi_port(&endpoint, &user_config_dir);
+
+    let response = ws_upgrade_response(port);
+    assert!(
+        response.starts_with("HTTP/1.1 101 Switching Protocols"),
+        "with web ingestion enabled, a real WS upgrade must succeed unaffected by the Console router: {response}"
+    );
+
+    let _ = service.kill();
+    let _ = service.wait();
+    std::fs::remove_dir_all(&user_config_dir).ok();
 }

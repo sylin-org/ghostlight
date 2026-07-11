@@ -318,11 +318,17 @@ async fn run_service_loop(
     let pipe = inbound::pipe::PipeTransport::new(adapter_listener);
     tokio::spawn(pipe.run(ctx.clone()));
 
-    if inbound::web::enabled(&ctx.store) {
+    // The shared TCP listener serves TWO independently-enableable planes (ADR-0033 Decision 7):
+    // the inbound.web WS ingestion plane and the manage.web loopback Console. It binds when
+    // EITHER plane is enabled; each plane then gates its own requests (the WS path re-reads
+    // `inbound.web.enabled` per connection, the management router checks `manage.web.enabled`).
+    // With the hardened defaults (SEC pass, 2026-07) ingestion is off and the Console is on, so
+    // the listener binds loopback for the Console while no web tool session can be admitted.
+    if inbound::web::enabled(&ctx.store) || manage::web::enabled(&ctx.store) {
         tokio::spawn(inbound::web::run(ctx.clone()));
     } else {
         tracing::info!(
-            "inbound.web transport disabled by policy (inbound.web.enabled = false); not binding"
+            "web listener not bound: inbound.web.enabled and manage.web.enabled are both false"
         );
     }
 

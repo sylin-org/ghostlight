@@ -302,16 +302,35 @@ fn governance_section_lines() -> Vec<String> {
         Err(e) => return vec![format!("  config resolution is broken: {e}")],
     };
     let config_mode = config.governance_mode();
+    let audit_line = render_audit_status(config.audit_enabled(), config.audit_destination());
 
     let Some(manifest) = &loaded_policy.manifest else {
-        return render_governance_status(None);
+        let mut lines = render_governance_status(None);
+        lines.push(audit_line);
+        return lines;
     };
     let status = crate::governance::dispatch::governance_status(
         &manifest.grants,
         manifest.mode,
         config_mode,
     );
-    render_governance_status(Some(status))
+    let mut lines = render_governance_status(Some(status));
+    lines.push(audit_line);
+    lines
+}
+
+/// The doctor "Governance:" section's audit-health line (SEC hardening pass, 2026-07): the
+/// flight recorder is on by default in every preset, so a disabled recorder is called out
+/// loudly -- an incident in a session that keeps no record cannot be reconstructed afterwards.
+/// Pure, so the exact wording is unit-testable.
+fn render_audit_status(enabled: bool, destination: &str) -> String {
+    if enabled {
+        format!("  audit on (flight recorder; destination: {destination})")
+    } else {
+        "  audit OFF: tool calls leave NO record; an incident cannot be reconstructed \
+         (enable with `ghostlight config set audit.enabled true`)"
+            .to_string()
+    }
 }
 
 /// The pure rendering half of [`governance_section_lines`] (g15): the exact three wordings
@@ -321,7 +340,11 @@ fn render_governance_status(
     status: Option<crate::governance::dispatch::GovernanceStatus>,
 ) -> Vec<String> {
     match status {
-        None => vec!["  no manifest active (all-open); no grant-based denials".to_string()],
+        None => vec![
+            "  UNGOVERNED (all-open): no manifest active -- every tool and capability, \
+             including execute, is permitted; no grant-based denials"
+                .to_string(),
+        ],
         Some(s) if s.shadow => vec![
             "  mode  observe (SHADOW: would-deny events are recorded to the audit log but are \
              NOT blocked; this is observation, not protection)"
@@ -858,10 +881,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_governance_status_none_is_the_all_open_line() {
+    fn render_governance_status_none_shouts_ungoverned() {
+        let lines = render_governance_status(None);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("  UNGOVERNED (all-open)"), "{lines:?}");
+        assert!(lines[0].contains("no manifest active"), "{lines:?}");
+        assert!(lines[0].contains("including execute"), "{lines:?}");
+        assert!(lines[0].contains("no grant-based denials"), "{lines:?}");
+    }
+
+    #[test]
+    fn render_audit_status_on_names_the_destination() {
         assert_eq!(
-            render_governance_status(None),
-            vec!["  no manifest active (all-open); no grant-based denials".to_string()]
+            render_audit_status(true, "file"),
+            "  audit on (flight recorder; destination: file)"
+        );
+    }
+
+    #[test]
+    fn render_audit_status_off_warns_loudly_and_names_the_fix() {
+        let line = render_audit_status(false, "file");
+        assert!(line.contains("audit OFF"), "{line}");
+        assert!(line.contains("NO record"), "{line}");
+        assert!(
+            line.contains("ghostlight config set audit.enabled true"),
+            "{line}"
         );
     }
 
