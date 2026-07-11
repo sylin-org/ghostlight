@@ -4,7 +4,7 @@
 
 <h1 align="center">Ghostlight</h1>
 
-<p align="center"><strong>Governed access to your own browser, for AI agents.</strong></p>
+<p align="center"><strong>Let your AI agent drive your real, logged-in browser, from any MCP client, and watch every move.</strong></p>
 
 <p align="center">
   <a href="https://github.com/sylin-org/ghostlight/actions/workflows/ci.yml"><img src="https://github.com/sylin-org/ghostlight/actions/workflows/ci.yml/badge.svg?branch=dev" alt="CI"></a>
@@ -12,44 +12,40 @@
   <a href="https://github.com/sylin-org/ghostlight/releases/latest"><img src="https://img.shields.io/github/v/release/sylin-org/ghostlight?color=38BDF8&label=release" alt="release"></a>
 </p>
 
-Let your AI agent drive *your* browser: the real one, with your logins, your tabs, and your
-sessions. It works from any MCP client (Claude Code, Cursor, VS Code, Zed, Cline, or anything
-else that speaks MCP), governed when you want it and wide open when you don't.
+Your browser, with your logins, your tabs, your sessions, driven by your agent. It works from any
+MCP client (Claude Code, Cursor, VS Code, Zed, Cline, or anything else that speaks MCP), and you
+see every action happen. Governed when you want it, wide open when you don't.
 
 <!-- HERO DEMO SLOT: an annotated session GIF recorded by Ghostlight's own gif_creator tool
      (sky-blue click rings, action labels, progress bar, watermark). Capture with
-     scripts/capture-readme-tour.ps1, keep it under ~5 MB, then:
-<p align="center"><img src="docs/assets/demo.gif" alt="Ghostlight driving a browser: click ripples, captions, and a governed session"></p>
-<p align="center"><sub>This demo was recorded by Ghostlight itself, with its gif_creator tool.</sub></p>
+     scripts/capture-readme-tour.ps1, keep it under ~5 MB, then uncomment:
+<p align="center"><img src="docs/assets/demo.gif" alt="Ghostlight driving a real browser: sky-blue click ripples, action captions, and a governed session in its own tab group"></p>
+<p align="center"><sub>Recorded by Ghostlight itself, with its own <code>gif_creator</code> tool.</sub></p>
 -->
 
-## Why Ghostlight
+## Why it works
 
-- **Your session, not a clean-room browser.** The whole point is your authenticated context:
-  real cookies, real SSO, real tabs. Nothing gets relocated to a cloud browser or a throwaway
-  profile just to gain a technical property.
-- **Bring your own agent.** It speaks MCP, so any client works, including Claude via Bedrock or
-  Vertex. No lock-in to one vendor's app or cloud.
-- **Governance fused with the engine, not bolted on.** Capability classification, access
-  decisions, and audit all live at one chokepoint in the binary. A governed client sees only the
-  tools its grants permit, and every call is checked and recorded. All-open is a first-class
-  mode, not a degraded one.
+- **Your session, not a clean-room.** Real cookies, real SSO, real tabs. Nothing gets relocated to
+  a cloud browser or a throwaway profile just to gain a technical property; the whole point is your
+  authenticated context.
+- **Your agent already knows the tools.** The tool surface preserves the schemas Claude was trained
+  on, byte for byte, then adds more on top: see and act, forms and files, multi-step composition,
+  session recording, and inspection. A capable agent just works, and then some.
+- **Governed composition, not just clicks.** Capability grants, sacred never-touch domains, and a
+  structured audit record on every call, all resolved at one chokepoint in the binary, plus
+  audit-correlated multi-step batches with `dry_run` pre-flight. The flight recorder runs even wide
+  open, so a session always leaves a trail. All-open is a first-class mode, not a degraded one.
+- **You are always in control.** Every move is visible: sky-blue click ripples, a comet trail on
+  drags, a shimmer as it types, captions that narrate each step. It runs in its own tab group, kept
+  visually separate from your own tabs, and you can grab the wheel or hit the kill switch at any
+  moment. The license never gates behavior, and the binary never phones home.
 - **One portable binary, zero runtime dependencies.** No servers to babysit, and none of the
   install breakage that plagues Node-based browser MCPs.
 
-Anthropic ships a first-party Claude Code and Chrome integration, and it is good.
-[docs/COMPARISON.md](docs/COMPARISON.md) tells you straight when that path, or another, is the
-better pick. Ghostlight is for everyone those paths leave out: other MCP clients, Claude through
-cloud providers, and anyone who wants policy as code, an audit trail, or a self-hosted stack.
-
-## Watch it work
-
-Every move the agent makes is visible in the browser: sky-blue click ripples, a comet trail on
-drags, a shimmer as it types, and captions that narrate each step. It works inside its own tab
-group (labeled 👻Ghostlight), kept visually separate from your own tabs, and you can grab the
-wheel or hit the kill switch at any moment. It can even hand you a souvenir: `gif_creator`
-records the session and exports an annotated GIF, made by the same pipeline that draws the
-overlays.
+Anthropic ships a first-party Claude Code and Chrome integration, and it is good. Ghostlight is for
+everyone that path leaves out: other MCP clients, Claude through Bedrock or Vertex, and anyone who
+wants policy as code, an audit trail, or a self-hosted stack.
+[docs/COMPARISON.md](docs/COMPARISON.md) tells you straight when another path is the better pick.
 
 ## Install in two minutes
 
@@ -192,8 +188,9 @@ capabilities (`read`, `action`, `write`, `execute`) to an identity on the hosts 
 - **Observe before you enforce.** `observe` mode dispatches everything and records what enforce
   *would have* denied; `enforce` blocks. Sacred never-touch domains always enforce.
 - **Evidence built in.** Every call, whether permitted, denied, or shadow-denied, emits one
-  structured JSON-Lines audit record: identity, host, capability, grant, decision, duration.
-  Stream it to a file, stderr, or syslog for your SIEM ([guide](docs/guides/siem-integration.md)).
+  structured JSON-Lines audit record: identity, host, capability, grant, decision, duration. The
+  recorder is on by default even in all-open mode, so a session always leaves a trail. Stream it to
+  a file, stderr, or syslog for your SIEM ([guide](docs/guides/siem-integration.md)).
 - **Live and layered.** Manifests hot-reload without a restart (failing closed on a bad edit);
   configuration resolves through defaults, org policy, and user layers, with org locks.
 
@@ -206,7 +203,7 @@ mechanics, with the [solo-developer](docs/guides/solo-developer.md) and
 **Reviewing Ghostlight for procurement or a security assessment?** The
 [Trust Center](docs/trust/README.md) is public and ungated: it answers the questions reviewers
 ask first, each with linked evidence, and ships a CAIQ-shaped questionnaire plus MSA and DPA
-templates you can read and file before you ever talk to us.
+templates you can read and file before you ever reach out.
 
 ## How it works
 
@@ -265,17 +262,20 @@ with reasoning: accepted, deferred, or declined against the project's recorded v
 
 ## License
 
-Ghostlight is open-core. The engine (everything outside `crates/core/src/governance/`) is open source under
-Apache-2.0 OR MIT, at your option. The governance module (`crates/core/src/governance/`) is source-available
-under the Ghostlight Commercial License, and it is free for almost everyone: individuals and solo
-developers, teams of up to five, evaluation and development at any size, all-open operation at any
-size, and noncommercial nonprofit or open-source use. Exactly one situation needs a paid
-subscription: an organization of more than five people running the governance features
-operationally. See [LICENSING.md](LICENSING.md) for the plain-language guide.
+**The Continuity Promise comes first:** license state never affects behavior, and the binary never
+phones home. Ghostlight runs the same whether or not anyone ever pays.
 
-Editions, prices, the founding program (12 months free for the first ten organizations), and the
-Continuity Promise (license state never affects behavior, and the binary never phones home) are
-in [PRICING.md](PRICING.md).
+Ghostlight is open-core. The engine (everything outside `crates/core/src/governance/`) is open
+source under Apache-2.0 OR MIT, at your option. The governance module
+(`crates/core/src/governance/`) is source-available under the Ghostlight Commercial License, and it
+is free for almost everyone: individuals and solo developers, teams of up to five, evaluation and
+development at any size, all-open operation at any size, and noncommercial nonprofit or open-source
+use. Exactly one situation needs a paid subscription: an organization of more than five people
+running the governance features operationally.
+
+See [LICENSING.md](LICENSING.md) for the plain-language guide, and, when you want them,
+[PRICING.md](PRICING.md) for editions, prices, and the founding program (12 months free for the
+first ten organizations).
 
 ---
 
