@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Security-hardening and activation-UX pass following the SAPS strategic assessment.
+
+### Changed
+- **Safe-by-default posture.** The audit flight recorder now defaults ON in every preset,
+  all-open included (a session always leaves a trail), and `inbound.web.enabled` now defaults
+  OFF in every preset (driving the browser over a local TCP port is opt-in; the pipe path remains
+  the default). `ghostlight doctor` shouts `UNGOVERNED (all-open)` and prints an audit-health line.
+- **README/registry re-lead:** the front door leads with the durable axis (governance + audit +
+  governed composition) and the Continuity Promise; pricing is discoverable-when-sought.
+- Softened the security/support SLAs to explicit best-effort targets (solo project).
+
+### Added
+- **`ghostlight doctor` confirms the extension link without `--debug`** via an in-band
+  control-plane `status` request over the ADAPTER/CONTROL endpoint (activates the reserved
+  `control` role). Renders a real connected/disconnected verdict.
+- **`navigate` auto-creates the Ghostlight tab group** when none exists, instead of failing cold.
+- Supply-chain gate: `deny.toml` + a blocking `cargo-deny` CI job; pinned toolchain
+  (`rust-toolchain.toml`).
+- Bounded audit file (single-generation rotation at 50 MiB).
+- `MAINTENANCE.md` (continuity / bus-factor) and `CODE_OF_CONDUCT.md`.
+
+### Fixed
+- **Management-plane write path:** the `enable-remote` action requires an `X-Ghostlight-Intent`
+  consent header (CSRF hard-stop); the management router enforces a loopback `Host` header; a
+  present-but-unparseable `Origin` is no longer treated as the loopback peer.
+- **Owner-only pipe DACL fails closed** on Windows instead of falling back to the default DACL.
+- **One-liner installers verify integrity** (SHA-256 + best-effort `gh attestation verify`) before
+  trusting a downloaded binary.
+- **Group-gated the tab-URL probe** so it cannot enumerate the user's non-Ghostlight tabs.
+- Retired the perpetually-hanging `e2e-smoke` CI job; corrected stale docstrings and the governance
+  license path.
+
 ## [0.5.5] - 2026-07-11
 
 Central policy distribution (ADR-0055): an organization can now host, sign, and roll out a
