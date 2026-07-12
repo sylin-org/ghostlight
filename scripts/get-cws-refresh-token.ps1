@@ -30,11 +30,25 @@
 [CmdletBinding()]
 param(
     [int] $Port = 8976,
-    [int] $TimeoutSec = 180
+    [int] $TimeoutSec = 180,
+    # Write CWS_REFRESH_TOKEN straight into the env file (default: $HOME/.ghostlight-release.env)
+    # instead of printing it, so the token never lands on a terminal or in a transcript.
+    [switch] $Store,
+    [string] $EnvFile = (Join-Path $HOME '.ghostlight-release.env'),
+    # Pre-select this Google account on the consent page (helpful when signed into several).
+    [string] $LoginHint
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+# Auto-load the release env file if the client creds are not already in the environment (so this
+# helper "just works" after set-credentials.ps1, with no manual sourcing step).
+if ((-not $env:CWS_CLIENT_ID -or -not $env:CWS_CLIENT_SECRET) -and (Test-Path $EnvFile)) {
+    Get-Content $EnvFile | ForEach-Object {
+        if ($_ -match '^([A-Z0-9_]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2]) }
+    }
+}
 
 $clientId = if ($env:CWS_CLIENT_ID) { $env:CWS_CLIENT_ID } else { Read-Host 'CWS_CLIENT_ID' }
 $clientSecret = if ($env:CWS_CLIENT_SECRET) { $env:CWS_CLIENT_SECRET } else { Read-Host 'CWS_CLIENT_SECRET' }
@@ -46,7 +60,8 @@ $authUrl = 'https://accounts.google.com/o/oauth2/auth' +
     "?response_type=code&access_type=offline&prompt=consent" +
     "&redirect_uri=$([uri]::EscapeDataString($redirect))" +
     "&scope=$([uri]::EscapeDataString($scope))" +
-    "&client_id=$([uri]::EscapeDataString($clientId))"
+    "&client_id=$([uri]::EscapeDataString($clientId))" +
+    $(if ($LoginHint) { "&login_hint=$([uri]::EscapeDataString($LoginHint))" } else { '' })
 
 # Extract a query-string value from a raw HTTP request line ("GET /?code=x&scope=y HTTP/1.1").
 function Get-QueryValue([string] $RequestLine, [string] $Key) {
@@ -119,9 +134,29 @@ if (-not $resp.refresh_token) {
     throw 'the token response carried no refresh_token. Re-run with a FRESH consent (prompt=consent forces it); a refresh token is only returned on first consent per client unless forced.'
 }
 
-Write-Host ''
-Write-Host 'SUCCESS. Store this as CWS_REFRESH_TOKEN in your out-of-repo values file (never commit it):' -ForegroundColor Green
-Write-Host ''
-Write-Host "  $($resp.refresh_token)"
-Write-Host ''
-Write-Host 'Then verify all four CWS_* are set:  pwsh -File scripts/publish-extension.ps1 -DryRun'
+if ($Store) {
+    # Merge CWS_REFRESH_TOKEN into the env file in place, without ever printing the token.
+    $rt = $resp.refresh_token
+    $lines = if (Test-Path $EnvFile) { @(Get-Content $EnvFile) } else { @() }
+    $out = [System.Collections.Generic.List[string]]::new()
+    $seen = $false
+    foreach ($line in $lines) {
+        if ($line -match '^\s*CWS_REFRESH_TOKEN\s*=') { $out.Add("CWS_REFRESH_TOKEN=$rt"); $seen = $true }
+        else { $out.Add($line) }
+    }
+    if (-not $seen) { $out.Add("CWS_REFRESH_TOKEN=$rt") }
+    Set-Content -Path $EnvFile -Value $out -Encoding utf8
+    if (-not $IsWindows) { chmod 600 $EnvFile }
+    Write-Host ''
+    Write-Host "SUCCESS. Stored CWS_REFRESH_TOKEN in $EnvFile (length $($rt.Length), value hidden)." -ForegroundColor Green
+    Write-Host 'Verify all four CWS_* are set:  pwsh -File scripts/publish-extension.ps1 -DryRun'
+}
+else {
+    Write-Host ''
+    Write-Host 'SUCCESS. Store this as CWS_REFRESH_TOKEN in your out-of-repo values file (never commit it):' -ForegroundColor Green
+    Write-Host ''
+    Write-Host "  $($resp.refresh_token)"
+    Write-Host ''
+    Write-Host 'Store it:  pwsh -File local/set-credentials.ps1 CWS_REFRESH_TOKEN <token>'
+    Write-Host 'Then verify:  pwsh -File scripts/publish-extension.ps1 -DryRun'
+}
