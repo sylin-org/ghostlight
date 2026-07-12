@@ -3,7 +3,7 @@
 # Users: brew install sylin-org/tap/ghostlight
 class Ghostlight < Formula
   desc "Governed browser automation over your own authenticated Chromium session (MCP)"
-  homepage "https://sylin-org.github.io/ghostlight/"
+  homepage "https://sylin.org/ghostlight/"
   version "0.5.6"
   license "Apache-2.0"
 
@@ -33,7 +33,7 @@ class Ghostlight < Formula
       Connect the browser side (idempotent):
         ghostlight install
       then add the "Ghostlight in Browser" extension.
-      Walkthrough: https://sylin-org.github.io/ghostlight/install.html
+      Walkthrough: https://sylin.org/ghostlight/
     EOS
   end
 

@@ -25,10 +25,10 @@ npx ghostlight install
 
 and add the "Ghostlight in Browser" extension from the Chrome Web Store. Full walkthrough,
 one-click client buttons, and the manual paths:
-https://sylin-org.github.io/ghostlight/install.html
+https://sylin.org/ghostlight/
 
 ## Links
 
 - Project: https://github.com/sylin-org/ghostlight
-- What it is and why: https://sylin-org.github.io/ghostlight/
+- What it is and why: https://sylin.org/ghostlight/
 - License: engine is Apache-2.0 OR MIT; governance module is source-available (see LICENSE).

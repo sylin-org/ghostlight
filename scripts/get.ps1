@@ -8,7 +8,7 @@
 $ErrorActionPreference = "Stop"
 
 $Repo = "sylin-org/ghostlight"
-$InstallPage = "https://sylin-org.github.io/ghostlight/install.html"
+$InstallPage = "https://sylin.org/ghostlight/"
 
 if (-not [Environment]::Is64BitOperatingSystem) {
     Write-Error "ghostlight: only x64 Windows has a prebuilt binary. See $InstallPage"

@@ -367,11 +367,11 @@ async function killSession() {
 // First install: open the install walkthrough so whichever half the user found first
 // (extension or binary) leads them to the other. Fires ONLY on reason "install" -- never on
 // updates or browser restarts -- and holds no state. Mechanism only; no policy, no phoning
-// home (a static page on the project's GitHub Pages).
+// home (a static page on the project's website, sylin.org).
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install") {
     chrome.tabs.create({
-      url: "https://sylin-org.github.io/ghostlight/install.html?from=extension",
+      url: "https://sylin.org/ghostlight/chromium-extension/post-install/",
     });
   }
 });

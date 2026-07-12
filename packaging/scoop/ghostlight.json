@@ -1,7 +1,7 @@
 {
   "version": "0.5.6",
   "description": "Governed browser automation over your own authenticated Chromium session, for AI coding agents (MCP).",
-  "homepage": "https://sylin-org.github.io/ghostlight/",
+  "homepage": "https://sylin.org/ghostlight/",
   "license": "Apache-2.0 OR MIT (engine); Ghostlight Commercial License (governance module, source-available)",
   "architecture": {
     "64bit": {
@@ -13,7 +13,7 @@
   "bin": ["ghostlight.exe", "ghostlight-relay.exe"],
   "post_install": [
     "Write-Host 'Connect the browser: run ghostlight install, then add the Ghostlight in Browser extension.'",
-    "Write-Host 'Walkthrough: https://sylin-org.github.io/ghostlight/install.html'"
+    "Write-Host 'Walkthrough: https://sylin.org/ghostlight/'"
   ],
   "checkver": {
     "github": "https://github.com/sylin-org/ghostlight"

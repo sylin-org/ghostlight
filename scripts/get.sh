@@ -9,7 +9,7 @@
 set -eu
 
 REPO="sylin-org/ghostlight"
-INSTALL_PAGE="https://sylin-org.github.io/ghostlight/install.html"
+INSTALL_PAGE="https://sylin.org/ghostlight/"
 
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET="aarch64-apple-darwin" ;;

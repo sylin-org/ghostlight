@@ -127,7 +127,7 @@ async function ensureBinaries() {
     process.stderr.write(
       `ghostlight: no prebuilt binary for ${process.platform}/${process.arch}.\n` +
         `Build from source (cargo install --git https://github.com/${REPO}) or see\n` +
-        `https://sylin-org.github.io/ghostlight/install.html for options.\n`
+        `https://sylin.org/ghostlight/ for options.\n`
     );
     process.exit(1);
   }
