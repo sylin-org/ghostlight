@@ -10,10 +10,16 @@ when they disagree**, and update it when you land something that changes the pic
 - **Branches**: `main` = releases, `dev` = trunk. Work lands on `dev`; the owner reviews
   `dev -> main` PRs and cuts releases.
 - **Latest published release: v0.5.6** (2026-07-12), cut with `scripts/release.ps1 0.5.6`.
-  Shipped: GitHub Release (27 assets + attestations), npm `ghostlight@0.5.6`, homebrew tap,
-  scoop/winget/homebrew manifests committed to main, trust footers restamped, sylin.org
-  website refreshed. `dev` and `main` are in sync at the release commit (`5762c3a`). v0.5.5
-  was prepared but never published; its content folded into the 0.5.6 changelog.
+  Shipped and LIVE: GitHub Release (27 assets + attestations), npm `ghostlight@0.5.6`, homebrew
+  tap, **MCP registry (`org.sylin/ghostlight`)**, scoop/winget/homebrew manifests committed to
+  main, trust footers restamped, sylin.org website refreshed. `main` is at the release commit
+  `5762c3a`; `dev` is AHEAD of main by post-release tooling (registry step, server.json/URL fixes,
+  STATUS) -- these reach main at the next dev->main PR. v0.5.5 was prepared but never published.
+- **MCP registry publishing is now automated** in `release.ps1` (the `registry` step, after `npm`):
+  `mcp-publisher` DNS-auth publish, gated on `MCP_DNS_PRIVATE_KEY`. The one-time DNS proof is DONE
+  (apex TXT `v=MCPv1; k=ed25519; p=...` on sylin.org via Cloudflare; ed25519 key in the env file;
+  see `local/AUDIT-LOG.md`). The registry is immutable per version, so metadata fixes (like the
+  websiteUrl) only land on the NEXT version.
 - **v0.5.6 carries**: composable policy tiers + session overlay + `ghostlight demo` (ADR-0060),
   extension-owned browser identity (ADR-0061), browser-relay reconnect (ADR-0062), the
   deploy-quiesce lock (ADR-0063), explicit dev isolation then the one-stack model (ADR-0064
@@ -43,6 +49,25 @@ Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA), and the 
 
 ## Owed engineering work (in rough priority order)
 
+- **Content / URL consistency pass (IN PROGRESS, owner-driven)**: a sweep of outward-facing
+  content for stale/branded-URL issues and the post-install UX. Known items so far:
+  - The extension's post-install page: `extension/service-worker.js:374` opens
+    `https://sylin-org.github.io/ghostlight/install.html?from=extension` on `onInstalled` (a raw
+    github.io URL). OWNER WANTS: move this page to the SITE at
+    `sylin.org/ghostlight/chromium-extension/post-install`, style it like the rest of the website,
+    and point the extension there. Touches BOTH repos (browser-mcp extension + `sylin-org/website`
+    at `F:\Replica\NAS\Files\repo\github\sylin-org\website`, an Eleventy site).
+  - `server.json` websiteUrl was `sylin-org.github.io` -> FIXED to `https://sylin.org/ghostlight/`
+    (committed; applies on the next registry version, not 0.5.6 -- immutable).
+  - TODO: finish the `git grep sylin-org.github.io` sweep (server.json + service-worker.js:374
+    found; confirm no others) and reconcile all raw-github.io URLs to `sylin.org`.
+  - README distribution channels: owner asked to list all channels (npm/CWS/MCP-registry/brew...).
+    RECOMMENDATION: list only LIVE channels (GitHub, npm, homebrew, MCP registry), NOT the
+    not-yet-published ones (CWS blocked, Edge/winget not submitted). Public content -> DRAFT + get
+    owner confirm before pushing ([[confirm-public-content-before-posting]]).
+- **CWS listing completion** (owner): privacy practices + remote-code justification + video in the
+  Web Store dashboard, then publish the already-uploaded v0.5.6 package (or re-run
+  `scripts/publish-extension.ps1`).
 - **Lightbox legacy-27 migration** (ADR-0056): the 27 `#[ignore = "e2e"]` spawn tests +
   `scripts/test-e2e.*` migrate scenario-by-scenario into the lightbox harness against a
   per-test parity ledger. Not started; CI runs both tiers until the ledger completes.
