@@ -38,6 +38,15 @@ Security-hardening and activation-UX pass following the SAPS strategic assessmen
 - Softened the security/support SLAs to explicit best-effort targets (solo project).
 
 ### Added
+- **Field splash effect + a codified visual language.** Every form write (`form_input`,
+  `form_fill`, `file_upload`, `upload_image`) now draws a sky-blue splash hugging the field it
+  just set -- the click ripple's language applied to the field's own rectangle -- so a watcher
+  sees exactly which field the agent touched. The whole effect vocabulary (foundations,
+  invariants, the effect dictionary, and the add-an-effect checklist) is now codified in
+  `docs/design/visual-language.md` as the normative reference.
+- **`ghostlight demo` pacing controls:** `--setup-pause` (default 10s, a hold right after the
+  demo tab opens so you can resize/position the window) and `--section-pause` (default 5s
+  between the tour's sections), alongside the existing per-step `--pause`.
 - **`ghostlight doctor` confirms the extension link without `--debug`** via an in-band
   control-plane `status` request over the ADAPTER/CONTROL endpoint (activates the reserved
   `control` role). Renders a real connected/disconnected verdict.

@@ -9,8 +9,11 @@
 //   - a soft shimmer on the focused field when the agent types.
 // All are hidden during screenshots so the model's image stays clean, and are excluded from
 // read_page/find (their ids are prefixed "ghostlight-" and skipped in content.js). Driven by the
-// service worker via chrome.tabs.sendMessage. A lean reimplementation of the concept; no upstream
-// extension code is copied.
+// service worker via chrome.tabs.sendMessage (plus the GhostlightFx same-world seam at the bottom
+// for in-page triggers). A lean reimplementation of the concept; no upstream extension code is
+// copied. The NORMATIVE vocabulary -- foundations, invariants, the effect dictionary, and the
+// checklist for adding an effect -- is docs/design/visual-language.md; it and this file move
+// together.
 
 (function () {
   if (window.__browserMcpIndicator) return;
@@ -37,6 +40,7 @@
   const FADE_MS = 4000;
   const RIPPLE_MS = 620; // one click ring's expand-and-fade duration
   const RIPPLE_STAGGER_MS = 140; // gap between rings of a multi-click, so 2/3 read as a rhythm
+  const FIELD_SPLASH_MS = 700; // form-write splash hugging the field just set
   // Extended-vocabulary timings (the visual feedback dictionary).
   const LOZENGE_MS = 1250; // keystroke lozenge (type / key)
   const SCAN_MS = 1450; // read-page scan-line sweep
@@ -83,6 +87,10 @@
       "@keyframes ghostlight-trail{0%{opacity:.9}100%{opacity:0}}" +
       "@keyframes ghostlight-shimmer{0%{opacity:0}25%{opacity:1}60%{opacity:.7}100%{opacity:0}}" +
       "@keyframes ghostlight-shimmer-rm{0%{opacity:0}50%{opacity:.7}100%{opacity:0}}" +
+      // Field splash: the click ripple's expand-and-fade physics applied to the field's own
+      // rectangle -- settles in at full size, then releases outward as it fades.
+      "@keyframes ghostlight-fieldsplash{0%{opacity:0;transform:scale(.97)}18%{opacity:1;transform:scale(1)}62%{opacity:.85}100%{opacity:0;transform:scale(1.05)}}" +
+      "@keyframes ghostlight-fieldsplash-rm{0%{opacity:0}30%{opacity:.9}100%{opacity:0}}" +
       "@keyframes ghostlight-targetglow{0%{opacity:0}22%{opacity:1}100%{opacity:0}}" +
       "@keyframes ghostlight-flash{0%{opacity:.42}100%{opacity:0}}" +
       "@keyframes ghostlight-capframe{0%{opacity:0;transform:scale(1.03)}9%{opacity:1;transform:scale(1)}34%{opacity:1;transform:scale(1)}60%{opacity:1;transform:scale(.17);border-radius:16px}88%{opacity:1;transform:scale(.17);border-radius:16px}100%{opacity:0;transform:scale(.17);border-radius:16px}}" +
@@ -263,6 +271,43 @@
       "box-shadow:0 0 10px rgba(" + SKY_RGB + ",.5),inset 0 0 8px rgba(" + SKY_RGB + ",.25);" +
       "animation:" + anim + " 900ms ease-in-out forwards";
     addEphemeral(el, 1000);
+  }
+
+  // Form-write splash (docs/design/visual-language.md): the click ripple's language applied to
+  // the field's own rectangle, so a watcher sees exactly WHICH field the agent just set. A ring
+  // hugging the field's bounds (borrowing its border-radius) with a soft interior wash settles in
+  // and releases outward as it fades. Called with the ELEMENT, not coordinates -- the caller is
+  // the form writer itself (content.js via the GhostlightFx seam at the bottom of this file), the
+  // one place that knows the target.
+  function fieldSplash(target) {
+    if (hiddenForTool || document.hidden) return;
+    if (!target || typeof target.getBoundingClientRect !== "function") return;
+    let rect;
+    try { rect = target.getBoundingClientRect(); } catch (e) { return; }
+    if (!rect || (rect.width === 0 && rect.height === 0)) return;
+    ensureStyles();
+    let radius = "8px";
+    try {
+      const r = getComputedStyle(target).borderRadius;
+      if (r && r !== "0px") radius = r;
+    } catch (e) { /* keep the fallback */ }
+    const pad = 4;
+    const anim = reduceMotion() ? "ghostlight-fieldsplash-rm" : "ghostlight-fieldsplash";
+    const el = document.createElement("div");
+    el.id = FX_LAYER_ID + "-f" + fxSeq++; // "ghostlight-" prefix -> excluded from reads
+    el.setAttribute("aria-hidden", "true");
+    el.style.cssText =
+      "position:fixed;box-sizing:border-box;pointer-events:none;" +
+      "left:" + (rect.left - pad) + "px;top:" + (rect.top - pad) + "px;" +
+      "width:" + (rect.width + pad * 2) + "px;height:" + (rect.height + pad * 2) + "px;" +
+      "border-radius:" + radius + ";" +
+      "border:2px solid rgba(" + SKY_RGB + ",.9);" +
+      "background:radial-gradient(ellipse at center,rgba(" + SKY_RGB + ",.26) 0%,rgba(" + SKY_RGB + ",.08) 55%,rgba(" + SKY_RGB + ",0) 78%);" +
+      "box-shadow:0 0 14px rgba(" + SKY_RGB + ",.55),inset 0 0 10px rgba(" + SKY_RGB + ",.3);" +
+      "transform-origin:center;" +
+      "animation:" + anim + " " + FIELD_SPLASH_MS + "ms cubic-bezier(.22,1,.36,1) forwards";
+    addEphemeral(el, FIELD_SPLASH_MS + 80);
+    caption("Filling a field");
   }
 
   function showGlow() {
@@ -728,6 +773,22 @@
       if (changes.ghostlight_captions) captionsEnabled = !!changes.ghostlight_captions.newValue;
     });
   } catch (e) { /* storage unavailable: effects on, captions off */ }
+
+  // Same-isolated-world seam for sibling content scripts (content.js): a form write calls
+  // fieldSplash directly with the element it just set -- the writer is the one place that knows
+  // the target, so no service-worker hop needs to carry a rect. Page scripts can never reach this
+  // (content scripts live in the extension's isolated world), which is exactly why this is a
+  // direct export and NOT a DOM CustomEvent any page could forge. A form write is a genuine
+  // page-mutating action, so it also dismisses a lingering notification -- state cleanup that
+  // fires even with the effects master switch off, the same rule TOOL_ACTION_MESSAGE_TYPES
+  // applies to the message-driven actions above.
+  self.GhostlightFx = {
+    fieldSplash: function (target) {
+      if (activeNotifEl) dismissNotification();
+      if (!effectsEnabled) return;
+      fieldSplash(target);
+    },
+  };
 
   window.addEventListener("beforeunload", () => { hideGlow(); });
 })();

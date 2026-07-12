@@ -86,6 +86,13 @@ struct DemoArgs {
     /// Seconds to pause after each visible step so you can watch it happen. Default 2.
     #[arg(long, default_value_t = 2.0)]
     pause: f64,
+    /// Seconds to wait right after the demo tab opens, so you can resize and position the
+    /// browser window before the tour starts. Default 10.
+    #[arg(long, default_value_t = 10.0)]
+    setup_pause: f64,
+    /// Seconds to breathe between the tour's sections (Desk, Form, Signals, ...). Default 5.
+    #[arg(long, default_value_t = 5.0)]
+    section_pause: f64,
 }
 
 #[derive(Debug, Args)]
@@ -587,7 +594,14 @@ fn main() -> Result<()> {
         Cli {
             command: Some(Command::Demo(args)),
             ..
-        } => demo::run(&args.base_url, args.pause)?,
+        } => demo::run(
+            &args.base_url,
+            demo::Pacing {
+                step_secs: args.pause,
+                setup_secs: args.setup_pause,
+                section_secs: args.section_pause,
+            },
+        )?,
         Cli {
             command: Some(Command::License(args)),
             ..

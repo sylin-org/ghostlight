@@ -491,6 +491,16 @@
     }
     return null;
   }
+  // Field-touch splash (docs/design/visual-language.md): show the watcher WHICH field a form
+  // write just touched. A direct call into agent-visual-indicator.js's same-isolated-world
+  // GhostlightFx seam (both scripts share the extension's isolated world); best-effort and never
+  // load-bearing -- the indicator gates on its own effects switch and capture-hiding state.
+  function fieldFx(target) {
+    try {
+      const fx = self.GhostlightFx;
+      if (fx && typeof fx.fieldSplash === "function") fx.fieldSplash(target);
+    } catch (e) { /* effects are decorative; a form write never fails on them */ }
+  }
   function setFormValue(ref, value) {
     const el = deref(ref);
     if (!el) {
@@ -512,6 +522,7 @@
         return { error: "cannot uncheck a radio button; set another radio in the same group instead" };
       }
       if (target.checked !== want) target.click();
+      fieldFx(target);
       return { success: true, checked: target.checked };
     } else if (target.isContentEditable) {
       target.textContent = String(value);
@@ -525,6 +536,7 @@
     }
     target.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
     target.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    fieldFx(target);
     return { success: true, value: target.value };
   }
 
@@ -551,6 +563,7 @@
     target.focus();
     target.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
     target.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    fieldFx(target);
     return {
       success: true,
       output: "Uploaded " + r.decoded.length + " file(s) to file input: "
@@ -585,6 +598,7 @@
       target.focus();
       target.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
       target.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+      fieldFx(target);
       return { success: true, output: "Uploaded screenshot (" + name + ") to file input." };
     }
 

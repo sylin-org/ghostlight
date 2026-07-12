@@ -26,13 +26,25 @@ use tokio::process::{Child, ChildStdin, ChildStdout};
 /// the whole tour works on the demo pages and the finale's off-domain navigation is refused.
 const DEMO_POLICY: &str = include_str!("../examples/demo-policy.json");
 
-/// Entry point for the `demo` subcommand. `base_url` defaults to the live site; `pause` is the
-/// wait between visible steps so a watcher can follow along.
-pub fn run(base_url: &str, pause_secs: f64) -> Result<()> {
+/// The demo's three watchability rhythms, all operator-tunable: a short beat after each visible
+/// step, a long hold right after the tab opens (time to resize/position the window before the
+/// tour starts), and a breather between sections so each "test" reads as its own scene.
+#[derive(Debug, Clone, Copy)]
+pub struct Pacing {
+    /// Seconds after each visible step (`--pause`, default 2).
+    pub step_secs: f64,
+    /// Seconds after the demo tab opens, before the tour starts (`--setup-pause`, default 10).
+    pub setup_secs: f64,
+    /// Seconds between the tour's sections (`--section-pause`, default 5).
+    pub section_secs: f64,
+}
+
+/// Entry point for the `demo` subcommand. `base_url` defaults to the live site; `pacing` carries
+/// the three watchability rhythms (step beat, window-setup hold, section breather).
+pub fn run(base_url: &str, pacing: Pacing) -> Result<()> {
     let base = base_url.trim_end_matches('/').to_string();
-    let pause = Duration::from_secs_f64(pause_secs.max(0.0));
     let rt = tokio::runtime::Runtime::new().context("build the demo tokio runtime")?;
-    rt.block_on(drive(base, pause))
+    rt.block_on(drive(base, pacing))
 }
 
 /// A minimal MCP client speaking JSON-RPC over a spawned `ghostlight-relay --role agent`.
@@ -183,14 +195,20 @@ fn step(msg: &str) {
     println!("\n>> {msg}");
 }
 
+/// The between-sections breather: a visible countdown-free hold so each section of the tour
+/// reads as its own scene rather than one continuous blur.
+async fn section_break(pacing: &Pacing) {
+    tokio::time::sleep(Duration::from_secs_f64(pacing.section_secs.max(0.0))).await;
+}
+
 /// Run the whole scripted tour. Returns an error (non-zero exit) if any step fails, so this
 /// doubles as an end-to-end smoke test.
-async fn drive(base: String, pause: Duration) -> Result<()> {
+async fn drive(base: String, pacing: Pacing) -> Result<()> {
     println!("Ghostlight demo");
     println!("  stage : {base}");
     println!("  note  : keep the browser window visible -- the effects are hidden from screenshots by design.");
 
-    let mut c = Client::spawn(pause).await?;
+    let mut c = Client::spawn(Duration::from_secs_f64(pacing.step_secs.max(0.0))).await?;
 
     step("Handshake, declaring a tighten-only session policy (grants only sylin.org)");
     c.request(
@@ -211,9 +229,14 @@ async fn drive(base: String, pause: Duration) -> Result<()> {
     let tab_id = parse_tab_id(&created)
         .ok_or_else(|| anyhow!("could not read the new tab id from: {created}"))?;
     println!("   tab {tab_id}");
-    c.pause().await;
+    let setup = pacing.setup_secs.max(0.0);
+    if setup > 0.0 {
+        println!("   (holding {setup:.0}s -- resize and position the browser window now)");
+        tokio::time::sleep(Duration::from_secs_f64(setup)).await;
+    }
 
     // --- Desk: point and act ---
+    section_break(&pacing).await;
     step("Desk: navigate, then click the button and type in the field");
     c.call_tool(
         "navigate",
@@ -240,6 +263,7 @@ async fn drive(base: String, pause: Duration) -> Result<()> {
     }
 
     // --- Form: fill it in ---
+    section_break(&pacing).await;
     step("Form: fill every field and submit (nothing is sent anywhere)");
     c.call_tool(
         "navigate",
@@ -270,6 +294,7 @@ async fn drive(base: String, pause: Duration) -> Result<()> {
     c.pause().await;
 
     // --- Signals: watch the wire ---
+    section_break(&pacing).await;
     step("Signals: log to the console, fetch data, and wait for a slow task");
     c.call_tool(
         "navigate",
@@ -313,6 +338,7 @@ async fn drive(base: String, pause: Duration) -> Result<()> {
     c.pause().await;
 
     // --- Reading room: take it in ---
+    section_break(&pacing).await;
     step("Reading room: extract the text and find a passage");
     c.call_tool(
         "navigate",
@@ -328,6 +354,7 @@ async fn drive(base: String, pause: Duration) -> Result<()> {
     c.pause().await;
 
     // --- The guardrail: the whole point ---
+    section_break(&pacing).await;
     step("The guardrail: ask Ghostlight to step off the granted domain -- it should refuse");
     let outcome = c
         .call_tool(
