@@ -21,10 +21,9 @@ when they disagree**, and update it when you land something that changes the pic
   security-hardening pass.
 - **PR #41 (dev -> main) is OPEN**: "v0.5.6: session-policy governance, browser identity
   root-fixes, one-stack dev model, visual language". Owner reviews before merge.
-- **Uncommitted working tree** (as of this snapshot): in-flight test work touching
-  `tests/peer_death.rs`, `tests/support/mod.rs`, small test/lib tweaks (a `handshake`
-  re-export in `src/lib.rs`). If you did not author these, do not commit or revert them;
-  ask, or work around them.
+- **Working tree**: clean as of this snapshot. The spawn-tier e2e tests were aligned with
+  the ADR-0061/0062 contracts (identity-frame admission, tab-URL probe answers, the
+  rewritten relay-lifecycle test) on `dev`; the four changed e2e binaries verified green.
 
 ## Release pipeline (what shipping 0.5.6 takes)
 
