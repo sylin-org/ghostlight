@@ -134,6 +134,11 @@ fn session_killed_writes_one_session_event_record() {
         tokio::spawn(async move {
             let _ = attached.attach(browser_side).await;
         });
+        // ADR-0058: the first frame on this endpoint is now this session's hello.
+        let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
+        ghostlight::native::host::write_message(&mut ext_side, &hello)
+            .await
+            .unwrap();
         for _ in 0..200 {
             if browser.is_connected() {
                 break;

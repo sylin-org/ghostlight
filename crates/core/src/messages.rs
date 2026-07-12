@@ -142,13 +142,35 @@
 //! ## binary -> extension
 //! ```json
 //! { "type": "notification", "tabId": <number>, "class": "<string>", "icon": "<string>",
-//!   "description": "<string>", "ref": "<string>" }
+//!   "title": "<string>", "description": "<string>", "ref": "<string>" }
 //! ```
 //!
-//! `icon` and `ref` are optional. Additive; ONE new `type` value on the SAME channel, the same
-//! fire-and-forget-presentation posture as `group_request` above (no `id`, no reply, no policy
-//! decision on the extension side -- it renders exactly what it is told). `class` is a small,
-//! open-ended vocabulary (today: `"blocked"` for a sacred-domain denial, `"warning"` for a policy
-//! denial); `ref` is an opaque cross-reference (today: a denial_id) a viewer can correlate back to
+//! `icon`, `description`, and `ref` are optional; `title` is always present. Additive; ONE new
+//! `type` value on the SAME channel, the same fire-and-forget-presentation posture as
+//! `group_request` above (no `id`, no reply, no policy decision on the extension side -- it
+//! renders exactly what it is told). `title` is deliberately NOT the extension's `caption()`
+//! mechanism (optional decorative flavor text, off by default) -- a notification is substantive
+//! and must always render. `class` is the standard severity taxonomy this codebase's own tracing
+//! already uses -- `"info"`/`"debug"`/`"warn"`/`"error"` -- so the primitive stays general-purpose
+//! rather than denial-specific (today: `"error"` for a sacred-domain denial, `"warn"` for a policy
+//! denial); `ref` is an opaque cross-reference
+//! (today: a denial_id) a viewer can correlate back to
 //! the structured audit record later. First caller: [`crate::mcp::pipeline::run_tool_call`], at
 //! each of the three points a call is denied.
+//!
+//! ## Extension debug events (ADR-0059)
+//!
+//! ## extension -> binary (event; no `id` -- fire-and-forget, same posture as `focus`)
+//! ```json
+//! { "type": "debug_event", "event": "<string>", "detail": <any>? }
+//! ```
+//!
+//! Sent ONLY when the extension's own `chrome.storage.local` debug flag is on (default off,
+//! toggled from the options page); never sent otherwise, so a normal install produces zero
+//! extra traffic. `event` is a short name (`"connect_attempt"`, `"connect_disconnect"` today);
+//! `detail` is optional, freeform, and never policy-bearing -- purely a developer breadcrumb.
+//! The binary appends it verbatim into [`crate::hub::outbound::browser::Browser`]'s existing
+//! debug-state event ring (the SAME file `ghostlight doctor`/a raw `debug-state-<pid>.json`
+//! read already surfaces every other lifecycle note from), so the extension's own view of a
+//! connection interleaves with the service's, ordered by arrival -- one file, not two to
+//! correlate by hand.

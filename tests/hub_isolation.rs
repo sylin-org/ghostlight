@@ -71,6 +71,9 @@ fn attach_fake_extension(
     let responses: HashMap<&'static str, Value> = responses.into_iter().collect();
     let tab_urls: HashMap<i64, Option<&'static str>> = tab_urls.into_iter().collect();
     let handle = tokio::spawn(async move {
+        // ADR-0058: identify as pid 0, matching a plain un-encoded small tabId's decode.
+        let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
+        host::write_message(&mut ext_side, &hello).await.unwrap();
         loop {
             let Some(req) = host::read_message(&mut ext_side).await.unwrap() else {
                 break;

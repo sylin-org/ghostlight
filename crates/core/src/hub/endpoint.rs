@@ -127,7 +127,7 @@ async fn handle_adapter_connection<S>(
             answer_control_request(
                 &mut stream,
                 &hello,
-                ctx.browser.is_connected(),
+                ctx.browser.browser_snapshot(),
                 live_sessions,
             )
             .await;
@@ -154,7 +154,7 @@ async fn handle_adapter_connection<S>(
 async fn answer_control_request<S>(
     stream: &mut S,
     hello: &Value,
-    extension_connected: bool,
+    browsers: Vec<ghostlight_transport::ipc::BrowserInfo>,
     live_sessions: u64,
 ) where
     S: tokio::io::AsyncWrite + Unpin,
@@ -169,8 +169,9 @@ async fn answer_control_request<S>(
     }
     let reply = ghostlight_transport::ipc::StatusReply {
         hub: ghostlight_transport::handshake::HUB_PROTO,
-        extension_connected,
+        extension_connected: !browsers.is_empty(),
         live_sessions,
+        browsers,
     };
     let bytes = match serde_json::to_vec(&reply) {
         Ok(b) => b,
@@ -767,7 +768,11 @@ mod tests {
             "role": ghostlight_transport::handshake::ROLE_CONTROL,
             "request": ghostlight_transport::handshake::CONTROL_REQUEST_STATUS,
         });
-        answer_control_request(&mut server_side, &hello, true, 3).await;
+        let browsers = vec![ghostlight_transport::ipc::BrowserInfo {
+            pid: 4242,
+            focused: true,
+        }];
+        answer_control_request(&mut server_side, &hello, browsers, 3).await;
 
         let bytes = host::read_message(&mut client_side)
             .await
@@ -777,6 +782,8 @@ mod tests {
         assert_eq!(reply.hub, ghostlight_transport::handshake::HUB_PROTO);
         assert!(reply.extension_connected);
         assert_eq!(reply.live_sessions, 3);
+        assert_eq!(reply.browsers.len(), 1);
+        assert_eq!(reply.browsers[0].pid, 4242);
     }
 
     /// An unrecognized control request writes nothing and simply closes -- keeping the vocabulary
@@ -785,7 +792,7 @@ mod tests {
     async fn unknown_control_request_writes_nothing() {
         let (mut server_side, mut client_side) = tokio::io::duplex(4096);
         let hello = json!({ "role": ghostlight_transport::handshake::ROLE_CONTROL, "request": "future-thing" });
-        answer_control_request(&mut server_side, &hello, true, 0).await;
+        answer_control_request(&mut server_side, &hello, Vec::new(), 0).await;
         drop(server_side); // close the write half so the read observes EOF, not a hang
         assert!(
             host::read_message(&mut client_side)
@@ -808,6 +815,9 @@ mod tests {
         // Fake native-host: connect (retrying until serve is listening) and answer one request.
         let stream = connect(endpoint).await.expect("connect to serve");
         let (mut rd, mut wr) = tokio::io::split(stream);
+        // ADR-0058: the first frame on this endpoint is now this session's hello.
+        let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
+        host::write_message(&mut wr, &hello).await.unwrap();
         let fake = tokio::spawn(async move {
             let req = host::read_message(&mut rd).await.unwrap().unwrap();
             let v: Value = serde_json::from_slice(&req).unwrap();

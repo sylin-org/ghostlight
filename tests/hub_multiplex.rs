@@ -61,6 +61,9 @@ async fn two_sessions_route_replies_independently() {
     // shared physical link) and replies to each by id, echoing its own tool name back -- the
     // exact pattern `browser.rs::call_round_trips_a_tool_response` uses for a single session.
     let fake_ext = tokio::spawn(async move {
+        // ADR-0058: identify as pid 0, matching a plain un-encoded small tabId's decode.
+        let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
+        host::write_message(&mut ext_side, &hello).await.unwrap();
         for _ in 0..2 {
             let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
             let v: Value = serde_json::from_slice(&req).unwrap();
@@ -145,6 +148,9 @@ async fn one_kill_emits_one_audit_record_per_live_session() {
     tokio::spawn(async move {
         let _ = attached.attach(browser_side).await;
     });
+    // ADR-0058: the first frame on this endpoint is now this session's hello.
+    let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
+    host::write_message(&mut ext_side, &hello).await.unwrap();
     for _ in 0..200 {
         if browser.is_connected() {
             break;

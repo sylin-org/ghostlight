@@ -48,17 +48,21 @@
 //! as an ordinary id-less event, same as any other frame nothing is waiting for.
 //!
 //! On-screen notification ([`Browser::notify`], SAPS PRES-HIGH-01): the mcp-server sends
-//! `{ "type": "notification", "tabId", "class", "icon"?, "description", "ref"? }`. Same posture
-//! as `request_group` -- fire-and-forget, no `id`, no reply. `class` and `icon` are a small,
-//! open-ended vocabulary (today: `class: "blocked"` for a sacred-domain denial, `"warning"` for
-//! a policy denial) the extension renders without judging; `ref` is an opaque cross-reference
-//! (today: the denial_id) a viewer can correlate back to the structured audit record. First
-//! caller is a denial, fired from [`crate::mcp::pipeline::run_tool_call`] at each of the three
-//! points a call is denied -- the ONE place today where governance decides something and the
+//! `{ "type": "notification", "tabId", "class", "icon"?, "title", "description"?, "ref"? }`.
+//! Same posture as `request_group` -- fire-and-forget, no `id`, no reply. `class` and `icon` are
+//! the standard severity taxonomy this codebase's own tracing already uses --
+//! `"info"`/`"debug"`/`"warn"`/`"error"` -- so the primitive stays general-purpose rather than
+//! denial-specific (today: `class: "error"` for a sacred-domain denial, `"warn"` for a policy
+//! denial) the extension renders without judging; `title` is the
+//! always-shown headline, `description` an optional supporting line; `ref` is an opaque
+//! cross-reference (today: the denial_id) a viewer can correlate back to the structured audit
+//! record. First caller is a denial, fired from [`crate::mcp::pipeline::run_tool_call`] at each of
+//! the three points a call is denied -- the ONE place today where governance decides something and the
 //! extension is never otherwise contacted, so nothing on screen shows a block happened without
 //! this. Deliberately general so a future notification need (a policy hot-reload landing, for
 //! example) is a new `class`/`icon` value at an existing call site, not a new message type.
 
+use super::diagnostics::Diagnostic;
 use crate::ToolError;
 use ghostlight_transport::host;
 use ghostlight_transport::observability::DebugSink;
@@ -152,6 +156,57 @@ impl Drop for KillHookHandle {
     }
 }
 
+/// Clone `args` with its `tabId` field overwritten to `native` (ADR-0058). Used to build the
+/// extension-bound request from a caller's still-composite `args` without mutating the caller's
+/// own value (a `browser_batch`/`script` sub-step re-entering the chokepoint must see its
+/// original, untouched composite tabId).
+fn merge_tab_id(args: &Value, native: i64) -> Value {
+    let mut owned = args.clone();
+    if let Some(obj) = owned.as_object_mut() {
+        obj.insert("tabId".to_string(), json!(native));
+    }
+    owned
+}
+
+/// Recursively rewrite every plain-number `"tabId"` key in `v` to its composite form (ADR-0058),
+/// walking both real JSON structure (`structuredContent`, nested objects/arrays) and any
+/// `content[].text` block whose text happens to parse as JSON (`tabs_context_mcp`/
+/// `tabs_create_mcp` report their tab list this way, as a JSON-stringified text block AND as
+/// `structuredContent`). A text block that is not valid JSON is left untouched. Generic on
+/// purpose: covers every current tabId-reporting tool and any future one without a matching
+/// manual edit here.
+fn encode_tab_ids_in_value(v: &mut Value, target: u32) {
+    match v {
+        Value::Object(map) => {
+            if let Some(Value::Number(n)) = map.get("tabId") {
+                if let Some(native) = n.as_i64() {
+                    map.insert(
+                        "tabId".to_string(),
+                        json!(crate::constants::tab_id::encode(target, native)),
+                    );
+                }
+            }
+            if let Some(Value::String(text)) = map.get("text") {
+                if let Ok(mut parsed) = serde_json::from_str::<Value>(text) {
+                    encode_tab_ids_in_value(&mut parsed, target);
+                    if let Ok(restr) = serde_json::to_string(&parsed) {
+                        map.insert("text".to_string(), Value::String(restr));
+                    }
+                }
+            }
+            for value in map.values_mut() {
+                encode_tab_ids_in_value(value, target);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                encode_tab_ids_in_value(item, target);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Parse the extension's `rescale_coords` reply: a text content block holding
 /// `{"points": [[x, y], ...]}`. None on any shape mismatch (the caller keeps raw coordinates).
 fn parse_rescaled_points(reply: &Value) -> Option<Vec<(f64, f64)>> {
@@ -171,13 +226,34 @@ fn parse_rescaled_points(reply: &Value) -> Option<Vec<(f64, f64)>> {
     Some(out)
 }
 
+/// One attached browser's live send half plus enough identity to detect a stale self-removal
+/// race (ADR-0058): `generation` is this [`Browser::attach`] call's own monotonic id, so a
+/// reader loop that is about to remove its session on disconnect can tell whether a LATER
+/// attach (a reconnect from the same browser) has already replaced it -- and if so, leave the
+/// newer entry alone.
+struct BrowserSession {
+    sender: mpsc::UnboundedSender<Vec<u8>>,
+    generation: u64,
+}
+
 /// A cloneable handle the mcp-server uses to call tools on the extension.
 #[derive(Clone)]
 pub struct Browser {
     next_id: Arc<AtomicU64>,
     pending: Pending,
-    /// `Some` when a native-host (and thus the extension) is connected; `None` otherwise.
-    outgoing: Arc<Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>>,
+    /// Every currently-attached browser, keyed by its OS pid (ADR-0058; replaces the pre-0058
+    /// single `outgoing: Option<Sender>` slot). A hello for a pid already present REPLACES the
+    /// entry (a reconnect/relaunch from the SAME browser); a hello for a new pid is ADDED
+    /// alongside any others.
+    sessions: Arc<Mutex<HashMap<u32, BrowserSession>>>,
+    /// Focus recency (ADR-0058): front = the browser that most recently reported
+    /// `chrome.windows.onFocusChanged` gaining focus. Only entries also present in `sessions`
+    /// are ever consulted; a disconnected browser's entry is pruned on its own detach. Used ONLY
+    /// to pick a target when a call names no tab at all (tab-creation bootstrap); a call that
+    /// names a tab is always routed by that tab's OWN encoded browser pid, never by focus.
+    focus_chain: Arc<Mutex<Vec<u32>>>,
+    /// Monotonic source for [`BrowserSession::generation`] (ADR-0058).
+    next_session_generation: Arc<AtomicU64>,
     /// Readiness signal: `true` while a native-host / extension is attached. Lets callers await
     /// connectedness (see [`Browser::wait_connected`]) instead of polling [`Browser::is_connected`].
     connected: Arc<watch::Sender<bool>>,
@@ -216,7 +292,9 @@ impl Browser {
         Self {
             next_id: Arc::new(AtomicU64::new(1)),
             pending: Arc::new(Mutex::new(HashMap::new())),
-            outgoing: Arc::new(Mutex::new(None)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            focus_chain: Arc::new(Mutex::new(Vec::new())),
+            next_session_generation: Arc::new(AtomicU64::new(1)),
             // Dropping the initial receiver is fine: updates use `send_replace`, which does not
             // require a live receiver (unlike `send`, which would fail and skip the update).
             connected: Arc::new(watch::channel(false).0),
@@ -306,9 +384,75 @@ impl Browser {
         }
     }
 
-    /// True while a native-host / extension is connected.
+    /// True while at least one native-host / extension is connected (ADR-0058).
     pub fn is_connected(&self) -> bool {
-        self.outgoing.lock().unwrap().is_some()
+        !self.sessions.lock().unwrap().is_empty()
+    }
+
+    /// A snapshot of every attached browser for `ghostlight doctor` (ADR-0058, CAP-MED-01):
+    /// pid and whether it is the current focus-chain front, most-recently-focused first, falling
+    /// back to ascending pid order for browsers that have never reported focus (a stable,
+    /// deterministic order beats an arbitrary hash-map one for a diagnostic listing).
+    pub fn browser_snapshot(&self) -> Vec<ghostlight_transport::ipc::BrowserInfo> {
+        let sessions = self.sessions.lock().unwrap();
+        let chain = self.focus_chain.lock().unwrap();
+        let mut pids: Vec<u32> = sessions.keys().copied().collect();
+        pids.sort_unstable();
+        let mut ordered: Vec<u32> = chain
+            .iter()
+            .copied()
+            .filter(|p| sessions.contains_key(p))
+            .collect();
+        for pid in &pids {
+            if !ordered.contains(pid) {
+                ordered.push(*pid);
+            }
+        }
+        ordered
+            .into_iter()
+            .enumerate()
+            .map(|(i, pid)| ghostlight_transport::ipc::BrowserInfo {
+                pid,
+                focused: i == 0,
+            })
+            .collect()
+    }
+
+    /// Resolve which browser a call targets, from an optional COMPOSITE tab id (ADR-0058):
+    /// decoded from `args.tabId` when the call names a tab, else the focus-chain front (falling
+    /// back to the sole attached browser, then to the smallest pid, when nothing has ever
+    /// reported focus). Returns `(target_pid, native_tab_id)`; `target_pid` is `None` only when
+    /// NO browser is attached at all. `native_tab_id` is `Some` only when a tab was named --
+    /// the value to put on the wire to the extension, which never learns the composite encoding
+    /// exists.
+    fn resolve_target(&self, composite_tab_id: Option<i64>) -> (Option<u32>, Option<i64>) {
+        if let Some(composite) = composite_tab_id {
+            let (pid, native) = crate::constants::tab_id::decode(composite);
+            return (Some(pid), Some(native));
+        }
+        let sessions = self.sessions.lock().unwrap();
+        if sessions.is_empty() {
+            return (None, None);
+        }
+        let chain = self.focus_chain.lock().unwrap();
+        if let Some(pid) = chain.iter().find(|p| sessions.contains_key(p)) {
+            return (Some(*pid), None);
+        }
+        (sessions.keys().min().copied(), None)
+    }
+
+    /// Record that `browser_pid` just reported gaining window focus (ADR-0058): move-to-front,
+    /// no duplicate entries. Only "gained focus" is ever reported or tracked -- losing focus to
+    /// something else (another app, or nothing) carries no actionable signal, so the chain's
+    /// recency order alone already answers "who was focused most recently, among those still
+    /// attached" without a separate blurred/focused boolean per entry.
+    fn note_focus(&self, browser_pid: u32) {
+        let mut chain = self.focus_chain.lock().unwrap();
+        chain.retain(|p| *p != browser_pid);
+        chain.insert(0, browser_pid);
+        drop(chain);
+        self.debug
+            .ipc_note(&Diagnostic::FocusReported { browser_pid }.describe());
     }
 
     /// Wait until a native-host / extension is attached, up to `timeout`. Returns `true`
@@ -349,28 +493,53 @@ impl Browser {
         args: &Value,
     ) -> std::result::Result<Value, ToolError> {
         // The killed check precedes everything else, including the pending-map insert and the
-        // not-connected check (g11 constraint 12): after a kill the port drops and `outgoing`
-        // becomes `None`, so the generic not-connected error would otherwise win by accident.
+        // not-connected check (g11 constraint 12): after a kill the port drops and every
+        // session is gone, so the generic not-connected error would otherwise win by accident.
         // The binary knows the real cause; the engine is truthful. No debug tool_begin/tool_end
         // pairing here: the call never began in any trackable sense.
         if self.killed.load(Ordering::SeqCst) {
             return Err(kill_error());
         }
 
+        // ADR-0058: resolve which browser this call targets from its (possibly composite) tabId,
+        // and -- when it named one -- rewrite a LOCAL copy of `args` carrying the plain native
+        // tab id the extension actually understands. `args` itself is never mutated: a caller
+        // that recurses back through the governance chokepoint with its OWN, still-composite
+        // copy (`browser_batch`/`script` sub-steps) must see the untouched original.
+        let composite = args.get("tabId").and_then(Value::as_i64);
+        let (target, native_tab) = self.resolve_target(composite);
+        let Some(target) = target else {
+            let err = ToolError::extension("Browser extension not connected");
+            self.debug.tool_begin("-", tool);
+            self.debug.tool_end("-", false, &err.to_string());
+            return Err(err);
+        };
+        let owned_args;
+        let call_args = match native_tab {
+            Some(native) => {
+                owned_args = merge_tab_id(args, native);
+                &owned_args
+            }
+            None => args,
+        };
+
         // gif_creator (ADR-0053 D4): while this tab records, note the action BEFORE it runs so
         // the screencast frame its paint produces is the frame that carries its ring/label.
-        self.note_gif_action(guid, tool, args).await;
-        let result = self.raw_call(guid, tool, args).await?;
+        self.note_gif_action(guid, tool, call_args, target).await;
+        let result = self.raw_call(guid, tool, call_args, target).await?;
+        let result = self.encode_tab_ids(result, target);
         Ok(self.cache_and_inject_screenshot(guid, tool, result))
     }
 
     /// The bare envelope + dispatch of [`Browser::call`], shared with internal sends that must not
-    /// re-enter the gif action-noting or screenshot-cache layers.
+    /// re-enter the gif action-noting or screenshot-cache layers. `target` is the already-resolved
+    /// browser pid (ADR-0058) this specific request is sent to.
     async fn raw_call(
         &self,
         guid: &str,
         tool: &str,
         args: &Value,
+        target: u32,
     ) -> std::result::Result<Value, ToolError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
         let request =
@@ -387,7 +556,7 @@ impl Browser {
                 return Err(err);
             }
         };
-        self.send_and_await(id, framed, tool).await
+        self.send_and_await(id, framed, tool, target).await
     }
 
     /// The gif_creator recording sessions (ADR-0053), for the orchestrator handler.
@@ -401,10 +570,13 @@ impl Browser {
     /// ScreenshotContext -- the mechanism data stays where Chrome produces it; querying beats
     /// mirroring). Best-effort: on any failure the raw coordinates stand (identical in the common
     /// unzoomed case).
-    async fn note_gif_action(&self, guid: &str, tool: &str, args: &Value) {
+    async fn note_gif_action(&self, guid: &str, tool: &str, args: &Value, target: u32) {
         if tool != "computer" && tool != "navigate" {
             return;
         }
+        // `args` here is ALREADY the native (post-rewrite) form (ADR-0058: `Browser::call` passes
+        // its `call_args`, not the caller's original), so this matches `handle_gif_frame`'s own
+        // native-tabId keying of `self.recordings` -- both sides agree on the extension's own id.
         let Some(tab) = args.get("tabId").and_then(Value::as_i64) else {
             return;
         };
@@ -424,7 +596,10 @@ impl Browser {
         }
         if !points.is_empty() {
             let rescale_args = json!({ "tabId": tab, "points": points });
-            if let Ok(reply) = self.raw_call(guid, "rescale_coords", &rescale_args).await {
+            if let Ok(reply) = self
+                .raw_call(guid, "rescale_coords", &rescale_args, target)
+                .await
+            {
                 if let Some(rescaled) = parse_rescaled_points(&reply) {
                     let mut it = rescaled.into_iter();
                     if meta.coordinate.is_some() {
@@ -455,6 +630,14 @@ impl Browser {
             .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
         let device_width = event.get("deviceWidth").and_then(Value::as_f64);
         self.recordings.on_frame(tab, data, ts, device_width);
+    }
+
+    /// Re-encode every native tabId the extension reported in `result` back to composite form
+    /// (ADR-0058), using the browser this call was actually routed to. See
+    /// [`encode_tab_ids_in_value`] for the walk itself; this is just the `Browser::call` hook.
+    fn encode_tab_ids(&self, mut result: Value, target: u32) -> Value {
+        encode_tab_ids_in_value(&mut result, target);
+        result
     }
 
     /// ADR-0050 Decision 4 -- the ONE sanctioned additive change to a trained tool's OUTPUT: after a
@@ -543,9 +726,19 @@ impl Browser {
         if self.killed.load(Ordering::SeqCst) {
             return Err(kill_error());
         }
+        // ADR-0058: `tab_id` here is the composite MCP-facing id; decode to route to the owning
+        // browser and query it by its own native id.
+        let (target, native_tab) = self.resolve_target(Some(tab_id));
+        let Some(target) = target else {
+            let err = ToolError::extension("Browser extension not connected");
+            self.debug.tool_begin("-", "tab_url_request");
+            self.debug.tool_end("-", false, &err.to_string());
+            return Err(err);
+        };
+        let native_tab = native_tab.unwrap_or(tab_id);
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
-        let request = json!({ "id": id, "type": "tab_url_request", "tabId": tab_id });
+        let request = json!({ "id": id, "type": "tab_url_request", "tabId": native_tab });
         let framed = match serde_json::to_vec(&request)
             .map_err(|e| e.to_string())
             .and_then(|bytes| host::encode(&bytes).map_err(|e| e.to_string()))
@@ -558,7 +751,9 @@ impl Browser {
                 return Err(err);
             }
         };
-        let result = self.send_and_await(id, framed, "tab_url_request").await?;
+        let result = self
+            .send_and_await(id, framed, "tab_url_request", target)
+            .await?;
         Ok(result
             .get("url")
             .and_then(Value::as_str)
@@ -576,10 +771,25 @@ impl Browser {
     /// material in every log/audit sink) -- and it is not: this function contains no `tracing`
     /// call naming any of its arguments.
     pub fn request_group(&self, guid: &str, tab_ids: &[i64], title: &str) {
+        // ADR-0058: `tab_ids` are the composite, MCP-facing ids this session owns (mirrored
+        // from `args.tabId` at claim time -- `hub::session::claim_tab_live`). A session's tabs
+        // all belong to the SAME browser, so the first id's encoded pid picks the target; every
+        // id is decoded to its native form for the extension, which never learns the encoding.
+        let Some(&first) = tab_ids.first() else {
+            return; // nothing to group
+        };
+        let (target, _) = self.resolve_target(Some(first));
+        let Some(target) = target else {
+            return;
+        };
+        let native_ids: Vec<i64> = tab_ids
+            .iter()
+            .map(|&t| crate::constants::tab_id::decode(t).1)
+            .collect();
         let request = json!({
             "type": "group_request",
             "guid": guid,
-            "tabIds": tab_ids,
+            "tabIds": native_ids,
             "title": title,
         });
         let Ok(bytes) = serde_json::to_vec(&request) else {
@@ -588,8 +798,15 @@ impl Browser {
         let Ok(framed) = host::encode(&bytes) else {
             return;
         };
-        if let Some(tx) = self.outgoing.lock().unwrap().as_ref() {
-            let _ = tx.send(framed);
+        self.send_fire_and_forget(target, framed);
+    }
+
+    /// Enqueue an already-framed, fire-and-forget message onto `target`'s session, dropping it
+    /// silently if that browser is not (or no longer) attached -- the shared tail of
+    /// [`Browser::request_group`], [`Browser::notify`], and [`Browser::send_hold_reply`].
+    fn send_fire_and_forget(&self, target: u32, framed: Vec<u8>) {
+        if let Some(session) = self.sessions.lock().unwrap().get(&target) {
+            let _ = session.sender.send(framed);
         }
     }
 
@@ -597,31 +814,46 @@ impl Browser {
     /// out-of-band-presentation posture as [`Browser::request_group`] above, just a general
     /// vocabulary instead of one narrow purpose. No `id`, no reply awaited, no policy decision
     /// made on the extension side -- the binary has ALREADY decided everything (`class`, `icon`,
-    /// `description`); the extension only renders it. First caller: a denial (SAPS PRES-HIGH-01)
-    /// -- governance blocks a call before the extension is ever contacted for the call itself, so
-    /// today nothing on screen shows a block happened. `tab_id: None` renders nothing (there is
-    /// no always-visible "every tab" surface today; a future global-notification need can extend
-    /// this, not narrow it). A missing/dead connection or an encoding failure is a harmless
-    /// no-op, same reasoning as `request_group`: this is presentation, never a tool call.
+    /// `title`, `description`); the extension only renders it. `title` is the always-shown
+    /// headline (e.g. "Blocked - example.com"); `description` is an optional supporting line
+    /// (e.g. "access is denied (sacred domain)"). This is deliberately NOT the extension's
+    /// `caption()` mechanism: a caption is optional decorative flavor text, off by default; a
+    /// notification is substantive and must never be silently gated behind that preference.
+    /// First caller: a denial (SAPS PRES-HIGH-01) -- governance blocks a call before the
+    /// extension is ever contacted for the call itself, so today nothing on screen shows a
+    /// block happened. `tab_id: None` renders nothing (there is no always-visible "every tab"
+    /// surface today; a future global-notification need can extend this, not narrow it). A
+    /// missing/dead connection or an encoding failure is a harmless no-op, same reasoning as
+    /// `request_group`: this is presentation, never a tool call.
     pub fn notify(
         &self,
         tab_id: Option<i64>,
         class: &str,
         icon: Option<&str>,
-        description: &str,
+        title: &str,
+        description: Option<&str>,
         reference: Option<&str>,
     ) {
         let Some(tab_id) = tab_id else {
             return;
         };
+        // ADR-0058: `tab_id` is composite; decode to route to the owning browser and render on
+        // its own native tab.
+        let (target, native_tab) = self.resolve_target(Some(tab_id));
+        let (Some(target), Some(native_tab)) = (target, native_tab) else {
+            return;
+        };
         let mut notification = json!({
             "type": "notification",
-            "tabId": tab_id,
+            "tabId": native_tab,
             "class": class,
-            "description": description,
+            "title": title,
         });
         if let Some(icon) = icon {
             notification["icon"] = json!(icon);
+        }
+        if let Some(description) = description {
+            notification["description"] = json!(description);
         }
         if let Some(reference) = reference {
             notification["ref"] = json!(reference);
@@ -632,32 +864,44 @@ impl Browser {
         let Ok(framed) = host::encode(&bytes) else {
             return;
         };
-        if let Some(tx) = self.outgoing.lock().unwrap().as_ref() {
-            let _ = tx.send(framed);
-        }
+        self.send_fire_and_forget(target, framed);
     }
 
     /// Shared send-and-await core behind [`Browser::call`] and [`Browser::tab_url`] (g13):
-    /// register the pending reply slot, enqueue the already-framed bytes if a native-host is
-    /// connected (fail fast otherwise), and await the correlated reply up to [`TOOL_TIMEOUT`].
-    /// Each caller frames its own request first, since their encode-failure messages differ.
-    async fn send_and_await(&self, id: String, framed: Vec<u8>, debug_label: &str) -> CallResult {
+    /// register the pending reply slot, enqueue the already-framed bytes on `target`'s session if
+    /// still attached (fail fast otherwise), and await the correlated reply up to
+    /// [`TOOL_TIMEOUT`]. Each caller frames its own request first, since their encode-failure
+    /// messages differ. `target` is resolved (ADR-0058) before this is called; a `target` that
+    /// named a specific browser (via a decoded tabId) but is no longer attached gets a more
+    /// specific message than the generic "not connected" the zero-browsers case gets.
+    async fn send_and_await(
+        &self,
+        id: String,
+        framed: Vec<u8>,
+        debug_label: &str,
+        target: u32,
+    ) -> CallResult {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id.clone(), tx);
         self.debug.tool_begin(&id, debug_label);
 
-        // Enqueue only if a native-host is connected; otherwise fail fast. The lock is scoped so it
-        // is never held across the await below.
+        // Enqueue only if `target`'s session is still attached; otherwise fail fast. The lock is
+        // scoped so it is never held across the await below.
         let sent = {
-            let outgoing = self.outgoing.lock().unwrap();
-            match outgoing.as_ref() {
-                Some(tx) => tx.send(framed).is_ok(),
+            let sessions = self.sessions.lock().unwrap();
+            match sessions.get(&target) {
+                Some(session) => session.sender.send(framed).is_ok(),
                 None => false,
             }
         };
         if !sent {
             self.pending.lock().unwrap().remove(&id);
-            let err = ToolError::extension("Browser extension not connected");
+            let err = if self.is_connected() {
+                ToolError::extension("The browser that owns this tab is no longer connected")
+                    .next_step("re-check tabs_context_mcp; this tab's browser may have closed")
+            } else {
+                ToolError::extension("Browser extension not connected")
+            };
             self.debug.tool_end(&id, false, &err.to_string());
             return Err(err);
         }
@@ -683,45 +927,91 @@ impl Browser {
         outcome
     }
 
-    /// Attach a connected native-host stream: spawn a writer draining outgoing frames to it and run
-    /// a reader routing replies back to waiting callers.
+    /// Attach a connected native-host stream: read its `ROLE_BROWSER` session-hello (ADR-0058),
+    /// admit it as an independent session keyed by the hello's `browserPid`, then spawn a writer
+    /// draining outgoing frames to it and run a reader routing replies back to waiting callers.
     ///
-    /// A single active session is enforced here with an atomic slot claim on `outgoing`. The first
-    /// connection to arrive becomes the active session and returns [`AttachOutcome::Detached`] when
-    /// its stream later closes. A connection that arrives while a session is already attached is a
-    /// stray/extra one (a `doctor` probe, or a service-worker relaunch that overlaps the outgoing
-    /// connection): it is rejected immediately with [`AttachOutcome::AlreadyAttached`] by dropping
-    /// its stream halves (the peer then sees EOF and goes away) WITHOUT touching the live session's
-    /// sender, connected flag, or pending calls. This is what lets
-    /// [`crate::transport::native::ipc::serve`]
-    /// accept connections ahead of time (spawning `attach` per connection) so the pipe always has a
-    /// spare instance ready, instead of parking the accept loop for the whole session lifetime.
+    /// UNLIKE the pre-0058 single-slot design, a well-formed hello is ALWAYS admitted: a
+    /// `browserPid` already present REPLACES the existing entry (a service-worker relaunch or
+    /// reconnect from the SAME browser), and a NEW `browserPid` is ADDED alongside any others --
+    /// this is the actual multi-browser support. [`AttachOutcome::AlreadyAttached`] is returned
+    /// ONLY for a connection that never presents a valid hello at all: a bare probe (`doctor`'s
+    /// harmless connect-and-close, which sends nothing) or a malformed/wrong-role frame. Either
+    /// way nothing here is touched; the peer's stream is dropped and it observes EOF. This is
+    /// what lets [`crate::transport::native::ipc::serve`] accept connections ahead of time
+    /// (spawning `attach` per connection) so the pipe always has a spare instance ready, instead
+    /// of parking the accept loop for the whole service lifetime.
     ///
-    /// On [`AttachOutcome::Detached`] the browser is marked disconnected and every pending call is
-    /// failed. The single-slot claim is correct only because the reader loop below detects native-
-    /// host death promptly (EOF/BrokenPipe, no heartbeat) and frees the slot on the way out.
+    /// On [`AttachOutcome::Detached`] this ONE session's entry is removed (guarded against a
+    /// same-pid reconnect race by comparing [`BrowserSession::generation`], never blindly
+    /// cleared) and this session's own pending calls are failed via the grace-drain below;
+    /// `is_connected()`/`wait_connected` reflect "at least one browser remains," recomputed after
+    /// the removal.
     pub async fn attach<S>(&self, stream: S) -> AttachOutcome
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
         let (mut read_half, mut write_half) = tokio::io::split(stream);
-        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
-        // Atomic single-slot claim. If a session already holds the slot this is a stray/extra
-        // connection: return without touching any `Browser` state. Dropping `read_half`/`write_half`
-        // on return closes our end so the stray peer observes EOF. The guard is released at the end
-        // of this block and is never held across an await.
-        {
-            let mut outgoing = self.outgoing.lock().unwrap();
-            if outgoing.is_some() {
+        let hello_bytes = match host::read_message(&mut read_half).await {
+            Ok(Some(bytes)) => bytes,
+            _ => {
+                // ADR-0059: distinguishable from a malformed hello below -- this is the ordinary
+                // `doctor` probe shape (connect, read nothing, disconnect), expected traffic.
+                self.debug.ipc_note(&Diagnostic::BareProbe.describe());
                 return AttachOutcome::AlreadyAttached;
             }
-            *outgoing = Some(tx);
+        };
+        let hello: Value = match serde_json::from_slice(&hello_bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                self.debug.ipc_note(
+                    &Diagnostic::MalformedHello {
+                        parse_error: &e.to_string(),
+                    }
+                    .describe(),
+                );
+                return AttachOutcome::AlreadyAttached;
+            }
+        };
+        if hello.get("role").and_then(Value::as_str)
+            != Some(ghostlight_transport::handshake::ROLE_BROWSER)
+        {
+            self.debug.ipc_note(
+                &Diagnostic::WrongRole {
+                    role: hello.get("role").and_then(Value::as_str),
+                }
+                .describe(),
+            );
+            return AttachOutcome::AlreadyAttached;
         }
-        // A new native-host stream becoming the live session means the extension reconnected --
-        // which, because of the extension's own storage-marker gate, only happens after the
-        // user's explicit reconnect or a full browser restart (g11). Either way that is a fresh
-        // session: clear the kill flag.
+        let browser_pid = hello.get("browserPid").and_then(Value::as_u64).unwrap_or(0) as u32;
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
+        let replaced = {
+            let mut sessions = self.sessions.lock().unwrap();
+            let replaced = sessions.contains_key(&browser_pid);
+            sessions.insert(
+                browser_pid,
+                BrowserSession {
+                    sender: tx,
+                    generation,
+                },
+            );
+            replaced
+        };
+        self.debug.ipc_note(
+            &Diagnostic::Attached {
+                browser_pid,
+                replaced_existing: replaced,
+            }
+            .describe(),
+        );
+        // A native-host stream attaching means the extension (re)connected -- which, because of
+        // the extension's own storage-marker gate, only happens after the user's explicit
+        // reconnect or a full browser restart (g11). `killed` stays GLOBAL (ADR-0058 scope): any
+        // browser attaching clears it, matching the pre-0058 single-browser behavior.
         self.killed.store(false, Ordering::SeqCst);
         self.debug.set_connected(true);
         self.connected.send_replace(true);
@@ -741,7 +1031,7 @@ impl Browser {
             match host::read_message(&mut read_half).await {
                 Ok(Some(payload)) => {
                     self.debug.frame_in();
-                    self.route_reply(&payload);
+                    self.route_reply(browser_pid, &payload);
                 }
                 Ok(None) => {
                     break ToolError::extension("Browser extension disconnected before responding")
@@ -754,15 +1044,38 @@ impl Browser {
             }
         };
 
-        *self.outgoing.lock().unwrap() = None;
-        self.debug.set_connected(false);
-        self.connected.send_replace(false);
+        // Compare-before-remove (ADR-0058): only clear OUR OWN entry, never a newer one that has
+        // already replaced it (a reconnect from the same browser that raced ahead of this reader
+        // loop noticing its own stream died).
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            if matches!(sessions.get(&browser_pid), Some(s) if s.generation == generation) {
+                sessions.remove(&browser_pid);
+                self.debug
+                    .ipc_note(&Diagnostic::Detached { browser_pid }.describe());
+            } else {
+                self.debug
+                    .ipc_note(&Diagnostic::DetachedStale { browser_pid }.describe());
+            }
+            self.focus_chain
+                .lock()
+                .unwrap()
+                .retain(|p| *p != browser_pid);
+        }
+        let still_connected = self.is_connected();
+        self.debug.set_connected(still_connected);
+        self.connected.send_replace(still_connected);
         writer.abort();
 
         // ADR-0030 Decision 3 (H5): hold pending calls for a bounded grace window awaiting
         // reconnect instead of failing them the instant the stream closes. Spawned so `attach`
         // itself still returns `Detached` promptly regardless of the window's length -- neither
-        // `ipc::serve`'s per-connection task nor any other caller here blocks on it.
+        // `ipc::serve`'s per-connection task nor any other caller here blocks on it. ADR-0058
+        // simplification: this still waits on the GLOBAL `wait_connected` signal (any browser),
+        // not specifically THIS browser reconnecting -- with more than one browser attached, a
+        // pending call whose OWN browser stays gone can silently ride to its own `TOOL_TIMEOUT`
+        // instead of the earlier, clearer grace-window message. Disclosed, accepted scope
+        // boundary (see ADR-0058 "Explicitly out of scope"), not a silent gap.
         self.spawn_grace_drain(GRACE_WINDOW, drain_err);
 
         AttachOutcome::Detached
@@ -791,10 +1104,12 @@ impl Browser {
     }
 
     /// Route one framed message from the extension: the kill-switch event (g11:
-    /// `session_killed`, no `id`), a hold request (g10: `get_hold` / `set_hold` /
-    /// `toggle_hold`, answered here and returned early), or a reply to a waiting tool caller
-    /// (by id). Messages without an id are otherwise events.
-    fn route_reply(&self, payload: &[u8]) {
+    /// `session_killed`, no `id`), a focus event (ADR-0058: `{"type":"focus"}`, no `id`), a hold
+    /// request (g10: `get_hold` / `set_hold` / `toggle_hold`, answered here and returned early),
+    /// or a reply to a waiting tool caller (by id). Messages without an id are otherwise events.
+    /// `browser_pid` is the SENDING session's identity (from its own `attach()` hello), needed to
+    /// move the focus chain and to address a hold reply back to the right connection.
+    fn route_reply(&self, browser_pid: u32, payload: &[u8]) {
         let Ok(reply) = serde_json::from_slice::<Value>(payload) else {
             tracing::warn!("dropping unparseable extension reply");
             return;
@@ -804,6 +1119,29 @@ impl Browser {
 
         if reply.get("id").is_none() && msg_type == Some("session_killed") {
             self.handle_session_killed();
+            return;
+        }
+
+        if reply.get("id").is_none() && msg_type == Some("focus") {
+            self.note_focus(browser_pid);
+            return;
+        }
+
+        // ADR-0059: the extension's own debug-mode lifecycle notes (connect attempts,
+        // onDisconnect + chrome.runtime.lastError), forwarded ONLY when its local debug flag is
+        // on. Appended into the SAME structured ring `ipc_note` already writes to, so one file
+        // shows the extension's view interleaved with the service's own, by arrival order.
+        if reply.get("id").is_none() && msg_type == Some("debug_event") {
+            let event = reply.get("event").and_then(Value::as_str).unwrap_or("?");
+            let detail = reply.get("detail").cloned().unwrap_or(Value::Null);
+            self.debug.ipc_note(
+                &Diagnostic::FromExtension {
+                    browser_pid,
+                    event,
+                    detail: &detail,
+                }
+                .describe(),
+            );
             return;
         }
 
@@ -818,7 +1156,7 @@ impl Browser {
         if let (Some(id), Some(kind @ ("get_hold" | "set_hold" | "toggle_hold"))) =
             (reply.get("id").and_then(Value::as_str), msg_type)
         {
-            self.handle_hold_request(id, kind, &reply);
+            self.handle_hold_request(browser_pid, id, kind, &reply);
             return;
         }
 
@@ -847,11 +1185,12 @@ impl Browser {
     }
 
     /// Apply one hold request (g10) and send the `hold_state` (or `hold_error`) reply back
-    /// over the same connection. `get_hold` reports without changing state; `set_hold`
-    /// requires a boolean `held` member (a missing or non-boolean value is a `hold_error` that
-    /// changes nothing); `toggle_hold` flips atomically. Every request receives the state
-    /// AFTER the request was applied.
-    fn handle_hold_request(&self, id: &str, kind: &str, request: &Value) {
+    /// over the SAME connection it arrived on (`browser_pid`). `get_hold` reports without
+    /// changing state; `set_hold` requires a boolean `held` member (a missing or non-boolean
+    /// value is a `hold_error` that changes nothing); `toggle_hold` flips atomically. Every
+    /// request receives the state AFTER the request was applied. `held`/`killed` stay GLOBAL
+    /// (ADR-0058 scope), so the state itself does not depend on which browser asked.
+    fn handle_hold_request(&self, browser_pid: u32, id: &str, kind: &str, request: &Value) {
         let outcome = match kind {
             "get_hold" => Ok(self.held_for().is_some()),
             "toggle_hold" => Ok(self.toggle_held()),
@@ -865,13 +1204,13 @@ impl Browser {
             Ok(held) => json!({ "id": id, "type": "hold_state", "result": { "held": held } }),
             Err(error) => json!({ "id": id, "type": "hold_error", "error": error }),
         };
-        self.send_hold_reply(&reply);
+        self.send_hold_reply(browser_pid, &reply);
     }
 
-    /// Frame and enqueue a hold reply on the outgoing channel, dropping it silently if the
-    /// connection is already gone (the same fire-and-forget posture as every other
-    /// best-effort send in this module).
-    fn send_hold_reply(&self, reply: &Value) {
+    /// Frame and enqueue a hold reply on `browser_pid`'s connection (the one it arrived on),
+    /// dropping it silently if that session is already gone (the same fire-and-forget posture as
+    /// every other best-effort send in this module).
+    fn send_hold_reply(&self, browser_pid: u32, reply: &Value) {
         let Ok(bytes) = serde_json::to_vec(reply) else {
             tracing::warn!("failed to serialize a hold reply");
             return;
@@ -880,9 +1219,7 @@ impl Browser {
             tracing::warn!("failed to frame a hold reply");
             return;
         };
-        if let Some(tx) = self.outgoing.lock().unwrap().as_ref() {
-            let _ = tx.send(framed);
-        }
+        self.send_fire_and_forget(browser_pid, framed);
     }
 
     /// Handle the `session_killed` event (g11): exactly once per false-to-true transition
@@ -955,23 +1292,51 @@ mod tests {
     use super::*;
     use tokio::time::sleep;
 
-    async fn wait_connected(browser: &Browser) {
+    /// The default fake browser pid most tests attach as (ADR-0058): arbitrary, just needs to be
+    /// nonzero and distinct from any REAL pid the test process itself might carry.
+    const TEST_PID: u32 = 4242;
+
+    /// A valid `ROLE_BROWSER` session-hello for `pid`, framed and ready to write.
+    fn test_hello(pid: u32) -> Vec<u8> {
+        ghostlight_transport::handshake::browser_hello_bytes(
+            1,
+            Some(ghostlight_transport::proc::ProcId { pid, created: 0 }),
+        )
+    }
+
+    /// Attach a fake extension as `pid` (ADR-0058): create the duplex, write its hello, spawn
+    /// `attach()`, and wait for `browser` to report connected. Returns the extension-side half
+    /// for the test to drive. The common case for every test below that does not care about a
+    /// SPECIFIC pid value.
+    async fn attach_fake_extension_as(browser: &Browser, pid: u32) -> tokio::io::DuplexStream {
+        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
+        host::write_message(&mut ext_side, &test_hello(pid))
+            .await
+            .unwrap();
+        let attached = browser.clone();
+        tokio::spawn(async move { attached.attach(browser_side).await });
+        // Poll for THIS pid specifically (not `wait_connected`'s global is_connected(), which a
+        // SECOND attach -- a different pid, or the same one reconnecting -- would see as already
+        // true from an EARLIER session and return without ever giving the just-spawned task a
+        // chance to run). Sleep-then-check (not check-then-sleep) so at least one scheduling
+        // tick always happens before the first check, even on a single-threaded test runtime.
         for _ in 0..200 {
-            if browser.is_connected() {
-                return;
-            }
             sleep(Duration::from_millis(5)).await;
+            if browser.browser_snapshot().iter().any(|b| b.pid == pid) {
+                return ext_side;
+            }
         }
-        panic!("browser never reported connected");
+        panic!("browser never registered pid {pid} as connected");
+    }
+
+    async fn attach_fake_extension(browser: &Browser) -> tokio::io::DuplexStream {
+        attach_fake_extension_as(browser, TEST_PID).await
     }
 
     #[tokio::test]
     async fn call_round_trips_a_tool_response() {
-        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(browser_side).await });
+        let mut ext_side = attach_fake_extension(&browser).await;
 
         // Fake extension: read one framed request, reply with a result echoing the tool name.
         let fake_ext = tokio::spawn(async move {
@@ -985,7 +1350,6 @@ mod tests {
                 .unwrap();
         });
 
-        wait_connected(&browser).await;
         let result = browser
             .call(
                 "test-guid",
@@ -1000,10 +1364,8 @@ mod tests {
 
     #[tokio::test]
     async fn call_surfaces_a_tool_error() {
-        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(browser_side).await });
+        let mut ext_side = attach_fake_extension(&browser).await;
 
         tokio::spawn(async move {
             let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
@@ -1014,7 +1376,6 @@ mod tests {
                 .unwrap();
         });
 
-        wait_connected(&browser).await;
         let err = browser
             .call("test-guid", "javascript_tool", &json!({}))
             .await
@@ -1051,13 +1412,20 @@ mod tests {
     /// which drops it as an ordinary event.
     #[tokio::test]
     async fn request_group_sends_the_pinned_shape_and_a_reply_is_a_harmless_event() {
-        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(browser_side).await });
-        wait_connected(&browser).await;
+        let mut ext_side = attach_fake_extension(&browser).await;
 
-        browser.request_group("11111111-1111-4111-8111-111111111111", &[101, 202], "title");
+        // ADR-0058: tab_ids are composite (encoding TEST_PID); the wire shows the DECODED
+        // native ids the extension actually understands.
+        let composite_ids = [
+            crate::constants::tab_id::encode(TEST_PID, 101),
+            crate::constants::tab_id::encode(TEST_PID, 202),
+        ];
+        browser.request_group(
+            "11111111-1111-4111-8111-111111111111",
+            &composite_ids,
+            "title",
+        );
 
         let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
         let v: Value = serde_json::from_slice(&req).unwrap();
@@ -1097,10 +1465,8 @@ mod tests {
 
     #[tokio::test]
     async fn call_surfaces_a_cdp_tagged_tool_error_without_leaking_detail() {
-        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(browser_side).await });
+        let mut ext_side = attach_fake_extension(&browser).await;
 
         tokio::spawn(async move {
             let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
@@ -1117,7 +1483,6 @@ mod tests {
                 .unwrap();
         });
 
-        wait_connected(&browser).await;
         let err = browser
             .call("test-guid", "computer", &json!({}))
             .await
@@ -1130,10 +1495,8 @@ mod tests {
 
     #[tokio::test]
     async fn call_surfaces_a_page_tagged_tool_error() {
-        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(browser_side).await });
+        let mut ext_side = attach_fake_extension(&browser).await;
 
         tokio::spawn(async move {
             let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
@@ -1149,7 +1512,6 @@ mod tests {
                 .unwrap();
         });
 
-        wait_connected(&browser).await;
         let err = browser
             .call("test-guid", "form_input", &json!({}))
             .await
@@ -1168,8 +1530,13 @@ mod tests {
 
     #[tokio::test]
     async fn wait_connected_wakes_when_the_extension_attaches() {
-        let (browser_side, _ext_side) = tokio::io::duplex(64 * 1024);
+        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
+        // Written before attach() ever starts reading; the duplex buffers it, so the delayed
+        // attach() below finds its hello waiting immediately once it runs.
+        host::write_message(&mut ext_side, &test_hello(TEST_PID))
+            .await
+            .unwrap();
 
         let attached = browser.clone();
         tokio::spawn(async move {
@@ -1181,31 +1548,121 @@ mod tests {
         assert!(ready, "wait_connected must wake once attach() connects");
     }
 
+    /// A bare probe connection (no hello at all -- `doctor`'s harmless connect-and-close) is
+    /// rejected without touching any live session's state, exactly as a stray was pre-ADR-0058.
     #[tokio::test]
-    async fn a_second_attach_is_rejected_without_disturbing_the_live_session() {
-        let (first_side, mut first_ext) = tokio::io::duplex(64 * 1024);
-        let (second_side, _second_ext) = tokio::io::duplex(64 * 1024);
+    async fn a_hello_less_probe_is_rejected_without_disturbing_the_live_session() {
         let browser = Browser::new();
+        let mut ext_side = attach_fake_extension(&browser).await;
 
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(first_side).await });
-        wait_connected(&browser).await;
-
-        // A connection arriving while a session is attached is a stray: it must be rejected and must
-        // not clear the live session's sender or connected flag.
-        let outcome = browser.attach(second_side).await;
+        let (probe_side, probe_ext) = tokio::io::duplex(64 * 1024);
+        drop(probe_ext); // closes immediately, sending no hello -- exactly a bare probe
+        let outcome = browser.attach(probe_side).await;
         assert_eq!(outcome, AttachOutcome::AlreadyAttached);
         assert!(
             browser.is_connected(),
-            "the live session must stay connected after a stray attach"
+            "the live session must stay connected after a hello-less probe"
         );
 
         // ...and the live session still round-trips a call.
         let ext = tokio::spawn(async move {
-            let req = host::read_message(&mut first_ext).await.unwrap().unwrap();
+            let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
             let v: Value = serde_json::from_slice(&req).unwrap();
             let reply = json!({ "id": v["id"], "type": "tool_response", "result": { "ok": true } });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+        });
+        let result = browser
+            .call("test-guid", "navigate", &json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result, json!({ "ok": true }));
+        ext.await.unwrap();
+    }
+
+    /// ADR-0058: two DIFFERENT browsers (distinct pids) are BOTH admitted as independent, live
+    /// sessions -- the actual multi-browser support this whole change exists for. Each one's
+    /// own tab (encoded with its own pid) routes a call to that SPECIFIC session, never the
+    /// other.
+    #[tokio::test]
+    async fn two_different_browsers_are_both_admitted_and_route_independently() {
+        let browser = Browser::new();
+        let mut first_ext = attach_fake_extension_as(&browser, 1001).await;
+        let mut second_ext = attach_fake_extension_as(&browser, 2002).await;
+        assert!(browser.is_connected());
+        assert_eq!(browser.browser_snapshot().len(), 2);
+
+        let first_task = tokio::spawn(async move {
+            let req = host::read_message(&mut first_ext).await.unwrap().unwrap();
+            let v: Value = serde_json::from_slice(&req).unwrap();
+            assert_eq!(
+                v["args"]["tabId"], 5,
+                "browser 1's request carries its own native tabId"
+            );
+            let reply =
+                json!({ "id": v["id"], "type": "tool_response", "result": { "from": "first" } });
             host::write_message(&mut first_ext, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+        });
+        let result = browser
+            .call(
+                "test-guid",
+                "navigate",
+                &json!({ "tabId": crate::constants::tab_id::encode(1001, 5) }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, json!({ "from": "first" }));
+        first_task.await.unwrap();
+
+        let second_task = tokio::spawn(async move {
+            let req = host::read_message(&mut second_ext).await.unwrap().unwrap();
+            let v: Value = serde_json::from_slice(&req).unwrap();
+            assert_eq!(
+                v["args"]["tabId"], 9,
+                "browser 2's request carries its own native tabId"
+            );
+            let reply =
+                json!({ "id": v["id"], "type": "tool_response", "result": { "from": "second" } });
+            host::write_message(&mut second_ext, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+        });
+        let result = browser
+            .call(
+                "test-guid",
+                "navigate",
+                &json!({ "tabId": crate::constants::tab_id::encode(2002, 9) }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, json!({ "from": "second" }));
+        second_task.await.unwrap();
+    }
+
+    /// ADR-0058: a fresh hello for a pid ALREADY attached REPLACES the old session (a
+    /// service-worker relaunch or reconnect from the SAME browser), rather than being rejected.
+    #[tokio::test]
+    async fn a_reconnect_from_the_same_pid_replaces_the_old_session() {
+        let browser = Browser::new();
+        let _first_ext = attach_fake_extension_as(&browser, TEST_PID).await;
+        assert_eq!(browser.browser_snapshot().len(), 1);
+
+        let mut second_ext = attach_fake_extension_as(&browser, TEST_PID).await;
+        assert_eq!(
+            browser.browser_snapshot().len(),
+            1,
+            "the same pid reconnecting replaces, never adds a second entry"
+        );
+
+        // The NEW connection serves calls; the old one is simply not read from again.
+        let ext = tokio::spawn(async move {
+            let req = host::read_message(&mut second_ext).await.unwrap().unwrap();
+            let v: Value = serde_json::from_slice(&req).unwrap();
+            let reply = json!({ "id": v["id"], "type": "tool_response", "result": { "ok": true } });
+            host::write_message(&mut second_ext, &serde_json::to_vec(&reply).unwrap())
                 .await
                 .unwrap();
         });
@@ -1248,11 +1705,8 @@ mod tests {
 
     #[tokio::test]
     async fn hold_requests_are_answered_over_the_native_channel() {
-        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(browser_side).await });
-        wait_connected(&browser).await;
+        let mut ext_side = attach_fake_extension(&browser).await;
 
         async fn send_and_read(ext_side: &mut tokio::io::DuplexStream, request: Value) -> Value {
             host::write_message(ext_side, &serde_json::to_vec(&request).unwrap())
@@ -1300,16 +1754,18 @@ mod tests {
 
     #[tokio::test]
     async fn hold_survives_the_extension_disconnecting() {
-        let (browser_side, ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
         browser.set_held(true);
-
-        let attached = browser.clone();
-        let attach_task = tokio::spawn(async move { attached.attach(browser_side).await });
-        wait_connected(&browser).await;
+        let ext_side = attach_fake_extension(&browser).await;
 
         drop(ext_side);
-        let _ = attach_task.await.unwrap();
+        // Let the reader loop observe the close and remove its session before asserting.
+        for _ in 0..200 {
+            if !browser.is_connected() {
+                break;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
 
         assert!(
             browser.held_for().is_some(),
@@ -1321,11 +1777,8 @@ mod tests {
     /// section-7 error, and the extension never sees a reply.
     #[tokio::test]
     async fn kill_fails_in_flight_calls() {
-        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(browser_side).await });
-        wait_connected(&browser).await;
+        let mut ext_side = attach_fake_extension(&browser).await;
 
         let caller = browser.clone();
         let call_task =
@@ -1354,11 +1807,8 @@ mod tests {
     /// sent to the extension, no waiting on `TOOL_TIMEOUT`.
     #[tokio::test]
     async fn kill_fails_subsequent_calls_fast() {
-        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(browser_side).await });
-        wait_connected(&browser).await;
+        let mut ext_side = attach_fake_extension(&browser).await;
 
         host::write_message(
             &mut ext_side,
@@ -1392,13 +1842,9 @@ mod tests {
     /// closes.
     #[tokio::test]
     async fn kill_error_outlives_the_disconnect() {
-        let (browser_side, ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-        let attached = browser.clone();
-        let attach_task = tokio::spawn(async move { attached.attach(browser_side).await });
-        wait_connected(&browser).await;
+        let mut ext_side = attach_fake_extension(&browser).await;
 
-        let mut ext_side = ext_side;
         host::write_message(
             &mut ext_side,
             &serde_json::to_vec(&json!({ "type": "session_killed" })).unwrap(),
@@ -1406,7 +1852,12 @@ mod tests {
         .await
         .unwrap();
         drop(ext_side);
-        let _ = attach_task.await.unwrap();
+        for _ in 0..200 {
+            if !browser.is_connected() {
+                break;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
 
         let err = browser
             .call("test-guid", "navigate", &json!({}))
@@ -1422,11 +1873,8 @@ mod tests {
     /// Test 1d: a fresh attach clears the kill; a call round-trips normally afterward.
     #[tokio::test]
     async fn fresh_attach_clears_the_kill() {
-        let (first_side, mut first_ext) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-        let attached = browser.clone();
-        let first_attach = tokio::spawn(async move { attached.attach(first_side).await });
-        wait_connected(&browser).await;
+        let mut first_ext = attach_fake_extension_as(&browser, TEST_PID).await;
 
         host::write_message(
             &mut first_ext,
@@ -1442,16 +1890,19 @@ mod tests {
         }
         assert!(browser.is_killed());
 
-        // Tear down the first connection (a real "session ended") and wait for the slot to
-        // free before attaching a fresh one; a stray attach while a session still holds the
-        // slot is rejected without touching the kill flag.
+        // Tear down the first connection (a real "session ended") and wait for it to be
+        // removed before attaching a fresh one -- reconnecting from the SAME pid replaces the
+        // entry outright (ADR-0058), but this exercises the ordinary disconnect-then-reconnect
+        // path too.
         drop(first_ext);
-        let _ = first_attach.await.unwrap();
+        for _ in 0..200 {
+            if !browser.is_connected() {
+                break;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
 
-        let (second_side, mut second_ext) = tokio::io::duplex(64 * 1024);
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(second_side).await });
-        wait_connected(&browser).await;
+        let mut second_ext = attach_fake_extension_as(&browser, TEST_PID).await;
         assert!(
             !browser.is_killed(),
             "a fresh attach must clear the kill flag"
@@ -1477,17 +1928,13 @@ mod tests {
     /// connection.
     #[tokio::test]
     async fn kill_hook_fires_exactly_once_per_transition() {
-        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
         let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let hook_count = Arc::clone(&count);
         browser.on_session_killed(move || {
             hook_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         });
-
-        let attached = browser.clone();
-        tokio::spawn(async move { attached.attach(browser_side).await });
-        wait_connected(&browser).await;
+        let mut ext_side = attach_fake_extension(&browser).await;
 
         for _ in 0..2 {
             host::write_message(

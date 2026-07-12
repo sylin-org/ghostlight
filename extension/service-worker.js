@@ -19,7 +19,7 @@
 // this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
 // ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
 
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
@@ -101,6 +101,8 @@ async function connect() {
   if (nativePort) return; // re-check: another caller may have won an await above
   try {
     nativePort = chrome.runtime.connectNative(NATIVE_HOST);
+    sendDebugEvent("connect_attempt");
+    flushPendingDebugEvents(); // deliver any notes buffered while no port was open (ADR-0059)
     nativePort.onMessage.addListener((msg) => {
       if (msg && msg.type === "tool_request" && msg.id) {
         if (sessionKilled) {
@@ -154,13 +156,14 @@ async function connect() {
       }
       // On-screen notification (SAPS PRES-HIGH-01): mechanism only, out of band from tool
       // dispatch, the same fire-and-forget posture as group_request above. The binary has
-      // already decided everything (class/icon/description); this only relays it to the named
-      // tab's content script for rendering -- no policy decision, no interpretation here.
+      // already decided everything (class/icon/title/description); this only relays it to the
+      // named tab's content script for rendering -- no policy decision, no interpretation here.
       if (msg && msg.type === "notification" && typeof msg.tabId === "number") {
         sendToTab(msg.tabId, {
           type: "AGENT_NOTIFICATION",
           class: msg.class,
           icon: msg.icon,
+          title: msg.title,
           description: msg.description,
         });
         return;
@@ -178,10 +181,21 @@ async function connect() {
       }
     });
     nativePort.onDisconnect.addListener(() => {
+      // chrome.runtime.lastError is the ONE piece of information this file otherwise has no way
+      // to surface (ADR-0059): buffered (the port that would carry it just died) and delivered
+      // on the next successful connect.
+      const lastError = chrome.runtime.lastError;
+      sendDebugEvent("connect_disconnect", lastError ? String(lastError.message || lastError) : null);
       nativePort = null;
       updateHoldBadge(null); // state unknown without a session
       setTimeout(connect, RECONNECT_DELAY_MS);
     });
+    // Cold-start focus report (ADR-0058): a window can already be focused before this connect
+    // ever completes (the common case -- the user was already looking at this browser), and
+    // onFocusChanged below only fires on a FUTURE change, which might not happen again for a
+    // while. Check once, right after attaching, so the service's focus-chain tie-breaker has a
+    // real answer from the first tool call rather than only after the user later alt-tabs.
+    reportFocusIfFocused();
   } catch {
     nativePort = null;
     setTimeout(connect, RECONNECT_DELAY_MS);
@@ -191,6 +205,45 @@ async function connect() {
 function reply(id, result) {
   try { nativePort && nativePort.postMessage({ id, type: "tool_response", result }); } catch { /* port gone */ }
 }
+
+// --- Developer diagnostics (ADR-0059): mechanism only, fire-and-forget, the SAME posture as
+// focus reporting below -- off by default (chrome.storage.local "ghostlight_debug"), and when
+// on, purely a breadcrumb for `ghostlight doctor` / a raw debug-state file, never anything the
+// dispatch path reads back. The decision logic (is debug on, buffer-while-no-port) lives in the
+// pure lib/debug.js module (the SAME injected-dependency shape lib/grouping.js already
+// established); this worker only supplies WHAT to post and WHERE.
+const debugForwarder = self.GhostlightDebug.createDebugForwarder(chrome.storage.local);
+function postToNativePort(msg) {
+  nativePort.postMessage(msg);
+}
+function sendDebugEvent(event, detail) {
+  return debugForwarder.send(nativePort ? postToNativePort : null, event, detail);
+}
+function flushPendingDebugEvents() {
+  debugForwarder.flush(nativePort ? postToNativePort : null);
+}
+
+// --- Focus reporting (ADR-0058): mechanism only, fire-and-forget, the same posture as
+// group_request/notification. Chosen over OS-level window z-order specifically because Chrome's
+// own onFocusChanged/getLastFocused already answer "is THIS profile's window focused" from
+// inside the one process that already knows it -- portably, with no unsafe native window
+// enumeration. Only "gained focus" is ever reported: losing focus to another app (or to a
+// DIFFERENT browser profile, which looks identical from here) carries no actionable signal, so
+// there is no separate blurred/focused state to track or send.
+function reportFocus() {
+  try { nativePort && nativePort.postMessage({ type: "focus" }); } catch { /* port gone */ }
+}
+
+async function reportFocusIfFocused() {
+  try {
+    const win = await chrome.windows.getLastFocused();
+    if (win && win.focused) reportFocus();
+  } catch { /* no windows yet, or the API is unavailable on this platform */ }
+}
+
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId !== chrome.windows.WINDOW_ID_NONE) reportFocus();
+});
 
 // --- Take-the-wheel hold (g10): mechanism only. The binary holds the flag and decides;
 // this file only reports the user's gesture and renders the state the binary reports back.

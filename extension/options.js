@@ -6,17 +6,22 @@
 
 const effects = document.getElementById("effects");
 const captions = document.getElementById("captions");
+const debugToggle = document.getElementById("debug");
 
 function syncCaptionsAvailability() {
   // Captions are part of the visual feedback; if effects are off there is nothing to caption.
   captions.disabled = !effects.checked;
 }
 
-chrome.storage.local.get(["ghostlight_effects", "ghostlight_captions"], (r) => {
-  effects.checked = r.ghostlight_effects !== false; // default on
-  captions.checked = !!r.ghostlight_captions; // default off
-  syncCaptionsAvailability();
-});
+chrome.storage.local.get(
+  ["ghostlight_effects", "ghostlight_captions", "ghostlight_debug"],
+  (r) => {
+    effects.checked = r.ghostlight_effects !== false; // default on
+    captions.checked = !!r.ghostlight_captions; // default off
+    debugToggle.checked = !!r.ghostlight_debug; // default off (ADR-0059)
+    syncCaptionsAvailability();
+  }
+);
 
 effects.addEventListener("change", () => {
   chrome.storage.local.set({ ghostlight_effects: effects.checked });
@@ -25,6 +30,10 @@ effects.addEventListener("change", () => {
 
 captions.addEventListener("change", () => {
   chrome.storage.local.set({ ghostlight_captions: captions.checked });
+});
+
+debugToggle.addEventListener("change", () => {
+  chrome.storage.local.set({ ghostlight_debug: debugToggle.checked });
 });
 
 // --- Connection status: a live link indicator (polls the worker; the extension holds no policy).

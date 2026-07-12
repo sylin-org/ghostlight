@@ -569,7 +569,9 @@ dependencies = [
  "anyhow",
  "clap",
  "ghostlight-core",
+ "ghostlight-transport",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

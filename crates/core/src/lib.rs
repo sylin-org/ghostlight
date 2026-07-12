@@ -6,6 +6,7 @@
 pub(crate) mod armor;
 pub(crate) mod b64;
 pub mod browser;
+pub mod constants;
 pub mod gif;
 pub mod governance;
 pub mod hub;

@@ -107,7 +107,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - run: node --test tests/extension/constants.test.js tests/extension/geometry.test.js tests/extension/grouping.test.js tests/extension/keys.test.js tests/extension/settle.test.js tests/extension/observation.test.js tests/extension/treediff.test.js tests/extension/fileset.test.js
+      - run: node --test tests/extension/constants.test.js tests/extension/geometry.test.js tests/extension/grouping.test.js tests/extension/keys.test.js tests/extension/settle.test.js tests/extension/observation.test.js tests/extension/treediff.test.js tests/extension/fileset.test.js tests/extension/debug.test.js
 
   # Real extension + real binary over native messaging, driven as an MCP server over stdio
   # (ADR-0026 Decision 6). Retired 2026-07 (it hung to the 6-hour runner ceiling under

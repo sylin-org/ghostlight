@@ -23,13 +23,20 @@
   // Ghostlight brand accent: a luminous sky blue. SKY_RGB is the same color for rgba() shadows.
   const SKY = "#38bdf8";
   const SKY_RGB = "56,189,248";
-  // Denial accents (SAPS PRES-HIGH-01): a DIFFERENT hue family from the SKY "go" vocabulary
-  // above, on purpose -- amber for a policy denial, red for a sacred-domain hard block, so the
-  // contrast itself reads as "this is a guardrail, not a glitch."
-  const AMBER = "#f59e0b";
-  const AMBER_RGB = "245,158,11";
-  const RED = "#f43f5e";
-  const RED_RGB = "244,63,94";
+  // Notification severity accents (SAPS PRES-HIGH-01): a DIFFERENT hue family from the SKY "go"
+  // vocabulary above, on purpose -- the contrast itself reads as "this is a guardrail, not a
+  // glitch." Keyed by the same info/debug/warn/error taxonomy this codebase's own tracing logs
+  // already use, so the primitive stays general-purpose rather than denial-specific. Text on top
+  // of any of these is always NOTIF_TEXT (a dark near-black): amber and sky are light/bright
+  // enough that white text fails WCAG AA contrast against them, so dark text is used uniformly
+  // across all four rather than mixing light-on-dark and dark-on-light per color.
+  const NOTIF_COLORS = {
+    error: { bg: "#f43f5e", rgb: "244,63,94" },
+    warn: { bg: "#f59e0b", rgb: "245,158,11" },
+    info: { bg: "#38bdf8", rgb: "56,189,248" },
+    debug: { bg: "#94a3b8", rgb: "148,163,184" },
+  };
+  const NOTIF_TEXT = "#0b1220";
   const FADE_MS = 4000;
   const RIPPLE_MS = 620; // one click ring's expand-and-fade duration
   const RIPPLE_STAGGER_MS = 140; // gap between rings of a multi-click, so 2/3 read as a rhythm
@@ -40,6 +47,13 @@
   const ZOOMFRAME_MS = 1150; // zoom magnifier frame
   const CHEV_MS = 1150; // scroll chevron cascade
   const NAVPILL_MS = 1600; // navigate destination pill
+  // Notification bar timings (SAPS PRES-HIGH-01): the bar unfurls from the top edge, the
+  // description (if any) fades in just after. No hold/fade-out duration -- unlike every other
+  // effect in this file, a notification is persistent (dismissed by the next tool action on this
+  // tab, or an explicit close click), not a fire-and-fade confirmation.
+  const NOTIF_BAR_MS = 380; // bar unfurl from the top edge
+  const NOTIF_DESC_MS = 320; // description line fade-in
+  const NOTIF_DESC_DELAY_MS = 220; // description starts just after the bar settles
 
   let cursorEl = null;
   let glowEl = null;
@@ -48,6 +62,11 @@
   let fxSeq = 0;
   let glowActive = false; // whether the glow should be visible (independent of capture-hiding)
   let hiddenForTool = false; // suppressed during a screenshot capture
+  let notifLayer = null; // persistent notification bar's own container -- NEVER cleared by
+  // setHiddenForTool's screenshot-hiding (fxLayer.replaceChildren() would wipe a notification the
+  // instant the agent took a screenshot, defeating the whole point of it persisting)
+  let activeNotifEl = null; // the currently-shown notification, if any (tracked so the next tool
+  // action on this tab, or a fresh notification, can dismiss/replace it)
 
   function reduceMotion() {
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion:reduce)").matches);
@@ -76,10 +95,12 @@
       "@keyframes ghostlight-nav{0%{opacity:0;transform:translate(-50%,-14px)}14%{opacity:1;transform:translate(-50%,0)}82%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-8px)}}" +
       "@keyframes ghostlight-breath{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(.7)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}}" +
       "@keyframes ghostlight-lozenge{0%{opacity:0;transform:translate(-50%,12px)}16%{opacity:1;transform:translate(-50%,0)}78%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-6px)}}" +
-      "@keyframes ghostlight-denial-edge{0%,100%{opacity:0}15%{opacity:1}40%{opacity:.35}60%{opacity:1}100%{opacity:0}}" +
-      "@keyframes ghostlight-denial-badge{0%{opacity:0;transform:translate(-50%,-50%) scale(.6)}" +
-      "18%{opacity:1;transform:translate(-50%,-50%) scale(1.08)}30%{transform:translate(-50%,-50%) scale(1)}" +
-      "78%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%) scale(.92)}}" +
+      // Notification bar (SAPS PRES-HIGH-01): unfurls from the top edge once, then holds static
+      // and persistent -- no hold/fade-out keyframe, since dismissal is by next-action or close
+      // click, not a timer. The -rm variant is a plain fade for prefers-reduced-motion.
+      "@keyframes ghostlight-notif-bar{0%{transform:scaleY(0)}100%{transform:scaleY(1)}}" +
+      "@keyframes ghostlight-notif-bar-rm{0%{opacity:0}100%{opacity:1}}" +
+      "@keyframes ghostlight-notif-desc{0%{opacity:0}100%{opacity:.85}}" +
       ".ghostlight-cap{color:" + SKY + "}.ghostlight-arrow{color:" + SKY + ";margin-right:7px}" +
       "@media (prefers-reduced-motion:reduce){#" + GLOW_ID + "{animation:none}#" + CURSOR_ID + "{transition:none}}";
     (document.head || document.documentElement).appendChild(s);
@@ -252,6 +273,10 @@
       if (v) { fxLayer.style.display = "none"; fxLayer.replaceChildren(); } // clear in-flight effects for a clean capture
       else fxLayer.style.display = "";
     }
+    // Hide-and-restore, like cursor/caption/glow above -- NEVER replaceChildren() here. A
+    // notification is persistent state, not an in-flight effect; wiping it on every screenshot
+    // (which fires constantly during normal operation) would defeat its whole purpose.
+    if (notifLayer) notifLayer.style.display = v ? "none" : "";
   }
 
   // ----- Extended vocabulary: one visible treatment per agent action (the visual feedback
@@ -439,46 +464,98 @@
     caption("Zoom");
   }
 
-  // denial notification (SAPS PRES-HIGH-01): governance blocks a call before the extension is
-  // ever contacted for the call itself, so without this nothing on screen shows a block
-  // happened. No x/y -- a denial isn't tied to a click point -- so the treatment is a brief
-  // edge vignette (unmissable even at small GIF size) plus a center shield badge, not a
-  // point-effect. `cls` selects red (sacred, "blocked") vs amber (policy, "warning") by fixed
-  // internal lookup only -- never interpolated into markup. `description` reaches the screen
-  // ONLY via caption()'s textContent path (never innerHTML): it can carry an attacker-
-  // influenced domain, and this runs as a content script on every page.
-  const SHIELD_SVG =
-    "<svg width='34' height='38' viewBox='0 0 24 26' aria-hidden='true'>" +
+  // Notification bar (SAPS PRES-HIGH-01): governance blocks a call before the extension is ever
+  // contacted for the call itself, so without this nothing on screen shows a block happened.
+  // Deliberately NOT built on caption() -- a caption is optional decorative flavor text, off by
+  // default; a notification is substantive and must always render regardless of that preference
+  // (and regardless of the effects master switch too -- see the dispatcher below). Persistent, not
+  // timed: dismissed by the next tool action on this tab, or an explicit close click, never by a
+  // fade-out timer -- the whole point is that a human glancing back later still sees it. Lives in
+  // its OWN layer (notifLayer), never fxLayer: a screenshot's hide-for-capture wipes fxLayer's
+  // children outright, which would silently kill a notification the instant the agent looked at
+  // the page. `cls` selects the bar color by fixed internal lookup only (NOTIF_COLORS) -- never
+  // interpolated into markup. `title`/`description` reach the DOM only via .textContent
+  // (constructed with createElement, never an innerHTML string): they can carry an
+  // attacker-influenced domain, and this runs as a content script on every page.
+  const NOTIF_ICON_SVG =
+    "<svg width='18' height='20' viewBox='0 0 24 26' aria-hidden='true'>" +
     "<path d='M12 1 L21 4.5 V11 C21 17 17 21.5 12 24 C7 21.5 3 17 3 11 V4.5 Z' " +
-    "fill='%FILL%' stroke='white' stroke-width='1.4' stroke-linejoin='round'/></svg>";
-  function denialFx(cls, description) {
-    if (hiddenForTool || document.hidden) return;
+    "fill='" + NOTIF_TEXT + "' stroke='" + NOTIF_TEXT + "' stroke-width='0.5' stroke-linejoin='round'/></svg>";
+
+  function ensureNotifLayer() {
+    if (!notifLayer || !notifLayer.isConnected) {
+      notifLayer = document.createElement("div");
+      notifLayer.id = "ghostlight-notification-layer";
+      notifLayer.setAttribute("aria-hidden", "true");
+      notifLayer.style.cssText = "position:fixed;top:0;left:0;right:0;pointer-events:none;z-index:2147483647";
+      (document.body || document.documentElement).appendChild(notifLayer);
+    }
+    notifLayer.style.display = hiddenForTool ? "none" : ""; // match whatever state setHiddenForTool already set
+    return notifLayer;
+  }
+
+  function dismissNotification() {
+    if (activeNotifEl) { activeNotifEl.remove(); activeNotifEl = null; }
+  }
+
+  function showNotification(cls, title, description) {
+    if (document.hidden) return; // NOT gated on hiddenForTool: persistent state must survive a
+    // screenshot's hide/show cycle (handled via ensureNotifLayer + setHiddenForTool above), only
+    // suppressed outright when the tab itself isn't visible at all.
     ensureStyles();
-    const blocked = cls === "blocked";
-    const hex = blocked ? RED : AMBER;
-    const rgb = blocked ? RED_RGB : AMBER_RGB;
+    dismissNotification(); // replace, never stack two notifications
+    const layer = ensureNotifLayer();
+    const colors = NOTIF_COLORS[cls] || NOTIF_COLORS.info;
+    const rm = reduceMotion();
 
-    const edge = document.createElement("div");
-    edge.id = FX_LAYER_ID + "-de" + fxSeq++;
-    edge.setAttribute("aria-hidden", "true");
-    edge.style.cssText =
-      "position:fixed;inset:0;pointer-events:none;" +
-      "box-shadow:inset 0 0 22px rgba(" + rgb + ",.85),inset 0 0 44px rgba(" + rgb + ",.4);" +
-      "animation:ghostlight-denial-edge 900ms ease-in-out forwards";
-    addEphemeral(edge, 960);
+    const bar = document.createElement("div");
+    bar.id = "ghostlight-notifbar" + fxSeq++;
+    bar.style.cssText =
+      "position:relative;display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;" +
+      "box-sizing:border-box;background:" + colors.bg + ";" +
+      "box-shadow:0 4px 16px -4px rgba(" + colors.rgb + ",.6);transform-origin:top;pointer-events:none;" +
+      "animation:" + (rm ? "ghostlight-notif-bar-rm" : "ghostlight-notif-bar") + " " + NOTIF_BAR_MS + "ms cubic-bezier(.22,1,.36,1) forwards";
 
-    const badge = document.createElement("div");
-    badge.id = FX_LAYER_ID + "-db" + fxSeq++;
-    badge.setAttribute("aria-hidden", "true");
-    badge.innerHTML = SHIELD_SVG.replace("%FILL%", hex); // fixed internal markup + a fixed color constant -- never wire text
-    badge.style.cssText =
-      "position:fixed;left:50%;top:50%;pointer-events:none;opacity:0;" +
-      "transform:translate(-50%,-50%) scale(.6);" +
-      "filter:drop-shadow(0 0 10px rgba(" + rgb + ",.7));" +
-      "animation:ghostlight-denial-badge 2000ms cubic-bezier(.22,1,.36,1) forwards";
-    addEphemeral(badge, 2060);
+    const iconSpan = document.createElement("span");
+    iconSpan.style.cssText = "flex:0 0 auto;display:flex;align-items:center;justify-content:center";
+    iconSpan.innerHTML = NOTIF_ICON_SVG; // fixed internal markup + a fixed color constant -- never wire text
+    bar.appendChild(iconSpan);
 
-    caption(String(description || "Blocked"), hex, rgb);
+    const textCol = document.createElement("span");
+    textCol.style.cssText = "flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center";
+    const titleEl = document.createElement("span");
+    titleEl.style.cssText =
+      "font:600 13px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:" + NOTIF_TEXT + ";" +
+      "white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+    titleEl.textContent = String(title || "Blocked");
+    textCol.appendChild(titleEl);
+    if (description) {
+      const descEl = document.createElement("span");
+      descEl.style.cssText =
+        "font:12px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:" + NOTIF_TEXT + ";" +
+        "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:" + (rm ? ".85" : "0") +
+        (rm ? "" : ";animation:ghostlight-notif-desc " + NOTIF_DESC_MS + "ms ease-out " + NOTIF_DESC_DELAY_MS + "ms forwards");
+      descEl.textContent = String(description);
+      textCol.appendChild(descEl);
+    }
+    bar.appendChild(textCol);
+
+    // The one genuinely interactive, clickable element in this entire FX layer -- everything else
+    // is pointer-events:none by design. A real <button> (not a styled div) for native keyboard
+    // focus/activation, scoped narrowly so the rest of the bar still never intercepts a real click.
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Dismiss notification");
+    closeBtn.textContent = "×";
+    closeBtn.style.cssText =
+      "flex:0 0 auto;pointer-events:auto;cursor:pointer;background:transparent;border:none;" +
+      "color:" + NOTIF_TEXT + ";opacity:.7;font:20px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
+      "width:28px;height:28px;border-radius:6px";
+    closeBtn.addEventListener("click", dismissNotification);
+    bar.appendChild(closeBtn);
+
+    layer.appendChild(bar);
+    activeNotifEl = bar;
   }
 
   // wait: a soft breathing dot while the agent pauses.
@@ -496,9 +573,23 @@
     caption("Waiting");
   }
 
+  // A tool action taken on this tab dismisses any lingering notification -- checked ahead of
+  // both switches below, since dismissal is state cleanup, not a decorative effect (it must fire
+  // even with the effects master switch off). AGENT_NOTIFICATION itself is excluded: a fresh
+  // notification replaces the old one via showNotification's own dismissNotification() call,
+  // not this generic hook.
+  const TOOL_ACTION_MESSAGE_TYPES = new Set([
+    "UPDATE_PHANTOM_CURSOR", "AGENT_CLICK_RIPPLE", "AGENT_DRAG_TRAIL", "AGENT_TYPE_SHIMMER",
+    "AGENT_TARGET_GLOW", "AGENT_KEYSTROKE", "AGENT_SCROLL_CUE", "AGENT_READ_SCAN",
+    "AGENT_NAVIGATE_PILL", "AGENT_SCREENSHOT_FX", "AGENT_ZOOM_FRAME", "AGENT_WAIT_PULSE",
+  ]);
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (activeNotifEl && msg && TOOL_ACTION_MESSAGE_TYPES.has(msg.type)) dismissNotification();
     // Master switch: with effects off, swallow every render message (capture-management and the
     // caption preference still work; non-ours messages fall through to content.js below).
+    // AGENT_NOTIFICATION is deliberately NOT in this list -- see the doc comment above
+    // showNotification: a notification is substantive, not decorative, and must always render.
     if (!effectsEnabled) {
       switch (msg && msg.type) {
         case "UPDATE_PHANTOM_CURSOR":
@@ -513,7 +604,6 @@
         case "AGENT_SCREENSHOT_FX":
         case "AGENT_ZOOM_FRAME":
         case "AGENT_WAIT_PULSE":
-        case "AGENT_NOTIFICATION":
         case "SHOW_AGENT_INDICATORS":
           sendResponse({ success: true });
           return true;
@@ -546,7 +636,7 @@
       case "AGENT_WAIT_PULSE":
         waitPulse(); sendResponse({ success: true }); return true;
       case "AGENT_NOTIFICATION":
-        denialFx(msg.class, msg.description); sendResponse({ success: true }); return true;
+        showNotification(msg.class, msg.title, msg.description); sendResponse({ success: true }); return true;
       case "SET_CAPTIONS":
         captionsEnabled = !!msg.enabled; sendResponse({ success: true }); return true;
       case "SHOW_AGENT_INDICATORS":

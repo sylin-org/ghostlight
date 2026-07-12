@@ -64,3 +64,29 @@ You do NOT restart your editor or the browser. The agent adapter reconnects to t
 within its patient reconnect window (up to 120s; ADR-0045), replays the MCP handshake, and your
 next tool call is served by the new code. A rebuild that takes a minute or two is invisible to the
 MCP client.
+
+## 5. Faster iteration and diagnostics (ADR-0059)
+
+For wire-protocol changes (routing, tabId encoding, focus, notifications) you do not need a real
+Chrome session at all:
+
+```
+.\scripts\dev-loop.ps1                                              # kill/rebuild/restart/health-check in one shot
+.\target\release\lightbox.exe fake-browser --instance dev --auto-reply   # attach as a fake browser, no Chrome needed
+```
+
+`fake-browser` dials the real service exactly as the real relay does, prints every frame it
+receives, and (with `--auto-reply`) answers `tabs_context_mcp`/`tabs_create_mcp` with a
+DELIBERATELY billion-scale tab id -- the same magnitude a real Chrome session actually produces --
+so a tabId-encoding regression is caught on the first offline round trip. Commands at its prompt:
+`focus`, `kill`, `reply <id> <json-result>`, `quit`.
+
+When you do need a real browser, `.\scripts\dev-browser.ps1` launches an isolated, disposable
+Chrome profile (never your real one) pointed at the unpacked dev extension, with
+`GHOSTLIGHT_DEBUG=1` set so the browser-role relay writes debug state too.
+
+Every attach/detach/focus/reject decision (both sides: the service's own and, when the
+extension's "Developer diagnostics" option is on, the extension's `connect_attempt`/
+`connect_disconnect` notes) lands in the SAME structured event ring `debug-state-<pid>.json`
+already carries -- `ghostlight --instance dev doctor` and that file are the first places to look,
+before reasoning about timing from raw process logs.

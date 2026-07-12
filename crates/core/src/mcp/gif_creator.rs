@@ -50,12 +50,19 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
             error: crate::ToolError::binary("gif_creator requires a numeric tabId"),
         };
     };
+    // ADR-0058: `tab` (from the client-facing args) stays COMPOSITE everywhere it is forwarded
+    // to `ctx.browser.call(...)` below -- `Browser::call` decodes and routes it internally, the
+    // same as every other tool. `RecordingStore`, though, is keyed by the extension's OWN native
+    // tab id (fed by `handle_gif_frame`'s `gif_frame` events, which the extension reports in its
+    // own native numbering); every LOCAL `recordings.*()` call here uses this decoded value
+    // instead, so both sides agree on the same key.
+    let native_tab = crate::constants::tab_id::decode(tab).1;
     let recordings = ctx.browser.recordings();
 
     match action {
         "start_recording" => {
             // A fresh recording discards any prior frames for the tab.
-            recordings.start(tab);
+            recordings.start(native_tab);
             let args = json!({
                 "tabId": tab,
                 "quality": SCREENCAST_QUALITY,
@@ -64,7 +71,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
             });
             match ctx.browser.call(ctx.guid, "gif_capture_start", &args).await {
                 Err(error) => {
-                    recordings.clear(tab);
+                    recordings.clear(native_tab);
                     CallOutcome::Failure { error }
                 }
                 Ok(reply) => {
@@ -75,7 +82,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
                         if let Ok(v) = serde_json::from_str::<Value>(text) {
                             seeded = v.get("seeded").and_then(Value::as_u64).unwrap_or(0);
                             if let Some(vp_w) = v.get("vpW").and_then(Value::as_f64) {
-                                recordings.set_vp_w(tab, vp_w);
+                                recordings.set_vp_w(native_tab, vp_w);
                             }
                         }
                     }
@@ -86,7 +93,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
                 }
             }
         }
-        "stop_recording" => match recordings.stop(tab) {
+        "stop_recording" => match recordings.stop(native_tab) {
             None => text_outcome("No active recording for this tab."),
             Some(count) => {
                 // Best-effort: the screencast may already be gone with the tab or the debugger.
@@ -105,11 +112,11 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
                 .browser
                 .call(ctx.guid, "gif_capture_stop", &json!({ "tabId": tab }))
                 .await;
-            recordings.clear(tab);
+            recordings.clear(native_tab);
             text_outcome("Recording cleared.")
         }
         "export" => {
-            let frames = recordings.frames(tab);
+            let frames = recordings.frames(native_tab);
             if frames.is_empty() {
                 return text_outcome(
                     "No frames to export. Start a recording first with action=start_recording.",

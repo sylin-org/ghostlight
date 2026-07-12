@@ -173,6 +173,13 @@ async fn relay_with_watchdog(
 /// The Chrome native-messaging pass-through: resolve the instance, relay extension frames to the
 /// service as a stateless byte pipe, then `process::exit(0)` (tokio's stdin reader parks a blocking
 /// ReadFile on Chrome's still-open stdin; dropping the runtime would hang joining it).
+///
+/// ADR-0058: identifies itself to the service with a `ROLE_BROWSER` session-hello carrying its
+/// PARENT process's identity (the browser that spawned it via `connectNative`) -- captured with
+/// the SAME `proc::parent()` the agent role already uses for its own watchdog below -- and races
+/// the relay loop against a parent-death watchdog, so the process exits the moment the browser
+/// itself is gone rather than depending solely on stdin/pipe EOF (today's only signal for that,
+/// and the weaker of the two).
 fn run_browser() -> ! {
     // Chrome launches this with a bare path plus the extension origin (`chrome-extension://<id>/`)
     // and `--parent-window=<hwnd>` -- positional/flag args this role simply ignores.
@@ -184,9 +191,27 @@ fn run_browser() -> ! {
 
     tracing::info!("ghostlight starting (native-host role, launched by the browser)");
     let sink = build_debug_sink(debug, "native-host");
+    let browser_parent = proc::parent();
+    let hello =
+        ghostlight_transport::handshake::browser_hello_bytes(std::process::id(), browser_parent);
     let rt = tokio::runtime::Runtime::new().expect("build the native-host tokio runtime");
     let endpoints = ipc::endpoint_candidates(&selection);
-    let result = rt.block_on(async { ipc::relay_native_host(&endpoints, &sink).await });
+    let result = rt.block_on(async {
+        tokio::select! {
+            r = ipc::relay_native_host(&endpoints, &hello, &sink) => r,
+            _ = async {
+                match browser_parent {
+                    Some(p) => watchdog::wait_until_orphaned(p).await,
+                    // No determinable parent: never fires, so this arm simply never wins the
+                    // select -- the relay loop's own EOF detection remains the sole exit trigger.
+                    None => std::future::pending().await,
+                }
+            } => {
+                tracing::warn!("the browser that launched this relay has exited; ending");
+                Ok(())
+            }
+        }
+    });
     if let Err(e) = result {
         tracing::warn!(error = %e, "native-host relay ended with error");
     }

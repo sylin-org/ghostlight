@@ -1,0 +1,23 @@
+{
+  "schema": 3,
+  "name": "dev-live-test",
+  "version": "2026.07.1",
+  "mode": "enforce",
+  "identity": {
+    "resolved_by": "local_file",
+    "principal": "local-user",
+    "groups": [],
+    "resolved_at": "2026-07-01T00:00:00Z"
+  },
+  "grants": [
+    {
+      "id": "example-only",
+      "hosts": { "allow": ["example.org"] },
+      "allowed": ["read", "action"],
+      "description": "Live-test fixture (ADR-0059): only example.org is granted, so navigate/click/etc. work there and fail everywhere else."
+    }
+  ],
+  "config": [
+    { "key": "content.security.sacred_domains", "value": ["sacred-test.invalid"], "level": "mandatory" }
+  ]
+}

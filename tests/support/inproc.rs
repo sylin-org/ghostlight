@@ -124,6 +124,13 @@ impl Harness {
             let _ = attached.attach(browser_side).await;
         });
         tokio::spawn(async move {
+            // ADR-0058: identify as pid 0, the SAME value `constants::tab_id::decode` returns
+            // for a plain, un-encoded small tabId (the shape every caller of this fixture
+            // already uses), so no caller needs to know about composite encoding.
+            let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
+            if host::write_message(&mut ext_side, &hello).await.is_err() {
+                return;
+            }
             while let Ok(Some(req)) = host::read_message(&mut ext_side).await {
                 let v: Value = match serde_json::from_slice(&req) {
                     Ok(v) => v,

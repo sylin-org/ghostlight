@@ -305,11 +305,14 @@ pub(crate) async fn run_tool_call(
     if let Some(denial) = denial {
         if !dry_run {
             audit.sacred_deny(&denial, tab_domain.as_deref());
+            let (title, description) =
+                denial_notification("on the never-touch list", &denial.domain);
             browser.notify(
                 args.get("tabId").and_then(Value::as_i64),
-                "blocked",
+                "error",
                 Some("lock"),
-                &denial_notification_text("sacred domain", &denial.domain),
+                &title,
+                Some(&description),
                 Some(&denial.denial_id),
             );
         }
@@ -416,11 +419,14 @@ pub(crate) async fn run_tool_call(
     match gate {
         Gate::Deny { denial } => {
             if !dry_run {
+                let (title, description) =
+                    denial_notification("outside the granted policy", &denial.domain);
                 browser.notify(
                     args.get("tabId").and_then(Value::as_i64),
-                    "warning",
+                    "warn",
                     Some("shield"),
-                    &denial_notification_text("policy", &denial.domain),
+                    &title,
+                    Some(&description),
                     Some(&denial.denial_id),
                 );
             }
@@ -532,11 +538,14 @@ pub(crate) async fn run_tool_call(
                 }
                 Decision::Deny(d) => {
                     audit.landing_deny(&d, landing_domain.as_deref());
+                    let (title, description) =
+                        denial_notification("outside the granted policy", &d.domain);
                     browser.notify(
                         Some(tab_id),
-                        "warning",
+                        "warn",
                         Some("shield"),
-                        &denial_notification_text("policy", &d.domain),
+                        &title,
+                        Some(&description),
                         Some(&d.denial_id),
                     );
                     return CallOutcome::Denied {
@@ -579,16 +588,21 @@ pub(crate) async fn run_tool_call(
     }
 }
 
-/// The on-screen denial notification's description text (SAPS PRES-HIGH-01): "Blocked: <kind>
-/// (<domain>)", omitting the parenthetical when the denial carries no meaningful domain (an
-/// unresolved/miss denial's placeholder -- `enforcement.rs`'s `""` or `"(unknown)"` -- never a
-/// real host).
-fn denial_notification_text(kind: &str, domain: &str) -> String {
-    if domain.is_empty() || domain == "(unknown)" {
-        format!("Blocked: {kind}")
+/// The on-screen denial notification's title and description (SAPS PRES-HIGH-01): a domain-led
+/// headline "Blocked - <domain>" (just "Blocked" when the denial carries no meaningful domain --
+/// an unresolved/miss denial's placeholder, `enforcement.rs`'s `""` or `"(unknown)"`, never a
+/// real host), paired with a short, direct reason line supplied by the caller. The domain leads
+/// because it is the single most scannable fact -- what got blocked -- with the reason as
+/// supporting detail. `reason` echoes the vocabulary of the real denial message (e.g. "on the
+/// never-touch list", "outside the granted policy") rather than a generic phrase like "access is
+/// denied", matching this project's own established denial-text voice.
+fn denial_notification(reason: &str, domain: &str) -> (String, String) {
+    let title = if domain.is_empty() || domain == "(unknown)" {
+        "Blocked".to_string()
     } else {
-        format!("Blocked: {kind} ({domain})")
-    }
+        format!("Blocked - {domain}")
+    };
+    (title, reason.to_string())
 }
 
 /// Outcome of the sacred-domains check (shared format doc section 3.4, g08).
@@ -944,6 +958,11 @@ mod tests {
         let tab_urls: std::collections::HashMap<i64, Option<&'static str>> =
             tab_urls.into_iter().collect();
         let handle = tokio::spawn(async move {
+            // ADR-0058: identify as pid 0, the SAME value `constants::tab_id::decode` returns
+            // for a plain, un-encoded small tabId (the shape every test below already uses), so
+            // every existing test's tabId keeps working unchanged with no per-test encoding.
+            let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
+            host::write_message(&mut ext_side, &hello).await.unwrap();
             loop {
                 let Some(req) = host::read_message(&mut ext_side).await.unwrap() else {
                     break;
@@ -1058,7 +1077,7 @@ mod tests {
         wait_for_seen_len(&seen, 8).await;
         assert_eq!(
             *seen.lock().unwrap(),
-            ["tab_url_request:5", "notification:blocked"].repeat(4),
+            ["tab_url_request:5", "notification:error"].repeat(4),
             "the extension must never see an actual tool_request for a denied call -- only the \
              tab_url_request pre-flight and the on-screen denial notification"
         );

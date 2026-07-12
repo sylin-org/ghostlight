@@ -126,19 +126,34 @@ fn pick_native_host_endpoint(
 /// ADR-0048 D4: `endpoints` is the ordered candidate list; the first candidate whose endpoint
 /// exists is dialed (a fresh pick happens naturally per connect episode, because Chrome respawns
 /// this process on every native-messaging reconnect).
+///
+/// ADR-0058: `hello` is this browser-role relay's session-hello frame (`ROLE_BROWSER`, carrying
+/// this relay's own pid and its parent browser's [`crate::proc::ProcId`]), written once,
+/// immediately after `connect()` succeeds and before the generic byte-relay loop starts -- the
+/// SAME "peer speaks first" shape the adapter/control endpoint already uses, now also on this
+/// endpoint (PINS.md SS1's "no hello" applied only while the extension was assumed a singleton).
 pub async fn relay_native_host(
     endpoints: &[String],
+    hello: &[u8],
     debug: &crate::observability::DebugSink,
 ) -> Result<()> {
     // ADR-0051 Phase 2: the binary wires Chrome's real stdio; the framed relay logic lives in
     // `relay_native_host_over`, injectable in-process for tests.
-    relay_native_host_over(endpoints, debug, tokio::io::stdin(), tokio::io::stdout()).await
+    relay_native_host_over(
+        endpoints,
+        hello,
+        debug,
+        tokio::io::stdin(),
+        tokio::io::stdout(),
+    )
+    .await
 }
 
 /// [`relay_native_host`] with Chrome's stdio INJECTED (ADR-0051 Phase 2): the binary passes the
 /// real `stdin`/`stdout`; tests pass in-memory streams.
 pub async fn relay_native_host_over<I, O>(
     endpoints: &[String],
+    hello: &[u8],
     debug: &crate::observability::DebugSink,
     mut chrome_in: I,
     mut chrome_out: O,
@@ -151,6 +166,7 @@ where
     let stream = connect(&endpoint).await?;
     debug.ipc_note("connected to mcp-server endpoint");
     let (mut ipc_read, mut ipc_write) = tokio::io::split(stream);
+    host::write_message(&mut ipc_write, hello).await?;
 
     // extension -> mcp-server
     let upstream = async {
@@ -518,10 +534,30 @@ fn adapter_hello(guid: &crate::session_guid::SessionGuid) -> serde_json::Value {
 pub struct StatusReply {
     /// The protocol major version the SERVICE answered with (always [`crate::handshake::HUB_PROTO`]).
     pub hub: u32,
-    /// Whether a browser extension / native-host is currently attached to the service.
+    /// Whether a browser extension / native-host is currently attached to the service. Derived as
+    /// `!browsers.is_empty()` (ADR-0058); kept as its own field for wire back-compat with an older
+    /// `doctor` reading a newer service's reply mid-upgrade.
     pub extension_connected: bool,
     /// The number of live tool sessions (MCP adapters + web) at the moment of the reply.
     pub live_sessions: u64,
+    /// Every currently-attached browser (ADR-0058), most-recently-focused first. Non-sensitive:
+    /// a pid and a live tab count, nothing identifying beyond what the local OS process list
+    /// already shows any same-user process.
+    #[serde(default)]
+    pub browsers: Vec<BrowserInfo>,
+}
+
+/// One attached browser, as reported by `ghostlight doctor` (ADR-0058). Deliberately does not
+/// carry a tab count: the service has no live source for "how many tabs does this browser have"
+/// without a synchronous round-trip doctor's one-shot control query does not make (that number is
+/// the extension's own `chrome.tabs.query` state, never mirrored server-side today) -- a future
+/// addition, not a gap in this one.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BrowserInfo {
+    /// The browser (Chrome/Edge) process id -- the identity a session is keyed by.
+    pub pid: u32,
+    /// Whether this browser most recently reported window focus (the front of the focus chain).
+    pub focused: bool,
 }
 
 /// Ask the running SERVICE for a control-plane liveness [`StatusReply`] (CAP-MED-01). Dials the

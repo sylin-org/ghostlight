@@ -99,16 +99,26 @@ pub fn run(opts: DoctorOptions) -> Result<bool> {
     // whether the browser extension is attached, so doctor renders a real verdict WITHOUT requiring
     // --debug. Only worth querying when a server is actually accepting; `None` (service absent, too
     // old to answer the control role, or no reply within the short timeout) renders as "unknown".
-    let live_extension = if matches!(probe, EndpointProbe::Accepts) {
-        ipc::query_status(&endpoint).map(|s| s.extension_connected)
+    let live_status = if matches!(probe, EndpointProbe::Accepts) {
+        ipc::query_status(&endpoint)
     } else {
         None
     };
+    let live_extension = live_status.as_ref().map(|s| s.extension_connected);
     println!();
     println!("IPC endpoint:");
     println!("  {:<9}{}", "path", endpoint_display);
     println!("  {:<9}{}", "state", state_line(&probe));
     println!("  {:<9}{}", "extension", extension_line(live_extension));
+    // ADR-0058: list every attached browser, not just a single yes/no -- the diagnostic gap
+    // that made 2026-07-11's multi-browser connectivity debugging slow. Empty when the live
+    // query could not be made (older service, or the endpoint did not accept) or genuinely
+    // reported zero browsers; either way `extension_line` above already says why.
+    if let Some(status) = &live_status {
+        for line in browser_lines(&status.browsers) {
+            println!("{line}");
+        }
+    }
 
     // ADR-0048 D7: when this report is for the DEFAULT instance, say where UNPINNED clients
     // (agent adapters and the browser native host with no --instance) currently route: a live
@@ -435,6 +445,22 @@ fn extension_line(live_extension: Option<bool>) -> &'static str {
         Some(false) => "NOT connected (live: the service is running but no extension is attached)",
         None => "unknown (service not running, or too old to report; run with --debug for details)",
     }
+}
+
+/// The doctor "Browsers:" sub-list (ADR-0058): one line per currently-attached browser, most
+/// recently focused first. Empty input renders nothing (the "extension" line above already
+/// covers "no browser attached"). Pure so the exact wording is unit-testable without a live
+/// service.
+fn browser_lines(browsers: &[ghostlight_transport::ipc::BrowserInfo]) -> Vec<String> {
+    if browsers.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec!["  Browsers:".to_string()];
+    for b in browsers {
+        let focus_note = if b.focused { " (focused)" } else { "" };
+        lines.push(format!("    pid {}{}", b.pid, focus_note));
+    }
+    lines
 }
 
 // --- Debug sessions ---
@@ -1167,6 +1193,36 @@ mod tests {
         assert!(extension_line(Some(true)).contains("connected (live)"));
         assert!(extension_line(Some(false)).contains("NOT connected"));
         assert!(extension_line(None).contains("unknown"));
+    }
+
+    #[test]
+    fn browser_lines_is_empty_for_no_browsers() {
+        assert!(browser_lines(&[]).is_empty());
+    }
+
+    #[test]
+    fn browser_lines_marks_exactly_the_focused_one() {
+        let browsers = vec![
+            ghostlight_transport::ipc::BrowserInfo {
+                pid: 1001,
+                focused: true,
+            },
+            ghostlight_transport::ipc::BrowserInfo {
+                pid: 2002,
+                focused: false,
+            },
+        ];
+        let lines = browser_lines(&browsers);
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert_eq!(lines[0], "  Browsers:");
+        assert!(
+            lines[1].contains("1001") && lines[1].contains("(focused)"),
+            "{lines:?}"
+        );
+        assert!(
+            lines[2].contains("2002") && !lines[2].contains("(focused)"),
+            "{lines:?}"
+        );
     }
 
     #[test]

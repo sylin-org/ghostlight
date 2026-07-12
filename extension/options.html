@@ -149,6 +149,16 @@
       </div>
     </section>
 
+    <section class="card">
+      <div class="row">
+        <div class="text">
+          <h2>Developer diagnostics</h2>
+          <p>Sends connection lifecycle notes (connect attempts, disconnects) to the Ghostlight service's own debug log, ADR-0059. Off by default; adds no traffic unless the service was also started with <code>--debug</code>.</p>
+        </div>
+        <label class="switch"><input type="checkbox" id="debug"><span class="slider"></span></label>
+      </div>
+    </section>
+
     <section class="card info">
       <h2>Governance and policy</h2>
       <p>Which domains the agent may touch, capability limits, and the audit log are configured in the Ghostlight binary you installed -- not here. Run <code>ghostlight config</code> or <code>ghostlight policy</code>. This extension holds no policy; it only executes what the binary allows.</p>
