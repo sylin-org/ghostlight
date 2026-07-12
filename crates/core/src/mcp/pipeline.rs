@@ -214,6 +214,21 @@ pub(crate) async fn run_tool_call(
     orchestration: Option<(&'static str, &str, u32)>,
     dry_run: bool,
 ) -> CallOutcome {
+    // A second doorway onto Browser::notify() -- the same primitive the denial sites below call.
+    // Unlisted (never registered in `directory`, so it is absent from tools/list) but usable by
+    // any client, and ungoverned because it IS the channel governance uses to speak on screen.
+    if name == "notify" {
+        let tab_id = args.get("tabId").and_then(Value::as_i64);
+        let class = args.get("class").and_then(Value::as_str).unwrap_or("info");
+        let icon = args.get("icon").and_then(Value::as_str);
+        let title = args.get("title").and_then(Value::as_str).unwrap_or("Notification");
+        let description = args.get("description").and_then(Value::as_str);
+        browser.notify(tab_id, class, icon, title, description, None);
+        return CallOutcome::Success {
+            result: crate::mcp::types::text_content("notify sent"),
+        };
+    }
+
     // One snapshot for the whole call, taken once at entry: a reload mid-call must not tear
     // the snapshot the call already started with.
     let config = store.current();
