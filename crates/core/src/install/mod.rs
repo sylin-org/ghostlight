@@ -254,26 +254,20 @@ fn scope_of(system: bool) -> Scope {
 // --- Plan: install ---
 
 fn plan_install(opts: &InstallOptions, ctx: &PlanCtx) -> Result<Vec<Action>> {
-    plan_install_for(
-        opts,
-        ctx,
-        &ghostlight_transport::instance::Instance::resolve(),
-    )
+    // ADR-0064: the host surface is instance-agnostic now (every instance registers its own host,
+    // resolved from the environment via the `native_host::*` path helpers), so there is no longer a
+    // separate `_for` seam that took an instance argument.
+    plan_install_for(opts, ctx)
 }
 
-fn plan_install_for(
-    opts: &InstallOptions,
-    ctx: &PlanCtx,
-    instance: &ghostlight_transport::instance::Instance,
-) -> Result<Vec<Action>> {
+fn plan_install_for(opts: &InstallOptions, ctx: &PlanCtx) -> Result<Vec<Action>> {
     let scope = scope_of(opts.system);
     let mut actions = Vec::new();
 
-    // ADR-0048 D6: the reserved dev instance is reached through the UNIFIED browser surface the
-    // default install registers, so its install is THIN -- pinned MCP-client entries only. (Dev
-    // UNINSTALL still cleans up any legacy per-instance artifacts from pre-0048 installs.)
-    let dev_thin = instance.name() == Some(ghostlight_transport::instance::DEV_INSTANCE);
-    if !dev_thin {
+    // ADR-0064: every instance -- including dev -- registers its OWN native-messaging host (the
+    // per-instance surface ADR-0044 derives), replacing ADR-0048 D6's thin dev-shadow-onto-default.
+    // The bare block scopes the host-planning locals so they never leak into the client section.
+    {
         // ADR-0044 Decision 4: the DEFAULT instance's manifest points at the bare binary; a
         // non-default instance's points at a per-instance copy Chrome launches by name (argv[0]).
         let (launcher, needs_copy) = native_host::instance_launcher(ctx);
@@ -786,11 +780,6 @@ pub fn run_install(opts: InstallOptions) -> Result<()> {
         // ADR-0046 dev loop: an auto-started dev service would hold the exe lock during a rebuild;
         // the developer runs `ghostlight service` in a terminal instead (see docs/DEV-LOOP.md).
         println!("  (skipped: --no-supervisor)");
-    } else if ghostlight_transport::instance::Instance::resolve().name()
-        == Some(ghostlight_transport::instance::DEV_INSTANCE)
-    {
-        // ADR-0048 D6: a dev service runs in a terminal (docs/DEV-LOOP.md); never auto-started.
-        println!("  (skipped: the dev instance runs its service in a terminal; ADR-0048)");
     } else {
         supervisor::apply_steps(
             &ghostlight_transport::supervisor::supervisor_task_name(),
@@ -1068,9 +1057,13 @@ mod tests {
         assert!(exit_result(&t3).is_ok());
     }
 
+    /// ADR-0064: a plan carries BOTH native-host and MCP-client actions -- every instance registers
+    /// its own host now (here the default instance, env unset). The dev instance's own-host
+    /// registration is covered end to end by `tests/install_instance.rs` via the real `--instance`
+    /// CLI path (which sets `GHOSTLIGHT_INSTANCE` in the child), avoiding a process-global env race.
     #[test]
-    fn plan_install_for_the_dev_instance_is_client_entries_only() {
-        let dir = std::env::temp_dir().join(format!("ghostlight-devthin-{}", std::process::id()));
+    fn plan_install_plans_both_a_native_host_and_client_entries() {
+        let dir = std::env::temp_dir().join(format!("ghostlight-planshape-{}", std::process::id()));
         let home = dir.join("home");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join(".claude.json"), "{}").unwrap();
@@ -1080,7 +1073,6 @@ mod tests {
             config: dir.join("config"),
             local: dir.join("local"),
         };
-        let dev = ghostlight_transport::instance::Instance::from_name("dev").unwrap();
         let opts = InstallOptions {
             extension_id: None,
             dry_run: true,
@@ -1090,14 +1082,14 @@ mod tests {
             debug: false,
             no_supervisor: true,
         };
-        let actions = plan_install_for(&opts, &ctx, &dev).unwrap();
+        let actions = plan_install_for(&opts, &ctx).unwrap();
         assert!(
-            actions.iter().all(|a| !a.label.contains("native host")),
-            "a dev install plans no native-host action"
+            actions.iter().any(|a| a.label.contains("native host")),
+            "the plan registers a native host"
         );
         assert!(
             actions.iter().any(|a| a.label.contains("(client)")),
-            "a dev install still plans MCP-client entries"
+            "the plan also registers MCP-client entries"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

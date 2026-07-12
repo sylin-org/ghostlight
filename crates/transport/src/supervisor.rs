@@ -53,6 +53,34 @@ pub const RUN_KEY_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 /// distinct from the in-job, stdio-inheriting child ADR-0030 D8 deleted.
 pub const DETACHED_SPAWN_FLAGS: u32 = 0x0000_0008 | 0x0000_0200;
 
+/// The deploy-quiesce lock file name (ADR-0063), looked up NEXT TO the service executable
+/// `start_service` is about to spawn. While it exists (and is fresh), the self-heal holds off, so a
+/// deploy can kill and replace the binary without the self-heal racing the swap.
+pub const DEPLOY_LOCK_NAME: &str = "deploy.lock";
+
+/// How long a [`DEPLOY_LOCK_NAME`] lock is honored (ADR-0063). Far longer than any real deploy, but
+/// finite so a crashed deploy that left the file behind never permanently disables self-heal.
+pub const DEPLOY_LOCK_MAX_AGE: Duration = Duration::from_secs(30 * 60);
+
+/// True if a fresh deploy-quiesce lock (ADR-0063) sits next to `service_exe`. Scoped to the exe's
+/// DIRECTORY -- a deploy replaces the binaries in ONE directory (a build's `target/release`, an
+/// install's `bin/<version>`), and the lock lives there, so it quiesces the self-heal for exactly
+/// the binaries being swapped and nothing else. A lock older than [`DEPLOY_LOCK_MAX_AGE`] is treated
+/// as stale (ignored). Any filesystem error (no lock, unreadable) reads as "not locked" -- self-heal
+/// is best-effort, so it fails OPEN, never wedging on a lock it cannot stat.
+fn deploy_lock_present(service_exe: &std::path::Path) -> bool {
+    let Some(lock) = service_exe.parent().map(|d| d.join(DEPLOY_LOCK_NAME)) else {
+        return false;
+    };
+    match std::fs::metadata(&lock).and_then(|m| m.modified()) {
+        // A future/again-clock-skewed mtime (`elapsed()` errs) is treated as fresh: honor the lock.
+        Ok(modified) => modified
+            .elapsed()
+            .map_or(true, |age| age < DEPLOY_LOCK_MAX_AGE),
+        Err(_) => false,
+    }
+}
+
 /// Resolve the SIBLING service executable for a running relay (ADR-0054 Decision 2): the role
 /// executables ship side by side (ADR-0046/ADR-0051), so `<dir>/ghostlight-relay*[.exe]` maps to
 /// `<dir>/ghostlight[.exe]`. Pure: unit-tested against paths, never touches the filesystem.
@@ -128,6 +156,12 @@ pub fn start_service() {
             .ok()
             .and_then(|p| sibling_service_exe(&p));
         match exe {
+            // ADR-0063: hold off self-healing while a deploy owns this binary, so the swap is not
+            // raced by relaunching the OLD image.
+            Some(exe) if deploy_lock_present(&exe) => tracing::info!(
+                exe = %exe.display(),
+                "deploy in progress (deploy.lock present); not self-healing the service"
+            ),
             Some(exe) => match spawn_service_detached(&exe) {
                 Ok(()) => tracing::info!(
                     exe = %exe.display(),
@@ -147,6 +181,20 @@ pub fn start_service() {
 
     #[cfg(not(windows))]
     {
+        // ADR-0063: the deploy-quiesce lock holds off self-heal on EVERY platform. The Unix
+        // self-heal goes through the OS supervisor rather than a direct spawn, but the lock's
+        // meaning is identical -- a deploy owns the sibling binaries; do not relaunch the old
+        // image mid-swap. (Until v0.5.6 only the Windows branch checked it.)
+        let deploying = std::env::current_exe()
+            .ok()
+            .and_then(|p| sibling_service_exe(&p))
+            .is_some_and(|exe| deploy_lock_present(&exe));
+        if deploying {
+            tracing::info!(
+                "deploy in progress (deploy.lock present); not self-healing the service"
+            );
+            return;
+        }
         let Some((program, args)) = supervisor_start_command() else {
             tracing::debug!("no OS supervisor mechanism on this platform; nothing to start");
             return;
@@ -236,5 +284,40 @@ mod tests {
     #[test]
     fn self_heal_window_is_wider_than_its_own_retry_interval() {
         assert!(SELF_HEAL_RETRY_WINDOW > SELF_HEAL_RETRY_INTERVAL);
+    }
+
+    /// ADR-0063: the deploy-quiesce lock is honored ONLY when it exists next to the service exe and
+    /// is fresh -- absent reads as "not locked" (self-heal proceeds), and a stale lock (a crashed
+    /// deploy) is ignored so self-heal is never permanently disabled.
+    #[test]
+    fn deploy_lock_present_honors_fresh_ignores_stale_and_absent() {
+        let dir = std::env::temp_dir().join(format!(
+            "ghostlight-deploy-lock-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("ghostlight.exe");
+        let lock = dir.join(DEPLOY_LOCK_NAME);
+
+        // Absent -> not present (self-heal proceeds).
+        let _ = std::fs::remove_file(&lock);
+        assert!(!deploy_lock_present(&exe));
+
+        // Fresh -> present (self-heal holds off).
+        std::fs::write(&lock, b"").unwrap();
+        assert!(deploy_lock_present(&exe));
+
+        // Stale (older than the max age) -> ignored, so a crashed deploy self-recovers.
+        let stale = std::time::SystemTime::now() - DEPLOY_LOCK_MAX_AGE - Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&lock)
+            .unwrap()
+            .set_modified(stale)
+            .unwrap();
+        assert!(!deploy_lock_present(&exe));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

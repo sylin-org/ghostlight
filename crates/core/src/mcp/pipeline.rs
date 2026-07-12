@@ -57,6 +57,7 @@ pub(crate) async fn handle_tools_call(
     guid: &str,
     id: Option<Value>,
     params: Option<&Value>,
+    overlay: Option<&crate::governance::overlay::SessionOverlay>,
 ) -> JsonRpcResponse {
     // The missing-`name` case is a JSON-RPC protocol error, not a tool outcome: it never reaches
     // `run_tool_call` (PINS.md SS1).
@@ -68,7 +69,10 @@ pub(crate) async fn handle_tools_call(
         .cloned()
         .unwrap_or(Value::Null);
 
-    let outcome = run_tool_call(browser, store, governance, guid, name, &args, None, false).await;
+    let outcome = run_tool_call(
+        browser, store, governance, guid, name, &args, None, false, overlay,
+    )
+    .await;
     render_outcome(id, outcome)
 }
 
@@ -213,7 +217,26 @@ pub(crate) async fn run_tool_call(
     args: &Value,
     orchestration: Option<(&'static str, &str, u32)>,
     dry_run: bool,
+    overlay: Option<&crate::governance::overlay::SessionOverlay>,
 ) -> CallOutcome {
+    // A second doorway onto Browser::notify() -- the same primitive the denial sites below call.
+    // Unlisted (never registered in `directory`, so it is absent from tools/list) but usable by
+    // any client, and ungoverned because it IS the channel governance uses to speak on screen.
+    if name == "notify" {
+        let tab_id = args.get("tabId").and_then(Value::as_i64);
+        let class = args.get("class").and_then(Value::as_str).unwrap_or("info");
+        let icon = args.get("icon").and_then(Value::as_str);
+        let title = args
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("Notification");
+        let description = args.get("description").and_then(Value::as_str);
+        browser.notify(tab_id, class, icon, title, description, None);
+        return CallOutcome::Success {
+            result: crate::mcp::types::text_content("notify sent"),
+        };
+    }
+
     // One snapshot for the whole call, taken once at entry: a reload mid-call must not tear
     // the snapshot the call already started with.
     let config = store.current();
@@ -293,7 +316,26 @@ pub(crate) async fn run_tool_call(
     // check has already landed, leave it in place and ahead of grant evaluation"). STEP A: an
     // empty list (every preset's default) is the byte-identical fast path -- no extension
     // traffic, no parsing, no allocation.
-    let sacred_domains = config.sacred_domains();
+    //
+    // ADR-0060: a sacred deny-ceiling composes by UNION across tiers -- the session overlay's own
+    // sacred domains are checked alongside the service config's. The owned combined list is built
+    // ONLY when the overlay actually contributes sacred entries, so a session with no overlay (or
+    // an overlay with no sacred list) keeps the exact borrow-and-fast-path above.
+    let sacred_owned: Option<Vec<String>> = overlay
+        .map(|o| o.sacred_domains())
+        .filter(|s| !s.is_empty())
+        .map(|extra| {
+            config
+                .sacred_domains()
+                .iter()
+                .chain(extra.iter())
+                .cloned()
+                .collect()
+        });
+    let sacred_domains: &[String] = match &sacred_owned {
+        Some(v) => v,
+        None => config.sacred_domains(),
+    };
     let SacredCheck { tab_domain, denial } = if sacred_domains.is_empty() {
         SacredCheck {
             tab_domain: None,
@@ -356,6 +398,7 @@ pub(crate) async fn run_tool_call(
             guid,
             config: &config,
             args,
+            overlay,
         };
         let mut outcome = f(ctx).await;
         if let Some(batch_id) = take_batch_id(&mut outcome) {
@@ -379,11 +422,20 @@ pub(crate) async fn run_tool_call(
     // byte-identical. Resolution itself is now shape-driven (ADR-0024 Decision 1's
     // `ResourceShape`) instead of a per-tool name match.
     let config_mode = config.governance_mode();
-    let resolved = if governance.is_governed() && matches!(lookup, Some(r) if !r.is_empty()) {
+    // ADR-0060: a session overlay must be able to tighten even when the SERVICE is all-open, so
+    // the resource (the tabId->host probe) is resolved when EITHER the service is governed OR an
+    // overlay is present. A session with no overlay under an all-open service keeps the exact
+    // zero-probe fast path.
+    let resolved = if (governance.is_governed() || overlay.is_some())
+        && matches!(lookup, Some(r) if !r.is_empty())
+    {
         resolve_governing_resource(&mut tab_url, descriptor, args).await
     } else {
         None
     };
+    // The resolved host at decision time, kept for the overlay deny's audit record below (the
+    // service path stamps its own via `set_domain`; an overlay deny needs the same host string).
+    let domain_str: Option<String> = resolved.as_ref().and_then(|(_, d)| d.clone());
     if let Some((_, domain)) = &resolved {
         audit.set_domain(domain.clone());
     }
@@ -393,6 +445,19 @@ pub(crate) async fn run_tool_call(
     let navigate_post_check =
         resolved.is_some() && descriptor.post_dispatch == directory::PostDispatch::NavigateLanding;
     let resource = resolved.map(|(r, _)| r);
+    // ADR-0060: the session overlay's decision for this call, evaluated against the SAME resolved
+    // resource (a clone, so the service path still consumes the original). `None` when there is no
+    // overlay or no resolved target -- the overlay abstains, leaving the service decision as-is.
+    let overlay_decision = match (overlay, &resource) {
+        (Some(ov), Some(res)) => Some(ov.decide(
+            name,
+            action,
+            lookup.unwrap_or(&[]),
+            res.clone(),
+            config_mode,
+        )),
+        _ => None,
+    };
     // dry-run evaluates the REAL governance verdict but writes no audit record: it uses the
     // audit-free `governance.decide` (the same decision `authorize` calls internally) and returns
     // the verdict CallOutcome directly, so the `CallAudit` scope drops without `complete()`. A live
@@ -416,6 +481,32 @@ pub(crate) async fn run_tool_call(
     } else {
         governance.authorize(&mut audit, resource, config_mode)
     };
+    // ADR-0060: intersect the session overlay (deny-overrides). A service Deny already stands and
+    // is handled below; a service Proceed becomes Deny iff the overlay denies -- tighten-only,
+    // never the reverse. Handled here as an early return (not a shared `match` arm) because
+    // recording the deny CONSUMES the audit scope, so the Proceed continuation below must not be
+    // reachable on this path. Mirrors the service Deny arm's notify + return.
+    if let Gate::Proceed = gate {
+        if let Some(crate::governance::ports::Decision::Deny(denial)) = overlay_decision {
+            if !dry_run {
+                audit.sacred_deny(&denial, domain_str.as_deref());
+                let (title, description) =
+                    denial_notification("outside the granted policy", &denial.domain);
+                browser.notify(
+                    args.get("tabId").and_then(Value::as_i64),
+                    "warn",
+                    Some("shield"),
+                    &title,
+                    Some(&description),
+                    Some(&denial.denial_id),
+                );
+            }
+            return CallOutcome::Denied {
+                message: denial.message,
+                source: DenialSource::Policy,
+            };
+        }
+    }
     match gate {
         Gate::Deny { denial } => {
             if !dry_run {
@@ -493,6 +584,7 @@ pub(crate) async fn run_tool_call(
             guid,
             config: &config,
             args,
+            overlay,
         };
         let mut outcome = f(ctx).await;
         audit.dispatch_finished();
@@ -958,11 +1050,18 @@ mod tests {
         let tab_urls: std::collections::HashMap<i64, Option<&'static str>> =
             tab_urls.into_iter().collect();
         let handle = tokio::spawn(async move {
-            // ADR-0058: identify as pid 0, the SAME value `constants::tab_id::decode` returns
-            // for a plain, un-encoded small tabId (the shape every test below already uses), so
-            // every existing test's tabId keeps working unchanged with no per-test encoding.
+            // ADR-0058/0061: relay hello then the extension identity frame. The plain, un-encoded
+            // small tabIds every test below uses decode to slot 0, which `resolve_target` treats as
+            // "unrouted" and resolves to this sole focus-front browser -- so every existing test's
+            // tabId keeps working unchanged with no per-test encoding.
             let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
             host::write_message(&mut ext_side, &hello).await.unwrap();
+            let identity = serde_json::to_vec(&serde_json::json!({
+                "type": ghostlight_transport::handshake::EXTENSION_IDENTITY_TYPE,
+                ghostlight_transport::handshake::BROWSER_ID_FIELD: "pipeline-fixture",
+            }))
+            .unwrap();
+            host::write_message(&mut ext_side, &identity).await.unwrap();
             loop {
                 let Some(req) = host::read_message(&mut ext_side).await.unwrap() else {
                     break;
@@ -1055,6 +1154,7 @@ mod tests {
                 "test-guid",
                 Some(json!(1)),
                 Some(&params),
+                None,
             )
             .await;
             let text = resp.result.as_ref().expect("tool result present")["content"][0]["text"]
@@ -1116,6 +1216,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&denied_params),
+            None,
         )
         .await;
         let denied_text = denied.result.as_ref().expect("tool result present")["content"][0]
@@ -1139,6 +1240,74 @@ mod tests {
             "test-guid",
             Some(json!(2)),
             Some(&allowed_params),
+            None,
+        )
+        .await;
+        let allowed_text = allowed.result.as_ref().expect("tool result present")["content"][0]
+            ["text"]
+            .as_str()
+            .expect("text content block");
+        assert_eq!(allowed_text, "navigated");
+    }
+
+    /// ADR-0060: a tighten-only session overlay denies a target the SERVICE allows, and permits
+    /// an in-grant target -- the demo's exact scenario, and the headline security property. The
+    /// service is all-open (grants everything), so this also proves the overlay tightens even when
+    /// the service imposes nothing (the resource is resolved because an overlay is present).
+    #[tokio::test]
+    async fn a_session_overlay_denies_a_target_the_all_open_service_allows() {
+        let recorder = Arc::new(Recorder::disabled());
+        let governance = Arc::new(Governance::all_open(recorder as Arc<dyn AuditSink>));
+        let store = crate::governance::config::reload::ConfigStore::for_test_with_config(
+            config_with_sacred_domains(&[]),
+        );
+        let browser = Browser::new();
+        let (_ext, _seen) = attach_fake_extension_with_tab_urls(
+            &browser,
+            vec![(
+                "navigate",
+                json!({ "content": [{ "type": "text", "text": "navigated" }] }),
+            )],
+            vec![(5, Some("https://sylin.org/"))],
+        );
+        wait_connected(&browser).await;
+
+        let overlay = crate::governance::overlay::SessionOverlay::parse(
+            r#"{"schema":3,"name":"o","version":"1","mode":"enforce",
+                "grants":[{"id":"s","hosts":{"allow":["sylin.org","*.sylin.org"]},
+                "allowed":["read","action"],"description":"the stage"}]}"#,
+            crate::browser::pattern::is_valid_pattern,
+            crate::browser::polarity::evaluate_host,
+        )
+        .expect("overlay parses");
+
+        // Off-grant target: the overlay denies it, though the all-open service would allow it.
+        let denied = handle_tools_call(
+            &browser,
+            &store,
+            &governance,
+            "test-guid",
+            Some(json!(1)),
+            Some(&json!({ "name": "navigate", "arguments": { "url": "https://example.com/", "tabId": 5 } })),
+            Some(&overlay),
+        )
+        .await;
+        let denied_text = denied.result.as_ref().expect("tool result present")["content"][0]
+            ["text"]
+            .as_str()
+            .expect("text content block");
+        assert!(denied_text.starts_with("Denied"), "{denied_text}");
+        assert!(denied_text.contains("example.com"), "{denied_text}");
+
+        // In-grant target: the overlay allows it, so the call reaches the extension.
+        let allowed = handle_tools_call(
+            &browser,
+            &store,
+            &governance,
+            "test-guid",
+            Some(json!(2)),
+            Some(&json!({ "name": "navigate", "arguments": { "url": "https://sylin.org/", "tabId": 5 } })),
+            Some(&overlay),
         )
         .await;
         let allowed_text = allowed.result.as_ref().expect("tool result present")["content"][0]
@@ -1177,6 +1346,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let text = resp.result.as_ref().expect("tool result present")["content"][0]["text"]
@@ -1201,6 +1371,7 @@ mod tests {
             "test-guid",
             Some(json!(2)),
             Some(&params2),
+            None,
         )
         .await;
         let text2 = resp2.result.as_ref().expect("tool result present")["content"][0]["text"]
@@ -1236,6 +1407,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
 
@@ -1295,6 +1467,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let result = resp.result.as_ref().expect("tool result present");
@@ -1337,6 +1510,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let text = resp.result.as_ref().expect("tool result present")["content"][0]["text"]
@@ -1390,6 +1564,7 @@ mod tests {
             live_guids: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashMap::new()),
             ),
+            overlay: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
         crate::mcp::server::handle_line(
             &browser,
@@ -1411,6 +1586,7 @@ mod tests {
             "test-guid",
             Some(json!(2)),
             Some(&params),
+            None,
         )
         .await;
         let text = resp.result.as_ref().expect("tool result present")["content"][0]["text"]
@@ -1458,6 +1634,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
 
@@ -1489,6 +1666,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         assert_eq!(resp.error.as_ref().expect("error present")["code"], -32602);
@@ -1518,6 +1696,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         assert!(resp.error.is_none(), "a held reply is a JSON-RPC success");
@@ -1542,6 +1721,7 @@ mod tests {
             "test-guid",
             Some(json!(3)),
             Some(&explain_params),
+            None,
         )
         .await;
         let explain_result = explain_resp.result.as_ref().expect("tool result present");
@@ -1563,6 +1743,7 @@ mod tests {
             "test-guid",
             Some(json!(2)),
             Some(&params),
+            None,
         )
         .await;
         let result2 = resp2.result.as_ref().expect("tool result present");
@@ -1597,6 +1778,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&held_params),
+            None,
         )
         .await;
 
@@ -1610,6 +1792,7 @@ mod tests {
             "test-guid",
             Some(json!(2)),
             Some(&allowed_params),
+            None,
         )
         .await;
 
@@ -1700,6 +1883,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let text = resp.result.as_ref().expect("tool result present")["content"][0]["text"]
@@ -1749,6 +1933,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let text = resp.result.as_ref().expect("tool result present")["content"][0]["text"]
@@ -1814,6 +1999,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let result = resp.result.as_ref().expect("tool result present");
@@ -1865,6 +2051,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let result = resp.result.as_ref().expect("tool result present");
@@ -1915,6 +2102,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let text = resp.result.as_ref().expect("tool result present")["content"][0]["text"]
@@ -1975,6 +2163,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let enforce_text = enforce_resp.result.as_ref().expect("result")["content"][0]["text"]
@@ -2010,6 +2199,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let observe_text = observe_resp.result.as_ref().expect("result")["content"][0]["text"]
@@ -2162,6 +2352,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let result = resp.result.as_ref().expect("tool result present");
@@ -2208,6 +2399,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let result = resp.result.as_ref().expect("tool result present");
@@ -2233,6 +2425,7 @@ mod tests {
             "test-guid",
             Some(json!(2)),
             Some(&explain_params),
+            None,
         )
         .await;
         let explain_result = explain_resp.result.as_ref().expect("tool result present");
@@ -2287,6 +2480,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&read_page_params),
+            None,
         )
         .await;
         let read_page_text = read_page_resp.result.as_ref().expect("tool result present")
@@ -2317,6 +2511,7 @@ mod tests {
             "test-guid",
             Some(json!(2)),
             Some(&find_params),
+            None,
         )
         .await;
         let find_text = find_resp.result.as_ref().expect("tool result present")["content"][0]
@@ -2361,6 +2556,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let result = resp.result.as_ref().expect("tool result present");
@@ -2387,6 +2583,7 @@ mod tests {
             "test-guid",
             Some(json!(2)),
             Some(&denied_params),
+            None,
         )
         .await;
         let denied_text = denied_resp.result.as_ref().expect("tool result present")["content"][0]
@@ -2440,6 +2637,7 @@ mod tests {
             "test-guid",
             Some(json!(1)),
             Some(&params),
+            None,
         )
         .await;
         let text = resp.result.as_ref().expect("tool result present")["content"][0]["text"]
@@ -2565,6 +2763,7 @@ mod tests {
             guid: "test-guid",
             config: &config,
             args: &args,
+            overlay: None,
         };
 
         let mut outcome = synthetic(ctx).await;

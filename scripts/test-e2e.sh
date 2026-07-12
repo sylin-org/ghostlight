@@ -20,4 +20,8 @@
 set -euo pipefail
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${TMPDIR:-/tmp}/ghostlight-e2e-target}"
 echo "test-e2e: isolated CARGO_TARGET_DIR=$CARGO_TARGET_DIR (a live dev service will not lock it)"
+# The spawn tests launch ghostlight-relay as a SIBLING binary (tests/support::relay_bin), but no
+# CARGO_BIN_EXE_ dependency forces cargo to build another package's bin before the root package's
+# tests run -- build it explicitly so the first spawn never races the build plan.
+cargo build --locked -p ghostlight-relay
 cargo test --locked --no-fail-fast --workspace -- --include-ignored "$@" < /dev/null

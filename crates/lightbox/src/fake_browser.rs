@@ -11,7 +11,7 @@
 //! one ADR-0058 shipped with is caught by the FIRST offline round trip, before a real browser
 //! (whose own tab ids can genuinely reach that magnitude) is ever involved.
 
-use ghostlight_transport::instance::Selection;
+use ghostlight_transport::instance;
 use ghostlight_transport::ipc::{self, EndpointProbe};
 use ghostlight_transport::{handshake, host, proc};
 use serde_json::{json, Value};
@@ -35,9 +35,9 @@ pub fn run(opts: FakeBrowserOptions) -> anyhow::Result<()> {
 }
 
 async fn run_async(opts: FakeBrowserOptions) -> anyhow::Result<()> {
-    let selection = Selection::resolve_from(opts.instance.as_deref())
+    let instance = instance::resolve_from(opts.instance.as_deref())
         .map_err(|e| anyhow::anyhow!("invalid --instance: {e}"))?;
-    let endpoints = ipc::endpoint_candidates(&selection);
+    let endpoints = ipc::endpoint_candidates(&instance);
     let endpoint = pick_endpoint(&endpoints);
 
     println!(
@@ -57,9 +57,18 @@ async fn run_async(opts: FakeBrowserOptions) -> anyhow::Result<()> {
         }),
     );
     host::write_message(&mut write_half, &hello).await?;
+    // ADR-0061: identity is the EXTENSION's persistent UUID now, not the relay pid. Stand in for it
+    // with a stable id derived from --pid, sent as the opening identity frame the real extension
+    // would post; the service assigns this fake browser a slot from it.
+    let browser_id = format!("fake-browser-{}", opts.pid);
+    let identity = serde_json::to_vec(&json!({
+        "type": handshake::EXTENSION_IDENTITY_TYPE,
+        handshake::BROWSER_ID_FIELD: browser_id,
+    }))?;
+    host::write_message(&mut write_half, &identity).await?;
     println!(
-        "hello sent; attached as pid={}. auto-reply={}",
-        opts.pid, opts.auto_reply
+        "hello + identity sent; attached as browserId={browser_id}. auto-reply={}",
+        opts.auto_reply
     );
     println!("commands: focus | kill | reply <id> <json-result> | quit");
 

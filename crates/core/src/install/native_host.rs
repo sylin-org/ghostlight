@@ -152,10 +152,11 @@ pub struct HostManifest {
 }
 
 impl HostManifest {
-    /// Build from the binary path plus an OPTIONAL extra extension id (ADR-0048 D5): the two
-    /// shipped identities ([`STORE_EXTENSION_ID`], [`DEV_EXTENSION_ID`]) are always allowed, so
-    /// a default install needs no flag; `--extension-id` appends one more origin (validated,
-    /// deduplicated) for a fork or an enterprise-packaged extension.
+    /// Build from the binary path plus an OPTIONAL extra extension id (ADR-0065: one stack). The
+    /// host serves BOTH known builds of the extension -- the Web Store [`STORE_EXTENSION_ID`] and
+    /// the unpacked [`DEV_EXTENSION_ID`] (pinned by the committed manifest `key`, ADR-0016) -- so
+    /// either connects to whatever engine currently holds the endpoint. `--extension-id` appends
+    /// one more origin (validated, deduplicated) for a fork or an enterprise-packaged extension.
     pub fn resolve(current_exe: &Path, extension_id: Option<&str>) -> Result<Self> {
         let mut allowed_origins =
             vec![origin_for(STORE_EXTENSION_ID), origin_for(DEV_EXTENSION_ID)];
@@ -470,6 +471,8 @@ mod tests {
 
     #[test]
     fn host_manifest_json_has_type_stdio_and_exact_origin() {
+        // ADR-0065: the host serves both known extension builds (store + unpacked dev);
+        // `--extension-id` appends one more.
         let m = HostManifest::resolve(Path::new("/abs/ghostlight"), Some(&"a".repeat(32))).unwrap();
         let v: serde_json::Value = serde_json::from_str(&m.to_json()).unwrap();
         assert_eq!(v["name"], host_name());
@@ -501,10 +504,10 @@ mod tests {
         assert!(validate_extension_id("").is_err());
     }
 
-    /// ADR-0048 D5: no --extension-id needed -- both shipped identities are always allowed, and
-    /// re-passing one of them never duplicates the origin.
+    /// ADR-0065: the host always serves both known extension builds (store + unpacked dev);
+    /// `--extension-id` appends one more origin (validated, deduplicated).
     #[test]
-    fn resolve_without_an_id_allows_the_two_shipped_extensions() {
+    fn resolve_without_an_id_allows_both_known_extensions() {
         let m = HostManifest::resolve(Path::new("/x"), None).unwrap();
         assert_eq!(
             m.allowed_origins,
@@ -513,8 +516,11 @@ mod tests {
                 format!("chrome-extension://{DEV_EXTENSION_ID}/"),
             ]
         );
-        let dup = HostManifest::resolve(Path::new("/x"), Some(DEV_EXTENSION_ID)).unwrap();
+        // Re-passing an id the manifest already carries never duplicates.
+        let dup = HostManifest::resolve(Path::new("/x"), Some(STORE_EXTENSION_ID)).unwrap();
         assert_eq!(dup.allowed_origins.len(), 2);
+        let dup2 = HostManifest::resolve(Path::new("/x"), Some(DEV_EXTENSION_ID)).unwrap();
+        assert_eq!(dup2.allowed_origins.len(), 2);
     }
 
     #[test]

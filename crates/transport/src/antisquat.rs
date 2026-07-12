@@ -8,11 +8,14 @@
 //! single byte of its stdio. This is defense-in-depth, not a same-user sandbox: a determined
 //! same-user process can read any same-user file (Decision 8).
 //!
-//! The key is per-USER and shared across a user's instances (ADR-0048 amendment): it lives under
-//! the instance-INDEPENDENT `shared_data_dir`, NOT the per-instance `log_dir`, so the development
-//! override -- an unpinned (default-identity) adapter verifying a live `dev` service's proof --
-//! resolves the SAME secret on both sides. Per-instance keys would have added no same-user defense
-//! (the threat model is cross-user squatting), only broken the override.
+//! The key is PER-INSTANCE (ADR-0064): it lives under the instance's own `log_dir`, so an adapter
+//! and the service it connects to -- both pinned to the same instance -- resolve the SAME secret,
+//! while two different instances (a `dev` alongside the default) each own an isolated key. This
+//! replaces the ADR-0048 instance-INDEPENDENT `shared_data_dir` key, which only existed so an
+//! unpinned (default-identity) adapter could verify a live `dev` service's proof -- a case that no
+//! longer exists now that every client pins one instance. The threat model is unchanged (cross-user
+//! squatting; the key is per-USER via the user-owned data dir), so per-instance keys lose no defense.
+//! The DEFAULT instance's key location is byte-identical to before (`<data>/ghostlight/hub-key`).
 
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
@@ -21,10 +24,9 @@ use std::path::{Path, PathBuf};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// The per-install secret's filename under `crate::observability::shared_data_dir` (PINS.md SS5.3):
-/// PER-USER and shared across a user's instances (ADR-0048 amendment), never a machine-wide
-/// directory (that corrected an earlier `%ProgramData%` draft). Created lazily on the first
-/// `run_service` start if absent.
+/// The per-install secret's filename under the instance's `crate::observability::log_dir`
+/// (PINS.md SS5.3): PER-USER and PER-INSTANCE (ADR-0064), never a machine-wide directory (that
+/// corrected an earlier `%ProgramData%` draft). Created lazily on the first `run_service` start.
 const HUB_KEY_FILE: &str = "hub-key";
 
 /// The pinned refusal text (PINS.md SS5.3), logged and returned verbatim by the adapter on ANY
@@ -34,13 +36,11 @@ const HUB_KEY_FILE: &str = "hub-key";
 pub const REFUSAL_MESSAGE: &str = "refusing to connect: the Ghostlight service on this endpoint is not the one this user installed";
 
 fn hub_key_path() -> std::io::Result<PathBuf> {
-    // ADR-0048 amendment: the hub-key lives under the instance-INDEPENDENT
-    // [`crate::observability::shared_data_dir`], not the per-instance `log_dir`. The development
-    // override deliberately has an UNPINNED adapter (default identity) verify a live `dev`
-    // service's proof; a per-instance key would put the two on different secrets and every such
-    // connect would fail the anti-squat proof. The secret stays per-USER (the threat model is
-    // cross-user squatting), so sharing it across a user's instances loses no defense.
-    let dir = crate::observability::shared_data_dir().ok_or_else(|| {
+    // ADR-0064: the hub-key lives under the INSTANCE's own `log_dir`, so an adapter and the service
+    // it dials -- both pinned to the same instance -- resolve the same secret, and two instances own
+    // isolated keys. (The ADR-0048 instance-independent key only existed for the retired unpinned
+    // adapter -> dev-service shadow.)
+    let dir = crate::observability::log_dir().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "no per-user data directory available for the hub-key",

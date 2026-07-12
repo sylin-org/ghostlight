@@ -62,6 +62,15 @@ warnings`, and `cargo test` green; ASCII source (escapes for anything else); mat
 surrounding code's style; and one logical change per PR. For anything larger than a
 small fix, open a Discussion or Issue first so nobody builds the wrong thing.
 
+### The dev loop: seeing your changes live
+
+Ghostlight runs one stack ([ADR-0065](docs/adr/0065-one-stack-endpoint-is-the-engine.md)): one
+native host, one endpoint, one engine (whichever `ghostlight` service currently holds the
+endpoint). A Rust change and a JavaScript-extension change refresh differently -- a Rust change is
+one command (`scripts/dev-loop.ps1` swaps in your fresh build; editors and the browser reconnect on
+their own), a JS change is a Reload at `chrome://extensions`. [docs/DEV-LOOP.md](docs/DEV-LOOP.md)
+is the full how-to, starting with a "when code changes, do this" table.
+
 ### Running tests locally
 
 The suite has two tiers ([ADR-0032](docs/adr/0032-test-at-seams-and-inject-config-sources.md),

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ghostlight in Browser",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "description": "Governed browser automation over your own authenticated session, for AI agents.",
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5OBU2elZPOGUA3D9mUZL/nKkekxDmK6ZLQuJCJXVM6EK3szt2s+oG2U2VPTgXdxLDVTL3D0pqhZ0mzF+scDcWux0sGVCpnpmE4KftbJMQrcxwT6oDhMr5IDHjXrm7TLNlvBvyTcsdWnfim8DEC+kQNmS7errGJmWK54vKSRH+6SexjeOWLz94RGvS5t8/yBf36ZN9voOZBMNhyKJsTcppJh6ZGjTiXsGSVRFYn8zrZXx3acX/Q4ryu3+p10dK0R82AYfLp3qSuP4OrirK1dWxzW96QAwFZtCJzLuUNzaCgImZPcIqXogIYK91Q6h+5zRqsw9dvsGLbz62zV77JuyMQIDAQAB",

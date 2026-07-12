@@ -98,6 +98,13 @@ const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 /// window elapsing with no reconnect) fails them, with the unchanged disconnect error text.
 pub const GRACE_WINDOW: Duration = Duration::from_secs(10);
 
+/// How long [`Browser::attach`] waits for the extension's opening identity frame (ADR-0061) after a
+/// valid `ROLE_BROWSER` hello, before failing the admission closed. Generous: the extension posts it
+/// synchronously on connect and the byte-pipe relay forwards it immediately, so it arrives in
+/// milliseconds; this only bounds a silent or pre-0061 peer so its connection task never parks
+/// forever on a read that will not complete.
+const IDENTITY_WINDOW: Duration = Duration::from_secs(5);
+
 /// The truthful, hop-attributed error for every call while [`Browser::is_killed`] is true
 /// (g11): the user severed the session; never a generic connection failure.
 fn kill_error() -> ToolError {
@@ -172,9 +179,11 @@ fn merge_tab_id(args: &Value, native: i64) -> Value {
 /// walking both real JSON structure (`structuredContent`, nested objects/arrays) and any
 /// `content[].text` block whose text happens to parse as JSON (`tabs_context_mcp`/
 /// `tabs_create_mcp` report their tab list this way, as a JSON-stringified text block AND as
-/// `structuredContent`). A text block that is not valid JSON is left untouched. Generic on
-/// purpose: covers every current tabId-reporting tool and any future one without a matching
-/// manual edit here.
+/// `structuredContent`). A text block that is not valid JSON has its `Created tab {native}.` prose
+/// prefix rewritten too (see [`encode_created_tab_prose`]) so a consumer reading the human text gets
+/// the SAME composite id structuredContent carries; any other prose is left untouched. Generic on
+/// purpose: covers every current tabId-reporting tool and any future one without a matching manual
+/// edit here.
 fn encode_tab_ids_in_value(v: &mut Value, target: u32) {
     match v {
         Value::Object(map) => {
@@ -192,6 +201,8 @@ fn encode_tab_ids_in_value(v: &mut Value, target: u32) {
                     if let Ok(restr) = serde_json::to_string(&parsed) {
                         map.insert("text".to_string(), Value::String(restr));
                     }
+                } else if let Some(rewritten) = encode_created_tab_prose(text, target) {
+                    map.insert("text".to_string(), Value::String(rewritten));
                 }
             }
             for value in map.values_mut() {
@@ -205,6 +216,35 @@ fn encode_tab_ids_in_value(v: &mut Value, target: u32) {
         }
         _ => {}
     }
+}
+
+/// Rewrite the `Created tab {native}.` prose the extension prepends to a `tabs_create_mcp` result
+/// (`extension/service-worker.js`) so its tab id is the SAME composite structuredContent already
+/// carries (ADR-0058 encoding, completed here per the ADR-0061 live-verify finding). Without this,
+/// the human-readable text leaked the raw native id while structuredContent was slot-encoded, so a
+/// consumer that reads the prose (our own `demo`/scripts/smoke parsers, or a model reading the text
+/// rather than structuredContent) would route by an un-encoded id -- which only works by the slot-0
+/// focus fallback and mis-routes with more than one browser attached. Returns the rewritten string
+/// only when the exact `Created tab <digits>` prefix is present; every other prose is untouched.
+/// Deliberately narrow (one known phrase, not a fuzzy number sweep) so it never rewrites an
+/// unrelated integer that happens to appear in some other tool's text.
+fn encode_created_tab_prose(text: &str, target: u32) -> Option<String> {
+    const PREFIX: &str = "Created tab ";
+    let digits_start = text.find(PREFIX)? + PREFIX.len();
+    let digits_end = text[digits_start..]
+        .find(|c: char| !c.is_ascii_digit())
+        .map_or(text.len(), |i| digits_start + i);
+    if digits_end == digits_start {
+        return None; // "Created tab " not followed by a number
+    }
+    let native: i64 = text[digits_start..digits_end].parse().ok()?;
+    let composite = crate::constants::tab_id::encode(target, native);
+    Some(format!(
+        "{}{}{}",
+        &text[..digits_start],
+        composite,
+        &text[digits_end..]
+    ))
 }
 
 /// Parse the extension's `rescale_coords` reply: a text content block holding
@@ -241,16 +281,25 @@ struct BrowserSession {
 pub struct Browser {
     next_id: Arc<AtomicU64>,
     pending: Pending,
-    /// Every currently-attached browser, keyed by its OS pid (ADR-0058; replaces the pre-0058
-    /// single `outgoing: Option<Sender>` slot). A hello for a pid already present REPLACES the
-    /// entry (a reconnect/relaunch from the SAME browser); a hello for a new pid is ADDED
-    /// alongside any others.
+    /// Every currently-attached browser, keyed by its service-assigned `slot` (ADR-0061; replaces
+    /// the pre-0061 OS-pid key, which degraded to a colliding `0`). A reconnect from the SAME
+    /// browser (same UUID, so same slot) REPLACES the entry; a new browser (new UUID, new slot) is
+    /// ADDED alongside any others. Evicted on detach.
     sessions: Arc<Mutex<HashMap<u32, BrowserSession>>>,
-    /// Focus recency (ADR-0058): front = the browser that most recently reported
-    /// `chrome.windows.onFocusChanged` gaining focus. Only entries also present in `sessions`
-    /// are ever consulted; a disconnected browser's entry is pruned on its own detach. Used ONLY
-    /// to pick a target when a call names no tab at all (tab-creation bootstrap); a call that
-    /// names a tab is always routed by that tab's OWN encoded browser pid, never by focus.
+    /// The slot registry (ADR-0061): the extension's persistent browser UUID -> its stable
+    /// `slot` (1, 2, 3, ...; never 0). Assigned once per distinct browser and NEVER evicted, so a
+    /// reconnect from the same browser gets the SAME slot and its previously minted composite tab
+    /// ids still route. Bounded by the number of distinct browser profiles ever seen this service
+    /// lifetime -- tiny.
+    slots: Arc<Mutex<HashMap<String, u32>>>,
+    /// Monotonic source for the next `slot` (ADR-0061): starts at 1 so a slot is never 0.
+    next_slot: Arc<AtomicU64>,
+    /// Focus recency (ADR-0058/0061): front = the browser whose slot most recently gained window
+    /// focus (or, failing any focus report, most recently attached -- seeded on attach so the
+    /// chain always covers every live session). Only entries also present in `sessions` are ever
+    /// consulted; a disconnected browser's entry is pruned on detach. Used ONLY to pick a target
+    /// when a call names no tab at all (tab-creation bootstrap); a call that names a tab is always
+    /// routed by that tab's OWN encoded slot, never by focus.
     focus_chain: Arc<Mutex<Vec<u32>>>,
     /// Monotonic source for [`BrowserSession::generation`] (ADR-0058).
     next_session_generation: Arc<AtomicU64>,
@@ -293,6 +342,8 @@ impl Browser {
             next_id: Arc::new(AtomicU64::new(1)),
             pending: Arc::new(Mutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            slots: Arc::new(Mutex::new(HashMap::new())),
+            next_slot: Arc::new(AtomicU64::new(1)),
             focus_chain: Arc::new(Mutex::new(Vec::new())),
             next_session_generation: Arc::new(AtomicU64::new(1)),
             // Dropping the initial receiver is fine: updates use `send_replace`, which does not
@@ -389,70 +440,121 @@ impl Browser {
         !self.sessions.lock().unwrap().is_empty()
     }
 
-    /// A snapshot of every attached browser for `ghostlight doctor` (ADR-0058, CAP-MED-01):
-    /// pid and whether it is the current focus-chain front, most-recently-focused first, falling
-    /// back to ascending pid order for browsers that have never reported focus (a stable,
-    /// deterministic order beats an arbitrary hash-map one for a diagnostic listing).
+    /// Get-or-assign this browser's stable `slot` from its extension UUID (ADR-0061): a small,
+    /// monotonic, never-zero number. Called once at attach; the mapping is never evicted, so a
+    /// reconnect from the same UUID resolves to the same slot and its old composite tab ids still
+    /// route.
+    fn slot_for(&self, browser_id: &str) -> u32 {
+        let mut slots = self.slots.lock().unwrap();
+        if let Some(&slot) = slots.get(browser_id) {
+            return slot;
+        }
+        let slot = self.next_slot.fetch_add(1, Ordering::Relaxed) as u32;
+        slots.insert(browser_id.to_string(), slot);
+        slot
+    }
+
+    /// A pure lookup of a browser UUID's assigned slot (ADR-0061), or `None` if it has never
+    /// attached. Non-assigning, unlike [`Browser::slot_for`] -- used where observing must not
+    /// mint a slot (tests polling for a specific browser's admission).
+    pub fn slot_of(&self, browser_id: &str) -> Option<u32> {
+        self.slots.lock().unwrap().get(browser_id).copied()
+    }
+
+    /// A snapshot of every attached browser for `ghostlight doctor` (ADR-0058/0061, CAP-MED-01):
+    /// each browser's slot and whether it is the current focus-chain front, most-recently-focused
+    /// first, falling back to ascending slot order for browsers that have never reported focus (a
+    /// stable, deterministic order beats an arbitrary hash-map one for a diagnostic listing).
     pub fn browser_snapshot(&self) -> Vec<ghostlight_transport::ipc::BrowserInfo> {
         let sessions = self.sessions.lock().unwrap();
         let chain = self.focus_chain.lock().unwrap();
-        let mut pids: Vec<u32> = sessions.keys().copied().collect();
-        pids.sort_unstable();
+        let mut slots: Vec<u32> = sessions.keys().copied().collect();
+        slots.sort_unstable();
         let mut ordered: Vec<u32> = chain
             .iter()
             .copied()
-            .filter(|p| sessions.contains_key(p))
+            .filter(|s| sessions.contains_key(s))
             .collect();
-        for pid in &pids {
-            if !ordered.contains(pid) {
-                ordered.push(*pid);
+        for slot in &slots {
+            if !ordered.contains(slot) {
+                ordered.push(*slot);
             }
         }
         ordered
             .into_iter()
             .enumerate()
-            .map(|(i, pid)| ghostlight_transport::ipc::BrowserInfo {
-                pid,
+            .map(|(i, slot)| ghostlight_transport::ipc::BrowserInfo {
+                slot,
                 focused: i == 0,
             })
             .collect()
     }
 
-    /// Resolve which browser a call targets, from an optional COMPOSITE tab id (ADR-0058):
-    /// decoded from `args.tabId` when the call names a tab, else the focus-chain front (falling
-    /// back to the sole attached browser, then to the smallest pid, when nothing has ever
-    /// reported focus). Returns `(target_pid, native_tab_id)`; `target_pid` is `None` only when
-    /// NO browser is attached at all. `native_tab_id` is `Some` only when a tab was named --
-    /// the value to put on the wire to the extension, which never learns the composite encoding
+    /// Resolve which browser a call targets, from an optional COMPOSITE tab id (ADR-0058/0061):
+    /// decoded from `args.tabId` when the call names a tab, else the most-recently-active LIVE slot
+    /// (the focus chain front). Returns `(target_slot, native_tab_id)`; `target_slot` is `None`
+    /// only when NO browser is attached at all. `native_tab_id` is `Some` only when a tab was named
+    /// -- the value to put on the wire to the extension, which never learns the composite encoding
     /// exists.
+    ///
+    /// ADR-0061 retired the pre-0061 `sessions.keys().min()` fallback (which could hand a call to a
+    /// lingering pid-0 corpse): the focus chain is seeded on attach (see [`Browser::touch_focus`]),
+    /// so it always covers every live session, and a live focus-ordered entry is always available
+    /// when any browser is attached. The `.or_else` below is a defensive floor only -- it can no
+    /// longer select a dead or zero slot, because a slot maps to a live UUID and is evicted from
+    /// `sessions` on disconnect.
     fn resolve_target(&self, composite_tab_id: Option<i64>) -> (Option<u32>, Option<i64>) {
         if let Some(composite) = composite_tab_id {
-            let (pid, native) = crate::constants::tab_id::decode(composite);
-            return (Some(pid), Some(native));
+            let (slot, native) = crate::constants::tab_id::decode(composite);
+            if slot != 0 {
+                return (Some(slot), Some(native));
+            }
+            // Slot 0 is the documented "not from `encode`" sentinel (a plain, un-encoded tab id, as
+            // an in-proc test fixture uses, or a pre-0061 client). No browser is named, so resolve
+            // by focus like a no-tab call -- but keep the caller's native tab id. This can never
+            // pick a corpse (slot 0 is never assigned; the focus front is always a live slot).
+            return (self.focus_front_live(), Some(native));
         }
-        let sessions = self.sessions.lock().unwrap();
-        if sessions.is_empty() {
-            return (None, None);
-        }
-        let chain = self.focus_chain.lock().unwrap();
-        if let Some(pid) = chain.iter().find(|p| sessions.contains_key(p)) {
-            return (Some(*pid), None);
-        }
-        (sessions.keys().min().copied(), None)
+        (self.focus_front_live(), None)
     }
 
-    /// Record that `browser_pid` just reported gaining window focus (ADR-0058): move-to-front,
-    /// no duplicate entries. Only "gained focus" is ever reported or tracked -- losing focus to
-    /// something else (another app, or nothing) carries no actionable signal, so the chain's
-    /// recency order alone already answers "who was focused most recently, among those still
-    /// attached" without a separate blurred/focused boolean per entry.
-    fn note_focus(&self, browser_pid: u32) {
+    /// The most-recently-active LIVE slot (ADR-0061): the focus-chain front that is still attached,
+    /// or the smallest live slot as a deterministic floor, or `None` when no browser is attached.
+    /// Because the focus chain is seeded on attach and pruned on detach, and slots are never 0, this
+    /// never returns a dead or zero slot.
+    fn focus_front_live(&self) -> Option<u32> {
+        let sessions = self.sessions.lock().unwrap();
+        if sessions.is_empty() {
+            return None;
+        }
+        let chain = self.focus_chain.lock().unwrap();
+        chain
+            .iter()
+            .find(|s| sessions.contains_key(s))
+            .copied()
+            .or_else(|| sessions.keys().copied().min())
+    }
+
+    /// Move `slot` to the front of the focus chain (ADR-0061), no duplicate entries. The shared
+    /// core of [`Browser::note_focus`] (a real focus report) and the attach-time seed (a freshly
+    /// connected browser is the most-recently-active until another reports focus), so the chain
+    /// always covers every live session and [`Browser::resolve_target`] never needs a corpse-prone
+    /// fallback.
+    fn touch_focus(&self, slot: u32) {
         let mut chain = self.focus_chain.lock().unwrap();
-        chain.retain(|p| *p != browser_pid);
-        chain.insert(0, browser_pid);
-        drop(chain);
+        chain.retain(|s| *s != slot);
+        chain.insert(0, slot);
+    }
+
+    /// Record that `slot` just reported gaining window focus (ADR-0058/0061): move-to-front, plus a
+    /// diagnostic note. Only "gained focus" is ever reported or tracked -- losing focus to something
+    /// else (another app, or nothing) carries no actionable signal, so the chain's recency order
+    /// alone already answers "who was focused most recently, among those still attached" without a
+    /// separate blurred/focused boolean per entry.
+    fn note_focus(&self, slot: u32) {
+        self.touch_focus(slot);
         self.debug
-            .ipc_note(&Diagnostic::FocusReported { browser_pid }.describe());
+            .ipc_note(&Diagnostic::FocusReported { slot }.describe());
     }
 
     /// Wait until a native-host / extension is attached, up to `timeout`. Returns `true`
@@ -533,7 +635,7 @@ impl Browser {
 
     /// The bare envelope + dispatch of [`Browser::call`], shared with internal sends that must not
     /// re-enter the gif action-noting or screenshot-cache layers. `target` is the already-resolved
-    /// browser pid (ADR-0058) this specific request is sent to.
+    /// slot (ADR-0058/0061) this specific request is sent to.
     async fn raw_call(
         &self,
         guid: &str,
@@ -773,7 +875,7 @@ impl Browser {
     pub fn request_group(&self, guid: &str, tab_ids: &[i64], title: &str) {
         // ADR-0058: `tab_ids` are the composite, MCP-facing ids this session owns (mirrored
         // from `args.tabId` at claim time -- `hub::session::claim_tab_live`). A session's tabs
-        // all belong to the SAME browser, so the first id's encoded pid picks the target; every
+        // all belong to the SAME browser, so the first id's encoded slot picks the target; every
         // id is decoded to its native form for the extension, which never learns the encoding.
         let Some(&first) = tab_ids.first() else {
             return; // nothing to group
@@ -927,23 +1029,26 @@ impl Browser {
         outcome
     }
 
-    /// Attach a connected native-host stream: read its `ROLE_BROWSER` session-hello (ADR-0058),
-    /// admit it as an independent session keyed by the hello's `browserPid`, then spawn a writer
+    /// Attach a connected native-host stream: read its `ROLE_BROWSER` session-hello (ADR-0058) then
+    /// the extension's opening identity frame (ADR-0061), assign the browser's `slot` from its
+    /// persistent UUID, admit it as an independent session keyed by that slot, then spawn a writer
     /// draining outgoing frames to it and run a reader routing replies back to waiting callers.
     ///
-    /// UNLIKE the pre-0058 single-slot design, a well-formed hello is ALWAYS admitted: a
-    /// `browserPid` already present REPLACES the existing entry (a service-worker relaunch or
-    /// reconnect from the SAME browser), and a NEW `browserPid` is ADDED alongside any others --
-    /// this is the actual multi-browser support. [`AttachOutcome::AlreadyAttached`] is returned
-    /// ONLY for a connection that never presents a valid hello at all: a bare probe (`doctor`'s
-    /// harmless connect-and-close, which sends nothing) or a malformed/wrong-role frame. Either
-    /// way nothing here is touched; the peer's stream is dropped and it observes EOF. This is
-    /// what lets [`crate::transport::native::ipc::serve`] accept connections ahead of time
-    /// (spawning `attach` per connection) so the pipe always has a spare instance ready, instead
-    /// of parking the accept loop for the whole service lifetime.
+    /// UNLIKE the pre-0058 single-slot design, a well-formed handshake is ALWAYS admitted: a UUID
+    /// already mapped to a slot REPLACES that slot's existing session (a service-worker relaunch or
+    /// reconnect from the SAME browser), and a NEW UUID gets a NEW slot ADDED alongside any others
+    /// -- this is the actual multi-browser support. [`AttachOutcome::AlreadyAttached`] is returned
+    /// for a connection that never presents a valid hello at all -- a bare probe (`doctor`'s
+    /// harmless connect-and-close, which sends nothing) or a malformed/wrong-role frame -- OR that
+    /// presents a valid `ROLE_BROWSER` hello but no valid identity frame within [`IDENTITY_WINDOW`]
+    /// (ADR-0061 fail-closed: no identity, no admission). Either way nothing here is touched; the
+    /// peer's stream is dropped and it observes EOF. This is what lets
+    /// [`crate::transport::native::ipc::serve`] accept connections ahead of time (spawning `attach`
+    /// per connection) so the pipe always has a spare instance ready, instead of parking the accept
+    /// loop for the whole service lifetime.
     ///
     /// On [`AttachOutcome::Detached`] this ONE session's entry is removed (guarded against a
-    /// same-pid reconnect race by comparing [`BrowserSession::generation`], never blindly
+    /// same-slot reconnect race by comparing [`BrowserSession::generation`], never blindly
     /// cleared) and this session's own pending calls are failed via the grace-drain below;
     /// `is_connected()`/`wait_connected` reflect "at least one browser remains," recomputed after
     /// the removal.
@@ -985,15 +1090,32 @@ impl Browser {
             );
             return AttachOutcome::AlreadyAttached;
         }
-        let browser_pid = hello.get("browserPid").and_then(Value::as_u64).unwrap_or(0) as u32;
+        // ADR-0061: identity is the EXTENSION's persistent UUID, not the relay's guessed pid. Read
+        // the extension's opening identity frame -- the guaranteed-first native message it posts on
+        // connect, forwarded verbatim by the byte-pipe relay right after its own hello above --
+        // bounded by IDENTITY_WINDOW so a silent or pre-0061 peer that never sends it is rejected
+        // (fail closed) rather than parking this connection task on a read that never completes. The
+        // relay's `browserPid` is no longer consulted for identity; there is no pid fallback.
+        let browser_id =
+            match tokio::time::timeout(IDENTITY_WINDOW, host::read_message(&mut read_half)).await {
+                Ok(Ok(Some(bytes))) => {
+                    ghostlight_transport::handshake::parse_extension_identity(&bytes)
+                }
+                _ => None,
+            };
+        let Some(browser_id) = browser_id else {
+            self.debug.ipc_note(&Diagnostic::MissingIdentity.describe());
+            return AttachOutcome::AlreadyAttached;
+        };
+        let slot = self.slot_for(&browser_id);
 
         let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
         let replaced = {
             let mut sessions = self.sessions.lock().unwrap();
-            let replaced = sessions.contains_key(&browser_pid);
+            let replaced = sessions.contains_key(&slot);
             sessions.insert(
-                browser_pid,
+                slot,
                 BrowserSession {
                     sender: tx,
                     generation,
@@ -1001,9 +1123,12 @@ impl Browser {
             );
             replaced
         };
+        // Seed the focus chain (ADR-0061): a freshly connected browser is the most-recently-active
+        // until another reports focus, so `resolve_target(None)` always resolves to a live slot.
+        self.touch_focus(slot);
         self.debug.ipc_note(
             &Diagnostic::Attached {
-                browser_pid,
+                slot,
                 replaced_existing: replaced,
             }
             .describe(),
@@ -1031,7 +1156,7 @@ impl Browser {
             match host::read_message(&mut read_half).await {
                 Ok(Some(payload)) => {
                     self.debug.frame_in();
-                    self.route_reply(browser_pid, &payload);
+                    self.route_reply(slot, &payload);
                 }
                 Ok(None) => {
                     break ToolError::extension("Browser extension disconnected before responding")
@@ -1046,21 +1171,19 @@ impl Browser {
 
         // Compare-before-remove (ADR-0058): only clear OUR OWN entry, never a newer one that has
         // already replaced it (a reconnect from the same browser that raced ahead of this reader
-        // loop noticing its own stream died).
+        // loop noticing its own stream died). ADR-0061: only the live `sessions` entry is evicted;
+        // the slot's UUID->slot mapping in `slots` persists, so a reconnect resolves the same slot.
         {
             let mut sessions = self.sessions.lock().unwrap();
-            if matches!(sessions.get(&browser_pid), Some(s) if s.generation == generation) {
-                sessions.remove(&browser_pid);
+            if matches!(sessions.get(&slot), Some(s) if s.generation == generation) {
+                sessions.remove(&slot);
                 self.debug
-                    .ipc_note(&Diagnostic::Detached { browser_pid }.describe());
+                    .ipc_note(&Diagnostic::Detached { slot }.describe());
             } else {
                 self.debug
-                    .ipc_note(&Diagnostic::DetachedStale { browser_pid }.describe());
+                    .ipc_note(&Diagnostic::DetachedStale { slot }.describe());
             }
-            self.focus_chain
-                .lock()
-                .unwrap()
-                .retain(|p| *p != browser_pid);
+            self.focus_chain.lock().unwrap().retain(|s| *s != slot);
         }
         let still_connected = self.is_connected();
         self.debug.set_connected(still_connected);
@@ -1107,9 +1230,9 @@ impl Browser {
     /// `session_killed`, no `id`), a focus event (ADR-0058: `{"type":"focus"}`, no `id`), a hold
     /// request (g10: `get_hold` / `set_hold` / `toggle_hold`, answered here and returned early),
     /// or a reply to a waiting tool caller (by id). Messages without an id are otherwise events.
-    /// `browser_pid` is the SENDING session's identity (from its own `attach()` hello), needed to
-    /// move the focus chain and to address a hold reply back to the right connection.
-    fn route_reply(&self, browser_pid: u32, payload: &[u8]) {
+    /// `slot` is the SENDING session's assigned slot (ADR-0061), needed to move the focus chain and
+    /// to address a hold reply back to the right connection.
+    fn route_reply(&self, slot: u32, payload: &[u8]) {
         let Ok(reply) = serde_json::from_slice::<Value>(payload) else {
             tracing::warn!("dropping unparseable extension reply");
             return;
@@ -1123,7 +1246,7 @@ impl Browser {
         }
 
         if reply.get("id").is_none() && msg_type == Some("focus") {
-            self.note_focus(browser_pid);
+            self.note_focus(slot);
             return;
         }
 
@@ -1136,7 +1259,7 @@ impl Browser {
             let detail = reply.get("detail").cloned().unwrap_or(Value::Null);
             self.debug.ipc_note(
                 &Diagnostic::FromExtension {
-                    browser_pid,
+                    slot,
                     event,
                     detail: &detail,
                 }
@@ -1156,7 +1279,7 @@ impl Browser {
         if let (Some(id), Some(kind @ ("get_hold" | "set_hold" | "toggle_hold"))) =
             (reply.get("id").and_then(Value::as_str), msg_type)
         {
-            self.handle_hold_request(browser_pid, id, kind, &reply);
+            self.handle_hold_request(slot, id, kind, &reply);
             return;
         }
 
@@ -1185,12 +1308,12 @@ impl Browser {
     }
 
     /// Apply one hold request (g10) and send the `hold_state` (or `hold_error`) reply back
-    /// over the SAME connection it arrived on (`browser_pid`). `get_hold` reports without
+    /// over the SAME connection it arrived on (`slot`). `get_hold` reports without
     /// changing state; `set_hold` requires a boolean `held` member (a missing or non-boolean
     /// value is a `hold_error` that changes nothing); `toggle_hold` flips atomically. Every
     /// request receives the state AFTER the request was applied. `held`/`killed` stay GLOBAL
     /// (ADR-0058 scope), so the state itself does not depend on which browser asked.
-    fn handle_hold_request(&self, browser_pid: u32, id: &str, kind: &str, request: &Value) {
+    fn handle_hold_request(&self, slot: u32, id: &str, kind: &str, request: &Value) {
         let outcome = match kind {
             "get_hold" => Ok(self.held_for().is_some()),
             "toggle_hold" => Ok(self.toggle_held()),
@@ -1204,13 +1327,13 @@ impl Browser {
             Ok(held) => json!({ "id": id, "type": "hold_state", "result": { "held": held } }),
             Err(error) => json!({ "id": id, "type": "hold_error", "error": error }),
         };
-        self.send_hold_reply(browser_pid, &reply);
+        self.send_hold_reply(slot, &reply);
     }
 
-    /// Frame and enqueue a hold reply on `browser_pid`'s connection (the one it arrived on),
-    /// dropping it silently if that session is already gone (the same fire-and-forget posture as
-    /// every other best-effort send in this module).
-    fn send_hold_reply(&self, browser_pid: u32, reply: &Value) {
+    /// Frame and enqueue a hold reply on `slot`'s connection (the one it arrived on), dropping it
+    /// silently if that session is already gone (the same fire-and-forget posture as every other
+    /// best-effort send in this module).
+    fn send_hold_reply(&self, slot: u32, reply: &Value) {
         let Ok(bytes) = serde_json::to_vec(reply) else {
             tracing::warn!("failed to serialize a hold reply");
             return;
@@ -1219,7 +1342,7 @@ impl Browser {
             tracing::warn!("failed to frame a hold reply");
             return;
         };
-        self.send_fire_and_forget(browser_pid, framed);
+        self.send_fire_and_forget(slot, framed);
     }
 
     /// Handle the `session_killed` event (g11): exactly once per false-to-true transition
@@ -1292,45 +1415,62 @@ mod tests {
     use super::*;
     use tokio::time::sleep;
 
-    /// The default fake browser pid most tests attach as (ADR-0058): arbitrary, just needs to be
-    /// nonzero and distinct from any REAL pid the test process itself might carry.
-    const TEST_PID: u32 = 4242;
+    /// The default fake browser identity most tests attach as (ADR-0061): the persistent UUID the
+    /// extension would mint. Arbitrary; tests that need two distinct browsers pass distinct ids.
+    const TEST_BROWSER_ID: &str = "test-browser-0001";
 
-    /// A valid `ROLE_BROWSER` session-hello for `pid`, framed and ready to write.
-    fn test_hello(pid: u32) -> Vec<u8> {
+    /// A valid `ROLE_BROWSER` relay hello, framed. The relay's own pid identity is diagnostic-only
+    /// since ADR-0061 (the extension owns identity), so the value here is arbitrary.
+    fn test_hello() -> Vec<u8> {
         ghostlight_transport::handshake::browser_hello_bytes(
             1,
-            Some(ghostlight_transport::proc::ProcId { pid, created: 0 }),
+            Some(ghostlight_transport::proc::ProcId {
+                pid: 4242,
+                created: 0,
+            }),
         )
     }
 
-    /// Attach a fake extension as `pid` (ADR-0058): create the duplex, write its hello, spawn
-    /// `attach()`, and wait for `browser` to report connected. Returns the extension-side half
-    /// for the test to drive. The common case for every test below that does not care about a
-    /// SPECIFIC pid value.
-    async fn attach_fake_extension_as(browser: &Browser, pid: u32) -> tokio::io::DuplexStream {
+    /// The extension's opening identity frame for `browser_id` (ADR-0061), framed.
+    fn identity_frame(browser_id: &str) -> Vec<u8> {
+        serde_json::to_vec(&json!({ "type": "browser_hello", "browserId": browser_id })).unwrap()
+    }
+
+    /// Attach a fake extension for `browser_id` (ADR-0061): create the duplex, write the relay hello
+    /// THEN the extension identity frame, spawn `attach()`, and wait until the service assigns a
+    /// slot for this id and admits its session. Returns the extension-side half plus the assigned
+    /// slot, so the test can drive the connection and encode composite tab ids by slot.
+    async fn attach_fake_extension_as(
+        browser: &Browser,
+        browser_id: &str,
+    ) -> (tokio::io::DuplexStream, u32) {
         let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
-        host::write_message(&mut ext_side, &test_hello(pid))
+        host::write_message(&mut ext_side, &test_hello())
+            .await
+            .unwrap();
+        host::write_message(&mut ext_side, &identity_frame(browser_id))
             .await
             .unwrap();
         let attached = browser.clone();
         tokio::spawn(async move { attached.attach(browser_side).await });
-        // Poll for THIS pid specifically (not `wait_connected`'s global is_connected(), which a
-        // SECOND attach -- a different pid, or the same one reconnecting -- would see as already
-        // true from an EARLIER session and return without ever giving the just-spawned task a
-        // chance to run). Sleep-then-check (not check-then-sleep) so at least one scheduling
-        // tick always happens before the first check, even on a single-threaded test runtime.
+        // Poll for THIS browser's slot specifically (not `wait_connected`'s global is_connected(),
+        // which a SECOND attach -- a different id, or the same one reconnecting -- would see as
+        // already true from an EARLIER session and return without ever giving the just-spawned task
+        // a chance to run). Sleep-then-check (not check-then-sleep) so at least one scheduling tick
+        // always happens before the first check, even on a single-threaded test runtime.
         for _ in 0..200 {
             sleep(Duration::from_millis(5)).await;
-            if browser.browser_snapshot().iter().any(|b| b.pid == pid) {
-                return ext_side;
+            if let Some(slot) = browser.slot_of(browser_id) {
+                if browser.browser_snapshot().iter().any(|b| b.slot == slot) {
+                    return (ext_side, slot);
+                }
             }
         }
-        panic!("browser never registered pid {pid} as connected");
+        panic!("browser never registered id {browser_id} as connected");
     }
 
     async fn attach_fake_extension(browser: &Browser) -> tokio::io::DuplexStream {
-        attach_fake_extension_as(browser, TEST_PID).await
+        attach_fake_extension_as(browser, TEST_BROWSER_ID).await.0
     }
 
     #[tokio::test]
@@ -1413,13 +1553,13 @@ mod tests {
     #[tokio::test]
     async fn request_group_sends_the_pinned_shape_and_a_reply_is_a_harmless_event() {
         let browser = Browser::new();
-        let mut ext_side = attach_fake_extension(&browser).await;
+        let (mut ext_side, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
 
-        // ADR-0058: tab_ids are composite (encoding TEST_PID); the wire shows the DECODED
-        // native ids the extension actually understands.
+        // ADR-0058/0061: tab_ids are composite (encoding this browser's slot); the wire shows the
+        // DECODED native ids the extension actually understands.
         let composite_ids = [
-            crate::constants::tab_id::encode(TEST_PID, 101),
-            crate::constants::tab_id::encode(TEST_PID, 202),
+            crate::constants::tab_id::encode(slot, 101),
+            crate::constants::tab_id::encode(slot, 202),
         ];
         browser.request_group(
             "11111111-1111-4111-8111-111111111111",
@@ -1532,9 +1672,12 @@ mod tests {
     async fn wait_connected_wakes_when_the_extension_attaches() {
         let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let browser = Browser::new();
-        // Written before attach() ever starts reading; the duplex buffers it, so the delayed
-        // attach() below finds its hello waiting immediately once it runs.
-        host::write_message(&mut ext_side, &test_hello(TEST_PID))
+        // Written before attach() ever starts reading; the duplex buffers both frames, so the
+        // delayed attach() below finds the hello AND the identity frame waiting once it runs.
+        host::write_message(&mut ext_side, &test_hello())
+            .await
+            .unwrap();
+        host::write_message(&mut ext_side, &identity_frame(TEST_BROWSER_ID))
             .await
             .unwrap();
 
@@ -1581,17 +1724,19 @@ mod tests {
         ext.await.unwrap();
     }
 
-    /// ADR-0058: two DIFFERENT browsers (distinct pids) are BOTH admitted as independent, live
-    /// sessions -- the actual multi-browser support this whole change exists for. Each one's
-    /// own tab (encoded with its own pid) routes a call to that SPECIFIC session, never the
-    /// other.
+    /// ADR-0058/0061: two DIFFERENT browsers (distinct UUIDs) are BOTH admitted as independent,
+    /// live sessions with distinct non-zero slots -- the actual multi-browser support this whole
+    /// change exists for. Each one's own tab (encoded with its own slot) routes a call to that
+    /// SPECIFIC session, never the other.
     #[tokio::test]
     async fn two_different_browsers_are_both_admitted_and_route_independently() {
         let browser = Browser::new();
-        let mut first_ext = attach_fake_extension_as(&browser, 1001).await;
-        let mut second_ext = attach_fake_extension_as(&browser, 2002).await;
+        let (mut first_ext, slot_a) = attach_fake_extension_as(&browser, "browser-a").await;
+        let (mut second_ext, slot_b) = attach_fake_extension_as(&browser, "browser-b").await;
         assert!(browser.is_connected());
         assert_eq!(browser.browser_snapshot().len(), 2);
+        assert_ne!(slot_a, slot_b, "distinct browsers get distinct slots");
+        assert!(slot_a != 0 && slot_b != 0, "a slot is never 0");
 
         let first_task = tokio::spawn(async move {
             let req = host::read_message(&mut first_ext).await.unwrap().unwrap();
@@ -1610,7 +1755,7 @@ mod tests {
             .call(
                 "test-guid",
                 "navigate",
-                &json!({ "tabId": crate::constants::tab_id::encode(1001, 5) }),
+                &json!({ "tabId": crate::constants::tab_id::encode(slot_a, 5) }),
             )
             .await
             .unwrap();
@@ -1634,7 +1779,7 @@ mod tests {
             .call(
                 "test-guid",
                 "navigate",
-                &json!({ "tabId": crate::constants::tab_id::encode(2002, 9) }),
+                &json!({ "tabId": crate::constants::tab_id::encode(slot_b, 9) }),
             )
             .await
             .unwrap();
@@ -1642,19 +1787,25 @@ mod tests {
         second_task.await.unwrap();
     }
 
-    /// ADR-0058: a fresh hello for a pid ALREADY attached REPLACES the old session (a
-    /// service-worker relaunch or reconnect from the SAME browser), rather than being rejected.
+    /// ADR-0058/0061: a fresh handshake for a UUID ALREADY attached REPLACES the old session (a
+    /// service-worker relaunch or reconnect from the SAME browser), rather than being rejected, and
+    /// resolves to the SAME slot (the mapping is never evicted).
     #[tokio::test]
-    async fn a_reconnect_from_the_same_pid_replaces_the_old_session() {
+    async fn a_reconnect_from_the_same_id_replaces_the_old_session() {
         let browser = Browser::new();
-        let _first_ext = attach_fake_extension_as(&browser, TEST_PID).await;
+        let (_first_ext, slot_first) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
         assert_eq!(browser.browser_snapshot().len(), 1);
 
-        let mut second_ext = attach_fake_extension_as(&browser, TEST_PID).await;
+        let (mut second_ext, slot_second) =
+            attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
         assert_eq!(
             browser.browser_snapshot().len(),
             1,
-            "the same pid reconnecting replaces, never adds a second entry"
+            "the same id reconnecting replaces, never adds a second entry"
+        );
+        assert_eq!(
+            slot_first, slot_second,
+            "the same browser id keeps its slot across a reconnect"
         );
 
         // The NEW connection serves calls; the old one is simply not read from again.
@@ -1672,6 +1823,36 @@ mod tests {
             .unwrap();
         assert_eq!(result, json!({ "ok": true }));
         ext.await.unwrap();
+    }
+
+    /// ADR-0061 (fail closed): a valid `ROLE_BROWSER` hello whose follow-up frame is NOT a valid
+    /// extension identity frame admits no session -- there is no `browserPid` fallback anymore. A
+    /// wrong-TYPE second frame (a focus event) is used so the rejection is immediate, exercising the
+    /// parse-reject path rather than the `IDENTITY_WINDOW` timeout.
+    #[tokio::test]
+    async fn a_browser_hello_without_a_valid_identity_frame_is_rejected() {
+        let browser = Browser::new();
+        let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
+        host::write_message(&mut ext_side, &test_hello())
+            .await
+            .unwrap();
+        host::write_message(
+            &mut ext_side,
+            &serde_json::to_vec(&json!({ "type": "focus" })).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let outcome = browser.attach(browser_side).await;
+        assert_eq!(outcome, AttachOutcome::AlreadyAttached);
+        assert!(
+            !browser.is_connected(),
+            "no session is admitted without a valid identity frame"
+        );
+        assert!(
+            browser.slot_of("test-browser-0001").is_none(),
+            "no slot is minted for a rejected handshake"
+        );
     }
 
     #[test]
@@ -1874,7 +2055,7 @@ mod tests {
     #[tokio::test]
     async fn fresh_attach_clears_the_kill() {
         let browser = Browser::new();
-        let mut first_ext = attach_fake_extension_as(&browser, TEST_PID).await;
+        let (mut first_ext, _) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
 
         host::write_message(
             &mut first_ext,
@@ -1891,8 +2072,8 @@ mod tests {
         assert!(browser.is_killed());
 
         // Tear down the first connection (a real "session ended") and wait for it to be
-        // removed before attaching a fresh one -- reconnecting from the SAME pid replaces the
-        // entry outright (ADR-0058), but this exercises the ordinary disconnect-then-reconnect
+        // removed before attaching a fresh one -- reconnecting from the SAME id replaces the
+        // entry outright (ADR-0058/0061), but this exercises the ordinary disconnect-then-reconnect
         // path too.
         drop(first_ext);
         for _ in 0..200 {
@@ -1902,7 +2083,7 @@ mod tests {
             sleep(Duration::from_millis(5)).await;
         }
 
-        let mut second_ext = attach_fake_extension_as(&browser, TEST_PID).await;
+        let (mut second_ext, _) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
         assert!(
             !browser.is_killed(),
             "a fresh attach must clear the kill flag"
@@ -2105,5 +2286,47 @@ mod tests {
             browser.cache_and_inject_screenshot("g3", "computer", click.clone()),
             click
         );
+    }
+
+    /// ADR-0058/0061: the `Created tab {native}.` prose the extension prepends is rewritten to the
+    /// SAME composite structuredContent carries, so a consumer reading the human text routes by the
+    /// encoded id (not the raw native one, which only works by the slot-0 focus fallback and
+    /// mis-routes with more than one browser attached). Every other prose is untouched.
+    #[test]
+    fn encode_tab_ids_rewrites_the_created_tab_prose_to_composite() {
+        let slot = 3u32;
+        let native = 1_246_199_443i64;
+        let composite = crate::constants::tab_id::encode(slot, native);
+
+        // The tabs_create result shape: a prose text block + structuredContent, both native.
+        let mut result = json!({
+            "content": [{ "type": "text", "text": format!("Created tab {native}.\nThe group has 1 tab.") }],
+            "structuredContent": { "tabId": native, "tabs": [] }
+        });
+        encode_tab_ids_in_value(&mut result, slot);
+
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.starts_with(&format!("Created tab {composite}.")),
+            "the prose id is now composite: {text}"
+        );
+        assert!(
+            text.ends_with("The group has 1 tab."),
+            "the rest of the prose is preserved: {text}"
+        );
+        assert_eq!(
+            result["structuredContent"]["tabId"].as_i64(),
+            Some(composite),
+            "structuredContent stays consistent with the prose"
+        );
+
+        // A prose with no `Created tab` prefix, and the prefix with no number, are both untouched.
+        assert_eq!(
+            encode_created_tab_prose("Navigated to https://example.com/", slot),
+            None
+        );
+        assert_eq!(encode_created_tab_prose("Created tab .", slot), None);
+        // The round trip decodes back to (slot, native).
+        assert_eq!(crate::constants::tab_id::decode(composite), (slot, native));
     }
 }

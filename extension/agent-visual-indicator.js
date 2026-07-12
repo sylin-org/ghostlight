@@ -9,8 +9,11 @@
 //   - a soft shimmer on the focused field when the agent types.
 // All are hidden during screenshots so the model's image stays clean, and are excluded from
 // read_page/find (their ids are prefixed "ghostlight-" and skipped in content.js). Driven by the
-// service worker via chrome.tabs.sendMessage. A lean reimplementation of the concept; no upstream
-// extension code is copied.
+// service worker via chrome.tabs.sendMessage (plus the GhostlightFx same-world seam at the bottom
+// for in-page triggers). A lean reimplementation of the concept; no upstream extension code is
+// copied. The NORMATIVE vocabulary -- foundations, invariants, the effect dictionary, and the
+// checklist for adding an effect -- is docs/design/visual-language.md; it and this file move
+// together.
 
 (function () {
   if (window.__browserMcpIndicator) return;
@@ -23,23 +26,21 @@
   // Ghostlight brand accent: a luminous sky blue. SKY_RGB is the same color for rgba() shadows.
   const SKY = "#38bdf8";
   const SKY_RGB = "56,189,248";
-  // Notification severity accents (SAPS PRES-HIGH-01): a DIFFERENT hue family from the SKY "go"
-  // vocabulary above, on purpose -- the contrast itself reads as "this is a guardrail, not a
-  // glitch." Keyed by the same info/debug/warn/error taxonomy this codebase's own tracing logs
-  // already use, so the primitive stays general-purpose rather than denial-specific. Text on top
-  // of any of these is always NOTIF_TEXT (a dark near-black): amber and sky are light/bright
-  // enough that white text fails WCAG AA contrast against them, so dark text is used uniformly
-  // across all four rather than mixing light-on-dark and dark-on-light per color.
-  const NOTIF_COLORS = {
-    error: { bg: "#f43f5e", rgb: "244,63,94" },
-    warn: { bg: "#f59e0b", rgb: "245,158,11" },
-    info: { bg: "#38bdf8", rgb: "56,189,248" },
-    debug: { bg: "#94a3b8", rgb: "148,163,184" },
-  };
-  const NOTIF_TEXT = "#0b1220";
+  // Notification severity taxonomy (SAPS PRES-HIGH-01), same info/debug/warn/error names this
+  // codebase's tracing logs use. Color values live in the stylesheet (ensureStyles'
+  // `.ghostlight-notif-ribbon.<severity>` rules, each setting one `--gl-rgb` custom property);
+  // this allowlist just maps an unrecognized `cls` (possible -- `cls` arrives over a wire message)
+  // onto a known class instead of an unmatched one.
+  const NOTIF_SEVERITIES = ["error", "warn", "info", "debug"];
+  const NOTIF_TEXT = "#eaf6ff";
+  // The ribbon surface is ONE neutral for every severity; color lives only in the icon medallion
+  // and the ambient glow. A stable chrome reads calmer than four saturated full-bleed colors
+  // competing across a session, and the badge + glow still carry the color-coded urgency.
+  const NOTIF_RIBBON_BG = "#0c0f14";
   const FADE_MS = 4000;
   const RIPPLE_MS = 620; // one click ring's expand-and-fade duration
   const RIPPLE_STAGGER_MS = 140; // gap between rings of a multi-click, so 2/3 read as a rhythm
+  const FIELD_SPLASH_MS = 700; // form-write splash hugging the field just set
   // Extended-vocabulary timings (the visual feedback dictionary).
   const LOZENGE_MS = 1250; // keystroke lozenge (type / key)
   const SCAN_MS = 1450; // read-page scan-line sweep
@@ -47,13 +48,13 @@
   const ZOOMFRAME_MS = 1150; // zoom magnifier frame
   const CHEV_MS = 1150; // scroll chevron cascade
   const NAVPILL_MS = 1600; // navigate destination pill
-  // Notification bar timings (SAPS PRES-HIGH-01): the bar unfurls from the top edge, the
-  // description (if any) fades in just after. No hold/fade-out duration -- unlike every other
-  // effect in this file, a notification is persistent (dismissed by the next tool action on this
-  // tab, or an explicit close click), not a fire-and-fade confirmation.
-  const NOTIF_BAR_MS = 380; // bar unfurl from the top edge
+  // Notification band timings (SAPS PRES-HIGH-01): unfurls from its own horizontal center line
+  // (scaleY 0->1, transform-origin center) -- unlike every other effect in this file, a
+  // notification is persistent (dismissed by the next real tool action on this tab, or an
+  // explicit close click), not a fire-and-fade confirmation, so there is no hold/exit phase.
+  const NOTIF_GROW_MS = 320; // band unfurls from its center line
   const NOTIF_DESC_MS = 320; // description line fade-in
-  const NOTIF_DESC_DELAY_MS = 220; // description starts just after the bar settles
+  const NOTIF_DESC_DELAY_MS = 220; // description starts just after the band settles
 
   let cursorEl = null;
   let glowEl = null;
@@ -86,6 +87,10 @@
       "@keyframes ghostlight-trail{0%{opacity:.9}100%{opacity:0}}" +
       "@keyframes ghostlight-shimmer{0%{opacity:0}25%{opacity:1}60%{opacity:.7}100%{opacity:0}}" +
       "@keyframes ghostlight-shimmer-rm{0%{opacity:0}50%{opacity:.7}100%{opacity:0}}" +
+      // Field splash: the click ripple's expand-and-fade physics applied to the field's own
+      // rectangle -- settles in at full size, then releases outward as it fades.
+      "@keyframes ghostlight-fieldsplash{0%{opacity:0;transform:scale(.97)}18%{opacity:1;transform:scale(1)}62%{opacity:.85}100%{opacity:0;transform:scale(1.05)}}" +
+      "@keyframes ghostlight-fieldsplash-rm{0%{opacity:0}30%{opacity:.9}100%{opacity:0}}" +
       "@keyframes ghostlight-targetglow{0%{opacity:0}22%{opacity:1}100%{opacity:0}}" +
       "@keyframes ghostlight-flash{0%{opacity:.42}100%{opacity:0}}" +
       "@keyframes ghostlight-capframe{0%{opacity:0;transform:scale(1.03)}9%{opacity:1;transform:scale(1)}34%{opacity:1;transform:scale(1)}60%{opacity:1;transform:scale(.17);border-radius:16px}88%{opacity:1;transform:scale(.17);border-radius:16px}100%{opacity:0;transform:scale(.17);border-radius:16px}}" +
@@ -95,12 +100,57 @@
       "@keyframes ghostlight-nav{0%{opacity:0;transform:translate(-50%,-14px)}14%{opacity:1;transform:translate(-50%,0)}82%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-8px)}}" +
       "@keyframes ghostlight-breath{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(.7)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}}" +
       "@keyframes ghostlight-lozenge{0%{opacity:0;transform:translate(-50%,12px)}16%{opacity:1;transform:translate(-50%,0)}78%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-6px)}}" +
-      // Notification bar (SAPS PRES-HIGH-01): unfurls from the top edge once, then holds static
-      // and persistent -- no hold/fade-out keyframe, since dismissal is by next-action or close
-      // click, not a timer. The -rm variant is a plain fade for prefers-reduced-motion.
-      "@keyframes ghostlight-notif-bar{0%{transform:scaleY(0)}100%{transform:scaleY(1)}}" +
-      "@keyframes ghostlight-notif-bar-rm{0%{opacity:0}100%{opacity:1}}" +
+      // Notification band (SAPS PRES-HIGH-01): unfurls from its own horizontal center line
+      // (scaleY 0->1), then holds indefinitely -- no hold/exit keyframe, since dismissal is by
+      // next-action or close click, not a timer. The -rm variant is a plain fade.
+      "@keyframes ghostlight-notif-grow{0%{opacity:0;transform:scaleY(0)}100%{opacity:1;transform:scaleY(1)}}" +
+      "@keyframes ghostlight-notif-grow-rm{0%{opacity:0}100%{opacity:1}}" +
       "@keyframes ghostlight-notif-desc{0%{opacity:0}100%{opacity:.85}}" +
+      // Real CSS classes (not per-call inline strings like the transient effects above): a
+      // notification has four named severity variants sharing everything but one color, so the
+      // base rules live in `.ghostlight-notif-ribbon`/`-badge` and `.error`/`.warn`/`.info`/
+      // `.debug` each set only `--gl-rgb` (badge, icon, and glow all derive from it).
+      ".ghostlight-notif-ribbon{position:relative;display:flex;align-items:center;justify-content:center;" +
+      "gap:16px;height:" + NOTIF_BAND_H + "px;padding:0 64px;box-sizing:border-box;overflow:visible;" +
+      // The ribbon's own surface is the SAME neutral for every severity -- the badge and glow
+      // below carry the color-coded signal, so four different saturated full-bleed colors never
+      // compete with each other across a session (an established, consistent chrome).
+      "background:" + NOTIF_RIBBON_BG + ";" +
+      // A bright catch-light along the top edge and a soft colored glow along the bottom -- the
+      // same physical language as readScan's gradient sweep and capframe's soft edges, giving the
+      // band a sense of thickness/presence on both edges, with the severity color showing up
+      // ambiently even though the fill itself is neutral.
+      "box-shadow:inset 0 1px 0 rgba(255,255,255,.12),inset 0 -1px 0 rgba(var(--gl-rgb),.25)," +
+      "0 -6px 24px -6px rgba(var(--gl-rgb),.55),0 6px 24px -6px rgba(var(--gl-rgb),.55);" +
+      "transform-origin:center;animation:ghostlight-notif-grow " + NOTIF_GROW_MS + "ms cubic-bezier(.22,1,.36,1) forwards}" +
+      "@media (prefers-reduced-motion:reduce){.ghostlight-notif-ribbon{animation:ghostlight-notif-grow-rm " + NOTIF_GROW_MS + "ms ease-out forwards}}" +
+      ".ghostlight-notif-ribbon.error{--gl-rgb:239,68,68}" +
+      ".ghostlight-notif-ribbon.warn{--gl-rgb:245,158,11}" +
+      ".ghostlight-notif-ribbon.info{--gl-rgb:56,189,248}" +
+      ".ghostlight-notif-ribbon.debug{--gl-rgb:148,163,184}" +
+      // The icon medallion: a circle in the severity's bright accent (--gl-rgb), sized 1.5x the
+      // ribbon height so it overflows the top/bottom edges as a badge rather than sitting inside.
+      // `color` matches `background` so the glyph's `fill='currentColor'` reads as punched through.
+      ".ghostlight-notif-badge{flex:0 0 auto;width:" + NOTIF_BADGE_D + "px;height:" + NOTIF_BADGE_D + "px;" +
+      "border-radius:50%;display:flex;align-items:center;justify-content:center;" +
+      "box-shadow:0 4px 16px rgba(0,0,0,.35);background:rgb(var(--gl-rgb));color:rgb(var(--gl-rgb))}" +
+      ".ghostlight-notif-textcol{flex:0 1 auto;min-width:0;max-width:min(60vw,480px);" +
+      "display:flex;flex-direction:column;justify-content:center}" +
+      ".ghostlight-notif-title{font:600 15px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
+      "color:" + NOTIF_TEXT + ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
+      ".ghostlight-notif-desc{font:12.5px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
+      "color:" + NOTIF_TEXT + ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;" +
+      "animation:ghostlight-notif-desc " + NOTIF_DESC_MS + "ms ease-out " + NOTIF_DESC_DELAY_MS + "ms forwards}" +
+      "@media (prefers-reduced-motion:reduce){.ghostlight-notif-desc{opacity:.85;animation:none}}" +
+      // Close button: the one interactive element in the whole layer -- everything else is
+      // pointer-events:none. Absolutely positioned within the ribbon (not a flex sibling), so the
+      // icon+text duo centers as its own group regardless of where this sits in the corner.
+      ".ghostlight-notif-close{position:absolute;right:16px;top:50%;transform:translateY(-50%);" +
+      "pointer-events:auto;cursor:pointer;background:transparent;border:none;color:" + NOTIF_TEXT + ";" +
+      "opacity:.75;font:20px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
+      "width:28px;height:28px;border-radius:50%;transition:background-color 120ms ease-out}" +
+      ".ghostlight-notif-close:hover{background:rgba(255,255,255,.16)}" +
+      ".ghostlight-notif-close:focus-visible{outline:2px solid " + NOTIF_TEXT + ";outline-offset:2px;background:rgba(255,255,255,.16)}" +
       ".ghostlight-cap{color:" + SKY + "}.ghostlight-arrow{color:" + SKY + ";margin-right:7px}" +
       "@media (prefers-reduced-motion:reduce){#" + GLOW_ID + "{animation:none}#" + CURSOR_ID + "{transition:none}}";
     (document.head || document.documentElement).appendChild(s);
@@ -221,6 +271,43 @@
       "box-shadow:0 0 10px rgba(" + SKY_RGB + ",.5),inset 0 0 8px rgba(" + SKY_RGB + ",.25);" +
       "animation:" + anim + " 900ms ease-in-out forwards";
     addEphemeral(el, 1000);
+  }
+
+  // Form-write splash (docs/design/visual-language.md): the click ripple's language applied to
+  // the field's own rectangle, so a watcher sees exactly WHICH field the agent just set. A ring
+  // hugging the field's bounds (borrowing its border-radius) with a soft interior wash settles in
+  // and releases outward as it fades. Called with the ELEMENT, not coordinates -- the caller is
+  // the form writer itself (content.js via the GhostlightFx seam at the bottom of this file), the
+  // one place that knows the target.
+  function fieldSplash(target) {
+    if (hiddenForTool || document.hidden) return;
+    if (!target || typeof target.getBoundingClientRect !== "function") return;
+    let rect;
+    try { rect = target.getBoundingClientRect(); } catch (e) { return; }
+    if (!rect || (rect.width === 0 && rect.height === 0)) return;
+    ensureStyles();
+    let radius = "8px";
+    try {
+      const r = getComputedStyle(target).borderRadius;
+      if (r && r !== "0px") radius = r;
+    } catch (e) { /* keep the fallback */ }
+    const pad = 4;
+    const anim = reduceMotion() ? "ghostlight-fieldsplash-rm" : "ghostlight-fieldsplash";
+    const el = document.createElement("div");
+    el.id = FX_LAYER_ID + "-f" + fxSeq++; // "ghostlight-" prefix -> excluded from reads
+    el.setAttribute("aria-hidden", "true");
+    el.style.cssText =
+      "position:fixed;box-sizing:border-box;pointer-events:none;" +
+      "left:" + (rect.left - pad) + "px;top:" + (rect.top - pad) + "px;" +
+      "width:" + (rect.width + pad * 2) + "px;height:" + (rect.height + pad * 2) + "px;" +
+      "border-radius:" + radius + ";" +
+      "border:2px solid rgba(" + SKY_RGB + ",.9);" +
+      "background:radial-gradient(ellipse at center,rgba(" + SKY_RGB + ",.26) 0%,rgba(" + SKY_RGB + ",.08) 55%,rgba(" + SKY_RGB + ",0) 78%);" +
+      "box-shadow:0 0 14px rgba(" + SKY_RGB + ",.55),inset 0 0 10px rgba(" + SKY_RGB + ",.3);" +
+      "transform-origin:center;" +
+      "animation:" + anim + " " + FIELD_SPLASH_MS + "ms cubic-bezier(.22,1,.36,1) forwards";
+    addEphemeral(el, FIELD_SPLASH_MS + 80);
+    caption("Filling a field");
   }
 
   function showGlow() {
@@ -464,7 +551,7 @@
     caption("Zoom");
   }
 
-  // Notification bar (SAPS PRES-HIGH-01): governance blocks a call before the extension is ever
+  // Notification band (SAPS PRES-HIGH-01): governance blocks a call before the extension is ever
   // contacted for the call itself, so without this nothing on screen shows a block happened.
   // Deliberately NOT built on caption() -- a caption is optional decorative flavor text, off by
   // default; a notification is substantive and must always render regardless of that preference
@@ -473,21 +560,43 @@
   // fade-out timer -- the whole point is that a human glancing back later still sees it. Lives in
   // its OWN layer (notifLayer), never fxLayer: a screenshot's hide-for-capture wipes fxLayer's
   // children outright, which would silently kill a notification the instant the agent looked at
-  // the page. `cls` selects the bar color by fixed internal lookup only (NOTIF_COLORS) -- never
-  // interpolated into markup. `title`/`description` reach the DOM only via .textContent
+  // the page. `cls` selects the severity CSS class from a fixed allowlist (NOTIF_SEVERITIES),
+  // never interpolated into markup. `title`/`description` reach the DOM only via .textContent
   // (constructed with createElement, never an innerHTML string): they can carry an
   // attacker-influenced domain, and this runs as a content script on every page.
-  const NOTIF_ICON_SVG =
-    "<svg width='18' height='20' viewBox='0 0 24 26' aria-hidden='true'>" +
-    "<path d='M12 1 L21 4.5 V11 C21 17 17 21.5 12 24 C7 21.5 3 17 3 11 V4.5 Z' " +
-    "fill='" + NOTIF_TEXT + "' stroke='" + NOTIF_TEXT + "' stroke-width='0.5' stroke-linejoin='round'/></svg>";
+  //
+  // A shared white shield with a per-hint glyph punched through it: "lock" (a sealed padlock,
+  // "never touch") for a sacred block, anything else an exclamation mark ("a boundary was hit"),
+  // matching the distinct hints notify()'s callers already pass. `fill='currentColor'` takes the
+  // glyph color from the badge's own per-severity `color`, so this markup is severity-agnostic.
+  // `iconName`/`px` are internal values, never wire text.
+  function notifIconSvg(iconName, px) {
+    const shield = "<path d='M12 1 L21 4.5 V11 C21 17 17 21.5 12 24 C7 21.5 3 17 3 11 V4.5 Z' fill='#fff'/>";
+    const glyph = iconName === "lock"
+      ? "<rect x='8.1' y='12.4' width='7.8' height='6.8' rx='1.5' fill='currentColor'/>" +
+        "<path d='M9.5 12.4 V10.1 A2.5 2.5 0 0 1 14.5 10.1 V12.4' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round'/>"
+      : "<rect x='10.9' y='7.4' width='2.2' height='8.4' rx='1.1' fill='currentColor'/>" +
+        "<circle cx='12' cy='18.3' r='1.35' fill='currentColor'/>";
+    return (
+      "<svg width='" + px + "' height='" + Math.round(px * 26 / 24) + "' viewBox='0 0 24 26' aria-hidden='true'>" +
+      shield + glyph + "</svg>"
+    );
+  }
+  // The band's own resting height and the icon medallion's diameter -- the medallion is 1.5x the
+  // band's height by design, so it overflows the band's top/bottom edges as a badge rather than
+  // being clipped to fit inside it.
+  const NOTIF_BAND_H = 64;
+  const NOTIF_BADGE_D = Math.round(NOTIF_BAND_H * 1.5);
 
   function ensureNotifLayer() {
     if (!notifLayer || !notifLayer.isConnected) {
       notifLayer = document.createElement("div");
       notifLayer.id = "ghostlight-notification-layer";
       notifLayer.setAttribute("aria-hidden", "true");
-      notifLayer.style.cssText = "position:fixed;top:0;left:0;right:0;pointer-events:none;z-index:2147483647";
+      // Full-width, vertically centered on the viewport -- an overlay ribbon crossing the
+      // middle of the screen, not pinned to an edge, hard to miss regardless of page length.
+      notifLayer.style.cssText =
+        "position:fixed;left:0;right:0;top:50%;transform:translateY(-50%);pointer-events:none;z-index:2147483647";
       (document.body || document.documentElement).appendChild(notifLayer);
     }
     notifLayer.style.display = hiddenForTool ? "none" : ""; // match whatever state setHiddenForTool already set
@@ -498,64 +607,54 @@
     if (activeNotifEl) { activeNotifEl.remove(); activeNotifEl = null; }
   }
 
-  function showNotification(cls, title, description) {
+  function showNotification(cls, icon, title, description) {
     if (document.hidden) return; // NOT gated on hiddenForTool: persistent state must survive a
     // screenshot's hide/show cycle (handled via ensureNotifLayer + setHiddenForTool above), only
     // suppressed outright when the tab itself isn't visible at all.
     ensureStyles();
     dismissNotification(); // replace, never stack two notifications
     const layer = ensureNotifLayer();
-    const colors = NOTIF_COLORS[cls] || NOTIF_COLORS.info;
-    const rm = reduceMotion();
+    const severity = NOTIF_SEVERITIES.includes(cls) ? cls : "info";
 
-    const bar = document.createElement("div");
-    bar.id = "ghostlight-notifbar" + fxSeq++;
-    bar.style.cssText =
-      "position:relative;display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;" +
-      "box-sizing:border-box;background:" + colors.bg + ";" +
-      "box-shadow:0 4px 16px -4px rgba(" + colors.rgb + ",.6);transform-origin:top;pointer-events:none;" +
-      "animation:" + (rm ? "ghostlight-notif-bar-rm" : "ghostlight-notif-bar") + " " + NOTIF_BAR_MS + "ms cubic-bezier(.22,1,.36,1) forwards";
+    const band = document.createElement("div");
+    band.id = "ghostlight-notifbar" + fxSeq++;
+    band.className = "ghostlight-notif-ribbon " + severity;
 
-    const iconSpan = document.createElement("span");
-    iconSpan.style.cssText = "flex:0 0 auto;display:flex;align-items:center;justify-content:center";
-    iconSpan.innerHTML = NOTIF_ICON_SVG; // fixed internal markup + a fixed color constant -- never wire text
-    bar.appendChild(iconSpan);
+    // The icon medallion: see .ghostlight-notif-badge in ensureStyles for why it overflows the
+    // ribbon's own edges.
+    const badge = document.createElement("span");
+    badge.className = "ghostlight-notif-badge";
+    badge.innerHTML = notifIconSvg(icon, Math.round(NOTIF_BAND_H * 0.9));
+    band.appendChild(badge);
 
     const textCol = document.createElement("span");
-    textCol.style.cssText = "flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center";
+    textCol.className = "ghostlight-notif-textcol";
     const titleEl = document.createElement("span");
-    titleEl.style.cssText =
-      "font:600 13px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:" + NOTIF_TEXT + ";" +
-      "white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+    titleEl.className = "ghostlight-notif-title";
     titleEl.textContent = String(title || "Blocked");
     textCol.appendChild(titleEl);
     if (description) {
       const descEl = document.createElement("span");
-      descEl.style.cssText =
-        "font:12px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:" + NOTIF_TEXT + ";" +
-        "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:" + (rm ? ".85" : "0") +
-        (rm ? "" : ";animation:ghostlight-notif-desc " + NOTIF_DESC_MS + "ms ease-out " + NOTIF_DESC_DELAY_MS + "ms forwards");
+      descEl.className = "ghostlight-notif-desc";
       descEl.textContent = String(description);
       textCol.appendChild(descEl);
     }
-    bar.appendChild(textCol);
+    band.appendChild(textCol);
 
     // The one genuinely interactive, clickable element in this entire FX layer -- everything else
     // is pointer-events:none by design. A real <button> (not a styled div) for native keyboard
-    // focus/activation, scoped narrowly so the rest of the bar still never intercepts a real click.
+    // focus/activation, scoped narrowly so the rest of the band still never intercepts a real
+    // click. Every visual/positioning rule lives in ensureStyles as .ghostlight-notif-close.
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
+    closeBtn.className = "ghostlight-notif-close";
     closeBtn.setAttribute("aria-label", "Dismiss notification");
     closeBtn.textContent = "×";
-    closeBtn.style.cssText =
-      "flex:0 0 auto;pointer-events:auto;cursor:pointer;background:transparent;border:none;" +
-      "color:" + NOTIF_TEXT + ";opacity:.7;font:20px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
-      "width:28px;height:28px;border-radius:6px";
     closeBtn.addEventListener("click", dismissNotification);
-    bar.appendChild(closeBtn);
+    band.appendChild(closeBtn);
 
-    layer.appendChild(bar);
-    activeNotifEl = bar;
+    layer.appendChild(band);
+    activeNotifEl = band;
   }
 
   // wait: a soft breathing dot while the agent pauses.
@@ -573,15 +672,21 @@
     caption("Waiting");
   }
 
-  // A tool action taken on this tab dismisses any lingering notification -- checked ahead of
-  // both switches below, since dismissal is state cleanup, not a decorative effect (it must fire
-  // even with the effects master switch off). AGENT_NOTIFICATION itself is excluded: a fresh
-  // notification replaces the old one via showNotification's own dismissNotification() call,
-  // not this generic hook.
+  // A tool action that ACTS ON the page (clicks, drags, types, scrolls, navigates) dismisses any
+  // lingering notification -- checked ahead of both switches below, since dismissal is state
+  // cleanup, not a decorative effect (it must fire even with the effects master switch off).
+  // AGENT_NOTIFICATION itself is excluded: a fresh notification replaces the old one via
+  // showNotification's own dismissNotification() call, not this generic hook.
+  //
+  // Deliberately NOT in this set: AGENT_READ_SCAN, AGENT_SCREENSHOT_FX, AGENT_ZOOM_FRAME,
+  // AGENT_WAIT_PULSE. Those fire for read-only/observation calls (get_page_text, computer
+  // screenshot/zoom/wait) that never touch the page -- the agent (or a human) looking at the
+  // result of a denial is not "moving on" from it. Including them meant the single most natural
+  // next step after a denial (check what happened) silently destroyed the notification before
+  // anyone could see it.
   const TOOL_ACTION_MESSAGE_TYPES = new Set([
     "UPDATE_PHANTOM_CURSOR", "AGENT_CLICK_RIPPLE", "AGENT_DRAG_TRAIL", "AGENT_TYPE_SHIMMER",
-    "AGENT_TARGET_GLOW", "AGENT_KEYSTROKE", "AGENT_SCROLL_CUE", "AGENT_READ_SCAN",
-    "AGENT_NAVIGATE_PILL", "AGENT_SCREENSHOT_FX", "AGENT_ZOOM_FRAME", "AGENT_WAIT_PULSE",
+    "AGENT_TARGET_GLOW", "AGENT_KEYSTROKE", "AGENT_SCROLL_CUE", "AGENT_NAVIGATE_PILL",
   ]);
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -636,7 +741,7 @@
       case "AGENT_WAIT_PULSE":
         waitPulse(); sendResponse({ success: true }); return true;
       case "AGENT_NOTIFICATION":
-        showNotification(msg.class, msg.title, msg.description); sendResponse({ success: true }); return true;
+        showNotification(msg.class, msg.icon, msg.title, msg.description); sendResponse({ success: true }); return true;
       case "SET_CAPTIONS":
         captionsEnabled = !!msg.enabled; sendResponse({ success: true }); return true;
       case "SHOW_AGENT_INDICATORS":
@@ -668,6 +773,22 @@
       if (changes.ghostlight_captions) captionsEnabled = !!changes.ghostlight_captions.newValue;
     });
   } catch (e) { /* storage unavailable: effects on, captions off */ }
+
+  // Same-isolated-world seam for sibling content scripts (content.js): a form write calls
+  // fieldSplash directly with the element it just set -- the writer is the one place that knows
+  // the target, so no service-worker hop needs to carry a rect. Page scripts can never reach this
+  // (content scripts live in the extension's isolated world), which is exactly why this is a
+  // direct export and NOT a DOM CustomEvent any page could forge. A form write is a genuine
+  // page-mutating action, so it also dismisses a lingering notification -- state cleanup that
+  // fires even with the effects master switch off, the same rule TOOL_ACTION_MESSAGE_TYPES
+  // applies to the message-driven actions above.
+  self.GhostlightFx = {
+    fieldSplash: function (target) {
+      if (activeNotifEl) dismissNotification();
+      if (!effectsEnabled) return;
+      fieldSplash(target);
+    },
+  };
 
   window.addEventListener("beforeunload", () => { hideGlow(); });
 })();

@@ -16,7 +16,7 @@
 //! ghostlight-transport, so a service rebuild never relinks (locks) this binary (ADR-0046
 //! Decision 2, preserved by the merge).
 
-use ghostlight_transport::instance::{Instance, Selection};
+use ghostlight_transport::instance::{self, Instance};
 use ghostlight_transport::observability::{build_debug_sink, DebugSink};
 use ghostlight_transport::proc::{self, ProcId};
 use ghostlight_transport::role::{self, Role};
@@ -74,7 +74,7 @@ fn main() {
 fn run_agent(args: &[String]) -> ! {
     // Resolve the instance from the same precedence root `ghostlight` uses (ADR-0044) and fold the
     // winner back into GHOSTLIGHT_INSTANCE so every point-of-use `Instance::resolve()` agrees.
-    let selection = resolve_agent_selection();
+    let instance = resolve_agent_instance();
 
     let debug =
         std::env::var_os("GHOSTLIGHT_DEBUG").is_some() || args.iter().any(|a| a == "--debug");
@@ -97,20 +97,20 @@ fn run_agent(args: &[String]) -> ! {
 
     let rt = tokio::runtime::Runtime::new().expect("build the adapter tokio runtime");
     let block_sink = sink.clone();
-    let endpoints = ipc::endpoint_candidates(&selection);
+    let endpoints = ipc::endpoint_candidates(&instance);
     let code = rt.block_on(relay_with_watchdog(&endpoints, block_sink, parent));
 
     sink.flush();
     std::process::exit(code)
 }
 
-/// Resolve the agent's instance SELECTION (ADR-0048 D2): `--instance <name>` / `--instance=<name>`
-/// wins over `GHOSTLIGHT_INSTANCE`; the reserved word `default` pins the default; NOTHING pins
-/// nothing (resolve at connect time, preferring a live dev instance, ADR-0048 D1). An invalid name
-/// is fatal: print the validation error and exit 2.
-fn resolve_agent_selection() -> Selection {
-    match Selection::resolve_from(instance_flag_value().as_deref()) {
-        Ok(s) => s,
+/// Resolve the agent's instance (ADR-0044/0064): `--instance <name>` / `--instance=<name>` wins over
+/// `GHOSTLIGHT_INSTANCE`; the reserved word `default` (or nothing) IS the default instance -- there
+/// is no "resolve at connect time, prefer dev" anymore (ADR-0064 retired the auto-shadow). An
+/// invalid name is fatal: print the validation error and exit 2.
+fn resolve_agent_instance() -> Instance {
+    match instance::resolve_from(instance_flag_value().as_deref()) {
+        Ok(i) => i,
         Err(e) => {
             eprintln!("ghostlight-relay: {e}");
             std::process::exit(2);
@@ -183,7 +183,7 @@ async fn relay_with_watchdog(
 fn run_browser() -> ! {
     // Chrome launches this with a bare path plus the extension origin (`chrome-extension://<id>/`)
     // and `--parent-window=<hwnd>` -- positional/flag args this role simply ignores.
-    let selection = resolve_browser_selection();
+    let instance = resolve_browser_instance();
 
     // Chrome never passes `--debug`; the only debug signal is an inherited GHOSTLIGHT_DEBUG.
     let debug = std::env::var_os("GHOSTLIGHT_DEBUG").is_some();
@@ -195,7 +195,7 @@ fn run_browser() -> ! {
     let hello =
         ghostlight_transport::handshake::browser_hello_bytes(std::process::id(), browser_parent);
     let rt = tokio::runtime::Runtime::new().expect("build the native-host tokio runtime");
-    let endpoints = ipc::endpoint_candidates(&selection);
+    let endpoints = ipc::endpoint_candidates(&instance);
     let result = rt.block_on(async {
         tokio::select! {
             r = ipc::relay_native_host(&endpoints, &hello, &sink) => r,
@@ -220,27 +220,27 @@ fn run_browser() -> ! {
     std::process::exit(0);
 }
 
-/// Resolve the browser role's instance SELECTION (ADR-0048 D2/D4): an inherited, explicit
-/// `GHOSTLIGHT_INSTANCE` wins (the reserved word `default` pins the default; an invalid value is
-/// non-fatal -- Chrome launched us with no console, so warn and fall through); else a
-/// `ghostlight-relay-<n>` per-instance copy pins `<n>` via its own argv[0] (the ADR-0044 Decision 4
-/// launcher); else UNPINNED -- the plain sibling binary resolves at connect time, preferring a live
-/// dev instance.
-fn resolve_browser_selection() -> Selection {
+/// Resolve the browser role's instance (ADR-0044/0064): an inherited, explicit `GHOSTLIGHT_INSTANCE`
+/// wins (the reserved word `default` is the default; an invalid value is non-fatal -- Chrome launched
+/// us with no console, so warn and fall through); else a `ghostlight-relay-<n>` per-instance copy
+/// pins `<n>` via its own argv[0] (the ADR-0044 Decision 4 launcher -- this is how the dev extension's
+/// `ghostlight-relay-dev` copy targets the dev service, ADR-0064); else the DEFAULT instance. There
+/// is no "unpinned, resolve-at-connect, prefer dev" state anymore.
+fn resolve_browser_instance() -> Instance {
     if let Ok(raw) = std::env::var(Instance::ENV_VAR) {
         let name = raw.trim();
         if !name.is_empty() {
             if name.eq_ignore_ascii_case("default") {
                 std::env::remove_var(Instance::ENV_VAR);
-                return Selection::Pinned(Instance::default());
+                return Instance::default();
             }
             match Instance::from_name(name) {
                 Ok(i) => {
                     std::env::set_var(Instance::ENV_VAR, name);
-                    return Selection::Pinned(i);
+                    return i;
                 }
                 Err(e) => {
-                    tracing::warn!(value = %name, error = %e, "ignoring an invalid GHOSTLIGHT_INSTANCE; resolving at connect time");
+                    tracing::warn!(value = %name, error = %e, "ignoring an invalid GHOSTLIGHT_INSTANCE; using the default instance");
                     std::env::remove_var(Instance::ENV_VAR);
                 }
             }
@@ -250,12 +250,12 @@ fn resolve_browser_selection() -> Selection {
         if let Some(inst) = Instance::from_exe_stem_with_base(&exe, "ghostlight-relay") {
             if let Some(name) = inst.name() {
                 std::env::set_var(Instance::ENV_VAR, name);
-                return Selection::Pinned(inst);
+                return inst;
             }
         }
     }
     std::env::remove_var(Instance::ENV_VAR);
-    Selection::Unpinned
+    Instance::default()
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@
 # release.yml builds only `ghostlight` and `ghostlight-relay`, never this crate.
 [package]
 name = "ghostlight-lightbox"
-version = "0.5.5"
+version = "0.5.6"
 edition = "2021"
 publish = false
 description = "Ghostlight Lightbox: dev-only integration harness (ADR-0056). Not a shipped artifact."

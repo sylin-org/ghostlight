@@ -26,36 +26,37 @@ pub mod notification {
     }
 }
 
-/// Composite tab identifiers (ADR-0058): a `tabId` that crosses the wire to the MCP client
-/// encodes BOTH the owning browser's pid and the extension's own native Chrome tab id, as a
-/// single JSON number -- so routing a later call needs no server-side tabId->browser lookup
-/// table, and the trained `"tabId": {"type": "number"}` schema (`crate::browser::directory`)
-/// never changes shape. The extension itself never learns this encoding exists: only
+/// Composite tab identifiers (ADR-0058, amended by ADR-0061): a `tabId` that crosses the wire to
+/// the MCP client encodes BOTH the owning browser's service-assigned `slot` and the extension's own
+/// native Chrome tab id, as a single JSON number -- so routing a later call needs no server-side
+/// tabId->browser lookup table, and the trained `"tabId": {"type": "number"}` schema
+/// (`crate::browser::directory`) never changes shape. ADR-0061 replaced the high-bits `browser_pid`
+/// (which degraded to a colliding 0) with a `slot` derived from the extension's persistent UUID; the
+/// arithmetic is unchanged. The extension itself never learns this encoding exists: only
 /// `crate::mcp::pipeline` (decoding an inbound composite id to route the call, and encoding an
 /// outbound native id in a tool result) touches these.
 pub mod tab_id {
     /// Bounds the native (extension-side) tab id to `2^32` (matching Chrome's internal tab id,
     /// a 32-bit int -- LIVE-VERIFIED 2026-07-11 against a real browser: observed native ids up
     /// to `1_246_199_197`, over a billion, ruling out an earlier `10_000_000` bound that assumed
-    /// a small per-launch counter and silently overflowed into the pid digits on decode) and
-    /// keeps `browser_pid * MULTIPLIER` inside JavaScript's safe-integer range (2^53) for any
-    /// realistic OS pid (`(2^53-1) / 2^32 =~ 2.1 million`, far above any pid a real OS assigns).
+    /// a small per-launch counter and silently overflowed into the high bits on decode) and
+    /// keeps `slot * MULTIPLIER` inside JavaScript's safe-integer range (2^53) for any realistic
+    /// slot (`(2^53-1) / 2^32 =~ 2.1 million`, far above any per-service slot count).
     pub const MULTIPLIER: i64 = 1i64 << 32;
 
-    /// Combine a browser's pid and the extension's native tab id into one composite JSON number.
-    pub fn encode(browser_pid: u32, native_tab_id: i64) -> i64 {
-        (browser_pid as i64) * MULTIPLIER + native_tab_id
+    /// Combine a browser's slot and the extension's native tab id into one composite JSON number.
+    pub fn encode(slot: u32, native_tab_id: i64) -> i64 {
+        (slot as i64) * MULTIPLIER + native_tab_id
     }
 
-    /// Split a composite tab id back into `(browser_pid, native_tab_id)`. Not meaningfully
-    /// fallible: any `i64` decodes to SOME pair, even if the value never came from [`encode`] (a
-    /// caller that used a plain small native id un-encoded just decodes to `browser_pid: 0`,
-    /// which will simply fail to match any live session -- a clear "browser not connected"
-    /// error, not a panic or a silent misroute).
+    /// Split a composite tab id back into `(slot, native_tab_id)`. Not meaningfully fallible: any
+    /// `i64` decodes to SOME pair, even if the value never came from [`encode`] (a caller that used
+    /// a plain small native id un-encoded just decodes to `slot: 0`, which will simply fail to match
+    /// any live session -- a clear "browser not connected" error, not a panic or a silent misroute).
     pub fn decode(composite: i64) -> (u32, i64) {
-        let browser_pid = (composite / MULTIPLIER).max(0) as u32;
+        let slot = (composite / MULTIPLIER).max(0) as u32;
         let native_tab_id = composite.rem_euclid(MULTIPLIER);
-        (browser_pid, native_tab_id)
+        (slot, native_tab_id)
     }
 
     #[cfg(test)]

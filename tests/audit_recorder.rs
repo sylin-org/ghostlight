@@ -134,9 +134,17 @@ fn session_killed_writes_one_session_event_record() {
         tokio::spawn(async move {
             let _ = attached.attach(browser_side).await;
         });
-        // ADR-0058: the first frame on this endpoint is now this session's hello.
+        // ADR-0058/0061: the first frame is the relay hello, then the extension's identity frame.
         let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
         ghostlight::native::host::write_message(&mut ext_side, &hello)
+            .await
+            .unwrap();
+        let identity = serde_json::to_vec(&serde_json::json!({
+            "type": ghostlight_transport::handshake::EXTENSION_IDENTITY_TYPE,
+            ghostlight_transport::handshake::BROWSER_ID_FIELD: "audit-recorder-fixture",
+        }))
+        .unwrap();
+        ghostlight::native::host::write_message(&mut ext_side, &identity)
             .await
             .unwrap();
         for _ in 0..200 {

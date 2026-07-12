@@ -31,3 +31,9 @@ Thumbs.db
 # the working tree (NAS replica), not by git.
 /private/
 /saps
+
+# Machine-local dev state and working notes (engine/install state, session handoffs).
+# The convention is documented in local/README.md, which stays tracked; everything else
+# in local/ is this machine's business only.
+/local/*
+!/local/README.md

@@ -99,6 +99,7 @@ pub(crate) fn browser_batch_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
             store: ctx.store,
             governance: ctx.governance,
             guid: ctx.guid,
+            overlay: ctx.overlay,
         };
         // browser_batch is byte-faithful to its trained schema: no dry_run, no budget_ms override.
         let run = run_batch(

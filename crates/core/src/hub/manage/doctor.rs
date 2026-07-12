@@ -120,25 +120,8 @@ pub fn run(opts: DoctorOptions) -> Result<bool> {
         }
     }
 
-    // ADR-0048 D7: when this report is for the DEFAULT instance, say where UNPINNED clients
-    // (agent adapters and the browser native host with no --instance) currently route: a live
-    // dev instance shadows the default (the development override).
-    if instance.is_default() {
-        let dev = ghostlight_transport::instance::Instance::from_name(
-            ghostlight_transport::instance::DEV_INSTANCE,
-        )
-        .expect("'dev' is a valid instance name");
-        let dev_probe = ipc::probe_endpoint(&ipc::adapter_endpoint_name(&dev.endpoint()));
-        println!();
-        println!("Development override:");
-        if matches!(dev_probe, ipc::EndpointProbe::Absent) {
-            println!(
-                "  no dev instance is running; unpinned clients route to this default instance"
-            );
-        } else {
-            println!("  a dev instance is LIVE; unpinned clients currently route to it (ADR-0048)");
-        }
-    }
+    // ADR-0064 retired the auto-shadow: there is no "development override" to report -- each
+    // instance is a separate, explicitly-targeted stack (a `dev` install registers its own host).
 
     let (log_dir, rows) = gather_sessions();
     println!();
@@ -458,7 +441,7 @@ fn browser_lines(browsers: &[ghostlight_transport::ipc::BrowserInfo]) -> Vec<Str
     let mut lines = vec!["  Browsers:".to_string()];
     for b in browsers {
         let focus_note = if b.focused { " (focused)" } else { "" };
-        lines.push(format!("    pid {}{}", b.pid, focus_note));
+        lines.push(format!("    slot {}{}", b.slot, focus_note));
     }
     lines
 }
@@ -1204,11 +1187,11 @@ mod tests {
     fn browser_lines_marks_exactly_the_focused_one() {
         let browsers = vec![
             ghostlight_transport::ipc::BrowserInfo {
-                pid: 1001,
+                slot: 1,
                 focused: true,
             },
             ghostlight_transport::ipc::BrowserInfo {
-                pid: 2002,
+                slot: 2,
                 focused: false,
             },
         ];
@@ -1216,11 +1199,11 @@ mod tests {
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert_eq!(lines[0], "  Browsers:");
         assert!(
-            lines[1].contains("1001") && lines[1].contains("(focused)"),
+            lines[1].contains("slot 1") && lines[1].contains("(focused)"),
             "{lines:?}"
         );
         assert!(
-            lines[2].contains("2002") && !lines[2].contains("(focused)"),
+            lines[2].contains("slot 2") && !lines[2].contains("(focused)"),
             "{lines:?}"
         );
     }

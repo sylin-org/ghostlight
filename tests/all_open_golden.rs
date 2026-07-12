@@ -176,6 +176,7 @@ fn read_page_redaction_is_still_wired_at_the_chokepoint() {
                 .await
                 .expect("fake extension connects to the real IPC endpoint");
             let (mut read_half, mut write_half) = tokio::io::split(stream);
+            support::send_extension_attach_frames(&mut write_half).await;
             let req = ghostlight::native::host::read_message(&mut read_half)
                 .await
                 .unwrap()

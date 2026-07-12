@@ -22,22 +22,22 @@ pub enum Diagnostic<'a> {
     MalformedHello { parse_error: &'a str },
     /// A connection's hello parsed but named a role other than `ROLE_BROWSER`.
     WrongRole { role: Option<&'a str> },
-    /// A well-formed `ROLE_BROWSER` hello was admitted.
-    Attached {
-        browser_pid: u32,
-        replaced_existing: bool,
-    },
+    /// A `ROLE_BROWSER` hello was admitted but no valid extension identity frame followed within
+    /// the window (ADR-0061); the connection was rejected fail-closed (no slot assigned).
+    MissingIdentity,
+    /// A well-formed handshake was admitted and assigned a `slot` (ADR-0061).
+    Attached { slot: u32, replaced_existing: bool },
     /// A session's stream closed and its own entry was removed.
-    Detached { browser_pid: u32 },
-    /// A session's stream closed, but a NEWER hello for the same pid had already replaced it
+    Detached { slot: u32 },
+    /// A session's stream closed, but a NEWER handshake for the same slot had already replaced it
     /// (a reconnect race); the newer entry was left untouched.
-    DetachedStale { browser_pid: u32 },
-    /// `browser_pid` reported (via `chrome.windows.onFocusChanged`) gaining window focus.
-    FocusReported { browser_pid: u32 },
+    DetachedStale { slot: u32 },
+    /// The browser in `slot` reported (via `chrome.windows.onFocusChanged`) gaining window focus.
+    FocusReported { slot: u32 },
     /// A debug note the extension itself forwarded (ADR-0059's `debug_event` wire message),
     /// only ever sent when the extension's own local debug flag is on.
     FromExtension {
-        browser_pid: u32,
+        slot: u32,
         event: &'a str,
         detail: &'a Value,
     },
@@ -54,33 +54,37 @@ impl Diagnostic<'_> {
             Diagnostic::WrongRole { role } => {
                 format!("native-host: hello carried an unexpected role ({role:?}); rejected")
             }
+            Diagnostic::MissingIdentity => {
+                "native-host: no valid extension identity frame after the hello; rejected"
+                    .to_string()
+            }
             Diagnostic::Attached {
-                browser_pid,
+                slot,
                 replaced_existing,
             } => format!(
-                "native-host: browser attached, pid={browser_pid}{}",
+                "native-host: browser attached, slot={slot}{}",
                 if *replaced_existing {
-                    " (replaced an existing session for this pid)"
+                    " (replaced an existing session for this slot)"
                 } else {
                     " (new session)"
                 }
             ),
-            Diagnostic::Detached { browser_pid } => {
-                format!("native-host: browser detached, pid={browser_pid}")
+            Diagnostic::Detached { slot } => {
+                format!("native-host: browser detached, slot={slot}")
             }
-            Diagnostic::DetachedStale { browser_pid } => format!(
-                "native-host: pid={browser_pid}'s stream closed, but a NEWER session for the \
-                 same pid already replaced it; leaving that one alone"
+            Diagnostic::DetachedStale { slot } => format!(
+                "native-host: slot={slot}'s stream closed, but a NEWER session for the \
+                 same slot already replaced it; leaving that one alone"
             ),
-            Diagnostic::FocusReported { browser_pid } => {
-                format!("native-host: pid={browser_pid} reported gaining focus")
+            Diagnostic::FocusReported { slot } => {
+                format!("native-host: slot={slot} reported gaining focus")
             }
             Diagnostic::FromExtension {
-                browser_pid,
+                slot,
                 event,
                 detail,
             } => {
-                format!("extension (pid={browser_pid}) debug: {event} {detail}")
+                format!("extension (slot={slot}) debug: {event} {detail}")
             }
         }
     }
@@ -93,17 +97,17 @@ mod tests {
     #[test]
     fn attached_distinguishes_new_from_replaced() {
         let new = Diagnostic::Attached {
-            browser_pid: 42,
+            slot: 42,
             replaced_existing: false,
         }
         .describe();
         let replaced = Diagnostic::Attached {
-            browser_pid: 42,
+            slot: 42,
             replaced_existing: true,
         }
         .describe();
-        assert!(new.contains("pid=42") && new.contains("new session"));
-        assert!(replaced.contains("pid=42") && replaced.contains("replaced an existing session"));
+        assert!(new.contains("slot=42") && new.contains("new session"));
+        assert!(replaced.contains("slot=42") && replaced.contains("replaced an existing session"));
         assert_ne!(new, replaced);
     }
 
@@ -119,15 +123,15 @@ mod tests {
     }
 
     #[test]
-    fn from_extension_carries_pid_event_and_detail() {
+    fn from_extension_carries_slot_event_and_detail() {
         let detail = serde_json::json!({"lastError": "boom"});
         let line = Diagnostic::FromExtension {
-            browser_pid: 7,
+            slot: 7,
             event: "connect_disconnect",
             detail: &detail,
         }
         .describe();
-        assert!(line.contains("pid=7"));
+        assert!(line.contains("slot=7"));
         assert!(line.contains("connect_disconnect"));
         assert!(line.contains("boom"));
     }

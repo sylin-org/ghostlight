@@ -24,6 +24,8 @@ use clap::{Args, Parser, Subcommand};
 use ghostlight::hub::manage::doctor::DoctorOptions;
 use ghostlight::install::{InstallOptions, Selection, UninstallOptions};
 
+mod demo;
+
 /// Ghostlight -- the user's own authenticated browser, for AI agents.
 #[derive(Debug, Parser)]
 #[command(name = "ghostlight", version, about, long_about = None)]
@@ -69,8 +71,28 @@ enum Command {
     Policy(PolicyArgs),
     /// Run the persistent Ghostlight Hub service (owns the browser link; multiplexes clients).
     Service,
+    /// Drive a scripted tour of the public demo stage (sylin.org/ghostlight/demo).
+    Demo(DemoArgs),
     /// Show or install a Ghostlight license (state never affects behavior; ADR-0028).
     License(LicenseArgs),
+}
+
+#[derive(Debug, Args)]
+struct DemoArgs {
+    /// The demo stage base URL. Defaults to the live site; override for a local `eleventy --serve`
+    /// (e.g. http://localhost:8080/ghostlight/demo).
+    #[arg(long, default_value = "https://sylin.org/ghostlight/demo")]
+    base_url: String,
+    /// Seconds to pause after each visible step so you can watch it happen. Default 2.
+    #[arg(long, default_value_t = 2.0)]
+    pause: f64,
+    /// Seconds to wait right after the demo tab opens, so you can resize and position the
+    /// browser window before the tour starts. Default 10.
+    #[arg(long, default_value_t = 10.0)]
+    setup_pause: f64,
+    /// Seconds to breathe between the tour's sections (Desk, Form, Signals, ...). Default 5.
+    #[arg(long, default_value_t = 5.0)]
+    section_pause: f64,
 }
 
 #[derive(Debug, Args)]
@@ -569,6 +591,17 @@ fn main() -> Result<()> {
             keep_warm,
             ..
         } => ghostlight::hub::run_service(manifest, debug_flag || debug_env, keep_warm)?,
+        Cli {
+            command: Some(Command::Demo(args)),
+            ..
+        } => demo::run(
+            &args.base_url,
+            demo::Pacing {
+                step_secs: args.pause,
+                setup_secs: args.setup_pause,
+                section_secs: args.section_pause,
+            },
+        )?,
         Cli {
             command: Some(Command::License(args)),
             ..

@@ -7,7 +7,7 @@
 pub use ghostlight_core::{browser, governance, hub, install, mcp, messages, origin};
 pub use ghostlight_transport::error::{Error, Result, ToolError};
 pub use ghostlight_transport::init_tracing;
-pub use ghostlight_transport::{error, instance, observability, proc};
+pub use ghostlight_transport::{error, handshake, instance, observability, proc};
 
 /// Historical path continuity (`ghostlight::native::...`).
 pub mod native {

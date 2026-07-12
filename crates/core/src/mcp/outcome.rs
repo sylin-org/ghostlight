@@ -77,6 +77,11 @@ pub struct LocalCtx<'a> {
     pub guid: &'a str,
     pub config: &'a Config,
     pub args: &'a Value,
+    /// The calling session's tighten-only policy overlay (ADR-0060), if it declared one, so a
+    /// local handler that re-enters the pipeline (`script`, `form_fill`) subjects its OWN
+    /// sub-steps to the same session tier -- an orchestrated sub-call can never escape the
+    /// overlay its parent call was bound by.
+    pub overlay: Option<&'a crate::governance::overlay::SessionOverlay>,
 }
 
 /// A [`crate::browser::directory::Handler::Local`] handler's return type: a boxed, pinned

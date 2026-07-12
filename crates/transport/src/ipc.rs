@@ -42,14 +42,15 @@ pub fn default_endpoint() -> String {
         .unwrap_or_else(|_| crate::instance::Instance::resolve().endpoint())
 }
 
-/// The ordered MAIN-endpoint candidates an adapter dials (ADR-0048 D2/D3), pure core: the
-/// single-endpoint override wins, then the list override, then the selection's instances. Split
-/// from [`endpoint_candidates`] so it is unit-testable without racing parallel tests over
-/// process-global env state.
+/// The MAIN-endpoint candidates a client dials, pure core: the single-endpoint override wins, then
+/// the list override, then `instance`'s own ONE endpoint (ADR-0064: a client pins exactly one
+/// instance -- no more `[dev, default]` shadow). Split from [`endpoint_candidates`] so it is
+/// unit-testable without racing parallel tests over process-global env state. Still returns a `Vec`
+/// because `GHOSTLIGHT_ENDPOINTS` (the override integration tests' seam) can name several.
 fn candidates_from(
     single: Option<&str>,
     list: Option<&str>,
-    selection: &crate::instance::Selection,
+    instance: &crate::instance::Instance,
 ) -> Vec<String> {
     if let Some(ep) = single.map(str::trim).filter(|s| !s.is_empty()) {
         return vec![ep.to_string()];
@@ -65,22 +66,17 @@ fn candidates_from(
             return eps;
         }
     }
-    selection
-        .candidates()
-        .iter()
-        .map(crate::instance::Instance::endpoint)
-        .collect()
+    vec![instance.endpoint()]
 }
 
-/// The ordered endpoint candidates for `selection` (ADR-0048 D2/D3): `GHOSTLIGHT_ENDPOINT` (one
-/// pinned endpoint; tests and advanced deployments) wins, then `GHOSTLIGHT_ENDPOINTS` (a
-/// comma-separated pinned candidate LIST -- the override integration tests' seam), then the
-/// selection's instances' endpoints (`[dev, default]` when unpinned, exactly one when pinned).
-pub fn endpoint_candidates(selection: &crate::instance::Selection) -> Vec<String> {
+/// The endpoint candidates for `instance` (ADR-0064): `GHOSTLIGHT_ENDPOINT` (one pinned endpoint;
+/// tests and advanced deployments) wins, then `GHOSTLIGHT_ENDPOINTS` (a comma-separated candidate
+/// LIST -- the override integration tests' seam), then the instance's own single endpoint.
+pub fn endpoint_candidates(instance: &crate::instance::Instance) -> Vec<String> {
     candidates_from(
         std::env::var("GHOSTLIGHT_ENDPOINT").ok().as_deref(),
         std::env::var("GHOSTLIGHT_ENDPOINTS").ok().as_deref(),
-        selection,
+        instance,
     )
 }
 
@@ -151,48 +147,165 @@ pub async fn relay_native_host(
 
 /// [`relay_native_host`] with Chrome's stdio INJECTED (ADR-0051 Phase 2): the binary passes the
 /// real `stdin`/`stdout`; tests pass in-memory streams.
+///
+/// ADR-0062: this is now a RECONNECT loop, mirroring the adapter's ADR-0045 resilience. A service
+/// drop no longer ends the relay -- it reconnects to its one pinned instance's service (ADR-0064:
+/// the relay targets exactly one endpoint) and replays the extension's cached opening identity
+/// frame, keeping Chrome's native port alive the whole time. Only Chrome's stdin closing (the
+/// browser is gone) ends it. The Chrome-frame reader lives in its own task feeding a channel, so a
+/// frame is never cancelled mid-read and frames buffer across a brief reconnect instead of lost.
 pub async fn relay_native_host_over<I, O>(
     endpoints: &[String],
     hello: &[u8],
     debug: &crate::observability::DebugSink,
-    mut chrome_in: I,
+    chrome_in: I,
     mut chrome_out: O,
 ) -> Result<()>
 where
-    I: tokio::io::AsyncRead + Unpin,
+    I: tokio::io::AsyncRead + Unpin + Send + 'static,
     O: tokio::io::AsyncWrite + Unpin,
 {
-    let endpoint = pick_native_host_endpoint(endpoints, probe_endpoint);
-    let stream = connect(&endpoint).await?;
-    debug.ipc_note("connected to mcp-server endpoint");
-    let (mut ipc_read, mut ipc_write) = tokio::io::split(stream);
-    host::write_message(&mut ipc_write, hello).await?;
-
-    // extension -> mcp-server
-    let upstream = async {
+    // The long-lived Chrome->service frame reader (ADR-0062): reads complete native-messaging frames
+    // and forwards each over the channel. NEVER inside a `select!`, so `read_message` is never
+    // cancelled mid-frame; frames buffer in the channel across a reconnect, so a brief service gap
+    // never loses one. Chrome's stdin EOF drops `tx`, so the relay loop sees the browser close.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+    let reader_debug = debug.clone();
+    tokio::spawn(async move {
+        let mut chrome_in = chrome_in;
         while let Ok(Some(frame)) = host::read_message(&mut chrome_in).await {
-            debug.frame_in();
-            if host::write_message(&mut ipc_write, &frame).await.is_err() {
-                break;
+            reader_debug.frame_in();
+            if tx.send(frame).await.is_err() {
+                break; // the relay loop is gone
             }
         }
-    };
-    // mcp-server -> extension
-    let downstream = async {
-        while let Ok(Some(frame)) = host::read_message(&mut ipc_read).await {
-            if host::write_message(&mut chrome_out, &frame).await.is_err() {
-                break;
-            }
-            debug.frame_out();
-        }
-    };
+    });
 
-    tokio::select! {
-        _ = upstream => {}
-        _ = downstream => {}
+    // The extension's opening identity frame (ADR-0061), captured from the first channel frame and
+    // replayed to every reconnected service (the extension does not re-send it -- its port stays up).
+    let mut identity: Option<Vec<u8>> = None;
+    let mut first = true;
+    loop {
+        let stream = connect_native_with_retry(endpoints, !first).await?;
+        let (mut ipc_read, mut ipc_write) = tokio::io::split(stream);
+        host::write_message(&mut ipc_write, hello).await?;
+        if let Some(id) = &identity {
+            // ADR-0062: replay the cached identity right after the hello so the reconnected service
+            // re-admits the session under the same UUID (hence the same slot, ADR-0061).
+            host::write_message(&mut ipc_write, id).await?;
+        }
+        if first {
+            debug.ipc_note("connected to mcp-server endpoint");
+        } else {
+            debug.note_reconnected();
+        }
+
+        let side = native_relay_session(
+            &mut rx,
+            &mut identity,
+            &mut ipc_read,
+            &mut ipc_write,
+            &mut chrome_out,
+            debug,
+        )
+        .await;
+        first = false;
+        match side {
+            RelaySide::ClientClosed => {
+                debug.ipc_note("native-host relay ended (browser closed)");
+                return Ok(());
+            }
+            RelaySide::ServiceClosed => {
+                debug.ipc_note("service dropped; reconnecting the native-host relay");
+                // loop back and re-dial (re-resolving the endpoint, ADR-0048/0062).
+            }
+        }
     }
-    debug.ipc_note("relay ended");
-    Ok(())
+}
+
+/// Connect the native-host relay to its pinned instance's service (ADR-0062/0064). The FIRST connect
+/// stays fail-fast (a misconfigured install errors immediately); a RECONNECT is patient
+/// ([`RECONNECT_RETRY_WINDOW`]) so a rebuild-length service gap or a restart never gives up
+/// prematurely -- it simply waits for the one service to come back. Unlike the adapter's
+/// `connect_and_handshake` there is no anti-squat proof step: the browser endpoint's ACL is the
+/// transport's, and the browser hello carries no session-guid to squat.
+async fn connect_native_with_retry(
+    endpoints: &[String],
+    reconnect: bool,
+) -> Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin> {
+    let endpoint = pick_native_host_endpoint(endpoints, probe_endpoint);
+    match connect(&endpoint).await {
+        Ok(stream) => return Ok(stream),
+        Err(e) if !reconnect => return Err(e),
+        Err(_) => {}
+    }
+    let deadline = tokio::time::Instant::now() + RECONNECT_RETRY_WINDOW;
+    loop {
+        sleep(RECONNECT_RETRY_INTERVAL).await;
+        let endpoint = pick_native_host_endpoint(endpoints, probe_endpoint);
+        match connect(&endpoint).await {
+            Ok(stream) => return Ok(stream),
+            Err(e) if tokio::time::Instant::now() >= deadline => return Err(e),
+            Err(_) => {}
+        }
+    }
+}
+
+/// Relay one service connection for the native-host role until one side closes (ADR-0062), and
+/// report WHICH side so the caller exits or reconnects. Mirrors the adapter's `relay_session`: the
+/// Chrome->service direction reads complete frames from the channel (`rx.recv()` is cancellation-safe
+/// -- an un-received frame stays queued for the next reconnect) and captures the FIRST frame as the
+/// identity to replay; the service->Chrome direction classifies a read EOF/error as `ServiceClosed`
+/// (reconnect) and only a Chrome write failure as `ClientClosed` (exit), the same Windows-broken-pipe
+/// correctness ADR-0047 gave the adapter.
+async fn native_relay_session<R, W, CO>(
+    rx: &mut tokio::sync::mpsc::Receiver<Vec<u8>>,
+    identity: &mut Option<Vec<u8>>,
+    ipc_read: &mut R,
+    ipc_write: &mut W,
+    chrome_out: &mut CO,
+    debug: &crate::observability::DebugSink,
+) -> RelaySide
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+    CO: tokio::io::AsyncWrite + Unpin,
+{
+    let up = async {
+        loop {
+            match rx.recv().await {
+                None => break RelaySide::ClientClosed, // the Chrome reader ended (browser closed)
+                Some(frame) => {
+                    if identity.is_none() {
+                        // ADR-0061/0062: the extension's opening frame, cached (opaquely) for replay
+                        // on every future reconnect. The relay still never parses it.
+                        *identity = Some(frame.clone());
+                    }
+                    if host::write_message(ipc_write, &frame).await.is_err() {
+                        break RelaySide::ServiceClosed; // the service is gone
+                    }
+                }
+            }
+        }
+    };
+    let down = async {
+        loop {
+            match host::read_message(ipc_read).await {
+                Ok(Some(frame)) => {
+                    if host::write_message(chrome_out, &frame).await.is_err() {
+                        break RelaySide::ClientClosed; // writing to Chrome failed
+                    }
+                    debug.frame_out();
+                }
+                Ok(None) => break RelaySide::ServiceClosed, // service EOF
+                Err(_) => break RelaySide::ServiceClosed,   // service read error (e.g. broken pipe)
+            }
+        }
+    };
+    tokio::select! {
+        side = up => side,
+        side = down => side,
+    }
 }
 
 /// Which side of the adapter relay closed (ADR-0045): the classification that decides whether the
@@ -382,10 +495,10 @@ where
 /// re-presenting an identity, so tab ownership and this session's Chrome tab group survive the
 /// service gap instead of being orphaned when the connection drops.
 ///
-/// ADR-0048 D3: `endpoints` is the ORDERED main-endpoint candidate list (exactly one when
-/// pinned; `[dev, default]` when unpinned). Every connect episode -- the first connect and each
-/// reconnect tick -- walks the list in order, so a live dev instance shadows the default and a
-/// dead one fails over to it at reconnect speed.
+/// ADR-0064: `endpoints` is the pinned instance's endpoint (exactly one), or the multi-valued
+/// `GHOSTLIGHT_ENDPOINTS` test-override list. Every connect episode -- the first connect and each
+/// reconnect tick -- walks the list in order and connects to the first present one, waiting for it
+/// to come back on a restart.
 pub async fn relay_adapter(
     endpoints: &[String],
     debug: &crate::observability::DebugSink,
@@ -541,21 +654,22 @@ pub struct StatusReply {
     /// The number of live tool sessions (MCP adapters + web) at the moment of the reply.
     pub live_sessions: u64,
     /// Every currently-attached browser (ADR-0058), most-recently-focused first. Non-sensitive:
-    /// a pid and a live tab count, nothing identifying beyond what the local OS process list
-    /// already shows any same-user process.
+    /// a server-assigned slot and a focus flag, nothing identifying about the user's machine.
     #[serde(default)]
     pub browsers: Vec<BrowserInfo>,
 }
 
-/// One attached browser, as reported by `ghostlight doctor` (ADR-0058). Deliberately does not
-/// carry a tab count: the service has no live source for "how many tabs does this browser have"
-/// without a synchronous round-trip doctor's one-shot control query does not make (that number is
-/// the extension's own `chrome.tabs.query` state, never mirrored server-side today) -- a future
-/// addition, not a gap in this one.
+/// One attached browser, as reported by `ghostlight doctor` (ADR-0058, amended by ADR-0061).
+/// Deliberately does not carry a tab count: the service has no live source for "how many tabs does
+/// this browser have" without a synchronous round-trip doctor's one-shot control query does not make
+/// (that number is the extension's own `chrome.tabs.query` state, never mirrored server-side today)
+/// -- a future addition, not a gap in this one.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BrowserInfo {
-    /// The browser (Chrome/Edge) process id -- the identity a session is keyed by.
-    pub pid: u32,
+    /// The service-assigned slot (ADR-0061): a small, stable, non-zero number a session is keyed by,
+    /// mapped from the extension's persistent browser UUID. Replaces the pre-0061 `pid` (which could
+    /// degrade to a colliding 0). Also the high bits of every composite tab id this browser owns.
+    pub slot: u32,
     /// Whether this browser most recently reported window focus (the front of the focus chain).
     pub focused: bool,
 }
@@ -904,31 +1018,31 @@ mod tests {
     /// selection's instances (dev first when unpinned). Pure: no env access.
     #[test]
     fn candidates_from_honors_the_precedence_order() {
-        use crate::instance::{Instance, Selection};
-        let unpinned = Selection::Unpinned;
+        use crate::instance::Instance;
+        let default = Instance::default();
+        // Single-endpoint override wins over everything.
         assert_eq!(
-            candidates_from(Some("ep-one"), Some("a,b"), &unpinned),
+            candidates_from(Some("ep-one"), Some("a,b"), &default),
             vec!["ep-one".to_string()]
         );
+        // List override next (the GHOSTLIGHT_ENDPOINTS test seam; still multi-valued).
         assert_eq!(
-            candidates_from(None, Some(" a , b ,,"), &unpinned),
+            candidates_from(None, Some(" a , b ,,"), &default),
             vec!["a".to_string(), "b".to_string()]
         );
+        // ADR-0064: no override -> the instance's OWN single endpoint (no [dev, default] shadow).
         assert_eq!(
-            candidates_from(None, None, &unpinned),
-            vec![
-                "org.sylin.ghostlight.dev.v1".to_string(),
-                "org.sylin.ghostlight.v1".to_string()
-            ]
+            candidates_from(None, None, &default),
+            vec!["org.sylin.ghostlight.v1".to_string()]
         );
-        let pinned = Selection::Pinned(Instance::from_name("qa").unwrap());
+        let qa = Instance::from_name("qa").unwrap();
         assert_eq!(
-            candidates_from(None, None, &pinned),
+            candidates_from(None, None, &qa),
             vec!["org.sylin.ghostlight.qa.v1".to_string()]
         );
         // Blank overrides fall through rather than pinning an empty endpoint.
         assert_eq!(
-            candidates_from(Some("  "), None, &pinned),
+            candidates_from(Some("  "), None, &qa),
             vec!["org.sylin.ghostlight.qa.v1".to_string()]
         );
     }
@@ -1094,5 +1208,73 @@ mod tests {
             RelaySide::ClientClosed
         ));
         drop(service_write);
+    }
+
+    /// ADR-0062: the native-host relay session captures the extension's opening frame as the
+    /// identity to replay, forwards it to the service, and classifies a service drop as
+    /// ServiceClosed (reconnect) -- the resilience that keeps Chrome's port alive across a restart.
+    #[tokio::test]
+    async fn native_relay_captures_identity_and_reports_service_close() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(8);
+        let (service_peer, relay_stream) = tokio::io::duplex(64 * 1024);
+        let (mut ipc_read, mut ipc_write) = tokio::io::split(relay_stream);
+        let mut identity: Option<Vec<u8>> = None;
+        let mut chrome_out = tokio::io::sink();
+        let debug = crate::observability::DebugSink::disabled();
+
+        // The extension's opening (identity) frame arrives; the service reads it, then drops.
+        tx.send(b"identity-frame".to_vec()).await.unwrap();
+        let service = tokio::spawn(async move {
+            let mut service_peer = service_peer;
+            let got = host::read_message(&mut service_peer)
+                .await
+                .unwrap()
+                .unwrap();
+            drop(service_peer); // the service closes -> the relay's `down` read observes EOF
+            got
+        });
+
+        let side = native_relay_session(
+            &mut rx,
+            &mut identity,
+            &mut ipc_read,
+            &mut ipc_write,
+            &mut chrome_out,
+            &debug,
+        )
+        .await;
+
+        assert!(matches!(side, RelaySide::ServiceClosed));
+        assert_eq!(
+            identity.as_deref(),
+            Some(&b"identity-frame"[..]),
+            "the opening frame is cached for replay on reconnect"
+        );
+        assert_eq!(service.await.unwrap(), b"identity-frame");
+    }
+
+    /// ADR-0062: when Chrome's frame reader ends (the browser is gone), the session reports
+    /// ClientClosed (exit) -- never a reconnect -- and no identity is captured.
+    #[tokio::test]
+    async fn native_relay_reports_client_close_when_chrome_reader_ends() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(8);
+        drop(tx); // the Chrome-frame reader ended (browser closed)
+        let (_service_peer, relay_stream) = tokio::io::duplex(1024);
+        let (mut ipc_read, mut ipc_write) = tokio::io::split(relay_stream);
+        let mut identity: Option<Vec<u8>> = None;
+        let mut chrome_out = tokio::io::sink();
+
+        let side = native_relay_session(
+            &mut rx,
+            &mut identity,
+            &mut ipc_read,
+            &mut ipc_write,
+            &mut chrome_out,
+            &crate::observability::DebugSink::disabled(),
+        )
+        .await;
+
+        assert!(matches!(side, RelaySide::ClientClosed));
+        assert!(identity.is_none());
     }
 }

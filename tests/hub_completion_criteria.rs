@@ -93,6 +93,7 @@ fn two_real_adapters_multiplex_get_own_tab_groups_and_share_one_kill() {
                 .await
                 .expect("fake extension connects to the real extension endpoint");
             let (mut read_half, mut write_half) = tokio::io::split(stream);
+            support::send_extension_attach_frames(&mut write_half).await;
 
             let mut group_requests: Vec<Value> = Vec::new();
             let mut tool_requests: Vec<Value> = Vec::new();
@@ -103,6 +104,11 @@ fn two_real_adapters_multiplex_get_own_tab_groups_and_share_one_kill() {
                     .expect("a framed message from the service");
                 let v: Value = serde_json::from_slice(&frame).unwrap();
                 match v.get("type").and_then(Value::as_str) {
+                    // The service probes a claimed tab's URL before dispatch (domain resolution +
+                    // navigate's auto-create check); answer like a live in-group tab and move on.
+                    Some("tab_url_request") => {
+                        support::answer_tab_url(&mut write_half, &v).await;
+                    }
                     Some("group_request") => group_requests.push(v),
                     Some("tool_request") => {
                         let reply = json!({

@@ -71,9 +71,16 @@ fn attach_fake_extension(
     let responses: HashMap<&'static str, Value> = responses.into_iter().collect();
     let tab_urls: HashMap<i64, Option<&'static str>> = tab_urls.into_iter().collect();
     let handle = tokio::spawn(async move {
-        // ADR-0058: identify as pid 0, matching a plain un-encoded small tabId's decode.
+        // ADR-0058/0061: relay hello then the extension identity frame; plain un-encoded small
+        // tabIds decode to slot 0, which resolve_target routes to this sole focus-front browser.
         let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
         host::write_message(&mut ext_side, &hello).await.unwrap();
+        let identity = serde_json::to_vec(&serde_json::json!({
+            "type": ghostlight_transport::handshake::EXTENSION_IDENTITY_TYPE,
+            ghostlight_transport::handshake::BROWSER_ID_FIELD: "hub-isolation-fixture",
+        }))
+        .unwrap();
+        host::write_message(&mut ext_side, &identity).await.unwrap();
         loop {
             let Some(req) = host::read_message(&mut ext_side).await.unwrap() else {
                 break;

@@ -99,6 +99,9 @@ pub(crate) struct PipelineRunner<'a> {
     pub(crate) store: &'a Arc<ConfigStore>,
     pub(crate) governance: &'a Governance,
     pub(crate) guid: &'a str,
+    /// ADR-0060: the session's tighten-only overlay, threaded from the `LocalCtx` so every
+    /// orchestrated sub-step is bound by the SAME session tier its parent call was.
+    pub(crate) overlay: Option<&'a crate::governance::overlay::SessionOverlay>,
 }
 
 impl<'a> StepRunner for PipelineRunner<'a> {
@@ -122,6 +125,7 @@ impl<'a> StepRunner for PipelineRunner<'a> {
             self.store,
             self.governance,
             self.guid,
+            self.overlay,
         )
     }
 }
@@ -558,6 +562,7 @@ pub(crate) fn script_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
             store: ctx.store,
             governance: ctx.governance,
             guid: ctx.guid,
+            overlay: ctx.overlay,
         };
         let mut compact = interpret(
             ctx.args,
@@ -611,6 +616,7 @@ fn futures_await_block(
     store: &Arc<ConfigStore>,
     governance: &Governance,
     guid: &str,
+    overlay: Option<&crate::governance::overlay::SessionOverlay>,
 ) -> CallOutcome {
     tokio::task::block_in_place(|| {
         let handle = tokio::runtime::Handle::current();
@@ -623,6 +629,7 @@ fn futures_await_block(
             args,
             orchestration,
             dry_run,
+            overlay,
         ))
     })
 }

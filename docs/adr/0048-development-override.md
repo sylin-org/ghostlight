@@ -1,6 +1,12 @@
 # ADR-0048: The development override -- a live dev instance shadows the default for unpinned clients
 
-- Status: Accepted (ratified 2026-07-09)
+- Status: SUPERSEDED by [ADR-0064](0064-explicit-dev-isolation.md) (2026-07-12) -- the auto-shadow
+  (an unpinned client preferring a live `dev` instance) is retired in favor of explicit dev
+  isolation: the unpacked dev extension self-selects its OWN native host, a `dev` install registers
+  that host, and every client pins exactly one instance. The NAMED-instance identity this ADR built
+  on (ADR-0044) and the per-user hub-key survive; only the `Selection::Unpinned`/prefer-live-dev
+  half is gone. Kept for historical context.
+- Status (original): Accepted (ratified 2026-07-09)
 - Deciders: project owner (design conversation, 2026-07-09)
 - Amends: ADR-0044 (named instances -- the parallel-isolation DEFAULT is inverted for the
   dev-over-release case), ADR-0046 (adapter behavior)

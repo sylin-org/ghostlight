@@ -35,6 +35,7 @@ use crate::governance::dispatch::Governance;
 use crate::governance::enforcement::LocalPdp;
 use crate::governance::manifest::identity::ManifestIdentity;
 use crate::governance::manifest::source::LoadedPolicy;
+use crate::governance::overlay::SessionOverlay;
 use crate::governance::ports::{AuditSink, Denial};
 use crate::hub::outbound::browser::Browser;
 use crate::hub::session::SessionGuid;
@@ -435,6 +436,7 @@ where
         owned_tabs: Arc::clone(&owned_tabs),
         session_titles: Arc::clone(&session_titles),
         live_guids: Arc::clone(&live_guids),
+        overlay: Arc::new(Mutex::new(None)),
     };
 
     while let Some(line) = lines.next_line().await? {
@@ -598,6 +600,10 @@ pub(super) struct SessionSeat {
     pub(super) owned_tabs: Arc<Mutex<HashMap<i64, SessionGuid>>>,
     pub(super) session_titles: Arc<Mutex<HashMap<String, String>>>,
     pub(super) live_guids: Arc<Mutex<HashMap<String, usize>>>,
+    /// ADR-0060: this session's tighten-only policy overlay, populated at `initialize` if the
+    /// client declared one, read on every `tools/call`. An interior-mutable slot because
+    /// `initialize` (which sets it) and later calls (which read it) both hold `&SessionSeat`.
+    pub(super) overlay: Arc<Mutex<Option<Arc<SessionOverlay>>>>,
 }
 
 /// Parse and route one JSON-RPC line.
@@ -693,6 +699,35 @@ pub(super) async fn handle_line(
             // Capture the same clientInfo into the audit recorder's client field (shared
             // format doc section 6.1), first-wins for the whole session.
             capture_client_info(governance, raw.get("params"));
+            // ADR-0060: a client may declare a tighten-only session policy overlay in the
+            // initialize `_meta` (a schema-3 manifest, as a string). Parse and store it for this
+            // session's calls. A malformed overlay fails the handshake loudly (a client that asked
+            // to be restricted must never silently run unrestricted) -- the field's absence is the
+            // ordinary no-overlay path.
+            if let Some(policy_text) = raw
+                .get("params")
+                .and_then(|p| p.get("_meta"))
+                .and_then(|m| m.get("ghostlightSessionPolicy"))
+                .and_then(Value::as_str)
+            {
+                match SessionOverlay::parse(
+                    policy_text,
+                    crate::browser::pattern::is_valid_pattern,
+                    crate::browser::polarity::evaluate_host,
+                ) {
+                    Ok(overlay) => {
+                        *seat.overlay.lock().unwrap_or_else(PoisonError::into_inner) =
+                            Some(Arc::new(overlay));
+                    }
+                    Err(e) => {
+                        return Some(JsonRpcResponse::error(
+                            id,
+                            -32602,
+                            format!("invalid ghostlightSessionPolicy: {e}"),
+                        ));
+                    }
+                }
+            }
             // Warm the extension channel while the client finishes its handshake. The extension
             // side initiates the connection (Chrome spawns the native-host, which dials the
             // endpoint this process has served since startup), so there is nothing to dial from
@@ -739,6 +774,13 @@ pub(super) async fn handle_line(
             let owned_tabs = Arc::clone(&seat.owned_tabs);
             let session_titles = Arc::clone(&seat.session_titles);
             let live_guids = Arc::clone(&seat.live_guids);
+            // ADR-0060: capture this session's overlay (an Arc clone of the current slot) into the
+            // spawned task, so the tool call is evaluated against the same session tier.
+            let overlay = seat
+                .overlay
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
             let tool_name = params
                 .as_ref()
                 .and_then(|p| p.get("name"))
@@ -752,6 +794,7 @@ pub(super) async fn handle_line(
                     guid.as_str(),
                     id,
                     params.as_ref(),
+                    overlay.as_deref(),
                 )
                 .await;
                 if tool_name.as_deref() == Some("tabs_create_mcp") {

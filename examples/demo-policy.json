@@ -1,0 +1,23 @@
+{
+  "schema": 3,
+  "name": "Ghostlight demo policy",
+  "version": "2026.07.1",
+  "mode": "enforce",
+  "identity": {
+    "resolved_by": "local_file",
+    "principal": "demo-user",
+    "groups": [],
+    "resolved_at": "2026-07-01T00:00:00Z"
+  },
+  "grants": [
+    {
+      "id": "demo-stage",
+      "hosts": { "allow": ["sylin.org", "*.sylin.org"] },
+      "allowed": ["read", "action", "write", "execute"],
+      "description": "The Ghostlight demo stage (sylin.org/ghostlight/demo). Every capability is granted here so the whole tour works; everything off this domain is refused, which is what the guardrail finale demonstrates."
+    }
+  ],
+  "config": [
+    { "key": "content.security.sacred_domains", "value": ["sacred-bank.invalid"], "level": "mandatory" }
+  ]
+}

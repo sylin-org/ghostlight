@@ -769,7 +769,7 @@ mod tests {
             "request": ghostlight_transport::handshake::CONTROL_REQUEST_STATUS,
         });
         let browsers = vec![ghostlight_transport::ipc::BrowserInfo {
-            pid: 4242,
+            slot: 1,
             focused: true,
         }];
         answer_control_request(&mut server_side, &hello, browsers, 3).await;
@@ -783,7 +783,7 @@ mod tests {
         assert!(reply.extension_connected);
         assert_eq!(reply.live_sessions, 3);
         assert_eq!(reply.browsers.len(), 1);
-        assert_eq!(reply.browsers[0].pid, 4242);
+        assert_eq!(reply.browsers[0].slot, 1);
     }
 
     /// An unrecognized control request writes nothing and simply closes -- keeping the vocabulary
@@ -815,9 +815,15 @@ mod tests {
         // Fake native-host: connect (retrying until serve is listening) and answer one request.
         let stream = connect(endpoint).await.expect("connect to serve");
         let (mut rd, mut wr) = tokio::io::split(stream);
-        // ADR-0058: the first frame on this endpoint is now this session's hello.
+        // ADR-0058/0061: the first frames are the relay hello then the extension identity frame.
         let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
         host::write_message(&mut wr, &hello).await.unwrap();
+        let identity = serde_json::to_vec(&serde_json::json!({
+            "type": ghostlight_transport::handshake::EXTENSION_IDENTITY_TYPE,
+            ghostlight_transport::handshake::BROWSER_ID_FIELD: "endpoint-fixture",
+        }))
+        .unwrap();
+        host::write_message(&mut wr, &identity).await.unwrap();
         let fake = tokio::spawn(async move {
             let req = host::read_message(&mut rd).await.unwrap().unwrap();
             let v: Value = serde_json::from_slice(&req).unwrap();

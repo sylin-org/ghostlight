@@ -28,6 +28,7 @@ pub mod inbound;
 pub mod license;
 pub mod managed;
 pub mod manifest;
+pub mod overlay;
 pub mod paths;
 pub mod ports;
 pub mod simulate;

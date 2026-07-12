@@ -356,11 +356,15 @@ fn tools_call_waits_for_a_late_extension_and_notes_the_wait() {
                 .await
                 .expect("fake extension connects to the real IPC endpoint");
             let (mut read_half, mut write_half) = tokio::io::split(stream);
-            let req = ghostlight::native::host::read_message(&mut read_half)
-                .await
-                .unwrap()
-                .expect("one framed tool_request");
-            let v: Value = serde_json::from_slice(&req).unwrap();
+            support::send_extension_attach_frames(&mut write_half).await;
+            // navigate probes the tab's URL before dispatch; the helper answers the probe(s) and
+            // hands back the tool_request itself.
+            let v = support::read_frame_answering_tab_urls(
+                &mut read_half,
+                &mut write_half,
+                "tool_request",
+            )
+            .await;
             let reply = json!({
                 "id": v["id"],
                 "type": "tool_response",

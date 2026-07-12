@@ -1,6 +1,6 @@
 [package]
 name = "ghostlight-relay"
-version = "0.5.5"
+version = "0.5.6"
 edition = "2021"
 description = "Ghostlight relay: the single thin pass-through the editor or browser launches, role-selected at launch (ADR-0051 Phase 3, merging the ADR-0046 agent + browser adapters)."
 publish = false

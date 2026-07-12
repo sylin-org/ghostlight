@@ -22,6 +22,11 @@ if (-not $env:CARGO_TARGET_DIR) {
     $env:CARGO_TARGET_DIR = Join-Path $env:TEMP 'ghostlight-e2e-target'
 }
 Write-Host "test-e2e: isolated CARGO_TARGET_DIR=$($env:CARGO_TARGET_DIR) (a live dev service will not lock it)"
+# The spawn tests launch ghostlight-relay as a SIBLING binary (tests/support::relay_bin), but no
+# CARGO_BIN_EXE_ dependency forces cargo to build another package's bin before the root package's
+# tests run -- build it explicitly so the first spawn never races the build plan.
+cargo build --locked -p ghostlight-relay
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $extra = if ($args) { ' ' + ($args -join ' ') } else { '' }
 cmd /c "cargo test --locked --no-fail-fast --workspace -- --include-ignored$extra < NUL"
 exit $LASTEXITCODE

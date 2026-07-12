@@ -124,11 +124,21 @@ impl Harness {
             let _ = attached.attach(browser_side).await;
         });
         tokio::spawn(async move {
-            // ADR-0058: identify as pid 0, the SAME value `constants::tab_id::decode` returns
-            // for a plain, un-encoded small tabId (the shape every caller of this fixture
-            // already uses), so no caller needs to know about composite encoding.
+            // ADR-0058/0061: send the relay hello then the extension's opening identity frame. The
+            // service assigns this fake browser a slot; the plain, un-encoded small tabIds every
+            // caller of this fixture uses decode to slot 0, which `resolve_target` treats as
+            // "unrouted" and resolves to this sole focus-front browser -- so no caller needs to know
+            // about composite encoding.
             let hello = ghostlight_transport::handshake::browser_hello_bytes(1, None);
             if host::write_message(&mut ext_side, &hello).await.is_err() {
+                return;
+            }
+            let identity = serde_json::to_vec(&json!({
+                "type": ghostlight_transport::handshake::EXTENSION_IDENTITY_TYPE,
+                ghostlight_transport::handshake::BROWSER_ID_FIELD: "inproc-fixture",
+            }))
+            .unwrap();
+            if host::write_message(&mut ext_side, &identity).await.is_err() {
                 return;
             }
             while let Ok(Some(req)) = host::read_message(&mut ext_side).await {

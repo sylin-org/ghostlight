@@ -60,35 +60,6 @@ pub fn log_dir() -> Option<PathBuf> {
     dirs::data_local_dir().map(|d| d.join(crate::instance::Instance::resolve().dir_leaf()))
 }
 
-/// The per-USER, instance-INDEPENDENT data directory for cross-instance secrets -- today just the
-/// anti-squat `hub-key` (ADR-0048 amendment). Unlike [`log_dir`], this does NOT vary by instance:
-/// the development override deliberately has an UNPINNED adapter (default identity) connect to a
-/// live `dev` service, so both sides must resolve the SAME hub-key or the anti-squat proof fails.
-/// The anti-squat threat model is CROSS-USER squatting (the key file is user-ACL'd), so one shared
-/// per-user key is correct -- per-instance keys added no same-user defense. `GHOSTLIGHT_LOG_DIR`
-/// still overrides it (test isolation: a test's processes share one dir, hence one key), exactly as
-/// [`log_dir`] does.
-pub fn shared_data_dir() -> Option<PathBuf> {
-    shared_data_dir_from(
-        std::env::var_os("GHOSTLIGHT_LOG_DIR").map(PathBuf::from),
-        dirs::data_local_dir(),
-    )
-}
-
-/// Pure resolution of [`shared_data_dir`] from its two inputs (the `GHOSTLIGHT_LOG_DIR` override and
-/// the data-local base), split out so its instance-independence is unit-testable without racing
-/// parallel tests over the process-global `GHOSTLIGHT_INSTANCE`. Uses `Instance::default()`, NEVER
-/// `Instance::resolve()`, so it cannot vary by the current instance.
-fn shared_data_dir_from(
-    log_dir_override: Option<PathBuf>,
-    data_local: Option<PathBuf>,
-) -> Option<PathBuf> {
-    if let Some(dir) = log_dir_override {
-        return Some(dir);
-    }
-    data_local.map(|d| d.join(crate::instance::Instance::default().dir_leaf()))
-}
-
 /// Truncate `s` to at most `max` bytes on a UTF-8 char boundary (so non-ASCII never panics).
 fn boundary_clip(s: &str, max: usize) -> &str {
     if s.len() <= max {
@@ -925,27 +896,5 @@ mod tests {
         assert_eq!(snap["extension_connected"], false);
         assert_eq!(snap["in_flight"].as_array().unwrap().len(), 0);
         std::fs::remove_dir_all(&dir).ok();
-    }
-
-    /// ADR-0048 amendment (the anti-squat hub-key is per-USER, not per-instance): the shared data
-    /// dir uses the DEFAULT instance leaf regardless of the current instance, so an unpinned
-    /// adapter and a `dev` service resolve the SAME hub-key. The `GHOSTLIGHT_LOG_DIR` override
-    /// still wins (test isolation). Pure: no env access, no race.
-    #[test]
-    fn shared_data_dir_is_instance_independent_and_honors_the_override() {
-        let base = PathBuf::from("/data-local");
-        // No override: always the default leaf ("ghostlight"), never a `-dev` suffix.
-        assert_eq!(
-            shared_data_dir_from(None, Some(base.clone())),
-            Some(base.join("ghostlight"))
-        );
-        // The override wins verbatim (a test's shared dir).
-        let over = PathBuf::from("/tmp/shared");
-        assert_eq!(
-            shared_data_dir_from(Some(over.clone()), Some(base)),
-            Some(over)
-        );
-        // No data-local and no override: nothing to resolve.
-        assert_eq!(shared_data_dir_from(None, None), None);
     }
 }
