@@ -50,17 +50,19 @@ fn default_install_plan_is_byte_identical_and_places_no_copy() {
 }
 
 #[test]
-fn dev_install_plan_is_thin_client_entries_only() {
-    // ADR-0048 D6: the reserved dev instance rides the UNIFIED default browser surface, so its
-    // install plans NO host artifacts and NO supervisor -- pinned MCP-client entries only.
+fn dev_install_plan_registers_its_own_isolated_host() {
+    // ADR-0064: the dev instance is isolated explicitly, so its install plans its OWN per-instance
+    // stack (a `ghostlight-relay-dev` copy Chrome launches by name + a suffixed native host), just
+    // like any other named instance -- NOT the pre-0064 thin shadow onto the default host. It still
+    // skips the auto-start supervisor (a developer runs the dev service from a terminal).
     let plan = install_plan(Some("dev"));
     assert!(
-        !plan.contains("instance binary"),
-        "the dev plan places no per-instance binary copy: {plan}"
+        plan.contains("instance binary") && plan.contains("ghostlight-relay-dev"),
+        "the dev plan copies its own per-instance relay binary: {plan}"
     );
     assert!(
-        !plan.contains("org.sylin.ghostlight.dev"),
-        "the dev plan registers no per-instance native host: {plan}"
+        plan.contains("org.sylin.ghostlight.dev"),
+        "the dev plan registers its own suffixed native host: {plan}"
     );
     assert!(
         plan.contains("(client)"),
@@ -68,7 +70,7 @@ fn dev_install_plan_is_thin_client_entries_only() {
     );
     assert!(
         plan.contains("(skipped: the dev instance runs its service in a terminal; ADR-0048)"),
-        "the dev supervisor section prints the pinned skip line: {plan}"
+        "the dev supervisor section still prints the pinned skip line: {plan}"
     );
 }
 
