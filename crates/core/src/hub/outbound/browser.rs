@@ -1096,14 +1096,13 @@ impl Browser {
         // bounded by IDENTITY_WINDOW so a silent or pre-0061 peer that never sends it is rejected
         // (fail closed) rather than parking this connection task on a read that never completes. The
         // relay's `browserPid` is no longer consulted for identity; there is no pid fallback.
-        let browser_id = match tokio::time::timeout(IDENTITY_WINDOW, host::read_message(&mut read_half))
-            .await
-        {
-            Ok(Ok(Some(bytes))) => {
-                ghostlight_transport::handshake::parse_extension_identity(&bytes)
-            }
-            _ => None,
-        };
+        let browser_id =
+            match tokio::time::timeout(IDENTITY_WINDOW, host::read_message(&mut read_half)).await {
+                Ok(Ok(Some(bytes))) => {
+                    ghostlight_transport::handshake::parse_extension_identity(&bytes)
+                }
+                _ => None,
+            };
         let Some(browser_id) = browser_id else {
             self.debug.ipc_note(&Diagnostic::MissingIdentity.describe());
             return AttachOutcome::AlreadyAttached;
@@ -1797,7 +1796,8 @@ mod tests {
         let (_first_ext, slot_first) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
         assert_eq!(browser.browser_snapshot().len(), 1);
 
-        let (mut second_ext, slot_second) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        let (mut second_ext, slot_second) =
+            attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
         assert_eq!(
             browser.browser_snapshot().len(),
             1,

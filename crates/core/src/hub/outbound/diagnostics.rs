@@ -55,7 +55,8 @@ impl Diagnostic<'_> {
                 format!("native-host: hello carried an unexpected role ({role:?}); rejected")
             }
             Diagnostic::MissingIdentity => {
-                "native-host: no valid extension identity frame after the hello; rejected".to_string()
+                "native-host: no valid extension identity frame after the hello; rejected"
+                    .to_string()
             }
             Diagnostic::Attached {
                 slot,

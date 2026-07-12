@@ -74,7 +74,9 @@ fn deploy_lock_present(service_exe: &std::path::Path) -> bool {
     };
     match std::fs::metadata(&lock).and_then(|m| m.modified()) {
         // A future/again-clock-skewed mtime (`elapsed()` errs) is treated as fresh: honor the lock.
-        Ok(modified) => modified.elapsed().map_or(true, |age| age < DEPLOY_LOCK_MAX_AGE),
+        Ok(modified) => modified
+            .elapsed()
+            .map_or(true, |age| age < DEPLOY_LOCK_MAX_AGE),
         Err(_) => false,
     }
 }

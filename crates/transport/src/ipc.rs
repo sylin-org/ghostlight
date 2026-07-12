@@ -200,9 +200,15 @@ where
             debug.note_reconnected();
         }
 
-        let side =
-            native_relay_session(&mut rx, &mut identity, &mut ipc_read, &mut ipc_write, &mut chrome_out, debug)
-                .await;
+        let side = native_relay_session(
+            &mut rx,
+            &mut identity,
+            &mut ipc_read,
+            &mut ipc_write,
+            &mut chrome_out,
+            debug,
+        )
+        .await;
         first = false;
         match side {
             RelaySide::ClientClosed => {
@@ -1220,7 +1226,10 @@ mod tests {
         tx.send(b"identity-frame".to_vec()).await.unwrap();
         let service = tokio::spawn(async move {
             let mut service_peer = service_peer;
-            let got = host::read_message(&mut service_peer).await.unwrap().unwrap();
+            let got = host::read_message(&mut service_peer)
+                .await
+                .unwrap()
+                .unwrap();
             drop(service_peer); // the service closes -> the relay's `down` read observes EOF
             got
         });

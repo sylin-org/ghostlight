@@ -172,7 +172,10 @@ mod tests {
     #[test]
     fn parses_a_schema_3_overlay() {
         let overlay = parse(sylin_only_overlay()).expect("valid overlay parses");
-        assert_eq!(overlay.sacred_domains(), &["sacred-bank.invalid".to_string()]);
+        assert_eq!(
+            overlay.sacred_domains(),
+            &["sacred-bank.invalid".to_string()]
+        );
     }
 
     #[test]

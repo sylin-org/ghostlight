@@ -69,8 +69,10 @@ pub(crate) async fn handle_tools_call(
         .cloned()
         .unwrap_or(Value::Null);
 
-    let outcome =
-        run_tool_call(browser, store, governance, guid, name, &args, None, false, overlay).await;
+    let outcome = run_tool_call(
+        browser, store, governance, guid, name, &args, None, false, overlay,
+    )
+    .await;
     render_outcome(id, outcome)
 }
 
@@ -224,7 +226,10 @@ pub(crate) async fn run_tool_call(
         let tab_id = args.get("tabId").and_then(Value::as_i64);
         let class = args.get("class").and_then(Value::as_str).unwrap_or("info");
         let icon = args.get("icon").and_then(Value::as_str);
-        let title = args.get("title").and_then(Value::as_str).unwrap_or("Notification");
+        let title = args
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("Notification");
         let description = args.get("description").and_then(Value::as_str);
         browser.notify(tab_id, class, icon, title, description, None);
         return CallOutcome::Success {

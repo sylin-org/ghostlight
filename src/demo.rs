@@ -58,8 +58,14 @@ impl Client {
             .stderr(Stdio::null())
             .spawn()
             .with_context(|| format!("spawn {}", relay.display()))?;
-        let stdin = child.stdin.take().ok_or_else(|| anyhow!("relay stdin unavailable"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("relay stdout unavailable"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("relay stdin unavailable"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("relay stdout unavailable"))?;
         Ok(Self {
             child,
             stdin,
@@ -101,13 +107,17 @@ impl Client {
 
     /// Send a notification (no id, no response awaited).
     async fn notify(&mut self, method: &str, params: Value) -> Result<()> {
-        self.write(&json!({ "jsonrpc": "2.0", "method": method, "params": params })).await
+        self.write(&json!({ "jsonrpc": "2.0", "method": method, "params": params }))
+            .await
     }
 
     async fn write(&mut self, frame: &Value) -> Result<()> {
         let mut line = serde_json::to_string(frame)?;
         line.push('\n');
-        self.stdin.write_all(line.as_bytes()).await.context("write to relay")?;
+        self.stdin
+            .write_all(line.as_bytes())
+            .await
+            .context("write to relay")?;
         self.stdin.flush().await.context("flush relay stdin")
     }
 
@@ -116,7 +126,10 @@ impl Client {
     /// guardrail inspect the returned string; a genuine `isError` result is surfaced as an error.
     async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<String> {
         let result = self
-            .request("tools/call", json!({ "name": name, "arguments": arguments }))
+            .request(
+                "tools/call",
+                json!({ "name": name, "arguments": arguments }),
+            )
             .await?;
         if result.get("isError").and_then(Value::as_bool) == Some(true) {
             bail!("tool '{name}' reported an error: {}", first_text(&result));
@@ -147,11 +160,21 @@ fn first_text(result: &Value) -> String {
 /// The `ghostlight-relay` binary sitting next to this executable.
 fn relay_path() -> Result<std::path::PathBuf> {
     let exe = std::env::current_exe().context("resolve the current executable")?;
-    let dir = exe.parent().ok_or_else(|| anyhow!("executable has no parent directory"))?;
-    let name = if cfg!(windows) { "ghostlight-relay.exe" } else { "ghostlight-relay" };
+    let dir = exe
+        .parent()
+        .ok_or_else(|| anyhow!("executable has no parent directory"))?;
+    let name = if cfg!(windows) {
+        "ghostlight-relay.exe"
+    } else {
+        "ghostlight-relay"
+    };
     let path = dir.join(name);
     if !path.exists() {
-        bail!("ghostlight-relay not found next to {} (expected {})", exe.display(), path.display());
+        bail!(
+            "ghostlight-relay not found next to {} (expected {})",
+            exe.display(),
+            path.display()
+        );
     }
     Ok(path)
 }
@@ -192,21 +215,37 @@ async fn drive(base: String, pause: Duration) -> Result<()> {
 
     // --- Desk: point and act ---
     step("Desk: navigate, then click the button and type in the field");
-    c.call_tool("navigate", json!({ "tabId": tab_id, "url": format!("{base}/desk/") })).await?;
+    c.call_tool(
+        "navigate",
+        json!({ "tabId": tab_id, "url": format!("{base}/desk/") }),
+    )
+    .await?;
     c.pause().await;
     if let Some(btn) = find_ref(&mut c, tab_id, "the big call-to-action button").await? {
-        c.call_tool("computer", json!({ "action": "left_click", "tabId": tab_id, "ref": btn })).await?;
+        c.call_tool(
+            "computer",
+            json!({ "action": "left_click", "tabId": tab_id, "ref": btn }),
+        )
+        .await?;
         c.pause().await;
     }
     if let Some(field) = find_ref(&mut c, tab_id, "the text input field").await? {
-        c.call_tool("computer", json!({ "action": "left_click", "tabId": tab_id, "ref": field })).await?;
+        c.call_tool(
+            "computer",
+            json!({ "action": "left_click", "tabId": tab_id, "ref": field }),
+        )
+        .await?;
         c.call_tool("computer", json!({ "action": "type", "tabId": tab_id, "text": "Ghostlight is watching the stage." })).await?;
         c.pause().await;
     }
 
     // --- Form: fill it in ---
     step("Form: fill every field and submit (nothing is sent anywhere)");
-    c.call_tool("navigate", json!({ "tabId": tab_id, "url": format!("{base}/form/") })).await?;
+    c.call_tool(
+        "navigate",
+        json!({ "tabId": tab_id, "url": format!("{base}/form/") }),
+    )
+    .await?;
     c.pause().await;
     c.call_tool(
         "form_fill",
@@ -222,32 +261,68 @@ async fn drive(base: String, pause: Duration) -> Result<()> {
         }),
     )
     .await?;
-    let _ = c.call_tool("wait_for", json!({ "tabId": tab_id, "text": "Form received" })).await;
+    let _ = c
+        .call_tool(
+            "wait_for",
+            json!({ "tabId": tab_id, "text": "Form received" }),
+        )
+        .await;
     c.pause().await;
 
     // --- Signals: watch the wire ---
     step("Signals: log to the console, fetch data, and wait for a slow task");
-    c.call_tool("navigate", json!({ "tabId": tab_id, "url": format!("{base}/signals/") })).await?;
+    c.call_tool(
+        "navigate",
+        json!({ "tabId": tab_id, "url": format!("{base}/signals/") }),
+    )
+    .await?;
     c.pause().await;
     if let Some(log_btn) = find_ref(&mut c, tab_id, "the log to the console button").await? {
-        c.call_tool("computer", json!({ "action": "left_click", "tabId": tab_id, "ref": log_btn })).await?;
-        let _ = c.call_tool("read_console_messages", json!({ "tabId": tab_id })).await;
+        c.call_tool(
+            "computer",
+            json!({ "action": "left_click", "tabId": tab_id, "ref": log_btn }),
+        )
+        .await?;
+        let _ = c
+            .call_tool("read_console_messages", json!({ "tabId": tab_id }))
+            .await;
     }
     if let Some(fetch_btn) = find_ref(&mut c, tab_id, "the fetch demo data button").await? {
-        c.call_tool("computer", json!({ "action": "left_click", "tabId": tab_id, "ref": fetch_btn })).await?;
-        let _ = c.call_tool("read_network_requests", json!({ "tabId": tab_id })).await;
+        c.call_tool(
+            "computer",
+            json!({ "action": "left_click", "tabId": tab_id, "ref": fetch_btn }),
+        )
+        .await?;
+        let _ = c
+            .call_tool("read_network_requests", json!({ "tabId": tab_id }))
+            .await;
     }
     if let Some(slow_btn) = find_ref(&mut c, tab_id, "the start a slow task button").await? {
-        c.call_tool("computer", json!({ "action": "left_click", "tabId": tab_id, "ref": slow_btn })).await?;
-        let _ = c.call_tool("wait_for", json!({ "tabId": tab_id, "text": "slow task finished", "timeout_ms": 6000 })).await;
+        c.call_tool(
+            "computer",
+            json!({ "action": "left_click", "tabId": tab_id, "ref": slow_btn }),
+        )
+        .await?;
+        let _ = c
+            .call_tool(
+                "wait_for",
+                json!({ "tabId": tab_id, "text": "slow task finished", "timeout_ms": 6000 }),
+            )
+            .await;
     }
     c.pause().await;
 
     // --- Reading room: take it in ---
     step("Reading room: extract the text and find a passage");
-    c.call_tool("navigate", json!({ "tabId": tab_id, "url": format!("{base}/reading/") })).await?;
+    c.call_tool(
+        "navigate",
+        json!({ "tabId": tab_id, "url": format!("{base}/reading/") }),
+    )
+    .await?;
     c.pause().await;
-    let text = c.call_tool("get_page_text", json!({ "tabId": tab_id })).await?;
+    let text = c
+        .call_tool("get_page_text", json!({ "tabId": tab_id }))
+        .await?;
     println!("   get_page_text: {} chars", text.len());
     let _ = find_ref(&mut c, tab_id, "the word lantern").await?;
     c.pause().await;
@@ -255,7 +330,10 @@ async fn drive(base: String, pause: Duration) -> Result<()> {
     // --- The guardrail: the whole point ---
     step("The guardrail: ask Ghostlight to step off the granted domain -- it should refuse");
     let outcome = c
-        .call_tool("navigate", json!({ "tabId": tab_id, "url": "https://example.com/" }))
+        .call_tool(
+            "navigate",
+            json!({ "tabId": tab_id, "url": "https://example.com/" }),
+        )
         .await?;
     if outcome.starts_with("Denied") {
         println!("   refused, on screen and in plain language:");
@@ -274,7 +352,9 @@ async fn drive(base: String, pause: Duration) -> Result<()> {
 /// Find one element by natural-language query and return its first ref, or None if nothing matched
 /// (a soft miss: the tour narrates and continues rather than aborting on a page tweak).
 async fn find_ref(c: &mut Client, tab_id: i64, query: &str) -> Result<Option<String>> {
-    let found = c.call_tool("find", json!({ "tabId": tab_id, "query": query })).await?;
+    let found = c
+        .call_tool("find", json!({ "tabId": tab_id, "query": query }))
+        .await?;
     Ok(parse_first_ref(&found))
 }
 
@@ -329,14 +409,20 @@ mod tests {
 
     #[test]
     fn parses_a_composite_tab_id_from_structured_text() {
-        assert_eq!(parse_tab_id(r#"{"tabId": 93825471234567, "url": "x"}"#), Some(93825471234567));
+        assert_eq!(
+            parse_tab_id(r#"{"tabId": 93825471234567, "url": "x"}"#),
+            Some(93825471234567)
+        );
         assert_eq!(parse_tab_id("Created tab 42 in the group"), Some(42));
         assert_eq!(parse_tab_id("no id here"), None);
     }
 
     #[test]
     fn pulls_the_first_ref_token() {
-        assert_eq!(parse_first_ref("button [ref_7] primary"), Some("ref_7".to_string()));
+        assert_eq!(
+            parse_first_ref("button [ref_7] primary"),
+            Some("ref_7".to_string())
+        );
         assert_eq!(parse_first_ref("nothing"), None);
     }
 
