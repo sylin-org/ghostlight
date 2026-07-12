@@ -9,42 +9,37 @@ when they disagree**, and update it when you land something that changes the pic
 
 - **Branches**: `main` = releases, `dev` = trunk. Work lands on `dev`; the owner reviews
   `dev -> main` PRs and cuts releases.
-- **Latest published release: v0.5.4** (GitHub Release, npm, homebrew tap, scoop, winget
-  all aligned at 0.5.4). v0.5.5 was prepared but never published; its content is folded
-  into the 0.5.6 changelog entry.
-- **v0.5.6 is prepped and unreleased on `dev`** (CHANGELOG `[0.5.6]` dated 2026-07-12).
-  It carries: composable policy tiers + session overlay + `ghostlight demo` (ADR-0060),
-  extension-owned browser identity (ADR-0061), browser-relay reconnect resilience
-  (ADR-0062), the deploy-quiesce lock (ADR-0063), explicit dev isolation then the
-  one-stack model (ADR-0064 amended by ADR-0065), the redesigned on-screen governance
-  ribbon + unlisted `notify` tool, the field-splash FX pass, and the SAPS
-  security-hardening pass.
-- **PR #42 (dev -> main) is MERGED**: v0.5.6 is on `main` (merge `53907f7`); `main` and
-  `dev` are tree-identical. (PR #41 was an earlier, already-merged dev->main squash; the
-  divergence it left was reconciled by merge `1d54def` -- its only unique content was the
-  stale `scripts/dev-browser.ps1`, which ADR-0065 removed.) The RELEASE ITSELF IS NOT CUT:
-  no `v0.5.6` tag, no npm/homebrew/scoop/winget publish yet -- that is the owner's
-  irreversible-publish step below.
-- **Working tree**: clean. Full suite green (fast tier + the entire `--ignored` spawn tier
-  locally, and CI on the merge). The spawn-tier e2e tests were aligned with the ADR-0061/0062
-  contracts (identity-frame admission, tab-URL probe answers, the rewritten relay-lifecycle
-  test); the deploy-quiesce lock is now honored in the Unix self-heal too.
+- **Latest published release: v0.5.6** (2026-07-12), cut with `scripts/release.ps1 0.5.6`.
+  Shipped: GitHub Release (27 assets + attestations), npm `ghostlight@0.5.6`, homebrew tap,
+  scoop/winget/homebrew manifests committed to main, trust footers restamped, sylin.org
+  website refreshed. `dev` and `main` are in sync at the release commit (`5762c3a`). v0.5.5
+  was prepared but never published; its content folded into the 0.5.6 changelog.
+- **v0.5.6 carries**: composable policy tiers + session overlay + `ghostlight demo` (ADR-0060),
+  extension-owned browser identity (ADR-0061), browser-relay reconnect (ADR-0062), the
+  deploy-quiesce lock (ADR-0063), explicit dev isolation then the one-stack model (ADR-0064
+  amended by ADR-0065), the on-screen governance ribbon + `notify` tool, the field-splash FX
+  pass, the SAPS security-hardening pass, and the full deploy-automation + store-publish tooling.
+- **CWS publish is BLOCKED on a listing gate (owner action)**: the v0.5.6 package UPLOADED to
+  the Chrome Web Store successfully (staged as a draft), but the publish API returned 400 --
+  the listing needs, in the Developer Dashboard (Privacy practices tab): mandatory privacy
+  information, a remote-code-use justification, and a promotional video. Content to paste lives
+  in `docs/legal/PRIVACY.md`, `docs/legal/PERMISSION_JUSTIFICATIONS.md`, `docs/legal/STORE_LISTING.md`.
+  After filling those, publish from the dashboard OR re-run `pwsh -File scripts/publish-extension.ps1`
+  (the package is already uploaded; it will re-attempt publish). Edge was skipped (no `EDGE_*` creds).
 
-## Release pipeline (what shipping 0.5.6 takes)
+## Release pipeline (canonical map: `docs/RELEASE.md`)
 
-The complete, canonical channel-by-channel map is now **`docs/RELEASE.md`**. In short:
+`scripts/release.ps1 <version>` from `main` automates: tag, watch CI, verify assets, fill
+package-manager sums, homebrew tap, npm publish + smoke, trust-footer restamp, extension publish
+(Chrome Web Store + Edge; auto when `CWS_*`/`EDGE_*` creds are set), and the website refresh. The
+v0.5.6 run proved every step end to end (only the CWS listing gate above stopped the final publish).
 
-1. ~~Owner merges the dev -> main PR.~~ DONE (PR #42, merge `53907f7`).
-2. `scripts/release.ps1 0.5.6` from `main`. It now automates: tag, watch CI, verify assets,
-   fill package-manager sums, homebrew tap, npm publish + smoke, trust-footer restamp,
-   extension publish (Chrome Web Store + Edge; auto if `CWS_*`/`EDGE_*` creds are set, else it
-   prints exact steps and points at the built zip), and the website install-guide refresh.
-3. Manual remainder only: a winget PR to `microsoft/winget-pkgs` (per version, CLA), and the
-   MCP Registry `mcp-publisher` step (DNS auth). Both are called out in the script's report.
+CWS API creds are set up on this machine (see local/RELEASE-CREDENTIALS.md; values in
+`~/.ghostlight-release.env`, written by `local/set-credentials.ps1`). Load them before a release:
+`Get-Content "$HOME/.ghostlight-release.env" | % { if ($_ -match '^([A-Z0-9_]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1],$Matches[2]) } }`
 
-The old extension-zip trap is fixed: the Release workflow now builds the CWS-ready zip (key
-stripped, dev files excluded) via `package-extension.ps1`, so the shipped asset is submittable.
-Store API auto-submit needs one-time credential setup (documented in `docs/RELEASE.md`).
+Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA), and the MCP Registry
+`mcp-publisher` step (DNS auth on the sylin.org apex).
 
 ## Owed engineering work (in rough priority order)
 
