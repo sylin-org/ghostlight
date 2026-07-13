@@ -15,6 +15,9 @@ pub enum Dialect {
     McpServers,
     /// `servers` (VS Code). Entry additionally carries `"type": "stdio"`.
     Servers,
+    ContextServers, // Zed: key "context_servers", same entry shape as McpServers
+    OpenCodeMcp,    // OpenCode: key "mcp", { type:"local", command:[cmd,...args], enabled:true }
+    CrushMcp,       // Crush: key "mcp", same entry shape as Servers ({ type:"stdio", ... })
 }
 
 impl Dialect {
@@ -23,6 +26,8 @@ impl Dialect {
         match self {
             Dialect::McpServers => "mcpServers",
             Dialect::Servers => "servers",
+            Dialect::ContextServers => "context_servers",
+            Dialect::OpenCodeMcp | Dialect::CrushMcp => "mcp",
         }
     }
 }
@@ -40,12 +45,28 @@ impl ServerEntry {
     /// The JSON value for this entry under `dialect` (VS Code's `servers` adds `type: "stdio"`).
     pub fn to_value(&self, dialect: Dialect) -> Value {
         let mut obj = Map::new();
-        if dialect == Dialect::Servers {
-            obj.insert("type".into(), json!("stdio"));
+        match dialect {
+            // OpenCode: command + args COMBINED into one array; type/enabled required; env -> "environment".
+            Dialect::OpenCodeMcp => {
+                obj.insert("type".into(), json!("local"));
+                let mut command = vec![self.command.clone()];
+                command.extend(self.args.iter().cloned());
+                obj.insert("command".into(), json!(command));
+                obj.insert("enabled".into(), json!(true));
+                if !self.env.is_empty() {
+                    obj.insert("environment".into(), json!(self.env));
+                }
+            }
+            // Everything else uses a command string + args + env; Servers/Crush add type:"stdio".
+            _ => {
+                if matches!(dialect, Dialect::Servers | Dialect::CrushMcp) {
+                    obj.insert("type".into(), json!("stdio"));
+                }
+                obj.insert("command".into(), json!(self.command));
+                obj.insert("args".into(), json!(self.args));
+                obj.insert("env".into(), json!(self.env));
+            }
         }
-        obj.insert("command".into(), json!(self.command));
-        obj.insert("args".into(), json!(self.args));
-        obj.insert("env".into(), json!(self.env));
         Value::Object(obj)
     }
 }
@@ -181,6 +202,41 @@ mod tests {
         let out = parse(&merge_server(existing, Dialect::Servers, &entry()).unwrap());
         assert_eq!(out["servers"]["ghostlight"]["type"], "stdio");
         assert_eq!(out["servers"]["foo"]["command"], "y");
+    }
+
+    #[test]
+    fn context_servers_dialect_is_mcpservers_shape_under_a_different_key() {
+        let out = parse(&merge_server("", Dialect::ContextServers, &entry()).unwrap());
+        assert_eq!(
+            out["context_servers"]["ghostlight"]["command"],
+            "/abs/ghostlight"
+        );
+        assert!(out["context_servers"]["ghostlight"].get("type").is_none());
+    }
+
+    #[test]
+    fn crush_mcp_dialect_adds_type_stdio_under_mcp() {
+        let out = parse(&merge_server("", Dialect::CrushMcp, &entry()).unwrap());
+        assert_eq!(out["mcp"]["ghostlight"]["type"], "stdio");
+        assert_eq!(out["mcp"]["ghostlight"]["command"], "/abs/ghostlight");
+    }
+
+    #[test]
+    fn opencode_mcp_dialect_uses_command_array_type_local_and_omits_empty_env() {
+        let e = ServerEntry {
+            name: "ghostlight".into(),
+            command: "/abs/ghostlight".into(),
+            args: vec!["--role".into(), "agent".into()],
+            env: BTreeMap::new(),
+        };
+        let out = parse(&merge_server("", Dialect::OpenCodeMcp, &e).unwrap());
+        assert_eq!(out["mcp"]["ghostlight"]["type"], "local");
+        assert_eq!(out["mcp"]["ghostlight"]["enabled"], true);
+        assert_eq!(
+            out["mcp"]["ghostlight"]["command"],
+            json!(["/abs/ghostlight", "--role", "agent"])
+        );
+        assert!(out["mcp"]["ghostlight"].get("environment").is_none());
     }
 
     #[test]

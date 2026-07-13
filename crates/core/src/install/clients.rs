@@ -125,9 +125,8 @@ pub fn server_registered(spec: &ClientSpec, contents: &str, name: &str) -> bool 
         // VS Code's JSONC is deliberately not parsed by the installer; retain its prior
         // conservative quoted-key check for doctor reporting.
         AddVia::VsCodeCli => contents.contains(&format!("\"{name}\"")),
-        AddVia::JsonFileMerge(dialect) => {
-            merge::has_server(contents, dialect, name).unwrap_or(false)
-        }
+        AddVia::JsonFileMerge(dialect) => merge::has_server(contents, dialect, name)
+            .unwrap_or_else(|_| contents.contains(&format!("\"{name}\""))),
         AddVia::TomlFileMerge => toml_merge::has_server(contents, name).unwrap_or(false),
     }
 }
@@ -239,5 +238,13 @@ mod tests {
             windsurf.add_via,
             AddVia::JsonFileMerge(Dialect::McpServers)
         ));
+    }
+
+    #[test]
+    fn jsonc_config_with_comments_is_detected_by_substring_fallback() {
+        let cursor = client_by_id("cursor").unwrap(); // any JsonFileMerge client
+        let jsonc = "{\n  // a comment makes this unparseable as strict JSON\n  \"mcpServers\": { \"ghostlight\": {} }\n}";
+        assert!(server_registered(cursor, jsonc, "ghostlight"));
+        assert!(!server_registered(cursor, jsonc, "other"));
     }
 }

@@ -457,6 +457,16 @@ fn plan_client_install(
                         change: MergeChange::Add(entry.clone()),
                     },
                 },
+                // A config we cannot parse as JSON is almost always JSONC-with-comments (Zed/OpenCode/Crush). Do
+                // NOT reformat it (that would strip the user's comments); degrade to a printed manual step, which
+                // the tally counts as `manual`, never `failed`.
+                Err(merge::MergeError::Parse(_)) => Action {
+                    label,
+                    detail: target,
+                    noop: None,
+                    manual,
+                    op: Op::Manual,
+                },
                 Err(e) => blocked(label, target, e.to_string(), manual),
             }
         }
