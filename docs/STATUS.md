@@ -15,6 +15,10 @@ when they disagree**, and update it when you land something that changes the pic
   main, trust footers restamped, sylin.org website refreshed. `main` is at the release commit
   `5762c3a`; `dev` is AHEAD of main by post-release tooling (registry step, server.json/URL fixes,
   STATUS) -- these reach main at the next dev->main PR. v0.5.5 was prepared but never published.
+- **Unreleased on `dev`**: Codex is now a first-class installer target (ADR-0067). `ghostlight
+  install --client codex` losslessly adds the active relay to `~/.codex/config.toml`, removes it on
+  uninstall, and lets `doctor` report its registration accurately. The browser extension remains a
+  separate user-visible install step.
 - **MCP registry publishing is now automated** in `release.ps1` (the `registry` step, after `npm`):
   `mcp-publisher` DNS-auth publish, gated on `MCP_DNS_PRIVATE_KEY`. The one-time DNS proof is DONE
   (apex TXT `v=MCPv1; k=ed25519; p=...` on sylin.org via Cloudflare; ed25519 key in the env file;
@@ -49,6 +53,10 @@ Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA), and the 
 
 ## Owed engineering work (in rough priority order)
 
+- **Bidirectional installation handoff is implemented on `dev`** (ADR-0070): an explicit first
+  `ghostlight install` opens the stable extension walkthrough once; `--no-open`, dry-run,
+  CI, failed, and idempotent paths stay quiet. The canonical service-first page is live at
+  `sylin.org/ghostlight/service/post-install/`; the website publication gate is complete.
 - **Content / URL consistency pass (owner-driven, mostly DONE)**: swept outward-facing content
   for stale/branded URLs and moved the post-install UX onto the site. What landed:
   - **github.io fully retired.** The canonical home is `sylin.org/ghostlight`. Every reference to

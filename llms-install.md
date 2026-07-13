@@ -5,10 +5,19 @@ Chromium browser. You run the commands, then test; pull the user in only for wha
 -- restart the client to load the server, and load the browser extension if the test shows it
 missing. Everything here is idempotent and safe to re-run.
 
-## 1. Add the MCP server
+## 1. Install and register Ghostlight
 
-Add this stdio server entry to the MCP settings file you manage. The `npx` launcher fetches the
-portable binary on first run, so there is nothing to pre-install:
+Run the installer. The `npx` launcher fetches the native service and relay on first run, so there is
+nothing to compile. It registers every detected supported MCP client and the browser's native host:
+
+```sh
+npx -y ghostlight install
+```
+
+Use `--client codex` if the user asked to target Codex only. The command is idempotent and a first
+install opens the extension walkthrough. Show the user the output.
+
+For a client the installer does not recognize, add this entry manually after running the command:
 
 ```json
 {
@@ -24,16 +33,12 @@ portable binary on first run, so there is nothing to pre-install:
 Requirements on the machine: Node.js (for `npx`) and a Chromium browser (Chrome, Edge, Brave, or
 Chromium, version 116+). The binary itself has zero runtime dependencies.
 
-## 2. Connect the browser side (one time)
+## 2. Complete the visible browser step
 
-Run, and show the user the output:
-
-```sh
-npx -y ghostlight install
-```
-
-This registers the browser's native-messaging host and the MCP client entries (an idempotent,
-value-level merge -- it never clobbers existing config and never duplicates entries).
+The CLI cannot silently install a Chromium extension. Ask the user to follow the walkthrough opened
+by step 1. Until the Chrome Web Store listing is public, that means downloading
+`ghostlight-extension-v*.zip` from https://github.com/sylin-org/ghostlight/releases/latest,
+unzipping it, and loading it at `chrome://extensions` (Developer mode -> Load unpacked).
 
 ## 3. Test the whole chain
 
@@ -45,10 +50,7 @@ No ghostlight tools yet? Have the user restart the client (skip if it hot-reload
 - Errors or not connected -> the browser extension is the likely cause (the one piece the CLI can't
   install):
   1. Run `npx -y ghostlight doctor` to confirm which link is broken.
-  2. Have the user download `ghostlight-extension-v*.zip` from
-     https://github.com/sylin-org/ghostlight/releases/latest, unzip it, and load it unpacked at
-     `chrome://extensions` (Developer mode -> Load unpacked). A Web Store listing ("Ghostlight in
-     Browser") is coming; once live, they can use that instead.
+  2. Have the user complete the extension walkthrough from step 2.
   3. Retest (reload the extension at `chrome://extensions` first if the browser was already open).
 
 ## 4. First use

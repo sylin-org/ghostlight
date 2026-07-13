@@ -252,20 +252,17 @@ fn browser_rows(ctx: &PlanCtx) -> Vec<(String, bool, bool)> {
         .collect()
 }
 
-/// (display name, detected?, registered?) for each known MCP client (registered means the config
-/// file contains the active instance's server name as a quoted substring -- `"ghostlight"` for the
-/// default instance, `"ghostlight-<n>"` for a named one, ADR-0044).
+/// (display name, detected?, registered?) for each known MCP client. Each config dialect performs
+/// its own semantic registration check -- JSON for the original clients and lossless TOML for
+/// Codex -- against the active instance's server name (ADR-0044).
 fn client_rows(ctx: &PlanCtx) -> Vec<(String, bool, bool)> {
-    let needle = format!(
-        "\"{}\"",
-        ghostlight_transport::instance::Instance::resolve().mcp_server_name()
-    );
+    let server = ghostlight_transport::instance::Instance::resolve().mcp_server_name();
     clients::CLIENTS
         .iter()
         .map(|c| {
             let detected = clients::detect(c, ctx);
             let registered = std::fs::read_to_string(clients::config_path(c, ctx))
-                .map(|s| s.contains(&needle))
+                .map(|s| clients::server_registered(c, &s, &server))
                 .unwrap_or(false);
             (c.display.to_string(), detected, registered)
         })

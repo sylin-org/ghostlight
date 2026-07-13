@@ -3,6 +3,7 @@
 //! how we add our server entry (CLI vs safe JSON merge), and the dialect each uses (doc 11 B.*).
 
 use super::merge::{Dialect, ServerEntry};
+use super::{merge, toml_merge};
 use super::{on_path, PlanCtx};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -14,6 +15,7 @@ pub enum ClientId {
     ClaudeDesktop,
     Cursor,
     VsCode,
+    Codex,
 }
 
 /// How we register with a client. `FileMerge` is the idempotent value-level merge used for every
@@ -22,17 +24,15 @@ pub enum ClientId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddVia {
     VsCodeCli,
-    FileMerge,
+    JsonFileMerge(Dialect),
+    TomlFileMerge,
 }
 
 pub struct ClientSpec {
     pub id: ClientId,
     pub cli_id: &'static str,
     pub display: &'static str,
-    pub dialect: Dialect,
     pub add_via: AddVia,
-    /// True if the config permits comments (JSONC) -- such clients are CLI-only (never hand-merged).
-    pub is_jsonc: bool,
 }
 
 pub const CLIENTS: &[ClientSpec] = &[
@@ -40,35 +40,33 @@ pub const CLIENTS: &[ClientSpec] = &[
         id: ClientId::ClaudeCode,
         cli_id: "claude-code",
         display: "Claude Code",
-        dialect: Dialect::McpServers,
         // ~/.claude.json is plain JSON; a value-level merge is idempotent and safe even while
         // Claude Code is running (the merge re-reads at apply time -- see install::apply_merge).
-        add_via: AddVia::FileMerge,
-        is_jsonc: false,
+        add_via: AddVia::JsonFileMerge(Dialect::McpServers),
     },
     ClientSpec {
         id: ClientId::ClaudeDesktop,
         cli_id: "claude-desktop",
         display: "Claude Desktop",
-        dialect: Dialect::McpServers,
-        add_via: AddVia::FileMerge,
-        is_jsonc: false,
+        add_via: AddVia::JsonFileMerge(Dialect::McpServers),
     },
     ClientSpec {
         id: ClientId::Cursor,
         cli_id: "cursor",
         display: "Cursor",
-        dialect: Dialect::McpServers,
-        add_via: AddVia::FileMerge,
-        is_jsonc: false,
+        add_via: AddVia::JsonFileMerge(Dialect::McpServers),
     },
     ClientSpec {
         id: ClientId::VsCode,
         cli_id: "vscode",
         display: "VS Code",
-        dialect: Dialect::Servers,
         add_via: AddVia::VsCodeCli,
-        is_jsonc: true,
+    },
+    ClientSpec {
+        id: ClientId::Codex,
+        cli_id: "codex",
+        display: "Codex",
+        add_via: AddVia::TomlFileMerge,
     },
 ];
 
@@ -84,6 +82,7 @@ pub fn config_path(spec: &ClientSpec, ctx: &PlanCtx) -> PathBuf {
         ClientId::ClaudeDesktop => ctx.config.join("Claude").join("claude_desktop_config.json"),
         ClientId::Cursor => ctx.home.join(".cursor").join("mcp.json"),
         ClientId::VsCode => ctx.config.join("Code").join("User").join("mcp.json"),
+        ClientId::Codex => ctx.home.join(".codex").join("config.toml"),
     }
 }
 
@@ -99,6 +98,20 @@ pub fn detect(spec: &ClientSpec, ctx: &PlanCtx) -> bool {
                     .parent()
                     .is_some_and(std::path::Path::is_dir)
         }
+        ClientId::Codex => on_path("codex") || ctx.home.join(".codex").is_dir(),
+    }
+}
+
+/// True when this client's configuration contains the active Ghostlight MCP server.
+pub fn server_registered(spec: &ClientSpec, contents: &str, name: &str) -> bool {
+    match spec.add_via {
+        // VS Code's JSONC is deliberately not parsed by the installer; retain its prior
+        // conservative quoted-key check for doctor reporting.
+        AddVia::VsCodeCli => contents.contains(&format!("\"{name}\"")),
+        AddVia::JsonFileMerge(dialect) => {
+            merge::has_server(contents, dialect, name).unwrap_or(false)
+        }
+        AddVia::TomlFileMerge => toml_merge::has_server(contents, name).unwrap_or(false),
     }
 }
 
@@ -157,5 +170,35 @@ mod tests {
             cmd.contains("gl"),
             "command retains the parent dir /opt/gl: {cmd}"
         );
+    }
+
+    /// Codex is a first-class global TOML client: its CLI, desktop app, and IDE extension share
+    /// this one config file, so it must use the home-scoped Codex path rather than VS Code's JSONC.
+    #[test]
+    fn codex_uses_the_shared_home_toml_config() {
+        let ctx = PlanCtx {
+            current_exe: PathBuf::from("/opt/gl/ghostlight"),
+            home: PathBuf::from("/home/tester"),
+            config: PathBuf::from("/config"),
+            local: PathBuf::from("/local"),
+        };
+        let codex = client_by_id("codex").expect("Codex is a supported client");
+        assert_eq!(codex.display, "Codex");
+        assert_eq!(
+            config_path(codex, &ctx),
+            PathBuf::from("/home/tester/.codex/config.toml")
+        );
+        assert!(matches!(codex.add_via, AddVia::TomlFileMerge));
+    }
+
+    /// Doctor's format-aware check recognizes Codex's TOML table and never relies on a JSON-key
+    /// substring that would miss the unquoted `ghostlight` table segment.
+    #[test]
+    fn codex_registration_check_parses_the_toml_server_table() {
+        let codex = client_by_id("codex").unwrap();
+        let configured =
+            "[mcp_servers.ghostlight]\ncommand = \"relay\"\nargs = [\"--role\", \"agent\"]\n";
+        assert!(server_registered(codex, configured, "ghostlight"));
+        assert!(!server_registered(codex, configured, "other"));
     }
 }

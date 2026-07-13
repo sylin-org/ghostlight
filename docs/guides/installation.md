@@ -1,44 +1,48 @@
 # Installing Ghostlight
 
-Ghostlight is one Rust binary plus a thin browser extension. Installation wires three things
-together: your MCP client, the binary (which acts as the browser's native-messaging host), and the
-extension. This guide covers both install paths, what the installer actually writes, how to verify
-the chain, and how to undo it.
+Ghostlight is a native Rust service, a small relay, and a thin browser extension. Installation wires
+three things together: your MCP client, the local service, and the extension. This guide covers both
+install paths, what the installer actually writes, how to verify the chain, and how to undo it.
 
 If you just want the fast path, the three steps in the
-[README](../../README.md#install-in-two-minutes) are the whole story for most people. Come here
+[README](../../README.md#try-it) are the whole story for most people. Come here
 when you want a different path, a per-OS detail, or an explanation of what got registered.
 
 ## Prerequisites
 
 - A Chromium browser: Chrome, Edge, Brave, or Chromium, version 116 or newer. The 116 floor comes
   from the extension, which Chrome enforces when it loads; the binary itself checks no version.
-- An MCP client (Claude Code, Cursor, VS Code, and others).
-- For the npm path, Node.js (for `npx`). For the source path, a stable Rust toolchain
-  (https://rustup.rs). Either way the binary has no runtime dependencies.
+- An MCP client (Codex, Claude Code, Cursor, VS Code, and others).
+- For the npm path, Node.js supplies the `npx` launcher; the running Ghostlight service is native
+  Rust, not a Node service. For the source path, use a stable Rust toolchain (https://rustup.rs).
 
 ## Path A: the npm launcher
 
-The launcher fetches a single portable binary on first run and caches it. Nothing to compile.
+The launcher fetches the version-matched service and relay on first run and caches them. Nothing to
+compile.
 
-1. **Add the server** to your MCP client as a stdio server:
-
-       { "command": "npx", "args": ["-y", "ghostlight"] }
-
-   For Claude Code: `claude mcp add ghostlight -- npx -y ghostlight`.
-
-2. **Connect the browser side** (idempotent, safe to re-run):
+1. **Install and register Ghostlight** (idempotent, safe to re-run):
 
        npx -y ghostlight install
 
-3. **Add the extension.** Download `ghostlight-extension-v*.zip` from the
-   [latest release](https://github.com/sylin-org/ghostlight/releases/latest), unzip it, and load it
-   unpacked at `chrome://extensions` (Developer mode, then Load unpacked). A Chrome Web
-   Store listing ("Ghostlight in Browser") is in preparation.
+   The installer registers the browser side and every detected supported MCP client. Use
+   `--client codex` to target Codex only, `--dry-run` to inspect the plan, or `--no-open` for a
+   quiet installation. A first install opens the extension walkthrough.
 
-4. **Restart your client and reload the extension,** then verify:
+2. **Add the extension.** Until the Chrome Web Store listing is public, download
+   `ghostlight-extension-v*.zip` from the
+   [latest release](https://github.com/sylin-org/ghostlight/releases/latest), unzip it, and load it
+   unpacked at `chrome://extensions` (Developer mode, then Load unpacked). The walkthrough always
+   presents the current path.
+
+3. **Restart your MCP clients,** then try a browser request. Verification is optional:
 
        npx -y ghostlight doctor
+
+For an MCP client the installer does not recognize, add this stdio entry manually, then run the
+same install command for the browser side:
+
+    { "command": "npx", "args": ["-y", "ghostlight"] }
 
 ## Path B: build from source
 
@@ -51,7 +55,7 @@ The path when you want to read what you are running.
 The build produces two executables. `ghostlight` is the CLI and the persistent service.
 `ghostlight-relay` is the thin pass-through your MCP client and Chrome actually launch; it depends
 on almost nothing, so rebuilding the service never forces it to relink. Load the extension as in
-Path A step 3 (from the local `extension/` directory), then register:
+Path A step 2 (from the local `extension/` directory), then register:
 
     ./target/release/ghostlight install --extension-id cjcmhepmagomefjggkcohdbfemacojoa
 
@@ -72,18 +76,20 @@ might expect." For each browser and client it targets, `install`:
   `--extension-id` adds another.
 - **Registers an auto-start supervisor** so the service is there when a client asks for it. Skip it
   with `--no-supervisor`.
+- **Offers the browser extension once** after a first install. The stable walkthrough
+  URL contains no machine identifier or installation data. Use `--no-open` to suppress it.
 
 The client entry it writes points at `ghostlight-relay` with `--role agent`. You never launch the
 binary by hand; the client and the browser do.
 
 ### Which clients and browsers it knows
 
-`install` auto-detects and registers four clients (`claude-code`, `claude-desktop`, `cursor`,
-`vscode`) and four browsers (`chrome`, `edge`, `brave`, `chromium`). That list is smaller than the
+`install` auto-detects and registers five clients (`claude-code`, `claude-desktop`, `cursor`,
+`vscode`, `codex`) and four browsers (`chrome`, `edge`, `brave`, `chromium`). That list is smaller than the
 set of clients Ghostlight *works* with, and the gap is worth understanding. Any MCP client can use
-Ghostlight; the installer only knows how to write config for these four, because each has its own
+Ghostlight; the installer only knows how to write config for these five, because each has its own
 config location and dialect it handles specifically. For anything else (Zed, Cline, and the rest),
-add the stdio server entry from Path A step 1 by hand and it behaves the same. The installer's job
+add the stdio server entry from the Path A example by hand and it behaves the same. The installer's job
 is convenience, not gatekeeping.
 
 ### Useful flags
@@ -95,6 +101,7 @@ is convenience, not gatekeeping.
 - `--system` registers machine-wide (HKLM) instead of per-user.
 - `--debug` registers the server to run with observability on.
 - `--extension-id <id>` allows an additional extension id.
+- `--no-open` prints the extension walkthrough URL without launching the default browser.
 
 ## Verify with `doctor`
 
