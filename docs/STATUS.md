@@ -30,13 +30,18 @@ when they disagree**, and update it when you land something that changes the pic
   deploy-quiesce lock (ADR-0063), explicit dev isolation then the one-stack model (ADR-0064
   amended by ADR-0065), the on-screen governance ribbon + `notify` tool, the field-splash FX
   pass, the SAPS security-hardening pass, and the full deploy-automation + store-publish tooling.
-- **CWS publish is BLOCKED on a listing gate (owner action)**: the v0.5.6 package UPLOADED to
-  the Chrome Web Store successfully (staged as a draft), but the publish API returned 400 --
-  the listing needs, in the Developer Dashboard (Privacy practices tab): mandatory privacy
-  information, a remote-code-use justification, and a promotional video. Content to paste lives
-  in `docs/legal/PRIVACY.md`, `docs/legal/PERMISSION_JUSTIFICATIONS.md`, `docs/legal/STORE_LISTING.md`.
-  After filling those, publish from the dashboard OR re-run `pwsh -File scripts/publish-extension.ps1`
-  (the package is already uploaded; it will re-attempt publish). Edge was skipped (no `EDGE_*` creds).
+- **CWS publish is BLOCKED on listing completion (owner action)**: the v0.5.6 package is uploaded
+  and staged as a draft. The Developer Dashboard still needs the Privacy practices answers,
+  remote-code-use justification, and promotional video. Paste-ready, code-backed wording lives in
+  `docs/legal/PRIVACY.md`, `docs/legal/PERMISSION_JUSTIFICATIONS.md`, and
+  `docs/legal/STORE_LISTING.md`; its canonical public target is
+  `https://sylin.org/ghostlight/privacy/`. After completing the dashboard, publish there or re-run
+  `pwsh -File scripts/publish-extension.ps1` (the package is already uploaded). Edge was skipped
+  because no `EDGE_*` credentials are configured.
+- **CWS credential durability needs one owner-side change**: the Google OAuth consent screen is
+  External/Testing, so its refresh token is short-lived. Move the consent configuration to
+  Production or mint a fresh token before a later publish attempt. Credential locations remain in
+  `local/`; no values belong in tracked documentation.
 
 ## Release pipeline (canonical map: `docs/RELEASE.md`)
 
@@ -94,9 +99,9 @@ Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA), and the 
     to get it" line). CWS (blocked), Edge, winget, and scoop are omitted until each actually ships.
   This workstream is now COMPLETE; the only distribution follow-up left is the owner-side CWS listing
   gate below.
-- **CWS listing completion** (owner): privacy practices + remote-code justification + video in the
-  Web Store dashboard, then publish the already-uploaded v0.5.6 package (or re-run
-  `scripts/publish-extension.ps1`).
+- **CWS listing completion** (owner): confirm the public privacy URL is live, paste the privacy
+  practices and remote-code justification, upload the promotional video, then publish the
+  already-uploaded v0.5.6 package (or re-run `scripts/publish-extension.ps1`).
 - **Lightbox legacy-27 migration** (ADR-0056): the 27 `#[ignore = "e2e"]` spawn tests +
   `scripts/test-e2e.*` migrate scenario-by-scenario into the lightbox harness against a
   per-test parity ledger. Not started; CI runs both tiers until the ledger completes.
@@ -121,10 +126,8 @@ Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA), and the 
 
 ## Owner-side gates (agents cannot do these)
 
-- Cut the v0.5.6 release (owner: scripts/release.ps1 0.5.6 from main). PR #42 is merged.
-- Chrome Web Store: 0.5.0 zip was submitted 2026-07-10; resubmit after 0.5.6 (extension
-  changed). Edge Add-ons: same zip, never submitted.
-- MCP Registry: needs DNS TXT auth on the sylin.org apex + `mcp-publisher`.
+- Chrome Web Store: complete the v0.5.6 draft listing, make OAuth credentials durable, and publish.
+  Edge Add-ons remains unsubmitted.
 - Trust center legal: vendor entity name in the MSA (blocked on forming the LLC), the
   cyber-insurance yes/no line, counsel skim of MSA/DPA/LICENSE-GOVERNANCE before first
   EXECUTION (publication already happened by design; drafts are marked as drafts).

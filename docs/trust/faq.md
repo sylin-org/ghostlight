@@ -311,19 +311,19 @@ Evidence: supply-chain.md (releases, SBOM, dependencies); .github/workflows/rele
 ### How do we review and force-install the extension?
 
 Every extension permission is justified individually in a published permission-justification
-document, so your security team can review the exact access before approving it. The
-extension is Manifest V3, ships no remotely hosted code, and its extension ID is stable
-across installs, pinned by a committed manifest key. Today it is distributed as a versioned
-zip asset on each GitHub release, for review and self-hosted deployment; a Chrome Web Store
-listing is in preparation, and once it is live, fleet force-install through Chromium's
-`ExtensionInstallForcelist` pinned to the same ID applies. Store-installed extensions follow
-Chrome's auto-update; fleets that require version control over the extension can keep
-self-hosting.
+document, so your security team can review the exact access before approving it. The extension is
+Manifest V3, and all extension logic ships in the reviewed package. Its advertised
+`javascript_tool` accepts an explicit instruction from the local MCP client and evaluates it only
+in the attached page; it does not fetch or install extension logic. Release archives use the
+stable unpacked id pinned by the committed manifest key. The Chrome Web Store item has its own
+stable store-assigned id. Fleet policy can force-install either the Web Store item or a reviewed,
+self-hosted package by its corresponding id. Store-installed extensions follow Chrome's
+auto-update; fleets that require version control over the extension can keep self-hosting.
 
 See [docs/legal/PERMISSION_JUSTIFICATIONS.md](../legal/PERMISSION_JUSTIFICATIONS.md) and
 [extension/manifest.json](../../extension/manifest.json).
 
-Evidence: docs/legal/PERMISSION_JUSTIFICATIONS.md (per-permission rationale); extension/manifest.json (Manifest V3, no remote code).
+Evidence: docs/legal/PERMISSION_JUSTIFICATIONS.md (per-permission and page-JavaScript rationale); extension/manifest.json (Manifest V3 and packaged extension logic); crates/core/src/install/native_host.rs (both official ids).
 
 ## Legal and support
 
@@ -355,4 +355,4 @@ See the [licensing guide](../guides/licensing.md),
 
 Evidence: docs/guides/licensing.md; ADR-0027 (open-core split, source-available governance); ADR-0028 (expiry changes only the audit stamp).
 
-Last reviewed: 2026-07-10 against v0.5.6 | Contact: support@sylin.org
+Last reviewed: 2026-07-13 against v0.5.6 | Contact: support@sylin.org

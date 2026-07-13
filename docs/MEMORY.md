@@ -47,6 +47,10 @@ file does not restate them -- follow AGENTS.md.
 - **Distribution is automated and credential-gated** in `scripts/release.ps1`; the MCP registry
   publish is DNS-authed on the sylin.org apex; canonical URLs are `sylin.org` (the github.io site
   is retired, redirect-stubbed). Off-tree/secret change history is in `local/AUDIT-LOG.md`.
+- **Remote-code claims distinguish extension logic from page automation.** All extension logic
+  ships in the reviewed package, but `javascript_tool` carries an explicit local MCP-client
+  instruction to CDP `Runtime.evaluate` in the attached page. Never collapse those two facts into
+  the broader claim that every JavaScript string the extension evaluates ships in the package.
 
 ## Pointer index (where durable things live)
 
