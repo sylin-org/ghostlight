@@ -34,7 +34,8 @@ start, obvious while it acts, clear when it stops, and honest about what it can 
 Ghostlight is worth trying when:
 
 - your agent needs a site where you are already signed in, not a fresh browser profile;
-- you want the same browser tools from Codex, Claude Code, Cursor, VS Code, or another MCP client;
+- you want the same browser tools from Codex, Claude, Cursor, VS Code, Windsurf, Zed, OpenCode,
+  Crush, or another MCP client;
 - you want to watch the work, take the wheel, and understand failures without decoding logs; or
 - you need policy and evidence that a developer and a security reviewer can both inspect.
 
@@ -72,8 +73,9 @@ service is native Rust; there is no Node service to keep alive and nothing to co
    npx -y ghostlight install
    ```
 
-   The installer is idempotent and opens the extension walkthrough on the first run. Use
-   `--client codex` to target Codex only, or `--dry-run` to inspect every planned change first.
+   The installer is idempotent and opens the extension walkthrough on the first run. It recognizes
+   Claude Code, Claude Desktop, Cursor, VS Code, Codex, Windsurf, Zed, OpenCode, and Crush. Use
+   `--client <id>` to target one client, or `--dry-run` to inspect every planned change first.
 
 2. **Add the extension.** Until the Chrome Web Store listing is public, download
    `ghostlight-extension-v*.zip` from the

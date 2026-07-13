@@ -14,8 +14,11 @@ nothing to compile. It registers every detected supported MCP client and the bro
 npx -y ghostlight install
 ```
 
-Use `--client codex` if the user asked to target Codex only. The command is idempotent and a first
-install opens the extension walkthrough. Show the user the output.
+Supported client ids are `claude-code`, `claude-desktop`, `cursor`, `vscode`, `codex`, `windsurf`,
+`zed`, `opencode`, and `crush`. Use `--client <id>` if the user asked to target only one. The command
+is idempotent and a first install opens the extension walkthrough. Show the user the output. If a
+commented JSONC config needs a manual step, preserve the file and use the exact entry the installer
+prints; a manual step is guidance, not an installation failure.
 
 For a client the installer does not recognize, add this entry manually after running the command:
 

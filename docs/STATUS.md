@@ -1,6 +1,6 @@
 # STATUS -- where the project stands
 
-Last updated: 2026-07-12. This file is a point-in-time snapshot maintained by whoever
+Last updated: 2026-07-13. This file is a point-in-time snapshot maintained by whoever
 finishes significant work. It exists so a fresh agent (or human) can orient without any
 prior session context. **Trust the tree, `git log`, and the batch LEDGERs over this file
 when they disagree**, and update it when you land something that changes the picture.
@@ -12,13 +12,14 @@ when they disagree**, and update it when you land something that changes the pic
 - **Latest published release: v0.5.6** (2026-07-12), cut with `scripts/release.ps1 0.5.6`.
   Shipped and LIVE: GitHub Release (27 assets + attestations), npm `ghostlight@0.5.6`, homebrew
   tap, **MCP registry (`org.sylin/ghostlight`)**, scoop/winget/homebrew manifests committed to
-  main, trust footers restamped, sylin.org website refreshed. `main` is at the release commit
-  `5762c3a`; `dev` is AHEAD of main by post-release tooling (registry step, server.json/URL fixes,
-  STATUS) -- these reach main at the next dev->main PR. v0.5.5 was prepared but never published.
-- **Unreleased on `dev`**: Codex is now a first-class installer target (ADR-0067). `ghostlight
-  install --client codex` losslessly adds the active relay to `~/.codex/config.toml`, removes it on
-  uninstall, and lets `doctor` report its registration accurately. The browser extension remains a
-  separate user-visible install step.
+  main, trust footers restamped, sylin.org website refreshed. Post-release PR #45 is merged on
+  `main` at `d22db80`; `dev` is ahead with ADR-0071's installer-target batch. v0.5.5 was prepared
+  but never published.
+- **Unreleased installer work**: Codex is a first-class lossless-TOML target (ADR-0067), and
+  Windsurf, Zed, OpenCode, and Crush now join Claude Code/Desktop, Cursor, and VS Code as explicit
+  installer targets (ADR-0071). Strict JSON is merged idempotently. Commented JSONC is left intact
+  and receives a copyable manual entry; `doctor` uses a tolerant registration check. The browser
+  extension remains a separate user-visible install step.
 - **MCP registry publishing is now automated** in `release.ps1` (the `registry` step, after `npm`):
   `mcp-publisher` DNS-auth publish, gated on `MCP_DNS_PRIVATE_KEY`. The one-time DNS proof is DONE
   (apex TXT `v=MCPv1; k=ed25519; p=...` on sylin.org via Cloudflare; ed25519 key in the env file;

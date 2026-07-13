@@ -4,8 +4,8 @@ Durable progress. One task = one commit. Update RESUME HERE and add a log entry 
 
 ## RESUME HERE
 
-- Implementation complete: **T1-T5 are done**. Run the full batch gate, replace the final
-  `(this commit)` marker with its hash, and synchronize project status and user-facing client lists.
+- **Batch complete.** T1-T5, the full workspace gate, the JSONC regression test, copyable manual
+  fallback, project status, and user-facing client-list synchronization are done.
 - Two RESIDUAL confirms live inside the tasks (not blockers): OpenCode's Windows config path (T4),
   and whether Zed needs `"source": "custom"` (T3). Confirm at execution; the pinned defaults follow
   current vendor docs.
@@ -22,7 +22,7 @@ Durable progress. One task = one commit. Update RESUME HERE and add a log entry 
 | T2 merge foundation | e219d60 | DONE | merge.rs 3 dialects + mod.rs JSONC->Manual + clients.rs tolerant detect |
 | T3 Zed | 8f3f18e | DONE | `context_servers`; per-OS dir casing; no `source` per current official docs |
 | T4 OpenCode | fbf8502 | DONE | `mcp` type:local command-array; Windows path confirmed |
-| T5 Crush | (this commit) | DONE | `mcp` type:stdio |
+| T5 Crush | 9e52d26 | DONE | `mcp` type:stdio |
 
 ## Deviations
 
@@ -32,6 +32,11 @@ Durable progress. One task = one commit. Update RESUME HERE and add a log entry 
 2. T4 runtime confirmation: OpenCode is not installed on the execution machine. Current official
    OpenCode documentation explicitly directs Windows users to `%USERPROFILE%/.config/opencode`,
    corroborated by a Windows execution log in the OpenCode repository. The pinned path is unchanged.
+
+## Closeout
+
+- `2012d12` adds direct coverage that commented JSONC plans as `manual`, never `failed`.
+- `1f14e1e` takes PINS P3's optional polish: the manual step includes the copyable entry JSON.
 
 ## Research resolution (was: open pins)
 
