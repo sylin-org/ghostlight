@@ -17,7 +17,8 @@ The four properties, together, are the product:
 3. Governance fused in: capability classification per action, identity-bound host
    grants, sacred never-touch domains, observe/enforce modes, structured audit -- with
    all-open as a first-class default.
-4. Open, local-first, single Rust binary; the governance module's source is readable.
+4. Open and local-first: a Rust service with thin relays; the governance module's source is
+   readable.
 
 ## The first-party path: Claude Code + Claude in Chrome
 
@@ -49,8 +50,8 @@ denial ids, and the audit trail your security team asked for."
 **Microsoft Playwright MCP, extension mode** (~35k stars) -- the best-funded project
 on the automation axis; its `--extension` mode reuses a real logged-in tab, and it ships
 steadily. Node-based, no governance layer, and browser automation is a side feature of a
-testing tool. Ghostlight is purpose-built for the governed-agent case: single portable
-binary, no Node, policy and audit at the dispatch chokepoint.
+testing tool. Ghostlight is purpose-built for the governed-agent case: a native Rust runtime with
+no Node service, policy and audit at the dispatch chokepoint.
 
 **vercel-labs/agent-browser** (~38k stars) -- a single Rust binary over CDP with domain
 allowlists and action policies (governance-lite). But it copies your Chrome profile to a
@@ -88,7 +89,7 @@ own MCP client. Different deployment universe (and price class).
 
 ## The grid
 
-| | Real session | Any MCP client | Governance + audit | Open + local, single binary |
+| | Real session | Any MCP client | Governance + audit | Open + local runtime |
 |---|---|---|---|---|
 | Ghostlight | yes | yes | yes | yes |
 | Claude Code + Claude in Chrome | yes | no (Claude only) | site permissions, no audit | no (closed) |

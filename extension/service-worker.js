@@ -35,7 +35,7 @@ const {
 } = self.GhostlightConstants;
 // The H7 grouping DECISION (lib/grouping.js): pure, unit-tested in isolation
 // (tests/extension/grouping.test.js), given an injected chrome so it never touches policy.
-const { groupSessionTabs, managedGroupIds, isManagedGroupId, pruneDeadGroups } =
+const { groupSessionTabs, managedGroupIds, isManagedGroupId, pruneDeadGroups, reclaimGroupsByTitle } =
   self.GhostlightGrouping;
 
 // Native-messaging host name (ADR-0065: one stack). Every build of this extension -- the Web
@@ -57,15 +57,28 @@ let groupId = null;
 // session (and its composite tab ids) by, so identity survives relay reconnects and worker deaths
 // and never collides on a degraded pid=0.
 const browserIdentity = self.GhostlightIdentity.createBrowserIdentity(chrome.storage.local);
-// H7 (ADR-0030 Decision 6/7) + ADR-0047 D1: the per-session presentation map, guid -> Chrome
-// tab-group id. Since ADR-0047 D1 the single-group access-control gate
-// (groupTabs/inGroup/effectiveTabId) CONSULTS this map through the managed-surface predicate
+// ADR-0066 D1 (amends ADR-0047 D1): the presentation map is now keyed on the CLIENT, not the
+// per-process session guid -- `clientKey -> Chrome tab-group id`, where clientKey is the wire
+// `clientKey` (falling back to `guid`, then the legacy global group). Every session of the same
+// client reuses ONE durable group instead of minting a fresh one, so the browser stops
+// accumulating orphan groups. The single-group access-control gate
+// (groupTabs/inGroup/effectiveTabId) still CONSULTS this map through the managed-surface predicate
 // (lib/grouping.js managedGroupIds/isManagedGroupId): a tab is in-surface when it sits in the
-// global `groupId` group OR any per-session group recorded here. This supersedes the earlier
-// posture that the gate "cannot become session-aware" -- one-group-per-tab meant a per-session
-// group evicted a tab from the global group, so a global-only gate wrongly rejected tabs the
-// extension legitimately manages (ADR-0047 Context, the F4 desync).
-const sessionGroups = new Map();
+// global `groupId` group OR any group recorded here OR (ADR-0066 D5) in `managedTabs` below.
+const clientGroups = new Map();
+// ADR-0066 D5: the set of tabIds this extension has placed in a managed group. A tab the user
+// drags OUT of the group (detached, or moved to another window -- both ungroup it in Chrome) stays
+// drivable because it is still one of OUR tabs, while a tab we never managed (the user's own,
+// named by a guessed id) is still refused -- the extension gate, not just the service, is what
+// keeps the agent out of the user's personal tabs (the service first-touch-adopts any unowned id).
+// Session-scoped only (persisted in chrome.storage.session; Chrome renumbers tab ids across a
+// browser restart, so a stale id must never survive one), and re-seeded on rehydrate from the live
+// members of every managed group. Pruned on tabs.onRemoved.
+const managedTabs = new Set();
+// ADR-0066 D2/D4: the group title the service writes is the ghost glyph + a space + the clientKey
+// (session_title). This prefix is what rehydrate strips to reclaim a group by title after a
+// browser restart. Distinct from GROUP_TITLE (glyph + name, NO space) so the two never collide.
+const CLIENT_TITLE_PREFIX = "\u{1F47B} ";
 // Take-the-wheel hold (g10): pending id -> resolver, for get_hold/set_hold/toggle_hold replies.
 // A separate sequence and map from tool_request ids; hold ids never collide with tool ids
 // because tool ids are binary-chosen and hold ids are extension-chosen.
@@ -124,7 +137,7 @@ async function connect() {
           fail(msg.id, hopError("extension", "The user ended the browser session (kill switch)"));
           return;
         }
-        dispatch(msg.id, msg.tool, msg.args || {}, msg.guid);
+        dispatch(msg.id, msg.tool, msg.args || {}, msg.clientKey || msg.guid);
         return;
       }
       // Tab-URL query (g13): mechanism only. Reports chrome.tabs.get(tabId).url verbatim (or
@@ -157,9 +170,14 @@ async function connect() {
       // given the injected `chrome`) and persists the updated per-session map; fire-and-forget --
       // neither this request nor its reply carries an `id`, so nothing here awaits a correlated
       // response.
-      if (msg && msg.type === "group_request" && typeof msg.guid === "string") {
+      // ADR-0066 D3: key the group on the CLIENT (clientKey) when present, falling back to the guid
+      // for a legacy caller. Every named tab is also recorded in `managedTabs` (D5) so it stays
+      // reachable if the user later drags it out of the group.
+      const groupKey = (msg && (msg.clientKey || msg.guid)) || null;
+      if (msg && msg.type === "group_request" && typeof groupKey === "string" && groupKey) {
         const tabIds = Array.isArray(msg.tabIds) ? msg.tabIds : [];
-        groupSessionTabs(chrome, sessionGroups, msg.guid, tabIds, msg.title || GROUP_TITLE)
+        for (const t of tabIds) managedTabs.add(t);
+        groupSessionTabs(chrome, clientGroups, groupKey, tabIds, msg.title || GROUP_TITLE)
           .then(() => persistSessionState())
           .then(() => {
             try { nativePort && nativePort.postMessage({ type: "group_response", guid: msg.guid, ok: true }); } catch { /* port gone */ }
@@ -367,11 +385,11 @@ async function killSession() {
 // First install: open the install walkthrough so whichever half the user found first
 // (extension or binary) leads them to the other. Fires ONLY on reason "install" -- never on
 // updates or browser restarts -- and holds no state. Mechanism only; no policy, no phoning
-// home (a static page on the project's GitHub Pages).
+// home (a static page on the project's website, sylin.org).
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install") {
     chrome.tabs.create({
-      url: "https://sylin-org.github.io/ghostlight/install.html?from=extension",
+      url: "https://sylin.org/ghostlight/chromium-extension/post-install/",
     });
   }
 });
@@ -566,6 +584,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   gifCast.delete(tabId);
   tabHost.delete(tabId);
   tabUrl.delete(tabId);
+  managedTabs.delete(tabId); // ADR-0066 D5: a closed tab is no longer ours to reach
   persistSessionState();
 });
 chrome.debugger.onDetach.addListener((src) => attached.delete(src.tabId));
@@ -674,10 +693,14 @@ async function persistSessionState() {
   try {
     await chrome.storage.session.set({
       sessionState: { groupId, tabIds },
-      // H7 (ADR-0030 Decision 6/7): the per-session guid -> groupId map, persisted under its OWN
-      // key -- ADDITIVE alongside `sessionState` above, whose own shape is unchanged -- so a
-      // service-worker restart recovers per-session groups too.
-      sessionGroupsState: Array.from(sessionGroups.entries()),
+      // ADR-0066 D1: the clientKey -> groupId map, persisted under its OWN key -- ADDITIVE
+      // alongside `sessionState`, whose own shape is unchanged -- so a service-worker restart
+      // recovers client groups too (a browser restart clears it, and rehydrate reclaims by title).
+      clientGroupsState: Array.from(clientGroups.entries()),
+      // ADR-0066 D5: the managed-tab set, so a detached-but-owned tab stays reachable across a
+      // service-worker restart. Session-scoped only -- never storage.local -- because Chrome
+      // renumbers tab ids across a browser restart and a stale id must not survive one.
+      managedTabsState: Array.from(managedTabs),
     });
   } catch { /* persistence is best-effort; recovery still has the title-based fallback below */ }
 }
@@ -703,15 +726,19 @@ async function ensureGroup(create) {
   const gid = await chrome.tabs.group({ tabIds: [win.tabs[0].id] });
   await chrome.tabGroups.update(gid, { title: GROUP_TITLE, color: "blue" });
   groupId = gid;
+  managedTabs.add(win.tabs[0].id); // ADR-0066 D5: track the global group's tab too
   await persistSessionState();
 }
 
-// Session-group birth (ADR-0047 D3): create a tab directly inside `guid`'s group. First tab of
-// a session: one focused window whose single fresh tab becomes the group (no about:blank
-// litter); later tabs: a tab in the group's window, grouped immediately. The GROUP_TITLE
+// Client-group birth/reuse (ADR-0047 D3 as amended by ADR-0066 D1): create a tab directly inside
+// `key`'s group -- `key` is the client's stable clientKey (or a legacy guid). When the client
+// already has a group (this session OR a prior one, since the map is keyed on the client), the tab
+// is born in that group's window and grouped immediately: reuse, no new group. Only a client with
+// no existing group creates a fresh window+group (no about:blank litter). The GROUP_TITLE
 // placeholder is retitled by the service's next group_request (client-name title, ADR-0047 D4).
-async function createTabInSessionGroup(guid) {
-  let gid = sessionGroups.has(guid) ? sessionGroups.get(guid) : null;
+// The created tab is recorded in `managedTabs` (ADR-0066 D5) so it stays reachable if detached.
+async function createTabInSessionGroup(key) {
+  let gid = clientGroups.has(key) ? clientGroups.get(key) : null;
   if (gid !== null) {
     try { await chrome.tabGroups.get(gid); } catch { gid = null; }
   }
@@ -726,11 +753,12 @@ async function createTabInSessionGroup(guid) {
     tab = await chrome.tabs.create({ active: true, windowId: group.windowId });
     await chrome.tabs.group({ tabIds: [tab.id], groupId: gid });
   }
-  sessionGroups.set(guid, gid);
+  clientGroups.set(key, gid);
+  managedTabs.add(tab.id);
   return { tab, gid };
 }
 async function groupTabs() {
-  const ids = managedGroupIds(groupId, sessionGroups);
+  const ids = managedGroupIds(groupId, clientGroups);
   const all = [];
   for (const gid of ids) {
     try {
@@ -738,6 +766,16 @@ async function groupTabs() {
     } catch { /* a vanished group contributes no tabs */ }
   }
   return all;
+}
+// ADR-0066 D5: record every tab currently sitting in a managed group as a managed tab, so it stays
+// reachable if the user later drags it out. Called on rehydrate to rebuild the set from live state
+// after a browser restart (where the persisted set's tab ids are stale). Best-effort per group.
+async function seedManagedTabsFromGroups() {
+  for (const gid of managedGroupIds(groupId, clientGroups)) {
+    try {
+      for (const t of await chrome.tabs.query({ groupId: gid })) managedTabs.add(t.id);
+    } catch { /* a vanished group contributes no tabs */ }
+  }
 }
 async function inGroup(tabId) {
   // Always consult live state; the in-memory groupId can be stale after a restart.
@@ -750,7 +788,10 @@ async function inGroup(tabId) {
         await persistSessionState();
       }
     }
-    return isManagedGroupId(tab.groupId, groupId, sessionGroups);
+    // ADR-0066 D5: in-surface if the tab sits in a managed group OR it is one we manage but the
+    // user has dragged out of the group (ungrouped / moved to another window). `managedTabs` only
+    // ever holds tabs we grouped, so a never-managed user tab is still refused.
+    return isManagedGroupId(tab.groupId, groupId, clientGroups) || managedTabs.has(tabId);
   } catch {
     return false;
   }
@@ -760,17 +801,37 @@ async function inGroup(tabId) {
 // dispatch, which awaits this promise before running any tool.
 async function rehydrate() {
   try {
-    const stored = await chrome.storage.session.get(["sessionState", "sessionGroupsState"]);
+    const stored = await chrome.storage.session.get([
+      "sessionState",
+      "clientGroupsState",
+      "managedTabsState",
+    ]);
     const sessionState = stored && stored.sessionState;
-    // H7 (ADR-0030 Decision 6/7): restore the per-session map independently of the legacy
-    // single-group `sessionState` below -- a fresh install has neither, but either one being
-    // absent must not block recovering the other.
-    if (Array.isArray(stored && stored.sessionGroupsState)) {
-      for (const [guid, gid] of stored.sessionGroupsState) sessionGroups.set(guid, gid);
+    // ADR-0066 D1: restore the client-group map independently of the legacy single-group
+    // `sessionState` below -- a fresh install has neither, but either one being absent must not
+    // block recovering the other.
+    if (Array.isArray(stored && stored.clientGroupsState)) {
+      for (const [key, gid] of stored.clientGroupsState) clientGroups.set(key, gid);
     }
-    // ADR-0047 D5: drop any restored session groups whose Chrome group died while the worker was
-    // asleep, so the managed surface never names a stale group id.
-    if (await pruneDeadGroups(chrome, sessionGroups)) await persistSessionState();
+    // ADR-0066 D5: restore the managed-tab set (a service-worker restart keeps tab ids stable).
+    if (Array.isArray(stored && stored.managedTabsState)) {
+      for (const id of stored.managedTabsState) managedTabs.add(id);
+    }
+    // ADR-0047 D5: drop any restored groups whose Chrome group died while the worker was asleep,
+    // so the managed surface never names a stale group id.
+    await pruneDeadGroups(chrome, clientGroups);
+    // ADR-0066 D4: re-attach to groups Chrome restored after a browser restart (which cleared the
+    // persisted map) by matching their titles back to clientKeys -- reads only live state.
+    await reclaimGroupsByTitle(chrome, clientGroups, CLIENT_TITLE_PREFIX);
+    // ADR-0066 D5: re-seed managedTabs from the live members of every managed group (covers the
+    // browser-restart case where Chrome renumbered tab ids), then drop any managed id that no
+    // longer exists (tabs closed while the worker was asleep).
+    await seedManagedTabsFromGroups();
+    for (const id of Array.from(managedTabs)) {
+      try { await chrome.tabs.get(id); } catch { managedTabs.delete(id); }
+    }
+    // reclaim/prune/seed all mutate durable state; persist the reconciled maps unconditionally.
+    await persistSessionState();
     if (!sessionState) return; // genuinely fresh start: nothing more to recover
     const priorSession =
       sessionState.groupId !== null ||
@@ -825,14 +886,14 @@ async function effectiveTabId(rawTabId) {
 // works, instead of failing cold and having to discover tabs_create_mcp first. Bootstrap only when
 // the managed surface is genuinely empty: if managed tabs DO exist and the named tabId is not one
 // of them, effectiveTabId's helpful "not a tab Ghostlight manages" error stands -- a wrong tabId is
-// a real mistake, not a bootstrap. Session-scoped when a guid is present (ADR-0047), else the
-// legacy global group for guid-less native callers.
-async function navigateTabId(rawTabId, guid) {
+// a real mistake, not a bootstrap. Client-scoped when a `key` is present (ADR-0066: clientKey, or a
+// legacy guid), else the legacy global group for guid-less native callers.
+async function navigateTabId(rawTabId, key) {
   await ensureGroup(false);
   const tabs = await groupTabs();
   if (tabs.length) return effectiveTabId(rawTabId);
-  if (typeof guid === "string" && guid) {
-    const { tab } = await createTabInSessionGroup(guid);
+  if (typeof key === "string" && key) {
+    const { tab } = await createTabInSessionGroup(key);
     await persistSessionState();
     return tab.id;
   }
@@ -1364,6 +1425,7 @@ async function tabsCreateLegacy() {
   await ensureGroup(true);
   const tab = await chrome.tabs.create({ active: true });
   await chrome.tabs.group({ tabIds: [tab.id], groupId });
+  managedTabs.add(tab.id); // ADR-0066 D5
   await persistSessionState();
   const r = tabContext(await groupTabs());
   r.content[0].text = `Created tab ${tab.id}.\n` + r.content[0].text;
@@ -1380,9 +1442,11 @@ async function tabsContextLegacy(a) {
 }
 
 const handlers = {
-  async tabs_context_mcp(a, guid) {
-    if (typeof guid !== "string" || !guid) return tabsContextLegacy(a);
-    let gid = sessionGroups.has(guid) ? sessionGroups.get(guid) : null;
+  // `key` is the client's stable clientKey (ADR-0066), falling back to the guid, or absent for a
+  // legacy/hand-rolled native caller (the global-group path).
+  async tabs_context_mcp(a, key) {
+    if (typeof key !== "string" || !key) return tabsContextLegacy(a);
+    let gid = clientGroups.has(key) ? clientGroups.get(key) : null;
     if (gid !== null) {
       try { await chrome.tabGroups.get(gid); } catch { gid = null; }
     }
@@ -1390,22 +1454,22 @@ const handlers = {
       if (!a.createIfEmpty) {
         return text("No Ghostlight tab group for this session. Call tabs_context_mcp with createIfEmpty: true, or create a tab with tabs_create_mcp.");
       }
-      gid = (await createTabInSessionGroup(guid)).gid;
+      gid = (await createTabInSessionGroup(key)).gid;
       await persistSessionState();
     }
     return tabContext(await chrome.tabs.query({ groupId: gid }), gid);
   },
-  async tabs_create_mcp(_a, guid) {
-    if (typeof guid !== "string" || !guid) return tabsCreateLegacy();
-    const { tab, gid } = await createTabInSessionGroup(guid);
+  async tabs_create_mcp(_a, key) {
+    if (typeof key !== "string" || !key) return tabsCreateLegacy();
+    const { tab, gid } = await createTabInSessionGroup(key);
     await persistSessionState();
     const r = tabContext(await chrome.tabs.query({ groupId: gid }), gid);
     r.content[0].text = `Created tab ${tab.id}.\n` + r.content[0].text;
     r.structuredContent = { tabId: tab.id, tabs: r.structuredContent.tabs };
     return r;
   },
-  async navigate(a, guid) {
-    const tabId = await navigateTabId(a.tabId, guid);
+  async navigate(a, key) {
+    const tabId = await navigateTabId(a.tabId, key);
     if (a.url === "back") {
       await chrome.tabs.goBack(tabId);
     } else if (a.url === "forward") {
@@ -1728,12 +1792,14 @@ const handlers = {
   },
 };
 
-async function dispatch(id, tool, args, guid) {
+async function dispatch(id, tool, args, key) {
   await ready; // never run a tool against un-rehydrated state
   const handler = handlers[tool];
   if (!handler) return fail(id, `Unknown tool: ${tool}`);
   try {
-    reply(id, await handler(args, guid));
+    // ADR-0066: `key` is the client's clientKey (or a legacy guid); the grouping handlers use it
+    // to reuse the client's durable tab group. Every other handler ignores its second argument.
+    reply(id, await handler(args, key));
   } catch (e) {
     if (e instanceof TabAccessError) return reply(id, text(e.message));
     // Hop-tagged errors (cdp/page) pass through as-is; untagged errors keep the tool-name prefix.

@@ -358,7 +358,7 @@ struct InstallArgs {
     /// Add to every known client, not just detected ones.
     #[arg(long)]
     all_clients: bool,
-    /// Add only to this client id (repeatable): claude-code, claude-desktop, cursor, vscode.
+    /// Add only to this client id (repeatable): claude-code, claude-desktop, cursor, vscode, codex.
     #[arg(long = "client", value_name = "ID", conflicts_with = "all_clients")]
     clients: Vec<String>,
     /// Register the server to run in debug mode (sets GHOSTLIGHT_DEBUG=1 in its env).
@@ -368,6 +368,9 @@ struct InstallArgs {
     /// a terminal instead).
     #[arg(long)]
     no_supervisor: bool,
+    /// Do not open the browser-extension walkthrough after installation.
+    #[arg(long)]
+    no_open: bool,
 }
 
 #[derive(Debug, Args)]
@@ -431,6 +434,7 @@ impl From<InstallArgs> for InstallOptions {
             clients: selection(a.clients, a.all_clients),
             debug: a.debug,
             no_supervisor: a.no_supervisor,
+            no_open: a.no_open,
         }
     }
 }

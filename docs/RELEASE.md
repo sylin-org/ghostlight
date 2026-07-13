@@ -25,7 +25,7 @@ The release spans TWO repositories:
 | Edge Add-ons | the same zip | Automated when store creds are set, else printed steps | `release.ps1` (`extension`) -> `publish-extension.ps1` |
 | Trust center (`docs/trust/`) | "reviewed against vX.Y.Z" footer restamp | Automated | `release.ps1` (`trust`) |
 | Website (sylin.org) | refresh the install-guide fallback + trigger a rebuild | Automated | `release.ps1` (`website`) -> `publish-website.ps1` |
-| MCP Registry | `server.json` entry | Manual (founder-side: DNS auth) | you run `mcp-publisher` |
+| MCP Registry | `server.json` entry | Automated when `MCP_DNS_PRIVATE_KEY` is set, else skipped | `release.ps1` (`registry`) -> `mcp-publisher` (DNS auth) |
 
 `release.ps1` runs these as ordered, resumable steps: `preflight, tag, watch, verify, sums, tap,
 npm, trust, extension, website, report`. Each step detects whether it is already done and skips, so
@@ -61,13 +61,22 @@ Without them, the extension step prints exact manual submission instructions ins
    publishes npm and smoke-tests the launcher, restamps the trust footers, publishes the extension
    (auto or printed steps), and refreshes the website fallback.
 
-3. Do the two remaining manual channels (the `report` step reminds you):
+3. Do the one remaining manual channel (the `report` step reminds you):
    - **Winget**: open a PR to `microsoft/winget-pkgs` copying the filled
      `packaging/winget/Sylin.Ghostlight.yaml` (needs the one-time CLA).
-   - **MCP Registry**: `mcp-publisher` with DNS TXT auth on the `sylin.org` apex.
 
 Useful flags: `-From <step>` resumes after a partial run; `-SkipTap`, `-SkipNpm`, `-SkipExtension`,
-`-SkipWebsite` skip a channel; `-Yes` skips the interactive confirmations (for non-interactive runs).
+`-SkipWebsite`, `-SkipRegistry` skip a channel; `-Yes` skips the interactive confirmations.
+
+### MCP registry (`MCP_DNS_PRIVATE_KEY`)
+
+The `registry` step publishes `server.json` to registry.modelcontextprotocol.io via `mcp-publisher`
+(downloaded on demand, pinned). Authentication is DNS ownership of the namespace's domain
+(`org.sylin/...` -> `sylin.org`): a one-time apex TXT proof record, `v=MCPv1; k=ed25519; p=<pubkey>`,
+must stay in place. Generate the ed25519 key with `openssl` (see `local/RELEASE-CREDENTIALS.md` / the
+audit log), store the private hex as `MCP_DNS_PRIVATE_KEY`, and the step logs in and publishes. The
+registry is immutable per version, so re-running the same version is a no-op. If the key is unset,
+the step skips (not fatal).
 
 ## Extension stores
 

@@ -47,6 +47,10 @@
 .PARAMETER SkipWebsite
     Do not refresh the sylin.org website (the install-guide fallback + rebuild trigger).
 
+.PARAMETER SkipRegistry
+    Do not publish to the MCP registry. The registry step also self-skips when the
+    MCP_DNS_PRIVATE_KEY env var (the DNS-auth key) is not set.
+
 .EXAMPLE
     pwsh -File scripts/release.ps1 0.5.1
         Full release, with confirmations.
@@ -68,13 +72,14 @@ param(
     [switch] $DryRun,
     [switch] $Yes,
 
-    [ValidateSet('preflight', 'tag', 'watch', 'verify', 'sums', 'tap', 'npm', 'trust', 'extension', 'website', 'report')]
+    [ValidateSet('preflight', 'tag', 'watch', 'verify', 'sums', 'tap', 'npm', 'registry', 'trust', 'extension', 'website', 'report')]
     [string] $From = 'preflight',
 
     [switch] $SkipTap,
     [switch] $SkipNpm,
     [switch] $SkipExtension,
-    [switch] $SkipWebsite
+    [switch] $SkipWebsite,
+    [switch] $SkipRegistry
 )
 
 $ErrorActionPreference = 'Stop'
@@ -87,6 +92,11 @@ $TapSlug = 'sylin-org/homebrew-tap'
 $Tag = "v$Version"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
+# MCP registry publish (ADR/RELEASE.md): the pinned mcp-publisher release the registry step
+# downloads on demand (bump deliberately), and the production registry it targets.
+$McpPublisherVersion = 'v1.7.9'
+$RegistryUrl = 'https://registry.modelcontextprotocol.io'
+
 # The cross-build matrix (release.yml build job). Each archive is
 # ghostlight-<Tag>-<target>.<ext>; each ships two raw versionless bins too.
 $Targets = @(
@@ -96,7 +106,7 @@ $Targets = @(
     @{ Target = 'x86_64-unknown-linux-gnu'; Ext = 'tar.gz'; Windows = $false }
 )
 
-$StepOrder = @('preflight', 'tag', 'watch', 'verify', 'sums', 'tap', 'npm', 'trust', 'extension', 'website', 'report')
+$StepOrder = @('preflight', 'tag', 'watch', 'verify', 'sums', 'tap', 'npm', 'registry', 'trust', 'extension', 'website', 'report')
 
 # --- Output helpers --------------------------------------------------------------------
 
@@ -583,6 +593,84 @@ function Step-Npm {
     else { Write-Warn2 "doctor exited $code -- the launcher fetched v$Version (see output above); a nonzero here is expected when this machine has no browser/extension configured" }
 }
 
+# Derive the DNS domain the registry authenticates against: server.json's name is
+# <reverse-dns>/<id> (org.sylin/ghostlight), and the reverse-dns reversed is the domain (sylin.org).
+# The apex TXT proof record on that domain must exist for `login dns` to succeed (docs/RELEASE.md).
+function Get-RegistryDomain {
+    $sj = Get-Content (Join-Path $RepoRoot 'server.json') -Raw | ConvertFrom-Json
+    $ns = ($sj.name -split '/')[0]
+    $parts = $ns -split '\.'
+    [array]::Reverse($parts)
+    return ($parts -join '.')
+}
+
+# Locate mcp-publisher: prefer one on PATH; else download the pinned release into a temp dir. (The
+# tracked release script must not depend on the gitignored local/ copy, so it fetches its own.)
+function Resolve-McpPublisher {
+    $onPath = Get-Command mcp-publisher -ErrorAction SilentlyContinue
+    if ($onPath) { return $onPath.Source }
+    $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) { 'arm64' } else { 'amd64' }
+    $os = if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'darwin' } else { 'linux' }
+    $exeName = if ($IsWindows) { 'mcp-publisher.exe' } else { 'mcp-publisher' }
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) "mcp-publisher-$McpPublisherVersion"
+    $exe = Join-Path $dir $exeName
+    if (-not (Test-Path $exe)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $asset = "mcp-publisher_${os}_${arch}.tar.gz"
+        & gh release download $McpPublisherVersion --repo modelcontextprotocol/registry --pattern $asset --dir $dir --clobber
+        if ($LASTEXITCODE -ne 0) { throw "could not download $asset ($McpPublisherVersion) from modelcontextprotocol/registry" }
+        & tar -xzf (Join-Path $dir $asset) -C $dir
+    }
+    if (-not (Test-Path $exe)) { throw "mcp-publisher not found after download at $exe" }
+    return $exe
+}
+
+function Step-Registry {
+    Write-Banner 'Publish to the MCP registry'
+    if ($SkipRegistry) { Write-Skip '-SkipRegistry set'; return }
+
+    $domain = Get-RegistryDomain
+    $keySet = -not [string]::IsNullOrWhiteSpace($env:MCP_DNS_PRIVATE_KEY)
+
+    if ($DryRun) {
+        Write-Would "ensure mcp-publisher $McpPublisherVersion; validate server.json"
+        if ($keySet) { Write-Would "login dns --domain $domain, then publish (skips if $Version already on the registry)" }
+        else { Write-Warn2 'MCP_DNS_PRIVATE_KEY not set -> would SKIP (set it to auto-publish; see docs/RELEASE.md)' }
+        return
+    }
+    if (-not $keySet) {
+        Write-Warn2 'MCP_DNS_PRIVATE_KEY not set -- skipping the registry publish (not fatal).'
+        Write-Info 'To automate: set MCP_DNS_PRIVATE_KEY (DNS-auth key; see docs/RELEASE.md) and re-run: -From registry'
+        return
+    }
+
+    $mcp = Resolve-McpPublisher
+    Push-Location $RepoRoot
+    try {
+        & $mcp validate
+        if ($LASTEXITCODE -ne 0) { throw 'server.json failed registry validation (run: mcp-publisher validate)' }
+        Write-Ok 'server.json valid'
+
+        & $mcp login dns --domain $domain --private-key $env:MCP_DNS_PRIVATE_KEY | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "mcp-publisher login dns failed (is the apex TXT proof record on $domain live?)" }
+        Write-Ok "authenticated via DNS ($domain)"
+
+        $out = (& $mcp publish 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "published to the registry ($RegistryUrl)"
+        }
+        elseif ($out -match 'duplicate version|already (published|exists)') {
+            # The registry is immutable per version; a re-run of the same version is a no-op.
+            Write-Skip "version $Version already on the registry; not re-publishing"
+        }
+        else {
+            Write-Host $out
+            throw 'mcp-publisher publish failed'
+        }
+    }
+    finally { Pop-Location }
+}
+
 # Restamp the "Last reviewed ... against v<x>" version token in every docs/trust/ footer to the
 # release version. Idempotent: matches any existing vX.Y.Z (with or without a +dev suffix).
 function Set-TrustFooters([string] $Ver) {
@@ -680,6 +768,7 @@ function Step-Report {
     - assets verified, package-manager checksums filled + committed
     - homebrew tap updated$(if ($SkipTap) { ' (SKIPPED)' })
     - npm publish + smoke$(if ($SkipNpm) { ' (SKIPPED)' })
+    - MCP registry publish$(if ($SkipRegistry) { ' (SKIPPED)' }) -- auto when MCP_DNS_PRIVATE_KEY is set, else skipped
     - trust-center footers restamped to v$Version
     - extension published$(if ($SkipExtension) { ' (SKIPPED)' }) -- auto where store creds are set, else steps printed above
     - website install-guide fallback refreshed$(if ($SkipWebsite) { ' (SKIPPED)' })
@@ -716,6 +805,7 @@ $dispatch = @{
     sums      = { Step-Sums }
     tap       = { Step-Tap }
     npm       = { Step-Npm }
+    registry  = { Step-Registry }
     trust     = { Step-Trust }
     extension = { Step-Extension }
     website   = { Step-Website }

@@ -4,17 +4,23 @@
 
 <h1 align="center">Ghostlight</h1>
 
-<p align="center"><strong>Let your AI agent drive your real, logged-in browser, from any MCP client, and watch every move.</strong></p>
+<p align="center"><strong>Your real browser, for any MCP agent -- visible, local, and yours.</strong></p>
 
 <p align="center">
   <a href="https://github.com/sylin-org/ghostlight/actions/workflows/ci.yml"><img src="https://github.com/sylin-org/ghostlight/actions/workflows/ci.yml/badge.svg?branch=dev" alt="CI"></a>
   <a href="https://www.npmjs.com/package/ghostlight"><img src="https://img.shields.io/npm/v/ghostlight?color=38BDF8&label=npm" alt="npm"></a>
   <a href="https://github.com/sylin-org/ghostlight/releases/latest"><img src="https://img.shields.io/github/v/release/sylin-org/ghostlight?color=38BDF8&label=release" alt="release"></a>
+  <a href="https://registry.modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP_registry-org.sylin%2Fghostlight-38BDF8" alt="MCP registry"></a>
+  <a href="https://github.com/sylin-org/homebrew-tap"><img src="https://img.shields.io/badge/Homebrew-sylin--org%2Ftap-38BDF8" alt="Homebrew tap"></a>
 </p>
 
-Your browser, with your logins, your tabs, your sessions, driven by your agent. It works from any
-MCP client (Claude Code, Cursor, VS Code, Zed, Cline, or anything else that speaks MCP), and you
-see every action happen. Governed when you want it, wide open when you don't.
+Ghostlight lets an AI agent use the Chromium browser you already use -- with your logins, tabs, and
+sessions. Actions happen in front of you, in a dedicated tab group. It works wide open for personal
+use or under inspectable policy when stronger boundaries are useful. Everything runs locally, and
+nothing phones home.
+
+Responsibility is part of the experience, not a brake on it. A good agent tool should be easy to
+start, obvious while it acts, clear when it stops, and honest about what it can and cannot control.
 
 <!-- HERO DEMO SLOT: an annotated session GIF recorded by Ghostlight's own gif_creator tool
      (sky-blue click rings, action labels, progress bar, watermark). Capture with
@@ -23,58 +29,79 @@ see every action happen. Governed when you want it, wide open when you don't.
 <p align="center"><sub>Recorded by Ghostlight itself, with its own <code>gif_creator</code> tool.</sub></p>
 -->
 
-## Why it works
+## Is this your problem?
+
+Ghostlight is worth trying when:
+
+- your agent needs a site where you are already signed in, not a fresh browser profile;
+- you want the same browser tools from Codex, Claude Code, Cursor, VS Code, or another MCP client;
+- you want to watch the work, take the wheel, and understand failures without decoding logs; or
+- you need policy and evidence that a developer and a security reviewer can both inspect.
+
+It is probably not the right tool for a headless scraping farm, stealth automation, an isolated
+cloud browser, or a Claude-only setup already served by Anthropic's first-party integration. The
+[comparison guide](docs/COMPARISON.md) is candid about those choices.
+
+## What makes it feel different
 
 - **Your session, not a clean-room.** Real cookies, real SSO, real tabs. Nothing gets relocated to
   a cloud browser or a throwaway profile just to gain a technical property; the whole point is your
   authenticated context.
-- **Your agent already knows the tools.** The tool surface preserves the schemas Claude was trained
-  on, byte for byte, then adds more on top: see and act, forms and files, multi-step composition,
-  session recording, and inspection. A capable agent just works, and then some.
-- **Governed composition, not just clicks.** Capability grants, sacred never-touch domains, and a
-  structured audit record on every call, all resolved at one chokepoint in the binary, plus
-  audit-correlated multi-step batches with `dry_run` pre-flight. The flight recorder runs even wide
-  open, so a session always leaves a trail. All-open is a first-class mode, not a degraded one.
-- **You are always in control.** Every move is visible: sky-blue click ripples, a comet trail on
+- **The agent gets a tool surface shaped for models.** The trained schemas stay byte-stable;
+  additive tools provide forms, files, multi-step composition, recording, and inspection. Results
+  are compact, errors say how to recover, and a capable agent can begin without a Ghostlight lesson.
+- **The person watching can follow along.** Every move is visible: sky-blue click ripples, a comet trail on
   drags, a shimmer as it types, captions that narrate each step. It runs in its own tab group, kept
   visually separate from your own tabs, and you can grab the wheel or hit the kill switch at any
-  moment. The license never gates behavior, and the binary never phones home.
-- **One portable binary, zero runtime dependencies.** No servers to babysit, and none of the
-  install breakage that plagues Node-based browser MCPs.
+  moment.
+- **Responsibility scales with the job.** Personal use needs no policy. When boundaries matter,
+  Ghostlight adds capability grants, sacred never-touch domains, dry-run preflight, and one
+  structured record per call. The unrestricted engine remains a first-class product.
+- **The software stays yours.** The Rust service and its thin relay have no runtime framework to
+  maintain. The engine is open source, the governance code is readable, license state never changes
+  behavior, and an installed copy keeps working offline.
 
-Anthropic ships a first-party Claude Code and Chrome integration, and it is good. Ghostlight is for
-everyone that path leaves out: other MCP clients, Claude through Bedrock or Vertex, and anyone who
-wants policy as code, an audit trail, or a self-hosted stack.
-[docs/COMPARISON.md](docs/COMPARISON.md) tells you straight when another path is the better pick.
+## Try it
 
-## Install in two minutes
+Needs a Chromium browser (116+), an MCP client, and Node for the `npx` install path. The running
+service is native Rust; there is no Node service to keep alive and nothing to compile.
 
-Needs a Chromium browser (116+) and an MCP client. No Node, no Rust, nothing to compile.
-
-1. **Add the server** to your MCP client, or one line for Claude Code:
-
-   ```json
-   { "command": "npx", "args": ["-y", "ghostlight"] }
-   ```
-   ```sh
-   claude mcp add ghostlight -- npx -y ghostlight
-   ```
-   [![Add to Cursor](https://img.shields.io/badge/Cursor-Add_MCP_server-38BDF8?style=flat-square)](cursor://anysphere.cursor-deeplink/mcp/install?name=ghostlight&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImdob3N0bGlnaHQiXX0=)
-   [![Add to VS Code](https://img.shields.io/badge/VS_Code-Add_MCP_server-38BDF8?style=flat-square)](vscode:mcp/install?%7B%22name%22%3A%22ghostlight%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22ghostlight%22%5D%7D)
-
-2. **Connect the browser:**
+1. **Install the local service and register detected MCP clients:**
 
    ```sh
-   npx ghostlight install
+   npx -y ghostlight install
    ```
 
-3. **Add the extension.** Download `ghostlight-extension-v*.zip` from the
+   The installer is idempotent and opens the extension walkthrough on the first run. Use
+   `--client codex` to target Codex only, or `--dry-run` to inspect every planned change first.
+
+2. **Add the extension.** Until the Chrome Web Store listing is public, download
+   `ghostlight-extension-v*.zip` from the
    [latest release](https://github.com/sylin-org/ghostlight/releases/latest) and load it unpacked
-   at `chrome://extensions`. (A Chrome Web Store listing is in preparation.)
+   at `chrome://extensions`. The walkthrough opened by the installer shows the same current path.
 
-Restart your client and the browser tools appear. If anything looks off, `npx ghostlight doctor`
-tells you exactly what. Prebuilt archives, building from source, and every other path live in the
+3. **Restart your MCP clients.** The browser tools appear. Try:
+
+   > Open a new browser tab, go to example.com, and tell me what the page says.
+
+If anything looks off, `npx ghostlight doctor` tells you exactly what. Prebuilt archives, building
+from source, and every other path live in the
 [installation guide](docs/guides/installation.md) and the manual steps below.
+
+For an unsupported client, add `{ "command": "npx", "args": ["-y", "ghostlight"] }` as a stdio
+MCP server, then run the installer for the browser side. If VS Code reports a manual client step,
+use its native installer:
+
+[![Add to VS Code](https://img.shields.io/badge/VS_Code-Add_MCP_server-38BDF8?style=flat-square)](vscode:mcp/install?%7B%22name%22%3A%22ghostlight%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22ghostlight%22%5D%7D)
+
+**Current platform state.** Windows is verified end to end against a live browser. macOS and Linux
+build and pass the full test suite in CI, but their live-browser verification is still owed. The
+Chrome Web Store package is uploaded; publication is waiting on the store listing review details.
+
+**Other ways to get it.** Homebrew: `brew install sylin-org/tap/ghostlight`. On the
+[MCP registry](https://registry.modelcontextprotocol.io) as `org.sylin/ghostlight`. Every release
+also ships prebuilt binaries and checksums on the
+[Releases page](https://github.com/sylin-org/ghostlight/releases/latest).
 
 <details>
 <summary><strong>Manual install (inspect everything)</strong></summary>
@@ -91,7 +118,8 @@ tells you exactly what. Prebuilt archives, building from source, and every other
    already allows it, so there is nothing to copy.
 3. **Register.** `./target/release/ghostlight install`. Useful flags: `--dry-run` (print the
    plan, write nothing), `--browser <id>` / `--client <id>` (limit scope; repeatable),
-   `--all-browsers` / `--all-clients`, `--debug` (observability on), `--system` (machine-wide).
+   `--all-browsers` / `--all-clients`, `--no-open`, `--debug` (observability on), and `--system`
+   (machine-wide).
    The installer is an idempotent value-level merge; it never clobbers your config and never
    duplicates entries.
 4. **Restart the client, reload the extension, run `ghostlight doctor`.** A healthy result
@@ -208,15 +236,16 @@ templates you can read and file before you ever reach out.
 ## How it works
 
 ```
-MCP Client  --stdio-->  Rust Binary  --native messaging-->  Extension  --CDP-->  Browser
- (agent)                (engine +      (4-byte framed)      (thin CDP           (your real
-                         governance)                         executor)           session)
+MCP Client <--stdio--> Relay <--local IPC--> Service <--native messaging--> Relay
+                                                                        |
+                                                                     Extension <--CDP--> Browser
 ```
 
-Three processes, two protocol boundaries. The binary is both the MCP server and the browser's
-native-messaging host. The extension is deliberately thin: it holds only what must touch a
-Chrome API, and no policy at all. Windows, macOS, and Linux all build and pass the full test
-suite in CI, and end-to-end browser use is verified on Windows today.
+The persistent Rust service owns browser sessions, governance, and audit. The two roles that MCP
+clients and Chromium spawn are handled by one small `ghostlight-relay` executable. The extension is
+deliberately thin: it contains Chrome-API mechanism, not policy. All decisions and records stay in
+the local service. The separation lets clients, the extension worker, and the service restart
+without making the user rebuild their browser session.
 
 <details>
 <summary><strong>CLI and troubleshooting</strong></summary>

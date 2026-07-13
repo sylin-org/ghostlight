@@ -124,13 +124,25 @@ pub fn owned_tab_ids(
     ids
 }
 
-/// The per-session Chrome group title (ADR-0047 D4, superseding the hub batch's SS6 pin):
-/// `"\u{1F47B} <client name>"`, deduplicated with `" (2)"`, `" (3)"`, ... when another session
-/// already holds the same base title, falling back to the literal name `Ghostlight` when no
-/// clientInfo was captured. Computed once per guid in the service-lifetime `titles` registry and
-/// reused for every later request for the SAME guid (stable across reconnects, ADR-0047 D2). The
-/// client name is the MCP `clientInfo.name` the agent presented; unlike the superseded
-/// guid-prefix title it embeds no GUID, so it never touches ADR-0030 Decision 4's redaction path.
+/// The stable per-CLIENT presentation key (ADR-0066 D1/D3): the MCP `clientInfo.name` the agent
+/// presented, or the literal `Ghostlight` when no clientInfo was captured. This -- not the
+/// per-process GUID -- is what the extension keys its `clientKey -> chromeGroupId` map on, so every
+/// session of the same client (sequential OR concurrent) presents into the SAME Chrome tab group
+/// instead of minting a fresh one. Deliberately just the name: `clientInfo` carries no
+/// per-workspace discriminator, and "one group per client" is the owner-chosen behavior; this is
+/// the single place to refine the key if a client ever reports a richer identity. Carries no GUID,
+/// so it never touches ADR-0030 Decision 4's redaction path.
+pub fn client_key(client_name: Option<&str>) -> String {
+    client_name.unwrap_or("Ghostlight").to_string()
+}
+
+/// The per-client Chrome group title (ADR-0047 D4 as amended by ADR-0066 D2): `"\u{1F47B} "`
+/// (the ghost glyph + a space) followed by the [`client_key`]. ADR-0066 DROPS the ADR-0047 ` (2)`/
+/// ` (3)` dedup: concurrent same-client sessions now SHARE one group, so they share one title, and
+/// the title stays a pure function of the client identity -- which lets the extension reclaim a
+/// group after a browser restart by stripping the glyph-plus-space prefix back to the clientKey
+/// (ADR-0066 D4). The per-guid `titles` cache is kept only so the title is byte-stable across
+/// reconnects (ADR-0047 D2). Embeds no GUID (ADR-0030 Decision 4 redaction path untouched).
 pub fn session_title(
     titles: &Mutex<HashMap<String, String>>,
     guid: &SessionGuid,
@@ -140,16 +152,9 @@ pub fn session_title(
     if let Some(existing) = map.get(guid.as_str()) {
         return existing.clone();
     }
-    let name = client_name.unwrap_or("Ghostlight");
-    let base = format!("\u{1F47B} {name}");
-    let mut candidate = base.clone();
-    let mut n = 1u32;
-    while map.values().any(|t| t == &candidate) {
-        n += 1;
-        candidate = format!("{base} ({n})");
-    }
-    map.insert(guid.as_str().to_string(), candidate.clone());
-    candidate
+    let title = format!("\u{1F47B} {}", client_key(client_name));
+    map.insert(guid.as_str().to_string(), title.clone());
+    title
 }
 
 /// The connecting peer's OS credential, captured by the LOCAL accept layer (`ipc::serve_adapters`)
@@ -334,12 +339,22 @@ mod tests {
         assert_eq!(owned_tab_ids(&owned_tabs, &b), vec![303]);
     }
 
-    /// ADR-0047 D4 (PINS P5): the title is the ghost glyph + the client's name, deduped with
-    /// `" (2)"`/`" (3)"` across distinct sessions holding the same base name, cached per guid so a
-    /// repeat call is stable (never bumps), and falls back to `Ghostlight` when no client name was
-    /// captured.
+    /// ADR-0066 D1/D3: the clientKey is the plain client name (the reuse key the extension groups
+    /// on), falling back to `Ghostlight` when no clientInfo was captured.
     #[test]
-    fn session_title_uses_client_name_with_dedupe_and_fallback() {
+    fn client_key_is_the_client_name_with_ghostlight_fallback() {
+        assert_eq!(client_key(Some("Claude Code")), "Claude Code");
+        assert_eq!(client_key(Some("Cursor")), "Cursor");
+        assert_eq!(client_key(None), "Ghostlight");
+    }
+
+    /// ADR-0066 D2 (amends ADR-0047 D4): the title is the ghost glyph + a space + the client name,
+    /// with NO ` (2)`/` (3)` dedup -- two sessions of the SAME client get the SAME title (they now
+    /// share one group), the title is byte-stable on a repeat call for a guid, and it falls back to
+    /// `Ghostlight` when no client name was captured. The glyph-plus-space prefix is what the
+    /// extension strips to reclaim a group by title after a browser restart (ADR-0066 D4).
+    #[test]
+    fn session_title_is_stable_per_client_without_dedup() {
         let t = Mutex::new(HashMap::new());
         let g1 = SessionGuid::mint();
         let g2 = SessionGuid::mint();
@@ -348,16 +363,23 @@ mod tests {
             session_title(&t, &g1, Some("Claude Code")),
             "\u{1F47B} Claude Code"
         );
+        // A SECOND, distinct session of the same client gets the SAME title (no bump to (2)):
+        // ADR-0066 shares one group across a client's sessions.
         assert_eq!(
             session_title(&t, &g2, Some("Claude Code")),
-            "\u{1F47B} Claude Code (2)"
+            "\u{1F47B} Claude Code"
         );
-        // A repeat call for the SAME guid returns the cached title, never bumps to (3).
+        // A repeat call for the SAME guid returns the cached title, unchanged.
         assert_eq!(
             session_title(&t, &g1, Some("Claude Code")),
             "\u{1F47B} Claude Code"
         );
         assert_eq!(session_title(&t, &g3, None), "\u{1F47B} Ghostlight");
+        // The title is exactly the glyph, a space, then the clientKey -- the reclaim contract.
+        assert_eq!(
+            session_title(&t, &g1, Some("Claude Code")),
+            format!("\u{1F47B} {}", client_key(Some("Claude Code")))
+        );
     }
 
     /// ADR-0047 D5 (PINS P6): a tab owned by a session with no live connection is adoptable by a

@@ -27,7 +27,7 @@
     "audit",
     "ai-agent"
   ],
-  "homepage": "https://sylin-org.github.io/ghostlight/",
+  "homepage": "https://sylin.org/ghostlight/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sylin-org/ghostlight.git",

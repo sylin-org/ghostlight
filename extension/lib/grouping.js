@@ -95,11 +95,43 @@ async function pruneDeadGroups(chrome, sessionGroups) {
   return changed;
 }
 
+// ADR-0066 D4: re-attach forgotten client groups after a full browser restart. The persisted
+// key->groupId map lives in chrome.storage.session, which a browser restart clears, so on startup
+// this scans the tab groups Chrome RESTORED and re-maps any whose title carries the managed
+// `prefix` (the ghost glyph + a space, `\u{1F47B} `) back to its clientKey -- `title` minus the
+// prefix, the exact contract `session_title` writes on the service side. It reads ONLY live state,
+// never a persisted (possibly Chrome-renumbered) id, so it can never resurrect a stale id that
+// might now alias one of the user's own tabs. A key already mapped to a live group, or a group id
+// already claimed, is left untouched (first title wins), so legacy litter titled `... (2)` maps to
+// its own distinct key and is never re-created for a fresh session. Returns true when it added
+// anything (the caller persists). Best-effort: no tabGroups access, or none, yields no change.
+async function reclaimGroupsByTitle(chrome, sessionGroups, prefix) {
+  let groups;
+  try {
+    groups = await chrome.tabGroups.query({});
+  } catch {
+    return false;
+  }
+  const mapped = new Set(sessionGroups.values());
+  let changed = false;
+  for (const g of groups) {
+    const title = (g && g.title) || "";
+    if (!title.startsWith(prefix)) continue;
+    const key = title.slice(prefix.length);
+    if (!key || sessionGroups.has(key) || mapped.has(g.id)) continue;
+    sessionGroups.set(key, g.id);
+    mapped.add(g.id);
+    changed = true;
+  }
+  return changed;
+}
+
 const GhostlightGrouping = {
   groupSessionTabs,
   managedGroupIds,
   isManagedGroupId,
   pruneDeadGroups,
+  reclaimGroupsByTitle,
 };
 if (typeof module !== "undefined" && module.exports) {
   module.exports = GhostlightGrouping;

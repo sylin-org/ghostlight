@@ -1,13 +1,13 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "org.sylin/ghostlight",
-  "description": "Let your AI agent drive your real, logged-in browser from any MCP client, and watch every move. Governed when you want it (capability grants, sacred never-touch domains, structured audit, dry-run composition), wide open when you don't. One portable binary, no runtime deps.",
+  "description": "Drive your real logged-in browser from any MCP client. Governed or wide open, one portable binary.",
   "repository": {
     "url": "https://github.com/sylin-org/ghostlight",
     "source": "github"
   },
   "version": "0.5.6",
-  "websiteUrl": "https://sylin-org.github.io/ghostlight/",
+  "websiteUrl": "https://sylin.org/ghostlight/",
   "packages": [
     {
       "registryType": "npm",

@@ -3,13 +3,16 @@
 //!
 //! Registers the native-messaging host (Windows registry / macOS+Linux file drop) for detected
 //! Chromium browsers, and adds the `ghostlight` server to detected MCP clients (CLI where a safe
-//! one exists, else a careful JSON merge). Idempotent; `--dry-run` writes nothing; every failure is
-//! independent and prints exact manual steps. This is engine packaging, not governance.
+//! one exists, else a careful format-aware config merge). Idempotent; `--dry-run` writes nothing;
+//! every failure is independent and prints exact manual steps. This is engine packaging, not
+//! governance.
 
 pub mod clients;
+mod handoff;
 pub mod merge;
 pub mod native_host;
 pub mod supervisor;
+pub mod toml_merge;
 
 use crate::{Error, Result};
 use native_host::{BrowserSpec, HostManifest, WowView};
@@ -52,6 +55,8 @@ pub struct InstallOptions {
     /// Skip registering the OS auto-start supervisor (dev instances run `ghostlight service` in a
     /// terminal instead of an auto-started one that would hold the exe lock during rebuilds).
     pub no_supervisor: bool,
+    /// Do not open the browser-extension handoff after an interactive installation.
+    pub no_open: bool,
 }
 #[derive(Debug, Clone)]
 pub struct UninstallOptions {
@@ -189,6 +194,11 @@ enum Op {
     Merge {
         path: PathBuf,
         dialect: merge::Dialect,
+        change: MergeChange,
+    },
+    /// Merge a change into Codex's shared TOML config without disturbing unrelated settings.
+    TomlMerge {
+        path: PathBuf,
         change: MergeChange,
     },
     RunCli {
@@ -417,12 +427,12 @@ fn plan_client_install(
         // Every plain-JSON client (Claude Code/Desktop, Cursor) is an idempotent value-level merge.
         // Claude Code's entry lives in ~/.claude.json, which a running Claude Code also writes; the
         // merge is deferred to apply time (see `Op::Merge`) so we never clobber a concurrent write.
-        AddVia::FileMerge => {
+        AddVia::JsonFileMerge(dialect) => {
             let path = clients::config_path(c, ctx);
             let target = path.display().to_string();
             let manual = format!(
                 "merge our server into {target} under \"{}\"",
-                c.dialect.top_key()
+                dialect.top_key()
             );
             // Missing config => empty (new file); an unreadable *existing* file blocks this client.
             let existing = match read_config_or_empty(&path) {
@@ -433,8 +443,8 @@ fn plan_client_install(
             };
             // Validate now (so `--dry-run` surfaces a non-mergeable config) and compute the no-op
             // state; the authoritative merge re-runs against fresh content at apply time.
-            match merge::merge_server(&existing, c.dialect, entry)
-                .and_then(|_| merge::server_matches(&existing, c.dialect, entry))
+            match merge::merge_server(&existing, dialect, entry)
+                .and_then(|_| merge::server_matches(&existing, dialect, entry))
             {
                 Ok(noop) => Action {
                     label,
@@ -443,7 +453,39 @@ fn plan_client_install(
                     manual,
                     op: Op::Merge {
                         path,
-                        dialect: c.dialect,
+                        dialect,
+                        change: MergeChange::Add(entry.clone()),
+                    },
+                },
+                Err(e) => blocked(label, target, e.to_string(), manual),
+            }
+        }
+        // Codex stores shared configuration in TOML. Its document contains model settings,
+        // project trust state, comments, and other MCP servers, so the lossless TOML merge is
+        // planned and re-run at apply time just like the JSON path above.
+        AddVia::TomlFileMerge => {
+            let path = clients::config_path(c, ctx);
+            let target = path.display().to_string();
+            let manual = format!(
+                "merge our server into {target} under [mcp_servers.{}]",
+                entry.name
+            );
+            let existing = match read_config_or_empty(&path) {
+                Ok(s) => s,
+                Err(e) => {
+                    return blocked(label, target, format!("cannot read config: {e}"), manual)
+                }
+            };
+            match toml_merge::merge_server(&existing, entry)
+                .and_then(|_| toml_merge::server_matches(&existing, entry))
+            {
+                Ok(noop) => Action {
+                    label,
+                    detail: target,
+                    noop: noop.then_some("already registered"),
+                    manual,
+                    op: Op::TomlMerge {
+                        path,
                         change: MergeChange::Add(entry.clone()),
                     },
                 },
@@ -521,6 +563,16 @@ fn plan_uninstall(opts: &UninstallOptions, ctx: &PlanCtx) -> Result<Vec<Action>>
     for c in selected_clients(&opts.clients, ctx) {
         actions.push(plan_client_uninstall(c, ctx));
     }
+    let handoff_marker = handoff::marker_path(&ctx.local);
+    actions.push(Action {
+        label: "extension handoff marker".into(),
+        detail: handoff_marker.display().to_string(),
+        noop: (!handoff_marker.exists()).then_some("absent"),
+        manual: format!("delete {}", handoff_marker.display()),
+        op: Op::RemovePath {
+            path: handoff_marker,
+        },
+    });
     Ok(actions)
 }
 
@@ -529,9 +581,9 @@ fn plan_client_uninstall(c: &clients::ClientSpec, ctx: &PlanCtx) -> Action {
     // The MCP server entry key for the active instance (ADR-0044): `ghostlight` for the default,
     // `ghostlight-<n>` for a named instance -- so uninstall removes only this instance's entry.
     let server = ghostlight_transport::instance::Instance::resolve().mcp_server_name();
-    // VS Code's JSONC config can't be safely rewritten by a value-level merge -> manual removal.
-    if c.is_jsonc {
-        return Action {
+    match c.add_via {
+        // VS Code's JSONC config can't be safely rewritten by a value-level merge -> manual removal.
+        clients::AddVia::VsCodeCli => Action {
             label,
             detail: "manual".into(),
             noop: None,
@@ -539,34 +591,62 @@ fn plan_client_uninstall(c: &clients::ClientSpec, ctx: &PlanCtx) -> Action {
                 "remove the \"{server}\" entry from the VS Code mcp.json 'servers' block"
             ),
             op: Op::Manual,
-        };
-    }
-    // Every other client (incl. Claude Code, whose entry lives in ~/.claude.json) is removed by a
-    // single idempotent value-level merge -- no subprocess, and a semantic no-op when absent.
-    let path = clients::config_path(c, ctx);
-    let target = path.display().to_string();
-    let manual = format!("remove \"{server}\" from {target}");
-    // Missing config => empty (nothing to remove); an unreadable *existing* file blocks this client.
-    let existing = match read_config_or_empty(&path) {
-        Ok(s) => s,
-        Err(e) => return blocked(label, target, format!("cannot read config: {e}"), manual),
-    };
-    // Validate now (a non-object root errors here, at dry-run) and compute the no-op state.
-    match merge::remove_server(&existing, c.dialect, &server)
-        .and_then(|_| merge::has_server(&existing, c.dialect, &server))
-    {
-        Ok(present) => Action {
-            label,
-            detail: target,
-            noop: (!present).then_some("not present"),
-            manual,
-            op: Op::Merge {
-                path,
-                dialect: c.dialect,
-                change: MergeChange::Remove(server),
-            },
         },
-        Err(e) => blocked(label, target, e.to_string(), manual),
+        // The original JSON clients use the same idempotent value-level removal as before.
+        clients::AddVia::JsonFileMerge(dialect) => {
+            let path = clients::config_path(c, ctx);
+            let target = path.display().to_string();
+            let manual = format!("remove \"{server}\" from {target}");
+            let existing = match read_config_or_empty(&path) {
+                Ok(s) => s,
+                Err(e) => {
+                    return blocked(label, target, format!("cannot read config: {e}"), manual)
+                }
+            };
+            match merge::remove_server(&existing, dialect, &server)
+                .and_then(|_| merge::has_server(&existing, dialect, &server))
+            {
+                Ok(present) => Action {
+                    label,
+                    detail: target,
+                    noop: (!present).then_some("not present"),
+                    manual,
+                    op: Op::Merge {
+                        path,
+                        dialect,
+                        change: MergeChange::Remove(server),
+                    },
+                },
+                Err(e) => blocked(label, target, e.to_string(), manual),
+            }
+        }
+        // Codex's lossless TOML path is fully symmetric with install.
+        clients::AddVia::TomlFileMerge => {
+            let path = clients::config_path(c, ctx);
+            let target = path.display().to_string();
+            let manual = format!("remove \"{server}\" from {target}");
+            let existing = match read_config_or_empty(&path) {
+                Ok(s) => s,
+                Err(e) => {
+                    return blocked(label, target, format!("cannot read config: {e}"), manual)
+                }
+            };
+            match toml_merge::remove_server(&existing, &server)
+                .and_then(|_| toml_merge::has_server(&existing, &server))
+            {
+                Ok(present) => Action {
+                    label,
+                    detail: target,
+                    noop: (!present).then_some("not present"),
+                    manual,
+                    op: Op::TomlMerge {
+                        path,
+                        change: MergeChange::Remove(server),
+                    },
+                },
+                Err(e) => blocked(label, target, e.to_string(), manual),
+            }
+        }
     }
 }
 
@@ -698,6 +778,7 @@ fn apply_one(op: &Op) -> Result<()> {
             dialect,
             change,
         } => apply_merge(path, *dialect, change),
+        Op::TomlMerge { path, change } => apply_toml_merge(path, change),
         Op::RunCli { program, argv } => {
             let status = std::process::Command::new(program)
                 .args(argv)
@@ -753,6 +834,36 @@ fn apply_merge(
     native_host::write_file_atomic(path, &updated)
 }
 
+/// Apply a Codex TOML merge against the file's latest contents, retaining unrelated TOML where the
+/// lossless editor permits and backing up only when Ghostlight's owned table changes.
+fn apply_toml_merge(path: &std::path::Path, change: &MergeChange) -> Result<()> {
+    let existing = read_config_or_empty(path).map_err(|e| {
+        Error::MergeConflict(format!("{}: cannot read config: {e}", path.display()))
+    })?;
+    let conflict = |e| Error::MergeConflict(format!("{}: {e}", path.display()));
+    let (needed, updated) = match change {
+        MergeChange::Add(entry) => (
+            !toml_merge::server_matches(&existing, entry).map_err(conflict)?,
+            toml_merge::merge_server(&existing, entry).map_err(conflict)?,
+        ),
+        MergeChange::Remove(name) => (
+            toml_merge::has_server(&existing, name).map_err(conflict)?,
+            toml_merge::remove_server(&existing, name).map_err(conflict)?,
+        ),
+    };
+    if !needed {
+        return Ok(());
+    }
+    if path.exists() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::fs::copy(path, append_extension(path, &format!("bak-{nanos}")))?;
+    }
+    native_host::write_file_atomic(path, &updated)
+}
+
 // --- Entry points ---
 
 /// `ghostlight install`
@@ -791,9 +902,28 @@ pub fn run_install(opts: InstallOptions) -> Result<()> {
     if opts.dry_run {
         println!("\nDry run -- nothing was written.");
     } else {
-        println!(
-            "\nNext: load the unpacked extension (chrome://extensions) and restart the browser."
-        );
+        let install_usable = tally.done > 0 || tally.noop > 0;
+        match handoff::offer(
+            &ctx.local,
+            opts.dry_run,
+            opts.no_open,
+            std::env::var_os("CI").is_some(),
+            install_usable,
+        ) {
+            Ok(handoff::HandoffOutcome::Opened) => println!(
+                "\nNext: install the browser extension in the page just opened, then restart your MCP clients."
+            ),
+            Ok(handoff::HandoffOutcome::AlreadyOffered | handoff::HandoffOutcome::Suppressed) => {
+                println!(
+                    "\nNext: install the browser extension at {}, then restart your MCP clients.",
+                    handoff::EXTENSION_INSTALL_URL
+                );
+            }
+            Err(e) => println!(
+                "\nNext: install the browser extension at {}, then restart your MCP clients.\n  [warn] could not open the page automatically: {e}",
+                handoff::EXTENSION_INSTALL_URL
+            ),
+        }
     }
     exit_result(&tally)
 }
@@ -964,6 +1094,41 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// Codex's shared TOML keeps unrelated model and project settings while the installer adds,
+    /// re-runs, and removes only Ghostlight's owned MCP table with the usual backup discipline.
+    #[test]
+    fn apply_toml_merge_is_idempotent_and_preserves_codex_settings() {
+        let dir =
+            std::env::temp_dir().join(format!("ghostlight-codex-merge-{}", std::process::id()));
+        let codex_dir = dir.join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let path = codex_dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "# keep this comment\nmodel = \"gpt-5\"\n\n[projects.\"repo\"]\ntrust_level = \"trusted\"\n\n[mcp_servers.other]\ncommand = \"other\"\n",
+        )
+        .unwrap();
+
+        apply_toml_merge(&path, &MergeChange::Add(entry())).unwrap();
+        let installed = std::fs::read_to_string(&path).unwrap();
+        assert!(installed.contains("# keep this comment"));
+        assert!(installed.contains("model = \"gpt-5\""));
+        assert!(installed.contains("[projects.\"repo\"]"));
+        assert!(installed.contains("[mcp_servers.other]"));
+        assert!(toml_merge::server_matches(&installed, &entry()).unwrap());
+        assert_eq!(bak_count(&codex_dir), 1);
+
+        apply_toml_merge(&path, &MergeChange::Add(entry())).unwrap();
+        assert_eq!(bak_count(&codex_dir), 1, "an exact re-install is a no-op");
+
+        apply_toml_merge(&path, &MergeChange::Remove("ghostlight".into())).unwrap();
+        let uninstalled = std::fs::read_to_string(&path).unwrap();
+        assert!(!toml_merge::has_server(&uninstalled, "ghostlight").unwrap());
+        assert!(toml_merge::has_server(&uninstalled, "other").unwrap());
+        assert_eq!(bak_count(&codex_dir), 2);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn read_config_or_empty_maps_missing_to_empty_but_surfaces_bad_bytes() {
         let dir = std::env::temp_dir().join(format!("ghostlight-rc-{}", std::process::id()));
@@ -1015,6 +1180,30 @@ mod tests {
         // Infallible: returns a Blocked action for this client instead of aborting the whole plan.
         let action = plan_client_install(cursor, &ctx, &entry());
         assert!(matches!(action.op, Op::Blocked { .. }));
+        assert!(action.noop.is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A targeted Codex install plans a TOML merge against the shared home config and does not
+    /// require the external `codex` CLI to be on PATH.
+    #[test]
+    fn plan_client_install_handles_codex_without_its_cli() {
+        let dir =
+            std::env::temp_dir().join(format!("ghostlight-codex-plan-{}", std::process::id()));
+        let home = dir.join("home");
+        let codex_dir = home.join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        std::fs::write(codex_dir.join("config.toml"), "model = \"gpt-5\"\n").unwrap();
+        let ctx = PlanCtx {
+            current_exe: PathBuf::from("/abs/ghostlight"),
+            home,
+            config: dir.join("config"),
+            local: dir.join("local"),
+        };
+        let codex = clients::client_by_id("codex").unwrap();
+        let action = plan_client_install(codex, &ctx, &entry());
+        assert_eq!(action.label, "Codex (client)");
+        assert!(matches!(action.op, Op::TomlMerge { .. }));
         assert!(action.noop.is_none());
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1081,6 +1270,7 @@ mod tests {
             clients: Selection::Only(vec!["claude-code".into()]),
             debug: false,
             no_supervisor: true,
+            no_open: true,
         };
         let actions = plan_install_for(&opts, &ctx).unwrap();
         assert!(

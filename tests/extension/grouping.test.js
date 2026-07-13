@@ -13,7 +13,7 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert");
-const { groupSessionTabs, managedGroupIds, isManagedGroupId, pruneDeadGroups } = require("../../extension/lib/grouping.js");
+const { groupSessionTabs, managedGroupIds, isManagedGroupId, pruneDeadGroups, reclaimGroupsByTitle } = require("../../extension/lib/grouping.js");
 
 // A minimal fake `chrome.tabs`/`chrome.tabGroups` recording every `chrome.tabs.group` call
 // (`groupCalls`, in the shape `{ tabIds: [...], groupId: <number|null> }`) and every
@@ -160,4 +160,59 @@ test("dead_groups_are_pruned_from_the_session_map", async () => {
   assert.strictEqual(await pruneDeadGroups(chrome, sessionGroups), true);
   assert.deepStrictEqual(Array.from(sessionGroups.entries()), [["S", 9]]);
   assert.strictEqual(await pruneDeadGroups(chrome, sessionGroups), false);
+});
+
+// ADR-0066 D4: reclaimGroupsByTitle re-attaches groups Chrome restored (after a browser restart
+// cleared the persisted map) by stripping the managed title prefix (`\u{1F47B} `, glyph + space)
+// back to the clientKey. It maps only titles carrying that exact prefix, ignores everything else
+// (including the legacy global title `\u{1F47B}Ghostlight`, which has NO space), and returns
+// whether it changed anything.
+test("groups_are_reclaimed_by_title_after_a_browser_restart", async () => {
+  const PREFIX = "\u{1F47B} ";
+  const chrome = {
+    tabGroups: {
+      async query() {
+        return [
+          { id: 21, title: PREFIX + "Claude Code" },
+          { id: 22, title: PREFIX + "Cursor" },
+          { id: 23, title: "My own group" }, // not managed: ignored
+          { id: 24, title: "\u{1F47B}Ghostlight" }, // legacy global (no space): ignored by this prefix
+        ];
+      },
+    },
+  };
+  const clientGroups = new Map();
+  assert.strictEqual(await reclaimGroupsByTitle(chrome, clientGroups, PREFIX), true);
+  assert.deepStrictEqual(
+    Array.from(clientGroups.entries()).sort(),
+    [["Claude Code", 21], ["Cursor", 22]],
+    "each managed title maps its clientKey to its group id; non-managed titles are ignored"
+  );
+  // Idempotent: a second pass with everything already mapped changes nothing.
+  assert.strictEqual(await reclaimGroupsByTitle(chrome, clientGroups, PREFIX), false);
+});
+
+// ADR-0066 D4: reclaim never overwrites an existing live mapping (a key already present) and never
+// claims a group id already mapped, so a duplicate title (legacy "... (2)" litter renamed by hand,
+// or a stale duplicate) cannot steal a live group; the first title wins and the rest are left as
+// orphans rather than re-created for a fresh session.
+test("reclaim_does_not_overwrite_a_live_mapping_or_double_claim_a_group_id", async () => {
+  const PREFIX = "\u{1F47B} ";
+  const chrome = {
+    tabGroups: {
+      async query() {
+        return [
+          { id: 30, title: PREFIX + "Claude Code" }, // key already mapped to a different live id
+          { id: 12, title: PREFIX + "Zed" }, // id 12 already claimed by another key below
+        ];
+      },
+    },
+  };
+  const clientGroups = new Map([["Claude Code", 99], ["Cursor", 12]]);
+  assert.strictEqual(await reclaimGroupsByTitle(chrome, clientGroups, PREFIX), false);
+  assert.deepStrictEqual(
+    Array.from(clientGroups.entries()).sort(),
+    [["Claude Code", 99], ["Cursor", 12]],
+    "a present key is not overwritten, and an already-claimed group id is not re-mapped"
+  );
 });

@@ -51,10 +51,10 @@ Evidence: the Cargo.toml dependency tree (no model-provider SDK present); docs/S
 ### What can the browser extension access, and where does that data go?
 
 The extension is a thin executor with no policy logic and no cloud backend. It reads and acts
-on the page you direct it to, and it sends what it observes only to the local Ghostlight
-binary over Chromium native messaging. There is no path from the extension to any Ghostlight
-server, because none exists. Every requested browser permission is justified individually in
-a published permission-justification document.
+on the page you direct it to, and it sends what it observes only through Chromium native messaging
+to the local Ghostlight service. There is no path from the extension to a vendor-hosted Ghostlight
+service, because none exists. Every requested browser permission is justified individually in a
+published permission-justification document.
 
 See [docs/legal/PERMISSION_JUSTIFICATIONS.md](../legal/PERMISSION_JUSTIFICATIONS.md),
 [extension/manifest.json](../../extension/manifest.json), and [data-flows.md](data-flows.md).
@@ -276,7 +276,8 @@ Evidence: ADR-0028 Decision 6 (Continuity Promise wording); docs/guides/licensin
 ### What are your BC/DR commitments?
 
 The conventional BC/DR question inverts here, because nothing of the vendor's runs in your
-critical path: there is no Ghostlight service whose outage could take your workflows down.
+critical path: there is no vendor-hosted Ghostlight service whose outage could take your workflows
+down.
 Central policy continues to enforce from its last-known-good cache through a policy-source
 outage, and a cold boot with nothing available fails closed to the protective state rather
 than opening up. Your continuity therefore depends on your own infrastructure, which you

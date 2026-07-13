@@ -45,6 +45,12 @@ Three postures, one engine:
 
 ## Principle 3: Delight is layered, mirroring the architecture
 
+Responsibility and delight are not opposite ends of a slider. Thoughtless control makes them feel
+opposed; careful product design makes responsibility part of why the tool is pleasant to use.
+Visibility reduces uncertainty. A precise boundary prevents cleanup. A useful denial preserves
+momentum. An inspectable local system earns confidence. These qualities belong at every layer, not
+only in an enterprise overlay.
+
 Delight is a **stack**, composed the same way the engine + overlay are:
 
 - **L0: Base capability delight** *(engine; every persona, every mode)*. Automating the

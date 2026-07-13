@@ -7,15 +7,15 @@ the vendor ships, not about protecting a vendor-side data store.
 
 ## Architecture and trust boundaries
 
-Ghostlight spans three processes and two protocol boundaries: your MCP client talks to the
-Ghostlight binary over stdio, and the binary talks to the browser extension over Chromium
-native messaging; inside the browser, the extension drives pages over the DevTools protocol.
-(The binary role is carried by a persistent service plus thin pass-through relays, all
-local.) Everything runs on the endpoint. The MCP client and the model behind it are yours: Ghostlight is the governed
-bridge between that client and a browser session you are already signed into, and it never
-relocates the session to a vendor-controlled or fresh-profile browser. The trust boundaries
-that matter are the two protocol hops, both local, and the policy decision point inside the
-binary that every action passes through.
+Ghostlight runs as a persistent local service, a small relay executable in two roles, and a browser
+extension. Your MCP client talks over stdio to the agent relay, which forwards over owner-scoped
+local IPC to the service. Chromium talks through the browser relay using native messaging. Inside
+the browser, the extension drives pages over the DevTools protocol. Everything runs on the
+endpoint. The MCP client and the model behind it are yours: Ghostlight is the governed bridge
+between that client and a browser session you are already signed into, and it never relocates the
+session to a vendor-controlled or fresh-profile browser. The trust boundaries that matter are the
+local protocol hops and the policy decision point inside the service that every action passes
+through.
 
 ## The governance layer
 

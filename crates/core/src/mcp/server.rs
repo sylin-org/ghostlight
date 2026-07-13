@@ -699,6 +699,18 @@ pub(super) async fn handle_line(
             // Capture the same clientInfo into the audit recorder's client field (shared
             // format doc section 6.1), first-wins for the whole session.
             capture_client_info(governance, raw.get("params"));
+            // ADR-0066 D3: record this session's stable per-client presentation key, from the same
+            // captured clientInfo.name that titles the group, BEFORE any tabs_create can run. Every
+            // tool_request/group_request for this guid is then stamped with it, so the extension
+            // groups the session's tabs under the client's durable group (reused across the client's
+            // sessions) instead of minting a fresh per-guid one.
+            let client_key = crate::hub::session::client_key(
+                governance
+                    .current_client()
+                    .as_ref()
+                    .map(|c| c.name.as_str()),
+            );
+            browser.set_client_key(seat.guid.as_str(), &client_key);
             // ADR-0060: a client may declare a tighten-only session policy overlay in the
             // initialize `_meta` (a schema-3 manifest, as a string). Parse and store it for this
             // session's calls. A malformed overlay fails the handshake loudly (a client that asked

@@ -7,19 +7,24 @@ documents it points to.
 
 ## Read this first (in order)
 
-1. [docs/STATUS.md](docs/STATUS.md) -- where the project stands right now: version state,
+1. [docs/MEMORY.md](docs/MEMORY.md) -- the cross-agent project memory: the owner's standing
+   working preferences, durable cross-cutting learnings, and a pointer index to everything below.
+   Read it first; it tells you where each kind of durable fact lives. Its sensitive/machine-local
+   counterpart is `local/NOTES.md` (gitignored).
+2. [docs/STATUS.md](docs/STATUS.md) -- where the project stands right now: version state,
    open PRs, in-flight work, and the owed-items list. Read it before starting anything.
-2. [docs/adr/README.md](docs/adr/README.md) -- the ADR index. **Before touching a subsystem,
+3. [docs/adr/README.md](docs/adr/README.md) -- the ADR index. **Before touching a subsystem,
    read its ADR(s).** ADRs are the authoritative record of every design decision; do not
    re-litigate a decided question, and do not silently contradict one. To change a decision,
    write a new ADR (or a marked amendment), never rewrite history.
-3. [docs/SPEC.md](docs/SPEC.md) -- the original design specification. Still the best deep
+4. [docs/SPEC.md](docs/SPEC.md) -- the original design specification. Still the best deep
    explanation of the governance model, but ADRs supersede it where they differ.
-4. [docs/DEV-LOOP.md](docs/DEV-LOOP.md) -- read before any build/run/deploy work on a dev
+5. [docs/DEV-LOOP.md](docs/DEV-LOOP.md) -- read before any build/run/deploy work on a dev
    machine. It starts with a "when code changes, do this" table.
-5. `local/MACHINE-STATE.md` -- if present (it is gitignored), machine-local truth: which
-   engine is running, install state, local gotchas. See [local/README.md](local/README.md).
-6. [CONTRIBUTING.md](CONTRIBUTING.md) -- test tiers, PR expectations, licensing boundary.
+6. `local/MACHINE-STATE.md` and `local/NOTES.md` -- if present (both gitignored): machine-local
+   truth (which engine is running, install state, local gotchas) and sensitive/working memory
+   (owner context, credential *locations*, session handoffs). See [local/README.md](local/README.md).
+7. [CONTRIBUTING.md](CONTRIBUTING.md) -- test tiers, PR expectations, licensing boundary.
 
 Larger work is organized as task batches under `docs/tasks/<batch>/`, each with a
 `BOOTSTRAP.md` (ground rules) and a `LEDGER.md` (durable progress, one task = one commit,
@@ -174,16 +179,23 @@ Superseded with nuance (the ADR is authoritative where they differ):
 
 ## Personal and machine-local data
 
-- `/private/` (gitignored) -- founder-personal stash. Not for agents.
-- `local/` (gitignored except its README) -- machine-local dev state and working notes that
-  any local agent may read and update: which engine is running, install state, tokens'
-  *locations* (never token values), local gotchas. See [local/README.md](local/README.md).
-- Model-specific memory systems (e.g. Claude Code's auto-memory) may exist alongside this
-  repo, but they are caches. Anything load-bearing belongs in the repo: decisions in ADRs,
-  state in `docs/STATUS.md` or a batch LEDGER, machine facts in `local/`.
+- `/private/` (gitignored) -- founder-personal stash (legal, entity, financial planning). Not for
+  agents; do not read or publish it.
+- `local/` (gitignored except its README) -- machine-local dev state and working notes that any
+  local agent may read and update: `MACHINE-STATE.md` (which engine is running, install state,
+  local gotchas) and `NOTES.md` (owner/working context, credential *locations* -- never values --,
+  session handoffs). See [local/README.md](local/README.md).
+- **Memory is project-level, not model-private** (the owner delegates across several agents/LLMs).
+  Durable memory lives in the repo: standing preferences + learnings + index in
+  [docs/MEMORY.md](docs/MEMORY.md), current state in `docs/STATUS.md` (or a batch LEDGER), decisions
+  in ADRs, machine/sensitive facts in `local/`. A model's own memory system (e.g. Claude Code's
+  auto-memory) is a secondary cache of these and must never diverge from or compete with them.
 
 ## Keeping this system honest
 
 When you finish significant work: update `docs/STATUS.md` (and the batch LEDGER if you are
-in one), record new decisions as ADRs, and keep this file pointing at reality. Trust the
-tree and `git log` over any prose that disagrees with them.
+in one), record new decisions as ADRs, capture any durable cross-cutting learning or standing
+preference in [docs/MEMORY.md](docs/MEMORY.md) (session handoffs and sensitive/working notes go in
+`local/NOTES.md`), and keep this file pointing at reality. Write durable facts to these project
+scopes, never to a model-private memory store (that is only a cache, and it must not diverge from
+these). Trust the tree and `git log` over any prose that disagrees with them.

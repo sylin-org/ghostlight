@@ -5,17 +5,18 @@ endpoint and to destinations you configure, and nowhere else.
 
 ## What runs where
 
-The Ghostlight binary runs on the endpoint. The thin extension runs inside the user's own
-Chrome on the same endpoint. There is no Ghostlight service, cloud backend, or vendor-hosted
-component anywhere in the path. Your MCP client and the model behind it are yours, running
-where you run them.
+The Ghostlight service and thin relay run on the endpoint. The extension runs inside the user's own
+Chromium browser on the same endpoint. There is no vendor-hosted Ghostlight service or cloud backend
+anywhere in the path. Your MCP client and the model behind it are yours, running where you run them.
 
 ## Flows that exist
 
 | Flow | Transport | Where it goes |
 | --- | --- | --- |
-| MCP client to binary | stdio | Local, same machine. |
-| Binary to extension | Chromium native messaging | Local, same machine. |
+| MCP client to agent relay | stdio | Local, same machine. |
+| Agent relay to service | Named pipe or Unix-domain socket | Local, owner-scoped IPC. |
+| Service to browser relay | Named pipe or Unix-domain socket | Local, owner-scoped IPC. |
+| Browser relay to extension | Chromium native messaging | Local, same machine. |
 | Extension to pages | DevTools protocol | The user's own authenticated browser session. |
 | Audit records | file (JSON Lines), syslog (RFC 5424 over UDP), stderr, or none | The destination you configure; default is a local file. |
 | Managed policy fetch | conditional HTTP(S) GET | Your own policy endpoint, and only when your organization configures central policy. The bundle signature, not the transport, is the trust anchor. |

@@ -8,6 +8,9 @@ to publish:
   install/registration state, native-host and MCP-entry paths, local gotchas, leftover
   artifacts. Agents should read it on session start (see [AGENTS.md](../AGENTS.md)) and
   update it when they change machine state (installs, engine swaps, deletions).
+- `NOTES.md` (suggested convention): the sensitive/working half of the cross-agent memory --
+  owner and working context, credential *locations*, and session handoffs. Any local agent may
+  read and update it. Its non-sensitive counterpart is the tracked `docs/MEMORY.md`.
 - Scratch notes, session handoffs, personal to-do lists tied to this checkout.
 - *Locations* of credentials (e.g. "npm token lives in ~/.npmrc") -- never credential
   values themselves.

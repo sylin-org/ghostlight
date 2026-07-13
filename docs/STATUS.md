@@ -9,45 +9,93 @@ when they disagree**, and update it when you land something that changes the pic
 
 - **Branches**: `main` = releases, `dev` = trunk. Work lands on `dev`; the owner reviews
   `dev -> main` PRs and cuts releases.
-- **Latest published release: v0.5.4** (GitHub Release, npm, homebrew tap, scoop, winget
-  all aligned at 0.5.4). v0.5.5 was prepared but never published; its content is folded
-  into the 0.5.6 changelog entry.
-- **v0.5.6 is prepped and unreleased on `dev`** (CHANGELOG `[0.5.6]` dated 2026-07-12).
-  It carries: composable policy tiers + session overlay + `ghostlight demo` (ADR-0060),
-  extension-owned browser identity (ADR-0061), browser-relay reconnect resilience
-  (ADR-0062), the deploy-quiesce lock (ADR-0063), explicit dev isolation then the
-  one-stack model (ADR-0064 amended by ADR-0065), the redesigned on-screen governance
-  ribbon + unlisted `notify` tool, the field-splash FX pass, and the SAPS
-  security-hardening pass.
-- **PR #42 (dev -> main) is MERGED**: v0.5.6 is on `main` (merge `53907f7`); `main` and
-  `dev` are tree-identical. (PR #41 was an earlier, already-merged dev->main squash; the
-  divergence it left was reconciled by merge `1d54def` -- its only unique content was the
-  stale `scripts/dev-browser.ps1`, which ADR-0065 removed.) The RELEASE ITSELF IS NOT CUT:
-  no `v0.5.6` tag, no npm/homebrew/scoop/winget publish yet -- that is the owner's
-  irreversible-publish step below.
-- **Working tree**: clean. Full suite green (fast tier + the entire `--ignored` spawn tier
-  locally, and CI on the merge). The spawn-tier e2e tests were aligned with the ADR-0061/0062
-  contracts (identity-frame admission, tab-URL probe answers, the rewritten relay-lifecycle
-  test); the deploy-quiesce lock is now honored in the Unix self-heal too.
+- **Latest published release: v0.5.6** (2026-07-12), cut with `scripts/release.ps1 0.5.6`.
+  Shipped and LIVE: GitHub Release (27 assets + attestations), npm `ghostlight@0.5.6`, homebrew
+  tap, **MCP registry (`org.sylin/ghostlight`)**, scoop/winget/homebrew manifests committed to
+  main, trust footers restamped, sylin.org website refreshed. `main` is at the release commit
+  `5762c3a`; `dev` is AHEAD of main by post-release tooling (registry step, server.json/URL fixes,
+  STATUS) -- these reach main at the next dev->main PR. v0.5.5 was prepared but never published.
+- **Unreleased on `dev`**: Codex is now a first-class installer target (ADR-0067). `ghostlight
+  install --client codex` losslessly adds the active relay to `~/.codex/config.toml`, removes it on
+  uninstall, and lets `doctor` report its registration accurately. The browser extension remains a
+  separate user-visible install step.
+- **MCP registry publishing is now automated** in `release.ps1` (the `registry` step, after `npm`):
+  `mcp-publisher` DNS-auth publish, gated on `MCP_DNS_PRIVATE_KEY`. The one-time DNS proof is DONE
+  (apex TXT `v=MCPv1; k=ed25519; p=...` on sylin.org via Cloudflare; ed25519 key in the env file;
+  see `local/AUDIT-LOG.md`). The registry is immutable per version, so metadata fixes (like the
+  websiteUrl) only land on the NEXT version.
+- **v0.5.6 carries**: composable policy tiers + session overlay + `ghostlight demo` (ADR-0060),
+  extension-owned browser identity (ADR-0061), browser-relay reconnect (ADR-0062), the
+  deploy-quiesce lock (ADR-0063), explicit dev isolation then the one-stack model (ADR-0064
+  amended by ADR-0065), the on-screen governance ribbon + `notify` tool, the field-splash FX
+  pass, the SAPS security-hardening pass, and the full deploy-automation + store-publish tooling.
+- **CWS publish is BLOCKED on a listing gate (owner action)**: the v0.5.6 package UPLOADED to
+  the Chrome Web Store successfully (staged as a draft), but the publish API returned 400 --
+  the listing needs, in the Developer Dashboard (Privacy practices tab): mandatory privacy
+  information, a remote-code-use justification, and a promotional video. Content to paste lives
+  in `docs/legal/PRIVACY.md`, `docs/legal/PERMISSION_JUSTIFICATIONS.md`, `docs/legal/STORE_LISTING.md`.
+  After filling those, publish from the dashboard OR re-run `pwsh -File scripts/publish-extension.ps1`
+  (the package is already uploaded; it will re-attempt publish). Edge was skipped (no `EDGE_*` creds).
 
-## Release pipeline (what shipping 0.5.6 takes)
+## Release pipeline (canonical map: `docs/RELEASE.md`)
 
-The complete, canonical channel-by-channel map is now **`docs/RELEASE.md`**. In short:
+`scripts/release.ps1 <version>` from `main` automates: tag, watch CI, verify assets, fill
+package-manager sums, homebrew tap, npm publish + smoke, trust-footer restamp, extension publish
+(Chrome Web Store + Edge; auto when `CWS_*`/`EDGE_*` creds are set), and the website refresh. The
+v0.5.6 run proved every step end to end (only the CWS listing gate above stopped the final publish).
 
-1. ~~Owner merges the dev -> main PR.~~ DONE (PR #42, merge `53907f7`).
-2. `scripts/release.ps1 0.5.6` from `main`. It now automates: tag, watch CI, verify assets,
-   fill package-manager sums, homebrew tap, npm publish + smoke, trust-footer restamp,
-   extension publish (Chrome Web Store + Edge; auto if `CWS_*`/`EDGE_*` creds are set, else it
-   prints exact steps and points at the built zip), and the website install-guide refresh.
-3. Manual remainder only: a winget PR to `microsoft/winget-pkgs` (per version, CLA), and the
-   MCP Registry `mcp-publisher` step (DNS auth). Both are called out in the script's report.
+CWS API creds are set up on this machine (see local/RELEASE-CREDENTIALS.md; values in
+`~/.ghostlight-release.env`, written by `local/set-credentials.ps1`). Load them before a release:
+`Get-Content "$HOME/.ghostlight-release.env" | % { if ($_ -match '^([A-Z0-9_]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1],$Matches[2]) } }`
 
-The old extension-zip trap is fixed: the Release workflow now builds the CWS-ready zip (key
-stripped, dev files excluded) via `package-extension.ps1`, so the shipped asset is submittable.
-Store API auto-submit needs one-time credential setup (documented in `docs/RELEASE.md`).
+Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA), and the MCP Registry
+`mcp-publisher` step (DNS auth on the sylin.org apex).
 
 ## Owed engineering work (in rough priority order)
 
+- **Public documentation was rebalanced around responsible delight**: the applied review lives in
+  `docs/design/public-documentation-review-2026-07.md`. The README now leads with the real-session
+  problem, fit and anti-fit, visible experience, one install journey, and candid platform state.
+  It also corrects stale topology, audit-default, roadmap, and install-time-vs-runtime claims.
+  Remaining high-value work: CWS publication, the hero GIF, and macOS/Linux live verification.
+- **WebMCP participation can begin without product support**: research 15 records the current
+  governance gaps, a bounded non-shipping origin-trial experiment, and a draft response for the
+  WebMCP explainer. Owner actions: approve the outbound text, join Chrome's early preview program,
+  and choose a controlled experiment origin. ADR-0043's no-implementation stance remains intact.
+- **Agent journey evaluation artifacts are proposed** (ADR-0069): local, minimized evidence for
+  comparing models and clients across a browser journey. Acceptance requires concrete journeys, a
+  data inventory and threat review, a versioned artifact schema, lightbox production, and evidence
+  from at least two client or model configurations.
+- **Bounded delegation needs scenario validation before an ADR**: the release-candidate triage
+  journey in `docs/design/bounded-delegation-scenario.md` exercises the ADR-0060 session overlay and
+  identifies the unresolved approval, expiry, budget, intent, and digest questions.
+- **Bidirectional installation handoff is implemented on `dev`** (ADR-0070): an explicit first
+  `ghostlight install` opens the stable extension walkthrough once; `--no-open`, dry-run,
+  CI, failed, and idempotent paths stay quiet. The canonical service-first page is live at
+  `sylin.org/ghostlight/service/post-install/`; the website publication gate is complete.
+- **Scoped MCP cancellation is proposed and deferred** (ADR-0068): first verify that supported
+  clients emit `notifications/cancelled`. If demand exists, stop `script`/`browser_batch` only
+  between steps, let the active step settle, preserve audit, and never claim rollback.
+- **Content / URL consistency pass (owner-driven, mostly DONE)**: swept outward-facing content
+  for stale/branded URLs and moved the post-install UX onto the site. What landed:
+  - **github.io fully retired.** The canonical home is `sylin.org/ghostlight`. Every reference to
+    `sylin-org.github.io/ghostlight` was repointed (extension onInstalled, homebrew/scoop/winget/npm
+    homepage + walkthrough URLs, `scripts/get.sh`/`get.ps1`, npm launcher fallback). `site/index.html`
+    and `site/install.html` became meta-refresh redirect stubs to sylin.org (index -> project page,
+    install -> post-install page). Committed on `dev` (b55102e). The Pages deploy is path-scoped to
+    `site/**` on `main`, so the redirect stubs go live at the next dev->main merge.
+  - **Post-install page is LIVE**: `sylin.org/ghostlight/chromium-extension/post-install/`
+    (website repo `src/ghostlight/chromium-extension/post-install.njk`, teal accent, base.njk layout).
+    `extension/service-worker.js:374` now opens it. Website pushed to `main` (auto-deployed).
+  - `server.json` websiteUrl was already FIXED to `https://sylin.org/ghostlight/` (applies on the
+    next registry version, not 0.5.6 -- immutable).
+  - README now lists the LIVE distribution channels (MCP registry + Homebrew badges, an "Other ways
+    to get it" line). CWS (blocked), Edge, winget, and scoop are omitted until each actually ships.
+  This workstream is now COMPLETE; the only distribution follow-up left is the owner-side CWS listing
+  gate below.
+- **CWS listing completion** (owner): privacy practices + remote-code justification + video in the
+  Web Store dashboard, then publish the already-uploaded v0.5.6 package (or re-run
+  `scripts/publish-extension.ps1`).
 - **Lightbox legacy-27 migration** (ADR-0056): the 27 `#[ignore = "e2e"]` spawn tests +
   `scripts/test-e2e.*` migrate scenario-by-scenario into the lightbox harness against a
   per-test parity ledger. Not started; CI runs both tiers until the ledger completes.

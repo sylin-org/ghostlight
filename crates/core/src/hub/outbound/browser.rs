@@ -325,6 +325,14 @@ pub struct Browser {
     /// here under a minted `img_...` id so `upload_image` can later place it into a file input or a
     /// drag-drop target. Bounded per guid ([`SCREENSHOT_CACHE_BOUND`]), evicting the oldest.
     screenshot_cache: ScreenshotCache,
+    /// The `guid -> clientKey` map (ADR-0066 D3): a session's stable per-CLIENT presentation key
+    /// ([`crate::hub::session::client_key`]), captured at `initialize` and stamped onto the
+    /// `tool_request`/`group_request` envelopes so the extension keys its Chrome tab group on the
+    /// client (reused across the client's sessions) rather than the per-process guid. A guid with no
+    /// entry (a legacy/hand-rolled caller that never sent `initialize`, or an in-proc test) simply
+    /// sends no `clientKey`, and the extension falls back to guid-keying. Bounded by the number of
+    /// distinct sessions this service lifetime; never evicted (tiny, like the slot map).
+    client_keys: Arc<Mutex<HashMap<String, String>>>,
     /// gif_creator recording sessions (ADR-0053 D3/D4): per-tab state + disk-backed frames, fed by
     /// the extension's unsolicited `gif_frame` events and read back at export.
     recordings: Arc<super::recording::RecordingStore>,
@@ -355,8 +363,27 @@ impl Browser {
             kill_hooks: Arc::new(Mutex::new(Vec::new())),
             next_hook_id: Arc::new(AtomicU64::new(1)),
             screenshot_cache: Arc::new(Mutex::new(HashMap::new())),
+            client_keys: Arc::new(Mutex::new(HashMap::new())),
             recordings: Arc::new(super::recording::RecordingStore::new()),
         }
+    }
+
+    /// Record a session's stable per-client presentation key (ADR-0066 D3), captured at
+    /// `initialize` from `clientInfo.name` (via [`crate::hub::session::client_key`]). Overwrites
+    /// any prior value for the same guid -- a re-`initialize` on a reconnected session keeps the
+    /// mapping current. Read by [`Browser::raw_call`] and [`Browser::request_group`] when stamping
+    /// the wire; the value is presentation only and, like the guid, is never logged from here.
+    pub fn set_client_key(&self, guid: &str, client_key: &str) {
+        self.client_keys
+            .lock()
+            .unwrap()
+            .insert(guid.to_string(), client_key.to_string());
+    }
+
+    /// This guid's stamped clientKey (ADR-0066 D3), or `None` if none was captured. `None` sends no
+    /// `clientKey` on the wire, and the extension falls back to guid-keying.
+    fn client_key_for(&self, guid: &str) -> Option<String> {
+        self.client_keys.lock().unwrap().get(guid).cloned()
     }
 
     /// The observability sink (used by the mcp-server to record the MCP boundary).
@@ -644,8 +671,14 @@ impl Browser {
         target: u32,
     ) -> std::result::Result<Value, ToolError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
-        let request =
+        let mut request =
             json!({ "id": id, "type": "tool_request", "tool": tool, "args": args, "guid": guid });
+        // ADR-0066 D3: stamp the session's stable per-client key so the extension groups this
+        // call's tab under the client's durable group, not a fresh per-guid one. Additive and
+        // optional -- omitted when no clientInfo was captured, and the extension falls back to guid.
+        if let Some(client_key) = self.client_key_for(guid) {
+            request["clientKey"] = json!(client_key);
+        }
         let framed = match serde_json::to_vec(&request)
             .map_err(|e| e.to_string())
             .and_then(|bytes| host::encode(&bytes).map_err(|e| e.to_string()))
@@ -888,12 +921,18 @@ impl Browser {
             .iter()
             .map(|&t| crate::constants::tab_id::decode(t).1)
             .collect();
-        let request = json!({
+        let mut request = json!({
             "type": "group_request",
             "guid": guid,
             "tabIds": native_ids,
             "title": title,
         });
+        // ADR-0066 D3: the group request carries the same additive clientKey as tool_request, so
+        // the extension (re)groups the owned tabs under the client's durable group. Omitted when no
+        // clientInfo was captured; the extension then keys on guid, as before.
+        if let Some(client_key) = self.client_key_for(guid) {
+            request["clientKey"] = json!(client_key);
+        }
         let Ok(bytes) = serde_json::to_vec(&request) else {
             return;
         };

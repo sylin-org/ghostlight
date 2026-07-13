@@ -1,8 +1,8 @@
 # ghostlight (npm launcher)
 
-Governed browser automation for AI coding agents. Ghostlight gives any MCP client controlled
-access to your own authenticated Chromium session, with capability grants, protected domains,
-and a structured audit trail. All-open by default; governance when you want it.
+Delightful, responsible browser automation for AI coding agents. Ghostlight gives any MCP client
+access to your own authenticated Chromium session, keeps the work visible, and adds inspectable
+boundaries when you want them. All-open is a first-class default.
 
 This npm package is a thin launcher. On first run it downloads the version-matched Ghostlight
 binaries from the GitHub release and caches them under `~/.ghostlight/bin/`, so there are no
@@ -11,24 +11,25 @@ runtime dependencies. A bare `npx ghostlight` starts the MCP server your client 
 
 ## Quick start
 
-Add to any MCP client as a stdio server:
+Install the service, browser connection, and detected MCP-client entries in one idempotent step:
+
+```
+npx -y ghostlight install
+```
+
+The command opens the current extension walkthrough on the first run. Until the Chrome Web Store
+listing is public, the walkthrough provides the manual release-archive path. Restart your MCP
+clients when both halves are installed. Full walkthrough, client buttons, and manual paths:
+https://sylin.org/ghostlight/
+
+For a client the installer does not recognize, use Ghostlight as this stdio server:
 
 ```json
 { "command": "npx", "args": ["-y", "ghostlight"] }
 ```
 
-Then connect the browser side (once, idempotent):
-
-```
-npx ghostlight install
-```
-
-and add the "Ghostlight in Browser" extension from the Chrome Web Store. Full walkthrough,
-one-click client buttons, and the manual paths:
-https://sylin-org.github.io/ghostlight/install.html
-
 ## Links
 
 - Project: https://github.com/sylin-org/ghostlight
-- What it is and why: https://sylin-org.github.io/ghostlight/
+- What it is and why: https://sylin.org/ghostlight/
 - License: engine is Apache-2.0 OR MIT; governance module is source-available (see LICENSE).
