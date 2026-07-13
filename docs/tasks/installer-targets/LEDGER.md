@@ -4,7 +4,7 @@ Durable progress. One task = one commit. Update RESUME HERE and add a log entry 
 
 ## RESUME HERE
 
-- Next task: **T3 (Zed)**. T2 is complete, so every remaining task has its merge substrate. All
+- Next task: **T4 (OpenCode)**. T2 is complete, so every remaining task has its merge substrate. All
   remaining tasks are authored and ready; oracles are in `PINS.md`.
 - Two RESIDUAL confirms live inside the tasks (not blockers): OpenCode's Windows config path (T4),
   and whether Zed needs `"source": "custom"` (T3). Confirm at execution; the pinned defaults follow
@@ -19,14 +19,16 @@ Durable progress. One task = one commit. Update RESUME HERE and add a log entry 
 | Task | Commit | Status | Notes |
 |------|--------|--------|-------|
 | T1 Windsurf | d4ad8ab | DONE | clients.rs; reuses `Dialect::McpServers` |
-| T2 merge foundation | (this commit) | DONE | merge.rs 3 dialects + mod.rs JSONC->Manual + clients.rs tolerant detect |
-| T3 Zed | (pending) | READY (needs T2) | `context_servers`; per-OS dir casing; RESIDUAL: source field |
+| T2 merge foundation | e219d60 | DONE | merge.rs 3 dialects + mod.rs JSONC->Manual + clients.rs tolerant detect |
+| T3 Zed | (this commit) | DONE | `context_servers`; per-OS dir casing; no `source` per current official docs |
 | T4 OpenCode | (pending) | READY (needs T2) | `mcp` type:local command-array; RESIDUAL: Windows path |
 | T5 Crush | (pending) | READY (needs T2) | `mcp` type:stdio |
 
 ## Deviations
 
-(record any numbered deviation from a task file here, with the reason, as it happens)
+1. T3 runtime confirmation: Zed is not installed on the execution machine. Current official Zed
+   documentation was re-checked on 2026-07-13 and shows local entries with `command`, `args`, and
+   `env`, without `source`. The pinned no-`source` shape is unchanged.
 
 ## Research resolution (was: open pins)
 

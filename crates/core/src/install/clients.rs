@@ -17,6 +17,7 @@ pub enum ClientId {
     VsCode,
     Codex,
     Windsurf,
+    Zed,
 }
 
 /// How we register with a client. `FileMerge` is the idempotent value-level merge used for every
@@ -77,6 +78,13 @@ pub const CLIENTS: &[ClientSpec] = &[
         // shape to Cursor's -- the value-level merge is idempotent and safe (ADR-0071 D1).
         add_via: AddVia::JsonFileMerge(Dialect::McpServers),
     },
+    ClientSpec {
+        id: ClientId::Zed,
+        cli_id: "zed",
+        display: "Zed",
+        // settings.json is JSONC; a commented file degrades to a printed manual step (T2).
+        add_via: AddVia::JsonFileMerge(Dialect::ContextServers),
+    },
 ];
 
 pub fn client_by_id(id: &str) -> Option<&'static ClientSpec> {
@@ -97,6 +105,13 @@ pub fn config_path(spec: &ClientSpec, ctx: &PlanCtx) -> PathBuf {
             .join(".codeium")
             .join("windsurf")
             .join("mcp_config.json"),
+        ClientId::Zed => {
+            if cfg!(target_os = "linux") {
+                ctx.home.join(".config").join("zed").join("settings.json")
+            } else {
+                ctx.config.join("Zed").join("settings.json")
+            }
+        }
     }
 }
 
@@ -115,6 +130,12 @@ pub fn detect(spec: &ClientSpec, ctx: &PlanCtx) -> bool {
         ClientId::Codex => on_path("codex") || ctx.home.join(".codex").is_dir(),
         ClientId::Windsurf => {
             on_path("windsurf") || ctx.home.join(".codeium").join("windsurf").is_dir()
+        }
+        ClientId::Zed => {
+            on_path("zed")
+                || config_path(spec, ctx)
+                    .parent()
+                    .is_some_and(std::path::Path::is_dir)
         }
     }
 }
@@ -246,5 +267,32 @@ mod tests {
         let jsonc = "{\n  // a comment makes this unparseable as strict JSON\n  \"mcpServers\": { \"ghostlight\": {} }\n}";
         assert!(server_registered(cursor, jsonc, "ghostlight"));
         assert!(!server_registered(cursor, jsonc, "other"));
+    }
+
+    /// Zed registers under the context_servers dialect at its per-OS settings.json (ADR-0071).
+    #[test]
+    fn zed_uses_context_servers_at_the_per_os_settings_path() {
+        let ctx = PlanCtx {
+            current_exe: PathBuf::from("/opt/gl/ghostlight"),
+            home: PathBuf::from("/home/tester"),
+            config: PathBuf::from("/config"),
+            local: PathBuf::from("/local"),
+        };
+        let zed = client_by_id("zed").expect("Zed is a supported client");
+        assert_eq!(zed.display, "Zed");
+        assert!(matches!(
+            zed.add_via,
+            AddVia::JsonFileMerge(Dialect::ContextServers)
+        ));
+        #[cfg(not(target_os = "linux"))]
+        assert_eq!(
+            config_path(zed, &ctx),
+            PathBuf::from("/config/Zed/settings.json")
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            config_path(zed, &ctx),
+            PathBuf::from("/home/tester/.config/zed/settings.json")
+        );
     }
 }
