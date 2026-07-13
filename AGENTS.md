@@ -194,5 +194,8 @@ Superseded with nuance (the ADR is authoritative where they differ):
 ## Keeping this system honest
 
 When you finish significant work: update `docs/STATUS.md` (and the batch LEDGER if you are
-in one), record new decisions as ADRs, and keep this file pointing at reality. Trust the
-tree and `git log` over any prose that disagrees with them.
+in one), record new decisions as ADRs, capture any durable cross-cutting learning or standing
+preference in [docs/MEMORY.md](docs/MEMORY.md) (session handoffs and sensitive/working notes go in
+`local/NOTES.md`), and keep this file pointing at reality. Write durable facts to these project
+scopes, never to a model-private memory store (that is only a cache, and it must not diverge from
+these). Trust the tree and `git log` over any prose that disagrees with them.
