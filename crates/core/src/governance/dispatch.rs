@@ -290,6 +290,8 @@ impl Governance {
             batch_id: None,
             step: None,
             dry_run: false,
+            target_assurance: None,
+            outcome: None,
         }
     }
 
@@ -495,6 +497,8 @@ pub struct CallAudit {
     batch_id: Option<String>,
     step: Option<u32>,
     dry_run: bool,
+    target_assurance: Option<String>,
+    outcome: Option<String>,
 }
 
 impl CallAudit {
@@ -569,6 +573,23 @@ impl CallAudit {
     /// parent's `CallAudit` before completing it.
     pub fn set_batch_id(&mut self, batch_id: &str) {
         self.batch_id = Some(batch_id.to_string());
+    }
+
+    /// Add a content-free target-selection class to the audit record.
+    pub fn set_target_assurance(&mut self, assurance: &str) {
+        if matches!(assurance, "semantic" | "ref" | "coordinate" | "none") {
+            self.target_assurance = Some(assurance.to_string());
+        }
+    }
+
+    /// Add a content-free observed outcome class to the audit record.
+    pub fn set_outcome(&mut self, outcome: &str) {
+        if matches!(
+            outcome,
+            "changed" | "unchanged" | "blocked" | "expect_met" | "expect_timeout"
+        ) {
+            self.outcome = Some(outcome.to_string());
+        }
     }
 
     /// Amend the scope's attribution after a successful navigate landing re-check (g13/g15,
@@ -707,6 +728,8 @@ impl CallAudit {
             batch_id: self.batch_id.clone(),
             step: self.step,
             dry_run: self.dry_run,
+            target_assurance: self.target_assurance.clone(),
+            outcome: self.outcome.clone(),
         }
     }
 }

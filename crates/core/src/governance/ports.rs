@@ -241,6 +241,12 @@ pub struct AuditRecord {
     /// `true` only on a script dry-run parent record. `false` on every other record; always
     /// present, never omitted, matching `held`'s always-present style.
     pub dry_run: bool,
+    /// Content-free confidence class for how the interaction target was selected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_assurance: Option<String>,
+    /// Content-free observed outcome category. This is correlation evidence, not causation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
 }
 
 /// A session EVENT record (shared format doc section 6, g11): additive to the tool-call
@@ -481,6 +487,8 @@ mod tests {
             batch_id: None,
             step: None,
             dry_run: false,
+            target_assurance: None,
+            outcome: None,
         }
     }
 

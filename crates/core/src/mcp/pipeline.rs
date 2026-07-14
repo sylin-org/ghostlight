@@ -151,6 +151,72 @@ fn take_dry_run(outcome: &mut CallOutcome) -> bool {
         .unwrap_or(false)
 }
 
+/// Extract the content-free interaction vocabulary used by audit records. Private side-channel
+/// fields are removed before the client sees the result; ordinary extension receipts are read
+/// directly. No page text, accessible name, URL, value, selector, or coordinate is copied.
+fn take_audit_signals(outcome: &mut CallOutcome) -> (Option<String>, Option<String>) {
+    let CallOutcome::Success { result } = outcome else {
+        return (None, None);
+    };
+    let hidden_assurance = result
+        .as_object_mut()
+        .and_then(|object| object.remove("_target_assurance"))
+        .and_then(|value| value.as_str().map(str::to_string));
+    let hidden_outcome = result
+        .as_object_mut()
+        .and_then(|object| object.remove("_outcome_category"))
+        .and_then(|value| value.as_str().map(str::to_string));
+    let receipt = result.pointer("/structuredContent/interactionReceipt");
+    let assurance = hidden_assurance.or_else(|| {
+        receipt
+            .and_then(|value| value.get("targetAssurance"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
+    let outcome = hidden_outcome.or_else(|| receipt.and_then(derive_receipt_outcome));
+    (assurance, outcome)
+}
+
+fn derive_receipt_outcome(receipt: &Value) -> Option<String> {
+    let blockers = receipt
+        .get("blockers")
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty());
+    if blockers {
+        return Some("blocked".to_string());
+    }
+    let observed = receipt.get("observedAfter")?;
+    if observed.get("expectMet").and_then(Value::as_bool) == Some(true) {
+        return Some("expect_met".to_string());
+    }
+    let changed = observed
+        .get("mutations")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        > 0
+        || observed.get("renderAdvanced").and_then(Value::as_bool) == Some(true)
+        || observed.get("urlChanged").is_some()
+        || observed.get("titleChanged").is_some()
+        || observed.get("alertOrStatus").is_some()
+        || observed
+            .get("changedElements")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty());
+    Some(if changed { "changed" } else { "unchanged" }.to_string())
+}
+
+fn stamp_audit_signals(
+    audit: &mut crate::governance::dispatch::CallAudit,
+    signals: (Option<String>, Option<String>),
+) {
+    if let Some(assurance) = signals.0 {
+        audit.set_target_assurance(&assurance);
+    }
+    if let Some(outcome) = signals.1 {
+        audit.set_outcome(&outcome);
+    }
+}
+
 /// SS2's free-action dispatch guard: true for a [`directory::Handler::Local`] tool whose
 /// `action: None` variant carries an EMPTY requirement set (today: `explain`; C7's `script`
 /// joins it). `form_fill` (C10) declares `Read + Write` on its `action: None` variant, so it is
@@ -170,7 +236,7 @@ fn is_free_local_action(descriptor: &directory::ToolDescriptor) -> bool {
 /// point 1 for a BOOLEAN-valued action key): a string value passes through unchanged (`computer`'s
 /// `action`); a boolean `true` maps to the action_key's own NAME (`form_fill`'s `submit: true` is
 /// looked up and audited as the action `"submit"`); `false`, an absent key, or any other value
-/// type yields no action. `action_key: None` (every tool but `computer` and `form_fill`) always
+/// type yields no action. `action_key: None` always
 /// yields `None`, ignoring whatever the args carry.
 fn extract_action<'a>(action_key: Option<&'a str>, args: &'a Value) -> Option<&'a str> {
     let key = action_key?;
@@ -406,6 +472,7 @@ pub(crate) async fn run_tool_call(
         if let Some(batch_id) = take_batch_id(&mut outcome) {
             audit.set_batch_id(&batch_id);
         }
+        stamp_audit_signals(&mut audit, take_audit_signals(&mut outcome));
         if take_dry_run(&mut outcome) {
             audit.mark_dry_run();
         }
@@ -593,6 +660,7 @@ pub(crate) async fn run_tool_call(
         if let Some(batch_id) = take_batch_id(&mut outcome) {
             audit.set_batch_id(&batch_id);
         }
+        stamp_audit_signals(&mut audit, take_audit_signals(&mut outcome));
         if let CallOutcome::Success { result } = &mut outcome {
             if let Some(pp) = descriptor.postprocess {
                 pp(result, config.secrets_redact());
@@ -605,7 +673,7 @@ pub(crate) async fn run_tool_call(
         return outcome;
     }
 
-    let outcome = browser.call(guid, name, args).await;
+    let mut outcome = browser.call(guid, name, args).await;
     audit.dispatch_finished();
 
     // Point 5 (g13/g15): after a dispatched `navigate` succeeds, re-check the FINAL
@@ -654,6 +722,15 @@ pub(crate) async fn run_tool_call(
         }
     }
 
+    if let Ok(result) = &mut outcome {
+        let mut wrapped = CallOutcome::Success {
+            result: std::mem::take(result),
+        };
+        stamp_audit_signals(&mut audit, take_audit_signals(&mut wrapped));
+        if let CallOutcome::Success { result: restored } = wrapped {
+            *result = restored;
+        }
+    }
     audit.complete();
 
     match outcome {
@@ -2242,7 +2319,7 @@ mod tests {
     // --- ADR-0022 Decision 7: the `explain` directory tool ---
 
     /// The full pinned `explain` response text, transcribed by hand from
-    /// `browser::directory::REGISTRY` (30 variants) in fixture order. This is the ONE place the
+    /// `browser::directory::REGISTRY` in fixture order. This is the ONE place the
     /// exact output is pinned; `directory::explain_text`'s own unit tests check only its
     /// structural shape.
     fn pinned_explain_text() -> String {
@@ -2310,6 +2387,13 @@ mod tests {
              controls and fills them.",
             "form_fill (submit): requires read. Fill form fields by label and click the form's \
              own submit control.",
+            "act_on (left_click): requires action. Resolve one target and click it once.",
+            "act_on (right_click): requires action. Resolve one target and open its context \
+             menu.",
+            "act_on (double_click): requires action. Resolve one target and double-click it.",
+            "act_on (hover): requires read. Resolve one target and move the pointer over it.",
+            "act_on (scroll_to): requires read. Resolve one target and scroll it into view.",
+            "act_on (set_value): requires write. Resolve one field and set its value.",
             "file_upload: requires write. Upload files (base64 bytes) to a file input \
              located by read_page or find, via its ref.",
             "browser_batch: requires nothing. Run a sequence of tool calls in one round trip; \

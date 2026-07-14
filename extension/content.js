@@ -495,7 +495,8 @@
     }
     return out;
   }
-  function find(query) {
+
+  function actionableCandidates() {
     const candidates = [];
     for (const el of collectAll(document)) {
       if (!visible(el)) continue;
@@ -507,17 +508,71 @@
         searchText: `${summary.role} ${summary.name} ${(el.textContent || "").slice(0, 200)} ${el.placeholder || ""} ${el.getAttribute("aria-label") || ""} ${typeof el.title === "string" ? el.title : ""} ${el.type || ""} ${tag}`,
       }));
     }
-    const ranked = (self.GhostlightActionable || GhostlightActionable).rankCandidates(query, candidates);
+    return candidates;
+  }
+
+  function publicCandidate(candidate) {
+    const result = Object.assign({}, candidate);
+    delete result.searchText;
+    const box = result.box || { x: 0, y: 0, width: 0, height: 0 };
+    result.x = Math.round(box.x + box.width / 2);
+    result.y = Math.round(box.y + box.height / 2);
+    return result;
+  }
+
+  function find(query) {
+    const ranked = (self.GhostlightActionable || GhostlightActionable).rankCandidates(query, actionableCandidates());
     const more = ranked.length > 20;
-    const results = ranked.slice(0, 20).map((candidate) => {
-      const result = Object.assign({}, candidate);
-      delete result.searchText;
-      const box = result.box || { x: 0, y: 0, width: 0, height: 0 };
-      result.x = Math.round(box.x + box.width / 2);
-      result.y = Math.round(box.y + box.height / 2);
-      return result;
-    });
+    const results = ranked.slice(0, 20).map(publicCandidate);
     return { results, more };
+  }
+
+  function resolveActionable(target) {
+    const page = {
+      url: location.href,
+      origin: location.origin,
+      title: document.title || "",
+      renderSerial,
+    };
+    if (target && target.ref) {
+      const el = deref(target.ref);
+      if (!el) {
+        return { error: staleRefMessage(target.ref) || `Element ${target.ref} not found or was garbage-collected.`, page };
+      }
+      const summary = publicCandidate(elementSummary(el));
+      const top = document.elementFromPoint(summary.x, summary.y);
+      const covered = !!(top && top !== el && !el.contains(top) && !top.contains(el));
+      return { target: summary, candidates: [], ambiguous: false, covered, page };
+    }
+    const query = target && (target.query || target.name);
+    const ranked = (self.GhostlightActionable || GhostlightActionable)
+      .rankCandidates(query, actionableCandidates(), target && target.role);
+    if (!ranked.length) {
+      const frameOrigins = Array.from(document.querySelectorAll("iframe, frame"))
+        .slice(0, 5)
+        .map((frame) => {
+          try { return new URL(frame.src || "about:blank", location.href).origin; }
+          catch (_error) { return "unknown"; }
+        });
+      return {
+        target: null,
+        candidates: [],
+        ambiguous: false,
+        frameUnsupported: frameOrigins.length > 0,
+        frameOrigins,
+        page,
+      };
+    }
+    const bestRank = ranked[0].matchRank;
+    const best = ranked.filter((candidate) => candidate.matchRank === bestRank);
+    if (best.length !== 1) {
+      return { target: null, candidates: best.slice(0, 5).map(publicCandidate), ambiguous: true, more: best.length > 5, page };
+    }
+    const summary = publicCandidate(best[0]);
+    const el = deref(summary.ref);
+    const top = document.elementFromPoint(summary.x, summary.y);
+    const covered = !!(el && top && top !== el && !el.contains(top) && !top.contains(el));
+    return { target: summary, candidates: [], ambiguous: false, covered, page };
   }
 
   // --- Form input (shadow-DOM traversal + native setter so framework inputs register) ---
@@ -963,6 +1018,7 @@
       }
       case "pageText": sendResponse({ result: pageText(msg.max_chars) }); return true;
       case "find": sendResponse({ result: find(msg.query) }); return true;
+      case "resolveActionable": sendResponse({ result: resolveActionable(msg.target || {}) }); return true;
       case "setFormValue": sendResponse({ result: setFormValue(msg.ref, msg.value) }); return true;
       case "setFiles": sendResponse({ result: setFiles(msg.ref, msg.files) }); return true;
       case "setImage": sendResponse({ result: setImage(msg.ref, msg.coordinate, msg.data, msg.filename, msg.mimeType) }); return true;

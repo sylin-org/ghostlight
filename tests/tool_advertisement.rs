@@ -59,6 +59,7 @@ async fn read_only_manifest_advertises_everything_except_write_and_execute_tools
             "narrate",
             "wait_for",
             "script",
+            "act_on",
             "browser_batch",
             "gif_creator",
             "explain",

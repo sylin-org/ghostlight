@@ -137,6 +137,7 @@ mod tests {
                 "narrate",
                 "wait_for",
                 "script",
+                "act_on",
                 "browser_batch",
                 "gif_creator",
                 "explain",

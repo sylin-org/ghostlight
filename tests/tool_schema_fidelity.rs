@@ -53,8 +53,8 @@ fn advertises_the_thirteen_trained_tools_plus_sanctioned_additions_with_explain_
         .collect();
     assert_eq!(
         names.len(),
-        22,
-        "13 trained tools plus narrate, wait_for, script, form_fill, file_upload, browser_batch, upload_image, gif_creator, and explain"
+        23,
+        "13 trained tools plus narrate, wait_for, script, form_fill, act_on, file_upload, browser_batch, upload_image, gif_creator, and explain"
     );
     assert_eq!(
         names[..13],
@@ -65,14 +65,15 @@ fn advertises_the_thirteen_trained_tools_plus_sanctioned_additions_with_explain_
     assert_eq!(names[14], "wait_for", "the 15th tool is wait_for");
     assert_eq!(names[15], "script", "the 16th tool is script");
     assert_eq!(names[16], "form_fill", "the 17th tool is form_fill");
-    assert_eq!(names[17], "file_upload", "the 18th tool is file_upload");
-    assert_eq!(names[18], "browser_batch", "the 19th tool is browser_batch");
-    assert_eq!(names[19], "upload_image", "the 20th tool is upload_image");
+    assert_eq!(names[17], "act_on", "the 18th tool is act_on");
+    assert_eq!(names[18], "file_upload", "the 19th tool is file_upload");
+    assert_eq!(names[19], "browser_batch", "the 20th tool is browser_batch");
+    assert_eq!(names[20], "upload_image", "the 21st tool is upload_image");
     assert_eq!(
-        names[20], "gif_creator",
-        "the 21st tool is gif_creator, immediately before explain"
+        names[21], "gif_creator",
+        "the 22nd tool is gif_creator, immediately before explain"
     );
-    assert_eq!(names[21], "explain", "explain stays positioned last");
+    assert_eq!(names[22], "explain", "explain stays positioned last");
 }
 
 /// The `explain` tool's own object matches ADR-0022 Decision 7 exactly: name, the pinned
@@ -110,8 +111,8 @@ fn explain_tool_object_matches_the_pinned_adr_0022_decision_7_shape() {
 
     assert_eq!(
         all.len(),
-        22,
-        "no tool other than narrate, wait_for, script, form_fill, file_upload, browser_batch, upload_image, gif_creator, and explain was added to the sacred fixture"
+        23,
+        "no tool other than narrate, wait_for, script, form_fill, act_on, file_upload, browser_batch, upload_image, gif_creator, and explain was added to the sacred fixture"
     );
 }
 
@@ -388,6 +389,7 @@ fn output_schemas_present_exactly_where_declared() {
             "wait_for",
             "script",
             "form_fill",
+            "act_on",
             "file_upload",
             "upload_image"
         ],

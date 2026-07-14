@@ -1231,6 +1231,9 @@ function typeShimmer(tabId) { sendToTab(tabId, { type: "AGENT_TYPE_SHIMMER" }); 
 // Extended vocabulary (the visual feedback dictionary): one treatment per action, all rendered by
 // agent-visual-indicator.js and all hidden from the agent's own screenshots.
 function targetGlow(tabId, x, y) { sendToTab(tabId, { type: "AGENT_TARGET_GLOW", x, y }); }
+function semanticTargetCue(tabId, x, y, action) {
+  return sendToTab(tabId, { type: "AGENT_SEMANTIC_TARGET", x, y, action });
+}
 function keystrokeCue(tabId, text, kind) { sendToTab(tabId, { type: "AGENT_KEYSTROKE", text, kind }); }
 function scrollCue(tabId, direction) { sendToTab(tabId, { type: "AGENT_SCROLL_CUE", direction }); }
 function readScan(tabId) { sendToTab(tabId, { type: "AGENT_READ_SCAN" }); }
@@ -2040,6 +2043,18 @@ const handlers = {
     };
     if (reason) out.structuredContent.reason = reason;
     return out;
+  },
+  // ADR-0078 C3 internal mechanisms. They are not registry tools and cannot be called by a model;
+  // the governed `act_on` local handler uses them after its one parent authorization.
+  async resolve_actionable_internal(a) {
+    const tabId = await effectiveTabId(a.tabId);
+    const r = await content(tabId, { type: "resolveActionable", target: a.target || {} });
+    return text(JSON.stringify((r && r.result) || { target: null, candidates: [] }));
+  },
+  async target_cue_internal(a) {
+    const tabId = await effectiveTabId(a.tabId);
+    await semanticTargetCue(tabId, a.x, a.y, a.action);
+    return text("Target cue shown.");
   },
   // Internal read for form_fill (ADR-0036 D5, PINS.md SS12): NOT in the tool REGISTRY, so models
   // cannot call it -- only form_fill's handler dials it via browser.call. Returns the value-free

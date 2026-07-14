@@ -482,6 +482,19 @@
     addEphemeral(g, 780);
   }
 
+  function semanticTarget(x, y, action) {
+    targetGlow(x, y);
+    const labels = {
+      left_click: "Click target",
+      right_click: "Context-menu target",
+      double_click: "Double-click target",
+      hover: "Hover target",
+      scroll_to: "Scroll target",
+      set_value: "Field target",
+    };
+    caption(labels[action] || "Action target");
+  }
+
   // type / key: a keystroke lozenge, bottom-center (KeyCastr). type shows the text; key the combo.
   function keystrokeLozenge(textStr, kind) {
     if (hiddenForTool || document.hidden) return;
@@ -825,7 +838,7 @@
   // anyone could see it.
   const TOOL_ACTION_MESSAGE_TYPES = new Set([
     "UPDATE_PHANTOM_CURSOR", "AGENT_CLICK_RIPPLE", "AGENT_DRAG_TRAIL", "AGENT_TYPE_SHIMMER",
-    "AGENT_TARGET_GLOW", "AGENT_KEYSTROKE", "AGENT_SCROLL_CUE", "AGENT_NAVIGATE_PILL",
+    "AGENT_TARGET_GLOW", "AGENT_SEMANTIC_TARGET", "AGENT_KEYSTROKE", "AGENT_SCROLL_CUE", "AGENT_NAVIGATE_PILL",
   ]);
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -845,6 +858,7 @@
         case "AGENT_DRAG_TRAIL":
         case "AGENT_TYPE_SHIMMER":
         case "AGENT_TARGET_GLOW":
+        case "AGENT_SEMANTIC_TARGET":
         case "AGENT_KEYSTROKE":
         case "AGENT_SCROLL_CUE":
         case "AGENT_READ_SCAN":
@@ -869,6 +883,8 @@
         shimmerFocused(); sendResponse({ success: true }); return true;
       case "AGENT_TARGET_GLOW":
         targetGlow(msg.x, msg.y); sendResponse({ success: true }); return true;
+      case "AGENT_SEMANTIC_TARGET":
+        semanticTarget(msg.x, msg.y, msg.action); sendResponse({ success: true }); return true;
       case "AGENT_KEYSTROKE":
         keystrokeLozenge(msg.text, msg.kind); sendResponse({ success: true }); return true;
       case "AGENT_SCROLL_CUE":

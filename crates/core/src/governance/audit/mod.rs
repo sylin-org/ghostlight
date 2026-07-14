@@ -294,6 +294,8 @@ mod tests {
             batch_id: None,
             step: None,
             dry_run: false,
+            target_assurance: None,
+            outcome: None,
         }
     }
 
