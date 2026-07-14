@@ -29,15 +29,13 @@ when they disagree**, and update it when you land something that changes the pic
   handoff (ADR-0070), agent narration (ADR-0072), reliable memory-only GIF recording and bounded
   browser transport (ADRs 0073/0074), the cohesive Card Foundry demo story, and the live Foundry
   companion route at `https://sylin.org/ghostlight/demo/foundry/`.
-- **CWS publish is BLOCKED on listing completion (owner action)**: the v0.5.7 package uploaded
-  successfully and is staged as a draft. The Developer Dashboard still needs the Privacy
-  practices answers, remote-code-use and host-permission justifications, the data-use compliance
-  certification, and at least one screenshot or video. Paste-ready, code-backed wording lives in
-  `docs/legal/PRIVACY.md`, `docs/legal/PERMISSION_JUSTIFICATIONS.md`, and
-  `docs/legal/STORE_LISTING.md`; its canonical public target is
-  `https://sylin.org/ghostlight/privacy/`. After completing the dashboard, publish there or re-run
-  `pwsh -File scripts/publish-extension.ps1` (the v0.5.7 package is already uploaded). Edge was
-  skipped because no `EDGE_*` credentials are configured.
+- **The Chrome Web Store listing is submitted and pending compliance review.** On 2026-07-13 the
+  owner completed the listing, Privacy practices, permission and remote-code justifications,
+  data-use certifications, screenshots, video, and promotional tiles, then submitted v0.5.7 for
+  review. Chrome warned that broad host permissions may trigger an in-depth review; that is the
+  intentional tradeoff for general-purpose automation across user-selected sites, not a rejected
+  submission. No action remains unless the reviewer asks for clarification. Edge was skipped
+  because no `EDGE_*` credentials are configured.
 - **CWS credential durability needs one owner-side change**: the Google OAuth consent screen is
   External/Testing, so its refresh token is short-lived. Move the consent configuration to
   Production or mint a fresh token before a later publish attempt. Credential locations remain in
@@ -86,8 +84,8 @@ when they disagree**, and update it when you land something that changes the pic
 `scripts/release.ps1 <version>` from `main` automates: tag, watch CI, verify assets, fill
 package-manager sums, homebrew tap, npm publish + smoke, trust-footer restamp, extension publish
 (Chrome Web Store + Edge; auto when `CWS_*`/`EDGE_*` creds are set), and the website refresh. The
-v0.5.7 run proved every step end to end (only the CWS listing gate above stopped the final Chrome
-submission; Edge remained unconfigured).
+v0.5.7 run proved every automated step end to end. The owner later completed the dashboard-only
+CWS metadata and submitted the item manually; Edge remains unconfigured.
 
 CWS API creds are set up on this machine (see local/RELEASE-CREDENTIALS.md; values in
 `~/.ghostlight-release.env`, written by `local/set-credentials.ps1`). Load them before a release:
@@ -102,7 +100,8 @@ manual when its API credentials or dashboard metadata are absent.
   `docs/design/public-documentation-review-2026-07.md`. The README now leads with the real-session
   problem, fit and anti-fit, visible experience, one install journey, and candid platform state.
   It also corrects stale topology, audit-default, roadmap, and install-time-vs-runtime claims.
-  Remaining high-value work: CWS publication, the hero GIF, and macOS/Linux live verification.
+  Remaining high-value work: the hero GIF, macOS/Linux live verification, and the outcome of the
+  pending CWS review.
 - **WebMCP participation can begin without product support**: research 15 records the current
   governance gaps, a bounded non-shipping origin-trial experiment, and a draft response for the
   WebMCP explainer. Owner actions: approve the outbound text, join Chrome's early preview program,
@@ -135,15 +134,10 @@ manual when its API credentials or dashboard metadata are absent.
   - `server.json` websiteUrl was already FIXED to `https://sylin.org/ghostlight/` (applies on the
     next registry version, not 0.5.6 -- immutable).
   - README now lists the LIVE distribution channels (MCP registry + Homebrew badges, an "Other ways
-    to get it" line). CWS (blocked), Edge, winget, and scoop are omitted until each actually ships.
-  This workstream is now COMPLETE; the only distribution follow-up left is the owner-side CWS listing
-  gate below.
-- **CWS listing completion** (owner): the public privacy URL is live and the v0.5.7 extension ZIP
-  is uploaded. Paste the privacy practices plus remote-code and host-permission justifications,
-  certify data-use compliance, and add at least one screenshot or the promotional video using the
-  proven `ghostlight demo` recipe in `docs/legal/STORE_LISTING.md`; then publish the staged package.
-  v0.5.7 includes `narrate` and the Card Foundry story. The live rehearsal passed on 2026-07-13,
-  including the session-policy denial finale.
+    to get it" line). CWS remains omitted until review completes and the listing is public; Edge,
+    winget, and scoop are omitted until each actually ships.
+  This workstream is now COMPLETE. The CWS listing was submitted on 2026-07-13 and has moved from
+  an owner-side completion gate to an external review wait.
 - **Agent narration is implemented** (ADR-0072): additive `narrate` is domainless RAWX none,
   bounded and schema-validated, ordinarily audited, ownership/hold/sacred checked, and legal in
   `script`/`browser_batch`. The policy-free extension renders one timed responsive Agent ribbon per
@@ -184,8 +178,8 @@ manual when its API credentials or dashboard metadata are absent.
 
 ## Owner-side gates (agents cannot do these)
 
-- Chrome Web Store: complete the v0.5.7 draft listing, make OAuth credentials durable, and publish.
-  Edge Add-ons remains unsubmitted.
+- Chrome Web Store: monitor the pending v0.5.7 review and answer any reviewer questions; make the
+  OAuth credentials durable before the next release. Edge Add-ons remains unsubmitted.
 - Trust center legal: vendor entity name in the MSA (blocked on forming the LLC), the
   cyber-insurance yes/no line, counsel skim of MSA/DPA/LICENSE-GOVERNANCE before first
   EXECUTION (publication already happened by design; drafts are marked as drafts).

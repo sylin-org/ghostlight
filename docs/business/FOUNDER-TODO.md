@@ -34,16 +34,12 @@ docs/business/PLAN.md). Check items off in place; add dates.
 - [ ] GitHub Pages site skeleton + sylin.org DNS (half a day; content arrives from the
       frontier queue).
 - [ ] Stripe account; draft (unpublished) payment links for team and enterprise.
-- [ ] **Chrome Web Store listing (IN PROGRESS, step by step).** Account created
-      (hello@sylin.org, non-trader, $5 paid, individual identity verification pending). Item
-      created as a DRAFT named **"Ghostlight in Browser"**; store-assigned id
-      **lejccfmoeogmhemakeknjjdhkfkgncdl**. Renamed package uploaded and its name verified in the
-      dashboard. Remaining founder steps:
-      >=1 screenshot at exactly 1280x800 (capture recipe + shot list now in
-      docs/legal/STORE_LISTING.md "Graphic assets checklist": Chrome DevTools device mode, NOT the
-      agent screenshot tool, which hides the effects and mis-sizes); fill the Privacy tab (also
-      paste-ready in that file); submit. Screenshots must be the REAL extension, not the
-      FX-dictionary Artifact.
+- [x] **Chrome Web Store listing submitted.** On 2026-07-13 the completed v0.5.7 listing for
+      **"Ghostlight in Browser"** was submitted under store id
+      **lejccfmoeogmhemakeknjjdhkfkgncdl**. Privacy practices, permission and remote-code
+      justifications, data-use certifications, screenshots, the unlisted video, and both
+      promotional tiles are present. It is pending compliance review; broad host permissions may
+      make that review more detailed.
 - [ ] **Verified CRX uploads -- future hardening, NOT at launch.** The CWS "Verified CRX
       uploads" opt-in ties item updates to a private signing key you hold (blocks account-
       takeover -> poisoned update). Deferred deliberately: it forces signed-CRX uploads from

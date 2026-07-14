@@ -263,8 +263,7 @@ this one is recorded from the outside:
 1. Run `target\release\ghostlight.exe doctor`; continue only when the extension is connected.
 2. Run the `ghostlight demo` command from the promotional-video recipe and record the browser window
    with OBS. The tour self-narrates through timed Agent ribbons, action effects, and the purpose-built
-   demo pages. Do this only after the staged extension package includes ADR-0072 `narrate`; the
-   current v0.5.6 draft predates it.
+   demo pages. The submitted v0.5.7 package includes ADR-0072 `narrate`.
 3. Extract the peak frame of an effect from the recording (VLC "Take Snapshot", or ffmpeg). Crop to
    1280x800 if the recorder added window chrome. Turning on "Show action captions" in the extension
    popup before recording adds the subtitle line, which reads well in a still.
@@ -294,9 +293,9 @@ audience. Capture the terminal window with the OS and crop to 1280x800.
 4. Submit for review. Expect extra scrutiny on `debugger` + `<all_urls>` + `nativeMessaging`; the
    justifications and privacy policy are written to answer exactly that.
 
-## Published extension id
+## Submitted extension id
 
-The item exists (draft). The store assigned the id
+The item was submitted for review on 2026-07-13. The store assigned the id
 **`lejccfmoeogmhemakeknjjdhkfkgncdl`** -- this is NOT the unpacked-dev id
 `cjcmhepmagomefjggkcohdbfemacojoa` (the dev id comes from the pinned manifest `key`, which is
 stripped from the store package).

@@ -98,7 +98,7 @@ use its native installer:
 
 **Current platform state.** Windows is verified end to end against a live browser. macOS and Linux
 build and pass the full test suite in CI, but their live-browser verification is still owed. The
-Chrome Web Store package is uploaded; publication is waiting on the store listing review details.
+Chrome Web Store package and listing have been submitted and are pending compliance review.
 
 **Other ways to get it.** Homebrew: `brew install sylin-org/tap/ghostlight`. On the
 [MCP registry](https://registry.modelcontextprotocol.io) as `org.sylin/ghostlight`. Every release

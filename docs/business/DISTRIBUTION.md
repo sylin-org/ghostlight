@@ -38,13 +38,10 @@ resolves the relay as a sibling.
       a classic **Automation token** (Access Tokens -> Classic -> Automation; it bypasses 2FA),
       set via `npm config set //registry.npmjs.org/:_authToken=<token>`. Reuse that same token as
       a GitHub Actions `NPM_TOKEN` secret if you later wire `npm publish` into release.yml.
-- [ ] **Chrome Web Store: submit.** Screenshots + Privacy tab per
-      docs/legal/STORE_LISTING.md, then submit for review. Upload
-      `dist/ghostlight-extension-v0.4.1.zip` -- build it with `pwsh -File
-      scripts/package-extension.ps1` (it strips the local-dev `key`, which the store rejects
-      on first upload). Do NOT use the `ghostlight-extension-v*.zip` from the GitHub release
-      assets: that one zips extension/ verbatim and still carries the `key`. Also submit to the
-      **Edge Add-ons store** (free, same zip, far less competition).
+- [x] **Chrome Web Store: submit.** The complete v0.5.7 listing was submitted on 2026-07-13 and is
+      pending compliance review. Store id: `lejccfmoeogmhemakeknjjdhkfkgncdl`.
+- [ ] **Edge Add-ons store.** Submit the same packaged extension after configuring the Edge
+      publisher credentials.
 - [ ] **MCP Registry (official).** Install `mcp-publisher`, validate `server.json`
       (repo root), authenticate via the GitHub method, publish. The registry feeds client
       UIs; the npm package must be live first.
