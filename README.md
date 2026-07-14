@@ -137,11 +137,11 @@ A typical first request:
 > Open a new browser tab, go to example.com, and tell me what the page says.
 
 The tool surface preserves the schemas Claude was trained on, byte for byte, then adds more on
-top, for 22 tools in five groups. (Everything behind those schemas is an original, clean-room
+top, for 25 tools in five groups. (Everything behind those schemas is an original, clean-room
 Rust implementation.)
 
 - **See and act.** Navigate, click, type, scroll, hover, drag; screenshots with exact coordinate
-  mapping and an on-page cursor.
+  mapping and an on-page cursor; semantic one-call actions with bounded outcome receipts.
 - **Forms and files.** Fill forms by element ref or semantically by label (shadow DOM included);
   upload file bytes or captured screenshots straight into page inputs and drop targets.
 - **Compose.** Multi-step scripts with inter-step data flow and `dry_run` pre-flight; one-call
@@ -149,8 +149,8 @@ Rust implementation.)
   phases for the person watching.
 - **Record.** Animated-GIF session recording with click cues, action labels, a progress bar, and
   real per-frame timing.
-- **Inspect.** Accessibility tree (with diff mode), page text, element search, console and
-  network activity, and consequence digests on mutating actions.
+- **Inspect.** Accessibility tree (with diff mode), page text, actionable element search, console
+  and network activity, JavaScript dialogs, and explicit owned-tab lifecycle controls.
 
 Ask the agent to call `explain` at any time for the authoritative, in-session directory of every
 action and the capability it requires.
@@ -177,6 +177,9 @@ action and the capability it requires.
 | `wait_for`              | Wait for a page condition and settlement         | read                       |
 | `script`                | Run a sequence of tool calls in one request (with optional `dry_run`) | none |
 | `form_fill`             | Fill a form by field labels in one call          | read + write (or read + write + action when `submit: true`) |
+| `act_on`                | Resolve, act on, and observe one semantic target | read, action, or write, per action |
+| `dialog`                | Inspect or explicitly resolve a JavaScript dialog | read or action, per action |
+| `tab_control`           | Focus, reload, or close one owned tab            | none or action, per action |
 | `file_upload`           | Upload file bytes to a file `<input>` on the page | write                     |
 | `browser_batch`         | Run a batch of browser actions in one call       | none                       |
 | `upload_image`          | Place a captured screenshot into a file input or drop target | write          |

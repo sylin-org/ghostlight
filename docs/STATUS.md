@@ -48,6 +48,13 @@ when they disagree**, and update it when you land something that changes the pic
   of its policy, configuration, remote-enable, and test scaffolding are removed. MCP clients enter
   through the same-user OS pipe. The Console is a separate read-only loopback HTTP listener and
   rejects WebSocket upgrades. ADR-0076 is superseded; any future remote design starts from zero.
+- **The closed-loop browser core is implemented (ADR-0078).** The additive 25-tool surface now
+  includes semantic `act_on`, explicit JavaScript dialog control, and exact owned-tab
+  focus/reload/close. Actionable observations, bounded interaction receipts, service-authored
+  untrusted-output provenance, and final response budgets reduce model roundtrips without moving
+  policy or page content into the extension. The 13 trained schemas remain byte-stable. All fast
+  gates and all 34 Lightbox scenarios pass. Visible-browser verification remains pending on the
+  Linux lifecycle host.
 - **The Linux lifecycle test recipe is ready.** `docs/testing/linux-live-lifecycle.md` pins Ubuntu
   Desktop 24.04 LTS, visible Chrome Stable, VS Code first and Codex second, one ordinary OS user,
   and clean install through uninstall evidence. The owner is preparing the host and SSH access.
@@ -58,7 +65,7 @@ when they disagree**, and update it when you land something that changes the pic
   publishes the contact, expiry, canonical URL, and Ghostlight security-policy link.
 - **The four-phase public documentation freshness pass is complete in the working tree.** Trust
   material now follows SECURITY.md's best-effort solo-maintainer targets and names only live
-  distribution channels. Present-facing guides use the v0.5.7 service/relay topology, 22-tool
+  distribution channels. Present-facing guides use the v0.5.7 service/relay topology, 25-tool
   inventory, one-stack dev loop, shipped licensing behavior, and managed-tab boundary. The original
   SPEC is explicitly historical, recording privacy names the memory-only retention rules, and the
   sylin.org source carries a v0.5.7 fallback plus a product-first narrow hero. Ghostlight formatting,
@@ -122,13 +129,11 @@ when its API credentials or dashboard metadata are absent.
 
 ## Owed engineering work (in rough priority order)
 
-- **The closed-loop browser core is accepted and implementation-ready** (ADR-0078). The design
-  centers on one bounded interaction receipt: enrich `find` and targeted `read_page`, add a
-  fail-closed semantic `act_on`, mark page-sourced output as untrusted with service-authored
-  provenance, and add explicit dialog plus session-owned tab controls. The six-commit batch lives
-  at `docs/tasks/closed-loop-core/`; C1 is the RESUME HERE point. No production code has changed.
-  Cross-origin frame refs remain deferred because they require a separate multi-origin governance
-  decision. Headless, isolated, cloud, and remote browser execution remain out of scope.
+- **ADR-0078 visible-browser verification is owed.** C1-C6 and the automated gates are complete.
+  Run `docs/tasks/closed-loop-core/LIVE-VERIFY.md` against the visible Linux Chrome host once SSH
+  access is available. Cross-origin frame refs remain deferred because they require a separate
+  multi-origin governance decision. Headless, isolated, cloud, and remote browser execution remain
+  out of scope.
 - **Public documentation was rebalanced around responsible delight**: the applied review lives in
   `docs/design/public-documentation-review-2026-07.md`. The README now leads with the real-session
   problem, fit and anti-fit, visible experience, one install journey, and candid platform state.
