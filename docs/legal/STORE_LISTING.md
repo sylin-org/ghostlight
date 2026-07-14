@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Chrome Web Store Listing
 
-Last updated: 2026-07-04
+Last updated: 2026-07-13
 
 Paste-ready copy for every text field in the Chrome Web Store developer dashboard, plus the
 non-text asset checklist and the submission steps only the founder can take. Permission
@@ -76,8 +76,9 @@ Local-first and private:
 - Data the extension reads is sent only to the local native application on your own machine, over
   Chrome native messaging (a direct, on-device, process-to-process channel). Nothing is transmitted
   over the network to reach it.
-- All code the extension runs ships inside the extension package. Manifest V3 forbids remotely
-  hosted code, so this is enforced by the platform, not only promised.
+- All extension logic ships inside the reviewed extension package. The extension does not fetch or
+  dynamically import code that changes its own behavior. JavaScript supplied for an explicitly
+  requested javascript_tool call runs only in the attached page, not in the extension origin.
 
 Open and inspectable:
 - Source, install scripts, the governance policy engine, and full documentation are at
@@ -112,28 +113,58 @@ holds no policy or allowlist logic.
 scripting, nativeMessaging, tabGroups, windows, storage, alarms, and the `<all_urls>` host
 permission). They are written to paste one-to-one.
 
-**Privacy policy URL** (interim, stable, on the release branch; upgrade to a GitHub Pages URL when
-the site skeleton lands)
+**Privacy policy URL**
 
 ```
-https://github.com/sylin-org/ghostlight/blob/main/docs/legal/PRIVACY.md
+https://sylin.org/ghostlight/privacy/
+```
+
+**Remote code use justification**
+
+```
+The extension's service worker, content scripts, and support libraries all ship in the submitted
+package. It does not fetch or dynamically import code that changes extension behavior. Ghostlight
+does provide an explicitly advertised javascript_tool automation capability. When the user or
+connected AI agent requests that tool, JavaScript text arrives from the separately installed local
+native application over Chrome native messaging and is evaluated through CDP Runtime.evaluate in
+the attached web page. It runs only in that page's context, not in the extension origin, and is not
+installed, imported, or retained as extension code. Chrome's Manifest V3 requirements expressly
+list the Debugger API as a permitted API for remote-source execution when used for its documented
+purpose. The capability is invoked only for a specific tool call in the visible automation session.
+```
+
+Policy reference: [Chrome Web Store Manifest V3 requirements](https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements).
+
+**Limited Use disclosure** (must also appear at the privacy policy URL)
+
+```
+The use of information received from Google APIs will adhere to the Chrome Web Store User Data
+Policy, including the Limited Use requirements.
 ```
 
 **Data usage disclosure** -- recommended answers. This is a compliance attestation the founder
 signs at submission; confirm each answer against current dashboard wording before submitting.
 
-- Does this item collect or use user data? Recommend YES, and disclose "Website content" only. The
-  extension reads page content, screenshots, and console/network metadata of the automated tab. It
-  transmits that data ONLY to the local native application on the same device (never off-device,
-  never to the developer, never to a third party). Disclosing it is the defensible choice given the
-  broad content-access permissions a reviewer sees; the privacy policy explains the local-only path.
-- Do NOT check: personally identifiable information, health, financial/payment, authentication
-  information, personal communications, location, web history. The extension does not read the
-  credential/cookie store (it has no `cookies` permission), does not collect any of these as data
-  types, and does not build a browsing history. It only acts on the specific tab being automated.
+Policy reference: [Chrome Web Store privacy fields](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy).
+
+- Does this item collect or use user data? Select YES. Chrome requires disclosure even when data is
+  processed only on the user's device.
+- Select **Website content**. The extension handles page text and structure, images and screenshots,
+  console output, hyperlinks, and other content of the automated tab.
+- Select **User activity**. The dashboard definition includes network monitoring, clicks, mouse
+  position, scrolling, and keystrokes; Ghostlight handles network-request metadata and the
+  agent-directed interaction signals used in the visible automation session.
+- Do not select **Web history**: the extension does not request the history permission or maintain a
+  list of pages visited with visit times. Current URLs and titles are transient automation-tab state,
+  disclosed in the privacy policy under browser state.
+- Do not select personally identifiable information, health information, financial and payment
+  information, authentication information, personal communications, or location as separately
+  collected categories. Ghostlight does not target or extract those semantic data types. Content a
+  user explicitly asks it to handle remains covered by Website content; it does not read Chrome's
+  cookie, credential, payment, location, or communication stores.
 - Certifications (all TRUE):
-  - I do not sell or transfer user data to third parties outside of the approved use cases.
-  - I do not use or transfer user data for purposes unrelated to the item's single purpose.
+  - I do not sell user data to third parties.
+  - I do not use or transfer user data for purposes that are unrelated to my item's single purpose.
   - I do not use or transfer user data to determine creditworthiness or for lending purposes.
 
 ## Graphic assets checklist
@@ -141,8 +172,61 @@ signs at submission; confirm each answer against current dashboard wording befor
 - Store icon: 128x128 PNG. Present at `extension/icons/icon128.png` (also in the package).
 - Screenshots: at least one required; 1280x800 or 640x400, PNG or JPEG (a 24-bit PNG is safest).
   The shot list and how to capture each are below.
-- Small promo tile: 440x280 PNG. Optional; helps search placement. Not yet produced.
+- Promotional video: a YouTube URL that shows the extension's features. Required by the current
+  dashboard listing guidance. The recording recipe is below.
+- Small promo tile: 440x280 PNG. Required. Confirm the existing dashboard asset before submission;
+  no source asset is currently tracked in this repository.
 - Marquee promo tile: 1400x560 PNG. Optional; only used if the item is featured.
+
+Policy references: [complete the listing](https://developer.chrome.com/docs/webstore/cws-dashboard-listing)
+and [supply images](https://developer.chrome.com/docs/webstore/images).
+
+### Promotional video: the shortest honest story
+
+Use the built-in `ghostlight demo` tour. It drives the public demo stage through the same MCP relay
+and tool surface an agent uses. It shows the dedicated Ghostlight tab, visible actions, form work,
+console and network observation, page reading, and a tighten-only session policy refusing an
+off-domain navigation. The default pacing is designed for a roughly 90-second recording.
+
+1. Run `target\release\ghostlight.exe doctor`. Do not record until the verdict is OK and it says
+   `extension connected (live)`.
+2. In the extension popup, turn on **Show action captions**. Close or hide unrelated tabs and any
+   notification surface that could reveal personal information.
+3. In OBS, capture only the Chrome window at 1920x1080. Record without microphone or desktop audio.
+   Keep the browser chrome visible so the Ghostlight tab group and real-browser context are clear.
+4. Start recording, then run:
+
+   ```powershell
+   target\release\ghostlight.exe demo --setup-pause 10 --pause 3
+   ```
+
+   Use the setup pause to bring Chrome to the front. Do not interact until the terminal reports
+   `Demo complete -- every tool ran, and the guardrail held.`
+5. Stop recording. Trim only the idle setup and tail; keep the denial ribbon and its plain-language
+   explanation on screen for at least three seconds. Do not add claims, stock footage, or a sales
+   voice-over. The product behavior is the pitch.
+6. Upload the MP4 to YouTube as **Unlisted** with this metadata:
+
+   **Title**
+
+   ```text
+   Ghostlight: governed browser automation in your real browser
+   ```
+
+   **Description**
+
+   ```text
+   Ghostlight gives MCP agents visible, local access to the Chromium session you already use.
+   This uncut product tour shows real browser actions and a session policy refusing an off-domain
+   request. No cloud browser and no developer-operated service.
+
+   Project and source: https://github.com/sylin-org/ghostlight
+   Privacy: https://sylin.org/ghostlight/privacy/
+   ```
+
+7. Paste the YouTube share URL into **Promotional video** in the Store listing tab. Watch the
+   uploaded video once from a private window before submitting so its visibility and playback are
+   proven.
 
 ### How to capture an exact 1280x800 still
 
@@ -169,10 +253,11 @@ The hook: the sky-blue phantom cursor plus a click ripple, on a recognizable sit
 ghost-marked "Ghostlight" tab group. Because the effects are hidden from the agent's own captures,
 this one is recorded from the outside:
 
-1. Close this session's Ghostlight connection first (the capture script must own the IPC endpoint).
-2. Run `pwsh -File scripts/capture-readme-tour.ps1` and record the 1280x800 window with OBS (or any
-   screen recorder). The tour self-narrates: nav pill, click ripple and target glow, type shimmer,
-   scroll chevrons, the read scan-line.
+1. Run `target\release\ghostlight.exe doctor`; continue only when the extension is connected.
+2. Run the `ghostlight demo` command from the promotional-video recipe and record the browser window
+   with OBS. The tour self-narrates through timed Agent ribbons, action effects, and the purpose-built
+   demo pages. Do this only after the staged extension package includes ADR-0072 `narrate`; the
+   current v0.5.6 draft predates it.
 3. Extract the peak frame of an effect from the recording (VLC "Take Snapshot", or ffmpeg). Crop to
    1280x800 if the recorder added window chrome. Turning on "Show action captions" in the extension
    popup before recording adds the subtitle line, which reads well in a still.
@@ -197,7 +282,8 @@ audience. Capture the terminal window with the OS and crop to 1280x800.
 
 1. Create a Chrome Web Store developer account (one-time 5 USD fee). Agent cannot do this.
 2. Add new item; upload `dist/ghostlight-extension-v<version>.zip`.
-3. Fill the Store listing and Privacy tabs from this file; upload at least one screenshot.
+3. Fill the Store listing and Privacy tabs from this file; upload at least one screenshot and the
+   required small promo tile, then paste the YouTube promotional-video URL.
 4. Submit for review. Expect extra scrutiny on `debugger` + `<all_urls>` + `nativeMessaging`; the
    justifications and privacy policy are written to answer exactly that.
 
@@ -208,14 +294,13 @@ The item exists (draft). The store assigned the id
 `cjcmhepmagomefjggkcohdbfemacojoa` (the dev id comes from the pinned manifest `key`, which is
 stripped from the store package).
 
-Store-install onboarding therefore points the installer at the published id, so the native host's
-`allowed_origins` matches the extension a store user actually runs:
+Ordinary `ghostlight install` already registers both the Web Store id and the pinned unpacked-dev
+id in the native host's `allowed_origins`. A store user therefore runs the normal command:
 
 ```
-ghostlight install --extension-id lejccfmoeogmhemakeknjjdhkfkgncdl
+ghostlight install
 ```
 
-The installer already takes `--extension-id` as a validated parameter, so no code change is required
-for this. (Optional future step: put the store's public key into `extension/manifest.json`'s `key`
-field so unpacked-dev builds share the published id; if done, update the pinned id in the docs and
-ADR-0016.)
+`--extension-id` appends one additional validated origin for a fork or enterprise-packaged build;
+it is not required for either official Ghostlight extension id. The store and unpacked-dev ids are
+intentionally distinct.

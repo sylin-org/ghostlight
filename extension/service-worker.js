@@ -19,13 +19,26 @@
 // this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
 // ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
 
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/narration.js", "lib/wire-chunks.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
 // compositor frame, thin to the service-chosen interval, and forward kept frames as unsolicited
-// gif_frame events. This map is the relay's only state: tabId -> { minIntervalMs, lastSentTs }.
+// gif_frame events. Transient identity prevents delayed frames crossing recording generations.
 const gifCast = new Map();
+
+// ADR-0074: bounded, memory-only reassembly for large host-to-extension requests. The ordinary
+// request is dispatched only after every ordered chunk and its SHA-256 digest verify.
+const wireChunkStore = self.GhostlightWireChunks.createWireChunkStore({
+  decodeBase64: bytesFromBase64,
+  decodeUtf8: (bytes) => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+  sha256Hex: async (bytes) => {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0")
+    ).join("");
+  },
+});
 
 // Operational tunables (lib/constants.js), destructured once for use throughout this worker.
 const {
@@ -37,6 +50,9 @@ const {
 // (tests/extension/grouping.test.js), given an injected chrome so it never touches policy.
 const { groupSessionTabs, managedGroupIds, isManagedGroupId, pruneDeadGroups, reclaimGroupsByTitle } =
   self.GhostlightGrouping;
+// ADR-0072: pure, memory-only replacement and expiry state. The worker supplies tab routing;
+// this store contains no policy or page-content logic.
+const narrationStore = self.GhostlightNarration.createNarrationStore();
 
 // Native-messaging host name (ADR-0065: one stack). Every build of this extension -- the Web
 // Store release and the unpacked dev copy alike -- talks to the ONE host `org.sylin.ghostlight`,
@@ -128,10 +144,22 @@ async function connect() {
     // ADR-0061: announce identity FIRST, before any other frame. The relay forwards it verbatim, so
     // the service reads it as the extension's opening handshake frame (right after the relay's own
     // ROLE_BROWSER hello) and keys this browser's session by it. Fire-and-forget, mechanism only.
-    try { nativePort.postMessage({ type: "browser_hello", browserId }); } catch { /* port gone */ }
+    try {
+      nativePort.postMessage({
+        type: "browser_hello",
+        browserId,
+        features: ["chunkedHostMessagesV1"],
+      });
+    } catch { /* port gone */ }
     sendDebugEvent("connect_attempt");
     flushPendingDebugEvents(); // deliver any notes buffered while no port was open (ADR-0059)
-    nativePort.onMessage.addListener((msg) => {
+    const handleNativeMessage = (msg) => {
+      if (msg && msg.type === "wire_chunk") {
+        wireChunkStore.accept(msg, handleNativeMessage, (requestId, reason) => {
+          fail(requestId, hopError("extension", `Large request rejected: ${reason}`));
+        });
+        return;
+      }
       if (msg && msg.type === "tool_request" && msg.id) {
         if (sessionKilled) {
           fail(msg.id, hopError("extension", "The user ended the browser session (kill switch)"));
@@ -201,24 +229,53 @@ async function connect() {
         });
         return;
       }
+      // ADR-0072 session cleanup: the binary names only this MCP session's owned tabs. The
+      // extension clears the transient mechanism state and the matching on-page card.
+      if (msg && msg.type === "narration_clear" && typeof msg.tabId === "number") {
+        narrationStore.remove(msg.tabId);
+        sendToTab(msg.tabId, { type: "AGENT_NARRATION_CLEAR" });
+        return;
+      }
+      if (msg && msg.type === "gif_lease_renew" && typeof msg.tabId === "number") {
+        const cast = gifCast.get(msg.tabId);
+        if (cast && cast.recordingId === msg.recordingId && cast.generation === msg.generation) {
+          cast.leaseDeadline = Date.now() + boundedGifTimeout(msg.leaseMs, 15000);
+          armGifExpiry(msg.tabId, cast);
+        }
+        return;
+      }
+      if (msg && msg.type === "gif_capture_cancel" && typeof msg.tabId === "number") {
+        const cast = gifCast.get(msg.tabId);
+        if (cast && cast.recordingId === msg.recordingId && cast.generation === msg.generation) {
+          stopGifCast(msg.tabId, cast, null);
+        }
+        return;
+      }
       if (msg && (msg.type === "hold_state" || msg.type === "hold_error") && msg.id) {
         const pending = holdPending.get(msg.id);
         if (!pending) return; // late or duplicate reply
         holdPending.delete(msg.id);
         if (msg.type === "hold_state") {
-          updateHoldBadge(msg.result && msg.result.held === true);
+          const held = msg.result && msg.result.held === true;
+          updateHoldBadge(held);
+          if (held) stopAllGifCasts();
           pending.resolve(msg.result || null);
         } else {
           pending.resolve(null);
         }
       }
-    });
+    };
+    nativePort.onMessage.addListener(handleNativeMessage);
     nativePort.onDisconnect.addListener(() => {
       // chrome.runtime.lastError is the ONE piece of information this file otherwise has no way
       // to surface (ADR-0059): buffered (the port that would carry it just died) and delivered
       // on the next successful connect.
       const lastError = chrome.runtime.lastError;
       sendDebugEvent("connect_disconnect", lastError ? String(lastError.message || lastError) : null);
+      // ADR-0073: a native-port loss revokes capture immediately. An MV3 timer is not the sole
+      // safety mechanism for a privacy-sensitive screencast.
+      stopAllGifCasts();
+      wireChunkStore.clear();
       nativePort = null;
       updateHoldBadge(null); // state unknown without a session
       setTimeout(connect, RECONNECT_DELAY_MS);
@@ -365,7 +422,12 @@ async function killSession() {
     await sleep(100); // let the frame flush before the port is torn down
   }
 
+  stopAllGifCasts();
   await sweepDetachAll();
+
+  for (const tabId of narrationStore.clear()) {
+    sendToTab(tabId, { type: "AGENT_NARRATION_CLEAR" });
+  }
 
   attached.clear();
   attaching.clear();
@@ -515,18 +577,59 @@ function base64FromBytes(bytes) {
   return btoa(bin);
 }
 // Forward one captured frame to the binary as an unsolicited gif_frame event (ADR-0053 D2).
-function sendGifFrame(tabId, base64, deviceWidth) {
+function sendGifFrame(tabId, cast, base64, deviceWidth, finalFrame) {
   try {
     nativePort && nativePort.postMessage({
       type: "gif_frame",
       tabId,
+      recordingId: cast.recordingId,
+      generation: cast.generation,
+      sequence: cast.nextSequence++,
       data: base64,
       ts: Date.now(),
       deviceWidth: deviceWidth || undefined,
+      final: finalFrame === true,
     });
   } catch (e) {
     /* port gone; this frame is lost, the stream continues */
   }
+}
+function boundedGifTimeout(value, fallback) {
+  return Number.isFinite(value) && value >= 1000 ? Math.min(value, 10 * 60 * 1000) : fallback;
+}
+function stopGifCast(tabId, cast, reason) {
+  const current = gifCast.get(tabId);
+  if (!current || current !== cast) return;
+  gifCast.delete(tabId);
+  if (cast.expiryTimer) clearTimeout(cast.expiryTimer);
+  if (attached.has(tabId)) {
+    chrome.debugger.sendCommand({ tabId }, "Page.stopScreencast", {}).catch(() => {});
+  }
+  if (reason) {
+    try {
+      nativePort && nativePort.postMessage({
+        type: "gif_capture_ended",
+        tabId,
+        recordingId: cast.recordingId,
+        generation: cast.generation,
+        reason,
+      });
+    } catch { /* port gone */ }
+  }
+}
+function armGifExpiry(tabId, cast) {
+  if (cast.expiryTimer) clearTimeout(cast.expiryTimer);
+  const deadline = Math.min(cast.leaseDeadline, cast.hardDeadline);
+  cast.expiryTimer = setTimeout(() => {
+    const current = gifCast.get(tabId);
+    if (current !== cast) return;
+    const now = Date.now();
+    if (now < cast.leaseDeadline && now < cast.hardDeadline) {
+      armGifExpiry(tabId, cast);
+      return;
+    }
+    stopGifCast(tabId, cast, now >= cast.hardDeadline ? "hard_timeout" : "lease_expired");
+  }, Math.max(0, deadline - Date.now()));
 }
 // One screencast frame (ADR-0053 D2): ack immediately (unacked frames stall the compositor's
 // screencast pipeline), thin to the service-chosen minimum interval, and forward. The worker
@@ -540,10 +643,25 @@ async function handleScreencastFrame(tabId, params) {
   const cast = gifCast.get(tabId);
   if (!cast) return;
   const now = Date.now();
+  if (now >= cast.leaseDeadline || now >= cast.hardDeadline) {
+    stopGifCast(tabId, cast, now >= cast.hardDeadline ? "hard_timeout" : "lease_expired");
+    return;
+  }
   if (now - cast.lastSentTs < cast.minIntervalMs) return;
   cast.lastSentTs = now;
   const deviceWidth = params.metadata && params.metadata.deviceWidth;
-  sendGifFrame(tabId, params.data, deviceWidth);
+  sendGifFrame(tabId, cast, params.data, deviceWidth, false);
+}
+
+// Stop and forget all capture mechanics. Safe to call from disconnect and panic paths without
+// awaiting completion; clearing the map first prevents any later compositor event from forwarding.
+function stopAllGifCasts() {
+  const casts = Array.from(gifCast.entries());
+  gifCast.clear();
+  for (const [tabId, cast] of casts) {
+    if (cast.expiryTimer) clearTimeout(cast.expiryTimer);
+    if (attached.has(tabId)) cdp(tabId, "Page.stopScreencast", {}).catch(() => {});
+  }
 }
 async function encodeJpeg(bitmap, w, h, quality) {
   const canvas = new OffscreenCanvas(w, h);
@@ -574,6 +692,8 @@ async function enableDomain(tabId, domain) {
   state.domains.add(domain);
 }
 chrome.tabs.onRemoved.addListener((tabId) => {
+  const cast = gifCast.get(tabId);
+  if (cast) stopGifCast(tabId, cast, "browser_detached");
   if (attached.has(tabId)) {
     try { chrome.debugger.detach({ tabId }); } catch { /* already gone */ }
     attached.delete(tabId);
@@ -581,13 +701,17 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   consoleBuffer.delete(tabId);
   networkBuffer.delete(tabId);
   screenshotCtx.delete(tabId);
-  gifCast.delete(tabId);
   tabHost.delete(tabId);
   tabUrl.delete(tabId);
   managedTabs.delete(tabId); // ADR-0066 D5: a closed tab is no longer ours to reach
+  narrationStore.remove(tabId);
   persistSessionState();
 });
-chrome.debugger.onDetach.addListener((src) => attached.delete(src.tabId));
+chrome.debugger.onDetach.addListener((src) => {
+  const cast = gifCast.get(src.tabId);
+  if (cast) stopGifCast(src.tabId, cast, "browser_detached");
+  attached.delete(src.tabId);
+});
 
 // --- Console / network buffering (join network events by requestId, unlike the reference) ---
 function hostOf(url) {
@@ -595,6 +719,10 @@ function hostOf(url) {
 }
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.url !== undefined) { tabHost.set(tabId, hostOf(info.url)); tabUrl.set(tabId, info.url); }
+  if (info.status === "complete") {
+    const narration = narrationStore.current(tabId);
+    if (narration) renderNarration(tabId, narration);
+  }
 });
 // Render an uncaught-exception CDP event as one single-line string: base message, then an
 // optional (url:line) location, then an optional compact [at frame, frame, ...] stack.
@@ -1097,6 +1225,18 @@ function navigatePill(tabId, url) { sendToTab(tabId, { type: "AGENT_NAVIGATE_PIL
 function screenshotFx(tabId) { sendToTab(tabId, { type: "AGENT_SCREENSHOT_FX" }); }
 function zoomFrameCue(tabId, x0, y0, x1, y1) { sendToTab(tabId, { type: "AGENT_ZOOM_FRAME", x0, y0, x1, y1 }); }
 function waitPulse(tabId) { sendToTab(tabId, { type: "AGENT_WAIT_PULSE" }); }
+// ADR-0072: render one active narration record. Replays pass the record's remaining duration;
+// an expired record is filtered by the pure store before this function is called.
+function renderNarration(tabId, narration) {
+  const durationMs = Math.max(1, Math.round(narration.remainingMs || narration.durationMs));
+  return sendToTab(tabId, {
+    type: "AGENT_NARRATION",
+    generation: narration.generation,
+    text: narration.text,
+    position: narration.position,
+    durationMs,
+  });
+}
 const { KEY_MAP, BUTTON_BITS, modifierBits, keyCode, VK_NAMED, VK_PUNCT, CODE_PUNCT, vkCode, SHIFT_BASE, charKeyInfo } = self.GhostlightKeys;
 // CLICK_GAP_MS (press/release + inter-click spacing) comes from lib/constants.js.
 async function click(tabId, x, y, opts) {
@@ -1579,19 +1719,38 @@ const handlers = {
   // the seed frame and every kept screencast frame flow to the binary as gif_frame events.
   async gif_capture_start(a) {
     const tabId = await effectiveTabId(a.tabId);
+    if (!a.recordingId || !Number.isSafeInteger(a.generation)) {
+      throw hopError("binary", "gif_capture_start requires recording identity");
+    }
+    const cast = {
+      recordingId: a.recordingId,
+      generation: a.generation,
+      nextSequence: 0,
+      minIntervalMs: a.minIntervalMs || 200,
+      lastSentTs: 0,
+      leaseDeadline: Date.now() + boundedGifTimeout(a.leaseMs, 15000),
+      hardDeadline: Date.now() + boundedGifTimeout(a.hardTimeoutMs, 120000),
+      expiryTimer: null,
+    };
+    gifCast.set(tabId, cast);
+    armGifExpiry(tabId, cast);
     let seeded = 0;
     let vpW = null;
     try {
       const shot = await screenshot(tabId);
       const sctx = screenshotCtx.get(tabId);
       vpW = (sctx && sctx.vpW) || null;
-      sendGifFrame(tabId, shot.base64, vpW);
+      sendGifFrame(tabId, cast, shot.base64, vpW, false);
+      cast.lastSentTs = Date.now();
       seeded = 1;
     } catch (e) {
       /* the seed is best-effort; the screencast still starts */
     }
-    gifCast.set(tabId, { minIntervalMs: a.minIntervalMs || 200, lastSentTs: seeded ? Date.now() : 0 });
     try {
+      if (gifCast.get(tabId) !== cast || Date.now() >= cast.leaseDeadline ||
+          Date.now() >= cast.hardDeadline) {
+        throw hopError("extension", "capture lease expired during start");
+      }
       await ensureAttached(tabId);
       await enableDomain(tabId, "Page");
       // Change-driven capture (ADR-0052 D1): the compositor emits a frame only when the page
@@ -1602,18 +1761,35 @@ const handlers = {
         maxWidth: a.maxSide || MAX_SIDE,
         maxHeight: a.maxSide || MAX_SIDE,
       });
+      if (gifCast.get(tabId) !== cast) {
+        chrome.debugger.sendCommand({ tabId }, "Page.stopScreencast", {}).catch(() => {});
+        throw hopError("extension", "capture lease expired during start");
+      }
     } catch (e) {
-      gifCast.delete(tabId);
+      if (gifCast.get(tabId) === cast) {
+        if (cast.expiryTimer) clearTimeout(cast.expiryTimer);
+        gifCast.delete(tabId);
+      }
       throw e;
     }
     return text(JSON.stringify({ seeded, vpW }));
   },
   async gif_capture_stop(a) {
     const tabId = await effectiveTabId(a.tabId);
-    gifCast.delete(tabId);
-    if (attached.has(tabId)) {
-      try { await cdp(tabId, "Page.stopScreencast", {}); } catch (e) { /* already detached */ }
+    const cast = gifCast.get(tabId);
+    if (!cast || cast.recordingId !== a.recordingId || cast.generation !== a.generation) {
+      throw hopError("binary", "capture generation is no longer active");
     }
+    // Final-data-before-stop barrier (ADR-0073): post the final frame before this handler's tool
+    // response. Native-port ordering makes the service receive the frame before the reply.
+    try {
+      const shot = await screenshot(tabId);
+      const sctx = screenshotCtx.get(tabId);
+      sendGifFrame(tabId, cast, shot.base64, (sctx && sctx.vpW) || null, true);
+    } catch (e) {
+      /* final capture is best-effort; the service can preserve an interrupted recording */
+    }
+    stopGifCast(tabId, cast, null);
     return text("Screencast stopped.");
   },
   // Rescale model-space points (read off the downscaled screenshot) to CSS viewport px against
@@ -1781,6 +1957,45 @@ const handlers = {
     const domains = (a.domains || []).join(", ");
     const approach = (a.approach || []).map((s) => `- ${s}`).join("\n");
     return text(`Plan (auto-approved by the v1.0 engine):\nDomains: ${domains}\n${approach}`);
+  },
+  async narrate(a) {
+    const tabId = await effectiveTabId(a.tabId);
+    if (typeof a.text !== "string" || a.text.trim().length === 0 || a.text.length > 240) {
+      throw hopError("page", "text must be one non-empty sentence of at most 240 characters");
+    }
+    if (a.position !== undefined && !["auto", "top", "bottom"].includes(a.position)) {
+      throw hopError("page", 'position must be one of "auto", "top", or "bottom"');
+    }
+    if (a.duration_ms !== undefined &&
+        (!Number.isInteger(a.duration_ms) || a.duration_ms < 1000 || a.duration_ms > 30000)) {
+      throw hopError("page", "duration_ms must be an integer from 1000 through 30000");
+    }
+
+    const { record, replaced } = narrationStore.show(
+      tabId,
+      a.text,
+      a.position,
+      a.duration_ms
+    );
+    const response = await renderNarration(tabId, record);
+    setTimeout(() => narrationStore.remove(tabId, record.generation), record.durationMs + 50);
+
+    const shown = !!(response && response.shown === true);
+    const reason = shown
+      ? null
+      : ((response && response.reason) || "the visual layer is unavailable on this page");
+    const effectivePosition = (response && response.position) || record.position;
+    const out = text(shown
+      ? `Narration shown at ${effectivePosition} for ${record.durationMs}ms.`
+      : `Narration not shown: ${reason}.`);
+    out.structuredContent = {
+      shown,
+      position: effectivePosition,
+      duration_ms: record.durationMs,
+      replaced,
+    };
+    if (reason) out.structuredContent.reason = reason;
+    return out;
   },
   // Internal read for form_fill (ADR-0036 D5, PINS.md SS12): NOT in the tool REGISTRY, so models
   // cannot call it -- only form_fill's handler dials it via browser.call. Returns the value-free

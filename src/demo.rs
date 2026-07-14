@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! `ghostlight demo`: a scripted tour of the public demo stage
 //! (sylin.org/ghostlight/demo), driven as an ordinary MCP client so it exercises the REAL tool
-//! surface -- the same path Claude takes. Cross-platform, superseding the Windows-only
-//! `scripts/live-demo.ps1` (which predates the ADR-0046/0051 service split and no longer works).
+//! surface -- the same path Claude takes. Cross-platform, superseding the pre-ADR-0046/0051
+//! PowerShell harnesses that directly spawned the old single-process server.
 //!
 //! It connects by spawning `ghostlight-relay --role agent` and speaking newline-delimited
 //! JSON-RPC over its stdio -- the relay handles all the connect/handshake/reconnect resilience, so
@@ -26,12 +26,17 @@ use tokio::process::{Child, ChildStdin, ChildStdout};
 /// the whole tour works on the demo pages and the finale's off-domain navigation is refused.
 const DEMO_POLICY: &str = include_str!("../examples/demo-policy.json");
 
+/// How long each chapter caption remains visible and how long the demo waits before acting. The
+/// matching values make narration a deliberate chapter card instead of an overlay the next action
+/// races underneath.
+const NARRATION_DURATION: Duration = Duration::from_secs(6);
+
 /// The demo's three watchability rhythms, all operator-tunable: a short beat after each visible
 /// step, a long hold right after the tab opens (time to resize/position the window before the
 /// tour starts), and a breather between sections so each "test" reads as its own scene.
 #[derive(Debug, Clone, Copy)]
 pub struct Pacing {
-    /// Seconds after each visible step (`--pause`, default 2).
+    /// Seconds after each visible step (`--pause`, default 3).
     pub step_secs: f64,
     /// Seconds after the demo tab opens, before the tour starts (`--setup-pause`, default 10).
     pub setup_secs: f64,
@@ -201,6 +206,24 @@ async fn section_break(pacing: &Pacing) {
     tokio::time::sleep(Duration::from_secs_f64(pacing.section_secs.max(0.0))).await;
 }
 
+/// Put the demo's own semantic caption track on screen, then leave it undisturbed for its full
+/// lifetime so the sentence reads as a chapter card before the section begins. The visual layer
+/// controls replacement and expiry; this helper is only pacing and copy.
+async fn narrate(c: &mut Client, tab_id: i64, message: &str) -> Result<()> {
+    c.call_tool(
+        "narrate",
+        json!({
+            "tabId": tab_id,
+            "text": message,
+            "position": "auto",
+            "duration_ms": NARRATION_DURATION.as_millis()
+        }),
+    )
+    .await?;
+    tokio::time::sleep(NARRATION_DURATION).await;
+    Ok(())
+}
+
 /// Run the whole scripted tour. Returns an error (non-zero exit) if any step fails, so this
 /// doubles as an end-to-end smoke test.
 async fn drive(base: String, pacing: Pacing) -> Result<()> {
@@ -244,6 +267,18 @@ async fn drive(base: String, pacing: Pacing) -> Result<()> {
     )
     .await?;
     c.pause().await;
+    narrate(
+        &mut c,
+        tab_id,
+        "Ghostlight works in the browser session you already use.",
+    )
+    .await?;
+    narrate(
+        &mut c,
+        tab_id,
+        "The agent can point, click, and type visibly.",
+    )
+    .await?;
     if let Some(btn) = find_ref(&mut c, tab_id, "the big call-to-action button").await? {
         c.call_tool(
             "computer",
@@ -258,6 +293,7 @@ async fn drive(base: String, pacing: Pacing) -> Result<()> {
             json!({ "action": "left_click", "tabId": tab_id, "ref": field }),
         )
         .await?;
+        c.pause().await;
         c.call_tool("computer", json!({ "action": "type", "tabId": tab_id, "text": "Ghostlight is watching the stage." })).await?;
         c.pause().await;
     }
@@ -271,6 +307,12 @@ async fn drive(base: String, pacing: Pacing) -> Result<()> {
     )
     .await?;
     c.pause().await;
+    narrate(
+        &mut c,
+        tab_id,
+        "Structured tools can complete an entire form.",
+    )
+    .await?;
     c.call_tool(
         "form_fill",
         json!({
@@ -285,6 +327,7 @@ async fn drive(base: String, pacing: Pacing) -> Result<()> {
         }),
     )
     .await?;
+    c.pause().await;
     let _ = c
         .call_tool(
             "wait_for",
@@ -302,15 +345,23 @@ async fn drive(base: String, pacing: Pacing) -> Result<()> {
     )
     .await?;
     c.pause().await;
+    narrate(
+        &mut c,
+        tab_id,
+        "The agent can inspect console and network signals.",
+    )
+    .await?;
     if let Some(log_btn) = find_ref(&mut c, tab_id, "the log to the console button").await? {
         c.call_tool(
             "computer",
             json!({ "action": "left_click", "tabId": tab_id, "ref": log_btn }),
         )
         .await?;
+        c.pause().await;
         let _ = c
             .call_tool("read_console_messages", json!({ "tabId": tab_id }))
             .await;
+        c.pause().await;
     }
     if let Some(fetch_btn) = find_ref(&mut c, tab_id, "the fetch demo data button").await? {
         c.call_tool(
@@ -318,9 +369,11 @@ async fn drive(base: String, pacing: Pacing) -> Result<()> {
             json!({ "action": "left_click", "tabId": tab_id, "ref": fetch_btn }),
         )
         .await?;
+        c.pause().await;
         let _ = c
             .call_tool("read_network_requests", json!({ "tabId": tab_id }))
             .await;
+        c.pause().await;
     }
     if let Some(slow_btn) = find_ref(&mut c, tab_id, "the start a slow task button").await? {
         c.call_tool(
@@ -328,6 +381,7 @@ async fn drive(base: String, pacing: Pacing) -> Result<()> {
             json!({ "action": "left_click", "tabId": tab_id, "ref": slow_btn }),
         )
         .await?;
+        c.pause().await;
         let _ = c
             .call_tool(
                 "wait_for",
@@ -346,6 +400,12 @@ async fn drive(base: String, pacing: Pacing) -> Result<()> {
     )
     .await?;
     c.pause().await;
+    narrate(
+        &mut c,
+        tab_id,
+        "It can read page content without moving the session elsewhere.",
+    )
+    .await?;
     let text = c
         .call_tool("get_page_text", json!({ "tabId": tab_id }))
         .await?;
@@ -355,6 +415,12 @@ async fn drive(base: String, pacing: Pacing) -> Result<()> {
 
     // --- The guardrail: the whole point ---
     section_break(&pacing).await;
+    narrate(
+        &mut c,
+        tab_id,
+        "Policy still decides where the agent may go.",
+    )
+    .await?;
     step("The guardrail: ask Ghostlight to step off the granted domain -- it should refuse");
     let outcome = c
         .call_tool(
@@ -365,6 +431,7 @@ async fn drive(base: String, pacing: Pacing) -> Result<()> {
     if outcome.starts_with("Denied") {
         println!("   refused, on screen and in plain language:");
         println!("   {outcome}");
+        c.pause().await;
         println!("\nDemo complete -- every tool ran, and the guardrail held.");
         Ok(())
     } else {

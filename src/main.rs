@@ -83,8 +83,8 @@ struct DemoArgs {
     /// (e.g. http://localhost:8080/ghostlight/demo).
     #[arg(long, default_value = "https://sylin.org/ghostlight/demo")]
     base_url: String,
-    /// Seconds to pause after each visible step so you can watch it happen. Default 2.
-    #[arg(long, default_value_t = 2.0)]
+    /// Seconds to pause after each visible step so you can watch it happen. Default 3.
+    #[arg(long, default_value_t = 3.0)]
     pause: f64,
     /// Seconds to wait right after the demo tab opens, so you can resize and position the
     /// browser window before the tour starts. Default 10.

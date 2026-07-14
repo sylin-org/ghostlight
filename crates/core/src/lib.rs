@@ -14,5 +14,6 @@ pub mod install;
 pub mod mcp;
 pub mod messages;
 pub mod origin;
+pub(crate) mod recording;
 
 pub use ghostlight_transport::error::{Error, Result, ToolError};

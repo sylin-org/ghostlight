@@ -32,6 +32,7 @@ consistent on-page treatment: a small visual "dictionary" the phantom cursor spe
 | zoom | a magnifier frame closes on the captured region |
 | read_page / find / get_page_text | a scan-line sweeps down the page ("the agent is reading") |
 | wait | a soft breathing dot |
+| narrate | a timed, responsive sky-accent Agent ribbon that explains a meaningful workflow phase |
 | ambient | the "agent active" glow while a tool runs, plus an optional action caption (below) |
 
 The scan-line is ours: no recording tool has it, because none of them is an agent reading a page.
@@ -40,13 +41,16 @@ The scan-line is ours: no recording tool has it, because none of them is an agen
 
 - **Render layer:** `extension/agent-visual-indicator.js` (a policy-free content script). Each
   treatment is a small function that appends an ephemeral, pointer-transparent element to the FX
-  layer and removes it when its animation ends. Timings are constants at the top of that file.
+  layer and removes it when its animation ends. Narration is the bounded-state exception: the
+  service worker owns its timer and navigation replay. Timings are constants at the top of those
+  files.
 - **Triggers:** `extension/service-worker.js` sends one message per action
   (`AGENT_TARGET_GLOW`, `AGENT_KEYSTROKE`, `AGENT_SCROLL_CUE`, `AGENT_READ_SCAN`,
-  `AGENT_NAVIGATE_PILL`, `AGENT_SCREENSHOT_FX`, `AGENT_ZOOM_FRAME`, `AGENT_WAIT_PULSE`) at the point
+  `AGENT_NAVIGATE_PILL`, `AGENT_SCREENSHOT_FX`, `AGENT_ZOOM_FRAME`, `AGENT_WAIT_PULSE`,
+  `AGENT_NARRATION`) at the point
   the action runs. The worker holds mechanism only; the effects carry no policy.
 - **Interactive reference:** the vocabulary was designed and approved in a standalone preview that
-  plays each treatment on a mock browser, preserved verbatim at
+  plays each treatment on a mock browser, preserved and extended at
   [visual-feedback-dictionary.html](visual-feedback-dictionary.html). Open it in a browser and click
   any entry to replay a single effect, or "Run the tour" for the full sequence. It is a good source
   for a marketing GIF, separate from the store screenshots, which should show the real extension.
@@ -56,6 +60,16 @@ The scan-line is ours: no recording tool has it, because none of them is an agen
 An optional subtitle track (`SET_CAPTIONS`) names the current action bottom-center: gorgeous for a
 recorded demo, too chatty for everyday driving, so it is off unless turned on. It is hidden during
 captures like every other effect, so it never lands in the model's image.
+
+## Agent narration
+
+`narrate` is the semantic track for a person watching a longer workflow. It is not a mechanical
+action caption and cannot imitate the governance ribbon. One wide edge ribbon appears per tab, a
+new call replaces it, and the original deadline survives navigation. `auto` chooses top or bottom
+once, away from recent focus, pointer, and scroll activity; explicit edges stay deterministic. The
+ribbon does not chase the user after it appears. It requires no RAWX capability because it does not
+touch page content. It still follows tab ownership, audit, take-the-wheel, capture hiding, and the
+visual-effects preference.
 
 ## Sources
 

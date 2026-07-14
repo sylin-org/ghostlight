@@ -20,9 +20,9 @@ pub fn host_name() -> String {
 /// Human-readable description written into the native-messaging host manifest.
 pub const HOST_DESCRIPTION: &str = "Ghostlight native messaging host";
 
-/// Upper bound on a single framed message. Chrome caps host->extension messages at 1 MiB; we allow
-/// a generous ceiling for binary<->extension traffic (screenshots) and reject anything larger as
-/// almost certainly a framing desync.
+/// Upper bound on generic framed IPC input. This is a corruption guard, not Chrome's directional
+/// contract: the core browser adapter separately keeps host-to-extension messages below Chrome's
+/// 1 MiB limit and uses bounded negotiated chunks for larger ordinary requests (ADR-0074).
 pub const MAX_MESSAGE_LEN: u32 = 128 * 1024 * 1024;
 
 /// Frame a payload as a native message: a 4-byte little-endian length prefix + the payload bytes.

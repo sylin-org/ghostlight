@@ -67,12 +67,14 @@ use crate::ToolError;
 use ghostlight_transport::host;
 use ghostlight_transport::observability::DebugSink;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, watch};
+use zeroize::Zeroizing;
 
 /// A kill hook: `Fn`, not `FnOnce`, because it is stored and may (in principle) be invoked more
 /// than once across the `Browser`'s lifetime -- once per kill event, across however many kills
@@ -90,6 +92,15 @@ type KillHooks = Arc<Mutex<Vec<(u64, KillHook)>>>;
 
 /// How long to wait for the extension to answer a single tool call before giving up.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
+/// Browser final-frame barriers are deliberately much shorter than an ordinary tool timeout.
+const RECORDING_BARRIER_TIMEOUT: Duration = Duration::from_secs(5);
+/// Conservative payload ceiling below Chrome's 1 MiB host-to-extension native-message limit.
+const CHROME_OUTBOUND_PAYLOAD_LIMIT: usize = 900 * 1024;
+/// Raw bytes carried by one base64 wire chunk; its JSON envelope remains below the limit above.
+const WIRE_CHUNK_BYTES: usize = 512 * 1024;
+/// Extension reassembly bound for one ordinary serialized request.
+const MAX_CHUNKED_REQUEST_BYTES: usize = 32 * 1024 * 1024;
+const CHUNKED_HOST_MESSAGES_V1: &str = "chunkedHostMessagesV1";
 
 /// Bounded reconnect grace window (ADR-0030 Decision 3, "D1 -- the honest singleton queue":
 /// "truthful failure on a real drop"; PINNED in PINS.md SS4). STRICTLY LESS THAN
@@ -115,6 +126,14 @@ fn kill_error() -> ToolError {
 /// Delivered to a waiting caller: `Ok(result)` or `Err(hop-attributed tool error)`.
 type CallResult = std::result::Result<Value, ToolError>;
 type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<CallResult>>>>;
+
+/// Failure from a side-effecting request, including whether bytes entered the browser session
+/// without a conclusive reply. Callers use this bit to avoid retrying an operation that may have
+/// completed in the page.
+pub(crate) struct DeliveryFailure {
+    pub(crate) error: ToolError,
+    pub(crate) outcome_unknown: bool,
+}
 
 /// A screenshot cached per session for later `upload_image` reference (ADR-0050 Decision 4). Holds
 /// the base64 bytes and the media type exactly as the extension's `computer` screenshot result
@@ -173,6 +192,13 @@ fn merge_tab_id(args: &Value, native: i64) -> Value {
         obj.insert("tabId".to_string(), json!(native));
     }
     owned
+}
+
+fn is_recording_internal_tool(tool: &str) -> bool {
+    matches!(
+        tool,
+        "gif_capture_start" | "gif_capture_stop" | "rescale_coords" | "upload_image_exec"
+    )
 }
 
 /// Recursively rewrite every plain-number `"tabId"` key in `v` to its composite form (ADR-0058),
@@ -272,8 +298,9 @@ fn parse_rescaled_points(reply: &Value) -> Option<Vec<(f64, f64)>> {
 /// attach (a reconnect from the same browser) has already replaced it -- and if so, leave the
 /// newer entry alone.
 struct BrowserSession {
-    sender: mpsc::UnboundedSender<Vec<u8>>,
+    sender: mpsc::UnboundedSender<Zeroizing<Vec<u8>>>,
     generation: u64,
+    chunked_host_messages_v1: bool,
 }
 
 /// A cloneable handle the mcp-server uses to call tools on the extension.
@@ -333,9 +360,10 @@ pub struct Browser {
     /// sends no `clientKey`, and the extension falls back to guid-keying. Bounded by the number of
     /// distinct sessions this service lifetime; never evicted (tiny, like the slot map).
     client_keys: Arc<Mutex<HashMap<String, String>>>,
-    /// gif_creator recording sessions (ADR-0053 D3/D4): per-tab state + disk-backed frames, fed by
-    /// the extension's unsolicited `gif_frame` events and read back at export.
-    recordings: Arc<super::recording::RecordingStore>,
+    /// Session/surface/generation-scoped, memory-only GIF recordings (ADR-0073).
+    recordings: Arc<crate::recording::RecordingCoordinator>,
+    /// Starts the one process-local deadline and health-lease supervisor lazily.
+    recording_supervisor_started: Arc<AtomicBool>,
 }
 
 impl Browser {
@@ -364,7 +392,8 @@ impl Browser {
             next_hook_id: Arc::new(AtomicU64::new(1)),
             screenshot_cache: Arc::new(Mutex::new(HashMap::new())),
             client_keys: Arc::new(Mutex::new(HashMap::new())),
-            recordings: Arc::new(super::recording::RecordingStore::new()),
+            recordings: Arc::new(crate::recording::RecordingCoordinator::new()),
+            recording_supervisor_started: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -405,6 +434,8 @@ impl Browser {
         let was_held = guard.is_some();
         if held && !was_held {
             *guard = Some(Instant::now());
+            self.recordings
+                .interrupt_all(crate::recording::StopReason::UserHold);
             tracing::info!("user hold engaged");
         } else if !held && was_held {
             *guard = None;
@@ -419,6 +450,8 @@ impl Browser {
         let now_held = guard.is_none();
         if now_held {
             *guard = Some(Instant::now());
+            self.recordings
+                .interrupt_all(crate::recording::StopReason::UserHold);
             tracing::info!("user hold engaged");
         } else {
             *guard = None;
@@ -652,12 +685,84 @@ impl Browser {
             None => args,
         };
 
+        let activity_surface = native_tab.map(|native_tab| crate::recording::SurfaceId {
+            slot: target,
+            native_tab,
+        });
+        let activity_admitted = activity_surface.is_some_and(|surface| {
+            !is_recording_internal_tool(tool) && self.recordings.begin_activity(guid, surface)
+        });
+
         // gif_creator (ADR-0053 D4): while this tab records, note the action BEFORE it runs so
         // the screencast frame its paint produces is the frame that carries its ring/label.
         self.note_gif_action(guid, tool, call_args, target).await;
-        let result = self.raw_call(guid, tool, call_args, target).await?;
+        let result = self.raw_call(guid, tool, call_args, target).await;
+        if activity_admitted {
+            self.recordings.finish_activity(
+                guid,
+                activity_surface.expect("admitted activity has a surface"),
+            );
+        }
+        let result = result?;
         let result = self.encode_tab_ids(result, target);
         Ok(self.cache_and_inject_screenshot(guid, tool, result))
+    }
+
+    /// Invoke a side-effecting extension operation while preserving outcome uncertainty.
+    ///
+    /// A timeout, disconnect, or partial enqueue after at least one frame entered the browser
+    /// session is reported with `outcome_unknown = true`. A local preparation failure, absent
+    /// session, or explicit extension error remains a conclusive failure. This is intentionally
+    /// separate from [`Browser::call`], whose historical error surface cannot carry that bit.
+    pub(crate) async fn call_with_delivery_outcome(
+        &self,
+        guid: &str,
+        tool: &str,
+        args: &Value,
+    ) -> std::result::Result<Value, DeliveryFailure> {
+        if self.killed.load(Ordering::SeqCst) {
+            return Err(DeliveryFailure {
+                error: kill_error(),
+                outcome_unknown: false,
+            });
+        }
+
+        let composite = args.get("tabId").and_then(Value::as_i64);
+        let (target, native_tab) = self.resolve_target(composite);
+        let Some(target) = target else {
+            return Err(DeliveryFailure {
+                error: ToolError::extension("Browser extension not connected"),
+                outcome_unknown: false,
+            });
+        };
+        let owned_args;
+        let call_args = match native_tab {
+            Some(native) => {
+                owned_args = merge_tab_id(args, native);
+                &owned_args
+            }
+            None => args,
+        };
+
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
+        let mut request = json!({ "id": id, "type": "tool_request", "tool": tool, "args": call_args, "guid": guid });
+        if let Some(client_key) = self.client_key_for(guid) {
+            request["clientKey"] = json!(client_key);
+        }
+        let payload = serde_json::to_vec(&request)
+            .map(Zeroizing::new)
+            .map_err(|error| DeliveryFailure {
+                error: ToolError::binary(format!("failed to encode the tool request: {error}")),
+                outcome_unknown: false,
+            })?;
+        let frames = self
+            .outbound_frames(target, &id, &payload)
+            .map_err(|error| DeliveryFailure {
+                error,
+                outcome_unknown: false,
+            })?;
+        self.send_and_await_delivery(id, frames, tool, target, TOOL_TIMEOUT)
+            .await
     }
 
     /// The bare envelope + dispatch of [`Browser::call`], shared with internal sends that must not
@@ -670,6 +775,18 @@ impl Browser {
         args: &Value,
         target: u32,
     ) -> std::result::Result<Value, ToolError> {
+        self.raw_call_with_timeout(guid, tool, args, target, TOOL_TIMEOUT)
+            .await
+    }
+
+    async fn raw_call_with_timeout(
+        &self,
+        guid: &str,
+        tool: &str,
+        args: &Value,
+        target: u32,
+        timeout: Duration,
+    ) -> std::result::Result<Value, ToolError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
         let mut request =
             json!({ "id": id, "type": "tool_request", "tool": tool, "args": args, "guid": guid });
@@ -679,11 +796,8 @@ impl Browser {
         if let Some(client_key) = self.client_key_for(guid) {
             request["clientKey"] = json!(client_key);
         }
-        let framed = match serde_json::to_vec(&request)
-            .map_err(|e| e.to_string())
-            .and_then(|bytes| host::encode(&bytes).map_err(|e| e.to_string()))
-        {
-            Ok(framed) => framed,
+        let payload = match serde_json::to_vec(&request) {
+            Ok(payload) => Zeroizing::new(payload),
             Err(e) => {
                 let err = ToolError::binary(format!("failed to encode the tool request: {e}"));
                 self.debug.tool_begin(&id, tool);
@@ -691,12 +805,231 @@ impl Browser {
                 return Err(err);
             }
         };
-        self.send_and_await(id, framed, tool, target).await
+        let frames = self.outbound_frames(target, &id, &payload)?;
+        self.send_and_await(id, frames, tool, target, timeout).await
     }
 
-    /// The gif_creator recording sessions (ADR-0053), for the orchestrator handler.
-    pub(crate) fn recordings(&self) -> &super::recording::RecordingStore {
+    fn outbound_frames(
+        &self,
+        target: u32,
+        request_id: &str,
+        payload: &[u8],
+    ) -> std::result::Result<Vec<Zeroizing<Vec<u8>>>, ToolError> {
+        if payload.len() <= CHROME_OUTBOUND_PAYLOAD_LIMIT {
+            return host::encode(payload)
+                .map(|frame| vec![Zeroizing::new(frame)])
+                .map_err(|error| ToolError::binary(format!("failed to frame request: {error}")));
+        }
+        if payload.len() > MAX_CHUNKED_REQUEST_BYTES {
+            return Err(ToolError::binary(format!(
+                "Browser-bound request is {} bytes; the memory-only transport limit is {} bytes",
+                payload.len(),
+                MAX_CHUNKED_REQUEST_BYTES
+            )));
+        }
+        let supports_chunks = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&target)
+            .is_some_and(|session| session.chunked_host_messages_v1);
+        if !supports_chunks {
+            return Err(ToolError::extension(
+                "This Ghostlight extension is too old for bounded large-value transport",
+            )
+            .next_step("update or reload the Ghostlight extension, then retry"));
+        }
+
+        let transfer_id = format!("wire_{}", uuid::Uuid::new_v4().simple());
+        let digest = Sha256::digest(payload);
+        let sha256: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let count = payload.len().div_ceil(WIRE_CHUNK_BYTES);
+        let mut frames = Vec::with_capacity(count);
+        for (index, chunk) in payload.chunks(WIRE_CHUNK_BYTES).enumerate() {
+            let message = json!({
+                "type": "wire_chunk",
+                "transferId": transfer_id,
+                "requestId": request_id,
+                "index": index,
+                "count": count,
+                "totalBytes": payload.len(),
+                "sha256": sha256,
+                "data": crate::b64::encode(chunk),
+            });
+            let bytes = serde_json::to_vec(&message).map_err(|error| {
+                ToolError::binary(format!("failed to encode request chunk: {error}"))
+            })?;
+            if bytes.len() > CHROME_OUTBOUND_PAYLOAD_LIMIT {
+                return Err(ToolError::binary(
+                    "request chunk exceeded the Chrome-safe bound",
+                ));
+            }
+            frames.push(Zeroizing::new(host::encode(&bytes).map_err(|error| {
+                ToolError::binary(format!("failed to frame request chunk: {error}"))
+            })?));
+        }
+        Ok(frames)
+    }
+
+    /// The memory-only recording coordinator (ADR-0073), for local orchestration and cleanup.
+    pub(crate) fn recordings(&self) -> &crate::recording::RecordingCoordinator {
         &self.recordings
+    }
+
+    /// Start the process-local recording deadline and lease supervisor exactly once.
+    pub(crate) fn ensure_recording_supervisor(&self) {
+        if self
+            .recording_supervisor_started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
+        if tokio::runtime::Handle::try_current().is_err() {
+            self.recording_supervisor_started
+                .store(false, Ordering::SeqCst);
+            return;
+        }
+        let browser = self.clone();
+        tokio::spawn(async move {
+            let mut deadlines = tokio::time::interval(Duration::from_secs(1));
+            let mut last_renewal = Instant::now()
+                .checked_sub(crate::recording::HEALTH_RENEW_INTERVAL)
+                .unwrap_or_else(Instant::now);
+            loop {
+                deadlines.tick().await;
+                for due in browser.recordings.poll_deadlines() {
+                    let worker = browser.clone();
+                    tokio::spawn(async move {
+                        worker.finalize_due_recording(due).await;
+                    });
+                }
+                if last_renewal.elapsed() >= crate::recording::HEALTH_RENEW_INTERVAL {
+                    for target in browser.recordings.lease_targets() {
+                        browser.send_recording_renewal(&target);
+                    }
+                    last_renewal = Instant::now();
+                }
+            }
+        });
+    }
+
+    async fn finalize_due_recording(&self, due: crate::recording::DueFinalization) {
+        let args = json!({
+            "tabId": due.ticket.surface.native_tab,
+            "recordingId": due.ticket.id.as_str(),
+            "generation": due.ticket.generation,
+        });
+        let success = self
+            .raw_call_with_timeout(
+                &due.owner,
+                "gif_capture_stop",
+                &args,
+                due.ticket.surface.slot,
+                RECORDING_BARRIER_TIMEOUT,
+            )
+            .await
+            .is_ok();
+        self.recordings
+            .finish_finalizing(&due.ticket, success, due.reason);
+    }
+
+    /// Stop one exact capture generation through the bounded final-frame barrier.
+    pub(crate) async fn stop_recording_capture(
+        &self,
+        guid: &str,
+        ticket: &crate::recording::RecordingTicket,
+    ) -> std::result::Result<Value, ToolError> {
+        let args = json!({
+            "tabId": ticket.surface.native_tab,
+            "recordingId": ticket.id.as_str(),
+            "generation": ticket.generation,
+        });
+        self.raw_call_with_timeout(
+            guid,
+            "gif_capture_stop",
+            &args,
+            ticket.surface.slot,
+            RECORDING_BARRIER_TIMEOUT,
+        )
+        .await
+    }
+
+    /// Stop one exact capture generation without awaiting a reply, used after immediate erasure.
+    pub(crate) fn cancel_recording_capture(&self, ticket: &crate::recording::RecordingTicket) {
+        self.send_recording_cancel(ticket);
+    }
+
+    fn send_recording_renewal(&self, target: &crate::recording::LeaseTarget) {
+        let message = json!({
+            "type": "gif_lease_renew",
+            "tabId": target.ticket.surface.native_tab,
+            "recordingId": target.ticket.id.as_str(),
+            "generation": target.ticket.generation,
+            "leaseMs": crate::recording::HEALTH_LEASE.as_millis() as u64,
+        });
+        let Ok(bytes) = serde_json::to_vec(&message) else {
+            return;
+        };
+        let Ok(framed) = host::encode(&bytes) else {
+            return;
+        };
+        self.send_fire_and_forget(target.ticket.surface.slot, framed);
+    }
+
+    fn send_recording_cancel(&self, ticket: &crate::recording::RecordingTicket) {
+        self.send_recording_cancel_identity(ticket.surface, ticket.id.as_str(), ticket.generation);
+    }
+
+    fn send_recording_cancel_identity(
+        &self,
+        surface: crate::recording::SurfaceId,
+        recording_id: &str,
+        generation: u64,
+    ) {
+        let message = json!({
+            "type": "gif_capture_cancel",
+            "tabId": surface.native_tab,
+            "recordingId": recording_id,
+            "generation": generation,
+        });
+        let Ok(bytes) = serde_json::to_vec(&message) else {
+            return;
+        };
+        let Ok(framed) = host::encode(&bytes) else {
+            return;
+        };
+        self.send_fire_and_forget(surface.slot, framed);
+    }
+
+    /// Erase all captured content owned by one MCP session and stop matching extension relays.
+    pub(crate) fn erase_session_recordings(&self, guid: &str) {
+        for ticket in self
+            .recordings
+            .end_session(guid, crate::recording::StopReason::SessionEnded)
+        {
+            self.send_recording_cancel(&ticket);
+        }
+    }
+
+    /// Erase all captured content after a global invalidation such as policy reload or panic.
+    pub(crate) fn erase_all_recordings(&self, reason: crate::recording::StopReason) {
+        for ticket in self.recordings.end_all(reason) {
+            self.send_recording_cancel(&ticket);
+        }
+    }
+
+    /// Resolve a model-facing composite tab id into the browser slot + native tab surface used by
+    /// recording identity. Slot-zero legacy ids follow the same live-focus fallback as dispatch.
+    pub(crate) fn recording_surface(
+        &self,
+        composite_tab: i64,
+    ) -> Option<crate::recording::SurfaceId> {
+        let (slot, native) = self.resolve_target(Some(composite_tab));
+        Some(crate::recording::SurfaceId {
+            slot: slot?,
+            native_tab: native?,
+        })
     }
 
     /// While `tool`'s tab is actively recording, describe the action for overlay tagging
@@ -709,13 +1042,16 @@ impl Browser {
         if tool != "computer" && tool != "navigate" {
             return;
         }
-        // `args` here is ALREADY the native (post-rewrite) form (ADR-0058: `Browser::call` passes
-        // its `call_args`, not the caller's original), so this matches `handle_gif_frame`'s own
-        // native-tabId keying of `self.recordings` -- both sides agree on the extension's own id.
+        // `args` here is already the native (post-rewrite) form. The routed slot completes the
+        // surface identity, preventing equal native ids in two browsers from colliding.
         let Some(tab) = args.get("tabId").and_then(Value::as_i64) else {
             return;
         };
-        if !self.recordings.is_active(tab) {
+        let surface = crate::recording::SurfaceId {
+            slot: target,
+            native_tab: tab,
+        };
+        if !self.recordings.is_active(guid, surface) {
             return;
         }
         let Some(mut meta) = crate::gif::describe_action(tool, args) else {
@@ -746,17 +1082,26 @@ impl Browser {
                 }
             }
         }
-        self.recordings.note_action(tab, meta);
+        self.recordings.note_action(guid, surface, meta);
     }
 
     /// One unsolicited `gif_frame` event from the extension's screencast relay (ADR-0053 D2):
     /// hand the base64 JPEG to the recording store (which drops it unless the tab is actively
     /// recording).
-    fn handle_gif_frame(&self, event: &Value) {
+    fn handle_gif_frame(&self, slot: u32, event: &Value) {
         let Some(tab) = event.get("tabId").and_then(Value::as_i64) else {
             return;
         };
         let Some(data) = event.get("data").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(recording_id) = event.get("recordingId").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(generation) = event.get("generation").and_then(Value::as_u64) else {
+            return;
+        };
+        let Some(sequence) = event.get("sequence").and_then(Value::as_u64) else {
             return;
         };
         let ts = event
@@ -764,7 +1109,23 @@ impl Browser {
             .and_then(Value::as_i64)
             .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
         let device_width = event.get("deviceWidth").and_then(Value::as_f64);
-        self.recordings.on_frame(tab, data, ts, device_width);
+        let final_frame = event.get("final").and_then(Value::as_bool) == Some(true);
+        let surface = crate::recording::SurfaceId {
+            slot,
+            native_tab: tab,
+        };
+        if !self.recordings.on_frame(
+            surface,
+            recording_id,
+            generation,
+            sequence,
+            data,
+            ts,
+            device_width,
+            final_frame,
+        ) {
+            self.send_recording_cancel_identity(surface, recording_id, generation);
+        }
     }
 
     /// Re-encode every native tabId the extension reported in `result` back to composite form
@@ -887,7 +1248,13 @@ impl Browser {
             }
         };
         let result = self
-            .send_and_await(id, framed, "tab_url_request", target)
+            .send_and_await(
+                id,
+                vec![Zeroizing::new(framed)],
+                "tab_url_request",
+                target,
+                TOOL_TIMEOUT,
+            )
             .await?;
         Ok(result
             .get("url")
@@ -942,12 +1309,37 @@ impl Browser {
         self.send_fire_and_forget(target, framed);
     }
 
+    /// Clear the transient narration card on each named composite tab when its MCP session ends
+    /// (ADR-0072). This is policy-free, fire-and-forget presentation cleanup: each tab id selects
+    /// its owning browser, and the extension receives only the native tab id. A disconnected
+    /// browser or encoding failure is a harmless no-op; every narration also has a hard 30-second
+    /// lifetime, so cleanup never becomes a correctness dependency.
+    pub fn clear_narrations(&self, tab_ids: &[i64]) {
+        for &tab_id in tab_ids {
+            let (target, native_tab) = self.resolve_target(Some(tab_id));
+            let (Some(target), Some(native_tab)) = (target, native_tab) else {
+                continue;
+            };
+            let Ok(bytes) = serde_json::to_vec(&json!({
+                "type": "narration_clear",
+                "tabId": native_tab,
+            })) else {
+                continue;
+            };
+            let Ok(framed) = host::encode(&bytes) else {
+                continue;
+            };
+            self.send_fire_and_forget(target, framed);
+        }
+    }
+
     /// Enqueue an already-framed, fire-and-forget message onto `target`'s session, dropping it
     /// silently if that browser is not (or no longer) attached -- the shared tail of
-    /// [`Browser::request_group`], [`Browser::notify`], and [`Browser::send_hold_reply`].
+    /// [`Browser::request_group`], [`Browser::clear_narrations`], [`Browser::notify`], and
+    /// [`Browser::send_hold_reply`].
     fn send_fire_and_forget(&self, target: u32, framed: Vec<u8>) {
         if let Some(session) = self.sessions.lock().unwrap().get(&target) {
-            let _ = session.sender.send(framed);
+            let _ = session.sender.send(Zeroizing::new(framed));
         }
     }
 
@@ -1018,21 +1410,45 @@ impl Browser {
     async fn send_and_await(
         &self,
         id: String,
-        framed: Vec<u8>,
+        frames: Vec<Zeroizing<Vec<u8>>>,
         debug_label: &str,
         target: u32,
+        timeout: Duration,
     ) -> CallResult {
+        self.send_and_await_delivery(id, frames, debug_label, target, timeout)
+            .await
+            .map_err(|failure| failure.error)
+    }
+
+    async fn send_and_await_delivery(
+        &self,
+        id: String,
+        frames: Vec<Zeroizing<Vec<u8>>>,
+        debug_label: &str,
+        target: u32,
+        timeout: Duration,
+    ) -> std::result::Result<Value, DeliveryFailure> {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id.clone(), tx);
         self.debug.tool_begin(&id, debug_label);
 
         // Enqueue only if `target`'s session is still attached; otherwise fail fast. The lock is
         // scoped so it is never held across the await below.
-        let sent = {
+        let (sent, sent_count) = {
             let sessions = self.sessions.lock().unwrap();
             match sessions.get(&target) {
-                Some(session) => session.sender.send(framed).is_ok(),
-                None => false,
+                Some(session) => {
+                    let mut sent_count = 0;
+                    let sent = frames.into_iter().all(|frame| {
+                        let sent = session.sender.send(frame).is_ok();
+                        if sent {
+                            sent_count += 1;
+                        }
+                        sent
+                    });
+                    (sent, sent_count)
+                }
+                None => (false, 0),
             }
         };
         if !sent {
@@ -1044,26 +1460,41 @@ impl Browser {
                 ToolError::extension("Browser extension not connected")
             };
             self.debug.tool_end(&id, false, &err.to_string());
-            return Err(err);
+            return Err(DeliveryFailure {
+                error: err,
+                outcome_unknown: sent_count > 0,
+            });
         }
-        self.debug.frame_out();
+        for _ in 0..sent_count {
+            self.debug.frame_out();
+        }
 
-        let outcome = match tokio::time::timeout(TOOL_TIMEOUT, rx).await {
+        let outcome = match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(Ok(result))) => Ok(result),
-            Ok(Ok(Err(err))) => Err(err),
-            Ok(Err(_closed)) => Err(ToolError::extension(
-                "Browser extension disconnected before responding",
-            )
-            .next_step("retry the call; the extension reconnects automatically")),
+            Ok(Ok(Err(err))) => Err(DeliveryFailure {
+                error: err,
+                outcome_unknown: false,
+            }),
+            Ok(Err(_closed)) => Err(DeliveryFailure {
+                error: ToolError::extension("Browser extension disconnected before responding")
+                    .next_step("do not retry automatically; inspect the page before deciding"),
+                outcome_unknown: true,
+            }),
             Err(_elapsed) => {
                 self.pending.lock().unwrap().remove(&id);
-                Err(ToolError::extension("Tool request timed out after 60s")
-                    .next_step("check that Chrome is running and responsive, then retry"))
+                Err(DeliveryFailure {
+                    error: ToolError::extension(format!(
+                        "Tool request timed out after {}ms",
+                        timeout.as_millis()
+                    ))
+                    .next_step("do not retry automatically; inspect the page before deciding"),
+                    outcome_unknown: true,
+                })
             }
         };
         match &outcome {
-            Ok(v) => self.debug.tool_end(&id, true, &v.to_string()),
-            Err(e) => self.debug.tool_end(&id, false, &e.to_string()),
+            Ok(_) => self.debug.tool_end(&id, true, ""),
+            Err(failure) => self.debug.tool_end(&id, false, &failure.error.to_string()),
         }
         outcome
     }
@@ -1135,20 +1566,27 @@ impl Browser {
         // bounded by IDENTITY_WINDOW so a silent or pre-0061 peer that never sends it is rejected
         // (fail closed) rather than parking this connection task on a read that never completes. The
         // relay's `browserPid` is no longer consulted for identity; there is no pid fallback.
-        let browser_id =
+        let identity_bytes =
             match tokio::time::timeout(IDENTITY_WINDOW, host::read_message(&mut read_half)).await {
-                Ok(Ok(Some(bytes))) => {
-                    ghostlight_transport::handshake::parse_extension_identity(&bytes)
-                }
-                _ => None,
+                Ok(Ok(Some(bytes))) => bytes,
+                _ => Vec::new(),
             };
+        let browser_id = ghostlight_transport::handshake::parse_extension_identity(&identity_bytes);
         let Some(browser_id) = browser_id else {
             self.debug.ipc_note(&Diagnostic::MissingIdentity.describe());
             return AttachOutcome::AlreadyAttached;
         };
+        let chunked_host_messages_v1 = serde_json::from_slice::<Value>(&identity_bytes)
+            .ok()
+            .and_then(|identity| identity.get("features").and_then(Value::as_array).cloned())
+            .is_some_and(|features| {
+                features
+                    .iter()
+                    .any(|feature| feature.as_str() == Some(CHUNKED_HOST_MESSAGES_V1))
+            });
         let slot = self.slot_for(&browser_id);
 
-        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Zeroizing<Vec<u8>>>();
         let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
         let replaced = {
             let mut sessions = self.sessions.lock().unwrap();
@@ -1158,6 +1596,7 @@ impl Browser {
                 BrowserSession {
                     sender: tx,
                     generation,
+                    chunked_host_messages_v1,
                 },
             );
             replaced
@@ -1223,6 +1662,10 @@ impl Browser {
                     .ipc_note(&Diagnostic::DetachedStale { slot }.describe());
             }
             self.focus_chain.lock().unwrap().retain(|s| *s != slot);
+        }
+        if !self.sessions.lock().unwrap().contains_key(&slot) {
+            self.recordings
+                .interrupt_slot(slot, crate::recording::StopReason::BrowserDisconnected);
         }
         let still_connected = self.is_connected();
         self.debug.set_connected(still_connected);
@@ -1311,7 +1754,31 @@ impl Browser {
             // gif_creator capture (ADR-0053 D2): the first unsolicited extension event beyond the
             // handshake. Unknown id-less event types keep falling through to the generic
             // event/heartbeat return below, so protocol skew stays harmless.
-            self.handle_gif_frame(&reply);
+            self.handle_gif_frame(slot, &reply);
+            return;
+        }
+
+        if reply.get("id").is_none() && msg_type == Some("gif_capture_ended") {
+            let (Some(tab), Some(recording_id), Some(generation)) = (
+                reply.get("tabId").and_then(Value::as_i64),
+                reply.get("recordingId").and_then(Value::as_str),
+                reply.get("generation").and_then(Value::as_u64),
+            ) else {
+                return;
+            };
+            self.recordings.interrupt_identity(
+                crate::recording::SurfaceId {
+                    slot,
+                    native_tab: tab,
+                },
+                recording_id,
+                generation,
+                match reply.get("reason").and_then(Value::as_str) {
+                    Some("hard_timeout") => crate::recording::StopReason::HardTimeout,
+                    Some("browser_detached") => crate::recording::StopReason::BrowserDisconnected,
+                    _ => crate::recording::StopReason::LeaseExpired,
+                },
+            );
             return;
         }
 
@@ -1336,8 +1803,8 @@ impl Browser {
                     .unwrap_or("tool execution failed")
                     .to_string();
                 let hop = reply.get("hop").and_then(Value::as_str);
-                if let Some(detail) = reply.get("detail").and_then(Value::as_str) {
-                    tracing::debug!(detail, "extension error detail");
+                if reply.get("detail").is_some() {
+                    tracing::debug!("extension supplied redacted error detail");
                 }
                 Err(ToolError::from_extension_wire(hop, message))
             }
@@ -1395,6 +1862,7 @@ impl Browser {
         if self.killed.swap(true, Ordering::SeqCst) {
             return; // already handled; a duplicate frame is a no-op
         }
+        self.erase_all_recordings(crate::recording::StopReason::Panic);
         for (_, tx) in self.pending.lock().unwrap().drain() {
             let _ = tx.send(Err(kill_error()));
         }
@@ -1565,6 +2033,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn side_effecting_call_treats_an_explicit_error_as_conclusive() {
+        let browser = Browser::new();
+        let mut ext_side = attach_fake_extension(&browser).await;
+
+        tokio::spawn(async move {
+            let request = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let value: Value = serde_json::from_slice(&request).unwrap();
+            let reply = json!({ "id": value["id"], "type": "tool_error", "error": "rejected" });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+        });
+
+        let failure = browser
+            .call_with_delivery_outcome("test-guid", "upload_image_exec", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(!failure.outcome_unknown);
+        assert!(failure.error.to_string().contains("rejected"));
+    }
+
+    #[tokio::test]
+    async fn side_effecting_call_treats_a_missing_reply_after_enqueue_as_unknown() {
+        let browser = Browser::new();
+        let (_ext_side, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        let frame = Zeroizing::new(host::encode(b"{}").unwrap());
+
+        let failure = browser
+            .send_and_await_delivery(
+                "uncertain-id".into(),
+                vec![frame],
+                "upload_image_exec",
+                slot,
+                Duration::from_millis(10),
+            )
+            .await
+            .unwrap_err();
+        assert!(failure.outcome_unknown);
+        assert!(failure.error.to_string().contains("timed out"));
+    }
+
+    #[tokio::test]
     async fn call_without_a_connection_fails_fast() {
         let browser = Browser::new();
         let err = browser
@@ -1574,6 +2084,53 @@ mod tests {
         let text = err.to_string();
         assert!(text.starts_with("[hop: extension]"), "{text}");
         assert!(text.contains("not connected"), "{text}");
+    }
+
+    #[test]
+    fn oversized_requests_require_negotiated_chunk_transport() {
+        let browser = Browser::new();
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        browser.sessions.lock().unwrap().insert(
+            1,
+            BrowserSession {
+                sender,
+                generation: 1,
+                chunked_host_messages_v1: false,
+            },
+        );
+        let payload = vec![b'x'; CHROME_OUTBOUND_PAYLOAD_LIMIT + 1];
+        let error = browser.outbound_frames(1, "7", &payload).unwrap_err();
+        assert!(error.to_string().contains("too old"));
+    }
+
+    #[test]
+    fn negotiated_chunks_stay_bounded_and_reassemble_exactly() {
+        let browser = Browser::new();
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        browser.sessions.lock().unwrap().insert(
+            1,
+            BrowserSession {
+                sender,
+                generation: 1,
+                chunked_host_messages_v1: true,
+            },
+        );
+        let payload: Vec<u8> = (0..CHROME_OUTBOUND_PAYLOAD_LIMIT + 12345)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        let frames = browser.outbound_frames(1, "9", &payload).unwrap();
+        assert!(frames.len() > 1);
+        let mut rebuilt = Vec::new();
+        for (expected_index, frame) in frames.iter().enumerate() {
+            let declared = u32::from_le_bytes(frame[..4].try_into().unwrap()) as usize;
+            assert_eq!(declared, frame.len() - 4);
+            assert!(declared <= CHROME_OUTBOUND_PAYLOAD_LIMIT);
+            let chunk: Value = serde_json::from_slice(&frame[4..]).unwrap();
+            assert_eq!(chunk["type"], "wire_chunk");
+            assert_eq!(chunk["index"], expected_index);
+            rebuilt.extend(crate::b64::decode(chunk["data"].as_str().unwrap()).unwrap());
+        }
+        assert_eq!(rebuilt, payload);
     }
 
     /// H7 supplementary (not task-named; the pinned H7 assertions live in
@@ -1640,6 +2197,25 @@ mod tests {
             .unwrap();
         assert_eq!(result, json!({ "ok": true }));
         fake_ext.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn clear_narrations_routes_each_composite_tab_as_fire_and_forget() {
+        let browser = Browser::new();
+        let (mut ext_side, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        browser.clear_narrations(&[
+            crate::constants::tab_id::encode(slot, 101),
+            crate::constants::tab_id::encode(slot, 202),
+        ]);
+
+        for expected_tab in [101, 202] {
+            let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let value: Value = serde_json::from_slice(&req).unwrap();
+            assert_eq!(
+                value,
+                json!({ "type": "narration_clear", "tabId": expected_tab })
+            );
+        }
     }
 
     #[tokio::test]

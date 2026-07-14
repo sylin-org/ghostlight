@@ -11,7 +11,7 @@
 //! fixture can produce a suggestion honestly. The suggestion text is GENERATED from the fixture,
 //! never hand-authored per tool:
 //!   - field name + expected type come from `inputSchema`;
-//!   - enum alternatives come from `inputSchema.properties.<field>.enum`;
+//!   - enum alternatives and scalar bounds come from `inputSchema.properties.<field>`;
 //!   - the example shape comes from the tool's `example.call` field;
 //!   - the "get a tabId first" hint is one hard-coded conditional (the single piece of logic not
 //!     derived from the fixture; justified because a per-field `suggestion` annotation is
@@ -58,20 +58,21 @@ impl ToolSchema {
 /// call, or `Err(ToolError::InvalidRequest { .. })` with a corrective `next_step` for the
 /// schema-violation classes the ADR names.
 ///
-/// The three checks, in the order they run (the first failure wins, so the model gets the most
+/// The four checks, in the order they run (the first failure wins, so the model gets the most
 /// actionable correction first):
 ///   1. unknown property (under `additionalProperties: false`) -- caught before required/type so
 ///      a typo'd field name is named explicitly rather than masked as a missing required field;
 ///   2. missing required field;
-///   3. wrong type on a present field.
+///   3. wrong type on a present field;
+///   4. enum, numeric-bound, and string-length constraints on a present field.
 ///
-/// NOTE on what is NOT checked: enum values (e.g. `computer.action`) are deliberately NOT
-/// enforced here. An unknown `computer.action` is already handled fail-closed by the governance
+/// NOTE on the one enum exception: an `action` field (e.g. `computer.action`) is deliberately NOT
+/// enforced here. An unknown action is already handled fail-closed by the governance
 /// layer (the directory classifies it as a miss and returns a stable `Denied (D-xxxxxxxx):`
 /// audit-grade denial), which is a MORE informative outcome than a generic validation error --
 /// it is a governed decision with a denial id, not a structural rejection. Enforcing enums here
-/// would shadow that well-designed path. The structural checks (required/type/additionalProperties)
-/// are pure structural correctness, with no governed alternative, so those are enforced here.
+/// would shadow that well-designed path. Other enum fields and scalar constraints have no
+/// governed alternative, so they are enforced here.
 pub fn validate_arguments(schema: &ToolSchema, arguments: &Value) -> Result<(), ToolError> {
     let obj = match arguments.as_object() {
         Some(o) => o,
@@ -149,7 +150,55 @@ pub fn validate_arguments(schema: &ToolSchema, arguments: &Value) -> Result<(), 
                         .next_step(example_shape_hint(schema, field)));
                 }
             }
-            // Enum values are NOT enforced here -- see the function doc comment above.
+            if field != "action" {
+                if let Some(allowed) = spec.get("enum").and_then(Value::as_array) {
+                    if !allowed.contains(value) {
+                        let choices = allowed
+                            .iter()
+                            .map(Value::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let msg = format!("field '{field}' must be one of {choices}");
+                        return Err(ToolError::invalid_request(msg)
+                            .next_step(example_shape_hint(schema, field)));
+                    }
+                }
+            }
+            if let Some(number) = value.as_f64() {
+                if let Some(minimum) = spec.get("minimum").and_then(Value::as_f64) {
+                    if number < minimum {
+                        let msg = format!("field '{field}' must be at least {minimum}");
+                        return Err(ToolError::invalid_request(msg)
+                            .next_step(example_shape_hint(schema, field)));
+                    }
+                }
+                if let Some(maximum) = spec.get("maximum").and_then(Value::as_f64) {
+                    if number > maximum {
+                        let msg = format!("field '{field}' must be at most {maximum}");
+                        return Err(ToolError::invalid_request(msg)
+                            .next_step(example_shape_hint(schema, field)));
+                    }
+                }
+            }
+            if let Some(text) = value.as_str() {
+                let length = text.chars().count() as u64;
+                if let Some(minimum) = spec.get("minLength").and_then(Value::as_u64) {
+                    if length < minimum {
+                        let msg =
+                            format!("field '{field}' must contain at least {minimum} character(s)");
+                        return Err(ToolError::invalid_request(msg)
+                            .next_step(example_shape_hint(schema, field)));
+                    }
+                }
+                if let Some(maximum) = spec.get("maxLength").and_then(Value::as_u64) {
+                    if length > maximum {
+                        let msg =
+                            format!("field '{field}' must contain at most {maximum} character(s)");
+                        return Err(ToolError::invalid_request(msg)
+                            .next_step(example_shape_hint(schema, field)));
+                    }
+                }
+            }
         }
     }
 
@@ -336,27 +385,53 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_enum_value_is_not_enforced_here_governance_handles_it() {
-        // Enum values (e.g. computer.action) are deliberately NOT checked by this validator --
+    fn an_unknown_action_value_is_not_enforced_here_governance_handles_it() {
+        // Action enum values are deliberately NOT checked by this validator --
         // governance's directory classifies an unknown action as a miss and returns a stable
         // Denied (D-xxxxxxxx) denial, which is more informative than a structural rejection. So an
-        // unknown enum value must pass this validator and reach governance.
+        // unknown action value must pass this validator and reach governance.
         let schema = ToolSchema {
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "color": { "type": "string", "enum": ["red", "green", "blue"] }
+                    "action": { "type": "string", "enum": ["read", "write"] }
                 },
-                "required": ["color"],
+                "required": ["action"],
                 "additionalProperties": false
             }),
-            example_call: Some(serde_json::json!({ "color": "red" })),
+            example_call: Some(serde_json::json!({ "action": "read" })),
         };
-        let args = serde_json::json!({ "color": "purple" });
+        let args = serde_json::json!({ "action": "unknown" });
         assert!(
             validate_arguments(&schema, &args).is_ok(),
-            "enum values are not enforced here; an unknown value passes to governance"
+            "action enum values are not enforced here; an unknown value passes to governance"
         );
+    }
+
+    #[test]
+    fn non_action_enums_and_scalar_bounds_are_enforced() {
+        let schema = ToolSchema::for_tool("narrate").expect("narrate schema");
+        for args in [
+            serde_json::json!({ "tabId": 1, "text": "", "position": "bottom" }),
+            serde_json::json!({ "tabId": 1, "text": "ok", "position": "sideways" }),
+            serde_json::json!({ "tabId": 1, "text": "ok", "duration_ms": 999 }),
+            serde_json::json!({ "tabId": 1, "text": "ok", "duration_ms": 30001 }),
+        ] {
+            assert!(
+                validate_arguments(&schema, &args).is_err(),
+                "accepted {args}"
+            );
+        }
+        assert!(validate_arguments(
+            &schema,
+            &serde_json::json!({
+                "tabId": 1,
+                "text": "ok",
+                "position": "auto",
+                "duration_ms": 5000
+            })
+        )
+        .is_ok());
     }
 
     #[test]

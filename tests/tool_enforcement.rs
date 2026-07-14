@@ -315,7 +315,7 @@ async fn union_rule_end_to_end() {
 }
 
 /// Test 8: the all-open invariant. With no `--manifest` at all, behavior is byte-identical to
-/// today (21 tools -- the 13 trained tools plus `wait_for`, `script`, `form_fill`, `file_upload`,
+/// today (22 tools -- the 13 trained tools plus `narrate`, `wait_for`, `script`, `form_fill`, `file_upload`,
 /// `browser_batch`, `upload_image`, `gif_creator`, and the ADR-0022 Decision 7 `explain` addition -- fixture
 /// identity, `not connected` execution error) and no `Denied (` text ever appears (the count itself
 /// derives from `directory::advertised_tool_count()`, so this narration is descriptive, not a pin).

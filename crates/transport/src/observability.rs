@@ -28,7 +28,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// How many recent events to keep in the live snapshot (the JSONL log keeps everything).
 const RECENT_CAP: usize = 64;
 
-/// Max length of an event `detail` body before truncation (keeps screenshots out of the log).
+/// Test bound for the legacy clipping helper; production event bodies are no longer persisted.
+#[cfg(test)]
 const DETAIL_MAX: usize = 600;
 
 /// Max length of a client-controlled identifier (tool / method / id) embedded in a summary.
@@ -506,7 +507,8 @@ impl DebugSink {
         });
     }
 
-    /// Truncate a body for the `detail` field (avoids logging whole screenshots), on a char boundary.
+    /// Exercise boundary-safe clipping independently of production metadata-only logging.
+    #[cfg(test)]
     fn clip(body: &str) -> String {
         if body.len() <= DETAIL_MAX {
             body.to_string()
@@ -528,8 +530,9 @@ impl DebugSink {
         }
     }
 
-    /// Record an incoming MCP JSON-RPC request.
-    pub fn mcp_request(&self, method: &str, id: &str, body: &str) {
+    /// Record incoming MCP request metadata. Bodies may contain page content or captured pixels and
+    /// are deliberately never persisted, even in debug mode (ADR-0073).
+    pub fn mcp_request(&self, method: &str, id: &str, _body: &str) {
         self.with(|i| {
             i.counters.mcp_requests += 1;
             i.record(
@@ -538,15 +541,15 @@ impl DebugSink {
                     kind: "mcp",
                     dir: "in",
                     summary: format!("{} (id={})", Self::ident(method), Self::ident(id)),
-                    detail: Some(Self::clip(body)),
+                    detail: None,
                 },
                 false,
             );
         });
     }
 
-    /// Record an outgoing MCP JSON-RPC response.
-    pub fn mcp_response(&self, id: &str, body: &str) {
+    /// Record outgoing MCP response metadata without persisting the response body (ADR-0073).
+    pub fn mcp_response(&self, id: &str, _body: &str) {
         self.with(|i| {
             i.record(
                 Event {
@@ -554,7 +557,7 @@ impl DebugSink {
                     kind: "mcp",
                     dir: "out",
                     summary: format!("response (id={})", Self::ident(id)),
-                    detail: Some(Self::clip(body)),
+                    detail: None,
                 },
                 false,
             );
@@ -587,7 +590,7 @@ impl DebugSink {
     }
 
     /// Record the end of a tool call (removes it from in-flight; `ok=false` counts a tool error).
-    pub fn tool_end(&self, id: &str, ok: bool, detail: &str) {
+    pub fn tool_end(&self, id: &str, ok: bool, _detail: &str) {
         self.with(|i| {
             let tool = i.in_flight.remove(id).map(|f| f.tool).unwrap_or_default();
             if !ok {
@@ -603,7 +606,7 @@ impl DebugSink {
                         Self::ident(id),
                         if ok { "ok" } else { "error" }
                     ),
-                    detail: Some(Self::clip(detail)),
+                    detail: None,
                 },
                 false,
             );

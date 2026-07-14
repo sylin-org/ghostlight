@@ -47,6 +47,17 @@ file does not restate them -- follow AGENTS.md.
 - **Distribution is automated and credential-gated** in `scripts/release.ps1`; the MCP registry
   publish is DNS-authed on the sylin.org apex; canonical URLs are `sylin.org` (the github.io site
   is retired, redirect-stubbed). Off-tree/secret change history is in `local/AUDIT-LOG.md`.
+- **Remote-code claims distinguish extension logic from page automation.** All extension logic
+  ships in the reviewed package, but `javascript_tool` carries an explicit local MCP-client
+  instruction to CDP `Runtime.evaluate` in the attached page. Never collapse those two facts into
+  the broader claim that every JavaScript string the extension evaluates ships in the package.
+- **Chrome native messaging has directional limits.** Extension-to-host input may be large, but a
+  single host-to-extension message is capped at 1 MiB. Keep the generic framing corruption ceiling
+  separate from the Chrome outbound contract and use ADR-0074's negotiated bounded chunks for
+  large browser-bound requests.
+- **Debug observability is metadata-only.** MCP bodies and successful tool results can contain page
+  text, form values, files, screenshots, or recordings. Never persist them in debug events; keep
+  method/tool ids, states, counts, timings, and byte sizes only (ADR-0073).
 
 ## Pointer index (where durable things live)
 

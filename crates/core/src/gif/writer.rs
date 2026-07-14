@@ -10,6 +10,43 @@
 //! call during the ADR-0053 live test).
 
 use std::borrow::Cow;
+use std::io::{self, Write};
+
+use super::GifError;
+use zeroize::Zeroizing;
+
+/// Hard ceiling on one encoded GIF. The encoder fails instead of growing an unbounded output.
+pub(crate) const MAX_ENCODED_GIF_BYTES: usize = 24 * 1024 * 1024;
+
+struct BoundedOutput {
+    bytes: Zeroizing<Vec<u8>>,
+}
+
+impl BoundedOutput {
+    fn new() -> Self {
+        Self {
+            bytes: Zeroizing::new(Vec::new()),
+        }
+    }
+
+    fn into_bytes(mut self) -> Vec<u8> {
+        std::mem::take(&mut *self.bytes)
+    }
+}
+
+impl Write for BoundedOutput {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.bytes.len().saturating_add(buf.len()) > MAX_ENCODED_GIF_BYTES {
+            return Err(io::Error::other("encoded GIF exceeds the memory limit"));
+        }
+        self.bytes.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 /// One encoded frame: quantized palette indices plus its GIF delay in centiseconds.
 pub(crate) struct IndexedFrame {
@@ -19,13 +56,14 @@ pub(crate) struct IndexedFrame {
 
 /// Assemble a complete animated GIF89a (looping forever) from a shared 256-entry global color
 /// table (`palette_rgb`, 768 bytes) and per-frame palette-index buffers with per-frame delays.
+#[cfg(test)]
 pub(crate) fn encode_gif(
     width: u16,
     height: u16,
     palette_rgb: &[u8],
     frames: &[IndexedFrame],
 ) -> Result<Vec<u8>, String> {
-    let mut out: Vec<u8> = Vec::new();
+    let mut out = BoundedOutput::new();
     {
         let mut encoder =
             gif::Encoder::new(&mut out, width, height, palette_rgb).map_err(|e| e.to_string())?;
@@ -46,7 +84,44 @@ pub(crate) fn encode_gif(
             encoder.write_frame(&frame).map_err(|e| e.to_string())?;
         }
     }
-    Ok(out)
+    Ok(out.into_bytes())
+}
+
+/// Assemble a GIF while asking for only one indexed frame at a time. The caller may decode,
+/// overlay, and quantize inside `frame_at`; each buffer drops after `write_frame` returns.
+pub(crate) fn encode_gif_streaming<F>(
+    width: u16,
+    height: u16,
+    palette_rgb: &[u8],
+    frame_count: usize,
+    mut frame_at: F,
+) -> Result<Vec<u8>, GifError>
+where
+    F: FnMut(usize) -> Result<IndexedFrame, GifError>,
+{
+    let mut out = BoundedOutput::new();
+    {
+        let mut encoder = gif::Encoder::new(&mut out, width, height, palette_rgb)
+            .map_err(|error| GifError::Encode(error.to_string()))?;
+        encoder
+            .set_repeat(gif::Repeat::Infinite)
+            .map_err(|error| GifError::Encode(error.to_string()))?;
+        for index in 0..frame_count {
+            let indexed = frame_at(index)?;
+            let frame = gif::Frame {
+                width,
+                height,
+                delay: indexed.delay_cs,
+                dispose: gif::DisposalMethod::Keep,
+                buffer: Cow::Borrowed(&indexed.indices),
+                ..gif::Frame::default()
+            };
+            encoder
+                .write_frame(&frame)
+                .map_err(|error| GifError::Encode(error.to_string()))?;
+        }
+    }
+    Ok(out.into_bytes())
 }
 
 #[cfg(test)]

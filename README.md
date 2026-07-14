@@ -22,11 +22,11 @@ nothing phones home.
 Responsibility is part of the experience, not a brake on it. A good agent tool should be easy to
 start, obvious while it acts, clear when it stops, and honest about what it can and cannot control.
 
-<!-- HERO DEMO SLOT: an annotated session GIF recorded by Ghostlight's own gif_creator tool
-     (sky-blue click rings, action labels, progress bar, watermark). Capture with
-     scripts/capture-readme-tour.ps1, keep it under ~5 MB, then uncomment:
+<!-- HERO DEMO SLOT: an annotated session GIF captured from Ghostlight's built-in live tour
+     (sky-blue click rings, action labels, progress bar, watermark). Record `ghostlight demo`,
+     export a GIF under ~5 MB, then uncomment:
 <p align="center"><img src="docs/assets/demo.gif" alt="Ghostlight driving a real browser: sky-blue click ripples, action captions, and a governed session in its own tab group"></p>
-<p align="center"><sub>Recorded by Ghostlight itself, with its own <code>gif_creator</code> tool.</sub></p>
+<p align="center"><sub>Ghostlight driving its own live demo stage, including a visible policy guardrail.</sub></p>
 -->
 
 ## Is this your problem?
@@ -34,7 +34,8 @@ start, obvious while it acts, clear when it stops, and honest about what it can 
 Ghostlight is worth trying when:
 
 - your agent needs a site where you are already signed in, not a fresh browser profile;
-- you want the same browser tools from Codex, Claude Code, Cursor, VS Code, or another MCP client;
+- you want the same browser tools from Codex, Claude, Cursor, VS Code, Windsurf, Zed, OpenCode,
+  Crush, or another MCP client;
 - you want to watch the work, take the wheel, and understand failures without decoding logs; or
 - you need policy and evidence that a developer and a security reviewer can both inspect.
 
@@ -72,8 +73,9 @@ service is native Rust; there is no Node service to keep alive and nothing to co
    npx -y ghostlight install
    ```
 
-   The installer is idempotent and opens the extension walkthrough on the first run. Use
-   `--client codex` to target Codex only, or `--dry-run` to inspect every planned change first.
+   The installer is idempotent and opens the extension walkthrough on the first run. It recognizes
+   Claude Code, Claude Desktop, Cursor, VS Code, Codex, Windsurf, Zed, OpenCode, and Crush. Use
+   `--client <id>` to target one client, or `--dry-run` to inspect every planned change first.
 
 2. **Add the extension.** Until the Chrome Web Store listing is public, download
    `ghostlight-extension-v*.zip` from the
@@ -135,7 +137,7 @@ A typical first request:
 > Open a new browser tab, go to example.com, and tell me what the page says.
 
 The tool surface preserves the schemas Claude was trained on, byte for byte, then adds more on
-top, for 21 tools in five groups. (Everything behind those schemas is an original, clean-room
+top, for 22 tools in five groups. (Everything behind those schemas is an original, clean-room
 Rust implementation.)
 
 - **See and act.** Navigate, click, type, scroll, hover, drag; screenshots with exact coordinate
@@ -143,7 +145,8 @@ Rust implementation.)
 - **Forms and files.** Fill forms by element ref or semantically by label (shadow DOM included);
   upload file bytes or captured screenshots straight into page inputs and drop targets.
 - **Compose.** Multi-step scripts with inter-step data flow and `dry_run` pre-flight; one-call
-  action batches; wait-for-condition with page settlement.
+  action batches; wait-for-condition with page settlement; timed narration at meaningful workflow
+  phases for the person watching.
 - **Record.** Animated-GIF session recording with click cues, action labels, a progress bar, and
   real per-frame timing.
 - **Inspect.** Accessibility tree (with diff mode), page text, element search, console and
@@ -170,6 +173,7 @@ action and the capability it requires.
 | `read_network_requests` | Recent network activity                          | read                       |
 | `resize_window`         | Resize the browser window                        | none                       |
 | `update_plan`           | Record the agent's working plan                  | none                       |
+| `narrate`               | Show timed agent commentary without touching page content | none              |
 | `wait_for`              | Wait for a page condition and settlement         | read                       |
 | `script`                | Run a sequence of tool calls in one request (with optional `dry_run`) | none |
 | `form_fill`             | Fill a form by field labels in one call          | read + write (or read + write + action when `submit: true`) |

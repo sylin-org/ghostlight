@@ -69,8 +69,9 @@ docs/business/PLAN.md). Check items off in place; add dates.
       tasks, and escalating flags. Update the installed extension, let an agent session re-run
       the research-12 harvest against it, and confirm the fidelity snapshot still passes.
       Output: a delta note in docs/research/, before any harvest ADR (ADR-0041 D2).
-- [ ] Record the demo: scripts/live-demo.ps1 under OBS, cut to ~90 seconds, export GIF
-      for the README and MP4 for the site. (1 evening.)
+- [ ] Record the demo: run `ghostlight demo` under OBS using `docs/legal/STORE_LISTING.md`, keep it
+      below 90 seconds, upload the MP4 unlisted to YouTube for CWS, and export a GIF for the README.
+      (One recording, three uses.)
 - [ ] Write the Show HN post yourself (founder voice; HN detects ghostwriting). Post
       it; stay in the thread all day; DM the "we need this at work" commenters.
 - [ ] Submit the free listings: official MCP servers directory, Smithery, Glama,

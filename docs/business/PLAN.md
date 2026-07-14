@@ -123,7 +123,7 @@ All zero-dollar, all frontier-authored, all public under docs/ or the site:
 - Site on GitHub Pages with the sylin.org domain: landing, the three cards, pricing,
   the Continuity Promise, the comparison page. README overhaul as the storefront with a
   90-second demo GIF (the visual FX -- ripples, ghost tab group -- were accidentally
-  built for this; record scripts/live-demo.ps1 with OBS).
+  built for this; record the built-in `ghostlight demo` tour with OBS).
 - Listings, all free: the official MCP servers directory, Smithery, Glama, mcp.so,
   PulseMCP, Awesome-MCP lists. Chrome Web Store listing ($5 one-time developer fee,
   flagged; CWS package already prepared).

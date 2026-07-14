@@ -12,7 +12,8 @@ when you want a different path, a per-OS detail, or an explanation of what got r
 
 - A Chromium browser: Chrome, Edge, Brave, or Chromium, version 116 or newer. The 116 floor comes
   from the extension, which Chrome enforces when it loads; the binary itself checks no version.
-- An MCP client (Codex, Claude Code, Cursor, VS Code, and others).
+- An MCP client (Codex, Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Zed, OpenCode,
+  Crush, or another stdio MCP client).
 - For the npm path, Node.js supplies the `npx` launcher; the running Ghostlight service is native
   Rust, not a Node service. For the source path, use a stable Rust toolchain (https://rustup.rs).
 
@@ -72,6 +73,8 @@ might expect." For each browser and client it targets, `install`:
 - **Adds the MCP server to your client's config** with an idempotent, value-level merge. This is
   the part to trust: it re-reads the file at write time and changes only the one entry it owns, so
   it never clobbers a hand-edited config and never duplicates itself if you run it twice.
+  If comments make a JSONC file unsafe to merge automatically, the installer leaves it untouched
+  and prints the exact entry as a manual step. Guidance is reported separately from failure.
 - **Allow-lists the extension** by id. The Web Store and unpacked-dev ids are always allowed;
   `--extension-id` adds another.
 - **Registers an auto-start supervisor** so the service is there when a client asks for it. Skip it
@@ -84,13 +87,13 @@ binary by hand; the client and the browser do.
 
 ### Which clients and browsers it knows
 
-`install` auto-detects and registers five clients (`claude-code`, `claude-desktop`, `cursor`,
-`vscode`, `codex`) and four browsers (`chrome`, `edge`, `brave`, `chromium`). That list is smaller than the
-set of clients Ghostlight *works* with, and the gap is worth understanding. Any MCP client can use
-Ghostlight; the installer only knows how to write config for these five, because each has its own
-config location and dialect it handles specifically. For anything else (Zed, Cline, and the rest),
-add the stdio server entry from the Path A example by hand and it behaves the same. The installer's job
-is convenience, not gatekeeping.
+`install` auto-detects and registers nine clients (`claude-code`, `claude-desktop`, `cursor`,
+`vscode`, `codex`, `windsurf`, `zed`, `opencode`, `crush`) and four browsers (`chrome`, `edge`,
+`brave`, `chromium`). That list is smaller than the set of clients Ghostlight *works* with, and the
+gap is worth understanding. Any stdio MCP client can use Ghostlight; the installer only knows how
+to write config for these nine because each location and dialect is handled specifically. For
+anything else (Cline and the rest), add the stdio server entry from the Path A example by hand and
+it behaves the same. The installer's job is convenience, not gatekeeping.
 
 ### Useful flags
 

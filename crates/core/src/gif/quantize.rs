@@ -17,7 +17,7 @@ use color_quant::NeuQuant;
 pub(crate) const DEFAULT_SAMPLE_FAC: i32 = 10;
 
 /// Cap on pixels fed to NeuQuant training (bounds memory + time; deterministic stride).
-const TRAIN_PIXEL_BUDGET: usize = 500_000;
+pub(crate) const TRAIN_PIXEL_BUDGET: usize = 500_000;
 
 /// The trained global palette: 256 RGB triples plus the network for nearest-color lookups.
 pub(crate) struct GlobalPalette {
@@ -29,6 +29,7 @@ pub(crate) struct GlobalPalette {
 /// Train one adaptive 256-color palette from all frames' pixels. `frames` are RGBA buffers of
 /// equal length. Training pixels are sub-sampled with a deterministic stride so long recordings
 /// stay bounded; NeuQuant sub-samples that buffer again per `sample_fac`.
+#[cfg(test)]
 pub(crate) fn build_global_palette(frames: &[&[u8]], sample_fac: i32) -> GlobalPalette {
     let total_px: usize = frames.iter().map(|f| f.len() / 4).sum();
     let stride = if total_px > TRAIN_PIXEL_BUDGET {
@@ -49,11 +50,15 @@ pub(crate) fn build_global_palette(frames: &[&[u8]], sample_fac: i32) -> GlobalP
             g += 1;
         }
     }
-    if train.is_empty() {
-        train.extend_from_slice(&[0, 0, 0, 255]);
-    }
+    build_global_palette_from_sample(&train, sample_fac)
+}
 
-    let nq = NeuQuant::new(sample_fac, 256, &train);
+/// Train from an already bounded RGBA sample. The recording encoder builds this sample one frame
+/// at a time during pass one, so full decoded frames never accumulate in memory.
+pub(crate) fn build_global_palette_from_sample(sample: &[u8], sample_fac: i32) -> GlobalPalette {
+    let fallback = [0, 0, 0, 255];
+    let train = if sample.is_empty() { &fallback } else { sample };
+    let nq = NeuQuant::new(sample_fac, 256, train);
     let rgba = nq.color_map_rgba();
     let mut rgb = Vec::with_capacity(768);
     for entry in rgba.chunks_exact(4) {

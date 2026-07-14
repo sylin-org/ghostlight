@@ -1,7 +1,7 @@
 # ADR-0071: Additional installer targets (Windsurf, Zed, OpenCode, Crush)
 
 Date: 2026-07-13
-Status: Proposed
+Status: Accepted
 Builds on: ADR-0006 (MCP-client-agnostic server), the installer's client registry
 (`crates/core/src/install/clients.rs`, `merge.rs`), and ADR-0067 (Codex as a first-class target,
 which added the TOML file-merge path). Coordinates with the in-flight `install/` work: this ADR

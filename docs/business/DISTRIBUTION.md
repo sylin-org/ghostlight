@@ -67,7 +67,9 @@ resolves the relay as a sibling.
 
 ## Founder: the launch moment (do these together, after CWS approval)
 
-- [ ] Record the 90-second demo (OBS + scripts/live-demo.ps1), export the README hero GIF.
+- [ ] Record the sub-90-second demo (`ghostlight demo` + OBS) using the exact recipe in
+      `docs/legal/STORE_LISTING.md`; upload it unlisted to YouTube for CWS and export the README
+      hero GIF from the same recording.
 - [ ] **Show HN** -- founder-written (HN detects ghostwriting). Lead: "Claude-in-Chrome's
       governance model, open and vendor-neutral"; hooks: the UW study, the honest
       COMPARISON.md, the delight GIF. Stay in the thread all day.

@@ -16,6 +16,10 @@ pub enum ClientId {
     Cursor,
     VsCode,
     Codex,
+    Windsurf,
+    Zed,
+    OpenCode,
+    Crush,
 }
 
 /// How we register with a client. `FileMerge` is the idempotent value-level merge used for every
@@ -68,6 +72,36 @@ pub const CLIENTS: &[ClientSpec] = &[
         display: "Codex",
         add_via: AddVia::TomlFileMerge,
     },
+    ClientSpec {
+        id: ClientId::Windsurf,
+        cli_id: "windsurf",
+        display: "Windsurf",
+        // ~/.codeium/windsurf/mcp_config.json is plain JSON with an `mcpServers` map, identical in
+        // shape to Cursor's -- the value-level merge is idempotent and safe (ADR-0071 D1).
+        add_via: AddVia::JsonFileMerge(Dialect::McpServers),
+    },
+    ClientSpec {
+        id: ClientId::Zed,
+        cli_id: "zed",
+        display: "Zed",
+        // settings.json is JSONC; a commented file degrades to a printed manual step (T2).
+        add_via: AddVia::JsonFileMerge(Dialect::ContextServers),
+    },
+    ClientSpec {
+        id: ClientId::OpenCode,
+        cli_id: "opencode",
+        display: "OpenCode",
+        // opencode.json is JSONC; the `mcp` entry uses type:"local" + a command array (T2 dialect).
+        add_via: AddVia::JsonFileMerge(Dialect::OpenCodeMcp),
+    },
+    ClientSpec {
+        id: ClientId::Crush,
+        cli_id: "crush",
+        display: "Crush",
+        // crush.json's `mcp` entry uses type:"stdio" + command/args/env (T2 dialect). A commented
+        // file degrades to a printed manual step (T2 JSONC-safe fallback).
+        add_via: AddVia::JsonFileMerge(Dialect::CrushMcp),
+    },
 ];
 
 pub fn client_by_id(id: &str) -> Option<&'static ClientSpec> {
@@ -83,6 +117,24 @@ pub fn config_path(spec: &ClientSpec, ctx: &PlanCtx) -> PathBuf {
         ClientId::Cursor => ctx.home.join(".cursor").join("mcp.json"),
         ClientId::VsCode => ctx.config.join("Code").join("User").join("mcp.json"),
         ClientId::Codex => ctx.home.join(".codex").join("config.toml"),
+        ClientId::Windsurf => ctx
+            .home
+            .join(".codeium")
+            .join("windsurf")
+            .join("mcp_config.json"),
+        ClientId::Zed => {
+            if cfg!(target_os = "linux") {
+                ctx.home.join(".config").join("zed").join("settings.json")
+            } else {
+                ctx.config.join("Zed").join("settings.json")
+            }
+        }
+        ClientId::OpenCode => ctx
+            .home
+            .join(".config")
+            .join("opencode")
+            .join("opencode.json"),
+        ClientId::Crush => ctx.home.join(".config").join("crush").join("crush.json"),
     }
 }
 
@@ -99,6 +151,19 @@ pub fn detect(spec: &ClientSpec, ctx: &PlanCtx) -> bool {
                     .is_some_and(std::path::Path::is_dir)
         }
         ClientId::Codex => on_path("codex") || ctx.home.join(".codex").is_dir(),
+        ClientId::Windsurf => {
+            on_path("windsurf") || ctx.home.join(".codeium").join("windsurf").is_dir()
+        }
+        ClientId::Zed => {
+            on_path("zed")
+                || config_path(spec, ctx)
+                    .parent()
+                    .is_some_and(std::path::Path::is_dir)
+        }
+        ClientId::OpenCode => {
+            on_path("opencode") || ctx.home.join(".config").join("opencode").is_dir()
+        }
+        ClientId::Crush => on_path("crush") || ctx.home.join(".config").join("crush").is_dir(),
     }
 }
 
@@ -108,9 +173,8 @@ pub fn server_registered(spec: &ClientSpec, contents: &str, name: &str) -> bool 
         // VS Code's JSONC is deliberately not parsed by the installer; retain its prior
         // conservative quoted-key check for doctor reporting.
         AddVia::VsCodeCli => contents.contains(&format!("\"{name}\"")),
-        AddVia::JsonFileMerge(dialect) => {
-            merge::has_server(contents, dialect, name).unwrap_or(false)
-        }
+        AddVia::JsonFileMerge(dialect) => merge::has_server(contents, dialect, name)
+            .unwrap_or_else(|_| contents.contains(&format!("\"{name}\""))),
         AddVia::TomlFileMerge => toml_merge::has_server(contents, name).unwrap_or(false),
     }
 }
@@ -200,5 +264,104 @@ mod tests {
             "[mcp_servers.ghostlight]\ncommand = \"relay\"\nargs = [\"--role\", \"agent\"]\n";
         assert!(server_registered(codex, configured, "ghostlight"));
         assert!(!server_registered(codex, configured, "other"));
+    }
+
+    /// Windsurf (Devin Desktop / Cascade) registers under the same plain-JSON `mcpServers` dialect as
+    /// Cursor, at ~/.codeium/windsurf/mcp_config.json (ADR-0071 D1).
+    #[test]
+    fn windsurf_uses_the_codeium_mcp_config_path() {
+        let ctx = PlanCtx {
+            current_exe: PathBuf::from("/opt/gl/ghostlight"),
+            home: PathBuf::from("/home/tester"),
+            config: PathBuf::from("/config"),
+            local: PathBuf::from("/local"),
+        };
+        let windsurf = client_by_id("windsurf").expect("Windsurf is a supported client");
+        assert_eq!(windsurf.display, "Windsurf");
+        assert_eq!(
+            config_path(windsurf, &ctx),
+            PathBuf::from("/home/tester/.codeium/windsurf/mcp_config.json")
+        );
+        assert!(matches!(
+            windsurf.add_via,
+            AddVia::JsonFileMerge(Dialect::McpServers)
+        ));
+    }
+
+    #[test]
+    fn jsonc_config_with_comments_is_detected_by_substring_fallback() {
+        let cursor = client_by_id("cursor").unwrap(); // any JsonFileMerge client
+        let jsonc = "{\n  // a comment makes this unparseable as strict JSON\n  \"mcpServers\": { \"ghostlight\": {} }\n}";
+        assert!(server_registered(cursor, jsonc, "ghostlight"));
+        assert!(!server_registered(cursor, jsonc, "other"));
+    }
+
+    /// Zed registers under the context_servers dialect at its per-OS settings.json (ADR-0071).
+    #[test]
+    fn zed_uses_context_servers_at_the_per_os_settings_path() {
+        let ctx = PlanCtx {
+            current_exe: PathBuf::from("/opt/gl/ghostlight"),
+            home: PathBuf::from("/home/tester"),
+            config: PathBuf::from("/config"),
+            local: PathBuf::from("/local"),
+        };
+        let zed = client_by_id("zed").expect("Zed is a supported client");
+        assert_eq!(zed.display, "Zed");
+        assert!(matches!(
+            zed.add_via,
+            AddVia::JsonFileMerge(Dialect::ContextServers)
+        ));
+        #[cfg(not(target_os = "linux"))]
+        assert_eq!(
+            config_path(zed, &ctx),
+            PathBuf::from("/config/Zed/settings.json")
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            config_path(zed, &ctx),
+            PathBuf::from("/home/tester/.config/zed/settings.json")
+        );
+    }
+
+    /// OpenCode registers under the mcp (type:local, command-array) dialect at ~/.config/opencode (ADR-0071).
+    #[test]
+    fn opencode_uses_the_mcp_dialect_at_config_opencode() {
+        let ctx = PlanCtx {
+            current_exe: PathBuf::from("/opt/gl/ghostlight"),
+            home: PathBuf::from("/home/tester"),
+            config: PathBuf::from("/config"),
+            local: PathBuf::from("/local"),
+        };
+        let oc = client_by_id("opencode").expect("OpenCode is a supported client");
+        assert_eq!(oc.display, "OpenCode");
+        assert!(matches!(
+            oc.add_via,
+            AddVia::JsonFileMerge(Dialect::OpenCodeMcp)
+        ));
+        assert_eq!(
+            config_path(oc, &ctx),
+            PathBuf::from("/home/tester/.config/opencode/opencode.json")
+        );
+    }
+
+    /// Crush registers under the mcp (type:stdio) dialect at ~/.config/crush/crush.json (ADR-0071).
+    #[test]
+    fn crush_uses_the_mcp_stdio_dialect_at_config_crush() {
+        let ctx = PlanCtx {
+            current_exe: PathBuf::from("/opt/gl/ghostlight"),
+            home: PathBuf::from("/home/tester"),
+            config: PathBuf::from("/config"),
+            local: PathBuf::from("/local"),
+        };
+        let crush = client_by_id("crush").expect("Crush is a supported client");
+        assert_eq!(crush.display, "Crush");
+        assert!(matches!(
+            crush.add_via,
+            AddVia::JsonFileMerge(Dialect::CrushMcp)
+        ));
+        assert_eq!(
+            config_path(crush, &ctx),
+            PathBuf::from("/home/tester/.config/crush/crush.json")
+        );
     }
 }

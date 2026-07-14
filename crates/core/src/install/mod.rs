@@ -430,9 +430,12 @@ fn plan_client_install(
         AddVia::JsonFileMerge(dialect) => {
             let path = clients::config_path(c, ctx);
             let target = path.display().to_string();
+            let entry_json = serde_json::to_string_pretty(&entry.to_value(dialect))
+                .expect("serializing a JSON value cannot fail");
             let manual = format!(
-                "merge our server into {target} under \"{}\"",
-                dialect.top_key()
+                "add the \"{}\" entry under \"{}\" in {target}:\n{entry_json}",
+                entry.name,
+                dialect.top_key(),
             );
             // Missing config => empty (new file); an unreadable *existing* file blocks this client.
             let existing = match read_config_or_empty(&path) {
@@ -456,6 +459,16 @@ fn plan_client_install(
                         dialect,
                         change: MergeChange::Add(entry.clone()),
                     },
+                },
+                // A config we cannot parse as JSON is almost always JSONC-with-comments (Zed/OpenCode/Crush). Do
+                // NOT reformat it (that would strip the user's comments); degrade to a printed manual step, which
+                // the tally counts as `manual`, never `failed`.
+                Err(merge::MergeError::Parse(_)) => Action {
+                    label,
+                    detail: target,
+                    noop: None,
+                    manual,
+                    op: Op::Manual,
                 },
                 Err(e) => blocked(label, target, e.to_string(), manual),
             }
@@ -1181,6 +1194,35 @@ mod tests {
         let action = plan_client_install(cursor, &ctx, &entry());
         assert!(matches!(action.op, Op::Blocked { .. }));
         assert!(action.noop.is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn plan_client_install_routes_jsonc_parse_failure_to_manual() {
+        let dir =
+            std::env::temp_dir().join(format!("ghostlight-jsonc-manual-{}", std::process::id()));
+        let home = dir.join("home");
+        let cursor_dir = home.join(".cursor");
+        std::fs::create_dir_all(&cursor_dir).unwrap();
+        std::fs::write(
+            cursor_dir.join("mcp.json"),
+            "{\n  // preserve this comment\n  \"mcpServers\": {}\n}\n",
+        )
+        .unwrap();
+        let ctx = PlanCtx {
+            current_exe: PathBuf::from("/abs/ghostlight"),
+            home,
+            config: dir.join("config"),
+            local: dir.join("local"),
+        };
+        let cursor = clients::client_by_id("cursor").unwrap();
+
+        let action = plan_client_install(cursor, &ctx, &entry());
+        assert!(matches!(action.op, Op::Manual));
+        assert!(action.noop.is_none());
+        assert!(action.manual.contains("mcpServers"));
+        assert!(action.manual.contains("\"ghostlight\" entry"));
+        assert!(action.manual.contains("\"command\""));
         std::fs::remove_dir_all(&dir).ok();
     }
 

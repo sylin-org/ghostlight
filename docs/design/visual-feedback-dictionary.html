@@ -2,7 +2,7 @@
 <!--
   Ghostlight Visual Feedback Dictionary. Preserved design artifact.
 
-  This is a verbatim capture of the interactive preview in which the per-action
+  This began as a verbatim capture of the interactive preview in which the per-action
   visual-feedback vocabulary (docs/design/visual-feedback.md) was designed and
   approved. It plays each treatment on a mock browser stage: click rings and
   target glow, keystroke lozenges, scroll chevrons, the navigate pill, the
@@ -10,8 +10,8 @@
 
   Source: Claude artifact 73996361-1d1a-4319-a52c-8e9a5b58201f, captured
   2026-07-04. The claude.ai iframe-runtime preamble was stripped; the design
-  markup, styles, and script are otherwise unaltered (its typographic entities
-  are part of the original and are kept as-is). Self-contained: open this file
+  markup, styles, and script were later extended with accepted vocabulary additions such as
+  ADR-0072 narration. Its original typographic entities are kept as-is. Self-contained: open this file
   directly in a browser, or click an entry to replay a single effect.
 
   This is a marketing and design reference. The Chrome Web Store screenshots
@@ -109,6 +109,10 @@
         <h4>Reading</h4>
         <button class="entry" data-fx="read"><span class="k">read page / find</span><span class="d">a scan&#8209;line sweeps down &mdash; "the agent is reading"</span></button>
         <button class="entry" data-fx="wait"><span class="k">wait</span><span class="d">a breathing dot while it thinks</span></button>
+      </div>
+      <div class="rail-group">
+        <h4>Communication</h4>
+        <button class="entry" data-fx="narrate"><span class="k">narrate</span><span class="d">timed agent commentary for a meaningful phase</span></button>
       </div>
       <div class="rail-foot">
         <p>Drawn from the recording &amp; demo craft of
@@ -265,6 +269,25 @@
     transition: opacity .2s ease, transform .2s cubic-bezier(.22,1,.36,1);
   }
   .caption.on { opacity: 1; transform: translate(-50%, 0); }
+  .narration-preview {
+    position: absolute; left: 50%; bottom: 76px; transform: translate(-50%, 10px) scale(.98);
+    z-index: 58; width: 92%; min-height: clamp(76px, 11vw, 132px); box-sizing: border-box;
+    pointer-events: none; overflow: hidden; opacity: 0; display: flex; flex-direction: column;
+    justify-content: center; padding: clamp(16px, 2.4vw, 28px) clamp(24px, 3.5vw, 58px);
+    border-radius: clamp(14px, 1.4vw, 24px); color: #eaf6ff;
+    background: rgba(10,16,26,.94); border: 1px solid rgba(var(--sky-rgb),.5);
+    box-shadow: 0 16px 44px -18px rgba(var(--sky-rgb),.78), inset 0 1px 0 rgba(255,255,255,.08);
+    animation: narration-in 220ms cubic-bezier(.22,1,.36,1) forwards;
+  }
+  .narration-preview .agent-label {
+    display: block; margin: 0 0 6px; color: var(--sky); font: 700 clamp(10px, .8vw, 14px)/1.2 var(--mono);
+    letter-spacing: .13em; text-transform: uppercase;
+  }
+  .narration-preview .agent-text { display: block; font: 650 clamp(16px, 2vw, 30px)/1.3 var(--mono); overflow-wrap: anywhere; }
+  .narration-preview .agent-time { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(var(--sky-rgb),.13); }
+  .narration-preview .agent-time::after { content: ""; display: block; width: 100%; height: 100%; background: var(--sky); transform-origin: left; animation: narration-time 4200ms linear forwards; }
+  @keyframes narration-in { to { opacity: 1; transform: translate(-50%,0) scale(1); } }
+  @keyframes narration-time { to { transform: scaleX(0); } }
 
   /* phantom cursor */
   .cursor {
@@ -435,7 +458,7 @@
   @media (prefers-reduced-motion: reduce) {
     .cursor { transition: none; }
     .ripple, .trail-dot, .chevrons svg, .zoomframe, .scanline, .streak, .flash { animation-duration: 1ms; }
-    .glow { animation: none; }
+    .glow, .narration-preview, .narration-preview .agent-time::after { animation: none; }
   }
 </style>
 
@@ -592,6 +615,16 @@
     wait: function () {
       showCaption("Waiting");
       var b = document.createElement("div"); b.className = "breath"; ephemeral(b, 3300);
+    },
+    narrate: function () {
+      var old = viewport.querySelector(".narration-preview"); if (old) old.remove();
+      var card = document.createElement("div"); card.className = "narration-preview";
+      var label = document.createElement("span"); label.className = "agent-label"; label.textContent = "Agent";
+      var message = document.createElement("span"); message.className = "agent-text";
+      message.textContent = "Checking the result before making changes.";
+      var time = document.createElement("span"); time.className = "agent-time";
+      card.appendChild(label); card.appendChild(message); card.appendChild(time);
+      viewport.appendChild(card); setTimeout(function () { card.remove(); }, 4200);
     }
   };
 
@@ -606,7 +639,7 @@
   });
 
   // The tour: the sequence the real capture script runs, self-narrating.
-  var TOUR = ["navigate", "read", "click", "type", "key", "scroll", "zoom", "screenshot"];
+  var TOUR = ["narrate", "navigate", "read", "click", "type", "key", "scroll", "zoom", "screenshot"];
   document.getElementById("run-tour").addEventListener("click", function () {
     var i = 0;
     (function step() {

@@ -254,6 +254,7 @@ fn org_policy_hot_swap_end_to_end() {
         "read_page",
         "resize_window",
         "update_plan",
+        "narrate",
         "wait_for",
         "script",
         "browser_batch",
@@ -283,6 +284,7 @@ fn org_policy_hot_swap_end_to_end() {
         "read_page",
         "resize_window",
         "update_plan",
+        "narrate",
         "wait_for",
         "script",
         // C10: form_fill's None-variant requires [read, write], a subset of this grant's

@@ -68,7 +68,7 @@ fn read_audit_lines(path: &Path) -> Vec<Value> {
 
 /// A call requiring `read` (`tabs_context_mcp`, domain-less, denied via the union rule; the
 /// only domain-less tool with a non-empty capability requirement under ADR-0022 --
-/// `tabs_create_mcp`/`update_plan`/`resize_window` all require `[]` and short-circuit to Allow
+/// `tabs_create_mcp`/`update_plan`/`narrate`/`resize_window` all require `[]` and short-circuit to Allow
 /// unconditionally) under the `action`/`write`-only grant: `capability` denies it under
 /// enforce, attributed to `action-write-only`; `manifest_value` above is otherwise
 /// byte-identical across both runs.

@@ -48,7 +48,8 @@ set in `agent-visual-indicator.js`.
 | Zoom frame | `zoom` | "the agent is inspecting this region" | rectangle converging onto the region |
 | Wait pulse | `wait` | "deliberately pausing" | breathing dot, center-screen |
 | Caption track | any action (opt-in) | subtitle naming the action | bottom-center pill; off by default, gorgeous for demos |
-| Notification ribbon | governance speaks (denials via `Browser::notify()`) | "a guardrail held; here is why" | persistent top ribbon: neutral band, severity-colored icon medallion overflowing its edges |
+| Narration ribbon | `narrate` | "the agent wants the watcher to understand this workflow phase" | timed, responsive sky-accent edge ribbon with an Agent label and progress line; auto, top, or bottom |
+| Notification ribbon | governance speaks (denials via `Browser::notify()`) | "a guardrail held; here is why" | persistent responsive center ribbon: neutral full-width band, wrapped text, severity-colored icon medallion overflowing its edges |
 
 ## Invariants
 
@@ -64,11 +65,12 @@ than merely pretty.
 3. **Ephemeral by default.** Effects are fire-and-fade confirmations (`addEphemeral`: removed on
    `animationend` with a timeout fallback). The single exception is the notification ribbon,
    which persists until the next genuine page-mutating action or an explicit close -- it is
-   state, not confirmation, and capture-hiding must hide-and-restore it, never clear it.
+   state, not confirmation, and capture-hiding must hide-and-restore it, never clear it. Narration
+   is bounded state: one card per tab until its timer expires or a new narration replaces it.
 4. **Reduced motion respected.** Every animated effect has a `-rm` keyframe variant (plain fade,
    no travel/scale) selected via `prefers-reduced-motion`.
 5. **Optional, except governance.** The extension options' master switch (`ghostlight_effects`)
-   silences every decorative effect. The notification ribbon is deliberately exempt: a guardrail
+   silences every decorative effect, including narration. The notification ribbon is deliberately exempt: a guardrail
    explanation is substantive, not decorative. Notification DISMISSAL on a mutating action is
    likewise state cleanup and fires even with effects off.
 6. **Read-only actions never dismiss a notification.** Screenshots, scans, zooms, and waits fire
@@ -76,7 +78,7 @@ than merely pretty.
    the denial's explanation. Only genuinely mutating actions (click, drag, type, scroll,
    navigate, form writes) dismiss.
 7. **Wire text is text.** Any string that can carry page- or policy-influenced content (captions,
-   ribbon title/description) is inserted via `textContent`, never `innerHTML` -- this runs as a
+   narration, ribbon title/description) is inserted via `textContent`, never `innerHTML` -- this runs as a
    content script on `<all_urls>`.
 8. **Mechanism only.** The layer renders what it is told; it makes no policy decisions
    (ADR-0005, ADR-0053). Governance decides in the binary; the ribbon just speaks the decision.
@@ -92,6 +94,14 @@ than merely pretty.
   page-unreachable call -- deliberately NOT a DOM `CustomEvent`, which any page could forge. Use
   this seam when the trigger's natural home is in-page and a rect would otherwise have to ride a
   wire message.
+
+Narration uses the service-worker seam but has a longer lifecycle than an action effect. Its
+memory-only worker record survives navigation only until the original deadline, then replays the
+remaining duration into the new document. It is commentary, never governance: sky accent, inset
+edge ribbon, optional under the effects switch, and always below the notification layer. Auto
+placement chooses top or bottom once from recent touched-control, pointer, and scroll signals, then
+stays put. Both narration and notification geometry use bounded viewport-responsive sizing. The
+notification remains full-width, central, visually stronger, and never truncates its security text.
 
 ## Adding a new effect
 

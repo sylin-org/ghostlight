@@ -51,13 +51,17 @@ use serde_json::{json, Value};
 /// itself be wrong for a malformed call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceShape {
-    /// No governed resource: `tabs_context_mcp`, `tabs_create_mcp`, `update_plan`, `explain`.
+    /// No governed resource: `tabs_context_mcp`, `tabs_create_mcp`, `update_plan`, `narrate`,
+    /// `explain`.
     DomainLess,
     /// Governed by the tab's current URL, resolved via `tabId`: `read_page`, `computer`,
     /// `find`, `form_input`, and the other tab-scoped tools.
     TabScoped,
     /// Governed by the `url` argument: `navigate` only (extension-mirrored normalization).
     TargetArg,
+    /// Existing in-memory recording authority, with no live page lookup. Used for status, stop,
+    /// clear, and client-side export after capture authority has already been established.
+    RecordingScoped,
 }
 
 /// How a call is dispatched once authorized (ADR-0024 Decision 1, grown async by ADR-0035
@@ -143,9 +147,9 @@ pub struct ToolExample {
     pub returns: Option<&'static str>,
 }
 
-/// The tool registry: 21 descriptors (the 13 browser tools plus `wait_for`, `script`, `form_fill`,
-/// `file_upload`, `browser_batch`, `upload_image`, `gif_creator`, and `explain`), in the order they
-/// appear in `tools/list`. `computer`'s 13 variants are in the
+/// The tool registry: 22 descriptors (the 13 browser tools plus `narrate`, `wait_for`, `script`,
+/// `form_fill`, `file_upload`, `browser_batch`, `upload_image`, `gif_creator`, and `explain`), in
+/// the order they appear in `tools/list`. `computer`'s 13 variants are in the
 /// schema's `action` enum order, byte-for-byte, as `variants`.
 pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
@@ -827,6 +831,67 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         output_schema: None,
     },
     ToolDescriptor {
+        tool: "narrate",
+        advertised_description: "Show a short, temporary narration ribbon in the controlled browser tab so the person watching understands the current workflow phase. Use it for meaningful phase changes, not routine clicks or keystrokes. A new narration replaces the current one.",
+        input_schema: || json!({
+            "type": "object",
+            "properties": {
+                "tabId": {
+                    "type": "number",
+                    "description": "Tab ID in which to show the narration. Must be a tab owned by this session."
+                },
+                "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240,
+                    "description": "One short, user-visible sentence describing the current workflow phase."
+                },
+                "position": {
+                    "type": "string",
+                    "enum": ["auto", "top", "bottom"],
+                    "default": "auto",
+                    "description": "Which viewport edge holds the narration ribbon. Auto avoids recent interaction and scroll activity; defaults to auto."
+                },
+                "duration_ms": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 30000,
+                    "default": 5000,
+                    "description": "How long to show the narration, in milliseconds. Defaults to 5000."
+                }
+            },
+            "required": ["tabId", "text"],
+            "additionalProperties": false
+        }),
+        example: Some(ToolExample {
+            call: r#"{"tabId":0,"text":"Checking the result before making changes.","position":"auto","duration_ms":5000}"#,
+            returns: Some("Shows one timed, pointer-transparent agent narration ribbon; a new call replaces it."),
+        }),
+        action_key: None,
+        variants: &[ActionVariant {
+            action: None,
+            requires: &[],
+            directory_description: "Show temporary agent commentary in an owned tab; touches no page content and requires no RAWX capability.",
+        }],
+        resource: ResourceShape::DomainLess,
+        handler: Handler::ExtensionForward,
+        postprocess: None,
+        post_dispatch: PostDispatch::None,
+        output_schema: Some(|| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "shown": { "type": "boolean" },
+                    "position": { "type": "string" },
+                    "duration_ms": { "type": "number" },
+                    "replaced": { "type": "boolean" },
+                    "reason": { "type": "string" }
+                },
+                "required": ["shown", "position", "duration_ms", "replaced"]
+            })
+        }),
+    },
+    ToolDescriptor {
         tool: "wait_for",
         advertised_description: "Wait until the page is ready. By default waits for BOTH your condition and page settlement (DOM mutation rate decayed). Provide selector (CSS) or text (visible substring) with state visible|present|gone, or call with neither to wait for settlement alone. min_ms sets a minimum elapsed time; settle:false gates on the condition only. Returns elapsed_ms, settle diagnostics, and the matched element's ref for follow-up clicks. Times out with an error naming what WAS on the page.",
         input_schema: || json!({
@@ -1200,24 +1265,21 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "gif_creator",
-        // The description + parameter text below are TRANSCRIBED VERBATIM from the installed official
-        // Claude-in-Chrome v1.0.80 (assets/mcpPermissions-*.js `name:"gif_creator"`), the sole
-        // reference (ADR-0050 D1). gif_creator is a NEW additive tool (never trained), so this is not
-        // a sacred-surface pin, but it is the real schema, not an approximation. `enum` +
-        // `required` + `additionalProperties` follow our house JSON-Schema style (the official uses
-        // Anthropic's `parameters` format). Phase 1 produces a plain-frame GIF; the description's
-        // visual overlays are a DEFERRED extension feature (see the T4 LEDGER entry).
-        advertised_description: "Manage GIF recording and export for browser automation sessions. Control when to start/stop recording browser actions (clicks, scrolls, navigation), then export as an animated GIF with visual overlays (click indicators, action labels, progress bar, watermark). All operations are scoped to the tab's group. When starting recording, take a screenshot immediately after to capture the initial state as the first frame. When stopping recording, take a screenshot immediately before to capture the final state as the last frame. For export, either provide 'coordinate' to drag/drop upload to a page element, or set 'download: true' to download the GIF.",
+        // gif_creator is additive and not part of the 13 trained schemas. ADR-0073 simplifies the
+        // happy path to start -> ordinary browser work -> export; stop remains an optional explicit
+        // boundary, and status exposes the reliable lifecycle without touching the live page.
+        advertised_description: "Create a short, memory-only GIF of browser work. Call start_recording, use browser tools normally, then call export; export stops capture automatically. Recording also auto-stops after 30 seconds idle or 120 seconds total. Use status to inspect state, stop_recording for an optional explicit boundary, or clear to erase immediately. Export can return the GIF to the client (download:true) or place it on the page with ref or coordinate.",
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["start_recording", "stop_recording", "clear", "export"],
-                    "description": "Action to perform: 'start_recording' (begin capturing), 'stop_recording' (stop capturing but keep frames), 'export' (generate and export GIF), 'clear' (discard frames)"
+                    "enum": ["start_recording", "stop_recording", "status", "clear", "export"],
+                    "description": "Action to perform. The usual flow is start_recording, normal browser work, then export."
                 },
                 "tabId": { "type": "number", "description": "Tab ID to identify which tab group this operation applies to" },
                 "coordinate": { "type": "array", "description": "Viewport coordinates [x, y] for drag & drop upload. Required for 'export' action unless 'download' is true." },
+                "ref": { "type": "string", "description": "Element reference for upload to a file input. For 'export' action only; mutually exclusive with coordinate." },
                 "download": { "type": "boolean", "description": "If true, download the GIF instead of drag/drop upload. For 'export' action only." },
                 "filename": { "type": "string", "description": "Optional filename for exported GIF (default: 'recording-[timestamp].gif'). For 'export' action only." },
                 "options": { "type": "object", "description": "Optional GIF enhancement options for 'export' action. All default to true." }
@@ -1243,15 +1305,20 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 directory_description: "Stop recording; keep the captured frames for export.",
             },
             ActionVariant {
+                action: Some("status"),
+                requires: &[],
+                directory_description: "Report recording state and deadlines without reading the live page.",
+            },
+            ActionVariant {
                 action: Some("clear"),
                 requires: &[],
                 directory_description: "Discard the captured recording frames.",
             },
             ActionVariant {
                 action: Some("export"),
-                requires: &[Capability::Write],
+                requires: &[Capability::Read],
                 directory_description:
-                    "Encode the frames to a GIF and export it (download, or drag-drop at a coordinate).",
+                    "Encode the frames to a GIF. Client export requires read; page placement by ref or coordinate requires write.",
             },
         ],
         resource: ResourceShape::TabScoped,
@@ -1319,14 +1386,14 @@ pub const REGISTRY: &[ToolDescriptor] = &[
 /// into the exact same `initialize.instructions` string.
 ///
 /// Prose revised 2026-07-10 (ergonomics pass; ADR-0031 Decision 1 field contract unchanged): the
-/// `flow` field now reveals the higher-level tools (`wait_for`, `script`, `browser_batch`,
-/// `form_fill`) and steers tool choice, and all cost guidance is consolidated into `cost_notes`
-/// (the duplicated COST DISCIPLINE clause left `workflow`). The five-field set and the non-empty,
-/// `tabId`, and `Cost notes:` guarantees the tests pin are all preserved.
+/// `flow` field now reveals the higher-level tools (`narrate`, `wait_for`, `script`,
+/// `browser_batch`, `form_fill`) and steers tool choice, and all cost guidance is consolidated
+/// into `cost_notes` (the duplicated COST DISCIPLINE clause left `workflow`). The five-field set
+/// and the non-empty, `tabId`, and `Cost notes:` guarantees the tests pin are all preserved.
 pub const AGENT_GUIDE: AgentGuide = AgentGuide {
     summary: "Ghostlight drives the user's own authenticated browser. You observe and act on the web pages they're already logged into, in an isolated Ghostlight tab group separate from their own tabs. Default (no policy) is unrestricted; a policy can scope what's allowed.",
     workflow: "BEFORE ANYTHING ELSE: GET A tabId. Every tool that touches a page requires a `tabId` (a number) -- it is required, not optional. Get one with tabs_context_mcp (pass `createIfEmpty: true` to create the group if none exists; usually your first call) or tabs_create_mcp (open a new tab). Then navigate (tabId + url) to go somewhere.",
-    flow: "tabs_context_mcp -> navigate -> read (read_page for structure, get_page_text for prose, find for one element; screenshot only to see layout) -> act (form_fill for forms, computer for clicks and keys, form_input for a single field) -> re-read to confirm. On dynamic pages, use wait_for between navigating and reading so you see the settled page, not a spinner. When you can predict two or more steps ahead, run them in one call: script chains steps and passes results forward (e.g. `$prev.results.0.ref` after a find), and browser_batch runs a fixed sequence in one round-trip.",
+    flow: "tabs_context_mcp -> navigate -> read (read_page for structure, get_page_text for prose, find for one element; screenshot only to see layout) -> act (form_fill for forms, computer for clicks and keys, form_input for a single field) -> re-read to confirm. On dynamic pages, use wait_for between navigating and reading so you see the settled page, not a spinner. When a person is watching a longer workflow, use narrate at meaningful phase changes, not for routine clicks or keystrokes. When you can predict two or more steps ahead, run them in one call: script chains steps and passes results forward (e.g. `$prev.results.0.ref` after a find), and browser_batch runs a fixed sequence in one round-trip.",
     denials: "If a call is denied you'll see `Denied (D-xxxxxxxx): ...`. Call explain (no arguments) to see what's permitted -- you can do this any time to plan, not just after a denial -- and hand the denial id to the policy administrator.",
     cost_notes: "Cost notes: prefer read_page (structured tree) or get_page_text (plain text) over screenshots when you only need structure or text; a screenshot or zoom costs roughly 1,600 tokens, so capture one only when you need to see layout. read_page full is large on complex pages -- filter interactive is dramatically smaller, and diff true returns only what changed since your last read. get_page_text can return tens of thousands of tokens on document-heavy pages; prefer find for targeted lookups. Each script or browser_batch step is still one browser round-trip -- they save your tokens and turns, not the browser's work.",
 };
@@ -1387,7 +1454,7 @@ pub fn advertised_tools_json() -> Value {
     json!({ "tools": tools })
 }
 
-/// Look up a tool's registry row by name. Linear scan over 21 rows; the validity check the
+/// Look up a tool's registry row by name. Linear scan over 22 rows; the validity check the
 /// pipeline uses.
 pub fn descriptor(tool: &str) -> Option<&'static ToolDescriptor> {
     REGISTRY.iter().find(|row| row.tool == tool)
@@ -1435,6 +1502,46 @@ pub fn requires(tool: &str, action: Option<&str>) -> Option<&'static [Capability
             .map(|variant| variant.requires),
         None => row.variants.first().map(|variant| variant.requires),
     }
+}
+
+/// Per-call capability refinement for additive tools whose delivery mode changes the effect.
+/// The descriptor remains the source of the baseline used by advertisement and explain.
+pub fn requires_for_call(
+    descriptor: &ToolDescriptor,
+    action: Option<&str>,
+    args: &Value,
+) -> Option<&'static [Capability]> {
+    if descriptor.tool == "gif_creator"
+        && action == Some(crate::recording::action::EXPORT)
+        && gif_page_target(args)
+    {
+        return Some(&[Capability::Write]);
+    }
+    requires(descriptor.tool, action)
+}
+
+/// Resolve recording-only operations without probing the current tab. Starting capture and page
+/// placement still use the descriptor's ordinary tab-scoped authority.
+pub fn resource_for_call(
+    descriptor: &ToolDescriptor,
+    action: Option<&str>,
+    args: &Value,
+) -> ResourceShape {
+    if descriptor.tool != "gif_creator" {
+        return descriptor.resource;
+    }
+    if action == Some(crate::recording::action::START)
+        || (action == Some(crate::recording::action::EXPORT) && gif_page_target(args))
+    {
+        ResourceShape::TabScoped
+    } else {
+        ResourceShape::RecordingScoped
+    }
+}
+
+fn gif_page_target(args: &Value) -> bool {
+    args.get("coordinate").is_some_and(|value| !value.is_null())
+        || args.get("ref").is_some_and(|value| !value.is_null())
 }
 
 /// The `explain` tool's deterministic response text (ADR-0022 Decision 7): the capability
@@ -1561,7 +1668,7 @@ mod tests {
         );
 
         let total_variants: usize = REGISTRY.iter().map(|row| row.variants.len()).sum();
-        assert_eq!(total_variants, 37);
+        assert_eq!(total_variants, 39);
 
         let mut seen = HashSet::new();
         for row in REGISTRY {
@@ -1604,6 +1711,7 @@ mod tests {
             ("read_page", None, &[Capability::Read]),
             ("resize_window", None, &[]),
             ("update_plan", None, &[]),
+            ("narrate", None, &[]),
             ("wait_for", None, &[Capability::Read]),
             ("script", None, &[]),
             ("form_fill", None, &[Capability::Read, Capability::Write]),
@@ -1617,8 +1725,9 @@ mod tests {
             ("upload_image", None, &[Capability::Write]),
             ("gif_creator", Some("start_recording"), &[Capability::Read]),
             ("gif_creator", Some("stop_recording"), &[]),
+            ("gif_creator", Some("status"), &[]),
             ("gif_creator", Some("clear"), &[]),
-            ("gif_creator", Some("export"), &[Capability::Write]),
+            ("gif_creator", Some("export"), &[Capability::Read]),
             ("explain", None, &[]),
         ];
 
@@ -1644,6 +1753,7 @@ mod tests {
         assert_eq!(requires("computer", Some("no_such_action")), None);
         assert_eq!(requires("tabs_create_mcp", None), Some(&[][..]));
         assert_eq!(requires("update_plan", None), Some(&[][..]));
+        assert_eq!(requires("narrate", None), Some(&[][..]));
         assert_eq!(requires("explain", None), Some(&[][..]));
         assert_eq!(requires("computer", Some("wait")), Some(&[][..]));
         assert_eq!(requires("navigate", None), Some(&[Capability::Read][..]));
@@ -1674,6 +1784,27 @@ mod tests {
         assert_eq!(
             requires("form_fill", Some("submit")),
             Some(&[Capability::Read, Capability::Write, Capability::Action][..])
+        );
+    }
+
+    #[test]
+    fn gif_export_classification_follows_its_delivery_boundary() {
+        let gif = descriptor("gif_creator").unwrap();
+        assert_eq!(
+            requires_for_call(gif, Some("export"), &json!({"download": true})),
+            Some(&[Capability::Read][..])
+        );
+        assert_eq!(
+            requires_for_call(gif, Some("export"), &json!({"ref": "ref_1"})),
+            Some(&[Capability::Write][..])
+        );
+        assert_eq!(
+            resource_for_call(gif, Some("status"), &json!({"tabId": 1})),
+            ResourceShape::RecordingScoped
+        );
+        assert_eq!(
+            resource_for_call(gif, Some("export"), &json!({"coordinate": [1, 2]})),
+            ResourceShape::TabScoped
         );
     }
 
@@ -1813,6 +1944,14 @@ mod tests {
             ),
             (
                 "update_plan",
+                None,
+                ResourceShape::DomainLess,
+                false,
+                false,
+                PostDispatch::None,
+            ),
+            (
+                "narrate",
                 None,
                 ResourceShape::DomainLess,
                 false,

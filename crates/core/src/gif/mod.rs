@@ -17,17 +17,32 @@ mod writer;
 pub use overlay::{describe_action, take_action_for_frame, ActionMeta};
 use overlay::{Canvas, OverlayOptions};
 use serde_json::Value;
+use std::sync::Arc;
+use zeroize::Zeroizing;
 
 /// One captured frame as recorded by the service: raw JPEG bytes plus overlay context.
+#[derive(Clone)]
 pub struct RecordedFrame {
     /// The frame's JPEG bytes (a screencast frame or the seed screenshot).
-    pub jpeg: Vec<u8>,
+    pub jpeg: Arc<Zeroizing<Vec<u8>>>,
     /// Capture time (Unix ms) -- drives the per-frame GIF delay.
     pub ts_ms: i64,
     /// The CSS viewport width at capture; overlay scaleFactor = frame width / vp_w.
     pub vp_w: Option<f64>,
     /// The action this frame's paint shows, if one was tagged (ADR-0052 D4).
     pub action: Option<ActionMeta>,
+}
+
+impl RecordedFrame {
+    /// Build a frame whose compressed pixels are zeroized when their last in-process owner drops.
+    pub fn new(jpeg: Vec<u8>, ts_ms: i64, vp_w: Option<f64>, action: Option<ActionMeta>) -> Self {
+        Self {
+            jpeg: Arc::new(Zeroizing::new(jpeg)),
+            ts_ms,
+            vp_w,
+            action,
+        }
+    }
 }
 
 /// Encoding failures. Everything else in the pipeline is total.
@@ -84,56 +99,71 @@ fn resize_nearest(rgba: &[u8], sw: usize, sh: usize, dw: usize, dh: usize) -> Ve
     out
 }
 
-/// Encode a recording into a complete animated GIF89a: decode each JPEG, composite the overlays
-/// (gated by the tool's open `options` object -- all switches default on), learn one adaptive
-/// global palette across all frames, and write the file with real per-frame timing.
+fn render_frame(
+    frame: &RecordedFrame,
+    index: usize,
+    frame_count: usize,
+    dimensions: (usize, usize),
+    opts: &OverlayOptions,
+) -> Result<Zeroizing<Vec<u8>>, GifError> {
+    let (mut rgba, width, height) = decode_jpeg_rgba(frame.jpeg.as_slice())
+        .map_err(|reason| GifError::Decode { index, reason })?;
+    let (target_width, target_height) = dimensions;
+    if (width, height) != dimensions {
+        rgba = resize_nearest(&rgba, width, height, target_width, target_height);
+    }
+    let mut rgba = Zeroizing::new(rgba);
+    let mut canvas = Canvas {
+        buf: &mut rgba,
+        w: target_width,
+        h: target_height,
+    };
+    overlay::composite_overlays(
+        &mut canvas,
+        frame.action.as_ref(),
+        opts,
+        (index + 1) as f64 / frame_count as f64,
+        frame.vp_w,
+    );
+    Ok(rgba)
+}
+
+/// Encode a recording in two bounded passes. Pass one decodes one frame at a time into a capped
+/// palette sample. Pass two decodes, overlays, quantizes, and writes one frame at a time. Only the
+/// compressed source frames, the small palette sample, one working frame, and the final GIF coexist.
 pub fn encode_recording(frames: &[RecordedFrame], options: &Value) -> Result<Vec<u8>, GifError> {
     if frames.is_empty() {
         return Err(GifError::Empty);
     }
     let opts: OverlayOptions = overlay::resolve_overlay_options(options);
 
-    let mut rgba_frames: Vec<Vec<u8>> = Vec::with_capacity(frames.len());
-    let (mut w0, mut h0) = (0usize, 0usize);
+    let (first_pixels, w0, h0) = decode_jpeg_rgba(frames[0].jpeg.as_slice())
+        .map_err(|reason| GifError::Decode { index: 0, reason })?;
+    drop(Zeroizing::new(first_pixels));
+    let dimensions = (w0, h0);
+    let per_frame_budget = quantize::TRAIN_PIXEL_BUDGET.div_ceil(frames.len());
+    let mut sample = Zeroizing::new(Vec::with_capacity(
+        quantize::TRAIN_PIXEL_BUDGET.saturating_mul(4),
+    ));
     for (i, frame) in frames.iter().enumerate() {
-        let (mut rgba, w, h) = decode_jpeg_rgba(&frame.jpeg)
-            .map_err(|reason| GifError::Decode { index: i, reason })?;
-        if i == 0 {
-            (w0, h0) = (w, h);
-        } else if (w, h) != (w0, h0) {
-            rgba = resize_nearest(&rgba, w, h, w0, h0);
+        let rgba = render_frame(frame, i, frames.len(), dimensions, &opts)?;
+        let pixel_count = rgba.len() / 4;
+        let stride = pixel_count.div_ceil(per_frame_budget.max(1)).max(1);
+        for pixel in rgba.chunks_exact(4).step_by(stride) {
+            sample.extend_from_slice(pixel);
         }
-        let mut canvas = Canvas {
-            buf: &mut rgba,
-            w: w0,
-            h: h0,
-        };
-        let progress = (i + 1) as f64 / frames.len() as f64;
-        overlay::composite_overlays(
-            &mut canvas,
-            frame.action.as_ref(),
-            &opts,
-            progress,
-            frame.vp_w,
-        );
-        rgba_frames.push(rgba);
     }
-
-    let refs: Vec<&[u8]> = rgba_frames.iter().map(|f| f.as_slice()).collect();
-    let palette = quantize::build_global_palette(&refs, quantize::DEFAULT_SAMPLE_FAC);
+    let palette = quantize::build_global_palette_from_sample(&sample, quantize::DEFAULT_SAMPLE_FAC);
 
     let stamps: Vec<i64> = frames.iter().map(|f| f.ts_ms).collect();
     let delays_ms = overlay::compute_frame_delays(&stamps);
-    let indexed: Vec<writer::IndexedFrame> = rgba_frames
-        .iter()
-        .zip(delays_ms)
-        .map(|(rgba, ms)| writer::IndexedFrame {
-            indices: palette.quantize_frame(rgba),
-            delay_cs: ((ms as f64 / 10.0).round() as u16).max(2),
+    writer::encode_gif_streaming(w0 as u16, h0 as u16, &palette.rgb, frames.len(), |index| {
+        let rgba = render_frame(&frames[index], index, frames.len(), dimensions, &opts)?;
+        Ok(writer::IndexedFrame {
+            indices: palette.quantize_frame(&rgba),
+            delay_cs: ((delays_ms[index] as f64 / 10.0).round() as u16).max(2),
         })
-        .collect();
-
-    writer::encode_gif(w0 as u16, h0 as u16, &palette.rgb, &indexed).map_err(GifError::Encode)
+    })
 }
 
 #[cfg(test)]
@@ -160,24 +190,19 @@ mod tests {
     #[test]
     fn encodes_a_two_frame_recording_end_to_end() {
         let frames = vec![
-            RecordedFrame {
-                jpeg: RED.to_vec(),
-                ts_ms: 1000,
-                vp_w: Some(4.0),
-                action: None,
-            },
-            RecordedFrame {
-                jpeg: BLUE.to_vec(),
-                ts_ms: 1500,
-                vp_w: Some(4.0),
-                action: Some(ActionMeta {
+            RecordedFrame::new(RED.to_vec(), 1000, Some(4.0), None),
+            RecordedFrame::new(
+                BLUE.to_vec(),
+                1500,
+                Some(4.0),
+                Some(ActionMeta {
                     kind: "left_click".to_string(),
                     coordinate: Some((2.0, 2.0)),
                     start_coordinate: None,
                     description: "left_click".to_string(),
                     ts_ms: 1400,
                 }),
-            },
+            ),
         ];
         // Overlays off keeps the tiny 4x4 canvas readable; the pipeline still runs the full path.
         let gif = encode_recording(

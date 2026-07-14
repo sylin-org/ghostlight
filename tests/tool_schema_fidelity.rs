@@ -1,7 +1,7 @@
 //! Regression snapshot for the `tools/list` surface, now code-declared in
 //! `browser::directory::REGISTRY` (ADR-0034 Decision 4: tool declarations in code, not JSON).
 //!
-//! Pins the structural invariants: exactly the 13 trained tools + `explain`, in order, each with
+//! Pins the structural invariants: the 13 trained tools plus sanctioned additive tools, in order, each with
 //! a non-empty description and an object inputSchema. The computer tool carries all 13 actions.
 //! This is a regression snapshot (visibility), not a drift-prevention contract between two files.
 
@@ -41,7 +41,7 @@ fn tools() -> Vec<Value> {
 }
 
 #[test]
-fn advertises_exactly_the_thirteen_trained_tools_plus_explain_positioned_last() {
+fn advertises_the_thirteen_trained_tools_plus_sanctioned_additions_with_explain_last() {
     let names: Vec<String> = tools()
         .iter()
         .map(|t| {
@@ -53,28 +53,26 @@ fn advertises_exactly_the_thirteen_trained_tools_plus_explain_positioned_last() 
         .collect();
     assert_eq!(
         names.len(),
-        21,
-        "13 trained tools plus wait_for, script, form_fill, file_upload, browser_batch, upload_image, gif_creator, and explain"
+        22,
+        "13 trained tools plus narrate, wait_for, script, form_fill, file_upload, browser_batch, upload_image, gif_creator, and explain"
     );
     assert_eq!(
         names[..13],
         EXPECTED_TRAINED,
         "the 13 trained tools must stay byte-identical and in order"
     );
-    assert_eq!(names[13], "wait_for", "the 14th tool is wait_for");
-    assert_eq!(names[14], "script", "the 15th tool is script");
+    assert_eq!(names[13], "narrate", "the 14th tool is narrate");
+    assert_eq!(names[14], "wait_for", "the 15th tool is wait_for");
+    assert_eq!(names[15], "script", "the 16th tool is script");
+    assert_eq!(names[16], "form_fill", "the 17th tool is form_fill");
+    assert_eq!(names[17], "file_upload", "the 18th tool is file_upload");
+    assert_eq!(names[18], "browser_batch", "the 19th tool is browser_batch");
+    assert_eq!(names[19], "upload_image", "the 20th tool is upload_image");
     assert_eq!(
-        names[15], "form_fill",
-        "the 16th tool is form_fill, immediately before explain"
+        names[20], "gif_creator",
+        "the 21st tool is gif_creator, immediately before explain"
     );
-    assert_eq!(names[16], "file_upload", "the 17th tool is file_upload");
-    assert_eq!(names[17], "browser_batch", "the 18th tool is browser_batch");
-    assert_eq!(names[18], "upload_image", "the 19th tool is upload_image");
-    assert_eq!(
-        names[19], "gif_creator",
-        "the 20th tool is gif_creator, immediately before explain"
-    );
-    assert_eq!(names[20], "explain", "explain stays positioned last");
+    assert_eq!(names[21], "explain", "explain stays positioned last");
 }
 
 /// The `explain` tool's own object matches ADR-0022 Decision 7 exactly: name, the pinned
@@ -112,8 +110,8 @@ fn explain_tool_object_matches_the_pinned_adr_0022_decision_7_shape() {
 
     assert_eq!(
         all.len(),
-        21,
-        "no tool other than wait_for, script, form_fill, file_upload, browser_batch, upload_image, gif_creator, and explain was added to the sacred fixture"
+        22,
+        "no tool other than narrate, wait_for, script, form_fill, file_upload, browser_batch, upload_image, gif_creator, and explain was added to the sacred fixture"
     );
 }
 
@@ -132,6 +130,47 @@ fn every_tool_is_well_formed() {
             "{name}: inputSchema.type must be \"object\""
         );
     }
+}
+
+#[test]
+fn narrate_is_additive_and_pins_its_bounded_schema() {
+    let narrate = tools()
+        .into_iter()
+        .find(|t| t["name"] == "narrate")
+        .expect("narrate tool present");
+    assert_eq!(
+        narrate["inputSchema"],
+        json!({
+            "type": "object",
+            "properties": {
+                "tabId": {
+                    "type": "number",
+                    "description": "Tab ID in which to show the narration. Must be a tab owned by this session."
+                },
+                "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240,
+                    "description": "One short, user-visible sentence describing the current workflow phase."
+                },
+                "position": {
+                    "type": "string",
+                    "enum": ["auto", "top", "bottom"],
+                    "default": "auto",
+                    "description": "Which viewport edge holds the narration ribbon. Auto avoids recent interaction and scroll activity; defaults to auto."
+                },
+                "duration_ms": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 30000,
+                    "default": 5000,
+                    "description": "How long to show the narration, in milliseconds. Defaults to 5000."
+                }
+            },
+            "required": ["tabId", "text"],
+            "additionalProperties": false
+        })
+    );
 }
 
 #[test]
@@ -326,7 +365,8 @@ fn every_trained_tools_example_call_validates_against_its_own_input_schema() {
 
 /// C3 (ADR-0038 Decision 3, PINS.md SS5): `outputSchema` is advertised for exactly the v1
 /// structured-result vocabulary tools declared so far, in advertised order, and nowhere else;
-/// each is a JSON-Schema object. C4 adds `wait_for`; C7 adds `script`; C10 adds `form_fill`.
+/// each is a JSON-Schema object. ADR-0072 adds `narrate`; C4 adds `wait_for`; C7 adds `script`;
+/// C10 adds `form_fill`.
 #[test]
 fn output_schemas_present_exactly_where_declared() {
     let with_schema: Vec<String> = tools()
@@ -341,6 +381,7 @@ fn output_schemas_present_exactly_where_declared() {
             "tabs_create_mcp",
             "navigate",
             "find",
+            "narrate",
             "wait_for",
             "script",
             "form_fill"

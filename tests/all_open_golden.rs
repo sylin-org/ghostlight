@@ -26,12 +26,12 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
-/// The 21 tool names in advertised order (the 13 trained tools plus `wait_for`, `script`,
+/// The 22 tool names in advertised order (the 13 trained tools plus `narrate`, `wait_for`, `script`,
 /// `form_fill`, `file_upload` (ADR-0050 Decision 2), `browser_batch` (ADR-0050 Decision 3),
 /// `upload_image` (ADR-0050 Decision 4), `gif_creator` (ADR-0050 Decision 5), and ADR-0022
 /// Decision 7's sanctioned `explain` addition, positioned last), copied from the code-declared
 /// registry (`browser::directory::REGISTRY`), in declared order.
-const GOLDEN_TOOL_NAMES: [&str; 21] = [
+const GOLDEN_TOOL_NAMES: [&str; 22] = [
     "tabs_context_mcp",
     "tabs_create_mcp",
     "navigate",
@@ -45,6 +45,7 @@ const GOLDEN_TOOL_NAMES: [&str; 21] = [
     "read_page",
     "resize_window",
     "update_plan",
+    "narrate",
     "wait_for",
     "script",
     "form_fill",
@@ -62,7 +63,7 @@ fn tools_list_is_byte_stable_through_the_move() {
     assert_eq!(
         tools.len(),
         GOLDEN_TOOL_NAMES.len(),
-        "all 21 tools advertised (13 trained plus wait_for, script, form_fill, file_upload, browser_batch, upload_image, gif_creator, and explain)"
+        "all 22 tools advertised (13 trained plus narrate, wait_for, script, form_fill, file_upload, browser_batch, upload_image, gif_creator, and explain)"
     );
     for (i, name) in GOLDEN_TOOL_NAMES.iter().enumerate() {
         assert_eq!(

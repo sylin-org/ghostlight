@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Permission Justifications
 
-Last updated: 2026-07-03
+Last updated: 2026-07-13
 
 This document gives one paragraph per permission requested by the Ghostlight in Browser
 extension, written to be pasted directly into the corresponding justification text box in the
@@ -30,13 +30,15 @@ and titles back to the connected agent.
 The `debugger` permission is required because Ghostlight in Browser attaches the Chrome DevTools
 Protocol (CDP, version 1.3) to the single tab it is automating, via
 `chrome.debugger.attach`. This is the only mechanism that gives the extension a single,
-unified session for the four capabilities the tool depends on together: (1) dispatching
+unified session for the five capabilities the tool depends on together: (1) dispatching
 low-level synthetic input (mouse clicks, drags, key presses, scrolling) with the same
 coordinate and timing fidelity a real user produces, (2) capturing on-demand screenshots of the
 exact rendered tab, (3) during a user-requested session recording, capturing screen-cast frames
 of that same tab (Page.startScreencast) so the local application can assemble an annotated
-animated GIF of the session, and (4) capturing console and network events as they happen. No
-combination of public, non-debugger extension APIs provides all four in one coherent session
+animated GIF of the session, (4) capturing console and network events as they happen, and (5)
+evaluating JavaScript explicitly supplied by the connected local MCP client in the attached web
+page when the user invokes the advertised `javascript_tool` automation capability. No
+combination of public, non-debugger extension APIs provides all five in one coherent session
 against one target tab: `chrome.tabs.captureVisibleTab` cannot dispatch input, stream frames, or read console/network
 activity, and there is no public API for CDP-fidelity input dispatch or console/network event
 streaming. Content-script-simulated input (dispatching synthetic DOM events) is a fundamentally
@@ -47,6 +49,23 @@ general-purpose automation tool. The extension attaches the debugger only to the
 tab(s) it is actively automating, only for the duration of that automation session, and shows
 Chrome's own "being debugged" indicator on that tab for the whole time, so the user always has
 a visible signal that the capability is in use.
+
+## Remote code use / page-context JavaScript
+
+The extension's own logic is not remotely hosted. Its service worker, content scripts, and support
+libraries all ship in the submitted extension package; it does not fetch or dynamically import
+code that changes extension behavior. Ghostlight does provide an explicitly advertised
+`javascript_tool` browser-automation capability. When the user or connected AI agent requests that
+tool, JavaScript text arrives from the separately installed local native application over Chrome
+native messaging and is evaluated through CDP `Runtime.evaluate` in the attached web page. That
+text runs only in the page's context, not in the extension origin, and is not installed, imported,
+or retained as extension code. The Chrome Web Store's Manifest V3 requirements expressly list the
+Debugger API as a permitted API for remote-source execution when used for its documented purpose.
+This capability is necessary for user-directed page inspection and interaction that cannot be
+expressed reliably through fixed DOM operations alone. It is invoked only for a specific tool call
+in the visible automation session.
+
+Policy reference: [Chrome Web Store Manifest V3 requirements](https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements).
 
 ## scripting
 

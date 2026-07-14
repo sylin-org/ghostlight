@@ -1,6 +1,6 @@
 # STATUS -- where the project stands
 
-Last updated: 2026-07-12. This file is a point-in-time snapshot maintained by whoever
+Last updated: 2026-07-13. This file is a point-in-time snapshot maintained by whoever
 finishes significant work. It exists so a fresh agent (or human) can orient without any
 prior session context. **Trust the tree, `git log`, and the batch LEDGERs over this file
 when they disagree**, and update it when you land something that changes the picture.
@@ -12,13 +12,14 @@ when they disagree**, and update it when you land something that changes the pic
 - **Latest published release: v0.5.6** (2026-07-12), cut with `scripts/release.ps1 0.5.6`.
   Shipped and LIVE: GitHub Release (27 assets + attestations), npm `ghostlight@0.5.6`, homebrew
   tap, **MCP registry (`org.sylin/ghostlight`)**, scoop/winget/homebrew manifests committed to
-  main, trust footers restamped, sylin.org website refreshed. `main` is at the release commit
-  `5762c3a`; `dev` is AHEAD of main by post-release tooling (registry step, server.json/URL fixes,
-  STATUS) -- these reach main at the next dev->main PR. v0.5.5 was prepared but never published.
-- **Unreleased on `dev`**: Codex is now a first-class installer target (ADR-0067). `ghostlight
-  install --client codex` losslessly adds the active relay to `~/.codex/config.toml`, removes it on
-  uninstall, and lets `doctor` report its registration accurately. The browser extension remains a
-  separate user-visible install step.
+  main, trust footers restamped, sylin.org website refreshed. Post-release PR #45 is merged on
+  `main` at `d22db80`; `dev` is ahead with ADR-0071's installer-target batch. v0.5.5 was prepared
+  but never published.
+- **Unreleased installer work**: Codex is a first-class lossless-TOML target (ADR-0067), and
+  Windsurf, Zed, OpenCode, and Crush now join Claude Code/Desktop, Cursor, and VS Code as explicit
+  installer targets (ADR-0071). Strict JSON is merged idempotently. Commented JSONC is left intact
+  and receives a copyable manual entry; `doctor` uses a tolerant registration check. The browser
+  extension remains a separate user-visible install step.
 - **MCP registry publishing is now automated** in `release.ps1` (the `registry` step, after `npm`):
   `mcp-publisher` DNS-auth publish, gated on `MCP_DNS_PRIVATE_KEY`. The one-time DNS proof is DONE
   (apex TXT `v=MCPv1; k=ed25519; p=...` on sylin.org via Cloudflare; ed25519 key in the env file;
@@ -29,13 +30,43 @@ when they disagree**, and update it when you land something that changes the pic
   deploy-quiesce lock (ADR-0063), explicit dev isolation then the one-stack model (ADR-0064
   amended by ADR-0065), the on-screen governance ribbon + `notify` tool, the field-splash FX
   pass, the SAPS security-hardening pass, and the full deploy-automation + store-publish tooling.
-- **CWS publish is BLOCKED on a listing gate (owner action)**: the v0.5.6 package UPLOADED to
-  the Chrome Web Store successfully (staged as a draft), but the publish API returned 400 --
-  the listing needs, in the Developer Dashboard (Privacy practices tab): mandatory privacy
-  information, a remote-code-use justification, and a promotional video. Content to paste lives
-  in `docs/legal/PRIVACY.md`, `docs/legal/PERMISSION_JUSTIFICATIONS.md`, `docs/legal/STORE_LISTING.md`.
-  After filling those, publish from the dashboard OR re-run `pwsh -File scripts/publish-extension.ps1`
-  (the package is already uploaded; it will re-attempt publish). Edge was skipped (no `EDGE_*` creds).
+- **CWS publish is BLOCKED on listing completion (owner action)**: the v0.5.6 package is uploaded
+  and staged as a draft. The Developer Dashboard still needs the Privacy practices answers,
+  remote-code-use justification, and promotional video. Paste-ready, code-backed wording lives in
+  `docs/legal/PRIVACY.md`, `docs/legal/PERMISSION_JUSTIFICATIONS.md`, and
+  `docs/legal/STORE_LISTING.md`; its canonical public target is
+  `https://sylin.org/ghostlight/privacy/`. After completing the dashboard, publish there or re-run
+  `pwsh -File scripts/publish-extension.ps1` (the package is already uploaded). Edge was skipped
+  because no `EDGE_*` credentials are configured.
+- **CWS credential durability needs one owner-side change**: the Google OAuth consent screen is
+  External/Testing, so its refresh token is short-lived. Move the consent configuration to
+  Production or mint a fresh token before a later publish attempt. Credential locations remain in
+  `local/`; no values belong in tracked documentation.
+
+## Active work: reliable ephemeral GIF recording
+
+- **The demo tour is deliberately paused.** The owner chose to solve recording architecture before
+  returning to presentation work. The Capture Studio website block remains complete and live at
+  `/ghostlight/demo/studio/`; no browser-side capability-tour implementation has started.
+- **The failed export was a transport defect, not an encoder stall.** The preserved 12-frame
+  fixture encoded in under one second. The seven-frame coordinate export exceeded Chrome's 1 MiB
+  host-to-extension message limit, disconnected the native host, and then waited for the generic
+  60-second timeout. Four ordinary frames were already enough to cross that boundary.
+- **ADRs 0073 and 0074 are implemented on `dev`.** Recording is session/surface/
+  generation-owned, memory-only, byte-bounded, transactionally started and finalized, protected by
+  idle/hard deadlines plus an extension health lease, and erased on session/policy/panic/retention
+  cleanup. GIF encoding is two-pass and one-frame-at-a-time. Large browser-bound tool requests use
+  negotiated, SHA-256-verified, memory-only chunks; old extensions fail fast before an oversized
+  write. Debug MCP/tool payload persistence has been removed.
+- **The model flow is smaller.** Use `start_recording`, ordinary browser tools, then `export`.
+  Export auto-finalizes. `status`, explicit stop, and clear are supporting actions. Download export
+  requires Read; page placement by ref or coordinate requires Write. A timeout or disconnect after
+  enqueue reports `outcome_unknown` and `retry_safe: false` instead of inviting a duplicate page
+  effect. Formatting, strict clippy, all 72 extension tests, and the full Rust workspace suite are
+  green. The rebuilt service and reloaded unpacked extension passed a real MCP browser verification:
+  20 accepted frames (2,707,795 compressed bytes) encoded to a 7,046,417-byte GIF, crossed the
+  bounded chunk transport, and returned `dispatched` with `unverified` acceptance and
+  `retry_safe: false`. The test recording was cleared and its synthetic page overlay removed.
 
 ## Release pipeline (canonical map: `docs/RELEASE.md`)
 
@@ -93,9 +124,29 @@ Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA), and the 
     to get it" line). CWS (blocked), Edge, winget, and scoop are omitted until each actually ships.
   This workstream is now COMPLETE; the only distribution follow-up left is the owner-side CWS listing
   gate below.
-- **CWS listing completion** (owner): privacy practices + remote-code justification + video in the
-  Web Store dashboard, then publish the already-uploaded v0.5.6 package (or re-run
-  `scripts/publish-extension.ps1`).
+- **CWS listing completion** (owner): confirm the public privacy URL is live, paste the privacy
+  practices and remote-code justification, record and upload the promotional video using the
+  proven `ghostlight demo` recipe in `docs/legal/STORE_LISTING.md`, then publish the already-uploaded
+  package. The currently staged v0.5.6 package predates `narrate`; do not pair a narration video
+  with that package. Cut and upload the next release first (or re-run the extension publish step
+  after that release), then record. The earlier live rehearsal passed on 2026-07-13, including the
+  session-policy denial finale.
+- **Agent narration is implemented** (ADR-0072): additive `narrate` is domainless RAWX none,
+  bounded and schema-validated, ordinarily audited, ownership/hold/sacred checked, and legal in
+  `script`/`browser_batch`. The policy-free extension renders one timed responsive Agent ribbon per
+  tab with deterministic replacement, remaining-time navigation replay, effects/capture handling,
+  and tab/session/panic cleanup. Placement is `auto`/`top`/`bottom`; auto chooses one stable edge
+  away from recent touched-control, pointer, and scroll activity. The separate central governance
+  ribbon now has viewport-bounded sizing and wrapped, untruncated security text. `ghostlight demo`
+  narrates its six story beats after each stage loads, holds each caption for its full six-second
+  lifetime, and only then begins the visible actions. Rust and the 67-test extension suite are
+  green. Live browser
+  verification passed on 2026-07-13 through the real MCP `script`
+  path: `shown: true`, timed placement, replacement, active-navigation replay, and audit
+  `capability: "none"` with no grant attribution. After the responsive refinement reload, a
+  top-area hover resolved `auto` to bottom and a bottom-area hover resolved it to top; both calls
+  returned the effective edge and the user-visible wide ribbon. Existing MCP clients need one
+  restart to add the new direct `narrate` schema to their callable tool list.
 - **Lightbox legacy-27 migration** (ADR-0056): the 27 `#[ignore = "e2e"]` spawn tests +
   `scripts/test-e2e.*` migrate scenario-by-scenario into the lightbox harness against a
   per-test parity ledger. Not started; CI runs both tiers until the ledger completes.
@@ -107,8 +158,8 @@ Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA), and the 
     pending.
   - SEC-HIGH-02 full fix: token/auth for non-loopback sources once `enable-remote` returns
     (the action is currently disabled as the interim fix). Same design note; build pending.
-  - A1 demo GIF for the README hero slot (README has a commented placeholder): drive
-    `gif_creator` or `scripts/capture-readme-tour.ps1`, write `docs/assets/demo.gif`.
+  - A1 demo GIF for the README hero slot (README has a commented placeholder): export it from the
+    same `ghostlight demo` OBS recording used for the Store video, then write `docs/assets/demo.gif`.
 - **tabs_create prose leaks the un-encoded native tab id** (found in the ADR-0061 live
   verify; pre-existing, non-regression). Small fix in the tabs_create response text.
 - **ADR-0047 stage-2 user-supervised e2e re-run** still owed (needs the owner at a real
@@ -120,10 +171,8 @@ Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA), and the 
 
 ## Owner-side gates (agents cannot do these)
 
-- Cut the v0.5.6 release (owner: scripts/release.ps1 0.5.6 from main). PR #42 is merged.
-- Chrome Web Store: 0.5.0 zip was submitted 2026-07-10; resubmit after 0.5.6 (extension
-  changed). Edge Add-ons: same zip, never submitted.
-- MCP Registry: needs DNS TXT auth on the sylin.org apex + `mcp-publisher`.
+- Chrome Web Store: complete the v0.5.6 draft listing, make OAuth credentials durable, and publish.
+  Edge Add-ons remains unsubmitted.
 - Trust center legal: vendor entity name in the MSA (blocked on forming the LLC), the
   cyber-insurance yes/no line, counsel skim of MSA/DPA/LICENSE-GOVERNANCE before first
   EXECUTION (publication already happened by design; drafts are marked as drafts).

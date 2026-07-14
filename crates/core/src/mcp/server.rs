@@ -367,10 +367,15 @@ where
         let mut policy_changes = store.policy();
         let tx = tx.clone();
         let fixture = advertised_tools_json();
+        let browser = browser.clone();
         async move {
             let mut ignored_in_force = policy_changes.borrow().user_manifest_ignored;
             while policy_changes.changed().await.is_ok() {
                 let loaded_policy = policy_changes.borrow_and_update().clone();
+
+                // ADR-0073: a policy epoch change invalidates capture authority. Erase bytes
+                // before installing the new policy and stop every matching extension relay.
+                browser.erase_all_recordings(crate::recording::StopReason::PolicyChanged);
 
                 // ADR-0055 Impl.9c: track the org-signed policy sequence across a live change. A
                 // managed origin re-reads the T2 sidecar for the current seq; any other origin clears
@@ -480,6 +485,11 @@ where
             let _ = tx.send(Outbound::Response(resp));
         }
     }
+    // ADR-0072: narration is presentation owned by this MCP session. Clear it from every tab the
+    // session owns before dropping the session seat; the extension also enforces the timer, tab,
+    // and panic cleanup paths independently.
+    browser.erase_session_recordings(guid.as_str());
+    browser.clear_narrations(&crate::hub::session::owned_tab_ids(&owned_tabs, &guid));
     // Stop the policy-subscription task FIRST (and wait for the cancellation to actually take
     // effect) so its own `Outbound` sender clone is released before the writer's shutdown check
     // below relies on every sender being dropped.

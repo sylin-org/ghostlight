@@ -31,6 +31,10 @@ url = "2"
 jpeg-decoder = { version = "0.3", default-features = false }
 color_quant = "2.0"
 gif = { version = "0.14", default-features = false, features = ["std"] }
+# Captured browser pixels are ephemeral sensitive data. Zero owned frame buffers when their last
+# in-process owner is released (ADR-0073 D4); this is best-effort process hygiene, not an OS-level
+# no-swap/no-crash-dump claim.
+zeroize = { version = "1", features = ["alloc"] }
 # License verification (ADR-0028 Decision 11): composite Ed25519 + ML-DSA-65 (FIPS 204) signature
 # over the license claims, verified fully offline against an embedded key table. ML-DSA is the
 # post-quantum leg; Ed25519 is the classical guard (AND-composition). Both pure Rust (the four-target
