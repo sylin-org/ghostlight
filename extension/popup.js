@@ -7,6 +7,8 @@
 
 const statusEl = document.getElementById("status");
 const toggleEl = document.getElementById("toggle");
+const attentionSection = document.getElementById("attention-section");
+const attentionList = document.getElementById("attention-list");
 
 function render(state) {
   if (!state.session) {
@@ -39,6 +41,50 @@ toggleEl.addEventListener("click", () => {
 });
 
 refresh();
+
+function attentionAction(guid, disposition) {
+  chrome.runtime.sendMessage({ type: "ATTENTION_ACTION", guid, disposition }, renderAttention);
+}
+
+function renderAttention(state) {
+  const sessions = (state && Array.isArray(state.sessions)) ? state.sessions : [];
+  attentionSection.hidden = sessions.length === 0;
+  attentionList.replaceChildren();
+  for (const session of sessions) {
+    const item = document.createElement("div");
+    item.className = "attention-item";
+    const label = document.createElement("div");
+    label.className = "attention-label";
+    label.textContent = String(session.label || "MCP client") + " is paused";
+    const meta = document.createElement("div");
+    meta.className = "attention-meta";
+    meta.textContent = (session.origin ? String(session.origin) + " - " : "") +
+      String(session.count || 0) + " blocked actions";
+    const actions = document.createElement("div");
+    actions.className = "attention-actions";
+    for (const [disposition, text] of [
+      ["keep_paused", "Keep paused"],
+      ["resume", "Resume"],
+      ["resume_quiet", "Resume + quiet"],
+      ["end_session", "End session"],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      if (disposition === "end_session") button.className = "danger";
+      button.addEventListener("click", () => attentionAction(session.guid, disposition));
+      actions.appendChild(button);
+    }
+    item.append(label, meta, actions);
+    attentionList.appendChild(item);
+  }
+}
+
+function refreshAttention() {
+  chrome.runtime.sendMessage({ type: "GET_ATTENTION_STATE" }, renderAttention);
+}
+
+refreshAttention();
 
 // --- Panic kill switch (g11): one gesture, no confirmation. ---
 
@@ -74,7 +120,8 @@ function renderSession(state) {
   const connectedLine = state.connected
     ? "Connected to Ghostlight."
     : "Waiting for the Ghostlight service...";
-  sessionStatusEl.textContent = `${connectedLine} Debugger attached to ${state.attachedTabs} tab(s).`;
+  const recordingLine = state.recordingTabs > 0 ? ` REC on ${state.recordingTabs} tab(s).` : "";
+  sessionStatusEl.textContent = `${connectedLine} Debugger attached to ${state.attachedTabs} tab(s).${recordingLine}`;
   sessionButtonEl.id = "kill-button";
   sessionButtonEl.textContent = "End session now";
   sessionButtonEl.classList.add("kill");
@@ -99,6 +146,7 @@ refreshSession();
 // Poll while the popup is open so the dot flips green on its own when the ~24s keepalive
 // (or a just-started service) connects -- no reopen needed.
 setInterval(refreshSession, 1500);
+setInterval(refreshAttention, 1500);
 
 // --- Action captions (visual feedback dictionary): a persisted, off-by-default UI preference the
 // content-script indicator reads on every page. The one bit this popup persists; all session state

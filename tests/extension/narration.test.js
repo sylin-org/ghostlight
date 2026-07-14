@@ -79,18 +79,15 @@ test("renderer_contract_is_pointer_transparent_text_only_and_capture_hidden", ()
   assert.match(source, /if \(narrationLayer\) narrationLayer\.style\.display = v \? "none" : ""/);
   assert.match(source, /prefers-reduced-motion:reduce/);
   assert.match(source, /shown: false, reason: "visual effects are disabled"/);
-  assert.match(source, /width:min\(92vw,1600px\)/);
-  assert.match(source, /min-height:clamp\(76px,11vh,132px\)/);
+  assert.match(source, /max-width:min\(84vw,900px\)/);
+  assert.match(source, /ghostlight-narration-time[^}]+ghostlight-dots/);
+  assert.doesNotMatch(source, /ghostlight-narration-progress/);
   assert.match(source, /return \{ shown: true, position \}/);
-  assert.match(source, /--gl-notif-band-h:clamp\(56px,9vh,84px\)/);
-  assert.match(source, /--gl-notif-badge-d:clamp\(90px,15vh,126px\)/);
-  assert.match(source, /margin-block:clamp\(-21px,-3vh,-14px\)/);
-  assert.match(source, /ghostlight-notif-badge svg[^}]+width:72%/);
-  assert.match(source, /ghostlight-notif-title[^}]+clamp\(17px/);
-  assert.match(source, /ghostlight-notif-desc[^}]+clamp\(14px/);
-  assert.doesNotMatch(source, /gl-notif-band-h\) \*/);
-  assert.match(source, /ghostlight-notif-title[^}]+white-space:normal/);
-  assert.doesNotMatch(source, /ghostlight-notif-title[^}]+text-overflow:ellipsis/);
+  assert.match(source, /width:min\(88vw,620px\)/);
+  assert.match(source, /setTimeout\(dismissNotification, Math\.max\(500/);
+  assert.match(source, /ghostlight-attention-layer/);
+  assert.match(source, /backdrop-filter:blur\(5px\)/);
+  assert.match(source, /Resume \+ quiet site repeats/);
 });
 
 test("worker_contract_replays_and_clears_transient_state", () => {

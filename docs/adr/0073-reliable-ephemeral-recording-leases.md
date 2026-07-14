@@ -203,3 +203,10 @@ Audit remains argument-free and content-free as today.
 - gRPC deadlines and cancellation propagation.
 - W3C Screen Capture indicator and user-stop guidance.
 - OWASP logging data-exclusion guidance and RustCrypto `zeroize` limitations.
+
+## Amendment: truthful recording indicator (2026-07-14)
+
+ADR-0079 adds a user-visible REC state tied to the real screencast start/stop lifecycle. V1 uses
+extension chrome and popup feedback rather than an in-page live preview, so the cue cannot be
+recursively captured into the recording. It creates no new recording authority, persistence,
+capture path, or policy behavior.

@@ -73,6 +73,13 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// instead of an opaque "native messaging error: ...".
 #[derive(Debug, Clone, Error)]
 pub enum ToolError {
+    /// The local service paused this one MCP session after a denial burst. The MCP edge converts
+    /// this final dispatch-boundary signal into an ordinary attention-required result.
+    #[error("{message}")]
+    AttentionRequired {
+        /// Complete user/model-facing explanation of the local pause.
+        message: String,
+    },
     /// The MCP client's request itself was invalid (bad tool name, malformed arguments).
     #[error("[hop: invalid-request] {message}. Next step: {next_step}.")]
     InvalidRequest {
@@ -132,6 +139,13 @@ pub enum ToolError {
 }
 
 impl ToolError {
+    /// Build a final dispatch-boundary attention-required signal.
+    pub fn attention_required(message: impl Into<String>) -> Self {
+        Self::AttentionRequired {
+            message: message.into(),
+        }
+    }
+
     /// Build an `InvalidRequest` error with the default next step.
     pub fn invalid_request(message: impl Into<String>) -> Self {
         Self::InvalidRequest {
@@ -202,6 +216,7 @@ impl ToolError {
     pub fn next_step(self, step: impl Into<String>) -> Self {
         let step = step.into();
         match self {
+            Self::AttentionRequired { message } => Self::AttentionRequired { message },
             Self::InvalidRequest { message, .. } => Self::InvalidRequest {
                 message,
                 next_step: step,

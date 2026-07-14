@@ -1,6 +1,8 @@
 # Ghostlight visual-language refinement, 2026-07
 
-Status: Proposal for review. This document does not amend the normative visual language or ADRs.
+Status: Accepted and implemented on `dev`. ADR-0079 and the marked ADR-0072/0073 amendments are
+authoritative; [The Ghostlight visual language](visual-language.md) now carries the normative
+production vocabulary.
 
 ## Goal
 
@@ -8,9 +10,8 @@ Make every Ghostlight surface feel related while preserving the best part of the
 fluid, legible feedback that lets a person understand what an agent is doing in their real browser.
 Visual weight should match operational meaning.
 
-The current normative source remains [The Ghostlight visual language](visual-language.md). If this
-proposal is accepted, update that source and amend ADR-0072 before changing narration. The denial
-circuit breaker also requires its own ADR before implementation.
+The current normative source is [The Ghostlight visual language](visual-language.md). This design
+record preserves the reasoning and rejected alternatives behind the implemented refinement.
 
 ## One metaphor, four roles
 
@@ -171,14 +172,11 @@ yield. When recording and narration coexist, neither may cover the active contro
 10. A visual claim about pause, capture, or authority is backed by real service state before it is
     rendered.
 
-## Review sequence
+## Closure sequence
 
-1. Compare narration caption, ordinary-denial sticker, expanded pause, and minimized pause in the
-   interactive visual dictionary.
-2. Amend ADR-0072 if the caption replaces the accepted ribbon treatment.
-3. Decide the denial state machine and controls in a new ADR using research 16.
-4. Decide recording-indicator capture semantics in an ADR-0073 amendment.
-5. Implement one semantic surface at a time with extension unit tests and reduced-motion coverage.
-6. Rehearse each surface in a real browser, then run a non-author comprehension review.
-
-No production visual change should precede steps 1 through 4 for the affected surface.
+1. DONE: compare narration, isolated denial, and pause treatments.
+2. DONE: mark the ADR-0072 compact-caption amendment.
+3. DONE: accept ADR-0079 with service-owned per-session thresholds and controls.
+4. DONE: mark the ADR-0073 recording-indicator amendment.
+5. DONE: implement the surfaces with pure-store, renderer-contract, and state-machine tests.
+6. OWED: rehearse each surface in a real browser and run another non-author comprehension review.

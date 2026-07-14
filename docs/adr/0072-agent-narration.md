@@ -269,3 +269,10 @@ Owner proposal and acceptance, 2026-07-13, while rehearsing the Chrome Web Store
 add a `narrate` tool that displays a positioned, timed ribbon; a message remains until its timer
 expires or another narration replaces it; pair it with scripts/batches to explain "now doing
 this" phase changes; use it as the demo's own caption track; consider browser TTS as an alternative.
+
+## Amendment: compact activity treatment (2026-07-14)
+
+ADR-0079 replaces the original wide narration-card treatment. Narration is a compact caption with
+one transient three-dot activity cue and no progress bar. This changes presentation only. The tool
+contract, trust distinction, timing, replacement, navigation replay, audit, and capture-hiding
+decisions above remain authoritative.

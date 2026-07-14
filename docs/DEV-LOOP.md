@@ -180,13 +180,13 @@ Three gotchas:
   `http(s)` page loaded in the tab first. Navigate somewhere real (with `-Manifest
   examples\dev-live-test.json`, the committed fixture grants `example.org`) before triggering the
   thing you want to see.
-- **A screenshot NEVER shows FX or the notification bar in the captured pixels, by design** --
+- **A screenshot NEVER shows FX, a denial sticker, or an attention overlay in the captured pixels,
+  by design** --
   every effect (cursor, ripples, the notification layer) is hidden for the duration of the
   capture so the agent's own screenshot stays clean, then restored after. Do not read a clean
-  screenshot as "it didn't render" or "it got dismissed" -- it means neither on its own. Only a
-  read-only action (screenshot, zoom, get_page_text, wait) hides-and-restores; a genuine
-  mutating action (click, type, scroll, navigate) on the SAME tab actually dismisses a
-  notification, by its own design (persistent until the next real action or an explicit close).
+  screenshot as "it didn't render" or "it got dismissed" -- it means neither on its own. An
+  isolated denial sticker replaces an older sticker and expires after three seconds. A denial
+  burst can open a blocking attention overlay that stays until the user chooses a disposition.
   To see whether something is still there, ask the user to look at their own screen (the fastest
   path in practice), or capture out-of-band over the browser's own devtools websocket
   (`Page.captureScreenshot` via `--remote-debugging-port`, launched fresh and separately from the
@@ -197,11 +197,11 @@ Three gotchas:
 ### 5.3 The `notify` tool: iterating on notifications without a denial
 
 `notify` is an UNLISTED tool: a direct entry point onto `Browser::notify()` -- the same primitive
-governance denials call to draw the on-screen ribbon. It takes `tabId`, `class`
+governance denials call to draw the on-screen sticker. It takes `tabId`, `class`
 (`error`/`warn`/`info`/`debug`), optional `icon` (`lock` or anything else -> shield), `title`, and
-optional `description`, and renders the ribbon immediately, bypassing governance (it IS the channel
+optional `description`, and renders the sticker immediately, bypassing governance (it IS the channel
 governance speaks through). It is deliberately absent from `tools/list` and NOT registered in
-`browser/directory.rs` -- the ribbon is a governance-authority signal, not something the trained
+`browser/directory.rs` -- the sticker is a governance-authority signal, not something the trained
 model should emit -- so it exists only as the first branch of `run_tool_call` in
 `crates/core/src/mcp/pipeline.rs`. Look there, not in the directory, when auditing what tools exist.
 

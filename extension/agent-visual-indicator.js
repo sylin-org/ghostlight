@@ -50,10 +50,8 @@
   const ZOOMFRAME_MS = 1150; // zoom magnifier frame
   const CHEV_MS = 1150; // scroll chevron cascade
   const NAVPILL_MS = 1600; // navigate destination pill
-  // Notification band timings (SAPS PRES-HIGH-01): unfurls from its own horizontal center line
-  // (scaleY 0->1, transform-origin center) -- unlike every other effect in this file, a
-  // notification is persistent (dismissed by the next real tool action on this tab, or an
-  // explicit close click), not a fire-and-fade confirmation, so there is no hold/exit phase.
+  // Notification sticker timings (ADR-0079): a denial is transient, replaces any older sticker,
+  // and expires on its own. Repeated denials may open the separately rendered attention overlay.
   const NOTIF_GROW_MS = 320; // band unfurls from its center line
   const NOTIF_DESC_MS = 320; // description line fade-in
   const NOTIF_DESC_DELAY_MS = 220; // description starts just after the band settles
@@ -65,11 +63,12 @@
   let fxSeq = 0;
   let glowActive = false; // whether the glow should be visible (independent of capture-hiding)
   let hiddenForTool = false; // suppressed during a screenshot capture
-  let notifLayer = null; // persistent notification bar's own container -- NEVER cleared by
-  // setHiddenForTool's screenshot-hiding (fxLayer.replaceChildren() would wipe a notification the
-  // instant the agent took a screenshot, defeating the whole point of it persisting)
-  let activeNotifEl = null; // the currently-shown notification, if any (tracked so the next tool
-  // action on this tab, or a fresh notification, can dismiss/replace it)
+  let notifLayer = null; // transient sticker container, separate from disposable action FX
+  let activeNotifEl = null; // the currently shown sticker, tracked for replacement and expiry
+  let notifTimer = null;
+  let attentionLayer = null;
+  let activeAttentionGuid = null;
+  let attentionPriorFocus = null;
   let narrationLayer = null;
   let activeNarrationEl = null;
   let activeNarrationGeneration = null;
@@ -81,6 +80,25 @@
 
   function reduceMotion() {
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion:reduce)").matches);
+  }
+
+  function attentionCss() {
+    return (
+      ".ghostlight-attention-layer{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;" +
+      "padding:24px;box-sizing:border-box;background:rgba(5,10,18,.55);backdrop-filter:blur(5px) saturate(.7);pointer-events:auto}" +
+      ".ghostlight-attention-card{width:min(92vw,560px);padding:24px;border-radius:22px;color:#eaf6ff;background:rgba(10,16,26,.97);" +
+      "border:1px solid rgba(239,68,68,.7);box-shadow:0 24px 80px -24px rgba(239,68,68,.75);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}" +
+      ".ghostlight-attention-icon{display:grid;place-items:center;width:58px;height:58px;margin:0 auto 14px;border-radius:50%;" +
+      "background:#ef4444;color:white;font:800 30px/1 system-ui;box-shadow:0 0 28px rgba(239,68,68,.55)}" +
+      ".ghostlight-attention-title{text-align:center;font-size:22px;font-weight:700}.ghostlight-attention-desc{text-align:center;" +
+      "margin:8px 0 5px;color:#cbd5e1;font-size:14px;line-height:1.45}.ghostlight-attention-meta{text-align:center;color:" + SKY + ";font-size:12px;margin-bottom:20px}" +
+      ".ghostlight-attention-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.ghostlight-attention-actions button{" +
+      "min-height:42px;padding:9px 12px;border-radius:10px;border:1px solid rgba(148,163,184,.38);background:#172033;color:#eaf6ff;" +
+      "font:600 12px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;cursor:pointer}" +
+      ".ghostlight-attention-actions button:hover{border-color:" + SKY + ";background:#1d2b42}.ghostlight-attention-actions .danger{" +
+      "border-color:rgba(239,68,68,.6);color:#fecaca}" +
+      "@media (max-width:520px){.ghostlight-attention-actions{grid-template-columns:1fr}}"
+    );
   }
 
   function ensureStyles() {
@@ -110,15 +128,13 @@
       "@keyframes ghostlight-nav{0%{opacity:0;transform:translate(-50%,-14px)}14%{opacity:1;transform:translate(-50%,0)}82%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-8px)}}" +
       "@keyframes ghostlight-breath{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(.7)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}}" +
       "@keyframes ghostlight-lozenge{0%{opacity:0;transform:translate(-50%,12px)}16%{opacity:1;transform:translate(-50%,0)}78%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-6px)}}" +
-      // Notification band (SAPS PRES-HIGH-01): unfurls from its own horizontal center line
-      // (scaleY 0->1), then holds indefinitely -- no hold/exit keyframe, since dismissal is by
-      // next-action or close click, not a timer. The -rm variant is a plain fade.
+      // The denial sticker unfurls once, then its bounded timer removes it. The -rm variant is a
+      // plain fade for reduced-motion users.
       "@keyframes ghostlight-notif-grow{0%{opacity:0;transform:scaleY(0)}100%{opacity:1;transform:scaleY(1)}}" +
       "@keyframes ghostlight-notif-grow-rm{0%{opacity:0}100%{opacity:1}}" +
       "@keyframes ghostlight-notif-desc{0%{opacity:0}100%{opacity:.85}}" +
       "@keyframes ghostlight-narration-in{0%{opacity:0;transform:translate(-50%,10px) scale(.98)}100%{opacity:1;transform:translate(-50%,0) scale(1)}}" +
       "@keyframes ghostlight-narration-in-rm{0%{opacity:0}100%{opacity:1}}" +
-      "@keyframes ghostlight-narration-progress{0%{transform:scaleX(1)}100%{transform:scaleX(0)}}" +
       ".ghostlight-narration-card{position:absolute;left:50%;transform:translate(-50%,0);width:min(92vw,1600px);" +
       "min-height:clamp(76px,11vh,132px);box-sizing:border-box;pointer-events:none;overflow:hidden;" +
       "display:flex;flex-direction:column;justify-content:center;padding:clamp(16px,2.4vh,28px) clamp(24px,3.5vw,58px);" +
@@ -134,12 +150,9 @@
       ".ghostlight-narration-text{display:block;font:500 clamp(16px,min(2vw,3vh),34px)/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
       "overflow-wrap:anywhere}" +
       ".ghostlight-narration-card.chapter .ghostlight-narration-text{font-weight:650}" +
-      ".ghostlight-narration-time{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(" + SKY_RGB + ",.13)}" +
-      ".ghostlight-narration-time::after{content:'';display:block;width:100%;height:100%;transform-origin:left;" +
-      "background:" + SKY + ";animation:ghostlight-narration-progress var(--ghostlight-narration-ms) linear forwards}" +
-      "@media (prefers-reduced-motion:reduce){.ghostlight-narration-card{animation:ghostlight-narration-in-rm 180ms ease-out forwards}.ghostlight-narration-time::after{animation:none}}" +
+      "@media (prefers-reduced-motion:reduce){.ghostlight-narration-card{animation:ghostlight-narration-in-rm 180ms ease-out forwards}}" +
       // Real CSS classes (not per-call inline strings like the transient effects above): a
-      // notification has four named severity variants sharing everything but one color, so the
+      // denial sticker has four named severity variants sharing everything but one color, so the
       // base rules live in `.ghostlight-notif-ribbon`/`-badge` and `.error`/`.warn`/`.info`/
       // `.debug` each set only `--gl-rgb` (badge, icon, and glow all derive from it).
       ".ghostlight-notif-ribbon{--gl-notif-band-h:clamp(56px,9vh,84px);--gl-notif-badge-d:clamp(90px,15vh,126px);" +
@@ -179,9 +192,8 @@
       "color:" + NOTIF_TEXT + ";white-space:normal;overflow-wrap:anywhere;opacity:0;" +
       "animation:ghostlight-notif-desc " + NOTIF_DESC_MS + "ms ease-out " + NOTIF_DESC_DELAY_MS + "ms forwards}" +
       "@media (prefers-reduced-motion:reduce){.ghostlight-notif-desc{opacity:.85;animation:none}}" +
-      // Close button: the one interactive element in the whole layer -- everything else is
-      // pointer-events:none. Absolutely positioned within the ribbon (not a flex sibling), so the
-      // icon+text duo centers as its own group regardless of where this sits in the corner.
+      // The legacy close button remains in the DOM for keyboard compatibility but ADR-0079's
+      // compact sticker CSS hides it; expiry and replacement are the visible lifetime controls.
       ".ghostlight-notif-close{position:absolute;right:clamp(10px,1.5vw,20px);top:50%;transform:translateY(-50%);" +
       "pointer-events:auto;cursor:pointer;background:transparent;border:none;color:" + NOTIF_TEXT + ";" +
       "opacity:.75;font:clamp(18px,min(1.8vw,3vh),26px)/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
@@ -189,6 +201,19 @@
       ".ghostlight-notif-close:hover{background:rgba(255,255,255,.16)}" +
       ".ghostlight-notif-close:focus-visible{outline:2px solid " + NOTIF_TEXT + ";outline-offset:2px;background:rgba(255,255,255,.16)}" +
       ".ghostlight-cap{color:" + SKY + "}.ghostlight-arrow{color:" + SKY + ";margin-right:7px}" +
+      // ADR-0079: compact captions, transient centered denial stickers, and a true pause overlay.
+      "@keyframes ghostlight-dots{0%,20%{opacity:.25}50%{opacity:1}80%,100%{opacity:.25}}" +
+      ".ghostlight-narration-card{width:auto;max-width:min(84vw,900px);min-height:0;padding:10px 16px;border-radius:12px;" +
+      "display:flex;flex-direction:row;align-items:center;gap:10px}" +
+      ".ghostlight-narration-card.chapter{min-height:0}.ghostlight-narration-label{margin:0;font-size:10px}" +
+      ".ghostlight-narration-text{font-size:clamp(13px,1.4vw,18px);line-height:1.35}" +
+      ".ghostlight-narration-time{position:static;width:auto;height:auto;background:none;color:" + SKY + ";letter-spacing:2px;" +
+      "font:700 15px/1 monospace;animation:ghostlight-dots 1100ms ease-in-out 1}" +
+      ".ghostlight-narration-time::after{display:none}" +
+      ".ghostlight-notif-ribbon{--gl-notif-badge-d:52px;width:min(88vw,620px);min-height:0;padding:14px 20px;" +
+      "border-radius:16px;gap:12px;box-shadow:0 14px 44px -16px rgba(var(--gl-rgb),.75),inset 0 1px 0 rgba(255,255,255,.12)}" +
+      ".ghostlight-notif-badge{margin:0;width:52px;height:52px}.ghostlight-notif-title{font-size:16px}" +
+      ".ghostlight-notif-desc{font-size:13px}.ghostlight-notif-close{display:none}" +
       "@media (prefers-reduced-motion:reduce){#" + GLOW_ID + "{animation:none}#" + CURSOR_ID + "{transition:none}}";
     (document.head || document.documentElement).appendChild(s);
   }
@@ -400,9 +425,8 @@
       if (v) { fxLayer.style.display = "none"; fxLayer.replaceChildren(); } // clear in-flight effects for a clean capture
       else fxLayer.style.display = "";
     }
-    // Hide-and-restore, like cursor/caption/glow above -- NEVER replaceChildren() here. A
-    // notification is persistent state, not an in-flight effect; wiping it on every screenshot
-    // (which fires constantly during normal operation) would defeat its whole purpose.
+    // Hide-and-restore, like cursor/caption/glow above -- NEVER replaceChildren() here. The
+    // sticker has its own lifetime and clearing ordinary action FX must not remove it accidentally.
     if (notifLayer) notifLayer.style.display = v ? "none" : "";
     if (narrationLayer) narrationLayer.style.display = v ? "none" : "";
   }
@@ -423,7 +447,7 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
     });
   }
-  function clip(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+  function clip(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 3) + "..." : s; }
   function hostPath(u) {
     try { const url = new URL(u); return url.host + (url.pathname === "/" ? "" : url.pathname); }
     catch (e) { return String(u); }
@@ -587,6 +611,15 @@
       "background:rgba(" + SKY_RGB + ",.08);box-shadow:0 0 26px rgba(" + SKY_RGB + ",.45);transform-origin:100% 100%;" +
       "animation:ghostlight-capframe " + CAPFRAME_MS + "ms cubic-bezier(.5,0,.2,1) forwards";
     addEphemeral(frame, CAPFRAME_MS + 60);
+    const camera = document.createElement("div");
+    camera.id = FX_LAYER_ID + "-camera" + fxSeq++;
+    camera.setAttribute("aria-hidden", "true");
+    camera.textContent = "\u{1F4F7}";
+    camera.style.cssText =
+      "position:fixed;right:22px;bottom:22px;padding:8px 11px;border-radius:12px;pointer-events:none;" +
+      "font:22px/1 system-ui;background:rgba(10,16,26,.94);border:1px solid rgba(" + SKY_RGB + ",.6);" +
+      "box-shadow:0 10px 28px -10px rgba(" + SKY_RGB + ",.8);animation:ghostlight-lozenge 1100ms ease-out forwards";
+    addEphemeral(camera, 1160);
     caption("Screenshot");
   }
 
@@ -606,16 +639,14 @@
     caption("Zoom");
   }
 
-  // Notification band (SAPS PRES-HIGH-01): governance blocks a call before the extension is ever
+  // Notification sticker (ADR-0079): governance blocks a call before the extension is ever
   // contacted for the call itself, so without this nothing on screen shows a block happened.
   // Deliberately NOT built on caption() -- a caption is optional decorative flavor text, off by
   // default; a notification is substantive and must always render regardless of that preference
-  // (and regardless of the effects master switch too -- see the dispatcher below). Persistent, not
-  // timed: dismissed by the next tool action on this tab, or an explicit close click, never by a
-  // fade-out timer -- the whole point is that a human glancing back later still sees it. Lives in
-  // its OWN layer (notifLayer), never fxLayer: a screenshot's hide-for-capture wipes fxLayer's
-  // children outright, which would silently kill a notification the instant the agent looked at
-  // the page. `cls` selects the severity CSS class from a fixed allowlist (NOTIF_SEVERITIES),
+  // (and regardless of the effects master switch too -- see the dispatcher below). It replaces an
+  // older sticker and expires after the service-provided bounded duration. It lives in its OWN
+  // layer (notifLayer), never fxLayer: a screenshot's hide-for-capture wipes fxLayer's children.
+  // `cls` selects the severity CSS class from a fixed allowlist (NOTIF_SEVERITIES),
   // never interpolated into markup. `title`/`description` reach the DOM only via .textContent
   // (constructed with createElement, never an innerHTML string): they can carry an
   // attacker-influenced domain, and this runs as a content script on every page.
@@ -643,8 +674,7 @@
       notifLayer = document.createElement("div");
       notifLayer.id = "ghostlight-notification-layer";
       notifLayer.setAttribute("aria-hidden", "true");
-      // Full-width, vertically centered on the viewport -- an overlay ribbon crossing the
-      // middle of the screen, not pinned to an edge, hard to miss regardless of page length.
+      // Centered viewport host for the non-modal denial sticker.
       notifLayer.style.cssText =
         "position:fixed;left:0;right:0;top:50%;transform:translateY(-50%);pointer-events:none;z-index:2147483647";
       (document.body || document.documentElement).appendChild(notifLayer);
@@ -654,13 +684,14 @@
   }
 
   function dismissNotification() {
+    clearTimeout(notifTimer);
+    notifTimer = null;
     if (activeNotifEl) { activeNotifEl.remove(); activeNotifEl = null; }
   }
 
-  function showNotification(cls, icon, title, description) {
-    if (document.hidden) return; // NOT gated on hiddenForTool: persistent state must survive a
-    // screenshot's hide/show cycle (handled via ensureNotifLayer + setHiddenForTool above), only
-    // suppressed outright when the tab itself isn't visible at all.
+  function showNotification(cls, icon, title, description, durationMs) {
+    if (document.hidden) return; // NOT gated on hiddenForTool: the timer still owns sticker expiry
+    // across a screenshot's hide/show cycle; suppress creation only when the tab itself is hidden.
     ensureStyles();
     dismissNotification(); // replace, never stack two notifications
     const layer = ensureNotifLayer();
@@ -699,12 +730,89 @@
     closeBtn.type = "button";
     closeBtn.className = "ghostlight-notif-close";
     closeBtn.setAttribute("aria-label", "Dismiss notification");
-    closeBtn.textContent = "×";
+    closeBtn.textContent = "\u00d7";
     closeBtn.addEventListener("click", dismissNotification);
     band.appendChild(closeBtn);
 
     layer.appendChild(band);
     activeNotifEl = band;
+    notifTimer = setTimeout(dismissNotification, Math.max(500, Number(durationMs) || 3000));
+  }
+
+  function clearAttention(guid) {
+    if (guid && activeAttentionGuid && guid !== activeAttentionGuid) return false;
+    if (attentionLayer) attentionLayer.remove();
+    attentionLayer = null;
+    activeAttentionGuid = null;
+    if (attentionPriorFocus && attentionPriorFocus.isConnected && attentionPriorFocus.focus) {
+      try { attentionPriorFocus.focus(); } catch (e) { /* page focus target disappeared */ }
+    }
+    attentionPriorFocus = null;
+    return true;
+  }
+
+  function showAttention(msg) {
+    clearAttention();
+    attentionPriorFocus = document.activeElement;
+    const host = document.createElement("div");
+    host.id = "ghostlight-attention-host";
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = attentionCss();
+    const layer = document.createElement("div");
+    layer.id = "ghostlight-attention-layer";
+    layer.className = "ghostlight-attention-layer";
+    const card = document.createElement("section");
+    card.className = "ghostlight-attention-card";
+    card.setAttribute("role", "alertdialog");
+    card.setAttribute("aria-modal", "true");
+    card.tabIndex = -1;
+    const icon = document.createElement("div");
+    icon.className = "ghostlight-attention-icon";
+    icon.textContent = "!";
+    const title = document.createElement("div");
+    title.className = "ghostlight-attention-title";
+    title.textContent = String(msg.title || "Agent browsing paused");
+    const desc = document.createElement("div");
+    desc.className = "ghostlight-attention-desc";
+    desc.textContent = String(msg.description || "Repeated blocked actions need your attention.");
+    const meta = document.createElement("div");
+    meta.className = "ghostlight-attention-meta";
+    meta.textContent = String(msg.label || "MCP client") + (msg.origin ? " on " + String(msg.origin) : "");
+    const actions = document.createElement("div");
+    actions.className = "ghostlight-attention-actions";
+    const controls = [
+      ["keep_paused", "Keep paused"],
+      ["resume", "Resume"],
+      ["resume_quiet", "Resume + quiet site repeats"],
+      ["end_session", "End session"],
+    ];
+    for (const [disposition, text] of controls) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      if (disposition === "end_session") button.className = "danger";
+      button.addEventListener("click", function () {
+        chrome.runtime.sendMessage({ type: "ATTENTION_ACTION", guid: msg.guid, disposition }, function (state) {
+          if (disposition === "keep_paused") return;
+          if (state) clearAttention(msg.guid);
+        });
+      });
+      actions.appendChild(button);
+    }
+    card.append(icon, title, desc, meta, actions);
+    layer.appendChild(card);
+    layer.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        card.focus(); // safe default: remain paused and keep the decision visible
+      }
+    });
+    shadow.append(style, layer);
+    (document.body || document.documentElement).appendChild(host);
+    attentionLayer = host;
+    activeAttentionGuid = msg.guid;
+    card.focus();
   }
 
   function ensureNarrationLayer() {
@@ -786,7 +894,6 @@
     const card = document.createElement("div");
     card.id = "ghostlight-narration-" + String(msg.generation);
     card.className = "ghostlight-narration-card " + position + (text.trim().length <= 72 ? " chapter" : "");
-    card.style.setProperty("--ghostlight-narration-ms", durationMs + "ms");
 
     const label = document.createElement("span");
     label.className = "ghostlight-narration-label";
@@ -798,6 +905,7 @@
     card.appendChild(narrationText);
     const time = document.createElement("span");
     time.className = "ghostlight-narration-time";
+    time.textContent = "...";
     card.appendChild(time);
 
     ensureNarrationLayer().appendChild(card);
@@ -824,25 +932,7 @@
     caption("Waiting");
   }
 
-  // A tool action that ACTS ON the page (clicks, drags, types, scrolls, navigates) dismisses any
-  // lingering notification -- checked ahead of both switches below, since dismissal is state
-  // cleanup, not a decorative effect (it must fire even with the effects master switch off).
-  // AGENT_NOTIFICATION itself is excluded: a fresh notification replaces the old one via
-  // showNotification's own dismissNotification() call, not this generic hook.
-  //
-  // Deliberately NOT in this set: AGENT_READ_SCAN, AGENT_SCREENSHOT_FX, AGENT_ZOOM_FRAME,
-  // AGENT_WAIT_PULSE. Those fire for read-only/observation calls (get_page_text, computer
-  // screenshot/zoom/wait) that never touch the page -- the agent (or a human) looking at the
-  // result of a denial is not "moving on" from it. Including them meant the single most natural
-  // next step after a denial (check what happened) silently destroyed the notification before
-  // anyone could see it.
-  const TOOL_ACTION_MESSAGE_TYPES = new Set([
-    "UPDATE_PHANTOM_CURSOR", "AGENT_CLICK_RIPPLE", "AGENT_DRAG_TRAIL", "AGENT_TYPE_SHIMMER",
-    "AGENT_TARGET_GLOW", "AGENT_SEMANTIC_TARGET", "AGENT_KEYSTROKE", "AGENT_SCROLL_CUE", "AGENT_NAVIGATE_PILL",
-  ]);
-
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (activeNotifEl && msg && TOOL_ACTION_MESSAGE_TYPES.has(msg.type)) dismissNotification();
     // Master switch: with effects off, swallow every render message (capture-management and the
     // caption preference still work; non-ours messages fall through to content.js below).
     // AGENT_NOTIFICATION is deliberately NOT in this list -- see the doc comment above
@@ -900,7 +990,11 @@
       case "AGENT_WAIT_PULSE":
         waitPulse(); sendResponse({ success: true }); return true;
       case "AGENT_NOTIFICATION":
-        showNotification(msg.class, msg.icon, msg.title, msg.description); sendResponse({ success: true }); return true;
+        showNotification(msg.class, msg.icon, msg.title, msg.description, msg.durationMs); sendResponse({ success: true }); return true;
+      case "AGENT_ATTENTION_REQUIRED":
+        showAttention(msg); sendResponse({ success: true }); return true;
+      case "AGENT_ATTENTION_CLEAR":
+        clearAttention(msg.guid); sendResponse({ success: true }); return true;
       case "AGENT_NARRATION":
         sendResponse(showNarration(msg)); return true;
       case "AGENT_NARRATION_CLEAR":
@@ -970,17 +1064,13 @@
   // fieldSplash directly with the element it just set -- the writer is the one place that knows
   // the target, so no service-worker hop needs to carry a rect. Page scripts can never reach this
   // (content scripts live in the extension's isolated world), which is exactly why this is a
-  // direct export and NOT a DOM CustomEvent any page could forge. A form write is a genuine
-  // page-mutating action, so it also dismisses a lingering notification -- state cleanup that
-  // fires even with the effects master switch off, the same rule TOOL_ACTION_MESSAGE_TYPES
-  // applies to the message-driven actions above.
+  // direct export and NOT a DOM CustomEvent any page could forge.
   self.GhostlightFx = {
     fieldSplash: function (target) {
-      if (activeNotifEl) dismissNotification();
       if (!effectsEnabled) return;
       fieldSplash(target);
     },
   };
 
-  window.addEventListener("beforeunload", () => { hideGlow(); clearNarration(); });
+  window.addEventListener("beforeunload", () => { hideGlow(); clearNarration(); clearAttention(); });
 })();

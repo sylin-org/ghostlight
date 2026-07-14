@@ -60,6 +60,8 @@ pub enum CallOutcome {
     },
     /// A take-the-wheel pause: rendered as ordinary successful text.
     Held { message: String },
+    /// This MCP session's denial circuit is open: rendered as ordinary successful text.
+    AttentionRequired { message: String },
 }
 
 /// The context one [`crate::browser::directory::Handler::Local`] invocation receives (ADR-0035

@@ -80,6 +80,11 @@ struct NullAuditSink;
 impl AuditSink for NullAuditSink {
     fn record(&self, _record: &AuditRecord) {}
     fn record_session_event(&self, _record: &ghostlight::governance::ports::SessionEventRecord) {}
+    fn record_attention_event(
+        &self,
+        _record: &ghostlight::governance::ports::AttentionEventRecord,
+    ) {
+    }
 }
 
 #[test]

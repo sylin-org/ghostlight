@@ -64,6 +64,7 @@ fn a_recorded_call_lands_as_one_wellformed_jsonl_line() {
             "duration_ms",
             "manifest",
             "held",
+            "attention_required",
             "orchestrator",
             "batch_id",
             "step",
@@ -81,6 +82,7 @@ fn a_recorded_call_lands_as_one_wellformed_jsonl_line() {
     // only presence is pinned here.
     assert!(rec["duration_ms"].as_u64().is_some());
     assert_eq!(rec["held"], false);
+    assert_eq!(rec["attention_required"], false);
     assert_eq!(rec["client"]["name"], "claude-code");
     assert_eq!(rec["client"]["version"], "2.1.0");
     for field in ["identity", "domain", "grant_id", "denial_id", "manifest"] {
@@ -206,7 +208,7 @@ fn session_killed_writes_one_session_event_record() {
 }
 
 /// C1 (PINS SS3): with no orchestration ever stamped, a normal begin/complete record's
-/// serialized line ends with the four new keys, in order, all null/false.
+/// serialized line ends with the attention bit and four orchestration keys, in order.
 #[test]
 fn orchestration_keys_serialize_last_in_order() {
     let path = temp_path("orchestration-keys");
@@ -227,7 +229,7 @@ fn orchestration_keys_serialize_last_in_order() {
     let line = content.lines().next().expect("one line");
     assert!(
         line.ends_with(
-            r#""held":false,"orchestrator":null,"batch_id":null,"step":null,"dry_run":false}"#
+            r#""held":false,"attention_required":false,"orchestrator":null,"batch_id":null,"step":null,"dry_run":false}"#
         ),
         "line: {line}"
     );

@@ -268,6 +268,10 @@ impl AuditSink for Recorder {
     fn record_session_event(&self, record: &SessionEventRecord) {
         self.write_serialized(record, "session_event");
     }
+
+    fn record_attention_event(&self, record: &crate::governance::ports::AttentionEventRecord) {
+        self.write_serialized(record, "attention_event");
+    }
 }
 
 #[cfg(test)]
@@ -290,6 +294,7 @@ mod tests {
             duration_ms: 0,
             manifest: None,
             held: false,
+            attention_required: false,
             orchestrator: None,
             batch_id: None,
             step: None,

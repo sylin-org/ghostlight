@@ -176,6 +176,9 @@ mod tests {
             CallOutcome::Held { message } => CallOutcome::Held {
                 message: message.clone(),
             },
+            CallOutcome::AttentionRequired { message } => CallOutcome::AttentionRequired {
+                message: message.clone(),
+            },
         }
     }
     fn ok(text: &str) -> CallOutcome {
@@ -187,6 +190,11 @@ mod tests {
         CallOutcome::Denied {
             message: "denied".to_string(),
             source: crate::mcp::outcome::DenialSource::Policy,
+        }
+    }
+    fn attention_required() -> CallOutcome {
+        CallOutcome::AttentionRequired {
+            message: "human attention required".to_string(),
         }
     }
 
@@ -255,6 +263,27 @@ mod tests {
             "the third step never ran after the second was denied"
         );
         assert_eq!(run.summary, "1/3 steps completed; step 2 denied");
+    }
+
+    #[test]
+    fn browser_batch_reports_attention_required_and_stops() {
+        let translated = json!({"steps": [
+            {"tool": "a", "args": {}},
+            {"tool": "b", "args": {}},
+        ]});
+        let mut runner = StubRunner::new(vec![attention_required(), ok("b")]);
+        let run = run_batch(&translated, &mut runner, 120000, false, "browser_batch");
+        assert_eq!(run.steps[0].status, "attention_required");
+        assert_eq!(run.steps[1].status, "not_run");
+        assert_eq!(
+            run.summary,
+            "0/2 steps completed; attention required at step 1"
+        );
+        let result = build_batch_result(run);
+        assert!(result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("attention_required"));
     }
 
     #[test]

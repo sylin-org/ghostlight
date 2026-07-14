@@ -90,6 +90,17 @@ type KillHook = Box<dyn Fn() + Send + Sync>;
 /// is never removed.
 type KillHooks = Arc<Mutex<Vec<(u64, KillHook)>>>;
 
+type AttentionHook = Arc<dyn Fn(crate::governance::attention::AttentionEvent) + Send + Sync>;
+
+struct AttentionSession {
+    circuit: crate::governance::attention::AttentionCircuit,
+    label: String,
+    target: Option<(u32, i64)>,
+    hook: AttentionHook,
+}
+
+type AttentionSessions = Arc<Mutex<HashMap<String, AttentionSession>>>;
+
 /// How long to wait for the extension to answer a single tool call before giving up.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 /// Browser final-frame barriers are deliberately much shorter than an ordinary tool timeout.
@@ -121,6 +132,14 @@ const IDENTITY_WINDOW: Duration = Duration::from_secs(5);
 fn kill_error() -> ToolError {
     ToolError::extension("The user ended the browser session (kill switch)")
         .next_step("ask the user to reconnect from the Ghostlight extension popup, then retry")
+}
+
+fn attention_required_message() -> String {
+    "Attention required: Ghostlight paused this MCP session after repeated blocked actions. The \
+     requested browser action was NOT executed. Retrying will not help while the pause is active. \
+     Ask the user to review the Ghostlight overlay or extension popup and choose Resume, then \
+     continue only after they confirm."
+        .to_string()
 }
 
 /// Delivered to a waiting caller: `Ok(result)` or `Err(hop-attributed tool error)`.
@@ -364,6 +383,9 @@ pub struct Browser {
     recordings: Arc<crate::recording::RecordingCoordinator>,
     /// Starts the one process-local deadline and health-lease supervisor lazily.
     recording_supervisor_started: Arc<AtomicBool>,
+    /// Per-MCP-session denial attention circuits (ADR-0079). The same lock is held through the
+    /// final extension-frame enqueue, so an opening transition cannot race a stale admission.
+    attention_sessions: AttentionSessions,
 }
 
 impl Browser {
@@ -394,7 +416,87 @@ impl Browser {
             client_keys: Arc::new(Mutex::new(HashMap::new())),
             recordings: Arc::new(crate::recording::RecordingCoordinator::new()),
             recording_supervisor_started: Arc::new(AtomicBool::new(false)),
+            attention_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Register one live MCP session's memory-only attention circuit and transition hook.
+    pub fn register_attention_session(
+        &self,
+        guid: &str,
+        hook: impl Fn(crate::governance::attention::AttentionEvent) + Send + Sync + 'static,
+    ) {
+        self.attention_sessions.lock().unwrap().insert(
+            guid.to_string(),
+            AttentionSession {
+                circuit: crate::governance::attention::AttentionCircuit::new(),
+                label: "MCP client".to_string(),
+                target: None,
+                hook: Arc::new(hook),
+            },
+        );
+    }
+
+    /// Update the bounded human-facing label for a registered attention session.
+    pub fn set_attention_label(&self, guid: &str, label: &str) {
+        if let Some(session) = self.attention_sessions.lock().unwrap().get_mut(guid) {
+            session.label = label.chars().take(80).collect();
+        }
+    }
+
+    /// Remove all denial history, quieting, and presentation state for a finished MCP session.
+    pub fn clear_attention_session(&self, guid: &str) {
+        let removed = self.attention_sessions.lock().unwrap().remove(guid);
+        if let Some(session) = removed {
+            if let Some((target, native_tab)) = session.target {
+                self.send_attention_resolved(target, native_tab, guid);
+            }
+        }
+    }
+
+    /// Helpful model-facing text while this session's denial circuit is open.
+    pub fn attention_message(&self, guid: &str) -> Option<String> {
+        self.attention_sessions
+            .lock()
+            .unwrap()
+            .get(guid)
+            .and_then(|session| session.circuit.paused())
+            .map(|_| attention_required_message())
+    }
+
+    /// Observe one enforced denial and apply ADR-0079's presentation/transition behavior.
+    /// Returns whether the caller should emit the ordinary transient sticker.
+    pub fn observe_denial(
+        &self,
+        guid: &str,
+        tab_id: Option<i64>,
+        signal: crate::governance::attention::DenialSignal,
+    ) -> bool {
+        let target = tab_id.and_then(|tab_id| {
+            let (slot, native) = self.resolve_target(Some(tab_id));
+            slot.zip(native)
+        });
+        let (result, hook, label) = {
+            let mut sessions = self.attention_sessions.lock().unwrap();
+            let Some(session) = sessions.get_mut(guid) else {
+                return true;
+            };
+            if target.is_some() {
+                session.target = target;
+            }
+            let result = session.circuit.observe_at(signal, Instant::now());
+            (result, Arc::clone(&session.hook), session.label.clone())
+        };
+
+        if let Some(state) = result.opened {
+            hook(crate::governance::attention::AttentionEvent::opened(
+                state.clone(),
+            ));
+            if let Some((target, native_tab)) = target {
+                self.send_attention_required(target, native_tab, guid, &label, &state);
+            }
+        }
+        result.present_isolated
     }
 
     /// Record a session's stable per-client presentation key (ADR-0066 D3), captured at
@@ -761,7 +863,7 @@ impl Browser {
                 error,
                 outcome_unknown: false,
             })?;
-        self.send_and_await_delivery(id, frames, tool, target, TOOL_TIMEOUT)
+        self.send_and_await_delivery(id, frames, tool, target, TOOL_TIMEOUT, Some(guid))
             .await
     }
 
@@ -806,7 +908,8 @@ impl Browser {
             }
         };
         let frames = self.outbound_frames(target, &id, &payload)?;
-        self.send_and_await(id, frames, tool, target, timeout).await
+        self.send_and_await(id, frames, tool, target, timeout, Some(guid))
+            .await
     }
 
     fn outbound_frames(
@@ -1254,6 +1357,7 @@ impl Browser {
                 "tab_url_request",
                 target,
                 TOOL_TIMEOUT,
+                None,
             )
             .await?;
         Ok(result
@@ -1381,6 +1485,8 @@ impl Browser {
             "tabId": native_tab,
             "class": class,
             "title": title,
+            "mode": "sticker",
+            "durationMs": 3000,
         });
         if let Some(icon) = icon {
             notification["icon"] = json!(icon);
@@ -1392,6 +1498,47 @@ impl Browser {
             notification["ref"] = json!(reference);
         }
         let Ok(bytes) = serde_json::to_vec(&notification) else {
+            return;
+        };
+        let Ok(framed) = host::encode(&bytes) else {
+            return;
+        };
+        self.send_fire_and_forget(target, framed);
+    }
+
+    fn send_attention_required(
+        &self,
+        target: u32,
+        native_tab: i64,
+        guid: &str,
+        label: &str,
+        state: &crate::governance::attention::PauseState,
+    ) {
+        let message = json!({
+            "type": "attention_required",
+            "tabId": native_tab,
+            "guid": guid,
+            "label": label,
+            "category": state.signal.category.as_str(),
+            "origin": state.signal.origin,
+            "threshold": state.threshold.as_str(),
+            "count": state.count,
+            "title": "Agent browsing paused",
+            "description": "Repeated blocked actions need your attention before this client can continue.",
+            "controls": ["keep_paused", "resume", "resume_quiet", "end_session"],
+        });
+        self.send_json_fire_and_forget(target, &message);
+    }
+
+    fn send_attention_resolved(&self, target: u32, native_tab: i64, guid: &str) {
+        self.send_json_fire_and_forget(
+            target,
+            &json!({ "type": "attention_resolved", "tabId": native_tab, "guid": guid }),
+        );
+    }
+
+    fn send_json_fire_and_forget(&self, target: u32, message: &Value) {
+        let Ok(bytes) = serde_json::to_vec(message) else {
             return;
         };
         let Ok(framed) = host::encode(&bytes) else {
@@ -1414,8 +1561,9 @@ impl Browser {
         debug_label: &str,
         target: u32,
         timeout: Duration,
+        attention_guid: Option<&str>,
     ) -> CallResult {
-        self.send_and_await_delivery(id, frames, debug_label, target, timeout)
+        self.send_and_await_delivery(id, frames, debug_label, target, timeout, attention_guid)
             .await
             .map_err(|failure| failure.error)
     }
@@ -1427,16 +1575,31 @@ impl Browser {
         debug_label: &str,
         target: u32,
         timeout: Duration,
+        attention_guid: Option<&str>,
     ) -> std::result::Result<Value, DeliveryFailure> {
-        let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id.clone(), tx);
-        self.debug.tool_begin(&id, debug_label);
+        // ADR-0079 D3: hold the same attention lock through the actual frame enqueue. An opening
+        // transition must either happen before this check (and refuse the request) or after these
+        // bytes entered the already-dispatched set. There is no stale-check gap.
+        let (rx, sent, sent_count) = {
+            let attention_guard = self.attention_sessions.lock().unwrap();
+            if attention_guid.is_some_and(|guid| {
+                attention_guard
+                    .get(guid)
+                    .is_some_and(|session| session.circuit.paused().is_some())
+            }) {
+                return Err(DeliveryFailure {
+                    error: ToolError::attention_required(attention_required_message()),
+                    outcome_unknown: false,
+                });
+            }
+            let (tx, rx) = oneshot::channel();
+            self.pending.lock().unwrap().insert(id.clone(), tx);
+            self.debug.tool_begin(&id, debug_label);
 
-        // Enqueue only if `target`'s session is still attached; otherwise fail fast. The lock is
-        // scoped so it is never held across the await below.
-        let (sent, sent_count) = {
+            // Enqueue only if `target`'s session is still attached; otherwise fail fast. Both
+            // state locks end with this block and are never held across the reply await.
             let sessions = self.sessions.lock().unwrap();
-            match sessions.get(&target) {
+            let (sent, sent_count) = match sessions.get(&target) {
                 Some(session) => {
                     let mut sent_count = 0;
                     let sent = frames.into_iter().all(|frame| {
@@ -1449,7 +1612,8 @@ impl Browser {
                     (sent, sent_count)
                 }
                 None => (false, 0),
-            }
+            };
+            (rx, sent, sent_count)
         };
         if !sent {
             self.pending.lock().unwrap().remove(&id);
@@ -1789,6 +1953,13 @@ impl Browser {
             return;
         }
 
+        if let (Some(id), Some(kind @ ("get_attention" | "attention_action"))) =
+            (reply.get("id").and_then(Value::as_str), msg_type)
+        {
+            self.handle_attention_request(slot, id, kind, &reply);
+            return;
+        }
+
         let Some(id) = reply.get("id").and_then(Value::as_str) else {
             return; // an event/heartbeat, not a tool reply
         };
@@ -1846,6 +2017,105 @@ impl Browser {
         };
         let Ok(framed) = host::encode(&bytes) else {
             tracing::warn!("failed to frame a hold reply");
+            return;
+        };
+        self.send_fire_and_forget(slot, framed);
+    }
+
+    fn handle_attention_request(&self, slot: u32, id: &str, kind: &str, request: &Value) {
+        let result = match kind {
+            "get_attention" => Ok((self.attention_state_value(slot), false)),
+            "attention_action" => {
+                let guid = request.get("guid").and_then(Value::as_str);
+                let disposition = request
+                    .get("disposition")
+                    .and_then(Value::as_str)
+                    .and_then(crate::governance::attention::AttentionDisposition::parse_wire);
+                match (guid, disposition) {
+                    (Some(guid), Some(disposition)) => self
+                        .apply_attention_disposition(guid, disposition, Some(slot))
+                        .map(|end_session| (self.attention_state_value(slot), end_session))
+                        .ok_or("attention session is not paused"),
+                    _ => Err("attention_action requires a valid guid and disposition"),
+                }
+            }
+            _ => unreachable!("matched only attention request types"),
+        };
+        let reply = match result {
+            Ok((mut state, end_session)) => {
+                state["endSession"] = json!(end_session);
+                json!({ "id": id, "type": "attention_state", "result": state })
+            }
+            Err(error) => json!({ "id": id, "type": "attention_error", "error": error }),
+        };
+        self.send_attention_reply(slot, &reply);
+    }
+
+    fn apply_attention_disposition(
+        &self,
+        guid: &str,
+        disposition: crate::governance::attention::AttentionDisposition,
+        requesting_slot: Option<u32>,
+    ) -> Option<bool> {
+        let (prior, hook, target) = {
+            let mut sessions = self.attention_sessions.lock().unwrap();
+            let session = sessions.get_mut(guid)?;
+            if requesting_slot.is_some_and(|slot| {
+                session
+                    .target
+                    .is_none_or(|(target_slot, _)| target_slot != slot)
+            }) {
+                return None;
+            }
+            let prior = session.circuit.apply(disposition)?;
+            (prior, Arc::clone(&session.hook), session.target)
+        };
+        if let Some(event) =
+            crate::governance::attention::AttentionEvent::disposition(prior, disposition)
+        {
+            hook(event);
+        }
+        let end_session =
+            disposition == crate::governance::attention::AttentionDisposition::EndSession;
+        if !end_session
+            && disposition != crate::governance::attention::AttentionDisposition::KeepPaused
+        {
+            if let Some((target, native_tab)) = target {
+                self.send_attention_resolved(target, native_tab, guid);
+            }
+        }
+        Some(end_session)
+    }
+
+    fn attention_state_value(&self, slot: u32) -> Value {
+        let sessions = self.attention_sessions.lock().unwrap();
+        let paused = sessions
+            .iter()
+            .filter_map(|(guid, session)| {
+                let (_, native_tab) = session.target.filter(|(target, _)| *target == slot)?;
+                session.circuit.paused().map(|state| {
+                    json!({
+                        "guid": guid,
+                        "tabId": native_tab,
+                        "label": session.label,
+                        "category": state.signal.category.as_str(),
+                        "origin": state.signal.origin,
+                        "threshold": state.threshold.as_str(),
+                        "count": state.count,
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        json!({ "sessions": paused })
+    }
+
+    fn send_attention_reply(&self, slot: u32, reply: &Value) {
+        let Ok(bytes) = serde_json::to_vec(reply) else {
+            tracing::warn!("failed to serialize an attention reply");
+            return;
+        };
+        let Ok(framed) = host::encode(&bytes) else {
+            tracing::warn!("failed to frame an attention reply");
             return;
         };
         self.send_fire_and_forget(slot, framed);
@@ -2067,6 +2337,7 @@ mod tests {
                 "upload_image_exec",
                 slot,
                 Duration::from_millis(10),
+                None,
             )
             .await
             .unwrap_err();
@@ -2943,5 +3214,85 @@ mod tests {
         assert_eq!(encode_created_tab_prose("Created tab .", slot), None);
         // The round trip decodes back to (slot, native).
         assert_eq!(crate::constants::tab_id::decode(composite), (slot, native));
+    }
+
+    fn policy_denial(origin: &str) -> crate::governance::attention::DenialSignal {
+        crate::governance::attention::DenialSignal {
+            origin: Some(origin.to_string()),
+            capabilities: vec![crate::governance::ports::Capability::Action],
+            category: crate::governance::attention::DenialCategory::Policy,
+        }
+    }
+
+    #[tokio::test]
+    async fn open_attention_circuit_blocks_only_its_session_at_the_final_send_boundary() {
+        let browser = Browser::new();
+        let (mut extension, _) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        browser.register_attention_session("paused", |_| {});
+        browser.register_attention_session("other", |_| {});
+        for _ in 0..3 {
+            browser.observe_denial("paused", None, policy_denial("example.com"));
+        }
+
+        let err = browser
+            .call("paused", "navigate", &json!({}))
+            .await
+            .expect_err("the open circuit refuses before enqueue");
+        assert!(matches!(err, ToolError::AttentionRequired { .. }));
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20),
+            host::read_message(&mut extension)
+        )
+        .await
+        .is_err());
+
+        let other = browser.clone();
+        let call = tokio::spawn(async move { other.call("other", "navigate", &json!({})).await });
+        let request = host::read_message(&mut extension).await.unwrap().unwrap();
+        let request: Value = serde_json::from_slice(&request).unwrap();
+        host::write_message(
+            &mut extension,
+            &serde_json::to_vec(
+                &json!({ "id": request["id"], "type": "tool_response", "result": {"content": []} }),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(call.await.unwrap().is_ok());
+    }
+
+    #[test]
+    fn resume_closes_only_the_named_attention_circuit_and_emits_transition_events() {
+        let browser = Browser::new();
+        let events = Arc::new(AtomicU64::new(0));
+        let captured = Arc::clone(&events);
+        browser.register_attention_session("a", move |_| {
+            captured.fetch_add(1, Ordering::SeqCst);
+        });
+        browser.register_attention_session("b", |_| {});
+        for guid in ["a", "b"] {
+            for _ in 0..3 {
+                browser.observe_denial(guid, None, policy_denial("example.com"));
+            }
+        }
+        assert!(browser.attention_message("a").is_some());
+        assert!(browser.attention_message("b").is_some());
+        assert_eq!(events.load(Ordering::SeqCst), 1);
+
+        browser.apply_attention_disposition(
+            "a",
+            crate::governance::attention::AttentionDisposition::Resume,
+            None,
+        );
+        assert!(browser.attention_message("a").is_none());
+        assert!(browser.attention_message("b").is_some());
+        assert_eq!(events.load(Ordering::SeqCst), 2);
+
+        browser.clear_attention_session("b");
+        assert!(
+            browser.attention_message("b").is_none(),
+            "session teardown erases its circuit and denial history"
+        );
     }
 }

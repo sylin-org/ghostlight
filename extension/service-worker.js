@@ -19,7 +19,7 @@
 // this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
 // ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
 
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/narration.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/narration.js", "lib/attention.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
@@ -53,6 +53,7 @@ const { groupSessionTabs, managedGroupIds, isManagedGroupId, pruneDeadGroups, re
 // ADR-0072: pure, memory-only replacement and expiry state. The worker supplies tab routing;
 // this store contains no policy or page-content logic.
 const narrationStore = self.GhostlightNarration.createNarrationStore();
+const attentionStore = self.GhostlightAttention.createAttentionStore();
 // ADR-0078 D7: the minimum current CDP dialog state per tab. It is mechanism-only, memory-only,
 // and never resolves anything without an explicit model-facing dialog action.
 const dialogStore = self.GhostlightDialog.createDialogStore();
@@ -103,6 +104,9 @@ const CLIENT_TITLE_PREFIX = "\u{1F47B} ";
 // because tool ids are binary-chosen and hold ids are extension-chosen.
 const holdPending = new Map(); // id -> { resolve }
 let holdSeq = 0;
+const attentionPending = new Map();
+let attentionSeq = 0;
+let holdBadgeState = null;
 // Panic kill switch (g11): the hot-path mirror of the chrome.storage.session "session_killed"
 // marker (the source of truth for reconnect gating). Set synchronously, before any await, at
 // the start of killSession() and by startup recovery; kept in sync on every transition so
@@ -229,7 +233,22 @@ async function connect() {
           icon: msg.icon,
           title: msg.title,
           description: msg.description,
+          durationMs: msg.durationMs,
         });
+        return;
+      }
+      if (msg && msg.type === "attention_required" && typeof msg.tabId === "number") {
+        const record = attentionStore.show(msg);
+        renderAttention(msg.tabId, record);
+        refreshActionBadge();
+        return;
+      }
+      if (msg && msg.type === "attention_resolved" && typeof msg.guid === "string") {
+        const prior = attentionStore.remove(msg.guid);
+        if (prior && Number.isSafeInteger(prior.tabId)) {
+          sendToTab(prior.tabId, { type: "AGENT_ATTENTION_CLEAR", guid: msg.guid });
+        }
+        refreshActionBadge();
         return;
       }
       // ADR-0072/0078 session cleanup: the binary names only this MCP session's owned tabs. The
@@ -267,6 +286,17 @@ async function connect() {
         } else {
           pending.resolve(null);
         }
+        return;
+      }
+      if (msg && (msg.type === "attention_state" || msg.type === "attention_error") && msg.id) {
+        const pending = attentionPending.get(msg.id);
+        if (!pending) return;
+        attentionPending.delete(msg.id);
+        if (msg.type === "attention_state") {
+          pending.resolve(msg.result || { sessions: [] });
+        } else {
+          pending.resolve(null);
+        }
       }
     };
     nativePort.onMessage.addListener(handleNativeMessage);
@@ -290,6 +320,7 @@ async function connect() {
     // while. Check once, right after attaching, so the service's focus-chain tie-breaker has a
     // real answer from the first tool call rather than only after the user later alt-tabs.
     reportFocusIfFocused();
+    attentionRequest({ type: "get_attention" }).then(syncAttentionState);
   } catch {
     nativePort = null;
     setTimeout(connect, RECONNECT_DELAY_MS);
@@ -373,15 +404,85 @@ function holdRequest(payload) {
   });
 }
 
-// `held` is `true`/`false` from a hold_state reply, or `null` when the session state is
-// unknown (no connected port). Badge text/color only; renders state, decides nothing.
-function updateHoldBadge(held) {
-  if (held) {
+function attentionRequest(payload) {
+  return new Promise((resolve) => {
+    if (!nativePort) {
+      connect();
+      resolve(null);
+      return;
+    }
+    const id = `a${++attentionSeq}`;
+    const timer = setTimeout(() => {
+      attentionPending.delete(id);
+      resolve(null);
+    }, HOLD_REQUEST_TIMEOUT_MS);
+    attentionPending.set(id, {
+      resolve: (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+    });
+    try {
+      nativePort.postMessage(Object.assign({ id }, payload));
+    } catch {
+      clearTimeout(timer);
+      attentionPending.delete(id);
+      resolve(null);
+    }
+  });
+}
+
+function renderAttention(tabId, record) {
+  if (!record) return;
+  sendToTab(tabId, {
+    type: "AGENT_ATTENTION_REQUIRED",
+    guid: record.guid,
+    label: record.label,
+    category: record.category,
+    origin: record.origin,
+    threshold: record.threshold,
+    count: record.count,
+    title: record.title,
+    description: record.description,
+    controls: record.controls,
+  });
+}
+
+function syncAttentionState(result) {
+  if (!result) return;
+  const prior = attentionStore.clear();
+  for (const record of prior) {
+    if (Number.isSafeInteger(record.tabId)) {
+      sendToTab(record.tabId, { type: "AGENT_ATTENTION_CLEAR", guid: record.guid });
+    }
+  }
+  for (const raw of result.sessions || []) {
+    const record = attentionStore.show(raw);
+    if (record && Number.isSafeInteger(record.tabId)) renderAttention(record.tabId, record);
+  }
+  refreshActionBadge();
+}
+
+function refreshActionBadge() {
+  if (attentionStore.list().length > 0) {
+    chrome.action.setBadgeText({ text: "!" });
+    chrome.action.setBadgeBackgroundColor({ color: "#dc2626" });
+  } else if (holdBadgeState === true) {
     chrome.action.setBadgeText({ text: "II" });
     chrome.action.setBadgeBackgroundColor({ color: "#38bdf8" });
+  } else if (gifCast.size > 0) {
+    chrome.action.setBadgeText({ text: "REC" });
+    chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
   } else {
     chrome.action.setBadgeText({ text: "" });
   }
+}
+
+// `held` is `true`/`false` from a hold_state reply, or `null` when the session state is
+// unknown (no connected port). Badge text/color only; renders state, decides nothing.
+function updateHoldBadge(held) {
+  holdBadgeState = held;
+  refreshActionBadge();
 }
 
 chrome.commands.onCommand.addListener((command) => {
@@ -432,6 +533,11 @@ async function killSession() {
   for (const tabId of narrationStore.clear()) {
     sendToTab(tabId, { type: "AGENT_NARRATION_CLEAR" });
   }
+  for (const record of attentionStore.clear()) {
+    if (Number.isSafeInteger(record.tabId)) {
+      sendToTab(record.tabId, { type: "AGENT_ATTENTION_CLEAR", guid: record.guid });
+    }
+  }
 
   attached.clear();
   attaching.clear();
@@ -480,6 +586,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     });
     return true;
   }
+  if (msg && msg.type === "GET_ATTENTION_STATE") {
+    attentionRequest({ type: "get_attention" }).then((result) => {
+      syncAttentionState(result);
+      sendResponse(result || { sessions: [] });
+    });
+    return true;
+  }
+  if (msg && msg.type === "ATTENTION_ACTION") {
+    attentionRequest({
+      type: "attention_action",
+      guid: msg.guid,
+      disposition: msg.disposition,
+    }).then(async (result) => {
+      syncAttentionState(result);
+      if (result && result.endSession === true) await killSession();
+      sendResponse(result || { sessions: [] });
+    });
+    return true;
+  }
   if (msg && msg.type === "GET_SESSION_STATE") {
     (async () => {
       const s = await chrome.storage.session.get("session_killed");
@@ -487,6 +612,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         killed: s.session_killed === true,
         connected: nativePort !== null,
         attachedTabs: attached.size,
+        recordingTabs: gifCast.size,
       });
     })();
     return true;
@@ -606,6 +732,7 @@ function stopGifCast(tabId, cast, reason) {
   const current = gifCast.get(tabId);
   if (!current || current !== cast) return;
   gifCast.delete(tabId);
+  refreshActionBadge();
   if (cast.expiryTimer) clearTimeout(cast.expiryTimer);
   if (attached.has(tabId)) {
     chrome.debugger.sendCommand({ tabId }, "Page.stopScreencast", {}).catch(() => {});
@@ -738,6 +865,7 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === "complete") {
     const narration = narrationStore.current(tabId);
     if (narration) renderNarration(tabId, narration);
+    for (const attention of attentionStore.forTab(tabId)) renderAttention(tabId, attention);
   }
 });
 // Render an uncaught-exception CDP event as one single-line string: base message, then an
@@ -1967,10 +2095,12 @@ const handlers = {
         chrome.debugger.sendCommand({ tabId }, "Page.stopScreencast", {}).catch(() => {});
         throw hopError("extension", "capture lease expired during start");
       }
+      refreshActionBadge();
     } catch (e) {
       if (gifCast.get(tabId) === cast) {
         if (cast.expiryTimer) clearTimeout(cast.expiryTimer);
         gifCast.delete(tabId);
+        refreshActionBadge();
       }
       throw e;
     }

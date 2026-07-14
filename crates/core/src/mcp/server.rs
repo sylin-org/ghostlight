@@ -286,6 +286,16 @@ where
     }
     let governance_slot: Arc<Mutex<Arc<Governance>>> = Arc::new(Mutex::new(governance));
 
+    // ADR-0079: one independent denial-attention circuit per live MCP session. Its hook always
+    // reads the current governance snapshot so a manifest reload cannot send transition records
+    // to a stale audit sink or lose the captured client identity.
+    {
+        let attention_governance = Arc::clone(&governance_slot);
+        browser.register_attention_session(guid.as_str(), move |event| {
+            current_governance(&attention_governance).record_attention_event(event);
+        });
+    }
+
     // Panic kill switch (g11, ADR-0018 step 2): the extension signals `session_killed` once it
     // has severed its own debugger attachments; this session writes exactly one audit
     // session-event record per kill (`tracing::info!` fires regardless of `audit.enabled`, so
@@ -489,6 +499,7 @@ where
     // session owns before dropping the session seat; the extension also enforces the timer, tab,
     // and panic cleanup paths independently.
     browser.erase_session_recordings(guid.as_str());
+    browser.clear_attention_session(guid.as_str());
     browser.clear_narrations(&crate::hub::session::owned_tab_ids(&owned_tabs, &guid));
     // Stop the policy-subscription task FIRST (and wait for the cancellation to actually take
     // effect) so its own `Outbound` sender clone is released before the writer's shutdown check
@@ -741,6 +752,9 @@ pub(super) async fn handle_line(
                     .map(|c| c.name.as_str()),
             );
             browser.set_client_key(seat.guid.as_str(), &client_key);
+            if let Some(client) = governance.current_client() {
+                browser.set_attention_label(seat.guid.as_str(), &client.name);
+            }
             // ADR-0060: a client may declare a tighten-only session policy overlay in the
             // initialize `_meta` (a schema-3 manifest, as a string). Parse and store it for this
             // session's calls. A malformed overlay fails the handshake loudly (a client that asked

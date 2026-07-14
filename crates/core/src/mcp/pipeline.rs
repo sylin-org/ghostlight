@@ -88,6 +88,9 @@ fn render_outcome(id: Option<Value>, outcome: CallOutcome) -> JsonRpcResponse {
             JsonRpcResponse::success(id, text_content(with_org_contact_line(message)))
         }
         CallOutcome::Held { message } => JsonRpcResponse::success(id, text_content(message)),
+        CallOutcome::AttentionRequired { message } => {
+            JsonRpcResponse::success(id, text_content(message))
+        }
     }
 }
 
@@ -379,6 +382,16 @@ pub(crate) async fn run_tool_call(
         };
     }
 
+    // ADR-0079: refuse new work for only the MCP session whose denial circuit opened. The two
+    // orchestrator fronts are allowed to enter so their first sub-step can report the honest
+    // `attention_required` status; `explain` is local and dispatches no browser mechanism.
+    if !dry_run && !matches!(name, "explain" | "script" | "browser_batch") {
+        if let Some(message) = browser.attention_message(guid) {
+            audit.attention_required();
+            return CallOutcome::AttentionRequired { message };
+        }
+    }
+
     // ADR-0024 Decision 4: the sacred check and the grant path below share ONE lazily resolved,
     // memoized tab-URL probe per call, keyed on this call's own `tabId` argument, instead of two
     // different mechanisms (the sacred check's former internal `tabs_context_mcp` lookup,
@@ -426,14 +439,26 @@ pub(crate) async fn run_tool_call(
             audit.sacred_deny(&denial, tab_domain.as_deref());
             let (title, description) =
                 denial_notification("on the never-touch list", &denial.domain);
-            browser.notify(
-                args.get("tabId").and_then(Value::as_i64),
-                "error",
-                Some("lock"),
-                &title,
-                Some(&description),
-                Some(&denial.denial_id),
+            let tab_id = args.get("tabId").and_then(Value::as_i64);
+            let present = browser.observe_denial(
+                guid,
+                tab_id,
+                crate::governance::attention::DenialSignal {
+                    origin: tab_domain.clone().or_else(|| Some(denial.domain.clone())),
+                    capabilities: lookup.unwrap_or(&[]).to_vec(),
+                    category: crate::governance::attention::DenialCategory::Sacred,
+                },
             );
+            if present {
+                browser.notify(
+                    tab_id,
+                    "error",
+                    Some("lock"),
+                    &title,
+                    Some(&description),
+                    Some(&denial.denial_id),
+                );
+            }
         }
         return CallOutcome::Denied {
             message: denial.message,
@@ -570,14 +595,26 @@ pub(crate) async fn run_tool_call(
                 audit.sacred_deny(&denial, domain_str.as_deref());
                 let (title, description) =
                     denial_notification("outside the granted policy", &denial.domain);
-                browser.notify(
-                    args.get("tabId").and_then(Value::as_i64),
-                    "warn",
-                    Some("shield"),
-                    &title,
-                    Some(&description),
-                    Some(&denial.denial_id),
+                let tab_id = args.get("tabId").and_then(Value::as_i64);
+                let present = browser.observe_denial(
+                    guid,
+                    tab_id,
+                    crate::governance::attention::DenialSignal {
+                        origin: domain_str.clone().or_else(|| Some(denial.domain.clone())),
+                        capabilities: lookup.unwrap_or(&[]).to_vec(),
+                        category: crate::governance::attention::DenialCategory::Policy,
+                    },
                 );
+                if present {
+                    browser.notify(
+                        tab_id,
+                        "warn",
+                        Some("shield"),
+                        &title,
+                        Some(&description),
+                        Some(&denial.denial_id),
+                    );
+                }
             }
             return CallOutcome::Denied {
                 message: denial.message,
@@ -590,14 +627,26 @@ pub(crate) async fn run_tool_call(
             if !dry_run {
                 let (title, description) =
                     denial_notification("outside the granted policy", &denial.domain);
-                browser.notify(
-                    args.get("tabId").and_then(Value::as_i64),
-                    "warn",
-                    Some("shield"),
-                    &title,
-                    Some(&description),
-                    Some(&denial.denial_id),
+                let tab_id = args.get("tabId").and_then(Value::as_i64);
+                let present = browser.observe_denial(
+                    guid,
+                    tab_id,
+                    crate::governance::attention::DenialSignal {
+                        origin: domain_str.clone().or_else(|| Some(denial.domain.clone())),
+                        capabilities: lookup.unwrap_or(&[]).to_vec(),
+                        category: crate::governance::attention::DenialCategory::Policy,
+                    },
                 );
+                if present {
+                    browser.notify(
+                        tab_id,
+                        "warn",
+                        Some("shield"),
+                        &title,
+                        Some(&description),
+                        Some(&denial.denial_id),
+                    );
+                }
             }
             return CallOutcome::Denied {
                 message: denial.message,
@@ -712,14 +761,25 @@ pub(crate) async fn run_tool_call(
                     audit.landing_deny(&d, landing_domain.as_deref());
                     let (title, description) =
                         denial_notification("outside the granted policy", &d.domain);
-                    browser.notify(
+                    let present = browser.observe_denial(
+                        guid,
                         Some(tab_id),
-                        "warn",
-                        Some("shield"),
-                        &title,
-                        Some(&description),
-                        Some(&d.denial_id),
+                        crate::governance::attention::DenialSignal {
+                            origin: landing_domain.clone().or_else(|| Some(d.domain.clone())),
+                            capabilities: lookup.unwrap_or(&[]).to_vec(),
+                            category: crate::governance::attention::DenialCategory::Policy,
+                        },
                     );
+                    if present {
+                        browser.notify(
+                            Some(tab_id),
+                            "warn",
+                            Some("shield"),
+                            &title,
+                            Some(&description),
+                            Some(&d.denial_id),
+                        );
+                    }
                     return CallOutcome::Denied {
                         message: d.message,
                         source: DenialSource::Policy,
@@ -766,6 +826,7 @@ pub(crate) async fn run_tool_call(
         // the bare `ToolError`, with no slot for a pre-rendered note. No test pins this exact
         // combination (extension connects within the handshake grace window, then the dispatched
         // call itself still errors); see LEDGER.md for the full note.
+        Err(ToolError::AttentionRequired { message }) => CallOutcome::AttentionRequired { message },
         Err(e) => CallOutcome::Failure { error: e },
     }
 }

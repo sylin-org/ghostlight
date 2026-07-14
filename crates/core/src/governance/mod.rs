@@ -16,6 +16,7 @@
 //! serde (plus `uuid`/`chrono`/`sha2` for audit, manifest identity, and denial ids). A
 //! fail-closed arch-test (task A7) enforces that.
 
+pub mod attention;
 pub mod audit;
 pub mod config;
 pub mod crypto;

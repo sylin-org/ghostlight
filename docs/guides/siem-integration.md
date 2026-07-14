@@ -32,7 +32,7 @@ PRI 134 = facility 16 (local0), severity 6 (info). HOSTNAME, MSGID, and STRUCTUR
 are the RFC nil value `-`. `{timestamp}` is UTC RFC 3339 with millisecond precision.
 `{json}` is the record, unchanged from the file format. Example datagram:
 
-    <134>1 2026-07-03T14:32:15.003Z - ghostlight 18104 - - {"event_id":"1c5e...","ts":"2026-07-03T14:32:15.001Z","identity":{"principal":"support-team","resolved_by":"local_file"},"client":{"name":"claude-code","version":"2.1.0"},"tool":"computer","action":"left_click","capability":"action","domain":"app.crm.example.com","decision":"allow","grant_id":"crm-read-write","denial_id":null,"duration_ms":312,"manifest":{"name":"support-team-crm","version":"2026.07.1","hash":"9f31..."},"held":false}
+    <134>1 2026-07-03T14:32:15.003Z - ghostlight 18104 - - {"event_id":"1c5e...","ts":"2026-07-03T14:32:15.001Z","identity":{"principal":"support-team","resolved_by":"local_file"},"client":{"name":"claude-code","version":"2.1.0"},"tool":"computer","action":"left_click","capability":"action","domain":"app.crm.example.com","decision":"allow","grant_id":"crm-read-write","denial_id":null,"duration_ms":312,"manifest":{"name":"support-team-crm","version":"2026.07.1","hash":"9f31..."},"held":false,"attention_required":false,"orchestrator":null,"batch_id":null,"step":null,"dry_run":false}
 
 Send failures are logged locally and never break the tool call.
 
@@ -56,11 +56,23 @@ Field order is stable and part of the format. Absent values are `null`, not omit
 | `duration_ms` | number | Dispatch-to-result wall time. |
 | `manifest` | object or null | `{name, version, hash}` of the policy in force. |
 | `held` | boolean | True when answered with the take-the-wheel pause text. |
+| `attention_required` | boolean | True when this MCP session's denial circuit refused dispatch pending a human disposition. |
+| `orchestrator` | string or null | `script` or `form_fill` on an internal execution. |
+| `batch_id` | string or null | Correlates an orchestrator parent with its internal executions. |
+| `step` | number or null | One-indexed internal execution position. |
+| `dry_run` | boolean | True only on a `script` dry-run parent record. |
 
 Session events share the stream and are distinguishable by an `event` field (and the
 absence of `tool`/`decision`): `event` is `session_killed` (panic kill switch),
 `manifest_reload` (hot-reload swap), or `user_manifest_ignored` (org policy displaced a
 user manifest). Route on `event` presence.
+
+Attention transitions also share the stream and carry `event` values `attention_opened`,
+`attention_resumed`, `attention_quieted`, or `attention_ended`. Their stable content-free fields
+are `event_id`, `ts`, `client`, `event`, `category`, `capability`, `domain`, `threshold`, `count`,
+`window_ms`, and `disposition`. Null threshold/count/window values identify a closing disposition.
+These records do not contain the opaque session guid, full URL, tool arguments, denial message, or
+page content.
 
 A `license` field is additionally appended to tool-call records only while an organization-managed
 governance deployment has abnormal license state (see [PRICING.md](../../PRICING.md)); it never

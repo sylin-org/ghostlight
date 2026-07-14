@@ -139,6 +139,7 @@ fn step_text(outcome: &CallOutcome) -> Option<String> {
         }
         CallOutcome::Denied { message, .. } => return Some(message.clone()),
         CallOutcome::Held { message } => return Some(message.clone()),
+        CallOutcome::AttentionRequired { message } => return Some(message.clone()),
     };
     result
         .get("content")
@@ -180,6 +181,7 @@ fn status_of(outcome: &CallOutcome, dry_run: bool) -> &'static str {
             }
         }
         CallOutcome::Held { .. } => "held",
+        CallOutcome::AttentionRequired { .. } => "attention_required",
     }
 }
 
@@ -325,10 +327,9 @@ pub(crate) fn run_batch<R: StepRunner>(
         );
         let status = status_of(&outcome, dry_run);
 
-        // A held step stops the script UNCONDITIONALLY, regardless of onError: the user grabbed the
-        // wheel; burning through more steps that each answer "held" would be technically correct and
-        // humanly wrong.
-        if status == "held" {
+        // A human pause stops the script unconditionally, regardless of onError. Burning through
+        // later steps that cannot dispatch would be technically repetitive and humanly wrong.
+        if matches!(status, "held" | "attention_required") {
             records.push(StepOutcome {
                 step: step_no,
                 tool,
@@ -337,7 +338,11 @@ pub(crate) fn run_batch<R: StepRunner>(
             });
             structured.push(None);
             stopped_at = Some(step_no);
-            stop_reason = StopReason::Held;
+            stop_reason = if status == "held" {
+                StopReason::Held
+            } else {
+                StopReason::AttentionRequired
+            };
             break;
         }
 
@@ -413,6 +418,7 @@ enum StopReason {
     Failed,
     Denied,
     Held,
+    AttentionRequired,
     Budget,
 }
 
@@ -421,6 +427,7 @@ impl StopReason {
         match status {
             "denied" => StopReason::Denied,
             "held" => StopReason::Held,
+            "attention_required" => StopReason::AttentionRequired,
             _ => StopReason::Failed,
         }
     }
@@ -446,6 +453,10 @@ fn summarize(reason: StopReason, stopped_at: Option<u32>, completed: u32, total:
         StopReason::Held => {
             let k = stopped_at.unwrap_or(completed + 1);
             format!("{completed}/{total} steps completed; held at step {k}")
+        }
+        StopReason::AttentionRequired => {
+            let k = stopped_at.unwrap_or(completed + 1);
+            format!("{completed}/{total} steps completed; attention required at step {k}")
         }
     }
 }
@@ -714,6 +725,9 @@ mod tests {
             CallOutcome::Held { message } => CallOutcome::Held {
                 message: message.clone(),
             },
+            CallOutcome::AttentionRequired { message } => CallOutcome::AttentionRequired {
+                message: message.clone(),
+            },
         }
     }
 
@@ -731,6 +745,11 @@ mod tests {
         CallOutcome::Denied {
             message: "denied".to_string(),
             source: crate::mcp::outcome::DenialSource::Policy,
+        }
+    }
+    fn attention_required() -> CallOutcome {
+        CallOutcome::AttentionRequired {
+            message: "human attention required".to_string(),
         }
     }
 
@@ -757,6 +776,25 @@ mod tests {
             compact["summary"], "1/3 steps completed; held at step 2",
             "got: {}",
             compact["summary"]
+        );
+    }
+
+    #[test]
+    fn attention_required_stops_unconditionally_and_keeps_its_own_status() {
+        let args = json!({"steps":[
+            {"tool":"a","args":{}},
+            {"tool":"b","args":{}},
+            {"tool":"c","args":{}}
+        ], "onError":"continue"});
+        let mut runner = StubRunner::new(vec![ok("a"), attention_required(), ok("c")]);
+        let compact = interpret(&args, &mut runner, 120000, false);
+        assert_eq!(
+            statuses(&compact),
+            vec!["ok", "attention_required", "not_run"]
+        );
+        assert_eq!(
+            compact["summary"],
+            "1/3 steps completed; attention required at step 2"
         );
     }
 

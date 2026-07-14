@@ -99,6 +99,15 @@
   #open-options:hover {
     text-decoration: underline;
   }
+  #attention-section[hidden] { display: none; }
+  #attention-title { font-size: 13px; font-weight: 700; color: #991b1b; margin-bottom: 7px; }
+  .attention-item { padding: 8px; border: 1px solid #fecaca; border-radius: 8px; background: #fff7f7; margin-bottom: 7px; }
+  .attention-label { font-size: 12px; font-weight: 650; margin-bottom: 5px; }
+  .attention-meta { font-size: 11px; color: #666; margin-bottom: 7px; overflow-wrap: anywhere; }
+  .attention-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .attention-actions button { padding: 5px; font-size: 10px; cursor: pointer; }
+  .attention-actions button.danger { color: #991b1b; }
+  #local-note { font-size: 11px; color: #475569; line-height: 1.35; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -112,6 +121,12 @@
   <div id="shortcut-note">
     Keyboard shortcut: Alt+Shift+P by default; change it at chrome://extensions/shortcuts
   </div>
+  <div id="local-note">Local only. No Ghostlight account or sign-in is required.</div>
+  <section id="attention-section" hidden>
+    <hr>
+    <div id="attention-title">A client needs your attention</div>
+    <div id="attention-list"></div>
+  </section>
   <hr>
   <div id="session-status">Loading...</div>
   <button id="session-button" disabled>Loading...</button>
