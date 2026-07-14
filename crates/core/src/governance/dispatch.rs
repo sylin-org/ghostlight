@@ -586,7 +586,14 @@ impl CallAudit {
     pub fn set_outcome(&mut self, outcome: &str) {
         if matches!(
             outcome,
-            "changed" | "unchanged" | "blocked" | "expect_met" | "expect_timeout"
+            "changed"
+                | "unchanged"
+                | "blocked"
+                | "expect_met"
+                | "expect_timeout"
+                | "tab_focused"
+                | "tab_reloaded"
+                | "tab_closed"
         ) {
             self.outcome = Some(outcome.to_string());
         }

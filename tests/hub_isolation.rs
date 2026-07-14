@@ -262,6 +262,15 @@ async fn unowned_tab_is_refused_before_any_tab_url_probe() {
     .await;
     assert_ne!(dialog["result"]["isError"], true);
     assert_eq!(result_text(&dialog), "unknown tab");
+    let tab_control = call(
+        &mut reader_b,
+        3,
+        "tab_control",
+        json!({ "tabId": 5, "action": "focus" }),
+    )
+    .await;
+    assert_ne!(tab_control["result"]["isError"], true);
+    assert_eq!(result_text(&tab_control), "unknown tab");
     assert!(
         seen.lock().unwrap().is_empty(),
         "the fake extension must record ZERO frames for B's refused call: {:?}",

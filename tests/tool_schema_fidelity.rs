@@ -36,6 +36,10 @@ const DIALOG_DESCRIPTION: &str = "Inspect or explicitly resolve the JavaScript d
 one owned tab. Use status when the dialog state is unknown. Never accept, dismiss, or respond \
 without intent from the current task.";
 
+const TAB_CONTROL_DESCRIPTION: &str = "Focus, reload, or close one tab owned by this Ghostlight \
+session. Close is always explicit and never affects a user-owned tab or automatically deletes the \
+containing tab group.";
+
 fn tools() -> Vec<Value> {
     let v = advertised_tools_json();
     v["tools"]
@@ -57,8 +61,8 @@ fn advertises_the_thirteen_trained_tools_plus_sanctioned_additions_with_explain_
         .collect();
     assert_eq!(
         names.len(),
-        24,
-        "13 trained tools plus narrate, wait_for, script, form_fill, act_on, dialog, file_upload, browser_batch, upload_image, gif_creator, and explain"
+        25,
+        "13 trained tools plus narrate, wait_for, script, form_fill, act_on, dialog, tab_control, file_upload, browser_batch, upload_image, gif_creator, and explain"
     );
     assert_eq!(
         names[..13],
@@ -71,14 +75,15 @@ fn advertises_the_thirteen_trained_tools_plus_sanctioned_additions_with_explain_
     assert_eq!(names[16], "form_fill", "the 17th tool is form_fill");
     assert_eq!(names[17], "act_on", "the 18th tool is act_on");
     assert_eq!(names[18], "dialog", "the 19th tool is dialog");
-    assert_eq!(names[19], "file_upload", "the 20th tool is file_upload");
-    assert_eq!(names[20], "browser_batch", "the 21st tool is browser_batch");
-    assert_eq!(names[21], "upload_image", "the 22nd tool is upload_image");
+    assert_eq!(names[19], "tab_control", "the 20th tool is tab_control");
+    assert_eq!(names[20], "file_upload", "the 21st tool is file_upload");
+    assert_eq!(names[21], "browser_batch", "the 22nd tool is browser_batch");
+    assert_eq!(names[22], "upload_image", "the 23rd tool is upload_image");
     assert_eq!(
-        names[22], "gif_creator",
-        "the 23rd tool is gif_creator, immediately before explain"
+        names[23], "gif_creator",
+        "the 24th tool is gif_creator, immediately before explain"
     );
-    assert_eq!(names[23], "explain", "explain stays positioned last");
+    assert_eq!(names[24], "explain", "explain stays positioned last");
 }
 
 /// The `explain` tool's own object matches ADR-0022 Decision 7 exactly: name, the pinned
@@ -116,8 +121,8 @@ fn explain_tool_object_matches_the_pinned_adr_0022_decision_7_shape() {
 
     assert_eq!(
         all.len(),
-        24,
-        "no tool other than narrate, wait_for, script, form_fill, act_on, dialog, file_upload, browser_batch, upload_image, gif_creator, and explain was added to the sacred fixture"
+        25,
+        "no tool other than narrate, wait_for, script, form_fill, act_on, dialog, tab_control, file_upload, browser_batch, upload_image, gif_creator, and explain was added to the sacred fixture"
     );
 }
 
@@ -153,6 +158,31 @@ fn dialog_tool_matches_the_pinned_adr_0078_shape() {
                 "then": { "required": ["text"] },
                 "else": { "not": { "required": ["text"] } }
             }],
+            "additionalProperties": false
+        })
+    );
+}
+
+#[test]
+fn tab_control_tool_matches_the_pinned_adr_0078_shape() {
+    let tab_control = tool("tab_control");
+    assert_eq!(tab_control["description"], TAB_CONTROL_DESCRIPTION);
+    assert_eq!(
+        tab_control["inputSchema"],
+        json!({
+            "type": "object",
+            "properties": {
+                "tabId": {
+                    "type": "number",
+                    "description": "Tab ID to control. The tab must belong to this Ghostlight session."
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["focus", "reload", "close"],
+                    "description": "Focus the tab, reload its page, or explicitly close that one tab."
+                }
+            },
+            "required": ["tabId", "action"],
             "additionalProperties": false
         })
     );
@@ -437,6 +467,7 @@ fn output_schemas_present_exactly_where_declared() {
             "form_fill",
             "act_on",
             "dialog",
+            "tab_control",
             "file_upload",
             "upload_image",
             "gif_creator"

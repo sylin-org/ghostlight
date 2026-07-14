@@ -124,6 +124,22 @@ pub fn owned_tab_ids(
     ids
 }
 
+/// Release one tab only when `guid` is its current owner. Returns whether the binding was removed.
+/// Used after an explicitly authorized `tab_control.close` reports that Chrome closed the tab;
+/// repeated cleanup and a foreign-session attempt are both harmless no-ops.
+pub fn release_owned_tab(
+    owned_tabs: &Mutex<HashMap<i64, SessionGuid>>,
+    guid: &SessionGuid,
+    tab_id: i64,
+) -> bool {
+    let mut map = owned_tabs.lock().unwrap_or_else(PoisonError::into_inner);
+    if map.get(&tab_id) != Some(guid) {
+        return false;
+    }
+    map.remove(&tab_id);
+    true
+}
+
 /// The stable per-CLIENT presentation key (ADR-0066 D1/D3): the MCP `clientInfo.name` the agent
 /// presented, or the literal `Ghostlight` when no clientInfo was captured. This -- not the
 /// per-process GUID -- is what the extension keys its `clientKey -> chromeGroupId` map on, so every
@@ -337,6 +353,20 @@ mod tests {
         assert_eq!(claim_tab(&owned_tabs, &b, 303), TabClaim::Adopted);
         assert_eq!(owned_tab_ids(&owned_tabs, &a), vec![101, 202]);
         assert_eq!(owned_tab_ids(&owned_tabs, &b), vec![303]);
+    }
+
+    #[test]
+    fn explicit_tab_release_is_exact_owner_only_and_idempotent() {
+        let owned_tabs = Mutex::new(HashMap::new());
+        let a = SessionGuid::mint();
+        let b = SessionGuid::mint();
+        assert_eq!(claim_tab(&owned_tabs, &a, 101), TabClaim::Adopted);
+        assert_eq!(claim_tab(&owned_tabs, &a, 202), TabClaim::Adopted);
+        assert!(!release_owned_tab(&owned_tabs, &b, 101));
+        assert_eq!(owned_tab_ids(&owned_tabs, &a), vec![101, 202]);
+        assert!(release_owned_tab(&owned_tabs, &a, 101));
+        assert!(!release_owned_tab(&owned_tabs, &a, 101));
+        assert_eq!(owned_tab_ids(&owned_tabs, &a), vec![202]);
     }
 
     /// ADR-0066 D1/D3: the clientKey is the plain client name (the reuse key the extension groups

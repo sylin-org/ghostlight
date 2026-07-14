@@ -189,6 +189,15 @@ fn derive_receipt_outcome(receipt: &Value) -> Option<String> {
     if observed.get("expectMet").and_then(Value::as_bool) == Some(true) {
         return Some("expect_met".to_string());
     }
+    for (field, category) in [
+        ("tabFocused", "tab_focused"),
+        ("tabReloaded", "tab_reloaded"),
+        ("tabClosed", "tab_closed"),
+    ] {
+        if observed.get(field).and_then(Value::as_bool) == Some(true) {
+            return Some(category.to_string());
+        }
+    }
     let changed = observed
         .get("mutations")
         .and_then(Value::as_u64)
@@ -1224,6 +1233,7 @@ mod tests {
             ("read_page", json!({ "tabId": 5 })),
             ("computer", json!({ "action": "screenshot", "tabId": 5 })),
             ("dialog", json!({ "action": "status", "tabId": 5 })),
+            ("tab_control", json!({ "action": "focus", "tabId": 5 })),
             (
                 "javascript_tool",
                 json!({ "action": "javascript_exec", "text": "1", "tabId": 5 }),
@@ -1256,16 +1266,16 @@ mod tests {
         }
 
         let lines = read_lines(&path);
-        assert_eq!(lines.len(), 5, "exactly one deny record per denied call");
+        assert_eq!(lines.len(), 6, "exactly one deny record per denied call");
         for rec in &lines {
             assert_eq!(rec["decision"], "deny");
             assert_eq!(rec["denial_id"], "D-af6633ec");
             assert_eq!(rec["domain"], "www.mybank.com");
         }
-        wait_for_seen_len(&seen, 10).await;
+        wait_for_seen_len(&seen, 12).await;
         assert_eq!(
             *seen.lock().unwrap(),
-            ["tab_url_request:5", "notification:error"].repeat(5),
+            ["tab_url_request:5", "notification:error"].repeat(6),
             "the extension must never see an actual tool_request for a denied call -- only the \
              tab_url_request pre-flight and the on-screen denial notification"
         );
@@ -1816,6 +1826,27 @@ mod tests {
         assert!(
             dialog_text.contains("'dialog (status)' call"),
             "{dialog_text}"
+        );
+
+        let tab_params =
+            json!({ "name": "tab_control", "arguments": { "action": "focus", "tabId": 5 } });
+        let tab_resp = handle_tools_call(
+            &browser,
+            &store,
+            &governance,
+            "test-guid",
+            Some(json!(5)),
+            Some(&tab_params),
+            None,
+        )
+        .await;
+        let tab_text = tab_resp.result.as_ref().expect("tab result")["content"][0]["text"]
+            .as_str()
+            .expect("tab pause text");
+        assert!(tab_text.starts_with("Paused:"), "{tab_text}");
+        assert!(
+            tab_text.contains("'tab_control (focus)' call"),
+            "{tab_text}"
         );
 
         // ADR-0022 Decision 7: `explain` gets the ordinary pause text like any other tool
@@ -2425,6 +2456,11 @@ mod tests {
             "dialog (dismiss): requires action. Explicitly dismiss the current JavaScript dialog.",
             "dialog (respond): requires action. Explicitly respond to the current JavaScript \
              prompt with text.",
+            "tab_control (focus): requires nothing. Focus one session-owned tab without changing \
+             page content.",
+            "tab_control (reload): requires action. Reload one session-owned tab.",
+            "tab_control (close): requires action. Explicitly close one session-owned tab and no \
+             containing group.",
             "file_upload: requires write. Upload files (base64 bytes) to a file input \
              located by read_page or find, via its ref.",
             "browser_batch: requires nothing. Run a sequence of tool calls in one round trip; \

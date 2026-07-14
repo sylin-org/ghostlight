@@ -19,12 +19,12 @@ use ghostlight::governance::ports::{
 };
 use ghostlight::transport::mcp::tools::advertised_tools_json;
 
-/// The 24 tool names in advertised order (the 13 trained tools plus `narrate`, `wait_for`, `script`,
-/// `form_fill`, `act_on`, `dialog`, `file_upload` (ADR-0050 Decision 2), `browser_batch` (ADR-0050 Decision 3),
+/// The 25 tool names in advertised order (the 13 trained tools plus `narrate`, `wait_for`, `script`,
+/// `form_fill`, `act_on`, `dialog`, `tab_control`, `file_upload` (ADR-0050 Decision 2), `browser_batch` (ADR-0050 Decision 3),
 /// `upload_image` (ADR-0050 Decision 4), `gif_creator` (ADR-0050 Decision 5), and ADR-0022
 /// Decision 7's sanctioned `explain` addition, positioned last), copied from the code-declared
 /// registry (`browser::directory::REGISTRY`), in declared order.
-const GOLDEN_TOOL_NAMES: [&str; 24] = [
+const GOLDEN_TOOL_NAMES: [&str; 25] = [
     "tabs_context_mcp",
     "tabs_create_mcp",
     "navigate",
@@ -44,6 +44,7 @@ const GOLDEN_TOOL_NAMES: [&str; 24] = [
     "form_fill",
     "act_on",
     "dialog",
+    "tab_control",
     "file_upload",
     "browser_batch",
     "upload_image",
@@ -58,7 +59,7 @@ fn tools_list_is_byte_stable_through_the_move() {
     assert_eq!(
         tools.len(),
         GOLDEN_TOOL_NAMES.len(),
-        "all 24 tools advertised (13 trained plus narrate, wait_for, script, form_fill, act_on, dialog, file_upload, browser_batch, upload_image, gif_creator, and explain)"
+        "all 25 tools advertised (13 trained plus narrate, wait_for, script, form_fill, act_on, dialog, tab_control, file_upload, browser_batch, upload_image, gif_creator, and explain)"
     );
     for (i, name) in GOLDEN_TOOL_NAMES.iter().enumerate() {
         assert_eq!(

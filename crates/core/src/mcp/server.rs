@@ -616,6 +616,26 @@ pub(super) struct SessionSeat {
     pub(super) overlay: Arc<Mutex<Option<Arc<SessionOverlay>>>>,
 }
 
+fn release_explicitly_closed_tab(
+    owned_tabs: &Mutex<HashMap<i64, SessionGuid>>,
+    guid: &SessionGuid,
+    tab_id: Option<i64>,
+    response: &JsonRpcResponse,
+) -> bool {
+    let Some(tab_id) = tab_id else {
+        return false;
+    };
+    let closed = response
+        .result
+        .as_ref()
+        .and_then(|result| {
+            result.pointer("/structuredContent/interactionReceipt/observedAfter/tabClosed")
+        })
+        .and_then(Value::as_bool)
+        == Some(true);
+    closed && crate::hub::session::release_owned_tab(owned_tabs, guid, tab_id)
+}
+
 /// Parse and route one JSON-RPC line.
 ///
 /// Returns `Some(response)` for requests (an `id` member is present, even if `null`) and `None` for
@@ -808,6 +828,13 @@ pub(super) async fn handle_line(
                 .and_then(|p| p.get("name"))
                 .and_then(Value::as_str)
                 .map(str::to_string);
+            let explicit_close_tab = params.as_ref().and_then(|params| {
+                let is_close = params.get("name").and_then(Value::as_str) == Some("tab_control")
+                    && params.pointer("/arguments/action").and_then(Value::as_str) == Some("close");
+                is_close
+                    .then(|| params.pointer("/arguments/tabId").and_then(Value::as_i64))
+                    .flatten()
+            });
             tokio::spawn(async move {
                 let resp = pipeline::handle_tools_call(
                     &browser,
@@ -845,6 +872,7 @@ pub(super) async fn handle_line(
                         }
                     }
                 }
+                release_explicitly_closed_tab(&owned_tabs, &guid, explicit_close_tab, &resp);
                 let _ = tx.send(Outbound::Response(resp));
             });
             None
@@ -945,6 +973,50 @@ mod tests {
     use super::*;
     use crate::governance::manifest::document::{Grant, HostRules};
     use crate::governance::ports::Capability;
+
+    #[test]
+    fn observed_close_releases_exactly_one_owned_tab_once() {
+        let owned_tabs = Mutex::new(HashMap::new());
+        let guid = SessionGuid::mint();
+        let other = SessionGuid::mint();
+        assert_eq!(
+            crate::hub::session::claim_tab(&owned_tabs, &guid, 7),
+            crate::hub::session::TabClaim::Adopted
+        );
+        assert_eq!(
+            crate::hub::session::claim_tab(&owned_tabs, &guid, 8),
+            crate::hub::session::TabClaim::Adopted
+        );
+        let response = JsonRpcResponse::success(
+            Some(json!(1)),
+            json!({
+                "content":[{"type":"text","text":"Tab close observed."}],
+                "structuredContent":{"interactionReceipt":{"observedAfter":{"tabClosed":true}}}
+            }),
+        );
+        assert!(!release_explicitly_closed_tab(
+            &owned_tabs,
+            &other,
+            Some(7),
+            &response
+        ));
+        assert!(release_explicitly_closed_tab(
+            &owned_tabs,
+            &guid,
+            Some(7),
+            &response
+        ));
+        assert!(!release_explicitly_closed_tab(
+            &owned_tabs,
+            &guid,
+            Some(7),
+            &response
+        ));
+        assert_eq!(
+            crate::hub::session::owned_tab_ids(&owned_tabs, &guid),
+            vec![8]
+        );
+    }
 
     /// ADR-0041 D5 / ADR-0049: a supported requested revision is echoed back verbatim.
     #[test]

@@ -291,8 +291,8 @@ fn output_schema_with_provenance(descriptor: &ToolDescriptor) -> Value {
     schema
 }
 
-/// The tool registry: 24 descriptors (the 13 browser tools plus `narrate`, `wait_for`, `script`,
-/// `form_fill`, `act_on`, `dialog`, `file_upload`, `browser_batch`, `upload_image`, `gif_creator`, and
+/// The tool registry: 25 descriptors (the 13 browser tools plus `narrate`, `wait_for`, `script`,
+/// `form_fill`, `act_on`, `dialog`, `tab_control`, `file_upload`, `browser_batch`, `upload_image`, `gif_creator`, and
 /// `explain`), in
 /// the order they appear in `tools/list`. `computer`'s 13 variants are in the
 /// schema's `action` enum order, byte-for-byte, as `variants`.
@@ -1469,6 +1469,54 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         output_schema: None,
     },
     ToolDescriptor {
+        tool: "tab_control",
+        advertised_description: "Focus, reload, or close one tab owned by this Ghostlight session. Close is always explicit and never affects a user-owned tab or automatically deletes the containing tab group.",
+        input_schema: || json!({
+            "type": "object",
+            "properties": {
+                "tabId": {
+                    "type": "number",
+                    "description": "Tab ID to control. The tab must belong to this Ghostlight session."
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["focus", "reload", "close"],
+                    "description": "Focus the tab, reload its page, or explicitly close that one tab."
+                }
+            },
+            "required": ["tabId", "action"],
+            "additionalProperties": false
+        }),
+        example: Some(ToolExample {
+            call: r#"{"tabId":0,"action":"focus"}"#,
+            returns: Some("Focuses only the named owned tab and returns a bounded browser-state receipt."),
+        }),
+        action_key: Some("action"),
+        variants: &[
+            ActionVariant {
+                action: Some("focus"),
+                requires: &[],
+                directory_description: "Focus one session-owned tab without changing page content.",
+            },
+            ActionVariant {
+                action: Some("reload"),
+                requires: &[Capability::Action],
+                directory_description: "Reload one session-owned tab.",
+            },
+            ActionVariant {
+                action: Some("close"),
+                requires: &[Capability::Action],
+                directory_description: "Explicitly close one session-owned tab and no containing group.",
+            },
+        ],
+        resource: ResourceShape::TabScoped,
+        handler: Handler::ExtensionForward,
+        postprocess: Some(crate::browser::redact::apply_to_result),
+        page_output: PageOutput::None,
+        post_dispatch: PostDispatch::None,
+        output_schema: Some(receipt_output_schema),
+    },
+    ToolDescriptor {
         tool: "file_upload",
         advertised_description: "Upload one or multiple files to a file input element on the page. Do not click on file upload buttons or file inputs -- clicking opens a native file picker dialog that you cannot see or interact with. Instead, use read_page or find to locate the file input element, then use this tool with its ref to upload files directly.",
         input_schema: || json!({
@@ -1728,7 +1776,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
 pub const AGENT_GUIDE: AgentGuide = AgentGuide {
     summary: "Ghostlight drives the user's own authenticated browser. You observe and act on the web pages they're already logged into, in an isolated Ghostlight tab group separate from their own tabs. Default (no policy) is unrestricted; a policy can scope what's allowed.",
     workflow: "BEFORE ANYTHING ELSE: GET A tabId. Every tool that touches a page requires a `tabId` (a number) -- it is required, not optional. Get one with tabs_context_mcp (pass `createIfEmpty: true` to create the group if none exists; usually your first call) or tabs_create_mcp (open a new tab). Then navigate (tabId + url) to go somewhere.",
-    flow: "tabs_context_mcp -> navigate -> read (read_page for structure, get_page_text for prose, find for one element; screenshot only to see layout) -> act (act_on for one unique semantic target plus receipt, form_fill for forms, computer and form_input as exact low-level escapes). Use act_on with expect when it can replace a separate find, action, and wait/read loop. If a receipt reports dialog_open, inspect and explicitly resolve it with dialog before continuing. On dynamic pages, use wait_for between navigating and reading so you see the settled page, not a spinner. When a person is watching a longer workflow, use narrate at meaningful phase changes, not for routine clicks or keystrokes. When you can predict two or more steps ahead, run them in one call: script chains steps and passes results forward (e.g. `$prev.results.0.ref` after a find), and browser_batch runs a fixed sequence in one round-trip.",
+    flow: "tabs_context_mcp -> navigate -> read (read_page for structure, get_page_text for prose, find for one element; screenshot only to see layout) -> act (act_on for one unique semantic target plus receipt, form_fill for forms, computer and form_input as exact low-level escapes). Use act_on with expect when it can replace a separate find, action, and wait/read loop. If a receipt reports dialog_open, inspect and explicitly resolve it with dialog before continuing. Use tab_control only for an explicit focus, reload, or one-tab close; it never cleans up a group automatically. On dynamic pages, use wait_for between navigating and reading so you see the settled page, not a spinner. When a person is watching a longer workflow, use narrate at meaningful phase changes, not for routine clicks or keystrokes. When you can predict two or more steps ahead, run them in one call: script chains steps and passes results forward (e.g. `$prev.results.0.ref` after a find), and browser_batch runs a fixed sequence in one round-trip.",
     denials: "If a call is denied you'll see `Denied (D-xxxxxxxx): ...`. Call explain (no arguments) to see what's permitted -- you can do this any time to plan, not just after a denial -- and hand the denial id to the policy administrator.",
     cost_notes: "Cost notes: prefer read_page (structured tree) or get_page_text (plain text) over screenshots when you only need structure or text; a screenshot or zoom costs roughly 1,600 tokens, so capture one only when you need to see layout. read_page full is large on complex pages -- filter interactive is dramatically smaller, and diff true returns only what changed since your last read. get_page_text can return tens of thousands of tokens on document-heavy pages; prefer find for targeted lookups. Each script or browser_batch step is still one browser round-trip -- they save your tokens and turns, not the browser's work.",
 };
@@ -1970,8 +2018,8 @@ mod tests {
             .collect();
         assert_eq!(
             with_action_key.len(),
-            5,
-            "computer, form_fill, act_on, dialog, and gif_creator carry an action_key"
+            6,
+            "computer, form_fill, act_on, dialog, tab_control, and gif_creator carry an action_key"
         );
         let computer = with_action_key
             .iter()
@@ -1993,6 +2041,11 @@ mod tests {
             .find(|d| d.tool == "dialog")
             .expect("dialog present");
         assert_eq!(dialog.action_key, Some("action"));
+        let tab_control = with_action_key
+            .iter()
+            .find(|d| d.tool == "tab_control")
+            .expect("tab_control present");
+        assert_eq!(tab_control.action_key, Some("action"));
 
         let declared_actions = declared_computer_actions_in_order();
         let computer_actions: Vec<String> = computer
@@ -2013,6 +2066,7 @@ mod tests {
                 && row.tool != "form_fill"
                 && row.tool != "act_on"
                 && row.tool != "dialog"
+                && row.tool != "tab_control"
                 && row.tool != "gif_creator"
         }) {
             assert_eq!(
@@ -2034,9 +2088,14 @@ mod tests {
         );
         assert_eq!(act_on.variants.len(), 6, "act_on carries six variants");
         assert_eq!(dialog.variants.len(), 4, "dialog carries four variants");
+        assert_eq!(
+            tab_control.variants.len(),
+            3,
+            "tab_control carries three variants"
+        );
 
         let total_variants: usize = REGISTRY.iter().map(|row| row.variants.len()).sum();
-        assert_eq!(total_variants, 49);
+        assert_eq!(total_variants, 52);
 
         let mut seen = HashSet::new();
         for row in REGISTRY {
@@ -2098,6 +2157,9 @@ mod tests {
             ("dialog", Some("accept"), &[Capability::Action]),
             ("dialog", Some("dismiss"), &[Capability::Action]),
             ("dialog", Some("respond"), &[Capability::Action]),
+            ("tab_control", Some("focus"), &[]),
+            ("tab_control", Some("reload"), &[Capability::Action]),
+            ("tab_control", Some("close"), &[Capability::Action]),
             ("file_upload", None, &[Capability::Write]),
             ("browser_batch", None, &[]),
             ("upload_image", None, &[Capability::Write]),
@@ -2436,6 +2498,14 @@ mod tests {
             ),
             (
                 "dialog",
+                Some("action"),
+                ResourceShape::TabScoped,
+                false,
+                true,
+                PostDispatch::None,
+            ),
+            (
+                "tab_control",
                 Some("action"),
                 ResourceShape::TabScoped,
                 false,

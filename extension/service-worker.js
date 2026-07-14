@@ -19,7 +19,7 @@
 // this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
 // ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
 
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/narration.js", "lib/dialog.js", "lib/wire-chunks.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/narration.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
@@ -696,7 +696,9 @@ async function enableDomain(tabId, domain) {
   await chrome.debugger.sendCommand({ tabId }, domain + ".enable", {});
   state.domains.add(domain);
 }
-chrome.tabs.onRemoved.addListener((tabId) => {
+// Remove every transient mechanism record for one tab. Idempotent so explicit `tab_control.close`
+// and Chrome's onRemoved event can both call it without widening the close to a group or window.
+function clearTabState(tabId) {
   const cast = gifCast.get(tabId);
   if (cast) stopGifCast(tabId, cast, "browser_detached");
   if (attached.has(tabId)) {
@@ -712,6 +714,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   managedTabs.delete(tabId); // ADR-0066 D5: a closed tab is no longer ours to reach
   narrationStore.remove(tabId);
   persistSessionState();
+}
+chrome.tabs.onRemoved.addListener((tabId) => {
+  clearTabState(tabId);
 });
 chrome.debugger.onDetach.addListener((src) => {
   const cast = gifCast.get(src.tabId);
@@ -1775,6 +1780,33 @@ const handlers = {
       action: a.action,
       type: open.type,
       page: await pageMeta(tabId),
+    };
+    return out;
+  },
+  async tab_control(a) {
+    const tabId = await effectiveTabId(a.tabId);
+    const page = { tabId };
+    if (a.action === "focus") {
+      const tab = await chrome.tabs.get(tabId);
+      await chrome.windows.update(tab.windowId, { focused: true });
+      await chrome.tabs.update(tabId, { active: true });
+    } else if (a.action === "reload") {
+      await chrome.tabs.reload(tabId);
+      await waitForLoad(tabId);
+    } else if (a.action === "close") {
+      await chrome.tabs.remove(tabId);
+      clearTabState(tabId);
+    } else {
+      throw hopError("extension", `unsupported tab_control action: ${a.action}`);
+    }
+    const labels = {
+      focus: "Tab focus observed.",
+      reload: "Tab reload observed.",
+      close: "Tab close observed.",
+    };
+    const out = text(labels[a.action]);
+    out.structuredContent = {
+      interactionReceipt: self.GhostlightTabControl.makeReceipt(a.action, page),
     };
     return out;
   },
