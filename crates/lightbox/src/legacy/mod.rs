@@ -10,6 +10,7 @@ use crate::scenarios::Scenario;
 use crate::support::{self, TempRoot};
 
 mod console;
+mod hub;
 mod lifecycle;
 
 /// The migrated legacy scenario registry.
@@ -19,6 +20,7 @@ pub fn registry() -> Vec<Scenario> {
         control_status as fn() -> anyhow::Result<()>,
     )];
     scenarios.extend(console::registry());
+    scenarios.extend(hub::registry());
     scenarios.extend(lifecycle::registry());
     scenarios
 }

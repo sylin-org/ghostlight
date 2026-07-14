@@ -209,6 +209,41 @@ pub fn wait_extension_connected(log_dir: &Path, within: Duration) -> anyhow::Res
     }
 }
 
+/// Send the browser-role hello and persistent extension identity used by fake-extension scenarios.
+pub async fn send_extension_attach_frames<W>(writer: &mut W) -> anyhow::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let hello = ghostlight_transport::handshake::browser_hello_bytes(
+        std::process::id(),
+        Some(ghostlight_transport::proc::ProcId {
+            pid: std::process::id(),
+            created: 0,
+        }),
+    );
+    ghostlight_transport::host::write_message(writer, &hello).await?;
+    let identity = serde_json::to_vec(&serde_json::json!({
+        "type": ghostlight_transport::handshake::EXTENSION_IDENTITY_TYPE,
+        ghostlight_transport::handshake::BROWSER_ID_FIELD: format!("lightbox-{}", std::process::id()),
+    }))?;
+    ghostlight_transport::host::write_message(writer, &identity).await?;
+    Ok(())
+}
+
+/// Answer one tab URL probe with a synthetic live HTTPS page for the requested tab.
+pub async fn answer_tab_url<W>(writer: &mut W, request: &serde_json::Value) -> anyhow::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let reply = serde_json::json!({
+        "id": request["id"],
+        "type": "tab_url_response",
+        "result": { "url": format!("https://tab-{}.example.com/", request["tabId"]) },
+    });
+    ghostlight_transport::host::write_message(writer, &serde_json::to_vec(&reply)?).await?;
+    Ok(())
+}
+
 fn spawn_service_inner(
     endpoint: &str,
     log_dir: &Path,

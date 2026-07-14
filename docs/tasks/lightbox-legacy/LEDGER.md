@@ -3,8 +3,9 @@
 ## RESUME HERE
 
 T1 added isolated process orchestration and migrated the control/Console cluster. T2 migrated the
-seven adapter and lifecycle scenarios. 19 of 27 rows are now DONE and both sides pass. Resume with
-the hub-routing cluster; both legacy and Lightbox CI paths remain required.
+adapter/lifecycle cluster. T3 migrated the three hub-routing scenarios. 22 of 27 rows are DONE and
+both sides pass. Resume with the five specialized policy/browser scenarios; both legacy and
+Lightbox CI paths remain required.
 
 ## Status
 
@@ -15,9 +16,9 @@ the hub-routing cluster; both legacy and Lightbox CI paths remain required.
 | `adapter_reconnect::adapter_survives_a_five_second_service_gap` | `legacy-adapter-five-second-gap` | DONE | T2 |
 | `adapter_override::unpinned_adapter_prefers_the_first_candidate_and_fails_over` | `legacy-adapter-candidate-failover` | DONE | T2 |
 | `adapter_override::unpinned_adapter_falls_back_when_the_first_candidate_is_absent` | `legacy-adapter-candidate-fallback` | DONE | T2 |
-| `hub_completion_criteria::two_real_adapters_multiplex_get_own_tab_groups_and_share_one_kill` | pending | pending | |
-| `hub_multiplex::one_kill_emits_one_audit_record_per_live_session` | pending | pending | |
-| `hub_multiplex::adapter_endpoint_two_phase_wire_round_trips` | pending | pending | |
+| `hub_completion_criteria::two_real_adapters_multiplex_get_own_tab_groups_and_share_one_kill` | `legacy-hub-two-adapter-multiplex` | DONE | T3 |
+| `hub_multiplex::one_kill_emits_one_audit_record_per_live_session` | `legacy-hub-kill-audit-fanout` | DONE | T3 |
+| `hub_multiplex::adapter_endpoint_two_phase_wire_round_trips` | `legacy-hub-two-phase-wire` | DONE | T3 |
 | `all_open_golden::read_page_redaction_is_still_wired_at_the_chokepoint` | pending | pending | |
 | `manage_web_config_api::config_api_returns_every_registered_key_in_registry_order` | `legacy-console-config-registry` | DONE | T1 |
 | `manage_web_config_api::config_api_is_refused_when_inbound_web_from_denies_the_source` | `legacy-console-config-source-denied` | DONE | T1 |
