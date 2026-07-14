@@ -19,7 +19,7 @@
 // this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
 // ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
 
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/narration.js", "lib/attention.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/narration.js", "lib/attention.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
@@ -39,6 +39,97 @@ const wireChunkStore = self.GhostlightWireChunks.createWireChunkStore({
     ).join("");
   },
 });
+
+// ADR-0080: one worker generation owns the bounded resource executor. The service supplies the
+// execution class and resource identity; this mechanism only preserves FIFO and isolation.
+const EXECUTOR_GENERATION = typeof crypto.randomUUID === "function"
+  ? crypto.randomUUID()
+  : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+let executorBrowserSlot = null;
+const executionByRequest = new Map();
+
+function executorPost(item, message) {
+  try { item.port.postMessage(message); } catch { /* connection generation is gone */ }
+}
+
+function wireCommandId(item) {
+  return item.wireCommandId;
+}
+
+function postExecutorTerminal(item) {
+  executorPost(item, {
+    type: "tool_terminal",
+    id: item.requestId,
+    commandId: wireCommandId(item),
+    executorGeneration: EXECUTOR_GENERATION,
+    resource: item.resource,
+  });
+}
+
+const surfaceExecutor = self.GhostlightSurfaceExecutor.createSurfaceExecutor({
+  execute: async (item) => {
+    executionByRequest.set(item.requestId, item);
+    try {
+      await dispatch(
+        item.requestId,
+        item.request.tool,
+        item.request.args || {},
+        item.request.clientKey || item.request.guid
+      );
+    } finally {
+      executionByRequest.delete(item.requestId);
+    }
+  },
+  onAccepted: (item, duplicate) => executorPost(item, {
+    type: "tool_accepted",
+    id: item.requestId,
+    commandId: wireCommandId(item),
+    executorGeneration: EXECUTOR_GENERATION,
+    duplicate: duplicate === true,
+  }),
+  onRejected: (item, reason) => {
+    if (!item) return;
+    executionByRequest.set(item.requestId, item);
+    fail(item.requestId, hopError("extension", `Command not executed: ${reason}`));
+    executionByRequest.delete(item.requestId);
+    postExecutorTerminal(item);
+  },
+  onTerminal: postExecutorTerminal,
+});
+
+function requestBytes(msg) {
+  try { return new TextEncoder().encode(JSON.stringify(msg)).byteLength; } catch { return 0; }
+}
+
+function executionItem(msg, port, connectionGeneration) {
+  const execution = msg.execution || {};
+  const resource = execution.resource || null;
+  const wireId = execution.commandId === undefined ? msg.id : String(execution.commandId);
+  let key = "legacy:global";
+  if (resource && resource.kind === "surface") {
+    executorBrowserSlot = resource.browserSlot;
+    key = `surface:${resource.browserSlot}:${resource.nativeTab}`;
+  } else if (resource && resource.kind === "client_topology") {
+    key = `topology:${resource.browserSlot}:${resource.clientKey}`;
+  } else if (resource && resource.kind === "browser") {
+    key = `browser:${resource.browserSlot}`;
+  } else if (Number.isSafeInteger(msg.args && msg.args.tabId)) {
+    key = `legacy-surface:${msg.args.tabId}`;
+  }
+  const bypass = execution.class === "presentation" || execution.class === "local" ||
+    execution.class === "safety_protocol";
+  return {
+    commandId: `${connectionGeneration}:${wireId}`,
+    wireCommandId: wireId,
+    requestId: msg.id,
+    request: msg,
+    resource,
+    key,
+    bypass,
+    bytes: requestBytes(msg),
+    port,
+  };
+}
 
 // Operational tunables (lib/constants.js), destructured once for use throughout this worker.
 const {
@@ -64,12 +155,14 @@ const dialogStore = self.GhostlightDialog.createDialogStore();
 // that host (the installed release, or a fresh build a developer just started) serves everyone;
 // the extension never picks an engine.
 const NATIVE_HOST = "org.sylin.ghostlight";
+const BROWSER_GENERATION_KEY = "ghostlight_browser_generation";
 // The MCP tab group label shown in Chrome: a ghost emoji (U+1F47B) followed by the brand
 // name. The emoji is written as an escape so this source file stays ASCII; it renders as
 // the glyph at runtime.
 const GROUP_TITLE = "\u{1F47B}Ghostlight";
 
 let nativePort = null;
+let nativeConnectionSeq = 0;
 let groupId = null;
 // Extension-owned browser identity (ADR-0061): a UUID minted once and persisted in
 // chrome.storage.local, announced to the service as the opening frame of every native-messaging
@@ -145,9 +238,12 @@ async function connect() {
   // ADR-0061: resolve the persistent browser id BEFORE opening the port, so it can be sent as the
   // very first frame (below) with no await interleaving another message ahead of it.
   const browserId = await browserIdentity.get();
+  const browserGeneration = await browserProcessGeneration();
   if (nativePort) return; // re-check after the await above
   try {
     nativePort = chrome.runtime.connectNative(NATIVE_HOST);
+    const connectedPort = nativePort;
+    const connectionGeneration = `${EXECUTOR_GENERATION}:${++nativeConnectionSeq}`;
     // ADR-0061: announce identity FIRST, before any other frame. The relay forwards it verbatim, so
     // the service reads it as the extension's opening handshake frame (right after the relay's own
     // ROLE_BROWSER hello) and keys this browser's session by it. Fire-and-forget, mechanism only.
@@ -155,7 +251,9 @@ async function connect() {
       nativePort.postMessage({
         type: "browser_hello",
         browserId,
-        features: ["chunkedHostMessagesV1"],
+        browserGeneration,
+        features: ["chunkedHostMessagesV1", "surfaceExecutorV1"],
+        executorGeneration: EXECUTOR_GENERATION,
       });
     } catch { /* port gone */ }
     sendDebugEvent("connect_attempt");
@@ -172,7 +270,7 @@ async function connect() {
           fail(msg.id, hopError("extension", "The user ended the browser session (kill switch)"));
           return;
         }
-        dispatch(msg.id, msg.tool, msg.args || {}, msg.clientKey || msg.guid);
+        surfaceExecutor.submit(executionItem(msg, connectedPort, connectionGeneration));
         return;
       }
       // Tab-URL query (g13): mechanism only. Reports chrome.tabs.get(tabId).url verbatim (or
@@ -310,7 +408,8 @@ async function connect() {
       // safety mechanism for a privacy-sensitive screencast.
       stopAllGifCasts();
       wireChunkStore.clear();
-      nativePort = null;
+      surfaceExecutor.clear();
+      if (nativePort === connectedPort) nativePort = null;
       updateHoldBadge(null); // state unknown without a session
       setTimeout(connect, RECONNECT_DELAY_MS);
     });
@@ -327,8 +426,29 @@ async function connect() {
   }
 }
 
+async function browserProcessGeneration() {
+  const stored = await chrome.storage.session.get(BROWSER_GENERATION_KEY);
+  if (typeof stored[BROWSER_GENERATION_KEY] === "string" && stored[BROWSER_GENERATION_KEY]) {
+    return stored[BROWSER_GENERATION_KEY];
+  }
+  const generation = typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  await chrome.storage.session.set({ [BROWSER_GENERATION_KEY]: generation });
+  return generation;
+}
+
 function reply(id, result) {
-  try { nativePort && nativePort.postMessage({ id, type: "tool_response", result }); } catch { /* port gone */ }
+  const execution = executionByRequest.get(id);
+  const message = { id, type: "tool_response", result };
+  if (execution) {
+    message.commandId = wireCommandId(execution);
+    message.executorGeneration = EXECUTOR_GENERATION;
+  }
+  try {
+    const port = execution ? execution.port : nativePort;
+    port && port.postMessage(message);
+  } catch { /* port gone */ }
 }
 
 // --- Developer diagnostics (ADR-0059): mechanism only, fire-and-forget, the SAME posture as
@@ -645,7 +765,15 @@ function fail(id, error) {
   const msg = { id, type: "tool_error", error: (error && error.message) || String(error) };
   if (error && error.hop) msg.hop = error.hop;
   if (error && error.detail) msg.detail = error.detail;
-  try { nativePort && nativePort.postMessage(msg); } catch { /* port gone */ }
+  const execution = executionByRequest.get(id);
+  if (execution) {
+    msg.commandId = wireCommandId(execution);
+    msg.executorGeneration = EXECUTOR_GENERATION;
+  }
+  try {
+    const port = execution ? execution.port : nativePort;
+    port && port.postMessage(msg);
+  } catch { /* port gone */ }
 }
 
 // --- CDP ---
@@ -844,6 +972,16 @@ function clearTabState(tabId) {
 }
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearTabState(tabId);
+  if (executorBrowserSlot !== null) {
+    surfaceExecutor.destroyKey(`surface:${executorBrowserSlot}:${tabId}`);
+  }
+  try {
+    nativePort && nativePort.postMessage({
+      type: "surface_destroyed",
+      tabId,
+      executorGeneration: EXECUTOR_GENERATION,
+    });
+  } catch { /* port gone */ }
 });
 chrome.debugger.onDetach.addListener((src) => {
   const cast = gifCast.get(src.tabId);

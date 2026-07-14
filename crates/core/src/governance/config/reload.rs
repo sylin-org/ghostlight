@@ -41,6 +41,21 @@ use tokio::sync::watch;
 use super::load::{OrgConfig, UserConfig};
 use super::{layers, load, Config};
 
+/// One atomically published set of authority inputs (ADR-0080).
+///
+/// Session code builds its identity-bound `Governance` facade from `policy` and keeps it beside
+/// `config` under this epoch. A command can therefore never combine config from one reload with
+/// policy from another.
+#[derive(Clone)]
+pub struct AuthorityInputs {
+    /// The resolved configuration in force for this epoch.
+    pub config: Arc<Config>,
+    /// The resolved policy in force for this epoch.
+    pub policy: Arc<crate::governance::manifest::source::LoadedPolicy>,
+    /// Monotonic authority publication epoch.
+    pub epoch: u64,
+}
+
 /// How the store resolves the active policy on every (re)resolve (ADR-0056). Injected at the
 /// composition root so the file watcher and the managed:// poll timer share ONE correct resolution
 /// path: the watcher can never clobber a managed policy by falling back to the source-string loader
@@ -197,6 +212,10 @@ pub struct ConfigStore {
     /// policy-subscription task subscribes here to rebuild `Governance`, emit `list_changed`
     /// when the advertised set changed, and record the two ADR-0025 session events.
     policy_tx: watch::Sender<Arc<crate::governance::manifest::source::LoadedPolicy>>,
+    /// Config and policy published together after a complete reload transaction (ADR-0080).
+    authority_snapshot: Mutex<Arc<AuthorityInputs>>,
+    /// Broadcasts only complete config+policy pairs, never either half of a reload.
+    authority_tx: watch::Sender<Arc<AuthorityInputs>>,
 }
 
 /// The last-good layer inputs, per source. On a reload where one source fails to load or
@@ -262,6 +281,19 @@ impl ConfigStore {
     /// subsequent swaps. This module never emits any MCP notification itself.
     pub fn subscribe(&self) -> watch::Receiver<Arc<Config>> {
         self.tx.subscribe()
+    }
+
+    /// Return the complete config+policy authority inputs currently in force.
+    pub fn current_authority(&self) -> Arc<AuthorityInputs> {
+        self.authority_snapshot
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Subscribe to complete authority changes.
+    pub fn subscribe_authority(&self) -> watch::Receiver<Arc<AuthorityInputs>> {
+        self.authority_tx.subscribe()
     }
 
     /// [`Self::load_initial_with_policy`] with an all-open policy (no manifest from any
@@ -337,6 +369,12 @@ impl ConfigStore {
         let (tx, _rx) = watch::channel(config.clone());
         let policy_snapshot = Arc::new(loaded_policy.clone());
         let (policy_tx, _policy_rx) = watch::channel(policy_snapshot.clone());
+        let authority_snapshot = Arc::new(AuthorityInputs {
+            config: config.clone(),
+            policy: policy_snapshot.clone(),
+            epoch: 0,
+        });
+        let (authority_tx, _authority_rx) = watch::channel(authority_snapshot.clone());
         Ok(Arc::new(ConfigStore {
             snapshot: Mutex::new(config),
             resolution: Mutex::new(Arc::new(resolution)),
@@ -348,6 +386,8 @@ impl ConfigStore {
             policy_source,
             policy_snapshot: Mutex::new(policy_snapshot),
             policy_tx,
+            authority_snapshot: Mutex::new(authority_snapshot),
+            authority_tx,
         }))
     }
 
@@ -433,7 +473,34 @@ impl ConfigStore {
             self.maybe_publish_policy(loaded_policy);
         }
 
+        self.publish_authority();
+
         report
+    }
+
+    /// Publish the current config and policy together after both halves of a reload settle.
+    fn publish_authority(&self) {
+        let config = self.current();
+        let policy = self
+            .policy_snapshot
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let mut slot = self
+            .authority_snapshot
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if Arc::ptr_eq(&slot.config, &config) && Arc::ptr_eq(&slot.policy, &policy) {
+            return;
+        }
+        let next = Arc::new(AuthorityInputs {
+            config,
+            policy,
+            epoch: slot.epoch.wrapping_add(1),
+        });
+        *slot = next.clone();
+        drop(slot);
+        let _ = self.authority_tx.send(next);
     }
 
     /// Publish `loaded_policy` on the policy channel iff its manifest IDENTITY differs from
@@ -853,6 +920,12 @@ impl ConfigStore {
             user_manifest_ignored: false,
         });
         let (policy_tx, _policy_rx) = watch::channel(all_open.clone());
+        let authority_snapshot = Arc::new(AuthorityInputs {
+            config: config.clone(),
+            policy: all_open.clone(),
+            epoch: 0,
+        });
+        let (authority_tx, _authority_rx) = watch::channel(authority_snapshot.clone());
         Arc::new(ConfigStore {
             snapshot: Mutex::new(config),
             resolution: Mutex::new(Arc::new(layers::resolve(&layers::LayerInputs::default()))),
@@ -868,6 +941,8 @@ impl ConfigStore {
             policy_source: PolicySource::SourceString { user_source: None },
             policy_snapshot: Mutex::new(all_open),
             policy_tx,
+            authority_snapshot: Mutex::new(authority_snapshot),
+            authority_tx,
         })
     }
 
@@ -885,6 +960,12 @@ impl ConfigStore {
             user_manifest_ignored: false,
         });
         let (policy_tx, _policy_rx) = watch::channel(all_open.clone());
+        let authority_snapshot = Arc::new(AuthorityInputs {
+            config: config.clone(),
+            policy: all_open.clone(),
+            epoch: 0,
+        });
+        let (authority_tx, _authority_rx) = watch::channel(authority_snapshot.clone());
         Arc::new(ConfigStore {
             snapshot: Mutex::new(config),
             resolution: Mutex::new(Arc::new(layers::resolve(&layers::LayerInputs::default()))),
@@ -902,6 +983,8 @@ impl ConfigStore {
             },
             policy_snapshot: Mutex::new(all_open),
             policy_tx,
+            authority_snapshot: Mutex::new(authority_snapshot),
+            authority_tx,
         })
     }
 
@@ -918,7 +1001,9 @@ impl ConfigStore {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         let plan = plan_reload(org, user, &last_good);
-        self.apply_plan(plan)
+        let report = self.apply_plan(plan);
+        self.publish_authority();
+        report
     }
 
     /// Test-only: drive the FULL ADR-0025 reload flow (config layers derived from the SAME
@@ -1198,6 +1283,45 @@ mod tests {
         let woke = tokio::time::timeout(std::time::Duration::from_millis(50), rx.changed()).await;
         assert!(woke.is_ok(), "receiver must wake on a real change");
         assert!(!rx.borrow().audit_enabled());
+    }
+
+    #[tokio::test]
+    async fn authority_publication_never_exposes_a_torn_config_policy_pair() {
+        use crate::governance::manifest::source::ManifestOrigin;
+
+        let store = ConfigStore::for_test(Config::minimal(), LastGoodInputs::default());
+        let mut authority = store.subscribe_authority();
+        let governed = loaded_policy_with("acme", "1", ManifestOrigin::OrgPolicyFile);
+        let user = UserConfig {
+            preset: None,
+            values: serde_json::Map::from_iter([(
+                super::super::AUDIT_ENABLED.to_string(),
+                json!(false),
+            )]),
+        };
+
+        store.reload_with_policy(Ok(governed), Ok((user, Vec::new())));
+        tokio::time::timeout(std::time::Duration::from_millis(50), authority.changed())
+            .await
+            .expect("one complete authority publication")
+            .expect("authority sender remains live");
+        let published = authority.borrow_and_update().clone();
+        assert_eq!(published.epoch, 1);
+        assert!(!published.config.audit_enabled());
+        assert_eq!(
+            published
+                .policy
+                .manifest
+                .as_ref()
+                .map(|policy| policy.name.as_str()),
+            Some("acme")
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), authority.changed())
+                .await
+                .is_err(),
+            "the config and policy halves must not publish separately"
+        );
     }
 
     #[test]

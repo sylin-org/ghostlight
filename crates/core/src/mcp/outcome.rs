@@ -22,6 +22,9 @@ use crate::governance::config::reload::ConfigStore;
 use crate::governance::config::Config;
 use crate::governance::dispatch::Governance;
 use crate::hub::outbound::browser::Browser;
+use crate::hub::scheduling::ExecutionContext;
+use crate::mcp::authority::AuthoritySnapshot;
+use crate::mcp::authority::AuthorityStore;
 use crate::ToolError;
 use serde_json::Value;
 use std::sync::Arc;
@@ -53,6 +56,10 @@ pub enum CallOutcome {
     Success { result: Value },
     /// A tool execution failure, rendered as an `isError` result at the edge.
     Failure { error: ToolError },
+    /// Queue admission failed before browser dispatch. Retrying is safe when conditions change.
+    NotDispatched { message: String },
+    /// Bytes reached the browser but no conclusive terminal acknowledgement arrived.
+    OutcomeUnknown { message: String },
     /// A pre-dispatch denial (governance or sacred): rendered as ordinary successful text.
     Denied {
         message: String,
@@ -73,12 +80,18 @@ pub enum CallOutcome {
 pub struct LocalCtx<'a> {
     pub browser: &'a Browser,
     pub store: &'a Arc<ConfigStore>,
+    /// The complete authority slot used by orchestrated sub-steps.
+    pub authority: &'a AuthorityStore,
+    /// The immutable authority snapshot admitted for this compound call.
+    pub authority_snapshot: &'a Arc<AuthoritySnapshot>,
     pub governance: &'a Governance,
     /// The calling session's guid (ADR-0047 D3), so a local handler that re-enters the pipeline
     /// (`script`, `form_fill`) threads the SAME session identity onto its `Browser::call` envelopes.
     pub guid: &'a str,
     pub config: &'a Config,
     pub args: &'a Value,
+    /// The admitted execution context retained by descriptor-gated compound handlers.
+    pub execution: &'a ExecutionContext,
     /// The calling session's tighten-only policy overlay (ADR-0060), if it declared one, so a
     /// local handler that re-enters the pipeline (`script`, `form_fill`) subjects its OWN
     /// sub-steps to the same session tier -- an orchestrated sub-call can never escape the

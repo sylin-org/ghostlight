@@ -10,6 +10,7 @@
 //! audited once by the pipeline (requires Write); the internal forward carries the resolved bytes.
 
 use crate::hub::outbound::browser::Browser;
+use crate::hub::scheduling::ExecutionContext;
 use crate::mcp::outcome::{CallOutcome, LocalCtx, LocalFuture};
 use serde_json::{json, Value};
 
@@ -35,10 +36,15 @@ fn fail(message: impl Into<String>) -> CallOutcome {
 
 /// The `upload_image` `Handler::Local` entry point (ADR-0050 D4).
 pub(crate) fn upload_image_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
-    Box::pin(async move { run(ctx.browser, ctx.guid, ctx.args).await })
+    Box::pin(async move { run(ctx.browser, ctx.guid, ctx.args, ctx.execution).await })
 }
 
-async fn run(browser: &Browser, guid: &str, args: &Value) -> CallOutcome {
+async fn run(
+    browser: &Browser,
+    guid: &str,
+    args: &Value,
+    execution: &ExecutionContext,
+) -> CallOutcome {
     let Some(image_id) = args.get("imageId").and_then(Value::as_str) else {
         return fail("upload_image requires an imageId.");
     };
@@ -74,7 +80,10 @@ async fn run(browser: &Browser, guid: &str, args: &Value) -> CallOutcome {
         exec_args["coordinate"] = c.clone();
     }
 
-    match browser.call(guid, "upload_image_exec", &exec_args).await {
+    match browser
+        .call_with_context(guid, "upload_image_exec", &exec_args, execution)
+        .await
+    {
         Ok(result) => CallOutcome::Success { result },
         Err(error) => CallOutcome::Failure { error },
     }

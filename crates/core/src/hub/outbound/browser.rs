@@ -63,6 +63,11 @@
 //! example) is a new `class`/`icon` value at an existing call site, not a new message type.
 
 use super::diagnostics::Diagnostic;
+use crate::browser::directory::{SchedulingScope, ToolDescriptor};
+use crate::hub::scheduling::{
+    BrowserSurface, CommandScheduler, ExecutionContext, ProducerId, RetirementReason,
+    ScheduleFailure, ScheduleKey,
+};
 use crate::ToolError;
 use ghostlight_transport::host;
 use ghostlight_transport::observability::DebugSink;
@@ -220,6 +225,44 @@ fn is_recording_internal_tool(tool: &str) -> bool {
     )
 }
 
+fn execution_wire(context: &ExecutionContext) -> Value {
+    let class = match context.class() {
+        crate::hub::scheduling::ExecutionClass::Scheduled => "scheduled",
+        crate::hub::scheduling::ExecutionClass::Presentation => "presentation",
+        crate::hub::scheduling::ExecutionClass::Local => "local",
+        crate::hub::scheduling::ExecutionClass::SafetyProtocol => "safety_protocol",
+    };
+    let mut value = json!({ "class": class });
+    if let Some(command_id) = context.command_id() {
+        value["commandId"] = json!(command_id);
+    }
+    if let Some(epoch) = context.authority_epoch() {
+        value["authorityEpoch"] = json!(epoch);
+    }
+    if let Some(key) = context.key() {
+        value["resource"] = match key {
+            ScheduleKey::Surface(surface) => json!({
+                "kind": "surface",
+                "browserSlot": surface.browser_slot,
+                "nativeTab": surface.native_tab
+            }),
+            ScheduleKey::ClientTopology {
+                browser_slot,
+                client_key,
+            } => json!({
+                "kind": "client_topology",
+                "browserSlot": browser_slot,
+                "clientKey": client_key
+            }),
+            ScheduleKey::Browser { browser_slot } => json!({
+                "kind": "browser",
+                "browserSlot": browser_slot
+            }),
+        };
+    }
+    value
+}
+
 /// Recursively rewrite every plain-number `"tabId"` key in `v` to its composite form (ADR-0058),
 /// walking both real JSON structure (`structuredContent`, nested objects/arrays) and any
 /// `content[].text` block whose text happens to parse as JSON (`tabs_context_mcp`/
@@ -338,6 +381,9 @@ pub struct Browser {
     /// ids still route. Bounded by the number of distinct browser profiles ever seen this service
     /// lifetime -- tiny.
     slots: Arc<Mutex<HashMap<String, u32>>>,
+    /// Last browser-process generation announced for each stable browser slot. Unlike an
+    /// extension worker or native port, this changes only after Chrome clears storage.session.
+    browser_generations: Arc<Mutex<HashMap<u32, String>>>,
     /// Monotonic source for the next `slot` (ADR-0061): starts at 1 so a slot is never 0.
     next_slot: Arc<AtomicU64>,
     /// Focus recency (ADR-0058/0061): front = the browser whose slot most recently gained window
@@ -386,6 +432,8 @@ pub struct Browser {
     /// Per-MCP-session denial attention circuits (ADR-0079). The same lock is held through the
     /// final extension-frame enqueue, so an opening transition cannot race a stale admission.
     attention_sessions: AttentionSessions,
+    /// Service-owned resource scheduler shared by every MCP session (ADR-0080).
+    scheduler: CommandScheduler,
 }
 
 impl Browser {
@@ -401,6 +449,7 @@ impl Browser {
             pending: Arc::new(Mutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             slots: Arc::new(Mutex::new(HashMap::new())),
+            browser_generations: Arc::new(Mutex::new(HashMap::new())),
             next_slot: Arc::new(AtomicU64::new(1)),
             focus_chain: Arc::new(Mutex::new(Vec::new())),
             next_session_generation: Arc::new(AtomicU64::new(1)),
@@ -417,7 +466,106 @@ impl Browser {
             recordings: Arc::new(crate::recording::RecordingCoordinator::new()),
             recording_supervisor_started: Arc::new(AtomicBool::new(false)),
             attention_sessions: Arc::new(Mutex::new(HashMap::new())),
+            scheduler: CommandScheduler::default(),
         }
+    }
+
+    /// Return the service-owned browser command scheduler.
+    pub fn scheduler(&self) -> &CommandScheduler {
+        &self.scheduler
+    }
+
+    /// Resolve and acquire the descriptor-declared execution context for one call.
+    pub async fn acquire_execution(
+        &self,
+        descriptor: &ToolDescriptor,
+        guid: &str,
+        args: &Value,
+        authority_epoch: u64,
+        inherited: Option<&ExecutionContext>,
+    ) -> Result<ExecutionContext, ScheduleFailure> {
+        let producer = ProducerId::new(guid);
+        let composite_tab = args.get("tabId").and_then(Value::as_i64);
+        match descriptor.scheduling.scope {
+            SchedulingScope::Presentation => Ok(ExecutionContext::presentation()),
+            SchedulingScope::Local => Ok(ExecutionContext::local()),
+            // Compositions acquire at each concrete sub-step. Single-surface compositions pass
+            // their inherited context through LocalCtx once preflight can prove the target.
+            SchedulingScope::Composition => Ok(ExecutionContext::local()),
+            SchedulingScope::Surface => {
+                self.acquire_surface_for(producer, composite_tab, authority_epoch, inherited)
+                    .await
+            }
+            SchedulingScope::ClientTopology => {
+                let (slot, _) = self.resolve_target(composite_tab);
+                // Slot zero is a disconnected sentinel. It lets policy and audit run before the
+                // existing transport layer returns its canonical not-connected error, while no
+                // real browser resource can collide with it (assigned slots start at one).
+                let slot = slot.unwrap_or(0);
+                let client_key = self
+                    .client_key_for(guid)
+                    .unwrap_or_else(|| guid.to_string());
+                self.scheduler
+                    .acquire(
+                        ScheduleKey::ClientTopology {
+                            browser_slot: slot,
+                            client_key,
+                        },
+                        producer,
+                        authority_epoch,
+                    )
+                    .await
+            }
+            SchedulingScope::Browser => {
+                let (slot, _) = self.resolve_target(composite_tab);
+                let slot = slot.unwrap_or(0);
+                self.scheduler
+                    .acquire(
+                        ScheduleKey::Browser { browser_slot: slot },
+                        producer,
+                        authority_epoch,
+                    )
+                    .await
+            }
+        }
+    }
+
+    /// Acquire a concrete surface for a descriptor-preflighted composition.
+    pub(crate) async fn acquire_composition_surface(
+        &self,
+        guid: &str,
+        composite_tab: i64,
+        authority_epoch: u64,
+    ) -> Result<ExecutionContext, ScheduleFailure> {
+        self.acquire_surface_for(
+            ProducerId::new(guid),
+            Some(composite_tab),
+            authority_epoch,
+            None,
+        )
+        .await
+    }
+
+    async fn acquire_surface_for(
+        &self,
+        producer: ProducerId,
+        composite_tab: Option<i64>,
+        authority_epoch: u64,
+        inherited: Option<&ExecutionContext>,
+    ) -> Result<ExecutionContext, ScheduleFailure> {
+        let (slot, native_tab) = self.resolve_target(composite_tab);
+        let slot = slot.unwrap_or(0);
+        let native_tab = native_tab.ok_or(ScheduleFailure::TargetUnavailable {
+            reason: "tool requires a tabId",
+        })?;
+        let key = ScheduleKey::Surface(BrowserSurface {
+            browser_slot: slot,
+            native_tab,
+        });
+        if let Some(context) = inherited.filter(|context| context.authorizes(&key)) {
+            return Ok(context.clone());
+        }
+        self.scheduler.acquire(key, producer, authority_epoch).await
     }
 
     /// Register one live MCP session's memory-only attention circuit and transition hook.
@@ -446,6 +594,8 @@ impl Browser {
 
     /// Remove all denial history, quieting, and presentation state for a finished MCP session.
     pub fn clear_attention_session(&self, guid: &str) {
+        self.scheduler
+            .retire_producer(&ProducerId::new(guid), RetirementReason::SessionEnded);
         let removed = self.attention_sessions.lock().unwrap().remove(guid);
         if let Some(session) = removed {
             if let Some((target, native_tab)) = session.target {
@@ -489,6 +639,8 @@ impl Browser {
         };
 
         if let Some(state) = result.opened {
+            self.scheduler
+                .retire_producer(&ProducerId::new(guid), RetirementReason::Attention);
             hook(crate::governance::attention::AttentionEvent::opened(
                 state.clone(),
             ));
@@ -535,6 +687,7 @@ impl Browser {
         let mut guard = self.held.lock().unwrap();
         let was_held = guard.is_some();
         if held && !was_held {
+            self.scheduler.retire_all(RetirementReason::Hold);
             *guard = Some(Instant::now());
             self.recordings
                 .interrupt_all(crate::recording::StopReason::UserHold);
@@ -551,6 +704,7 @@ impl Browser {
         let mut guard = self.held.lock().unwrap();
         let now_held = guard.is_none();
         if now_held {
+            self.scheduler.retire_all(RetirementReason::Hold);
             *guard = Some(Instant::now());
             self.recordings
                 .interrupt_all(crate::recording::StopReason::UserHold);
@@ -756,6 +910,18 @@ impl Browser {
         tool: &str,
         args: &Value,
     ) -> std::result::Result<Value, ToolError> {
+        self.call_with_context(guid, tool, args, &ExecutionContext::safety_protocol())
+            .await
+    }
+
+    /// Invoke a tool with explicit scheduling or bypass authority.
+    pub async fn call_with_context(
+        &self,
+        guid: &str,
+        tool: &str,
+        args: &Value,
+        execution: &ExecutionContext,
+    ) -> std::result::Result<Value, ToolError> {
         // The killed check precedes everything else, including the pending-map insert and the
         // not-connected check (g11 constraint 12): after a kill the port drops and every
         // session is gone, so the generic not-connected error would otherwise win by accident.
@@ -797,8 +963,11 @@ impl Browser {
 
         // gif_creator (ADR-0053 D4): while this tab records, note the action BEFORE it runs so
         // the screencast frame its paint produces is the frame that carries its ring/label.
-        self.note_gif_action(guid, tool, call_args, target).await;
-        let result = self.raw_call(guid, tool, call_args, target).await;
+        self.note_gif_action(guid, tool, call_args, target, execution)
+            .await;
+        let result = self
+            .raw_call(guid, tool, call_args, target, execution)
+            .await;
         if activity_admitted {
             self.recordings.finish_activity(
                 guid,
@@ -821,6 +990,7 @@ impl Browser {
         guid: &str,
         tool: &str,
         args: &Value,
+        execution: &ExecutionContext,
     ) -> std::result::Result<Value, DeliveryFailure> {
         if self.killed.load(Ordering::SeqCst) {
             return Err(DeliveryFailure {
@@ -846,8 +1016,19 @@ impl Browser {
             None => args,
         };
 
+        let activity_surface = native_tab.map(|native_tab| crate::recording::SurfaceId {
+            slot: target,
+            native_tab,
+        });
+        let activity_admitted = activity_surface.is_some_and(|surface| {
+            !is_recording_internal_tool(tool) && self.recordings.begin_activity(guid, surface)
+        });
+        self.note_gif_action(guid, tool, call_args, target, execution)
+            .await;
+
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
         let mut request = json!({ "id": id, "type": "tool_request", "tool": tool, "args": call_args, "guid": guid });
+        request["execution"] = execution_wire(execution);
         if let Some(client_key) = self.client_key_for(guid) {
             request["clientKey"] = json!(client_key);
         }
@@ -863,8 +1044,18 @@ impl Browser {
                 error,
                 outcome_unknown: false,
             })?;
-        self.send_and_await_delivery(id, frames, tool, target, TOOL_TIMEOUT, Some(guid))
-            .await
+        let result = self
+            .send_and_await_delivery(id, frames, tool, target, TOOL_TIMEOUT, Some(guid))
+            .await;
+        if activity_admitted {
+            self.recordings.finish_activity(
+                guid,
+                activity_surface.expect("admitted activity has a surface"),
+            );
+        }
+        let result = result?;
+        let result = self.encode_tab_ids(result, target);
+        Ok(self.cache_and_inject_screenshot(guid, tool, result))
     }
 
     /// The bare envelope + dispatch of [`Browser::call`], shared with internal sends that must not
@@ -876,8 +1067,9 @@ impl Browser {
         tool: &str,
         args: &Value,
         target: u32,
+        execution: &ExecutionContext,
     ) -> std::result::Result<Value, ToolError> {
-        self.raw_call_with_timeout(guid, tool, args, target, TOOL_TIMEOUT)
+        self.raw_call_with_timeout(guid, tool, args, target, TOOL_TIMEOUT, execution)
             .await
     }
 
@@ -888,10 +1080,12 @@ impl Browser {
         args: &Value,
         target: u32,
         timeout: Duration,
+        execution: &ExecutionContext,
     ) -> std::result::Result<Value, ToolError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
         let mut request =
             json!({ "id": id, "type": "tool_request", "tool": tool, "args": args, "guid": guid });
+        request["execution"] = execution_wire(execution);
         // ADR-0066 D3: stamp the session's stable per-client key so the extension groups this
         // call's tab under the client's durable group, not a fresh per-guid one. Additive and
         // optional -- omitted when no clientInfo was captured, and the extension falls back to guid.
@@ -1030,6 +1224,7 @@ impl Browser {
                 &args,
                 due.ticket.surface.slot,
                 RECORDING_BARRIER_TIMEOUT,
+                &ExecutionContext::safety_protocol(),
             )
             .await
             .is_ok();
@@ -1042,6 +1237,7 @@ impl Browser {
         &self,
         guid: &str,
         ticket: &crate::recording::RecordingTicket,
+        execution: &ExecutionContext,
     ) -> std::result::Result<Value, ToolError> {
         let args = json!({
             "tabId": ticket.surface.native_tab,
@@ -1054,6 +1250,7 @@ impl Browser {
             &args,
             ticket.surface.slot,
             RECORDING_BARRIER_TIMEOUT,
+            execution,
         )
         .await
     }
@@ -1141,7 +1338,14 @@ impl Browser {
     /// ScreenshotContext -- the mechanism data stays where Chrome produces it; querying beats
     /// mirroring). Best-effort: on any failure the raw coordinates stand (identical in the common
     /// unzoomed case).
-    async fn note_gif_action(&self, guid: &str, tool: &str, args: &Value, target: u32) {
+    async fn note_gif_action(
+        &self,
+        guid: &str,
+        tool: &str,
+        args: &Value,
+        target: u32,
+        execution: &ExecutionContext,
+    ) {
         if tool != "computer" && tool != "navigate" {
             return;
         }
@@ -1171,7 +1375,7 @@ impl Browser {
         if !points.is_empty() {
             let rescale_args = json!({ "tabId": tab, "points": points });
             if let Ok(reply) = self
-                .raw_call(guid, "rescale_coords", &rescale_args, target)
+                .raw_call(guid, "rescale_coords", &rescale_args, target, execution)
                 .await
             {
                 if let Some(rescaled) = parse_rescaled_points(&reply) {
@@ -1321,7 +1525,11 @@ impl Browser {
     /// trusted from tool call parameters. `Ok(None)` covers both an unknown/closed tab (the
     /// extension reports `url: null`) and a reply missing the expected shape; either way the
     /// caller fails closed.
-    pub async fn tab_url(&self, tab_id: i64) -> std::result::Result<Option<String>, ToolError> {
+    pub async fn tab_url(
+        &self,
+        tab_id: i64,
+        execution: &ExecutionContext,
+    ) -> std::result::Result<Option<String>, ToolError> {
         if self.killed.load(Ordering::SeqCst) {
             return Err(kill_error());
         }
@@ -1335,9 +1543,19 @@ impl Browser {
             return Err(err);
         };
         let native_tab = native_tab.unwrap_or(tab_id);
+        let resource = ScheduleKey::Surface(BrowserSurface {
+            browser_slot: target,
+            native_tab,
+        });
+        if !execution.authorizes(&resource) {
+            return Err(ToolError::binary(
+                "tab URL probe lacks the admitted surface execution context",
+            ));
+        }
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
-        let request = json!({ "id": id, "type": "tab_url_request", "tabId": native_tab });
+        let mut request = json!({ "id": id, "type": "tab_url_request", "tabId": native_tab });
+        request["execution"] = execution_wire(execution);
         let framed = match serde_json::to_vec(&request)
             .map_err(|e| e.to_string())
             .and_then(|bytes| host::encode(&bytes).map_err(|e| e.to_string()))
@@ -1740,15 +1958,32 @@ impl Browser {
             self.debug.ipc_note(&Diagnostic::MissingIdentity.describe());
             return AttachOutcome::AlreadyAttached;
         };
-        let chunked_host_messages_v1 = serde_json::from_slice::<Value>(&identity_bytes)
-            .ok()
-            .and_then(|identity| identity.get("features").and_then(Value::as_array).cloned())
+        let identity_value = serde_json::from_slice::<Value>(&identity_bytes).ok();
+        let chunked_host_messages_v1 = identity_value
+            .as_ref()
+            .and_then(|identity| identity.get("features").and_then(Value::as_array))
             .is_some_and(|features| {
                 features
                     .iter()
                     .any(|feature| feature.as_str() == Some(CHUNKED_HOST_MESSAGES_V1))
             });
         let slot = self.slot_for(&browser_id);
+        let browser_generation = identity_value
+            .as_ref()
+            .and_then(|identity| identity.get("browserGeneration"))
+            .and_then(Value::as_str);
+        let process_restarted = browser_generation.is_some_and(|current| {
+            self.browser_generations
+                .lock()
+                .unwrap()
+                .insert(slot, current.to_string())
+                .is_some_and(|previous| previous != current)
+        });
+        if process_restarted {
+            // ADR-0080 D6: a changed browser-process generation is proof that old tabs and the
+            // old executor can no longer act, so it is one of only three quarantine-clear paths.
+            self.scheduler.destroy_browser(slot);
+        }
 
         let (tx, mut rx) = mpsc::unbounded_channel::<Zeroizing<Vec<u8>>>();
         let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
@@ -1830,6 +2065,10 @@ impl Browser {
         if !self.sessions.lock().unwrap().contains_key(&slot) {
             self.recordings
                 .interrupt_slot(slot, crate::recording::StopReason::BrowserDisconnected);
+            // A native-port loss or worker restart is not proof that the browser effect ended.
+            // Retire waiters, but retain active/quarantined surfaces until an exact terminal ack,
+            // a tab-destroy event, or a changed browser-process generation proves recovery.
+            self.scheduler.retire_browser(slot);
         }
         let still_connected = self.is_connected();
         self.debug.set_connected(still_connected);
@@ -1885,6 +2124,45 @@ impl Browser {
         };
 
         let msg_type = reply.get("type").and_then(Value::as_str);
+
+        // ADR-0080: acceptance is diagnostic only. It must never consume the pending response
+        // slot. A terminal acknowledgement is likewise out of band: it exists to reconcile the
+        // exact surface after a caller timeout made the outcome unknown.
+        if msg_type == Some("tool_accepted") {
+            return;
+        }
+
+        if msg_type == Some("tool_terminal") {
+            let command_id = reply.get("commandId").and_then(|value| {
+                value
+                    .as_u64()
+                    .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+            });
+            let native_tab = reply
+                .get("resource")
+                .and_then(|resource| resource.get("nativeTab"))
+                .and_then(Value::as_i64);
+            if let (Some(command_id), Some(native_tab)) = (command_id, native_tab) {
+                self.scheduler.reconcile_surface(
+                    BrowserSurface {
+                        browser_slot: slot,
+                        native_tab,
+                    },
+                    command_id,
+                );
+            }
+            return;
+        }
+
+        if reply.get("id").is_none() && msg_type == Some("surface_destroyed") {
+            if let Some(native_tab) = reply.get("tabId").and_then(Value::as_i64) {
+                self.scheduler.destroy_surface(BrowserSurface {
+                    browser_slot: slot,
+                    native_tab,
+                });
+            }
+            return;
+        }
 
         if reply.get("id").is_none() && msg_type == Some("session_killed") {
             self.handle_session_killed();
@@ -2132,6 +2410,7 @@ impl Browser {
         if self.killed.swap(true, Ordering::SeqCst) {
             return; // already handled; a duplicate frame is a no-op
         }
+        self.scheduler.retire_all(RetirementReason::Panic);
         self.erase_all_recordings(crate::recording::StopReason::Panic);
         for (_, tx) in self.pending.lock().unwrap().drain() {
             let _ = tx.send(Err(kill_error()));
@@ -2260,6 +2539,10 @@ mod tests {
             let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
             let v: Value = serde_json::from_slice(&req).unwrap();
             let id = v["id"].as_str().unwrap();
+            let accepted = json!({ "id": id, "type": "tool_accepted", "commandId": "1" });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&accepted).unwrap())
+                .await
+                .unwrap();
             let reply =
                 json!({ "id": id, "type": "tool_response", "result": { "echoed": v["tool"] } });
             host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
@@ -2277,6 +2560,29 @@ mod tests {
             .unwrap();
         assert_eq!(result, json!({ "echoed": "navigate" }));
         fake_ext.await.unwrap();
+    }
+
+    #[test]
+    fn terminal_acknowledgement_reconciles_only_its_exact_surface_command() {
+        let browser = Browser::new();
+        let surface = BrowserSurface {
+            browser_slot: 1,
+            native_tab: 42,
+        };
+        browser.scheduler.mark_surface_uncertain(surface, 7);
+
+        browser.route_reply(
+            1,
+            &serde_json::to_vec(&json!({
+                "id": "request-7",
+                "type": "tool_terminal",
+                "commandId": "7",
+                "resource": { "kind": "surface", "nativeTab": 42 }
+            }))
+            .unwrap(),
+        );
+
+        assert!(!browser.scheduler.reconcile_surface(surface, 7));
     }
 
     #[tokio::test]
@@ -2317,7 +2623,12 @@ mod tests {
         });
 
         let failure = browser
-            .call_with_delivery_outcome("test-guid", "upload_image_exec", &json!({}))
+            .call_with_delivery_outcome(
+                "test-guid",
+                "upload_image_exec",
+                &json!({}),
+                &ExecutionContext::safety_protocol(),
+            )
             .await
             .unwrap_err();
         assert!(!failure.outcome_unknown);

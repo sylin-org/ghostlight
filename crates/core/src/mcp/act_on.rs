@@ -10,6 +10,7 @@ use crate::browser::directory;
 use crate::governance::dispatch::Governance;
 use crate::governance::ports::Capability;
 use crate::hub::outbound::browser::Browser;
+use crate::hub::scheduling::ExecutionContext;
 use crate::mcp::outcome::{CallOutcome, LocalCtx, LocalFuture};
 use serde_json::{json, Map, Value};
 
@@ -25,7 +26,16 @@ const EXPECT_STATES: &[&str] = &["visible", "present", "gone"];
 
 /// Registry entry point. The parent grant decision has completed before this runs.
 pub(crate) fn act_on_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
-    Box::pin(async move { run(ctx.browser, ctx.governance, ctx.guid, ctx.args).await })
+    Box::pin(async move {
+        run(
+            ctx.browser,
+            ctx.governance,
+            ctx.guid,
+            ctx.args,
+            ctx.execution,
+        )
+        .await
+    })
 }
 
 fn invalid(message: impl Into<String>) -> CallOutcome {
@@ -197,7 +207,13 @@ fn internal_audit(
     audit
 }
 
-async fn run(browser: &Browser, governance: &Governance, guid: &str, args: &Value) -> CallOutcome {
+async fn run(
+    browser: &Browser,
+    governance: &Governance,
+    guid: &str,
+    args: &Value,
+    execution: &ExecutionContext,
+) -> CallOutcome {
     if let Err(message) = validate(args) {
         return invalid(message);
     }
@@ -219,10 +235,11 @@ async fn run(browser: &Browser, governance: &Governance, guid: &str, args: &Valu
         1,
     );
     let resolved = browser
-        .call(
+        .call_with_context(
             guid,
             "resolve_actionable_internal",
             &json!({ "tabId": tab_id, "target": target }),
+            execution,
         )
         .await;
     resolve_audit.dispatch_finished();
@@ -304,7 +321,7 @@ async fn run(browser: &Browser, governance: &Governance, guid: &str, args: &Valu
 
     let mut cue_audit = internal_audit(governance, "target_cue", None, Some(&[]), &batch_id, 2);
     let cue = browser
-        .call(
+        .call_with_context(
             guid,
             "target_cue_internal",
             &json!({
@@ -313,6 +330,7 @@ async fn run(browser: &Browser, governance: &Governance, guid: &str, args: &Valu
                 "y": resolved_target.get("y").and_then(Value::as_f64).unwrap_or(0.0),
                 "action": args["action"]
             }),
+            execution,
         )
         .await;
     cue_audit.dispatch_finished();
@@ -345,7 +363,9 @@ async fn run(browser: &Browser, governance: &Governance, guid: &str, args: &Valu
         &batch_id,
         3,
     );
-    let dispatched = browser.call(guid, tool, &dispatch_args).await;
+    let dispatched = browser
+        .call_with_context(guid, tool, &dispatch_args, execution)
+        .await;
     action_audit.dispatch_finished();
     action_audit.complete();
     let mut result = match dispatched {
@@ -381,7 +401,7 @@ async fn run(browser: &Browser, governance: &Governance, guid: &str, args: &Valu
             4,
         );
         let waited = browser
-            .call(guid, "wait_for", &Value::Object(wait_args))
+            .call_with_context(guid, "wait_for", &Value::Object(wait_args), execution)
             .await;
         wait_audit.dispatch_finished();
         wait_audit.complete();

@@ -80,7 +80,7 @@ async fn finalize(
         Ok(ticket) => {
             let stopped = ctx
                 .browser
-                .stop_recording_capture(ctx.guid, &ticket)
+                .stop_recording_capture(ctx.guid, &ticket, ctx.execution)
                 .await
                 .is_ok();
             recordings.finish_finalizing(
@@ -133,7 +133,11 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
                 "leaseMs": crate::recording::HEALTH_LEASE.as_millis() as u64,
                 "hardTimeoutMs": crate::recording::HARD_TIMEOUT.as_millis() as u64,
             });
-            match ctx.browser.call(ctx.guid, "gif_capture_start", &args).await {
+            match ctx
+                .browser
+                .call_with_context(ctx.guid, "gif_capture_start", &args, ctx.execution)
+                .await
+            {
                 Err(error) => {
                     recordings.fail_start(&ticket);
                     CallOutcome::Failure { error }
@@ -288,7 +292,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
                 }
                 return match ctx
                     .browser
-                    .call_with_delivery_outcome(ctx.guid, "upload_image_exec", &args)
+                    .call_with_delivery_outcome(ctx.guid, "upload_image_exec", &args, ctx.execution)
                     .await
                 {
                     Err(failure) if failure.outcome_unknown => {

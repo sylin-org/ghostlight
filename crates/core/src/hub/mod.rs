@@ -46,6 +46,7 @@ pub mod endpoint;
 pub mod inbound;
 pub mod manage;
 pub mod outbound;
+pub mod scheduling;
 pub mod session;
 
 /// Idle-grace shutdown window (ADR-0030 Decision 8; PINNED, PINS.md SS5.4): the SERVICE exits only

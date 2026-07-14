@@ -38,6 +38,8 @@ use crate::governance::config::reload::ConfigStore;
 use crate::governance::dispatch::{hold_message, Gate, Governance};
 use crate::governance::ports::{Capability, Decision, Denial, EffectiveMode, GoverningResource};
 use crate::hub::outbound::browser::Browser;
+use crate::hub::scheduling::{ExecutionClass, ExecutionContext, ScheduleFailure};
+use crate::mcp::authority::{AuthoritySnapshot, AuthorityStore};
 use crate::mcp::outcome::{CallOutcome, DenialSource, LocalCtx};
 use crate::mcp::types::{text_content, JsonRpcResponse};
 use crate::ToolError;
@@ -50,10 +52,26 @@ use std::time::{Duration, Instant};
 /// top of this module; this thin wrapper parses `id`/`params` and renders the returned
 /// [`CallOutcome`] into today's JSON-RPC envelope. `pub(crate)` so `server::handle_line`'s
 /// `tools/call` arm can reach it.
+#[cfg(test)]
 pub(crate) async fn handle_tools_call(
     browser: &Browser,
     store: &Arc<ConfigStore>,
-    governance: &Governance,
+    governance: &Arc<Governance>,
+    guid: &str,
+    id: Option<Value>,
+    params: Option<&Value>,
+    overlay: Option<&crate::governance::overlay::SessionOverlay>,
+) -> JsonRpcResponse {
+    let authority =
+        AuthorityStore::from_existing(&store.current_authority(), Arc::clone(governance));
+    handle_tools_call_scheduled(browser, store, &authority, guid, id, params, overlay).await
+}
+
+/// Production tools/call entry using the session's reloadable atomic authority store.
+pub(crate) async fn handle_tools_call_scheduled(
+    browser: &Browser,
+    store: &Arc<ConfigStore>,
+    authority: &AuthorityStore,
     guid: &str,
     id: Option<Value>,
     params: Option<&Value>,
@@ -70,7 +88,7 @@ pub(crate) async fn handle_tools_call(
         .unwrap_or(Value::Null);
 
     let outcome = run_tool_call(
-        browser, store, governance, guid, name, &args, None, false, overlay,
+        browser, store, authority, guid, name, &args, None, false, overlay, None, None,
     )
     .await;
     render_outcome(id, outcome)
@@ -84,6 +102,13 @@ fn render_outcome(id: Option<Value>, outcome: CallOutcome) -> JsonRpcResponse {
     match outcome {
         CallOutcome::Success { result } => JsonRpcResponse::success(id, result),
         CallOutcome::Failure { error } => JsonRpcResponse::success(id, error_result(error)),
+        CallOutcome::NotDispatched { message } => {
+            JsonRpcResponse::success(id, execution_status_result("not_dispatched", true, message))
+        }
+        CallOutcome::OutcomeUnknown { message } => JsonRpcResponse::success(
+            id,
+            execution_status_result("outcome_unknown", false, message),
+        ),
         CallOutcome::Denied { message, .. } => {
             JsonRpcResponse::success(id, text_content(with_org_contact_line(message)))
         }
@@ -91,6 +116,44 @@ fn render_outcome(id: Option<Value>, outcome: CallOutcome) -> JsonRpcResponse {
         CallOutcome::AttentionRequired { message } => {
             JsonRpcResponse::success(id, text_content(message))
         }
+    }
+}
+
+fn execution_status_result(status: &str, retry_safe: bool, message: String) -> Value {
+    json!({
+        "content": [{ "type": "text", "text": message }],
+        "structuredContent": {
+            "execution": {
+                "status": status,
+                "retrySafe": retry_safe
+            }
+        },
+        "isError": true
+    })
+}
+
+pub(crate) fn schedule_failure_message(error: ScheduleFailure) -> String {
+    match error {
+        ScheduleFailure::TargetUnavailable { reason } => {
+            format!("Browser command was not dispatched: {reason}")
+        }
+        ScheduleFailure::Overloaded { scope } => format!(
+            "Browser command was not dispatched because the {scope} queue is full. Retry later."
+        ),
+        ScheduleFailure::QueueDeadline => {
+            "Browser command was not dispatched before its queue deadline. Retry if it is still needed."
+                .to_string()
+        }
+        ScheduleFailure::AuthorityChanged => {
+            "Browser command was not dispatched because policy or configuration changed. Re-evaluate the current state before retrying."
+                .to_string()
+        }
+        ScheduleFailure::Retired { reason } => format!(
+            "Browser command was not dispatched because its queue was retired ({reason:?})."
+        ),
+        ScheduleFailure::SurfaceUncertain { command_id } => format!(
+            "Browser command was not dispatched because this tab is quarantined after command {command_id} had an unknown outcome. Inspect the tab or recreate it before continuing."
+        ),
     }
 }
 
@@ -289,13 +352,15 @@ fn extract_action<'a>(action_key: Option<&'a str>, args: &'a Value) -> Option<&'
 pub(crate) async fn run_tool_call(
     browser: &Browser,
     store: &Arc<ConfigStore>,
-    governance: &Governance,
+    authority: &AuthorityStore,
     guid: &str,
     name: &str,
     args: &Value,
     orchestration: Option<(&'static str, &str, u32)>,
     dry_run: bool,
     overlay: Option<&crate::governance::overlay::SessionOverlay>,
+    inherited_execution: Option<&ExecutionContext>,
+    inherited_authority: Option<&Arc<AuthoritySnapshot>>,
 ) -> CallOutcome {
     // A second doorway onto Browser::notify() -- the same primitive the denial sites below call.
     // Unlisted (never registered in `directory`, so it is absent from tools/list) but usable by
@@ -314,10 +379,6 @@ pub(crate) async fn run_tool_call(
             result: crate::mcp::types::text_content("notify sent"),
         };
     }
-
-    // One snapshot for the whole call, taken once at entry: a reload mid-call must not tear
-    // the snapshot the call already started with.
-    let config = store.current();
 
     // Unknown tool names are rejected before dispatch (and before waiting on the extension
     // channel at all): this is a client-request problem, not a browser/extension problem, and the
@@ -344,21 +405,83 @@ pub(crate) async fn run_tool_call(
         }
     }
 
+    let action = extract_action(descriptor.action_key, args);
+    let lookup: Option<&'static [Capability]> =
+        directory::requires_for_call(descriptor, action, args);
+
+    // Safety admission bypasses ordinary scheduling. A hold or attention pause is decided and
+    // audited immediately; it never occupies a browser resource queue.
+    if let Some(held_for) = browser.held_for() {
+        let snapshot = authority.current();
+        let mut audit = snapshot.governance.begin(name, action, lookup);
+        if let Some((orchestrator, batch_id, step)) = orchestration {
+            audit.orchestrated(orchestrator, batch_id, Some(step));
+        }
+        if !dry_run {
+            audit.held();
+        }
+        return CallOutcome::Held {
+            message: hold_message(name, action, held_for),
+        };
+    }
+    if !dry_run && !matches!(name, "explain" | "script" | "browser_batch") {
+        if let Some(message) = browser.attention_message(guid) {
+            let snapshot = authority.current();
+            let mut audit = snapshot.governance.begin(name, action, lookup);
+            if let Some((orchestrator, batch_id, step)) = orchestration {
+                audit.orchestrated(orchestrator, batch_id, Some(step));
+            }
+            audit.attention_required();
+            return CallOutcome::AttentionRequired { message };
+        }
+    }
+
+    // ADR-0080: acquire the declared resource before the first URL or governing probe, then
+    // capture config and governance together. If authority changes in the tiny interval between
+    // admission and capture, release and retry under the new epoch. A retained compound lease
+    // keeps the exact authority snapshot admitted for its parent operation.
+    let (execution, authority_snapshot) = loop {
+        let before = authority.current();
+        let execution = match browser
+            .acquire_execution(descriptor, guid, args, before.epoch, inherited_execution)
+            .await
+        {
+            Ok(execution) => execution,
+            Err(error) => {
+                return CallOutcome::NotDispatched {
+                    message: schedule_failure_message(error),
+                }
+            }
+        };
+        if inherited_execution.is_some_and(|inherited| {
+            execution.command_id().is_some() && execution.command_id() == inherited.command_id()
+        }) {
+            if let Some(snapshot) = inherited_authority {
+                break (execution, (*snapshot).clone());
+            }
+        }
+        let snapshot = authority.current();
+        if execution.class() != ExecutionClass::Scheduled
+            || execution.authority_epoch() == Some(snapshot.epoch)
+        {
+            break (execution, snapshot);
+        }
+        drop(execution);
+    };
+    let config = authority_snapshot.config.clone();
+    let governance = authority_snapshot.governance.as_ref();
+
     // The only tool-call argument ever read for audit purposes: the computer sub-action
     // (shared format doc section 6.2 sensitive-parameter omission; no other argument is read,
     // logged, or stored). Stage 4 (ADR-0024 Decision 1): the registry's `action_key` drives
     // this instead of a hardcoded `name == "computer"` check -- `computer` is the only
     // descriptor carrying one today. C10 (PINS.md SS13 point 1) extends this to a BOOLEAN
     // action key (`form_fill`'s `submit`): see [`extract_action`].
-    let action = extract_action(descriptor.action_key, args);
-
     // The single per-call action-directory lookup (ADR-0022 Decision 2, ADR-0024 Decision 3): a
     // pure static table scan, no I/O, performed ONCE and kept as the `Option` it is (a registry
     // miss is `None`, never coerced to an empty slice here): `governance.begin` and
     // `governance.authorize` both consume this SAME value, so there is exactly one lookup for
     // the whole call, feeding both the decision and the audit `capability` field.
-    let lookup: Option<&'static [Capability]> =
-        directory::requires_for_call(descriptor, action, args);
     let resource_shape = directory::resource_for_call(descriptor, action, args);
     let mut audit = governance.begin(name, action, lookup);
     // C1's orchestration stamping (PINS.md SS7): applied right after `begin`, so every audit
@@ -367,38 +490,17 @@ pub(crate) async fn run_tool_call(
         audit.orchestrated(orchestrator, batch_id, Some(step));
     }
 
-    // Take-the-wheel hold (g10, ADR-0018 step 2): a user gesture, not a policy decision, so it
-    // is checked before ANY dispatch machinery -- before governance.authorize, before the sacred
-    // check, before any extension traffic. A held call is answered immediately with a
-    // successful (never isError) text result and is never queued, deferred, or replayed;
-    // resuming affects only future calls. Held calls still produce one audit record
-    // (`decision: "allow"`, `held: true`, `duration_ms: 0`).
-    if let Some(held_for) = browser.held_for() {
-        if !dry_run {
-            audit.held();
-        }
-        return CallOutcome::Held {
-            message: hold_message(name, action, held_for),
-        };
-    }
-
-    // ADR-0079: refuse new work for only the MCP session whose denial circuit opened. The two
-    // orchestrator fronts are allowed to enter so their first sub-step can report the honest
-    // `attention_required` status; `explain` is local and dispatches no browser mechanism.
-    if !dry_run && !matches!(name, "explain" | "script" | "browser_batch") {
-        if let Some(message) = browser.attention_message(guid) {
-            audit.attention_required();
-            return CallOutcome::AttentionRequired { message };
-        }
-    }
-
     // ADR-0024 Decision 4: the sacred check and the grant path below share ONE lazily resolved,
     // memoized tab-URL probe per call, keyed on this call's own `tabId` argument, instead of two
     // different mechanisms (the sacred check's former internal `tabs_context_mcp` lookup,
     // deleted, and the grant path's `tab_url_request`). Nothing is probed until the first stage
     // that actually needs it calls `.get()` -- an all-open call, an ungoverned call, a free
     // action, or a call with no `tabId` at all issues zero frames.
-    let mut tab_url = LazyTabUrl::new(browser, args.get("tabId").and_then(Value::as_i64));
+    let mut tab_url = LazyTabUrl::new(
+        browser,
+        args.get("tabId").and_then(Value::as_i64),
+        &execution,
+    );
 
     // The sacred-domains never-touch check (ADR-0018 step 2, g08): always enforced,
     // independent of governance.mode or manifest presence -- RECONCILIATION.md section 1's
@@ -496,10 +598,13 @@ pub(crate) async fn run_tool_call(
         let ctx = LocalCtx {
             browser,
             store,
+            authority,
+            authority_snapshot: &authority_snapshot,
             governance,
             guid,
             config: &config,
             args,
+            execution: &execution,
             overlay,
         };
         let mut outcome = f(ctx).await;
@@ -707,10 +812,13 @@ pub(crate) async fn run_tool_call(
         let ctx = LocalCtx {
             browser,
             store,
+            authority,
+            authority_snapshot: &authority_snapshot,
             governance,
             guid,
             config: &config,
             args,
+            execution: &execution,
             overlay,
         };
         let mut outcome = f(ctx).await;
@@ -732,7 +840,9 @@ pub(crate) async fn run_tool_call(
         return outcome;
     }
 
-    let mut outcome = browser.call(guid, name, args).await;
+    let mut outcome = browser
+        .call_with_delivery_outcome(guid, name, args, &execution)
+        .await;
     audit.dispatch_finished();
 
     // Point 5 (g13/g15): after a dispatched `navigate` succeeds, re-check the FINAL
@@ -751,6 +861,7 @@ pub(crate) async fn run_tool_call(
                 lookup.unwrap_or(&[]),
                 tab_id,
                 config_mode,
+                &execution,
             )
             .await;
             match landing {
@@ -826,8 +937,28 @@ pub(crate) async fn run_tool_call(
         // the bare `ToolError`, with no slot for a pre-rendered note. No test pins this exact
         // combination (extension connects within the handshake grace window, then the dispatched
         // call itself still errors); see LEDGER.md for the full note.
-        Err(ToolError::AttentionRequired { message }) => CallOutcome::AttentionRequired { message },
-        Err(e) => CallOutcome::Failure { error: e },
+        Err(failure) if failure.outcome_unknown => {
+            if let (Some(crate::hub::scheduling::ScheduleKey::Surface(surface)), Some(command_id)) =
+                (execution.key(), execution.command_id())
+            {
+                browser
+                    .scheduler()
+                    .mark_surface_uncertain(*surface, command_id);
+            }
+            CallOutcome::OutcomeUnknown {
+                message: format!(
+                    "The browser command may have completed, but Ghostlight did not receive a conclusive terminal acknowledgement. Do not retry automatically; inspect the tab first. ({})",
+                    failure.error
+                ),
+            }
+        }
+        Err(crate::hub::outbound::browser::DeliveryFailure {
+            error: ToolError::AttentionRequired { message },
+            ..
+        }) => CallOutcome::AttentionRequired { message },
+        Err(failure) => CallOutcome::Failure {
+            error: failure.error,
+        },
     }
 }
 
@@ -992,6 +1123,7 @@ async fn resolve_governing_resource(
 /// transparent pass-through; parking would be a visible, detectable side effect that gives away
 /// a shadowed call, breaking g15's own truthfulness requirement that "the agent must not be able
 /// to tell a shadowed call from a permitted one").
+#[allow(clippy::too_many_arguments)]
 async fn post_navigate_landing_check(
     browser: &Browser,
     governance: &Governance,
@@ -1000,8 +1132,9 @@ async fn post_navigate_landing_check(
     requires: &[Capability],
     tab_id: i64,
     config_mode: EffectiveMode,
+    execution: &ExecutionContext,
 ) -> (Decision, Option<String>) {
-    let resolved = match browser.tab_url(tab_id).await {
+    let resolved = match browser.tab_url(tab_id, execution).await {
         Ok(Some(url)) => resource::resolved_url_resource(&url),
         Ok(None) | Err(_) => GoverningResource::Indeterminate,
     };
@@ -1012,10 +1145,11 @@ async fn post_navigate_landing_check(
     let decision = governance.decide(tool, None, requires, resolved, config_mode);
     if let Decision::Deny(_) = &decision {
         let _ = browser
-            .call(
+            .call_with_context(
                 guid,
                 "navigate",
                 &json!({ "url": "about:blank", "tabId": tab_id }),
+                &ExecutionContext::safety_protocol(),
             )
             .await;
     }
@@ -1037,14 +1171,16 @@ async fn post_navigate_landing_check(
 struct LazyTabUrl<'a> {
     browser: &'a Browser,
     tab_id: Option<i64>,
+    execution: &'a ExecutionContext,
     resolved: Option<Option<String>>,
 }
 
 impl<'a> LazyTabUrl<'a> {
-    fn new(browser: &'a Browser, tab_id: Option<i64>) -> Self {
+    fn new(browser: &'a Browser, tab_id: Option<i64>, execution: &'a ExecutionContext) -> Self {
         Self {
             browser,
             tab_id,
+            execution,
             resolved: None,
         }
     }
@@ -1054,7 +1190,7 @@ impl<'a> LazyTabUrl<'a> {
     async fn get(&mut self) -> Option<String> {
         if self.resolved.is_none() {
             let url = match self.tab_id {
-                Some(tab_id) => match self.browser.tab_url(tab_id).await {
+                Some(tab_id) => match self.browser.tab_url(tab_id, self.execution).await {
                     Ok(Some(url)) => Some(url),
                     Ok(None) | Err(_) => None,
                 },
@@ -1701,6 +1837,10 @@ mod tests {
         let governance = Arc::new(Governance::all_open(recorder as Arc<dyn AuditSink>));
         let store =
             crate::governance::config::reload::ConfigStore::for_test_with_config(Config::minimal());
+        let authority = Arc::new(AuthorityStore::from_existing(
+            &store.current_authority(),
+            Arc::clone(&governance),
+        ));
         let browser = Browser::new();
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<crate::mcp::server::Outbound>();
 
@@ -1729,6 +1869,7 @@ mod tests {
             &browser,
             &caps,
             &store,
+            &authority,
             &governance,
             &seat,
             &init_line,
@@ -2978,16 +3119,23 @@ mod tests {
         let store =
             crate::governance::config::reload::ConfigStore::for_test_with_config(Config::minimal());
         let recorder = Arc::new(Recorder::disabled());
-        let governance = Governance::all_open(recorder as Arc<dyn AuditSink>);
+        let governance = Arc::new(Governance::all_open(recorder as Arc<dyn AuditSink>));
+        let authority =
+            AuthorityStore::from_existing(&store.current_authority(), Arc::clone(&governance));
+        let authority_snapshot = authority.current();
+        let execution = ExecutionContext::local();
         let config = store.current();
         let args = json!({});
         let ctx = LocalCtx {
             browser: &browser,
             store: &store,
-            governance: &governance,
+            authority: &authority,
+            authority_snapshot: &authority_snapshot,
+            governance: governance.as_ref(),
             guid: "test-guid",
             config: &config,
             args: &args,
+            execution: &execution,
             overlay: None,
         };
 

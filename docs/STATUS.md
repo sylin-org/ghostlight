@@ -80,12 +80,17 @@ when they disagree**, and update it when you land something that changes the pic
   the four-stage practitioner journey, no-account/free-core facts, pre-release extension path, and
   a read-only first proof. The full Rust suite, strict clippy, 93 extension tests, JS syntax checks,
   and formatting are green. Visible Linux/browser verification remains owed.
-- **Resource-scoped browser command scheduling is accepted but not implemented (ADR-0080).** The
-  service will own one-at-a-time execution per concrete browser surface from governing-resource
-  resolution through audit, preserving producer order while selecting fairly across producers.
-  Different tabs remain parallel and presentation/control traffic uses separate lanes. Queued work
-  is bounded and lifecycle-aware; an MCP timeout cannot release a browser effect that may still be
-  running. Single-surface semantic flows retain a reentrant lease. The Presentation Broker and
+- **Resource-scoped browser command scheduling is implemented (ADR-0080).** The service now owns
+  bounded fair queues for concrete tab surfaces, client topology, and browser-wide work. Same-tab
+  commands serialize while different tabs remain parallel. Configuration and policy publish as one
+  atomic authority epoch; URL probes, dispatch, landing verification, compound helpers, and audit
+  retain the admitted execution context. Static single-surface scripts and browser batches retain
+  the tab lease and yield at a 60-second step boundary; dynamic and multi-surface batches schedule
+  per step. The extension adds a bounded per-surface FIFO, command deduplication, acceptance and
+  terminal acknowledgements, payload erasure, and separate presentation/control bypass. Unknown
+  outcomes quarantine a tab until an exact terminal acknowledgement, confirmed tab destruction,
+  or a changed browser-process generation proves recovery. Strict clippy, the full Rust workspace,
+  all 34 Lightbox scenarios, and 100 extension tests pass. The Presentation Broker and
   document-ready delivery design remain a separate ADR before the extension-signage architecture
   is implemented and retested.
 - **The agent-browser overlap map is current through v0.31.2 (2026-07-13).** Research 17 contains

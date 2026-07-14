@@ -12,11 +12,13 @@
 //! Testability seam: the interpreter is generic over a [`StepRunner`] so unit tests can drive
 //! fixed outcomes without a live `Browser`; the real handler wires [`pipeline::run_tool_call`] in.
 
+use crate::browser::directory::{self, SchedulingScope};
 use crate::governance::config::reload::ConfigStore;
-use crate::governance::dispatch::Governance;
 use crate::hub::outbound::browser::Browser;
+use crate::hub::scheduling::ExecutionContext;
+use crate::mcp::authority::AuthorityStore;
 use crate::mcp::outcome::{CallOutcome, LocalCtx, LocalFuture};
-use crate::mcp::pipeline::run_tool_call;
+use crate::mcp::pipeline::{run_tool_call, schedule_failure_message};
 use crate::mcp::refs::resolve_refs;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -97,11 +99,15 @@ pub(crate) trait StepRunner {
 pub(crate) struct PipelineRunner<'a> {
     pub(crate) browser: &'a Browser,
     pub(crate) store: &'a Arc<ConfigStore>,
-    pub(crate) governance: &'a Governance,
+    pub(crate) authority: &'a AuthorityStore,
     pub(crate) guid: &'a str,
     /// ADR-0060: the session's tighten-only overlay, threaded from the `LocalCtx` so every
     /// orchestrated sub-step is bound by the SAME session tier its parent call was.
     pub(crate) overlay: Option<&'a crate::governance::overlay::SessionOverlay>,
+    /// A statically preflighted single surface, if every page step resolves to it.
+    pub(crate) retained_tab: Option<i64>,
+    pub(crate) retained_execution: Option<ExecutionContext>,
+    pub(crate) retained_started: Option<Instant>,
 }
 
 impl<'a> StepRunner for PipelineRunner<'a> {
@@ -112,6 +118,29 @@ impl<'a> StepRunner for PipelineRunner<'a> {
         orchestration: Option<(&'static str, &str, u32)>,
         dry_run: bool,
     ) -> CallOutcome {
+        let inherited = if self.retained_tab.is_some() {
+            if self.retained_execution.is_none()
+                || self
+                    .retained_started
+                    .is_some_and(|started| started.elapsed() >= COMPOSITION_QUANTUM)
+            {
+                self.retained_execution.take();
+                let epoch = self.authority.current().epoch;
+                let Some(tab_id) = self.retained_tab else {
+                    unreachable!("retained surface has a tab id")
+                };
+                match acquire_retained_surface(self.browser, self.guid, tab_id, epoch) {
+                    Ok(execution) => {
+                        self.retained_execution = Some(execution);
+                        self.retained_started = Some(Instant::now());
+                    }
+                    Err(message) => return CallOutcome::NotDispatched { message },
+                }
+            }
+            self.retained_execution.as_ref()
+        } else {
+            None
+        };
         // Safety: the future returned by run_tool_call is awaited synchronously here via the
         // interpreter's tokio handle. The interpreter itself runs inside a LocalFuture (boxed),
         // so this re-entry is the async recursion ADR-0035 Decision 6 prices (pipeline -> local
@@ -123,9 +152,10 @@ impl<'a> StepRunner for PipelineRunner<'a> {
             dry_run,
             self.browser,
             self.store,
-            self.governance,
+            self.authority,
             self.guid,
             self.overlay,
+            inherited,
         )
     }
 }
@@ -136,6 +166,9 @@ fn step_text(outcome: &CallOutcome) -> Option<String> {
         CallOutcome::Success { result } => result,
         CallOutcome::Failure { error } => {
             return Some(error.to_string());
+        }
+        CallOutcome::NotDispatched { message } | CallOutcome::OutcomeUnknown { message } => {
+            return Some(message.clone());
         }
         CallOutcome::Denied { message, .. } => return Some(message.clone()),
         CallOutcome::Held { message } => return Some(message.clone()),
@@ -172,7 +205,9 @@ fn status_of(outcome: &CallOutcome, dry_run: bool) -> &'static str {
                 "ok"
             }
         }
-        CallOutcome::Failure { .. } => "error",
+        CallOutcome::Failure { .. }
+        | CallOutcome::NotDispatched { .. }
+        | CallOutcome::OutcomeUnknown { .. } => "error",
         CallOutcome::Denied { .. } => {
             if dry_run {
                 "would_deny"
@@ -187,6 +222,37 @@ fn status_of(outcome: &CallOutcome, dry_run: bool) -> &'static str {
 
 const STEP_TEXT_BUDGET: usize = 2000;
 const COMPACT_BUDGET: usize = 25000;
+/// A retained composition yields after at most the ordinary tool timeout, at a step boundary.
+const COMPOSITION_QUANTUM: Duration = Duration::from_secs(60);
+
+/// Return the one concrete tab shared by every surface step, or None for dynamic/mixed work.
+pub(crate) fn single_surface_tab(args: &Value) -> Option<i64> {
+    let inherited_tab = args.get("tabId").and_then(Value::as_i64);
+    let steps = args.get("steps").and_then(Value::as_array)?;
+    let mut surface = None;
+    for step in steps {
+        let name = step.get("tool").and_then(Value::as_str)?;
+        let descriptor = directory::descriptor(name)?;
+        match descriptor.scheduling.scope {
+            SchedulingScope::Surface => {
+                let tab = step
+                    .get("args")
+                    .and_then(|value| value.get("tabId"))
+                    .and_then(Value::as_i64)
+                    .or(inherited_tab)?;
+                if surface.is_some_and(|current| current != tab) {
+                    return None;
+                }
+                surface = Some(tab);
+            }
+            SchedulingScope::Local | SchedulingScope::Presentation => {}
+            SchedulingScope::ClientTopology
+            | SchedulingScope::Browser
+            | SchedulingScope::Composition => return None,
+        }
+    }
+    surface
+}
 
 /// Drive the shared batch engine over `args.steps` with `runner`, returning the raw [`BatchRun`]
 /// (per-step full results + summary + duration + batch_id) BEFORE any front-door formatting
@@ -329,7 +395,9 @@ pub(crate) fn run_batch<R: StepRunner>(
 
         // A human pause stops the script unconditionally, regardless of onError. Burning through
         // later steps that cannot dispatch would be technically repetitive and humanly wrong.
-        if matches!(status, "held" | "attention_required") {
+        if matches!(status, "held" | "attention_required")
+            || matches!(&outcome, CallOutcome::OutcomeUnknown { .. })
+        {
             records.push(StepOutcome {
                 step: step_no,
                 tool,
@@ -338,7 +406,9 @@ pub(crate) fn run_batch<R: StepRunner>(
             });
             structured.push(None);
             stopped_at = Some(step_no);
-            stop_reason = if status == "held" {
+            stop_reason = if matches!(&outcome, CallOutcome::OutcomeUnknown { .. }) {
+                StopReason::Failed
+            } else if status == "held" {
                 StopReason::Held
             } else {
                 StopReason::AttentionRequired
@@ -571,9 +641,16 @@ pub(crate) fn script_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
         let mut runner = PipelineRunner {
             browser: ctx.browser,
             store: ctx.store,
-            governance: ctx.governance,
+            authority: ctx.authority,
             guid: ctx.guid,
             overlay: ctx.overlay,
+            retained_tab: if dry_run {
+                None
+            } else {
+                single_surface_tab(ctx.args)
+            },
+            retained_execution: None,
+            retained_started: None,
         };
         let mut compact = interpret(
             ctx.args,
@@ -625,23 +702,39 @@ fn futures_await_block(
     dry_run: bool,
     browser: &Browser,
     store: &Arc<ConfigStore>,
-    governance: &Governance,
+    authority: &AuthorityStore,
     guid: &str,
     overlay: Option<&crate::governance::overlay::SessionOverlay>,
+    inherited_execution: Option<&ExecutionContext>,
 ) -> CallOutcome {
     tokio::task::block_in_place(|| {
         let handle = tokio::runtime::Handle::current();
         handle.block_on(run_tool_call(
             browser,
             store,
-            governance,
+            authority,
             guid,
             name,
             args,
             orchestration,
             dry_run,
             overlay,
+            inherited_execution,
+            None,
         ))
+    })
+}
+
+fn acquire_retained_surface(
+    browser: &Browser,
+    guid: &str,
+    tab_id: i64,
+    authority_epoch: u64,
+) -> Result<ExecutionContext, String> {
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current()
+            .block_on(browser.acquire_composition_surface(guid, tab_id, authority_epoch))
+            .map_err(schedule_failure_message)
     })
 }
 
@@ -650,6 +743,37 @@ mod tests {
     use super::*;
     use crate::ToolError;
     use serde_json::json;
+
+    #[test]
+    fn preflight_retains_one_static_surface_and_ignores_presentation_steps() {
+        let args = json!({
+            "tabId": 17,
+            "steps": [
+                {"tool": "read_page", "args": {}},
+                {"tool": "narrate", "args": {"tabId": 17, "message": "working"}},
+                {"tool": "computer", "args": {"action": "screenshot"}}
+            ]
+        });
+        assert_eq!(single_surface_tab(&args), Some(17));
+    }
+
+    #[test]
+    fn preflight_falls_back_for_mixed_dynamic_or_topology_work() {
+        let mixed = json!({"steps": [
+            {"tool": "read_page", "args": {"tabId": 1}},
+            {"tool": "find", "args": {"tabId": 2, "query": "x"}}
+        ]});
+        let dynamic = json!({"steps": [
+            {"tool": "read_page", "args": {"tabId": "$prev.tabId"}}
+        ]});
+        let topology = json!({"tabId": 1, "steps": [
+            {"tool": "read_page", "args": {}},
+            {"tool": "tabs_context_mcp", "args": {}}
+        ]});
+        assert_eq!(single_surface_tab(&mixed), None);
+        assert_eq!(single_surface_tab(&dynamic), None);
+        assert_eq!(single_surface_tab(&topology), None);
+    }
 
     /// One recorded dispatch into the stub runner, for asserting on what the interpreter actually
     /// sent (tool name, resolved args, orchestration stamp).
@@ -710,6 +834,12 @@ mod tests {
             },
             CallOutcome::Failure { error } => CallOutcome::Failure {
                 error: ToolError::invalid_request(error.to_string()),
+            },
+            CallOutcome::NotDispatched { message } => CallOutcome::NotDispatched {
+                message: message.clone(),
+            },
+            CallOutcome::OutcomeUnknown { message } => CallOutcome::OutcomeUnknown {
+                message: message.clone(),
             },
             CallOutcome::Denied { message, source } => CallOutcome::Denied {
                 message: message.clone(),

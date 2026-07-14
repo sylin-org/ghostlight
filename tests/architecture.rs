@@ -122,6 +122,14 @@ fn governance_dir() -> PathBuf {
         .join("governance")
 }
 
+fn mcp_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates")
+        .join("core")
+        .join("src")
+        .join("mcp")
+}
+
 /// Recursively collect every `.rs` file under `dir` into `out`. Hand-rolled, no `walkdir`.
 fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display())) {
@@ -176,6 +184,31 @@ fn governance_core_has_no_forbidden_back_edges() {
          The core is relocatable ONLY while it has no back-edges. Move the coupling behind a \
          port (A2) or into browser/. Violations:\n{}",
         violations.join("\n")
+    );
+}
+
+/// ADR-0080: production MCP code may not use the legacy safety-protocol Browser::call wrapper.
+/// Every ordinary browser dispatch must name call_with_context and carry an ExecutionContext.
+#[test]
+fn mcp_browser_dispatches_require_an_execution_context() {
+    let mut files = Vec::new();
+    collect_rust_files(&mcp_dir(), &mut files);
+    let mut violations = Vec::new();
+    for file in files {
+        let contents = fs::read_to_string(&file).expect("read MCP source");
+        let production = contents.split("#[cfg(test)]").next().unwrap_or(&contents);
+        let compact: String = production
+            .chars()
+            .filter(|character| !character.is_ascii_whitespace())
+            .collect();
+        if compact.contains("browser.call(") {
+            violations.push(file.display().to_string());
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "ordinary MCP browser sends must use call_with_context; legacy call found in: {}",
+        violations.join(", ")
     );
 }
 

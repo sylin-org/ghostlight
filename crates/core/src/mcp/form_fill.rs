@@ -17,6 +17,7 @@ use crate::browser::form_match::{self, ControlRef, FormStructure};
 use crate::governance::dispatch::Governance;
 use crate::governance::ports::Capability;
 use crate::hub::outbound::browser::Browser;
+use crate::hub::scheduling::ExecutionContext;
 use crate::mcp::outcome::{CallOutcome, LocalCtx, LocalFuture};
 use serde_json::{json, Value};
 use std::time::Instant;
@@ -24,7 +25,16 @@ use std::time::Instant;
 /// The `form_fill` tool's `Handler::Local` entry point (post-grant dispatch position, PINS.md
 /// SS2): the parent's governance decision has already run by the time this is called.
 pub(crate) fn form_fill_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
-    Box::pin(async move { run(ctx.browser, ctx.governance, ctx.guid, ctx.args).await })
+    Box::pin(async move {
+        run(
+            ctx.browser,
+            ctx.governance,
+            ctx.guid,
+            ctx.args,
+            ctx.execution,
+        )
+        .await
+    })
 }
 
 /// Build a `Success` result carrying `isError: true` -- byte-identical to what
@@ -71,7 +81,13 @@ fn first_text(result: &Value) -> Option<&str> {
         .as_str()
 }
 
-async fn run(browser: &Browser, governance: &Governance, guid: &str, args: &Value) -> CallOutcome {
+async fn run(
+    browser: &Browser,
+    governance: &Governance,
+    guid: &str,
+    args: &Value,
+    execution: &ExecutionContext,
+) -> CallOutcome {
     let started = Instant::now();
     let batch_id = uuid::Uuid::new_v4().to_string();
 
@@ -98,7 +114,12 @@ async fn run(browser: &Browser, governance: &Governance, guid: &str, args: &Valu
     // carries nothing. Internals attribute `None` rather than re-resolving a second grant lookup.
     structure_audit.attribute_grant(None);
     let structure_result = browser
-        .call(guid, "form_structure_internal", &json!({ "tabId": tab_id }))
+        .call_with_context(
+            guid,
+            "form_structure_internal",
+            &json!({ "tabId": tab_id }),
+            execution,
+        )
         .await;
     structure_audit.complete();
 
@@ -137,10 +158,11 @@ async fn run(browser: &Browser, governance: &Governance, guid: &str, args: &Valu
         fill_audit.orchestrated("form_fill", &batch_id, Some(step));
         fill_audit.attribute_grant(None);
         let dispatch = browser
-            .call(
+            .call_with_context(
                 guid,
                 "form_input",
                 &json!({ "tabId": tab_id, "ref": control.ref_id, "value": value.clone() }),
+                execution,
             )
             .await;
         fill_audit.complete();
@@ -199,10 +221,11 @@ async fn run(browser: &Browser, governance: &Governance, guid: &str, args: &Valu
                     submit_audit.orchestrated("form_fill", &batch_id, Some(step));
                     submit_audit.attribute_grant(None);
                     let dispatch = browser
-                        .call(
+                        .call_with_context(
                             guid,
                             "computer",
                             &json!({ "action": "left_click", "tabId": tab_id, "ref": candidate.ref_id }),
+                            execution,
                         )
                         .await;
                     submit_audit.complete();

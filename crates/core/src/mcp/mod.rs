@@ -6,6 +6,7 @@
 //! `tools/call`. Implemented in Phase 1.
 
 pub mod act_on;
+pub mod authority;
 pub mod browser_batch;
 pub mod form_fill;
 pub mod gif_creator;

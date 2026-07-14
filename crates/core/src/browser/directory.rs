@@ -105,6 +105,87 @@ pub enum PageOutput {
     Structured,
 }
 
+/// The scheduling resource declared by a tool descriptor (ADR-0080).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchedulingScope {
+    /// Serialize on the resolved native tab surface.
+    Surface,
+    /// Serialize topology work for one client within a browser slot.
+    ClientTopology,
+    /// Exclude all child work within the resolved browser slot.
+    Browser,
+    /// Bypass browser resource queues as presentation-only traffic.
+    Presentation,
+    /// Bypass browser resource queues as service-local work.
+    Local,
+    /// Resolve scheduling from the composition's concrete steps.
+    Composition,
+}
+
+/// How long a tool keeps its admitted scheduling lease (ADR-0080).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeaseMode {
+    /// One extension dispatch under one lease.
+    Dispatch,
+    /// Keep one surface across descriptor-gated internal operations.
+    RetainSurface,
+    /// Plan and schedule a composition at its concrete step boundary.
+    Composition,
+}
+
+/// Scheduling metadata owned by the tool registry rather than name switches in the pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scheduling {
+    /// Resource class on which the tool schedules.
+    pub scope: SchedulingScope,
+    /// Lease lifetime for the tool's implementation.
+    pub lease: LeaseMode,
+}
+
+impl Scheduling {
+    /// A normal one-dispatch surface tool.
+    pub const SURFACE: Self = Self {
+        scope: SchedulingScope::Surface,
+        lease: LeaseMode::Dispatch,
+    };
+
+    /// A compound tool that retains one surface across internal operations.
+    pub const RETAIN_SURFACE: Self = Self {
+        scope: SchedulingScope::Surface,
+        lease: LeaseMode::RetainSurface,
+    };
+
+    /// A client-topology command.
+    pub const CLIENT_TOPOLOGY: Self = Self {
+        scope: SchedulingScope::ClientTopology,
+        lease: LeaseMode::Dispatch,
+    };
+
+    /// A browser-wide command.
+    pub const BROWSER: Self = Self {
+        scope: SchedulingScope::Browser,
+        lease: LeaseMode::Dispatch,
+    };
+
+    /// Presentation traffic.
+    pub const PRESENTATION: Self = Self {
+        scope: SchedulingScope::Presentation,
+        lease: LeaseMode::Dispatch,
+    };
+
+    /// Service-local work.
+    pub const LOCAL: Self = Self {
+        scope: SchedulingScope::Local,
+        lease: LeaseMode::Dispatch,
+    };
+
+    /// A composition whose concrete steps determine scheduling.
+    pub const COMPOSITION: Self = Self {
+        scope: SchedulingScope::Composition,
+        lease: LeaseMode::Composition,
+    };
+}
+
 /// One action variant of a [`ToolDescriptor`]: its bound capability requirement set and its
 /// directory-facing description (the text `explain` renders -- distinct from the advertised
 /// description the model sees in `tools/list`). A tool with no sub-actions carries exactly one
@@ -139,6 +220,8 @@ pub struct ToolDescriptor {
     /// One entry per action variant; single-action tools carry one `action: None` entry.
     pub variants: &'static [ActionVariant],
     pub resource: ResourceShape,
+    /// Resource and lease behavior used by the service command scheduler.
+    pub scheduling: Scheduling,
     pub handler: Handler,
     /// Applied to the dispatch result before it is returned, when present: `read_page`'s
     /// secret redaction is the only user today.
@@ -323,6 +406,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 "List the MCP tab group: the ids, URLs, and titles of the tabs this server controls.",
         }],
         resource: ResourceShape::DomainLess,
+        scheduling: Scheduling::CLIENT_TOPOLOGY,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::Text,
@@ -369,6 +453,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Open a new empty tab in the MCP tab group; touches no page and no server.",
         }],
         resource: ResourceShape::DomainLess,
+        scheduling: Scheduling::CLIENT_TOPOLOGY,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::Text,
@@ -428,6 +513,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Load a URL in a tab, or go back or forward in its history; a top-level GET.",
         }],
         resource: ResourceShape::TargetArg,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::Text,
@@ -593,6 +679,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             },
         ],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::Receipt,
@@ -628,6 +715,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Search the page for elements matching a natural-language description.",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::Text,
@@ -683,6 +771,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Fill or set values in form fields; a declared, state-changing write.",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::Receipt,
@@ -718,6 +807,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Extract the page's readable text content, article-first, without HTML.",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::Text,
@@ -758,6 +848,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 "Run arbitrary JavaScript in the page; unbounded, and can bypass the UI entirely.",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::Text,
@@ -805,6 +896,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Read buffered browser console messages from a tab.",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::Text,
@@ -848,6 +940,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Read buffered HTTP network requests observed in a tab.",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::Text,
@@ -900,6 +993,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Read the page as an accessibility tree of elements with reference ids.",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::Text,
@@ -946,6 +1040,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Resize the browser window; browser state only, touches no page content.",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::BROWSER,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::None,
@@ -983,6 +1078,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Present a plan of intended actions to the user; informational only.",
         }],
         resource: ResourceShape::DomainLess,
+        scheduling: Scheduling::LOCAL,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::None,
@@ -1033,6 +1129,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Show temporary agent commentary in an owned tab; touches no page content and requires no RAWX capability.",
         }],
         resource: ResourceShape::DomainLess,
+        scheduling: Scheduling::PRESENTATION,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::None,
@@ -1102,6 +1199,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 "Wait for a condition and page settlement; observes the DOM, touches nothing.",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::Text,
@@ -1175,6 +1273,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 "Run up to 20 tool calls sequentially in one request; each step is authorized and audited individually.",
         }],
         resource: ResourceShape::DomainLess,
+        scheduling: Scheduling::COMPOSITION,
         handler: Handler::Local(crate::mcp::script::script_handler),
         postprocess: None,
         page_output: PageOutput::None,
@@ -1248,6 +1347,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             },
         ],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::RETAIN_SURFACE,
         handler: Handler::Local(crate::mcp::form_fill::form_fill_handler),
         postprocess: None,
         page_output: PageOutput::Structured,
@@ -1384,6 +1484,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             },
         ],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::RETAIN_SURFACE,
         handler: Handler::Local(crate::mcp::act_on::act_on_handler),
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::Receipt,
@@ -1462,6 +1563,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             },
         ],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::Text,
@@ -1510,6 +1612,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             },
         ],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::None,
@@ -1564,6 +1667,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 "Upload files (base64 bytes) to a file input located by read_page or find, via its ref.",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::SURFACE,
         handler: Handler::ExtensionForward,
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::Receipt,
@@ -1605,6 +1709,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 "Run a sequence of tool calls in one round trip; each item is name+input, authorized per item.",
         }],
         resource: ResourceShape::DomainLess,
+        scheduling: Scheduling::COMPOSITION,
         handler: Handler::Local(crate::mcp::browser_batch::browser_batch_handler),
         postprocess: None,
         page_output: PageOutput::None,
@@ -1638,6 +1743,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 "Upload a previously captured screenshot to a file input (ref) or drag-drop target (coordinate).",
         }],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::RETAIN_SURFACE,
         handler: Handler::Local(crate::mcp::upload_image::upload_image_handler),
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::Receipt,
@@ -1703,6 +1809,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             },
         ],
         resource: ResourceShape::TabScoped,
+        scheduling: Scheduling::RETAIN_SURFACE,
         // ADR-0053 D6: the orchestrator lives in the binary (the form_fill precedent); the
         // extension keeps only the thin screencast capture relay. Wiring only -- the advertised
         // schema above is untouched.
@@ -1729,6 +1836,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Show every action available here and the capability each one requires.",
         }],
         resource: ResourceShape::DomainLess,
+        scheduling: Scheduling::LOCAL,
         handler: Handler::Local(|ctx| {
             Box::pin(async move {
                 let _ = ctx;
@@ -2108,6 +2216,42 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn every_tool_has_the_accepted_scheduling_shape() {
+        const EXPECTED: &[(&str, Scheduling)] = &[
+            ("tabs_context_mcp", Scheduling::CLIENT_TOPOLOGY),
+            ("tabs_create_mcp", Scheduling::CLIENT_TOPOLOGY),
+            ("navigate", Scheduling::SURFACE),
+            ("computer", Scheduling::SURFACE),
+            ("find", Scheduling::SURFACE),
+            ("form_input", Scheduling::SURFACE),
+            ("get_page_text", Scheduling::SURFACE),
+            ("javascript_tool", Scheduling::SURFACE),
+            ("read_console_messages", Scheduling::SURFACE),
+            ("read_network_requests", Scheduling::SURFACE),
+            ("read_page", Scheduling::SURFACE),
+            ("resize_window", Scheduling::BROWSER),
+            ("update_plan", Scheduling::LOCAL),
+            ("narrate", Scheduling::PRESENTATION),
+            ("wait_for", Scheduling::SURFACE),
+            ("script", Scheduling::COMPOSITION),
+            ("form_fill", Scheduling::RETAIN_SURFACE),
+            ("act_on", Scheduling::RETAIN_SURFACE),
+            ("dialog", Scheduling::SURFACE),
+            ("tab_control", Scheduling::SURFACE),
+            ("file_upload", Scheduling::SURFACE),
+            ("browser_batch", Scheduling::COMPOSITION),
+            ("upload_image", Scheduling::RETAIN_SURFACE),
+            ("gif_creator", Scheduling::RETAIN_SURFACE),
+            ("explain", Scheduling::LOCAL),
+        ];
+        let actual: Vec<_> = REGISTRY
+            .iter()
+            .map(|descriptor| (descriptor.tool, descriptor.scheduling))
+            .collect();
+        assert_eq!(actual, EXPECTED);
     }
 
     #[test]

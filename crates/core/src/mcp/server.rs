@@ -29,10 +29,9 @@
 //! [`SCREENSHOT_CHUNK_THRESHOLD`] bytes with an explicit yield between chunks -- see the module
 //! doc on `src/hub/mod.rs` for the accepted-bottleneck framing this closes a gap in.
 
-use crate::browser::{advertise, directory, polarity};
+use crate::browser::{advertise, directory};
 use crate::governance::config::reload::ConfigStore;
 use crate::governance::dispatch::Governance;
-use crate::governance::enforcement::LocalPdp;
 use crate::governance::manifest::identity::ManifestIdentity;
 use crate::governance::manifest::source::LoadedPolicy;
 use crate::governance::overlay::SessionOverlay;
@@ -40,6 +39,7 @@ use crate::governance::ports::{AuditSink, Denial};
 use crate::hub::outbound::browser::Browser;
 use crate::hub::session::SessionGuid;
 use crate::hub::ServiceContext;
+use crate::mcp::authority::AuthorityStore;
 use crate::mcp::pipeline;
 use crate::mcp::tools::{advertised_tools_json, agent_guide_text};
 use crate::mcp::types::{text_content, JsonRpcResponse};
@@ -156,23 +156,6 @@ impl Drop for LiveGuidGuard {
     }
 }
 
-/// Build the live `Governance` facade from a resolved policy (ADR-0025 Decision 2): all-open
-/// when no manifest is active, a governed overlay otherwise. Exactly the wiring `run` performed
-/// inline at startup before this task, extracted so the policy-subscription task (below) can
-/// rebuild an equivalent instance on every hot-reloaded manifest swap.
-fn build_governance(policy: &LoadedPolicy, recorder: Arc<dyn AuditSink>) -> Governance {
-    match &policy.manifest {
-        Some(manifest) => Governance::governed(
-            Box::new(LocalPdp::new(polarity::evaluate_host)),
-            recorder,
-            manifest.grants.clone(),
-            manifest.hash.clone(),
-            manifest.mode,
-        ),
-        None => Governance::all_open(recorder),
-    }
-}
-
 /// The identity to stamp on a `manifest_reload` session event (ADR-0025 Decision 5): `None` for
 /// a swap to all-open, else the active manifest's `name`/`version`/`hash` (already computed by
 /// `parse_manifest`, never a second read).
@@ -182,13 +165,6 @@ fn manifest_identity_of(policy: &LoadedPolicy) -> Option<ManifestIdentity> {
         version: m.version.clone(),
         hash: m.hash.clone(),
     })
-}
-
-/// Snapshot the current `Governance` out of the swap slot: one `Arc` clone, released
-/// immediately (ADR-0025 Decision 2, the same per-call-snapshot idiom `ConfigStore::current`
-/// already follows for `Config`).
-fn current_governance(slot: &Arc<Mutex<Arc<Governance>>>) -> Arc<Governance> {
-    slot.lock().unwrap_or_else(PoisonError::into_inner).clone()
 }
 
 /// MCP revisions this server implements, oldest first (ADR-0041 D5; latest bumped to 2025-11-25 by
@@ -275,24 +251,27 @@ where
     // `loaded_policy` already resolved which one wins), all-open otherwise. `governance_slot`
     // (ADR-0025 Decision 2) is the swappable snapshot slot: every call clones the CURRENT
     // `Arc<Governance>` once, at the top of the main loop below, and uses it for the whole call.
-    let governance = Arc::new(build_governance(
-        &loaded_policy,
+    let authority_store = Arc::new(AuthorityStore::new(
+        &store.current_authority(),
         recorder.clone() as Arc<dyn AuditSink>,
     ));
+    let governance = authority_store.current().governance.clone();
     if loaded_policy.user_manifest_ignored {
         // ADR-0025 Decision 5: the promised startup audit note (implements the note
         // `source.rs`'s doc comment used to defer to "a future audit task").
         governance.record_user_manifest_ignored();
     }
-    let governance_slot: Arc<Mutex<Arc<Governance>>> = Arc::new(Mutex::new(governance));
 
     // ADR-0079: one independent denial-attention circuit per live MCP session. Its hook always
     // reads the current governance snapshot so a manifest reload cannot send transition records
     // to a stale audit sink or lose the captured client identity.
     {
-        let attention_governance = Arc::clone(&governance_slot);
+        let attention_authority = Arc::clone(&authority_store);
         browser.register_attention_session(guid.as_str(), move |event| {
-            current_governance(&attention_governance).record_attention_event(event);
+            attention_authority
+                .current()
+                .governance
+                .record_attention_event(event);
         });
     }
 
@@ -311,9 +290,9 @@ where
     // records nothing on a later kill. `_kill_handle` is held for the whole function body so the
     // registration outlives every kill this session may observe.
     let _kill_handle = {
-        let governance_slot = Arc::clone(&governance_slot);
+        let kill_authority = Arc::clone(&authority_store);
         browser.register_session_kill_hook(move || {
-            current_governance(&governance_slot).record_session_killed();
+            kill_authority.current().governance.record_session_killed();
             tracing::info!("session killed by the user");
         })
     };
@@ -369,28 +348,32 @@ where
     // would then wait forever for a sender that is never released -- the process would never
     // exit on stdin close.
     let policy_subscription = tokio::spawn({
-        let governance_slot = Arc::clone(&governance_slot);
+        let authority_store = Arc::clone(&authority_store);
         // ADR-0055 Impl.9c: a concrete Recorder handle (the AuditSink trait has no set_policy_seq)
         // so a live policy change keeps the tool-call policy_seq stamp in step with the new origin.
         let seq_recorder = Arc::clone(&recorder);
-        let recorder = recorder.clone() as Arc<dyn AuditSink>;
-        let mut policy_changes = store.policy();
+        let mut authority_changes = store.subscribe_authority();
         let tx = tx.clone();
         let fixture = advertised_tools_json();
         let browser = browser.clone();
         async move {
-            let mut ignored_in_force = policy_changes.borrow().user_manifest_ignored;
-            while policy_changes.changed().await.is_ok() {
-                let loaded_policy = policy_changes.borrow_and_update().clone();
+            let mut ignored_in_force = authority_changes.borrow().policy.user_manifest_ignored;
+            while authority_changes.changed().await.is_ok() {
+                let inputs = authority_changes.borrow_and_update().clone();
+                let outgoing = authority_store.current();
+                let policy_changed =
+                    manifest_identity_of(&outgoing.policy) != manifest_identity_of(&inputs.policy);
 
                 // ADR-0073: a policy epoch change invalidates capture authority. Erase bytes
                 // before installing the new policy and stop every matching extension relay.
-                browser.erase_all_recordings(crate::recording::StopReason::PolicyChanged);
+                if policy_changed {
+                    browser.erase_all_recordings(crate::recording::StopReason::PolicyChanged);
+                }
 
                 // ADR-0055 Impl.9c: track the org-signed policy sequence across a live change. A
                 // managed origin re-reads the T2 sidecar for the current seq; any other origin clears
                 // it (default None), so a Managed -> non-managed transition drops the stamp.
-                match loaded_policy.origin {
+                match inputs.policy.origin {
                     Some(crate::governance::manifest::source::ManifestOrigin::Managed) => {
                         let paths = crate::governance::paths::GovernancePaths::production();
                         if let Some(cache_path) = paths.managed_cache.as_ref() {
@@ -406,38 +389,29 @@ where
                     _ => seq_recorder.set_policy_seq(None),
                 }
 
-                let outgoing = current_governance(&governance_slot);
-                let before = advertise::advertised_tools(&fixture, outgoing.grants());
-                let client = outgoing.current_client();
-                drop(outgoing);
+                let before = advertise::advertised_tools(&fixture, outgoing.governance.grants());
+                browser.scheduler().advance_authority_epoch(inputs.epoch);
+                let next = authority_store.install(&inputs);
+                let after = advertise::advertised_tools(&fixture, next.governance.grants());
 
-                let new_governance = build_governance(&loaded_policy, recorder.clone());
-                if let Some(client) = client {
-                    new_governance.set_client(&client.name, &client.version);
+                if policy_changed {
+                    next.governance
+                        .record_manifest_reload(manifest_identity_of(&inputs.policy));
                 }
-                let after = advertise::advertised_tools(&fixture, new_governance.grants());
-                let new_governance = Arc::new(new_governance);
-
-                {
-                    let mut guard = governance_slot
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner);
-                    *guard = Arc::clone(&new_governance);
-                }
-
-                new_governance.record_manifest_reload(manifest_identity_of(&loaded_policy));
 
                 if before != after {
                     let _ = tx.send(Outbound::ToolsListChanged);
                 }
 
-                if crate::governance::ports::user_manifest_ignored_transitioned(
-                    ignored_in_force,
-                    loaded_policy.user_manifest_ignored,
-                ) {
-                    new_governance.record_user_manifest_ignored();
+                if policy_changed
+                    && crate::governance::ports::user_manifest_ignored_transitioned(
+                        ignored_in_force,
+                        inputs.policy.user_manifest_ignored,
+                    )
+                {
+                    next.governance.record_user_manifest_ignored();
                 }
-                ignored_in_force = loaded_policy.user_manifest_ignored;
+                ignored_in_force = inputs.policy.user_manifest_ignored;
             }
         }
     });
@@ -459,7 +433,8 @@ where
         if line.is_empty() {
             continue;
         }
-        let governance = current_governance(&governance_slot);
+        let authority_snapshot = authority_store.current();
+        let governance = authority_snapshot.governance.clone();
         // H4 (ADR-0030 Decision 6; PINS.md SS3): the cross-session tab-ownership gate runs
         // BEFORE any dispatch into `handle_line`'s "tools/call" arm -- and therefore before
         // `pipeline::handle_tools_call`'s own `LazyTabUrl` probe can ever fire for this line's
@@ -485,6 +460,7 @@ where
             &browser,
             &capabilities,
             &store,
+            &authority_store,
             &governance,
             &seat,
             line,
@@ -657,10 +633,12 @@ fn release_explicitly_closed_tab(
 /// `tools_call_produces_one_audit_record_with_client_identity` drives this directly, alongside
 /// `pipeline::handle_tools_call` -- a compile-necessary visibility widening from the pre-move
 /// private fn, since the two functions now live in sibling modules.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_line(
     browser: &Browser,
     capabilities: &crate::hub::outbound::Registry,
     store: &Arc<ConfigStore>,
+    authority: &Arc<AuthorityStore>,
     governance: &Arc<Governance>,
     seat: &SessionSeat,
     line: &str,
@@ -820,6 +798,7 @@ pub(super) async fn handle_line(
         "tools/call" => {
             let browser = browser.clone();
             let store = Arc::clone(store);
+            let authority = Arc::clone(authority);
             let governance = Arc::clone(governance);
             let tx = tx.clone();
             let params = raw.get("params").cloned();
@@ -850,10 +829,10 @@ pub(super) async fn handle_line(
                     .flatten()
             });
             tokio::spawn(async move {
-                let resp = pipeline::handle_tools_call(
+                let resp = pipeline::handle_tools_call_scheduled(
                     &browser,
                     &store,
-                    &governance,
+                    &authority,
                     guid.as_str(),
                     id,
                     params.as_ref(),

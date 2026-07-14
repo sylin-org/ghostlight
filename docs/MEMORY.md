@@ -65,6 +65,10 @@ file does not restate them -- follow AGENTS.md.
 - **Debug observability is metadata-only.** MCP bodies and successful tool results can contain page
   text, form values, files, screenshots, or recordings. Never persist them in debug events; keep
   method/tool ids, states, counts, timings, and byte sizes only (ADR-0073).
+- **A native-port or extension-worker restart is not a browser restart.** Chrome storage.session
+  provides the process-generation proof used by ADR-0080 recovery. Do not clear an uncertain tab
+  merely because the native host reconnected; require the exact terminal command, tab destruction,
+  or a changed browser-process generation.
 
 ## Pointer index (where durable things live)
 

@@ -11,7 +11,7 @@
 //! the audit trail names the front door the model actually called.
 
 use crate::mcp::outcome::{CallOutcome, LocalCtx, LocalFuture};
-use crate::mcp::script::{run_batch, BatchRun, PipelineRunner};
+use crate::mcp::script::{run_batch, single_surface_tab, BatchRun, PipelineRunner};
 use serde_json::{json, Value};
 
 /// Translate browser_batch's `{actions: [{name, input}]}` (plus an optional top-level `tabId`) into
@@ -97,9 +97,12 @@ pub(crate) fn browser_batch_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
         let mut runner = PipelineRunner {
             browser: ctx.browser,
             store: ctx.store,
-            governance: ctx.governance,
+            authority: ctx.authority,
             guid: ctx.guid,
             overlay: ctx.overlay,
+            retained_tab: single_surface_tab(&translated),
+            retained_execution: None,
+            retained_started: None,
         };
         // browser_batch is byte-faithful to its trained schema: no dry_run, no budget_ms override.
         let run = run_batch(
@@ -161,6 +164,12 @@ mod tests {
             },
             CallOutcome::Failure { error } => CallOutcome::Failure {
                 error: crate::ToolError::invalid_request(error.to_string()),
+            },
+            CallOutcome::NotDispatched { message } => CallOutcome::NotDispatched {
+                message: message.clone(),
+            },
+            CallOutcome::OutcomeUnknown { message } => CallOutcome::OutcomeUnknown {
+                message: message.clone(),
             },
             CallOutcome::Denied { message, source } => CallOutcome::Denied {
                 message: message.clone(),
