@@ -15,6 +15,9 @@ when they disagree**, and update it when you land something that changes the pic
   scoop/winget/homebrew manifests committed to main, trust footers restamped, and the sylin.org
   install-guide fallback refreshed. Release PR #48 merged at `96d1e02`; checksum fill is
   `49c4c5a` and the trust restamp is `4ddb5af`. v0.5.5 was prepared but never published.
+- **v0.5.8 is prepared on `dev`, not published.** Crates, the unpacked extension, npm/MCP
+  metadata, and package-manager templates identify as 0.5.8. Release checksums still belong to
+  the last published artifacts until the owner runs the release workflow from `main`.
 - **v0.5.7 includes the expanded installer matrix**: Codex is a first-class lossless-TOML target
   (ADR-0067), and Windsurf, Zed, OpenCode, and Crush join Claude Code/Desktop, Cursor, and VS Code
   as explicit installer targets (ADR-0071). Strict JSON is merged idempotently. Commented JSONC is

@@ -5,7 +5,21 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.8] - 2026-07-14
+
+Closed-loop browser actions, calmer visible feedback, local-only transport hardening, and
+resource-scoped command reliability.
+
+### Added
+
+- **Closed-loop browser core (ADR-0078).** The additive tool surface now includes semantic
+  `act_on`, explicit JavaScript dialog control, and exact owned-tab focus, reload, and close.
+  Bounded interaction receipts and ref-linked target resolution reduce read-act-read roundtrips.
+- **Resource-scoped scheduling (ADR-0080).** Browser work uses bounded fair queues per tab,
+  client topology, and browser. Same-tab commands serialize, different tabs remain parallel,
+  and single-surface compound operations retain a reentrant lease with a bounded yield quantum.
+- **Extension surface executor.** A bounded per-surface FIFO adds command deduplication,
+  acceptance and terminal acknowledgements, payload erasure, and exact unknown-outcome recovery.
 
 ### Removed
 
@@ -20,6 +34,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CycloneDX SBOM, packages the extension, creates a canonical `SHA256SUMS` manifest, and uploads
   one release bundle. The privileged publisher only downloads, verifies, attests, and releases
   those existing files.
+- **Developer-first entry.** The README and install journey lead with practitioner setup,
+  no-account and free-core facts, a read-only first proof, and the pre-release extension path.
+- **Calmer visible feedback (ADR-0079).** Isolated denials use a short non-modal sticker. Repeated
+  denials pause only the producing MCP session and offer explicit recovery controls. Narration,
+  screenshot, and recording cues share a quieter visual language.
+- **Atomic execution authority.** Configuration and policy publish as one epoch-bound snapshot;
+  URL probes, authorization, dispatch, landing verification, post-processing, and audit use one
+  admitted execution context.
+
+### Fixed
+
+- Native-port and extension-worker reconnects no longer clear an uncertain tab. Recovery requires
+  the exact terminal command, confirmed tab destruction, or a changed browser-process generation.
 
 ## [0.5.7] - 2026-07-13
 
