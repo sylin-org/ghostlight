@@ -37,6 +37,7 @@
     "ghostlight-cursor",
     "ghostlight-active",
     "ghostlight-ripples",
+    "ghostlight-signature-layer",
     "ghostlight-narration-layer",
     "ghostlight-notification-layer",
     "ghostlight-attention-host",
@@ -50,9 +51,14 @@
   const CURSOR_ID = "ghostlight-cursor";
   const GLOW_ID = "ghostlight-active";
   const FX_LAYER_ID = "ghostlight-ripples"; // holds all transient effects (rings, trail, shimmer)
+  const SIGNATURE_LAYER_ID = "ghostlight-signature-layer";
   const NARRATION_LAYER_ID = "ghostlight-narration-layer";
   const STYLE_ID = "ghostlight-indicator-styles";
-  const narrationPlacement = window.GhostlightNarrationPlacement;
+  const presentationPlacement = window.GhostlightPresentationPlacement;
+  const actionSignature = window.GhostlightActionSignature;
+  const ACTION_SIGNATURE_TYPE = actionSignature
+    ? actionSignature.TYPE
+    : "AGENT_ACTION_SIGNATURE";
   // Ghostlight brand accent: a luminous sky blue. SKY_RGB is the same color for rgba() shadows.
   const SKY = "#38bdf8";
   const SKY_RGB = "56,189,248";
@@ -77,6 +83,10 @@
   const ZOOMFRAME_MS = 1150; // zoom magnifier frame
   const CHEV_MS = 1150; // scroll chevron cascade
   const NAVPILL_MS = 1600; // navigate destination pill
+  const SIGNATURE_CONFIRM_MS = 900;
+  const SIGNATURE_EXIT_MS = 460;
+  const SIGNATURE_STALE_MS = 61000;
+  const SIGNATURE_PAINT_FALLBACK_MS = 80;
   // Notification sticker timings (ADR-0079): a denial is transient, replaces any older sticker,
   // and expires on its own. Repeated denials may open the separately rendered attention overlay.
   const NOTIF_GROW_MS = 320; // band unfurls from its center line
@@ -86,6 +96,13 @@
   let cursorEl = null;
   let glowEl = null;
   let fxLayer = null;
+  let signatureLayer = null;
+  let activeSignatureEl = null;
+  let activeSignatureKind = null;
+  let activeSignaturePosition = null;
+  let signatureFinishTimer = null;
+  let signatureRemoveTimer = null;
+  let signatureStaleTimer = null;
   let fxSeq = 0;
   let controlActive = false; // durable managed-tab scope, independent of capture-hiding
   let hiddenForTool = false; // suppressed during a screenshot capture
@@ -98,6 +115,7 @@
   let narrationLayer = null;
   let activeNarrationEl = null;
   let activeNarrationGeneration = null;
+  let activeNarrationPosition = null;
   let narrationTimer = null;
   let recentPointer = null;
   let recentTouched = null;
@@ -152,8 +170,50 @@
       "@keyframes ghostlight-scan{0%{opacity:0;transform:translateY(-80px)}12%{opacity:1}90%{opacity:1}100%{opacity:.85;transform:translateY(100vh)}}" +
       "@keyframes ghostlight-chev{0%{opacity:0;transform:translateY(-8px)}30%{opacity:1}100%{opacity:0;transform:translateY(10px)}}" +
       "@keyframes ghostlight-nav{0%{opacity:0;transform:translate(-50%,-14px)}14%{opacity:1;transform:translate(-50%,0)}82%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-8px)}}" +
-      "@keyframes ghostlight-breath{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(.7)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}}" +
       "@keyframes ghostlight-lozenge{0%{opacity:0;transform:translate(-50%,12px)}16%{opacity:1;transform:translate(-50%,0)}78%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-6px)}}" +
+      // ADR-0083 action-signature medallion: one quiet shell, with action-specific inner motion.
+      // Transform/opacity-only loops stay compositor-friendly while page JavaScript is active.
+      "@keyframes ghostlight-signature-gear{to{transform:rotate(360deg)}}" +
+      "@keyframes ghostlight-signature-particle{0%,100%{opacity:.28;transform:scale(.65)}50%{opacity:1;transform:scale(1.18)}}" +
+      "@keyframes ghostlight-signature-keyboard{0%,100%{transform:translateY(0);filter:drop-shadow(0 0 3px rgba(" + SKY_RGB + ",.35))}" +
+      "50%{transform:translateY(-1px);filter:drop-shadow(0 0 9px rgba(" + SKY_RGB + ",.95))}}" +
+      "@keyframes ghostlight-signature-dot{0%,20%,100%{opacity:.25;transform:translateY(1px) scale(.72)}50%{opacity:1;transform:translateY(-1px) scale(1)}}" +
+      "@keyframes ghostlight-signature-glint{0%{opacity:0;transform:translate(-50%,-50%) rotate(-80deg)}25%{opacity:1}" +
+      "100%{opacity:0;transform:translate(-50%,-50%) rotate(250deg)}}" +
+      ".ghostlight-signature-medallion{position:absolute;width:58px;height:58px;box-sizing:border-box;border-radius:18px;" +
+      "display:grid;place-items:center;pointer-events:none;color:" + SKY + ";background:rgba(10,16,26,.92);" +
+      "border:1px solid rgba(" + SKY_RGB + ",.58);box-shadow:0 12px 32px -14px rgba(" + SKY_RGB + ",.9)," +
+      "inset 0 1px 0 rgba(255,255,255,.09),0 0 18px -8px rgba(" + SKY_RGB + ",.75);" +
+      "opacity:1;transform:scale(1);transition:opacity 320ms ease-out,transform 420ms cubic-bezier(.22,1,.36,1);" +
+      "will-change:opacity,transform;overflow:visible}" +
+      ".ghostlight-signature-medallion.entering{opacity:0;transform:scale(.84)}" +
+      ".ghostlight-signature-medallion.leaving{opacity:0;transform:scale(.9)}" +
+      ".ghostlight-signature-medallion.top-left{top:18px;left:18px}" +
+      ".ghostlight-signature-medallion.top-right{top:18px;right:18px}" +
+      ".ghostlight-signature-medallion.bottom-left{bottom:18px;left:18px}" +
+      ".ghostlight-signature-medallion.bottom-right{right:18px;bottom:18px}" +
+      ".ghostlight-signature-icon{position:relative;width:100%;height:100%;display:grid;place-items:center}" +
+      ".ghostlight-signature-workwheel{width:35px;height:35px;will-change:transform;animation:ghostlight-signature-gear 2400ms linear infinite}" +
+      ".ghostlight-signature-workwheel svg{display:block;width:100%;height:100%;overflow:visible}" +
+      ".ghostlight-signature-particle{position:absolute;width:5px;height:5px;border-radius:50%;background:" + SKY + ";" +
+      "box-shadow:0 0 8px rgba(" + SKY_RGB + ",.9);animation:ghostlight-signature-particle 1300ms ease-in-out infinite}" +
+      ".ghostlight-signature-particle.p1{top:6px;right:7px}.ghostlight-signature-particle.p2{right:4px;bottom:12px;animation-delay:180ms}" +
+      ".ghostlight-signature-particle.p3{left:7px;bottom:6px;animation-delay:360ms}" +
+      ".ghostlight-signature-keyboard{font:29px/1 system-ui,sans-serif;will-change:transform,filter;" +
+      "animation:ghostlight-signature-keyboard 1150ms ease-in-out infinite}" +
+      ".ghostlight-signature-wait{display:flex;align-items:center;gap:5px}" +
+      ".ghostlight-signature-wait span{width:7px;height:7px;border-radius:50%;background:" + SKY + ";" +
+      "box-shadow:0 0 8px rgba(" + SKY_RGB + ",.8);animation:ghostlight-signature-dot 1050ms ease-in-out infinite}" +
+      ".ghostlight-signature-wait span:nth-child(2){animation-delay:150ms}.ghostlight-signature-wait span:nth-child(3){animation-delay:300ms}" +
+      ".ghostlight-signature-camera{font:27px/1 system-ui,sans-serif;filter:drop-shadow(0 0 6px rgba(" + SKY_RGB + ",.7))}" +
+      ".ghostlight-signature-glint{position:absolute;left:50%;top:50%;width:50px;height:50px;border-radius:50%;opacity:0;" +
+      "background:conic-gradient(from 0deg,transparent 0 78%,rgba(255,255,255,.95) 86%,transparent 94%);" +
+      "will-change:transform,opacity}" +
+      ".ghostlight-signature-medallion.completing .ghostlight-signature-workwheel," +
+      ".ghostlight-signature-medallion.completing .ghostlight-signature-keyboard{animation-play-state:paused}" +
+      ".ghostlight-signature-medallion.completing .ghostlight-signature-glint," +
+      ".ghostlight-signature-medallion.confirming .ghostlight-signature-glint{" +
+      "animation:ghostlight-signature-glint 520ms cubic-bezier(.22,1,.36,1) 1}" +
       // The denial sticker unfurls once, then its bounded timer removes it. The -rm variant is a
       // plain fade for reduced-motion users.
       "@keyframes ghostlight-notif-grow{0%{opacity:0;transform:scaleY(0)}100%{opacity:1;transform:scaleY(1)}}" +
@@ -240,7 +300,10 @@
       "border-radius:16px;gap:12px;box-shadow:0 14px 44px -16px rgba(var(--gl-rgb),.75),inset 0 1px 0 rgba(255,255,255,.12)}" +
       ".ghostlight-notif-badge{margin:0;width:52px;height:52px}.ghostlight-notif-title{font-size:16px}" +
       ".ghostlight-notif-desc{font-size:13px}.ghostlight-notif-close{display:none}" +
-      "@media (prefers-reduced-motion:reduce){#" + GLOW_ID + "{animation:none}#" + CURSOR_ID + "{transition:none}}";
+      "@media (prefers-reduced-motion:reduce){#" + GLOW_ID + "{animation:none}#" + CURSOR_ID + "{transition:none}" +
+      ".ghostlight-signature-medallion{transition:opacity 180ms ease-out}" +
+      ".ghostlight-signature-workwheel,.ghostlight-signature-particle,.ghostlight-signature-keyboard," +
+      ".ghostlight-signature-wait span,.ghostlight-signature-glint{animation:none!important}}";
     (document.head || document.documentElement).appendChild(s);
   }
 
@@ -291,6 +354,180 @@
     const remove = () => { if (done) return; done = true; el.remove(); };
     el.addEventListener("animationend", remove, { once: true });
     setTimeout(remove, maxMs); // fallback if animationend never fires
+  }
+
+  function ensureSignatureLayer() {
+    if (!signatureLayer || !signatureLayer.isConnected) {
+      signatureLayer = document.createElement("div");
+      signatureLayer.id = SIGNATURE_LAYER_ID;
+      signatureLayer.setAttribute("aria-hidden", "true");
+      signatureLayer.style.cssText =
+        "position:fixed;inset:0;pointer-events:none;z-index:2147483645";
+      (document.body || document.documentElement).appendChild(signatureLayer);
+    }
+    signatureLayer.style.display = hiddenForTool ? "none" : "";
+    return signatureLayer;
+  }
+
+  function populateSignatureIcon(medallion, kind) {
+    medallion.replaceChildren();
+    const icon = document.createElement("div");
+    icon.className = "ghostlight-signature-icon";
+    if (actionSignature && kind === actionSignature.KINDS.JAVASCRIPT) {
+      const gear = document.createElement("div");
+      gear.className = "ghostlight-signature-workwheel";
+      gear.innerHTML =
+        "<svg viewBox='0 0 48 48' aria-hidden='true' fill='none' stroke='currentColor' stroke-linecap='round'>" +
+        "<circle cx='24' cy='24' r='12' stroke-width='3.5'/><circle cx='24' cy='24' r='3.2' stroke-width='3.5'/>" +
+        "<path d='M24 4v7M24 37v7M4 24h7M37 24h7M9.9 9.9l5 5M33.1 33.1l5 5M38.1 9.9l-5 5M14.9 33.1l-5 5' stroke-width='4.2'/>" +
+        "</svg>";
+      icon.appendChild(gear);
+      for (let index = 1; index <= 3; index++) {
+        const particle = document.createElement("span");
+        particle.className = "ghostlight-signature-particle p" + index;
+        icon.appendChild(particle);
+      }
+    } else if (actionSignature && kind === actionSignature.KINDS.TYPING) {
+      const keyboard = document.createElement("span");
+      keyboard.className = "ghostlight-signature-keyboard";
+      keyboard.textContent = "\u2328\uFE0F";
+      icon.appendChild(keyboard);
+    } else if (actionSignature && kind === actionSignature.KINDS.WAIT) {
+      const dots = document.createElement("span");
+      dots.className = "ghostlight-signature-wait";
+      dots.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
+      icon.appendChild(dots);
+    } else if (actionSignature && kind === actionSignature.KINDS.SCREENSHOT) {
+      const camera = document.createElement("span");
+      camera.className = "ghostlight-signature-camera";
+      camera.textContent = "\u{1F4F7}";
+      icon.appendChild(camera);
+    }
+    const glint = document.createElement("span");
+    glint.className = "ghostlight-signature-glint";
+    icon.appendChild(glint);
+    medallion.appendChild(icon);
+  }
+
+  function signatureLabel(kind) {
+    if (!actionSignature) return "Working on this page";
+    const labels = {
+      [actionSignature.KINDS.JAVASCRIPT]: "Working on this page",
+      [actionSignature.KINDS.TYPING]: "Typing",
+      [actionSignature.KINDS.WAIT]: "Waiting",
+      [actionSignature.KINDS.SCREENSHOT]: "Screenshot",
+    };
+    return labels[kind] || "Working on this page";
+  }
+
+  function removeSignatureNow() {
+    clearTimeout(signatureFinishTimer);
+    clearTimeout(signatureRemoveTimer);
+    clearTimeout(signatureStaleTimer);
+    signatureFinishTimer = null;
+    signatureRemoveTimer = null;
+    signatureStaleTimer = null;
+    if (activeSignatureEl) activeSignatureEl.remove();
+    activeSignatureEl = null;
+    activeSignatureKind = null;
+    activeSignaturePosition = null;
+  }
+
+  function finishSignature(kind) {
+    if (!activeSignatureEl || !activeSignatureEl.isConnected || activeSignatureKind !== kind) {
+      return { shown: false, reason: "matching action signature is not active" };
+    }
+    clearTimeout(signatureFinishTimer);
+    clearTimeout(signatureRemoveTimer);
+    clearTimeout(signatureStaleTimer);
+    signatureStaleTimer = null;
+    const finishing = activeSignatureEl;
+    finishing.classList.add("completing");
+    signatureFinishTimer = setTimeout(function () {
+      if (activeSignatureEl !== finishing) return;
+      finishing.classList.add("leaving");
+      signatureRemoveTimer = setTimeout(function () {
+        if (activeSignatureEl === finishing) removeSignatureNow();
+      }, SIGNATURE_EXIT_MS);
+    }, 180);
+    return { shown: true, position: activeSignaturePosition };
+  }
+
+  function waitForSignaturePaint(result) {
+    return new Promise(function (resolve) {
+      let done = false;
+      const finish = function () {
+        if (done) return;
+        done = true;
+        clearTimeout(fallback);
+        resolve(result);
+      };
+      const fallback = setTimeout(finish, SIGNATURE_PAINT_FALLBACK_MS);
+      requestAnimationFrame(function () {
+        requestAnimationFrame(finish);
+      });
+    });
+  }
+
+  function beginSignature(kind, confirming) {
+    if (!effectsEnabled) {
+      removeSignatureNow();
+      return Promise.resolve({ shown: false, reason: "visual effects are disabled" });
+    }
+    if (hiddenForTool || document.hidden || attentionLayer) {
+      return Promise.resolve({ shown: false, reason: "the tab cannot show an action signature" });
+    }
+    ensureStyles();
+    clearTimeout(signatureFinishTimer);
+    clearTimeout(signatureRemoveTimer);
+    clearTimeout(signatureStaleTimer);
+    signatureFinishTimer = null;
+    signatureRemoveTimer = null;
+    signatureStaleTimer = null;
+
+    const position = effectiveSignaturePosition();
+    const isNew = !activeSignatureEl || !activeSignatureEl.isConnected;
+    if (isNew) {
+      activeSignatureEl = document.createElement("div");
+      activeSignatureEl.id = "ghostlight-action-signature";
+      activeSignatureEl.setAttribute("aria-hidden", "true");
+      activeSignatureEl.className = "ghostlight-signature-medallion entering";
+      ensureSignatureLayer().appendChild(activeSignatureEl);
+    }
+    activeSignatureEl.className = "ghostlight-signature-medallion" + (isNew ? " entering" : "");
+    activeSignatureEl.classList.add(position);
+    activeSignatureEl.classList.remove("confirming");
+    if (confirming === true) {
+      // Restart the glint even when repeated confirmations reuse the medallion.
+      void activeSignatureEl.offsetWidth;
+      activeSignatureEl.classList.add("confirming");
+    }
+    if (activeSignatureKind !== kind || isNew) populateSignatureIcon(activeSignatureEl, kind);
+    activeSignatureKind = kind;
+    activeSignaturePosition = position;
+    requestAnimationFrame(function () {
+      if (activeSignatureEl) activeSignatureEl.classList.remove("entering");
+    });
+    caption(signatureLabel(kind));
+
+    if (confirming) {
+      signatureFinishTimer = setTimeout(function () { finishSignature(kind); }, SIGNATURE_CONFIRM_MS);
+    } else {
+      signatureStaleTimer = setTimeout(function () {
+        if (activeSignatureKind === kind) removeSignatureNow();
+      }, SIGNATURE_STALE_MS);
+    }
+    return waitForSignaturePaint({ shown: true, position });
+  }
+
+  function showActionSignature(msg) {
+    if (!actionSignature || !actionSignature.isMessage(msg)) {
+      return Promise.resolve({ shown: false, reason: "invalid action signature" });
+    }
+    if (msg.phase === actionSignature.PHASES.FINISH) {
+      return Promise.resolve(finishSignature(msg.kind));
+    }
+    return beginSignature(msg.kind, msg.phase === actionSignature.PHASES.CONFIRM);
   }
 
   function addRipple(x, y, dashed) {
@@ -451,6 +688,7 @@
       if (v) { fxLayer.style.display = "none"; fxLayer.replaceChildren(); } // clear in-flight effects for a clean capture
       else fxLayer.style.display = "";
     }
+    if (signatureLayer) signatureLayer.style.display = v ? "none" : "";
     // Hide-and-restore, like cursor/caption/glow above -- NEVER replaceChildren() here. The
     // sticker has its own lifetime and clearing ordinary action FX must not remove it accidentally.
     if (notifLayer) notifLayer.style.display = v ? "none" : "";
@@ -546,14 +784,14 @@
     caption(labels[action] || "Action target");
   }
 
-  // type / key: a keystroke lozenge, bottom-center (KeyCastr). type shows the text; key the combo.
+  // Named key chords remain useful content. Ordinary typing uses ADR-0083's content-free keyboard
+  // medallion instead, so a visual effect can never disclose a password or masked form value.
   function keystrokeLozenge(textStr, kind) {
     if (hiddenForTool || document.hidden) return;
     ensureStyles();
-    const html = kind === "key"
-      ? String(textStr).split(/[+ ]/).filter(Boolean)
-          .map(function (k) { return "<span class='ghostlight-cap'>" + escapeHtml(k) + "</span>"; }).join(" + ")
-      : escapeHtml(clip(textStr, 44));
+    if (kind !== "key") return;
+    const html = String(textStr).split(/[+ ]/).filter(Boolean)
+      .map(function (k) { return "<span class='ghostlight-cap'>" + escapeHtml(k) + "</span>"; }).join(" + ");
     const el = document.createElement("div");
     el.id = FX_LAYER_ID + "-k" + fxSeq++;
     el.setAttribute("aria-hidden", "true");
@@ -638,15 +876,6 @@
       "background:rgba(" + SKY_RGB + ",.08);box-shadow:0 0 26px rgba(" + SKY_RGB + ",.45);transform-origin:100% 100%;" +
       "animation:ghostlight-capframe " + CAPFRAME_MS + "ms cubic-bezier(.5,0,.2,1) forwards";
     addEphemeral(frame, CAPFRAME_MS + 60);
-    const camera = document.createElement("div");
-    camera.id = FX_LAYER_ID + "-camera" + fxSeq++;
-    camera.setAttribute("aria-hidden", "true");
-    camera.textContent = "\u{1F4F7}";
-    camera.style.cssText =
-      "position:fixed;right:22px;bottom:22px;padding:8px 11px;border-radius:12px;pointer-events:none;" +
-      "font:22px/1 system-ui;background:rgba(10,16,26,.94);border:1px solid rgba(" + SKY_RGB + ",.6);" +
-      "box-shadow:0 10px 28px -10px rgba(" + SKY_RGB + ",.8);animation:ghostlight-lozenge 1100ms ease-out forwards";
-    addEphemeral(camera, 1160);
     caption("Screenshot");
   }
 
@@ -782,6 +1011,7 @@
   function showAttention(msg) {
     clearAttention();
     dismissNotification();
+    removeSignatureNow();
     attentionPriorFocus = document.activeElement;
     const host = document.createElement("div");
     host.id = "ghostlight-attention-host";
@@ -864,11 +1094,13 @@
     if (activeNarrationEl) activeNarrationEl.remove();
     activeNarrationEl = null;
     activeNarrationGeneration = null;
+    activeNarrationPosition = null;
     return true;
   }
 
   function visibleElementCenter(target) {
     if (!target || typeof target.getBoundingClientRect !== "function") return null;
+    if (target === document.body || target === document.documentElement) return null;
     if (target.closest && target.closest("[id^='ghostlight-']")) return null;
     let rect;
     try { rect = target.getBoundingClientRect(); } catch (e) { return null; }
@@ -890,14 +1122,33 @@
   }
 
   function effectiveNarrationPosition(requested) {
-    if (!narrationPlacement || typeof narrationPlacement.chooseNarrationPosition !== "function") {
+    if (!presentationPlacement ||
+        typeof presentationPlacement.chooseNarrationPosition !== "function") {
       return requested === "top" ? "top" : "bottom";
     }
-    return narrationPlacement.chooseNarrationPosition(requested, {
+    return presentationPlacement.chooseNarrationPosition(requested, {
       viewportHeight: window.innerHeight,
       pointer: recentPointer,
       touched: recentTouched,
+      focused: visibleElementCenter(document.activeElement),
       scroll: recentScroll,
+      signaturePosition: activeSignaturePosition,
+    });
+  }
+
+  function effectiveSignaturePosition() {
+    if (!presentationPlacement ||
+        typeof presentationPlacement.chooseSignaturePosition !== "function") {
+      return "bottom-right";
+    }
+    return presentationPlacement.chooseSignaturePosition({
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      pointer: recentPointer,
+      touched: recentTouched,
+      focused: visibleElementCenter(document.activeElement),
+      scroll: recentScroll,
+      narrationPosition: activeNarrationPosition,
     });
   }
 
@@ -943,25 +1194,11 @@
     ensureNarrationLayer().appendChild(card);
     activeNarrationEl = card;
     activeNarrationGeneration = generation;
+    activeNarrationPosition = position;
     narrationTimer = setTimeout(function () {
       clearNarration(generation);
     }, durationMs);
     return { shown: true, position };
-  }
-
-  // wait: a soft breathing dot while the agent pauses.
-  function waitPulse() {
-    if (hiddenForTool || document.hidden) return;
-    ensureStyles();
-    const el = document.createElement("div");
-    el.id = FX_LAYER_ID + "-w" + fxSeq++;
-    el.setAttribute("aria-hidden", "true");
-    el.style.cssText =
-      "position:fixed;left:50%;top:50%;width:16px;height:16px;border-radius:50%;transform:translate(-50%,-50%);" +
-      "pointer-events:none;background:" + SKY + ";box-shadow:0 0 18px rgba(" + SKY_RGB + ",.8);" +
-      "animation:ghostlight-breath 1500ms ease-in-out 2";
-    addEphemeral(el, 3200);
-    caption("Waiting");
   }
 
   chrome.runtime.onMessage.addListener((incoming, _sender, rawSendResponse) => {
@@ -1001,8 +1238,11 @@
         case "AGENT_NAVIGATE_PILL":
         case "AGENT_SCREENSHOT_FX":
         case "AGENT_ZOOM_FRAME":
-        case "AGENT_WAIT_PULSE":
           sendResponse({ success: true });
+          return true;
+        case ACTION_SIGNATURE_TYPE:
+          removeSignatureNow();
+          sendResponse({ shown: false, reason: "visual effects are disabled" });
           return true;
       }
     }
@@ -1032,8 +1272,8 @@
         screenshotFx(); sendResponse({ success: true }); return true;
       case "AGENT_ZOOM_FRAME":
         zoomFrame(msg.x0, msg.y0, msg.x1, msg.y1); sendResponse({ success: true }); return true;
-      case "AGENT_WAIT_PULSE":
-        waitPulse(); sendResponse({ success: true }); return true;
+      case ACTION_SIGNATURE_TYPE:
+        showActionSignature(msg).then(sendResponse); return true;
       case "AGENT_NOTIFICATION":
         showNotification(msg.class, msg.icon, msg.title, msg.description, msg.durationMs); sendResponse({ success: true }); return true;
       case "AGENT_NOTIFICATION_CLEAR":
@@ -1079,7 +1319,7 @@
       if (area !== "local") return;
       if (changes.ghostlight_effects) {
         effectsEnabled = changes.ghostlight_effects.newValue !== false;
-        if (!effectsEnabled) clearNarration();
+        if (!effectsEnabled) { clearNarration(); removeSignatureNow(); }
       }
       if (changes.ghostlight_captions) captionsEnabled = !!changes.ghostlight_captions.newValue;
     });
@@ -1129,5 +1369,10 @@
     },
   };
 
-  window.addEventListener("beforeunload", () => { hideControlBorder(); clearNarration(); clearAttention(); });
+  window.addEventListener("beforeunload", () => {
+    hideControlBorder();
+    clearNarration();
+    removeSignatureNow();
+    clearAttention();
+  });
 })();

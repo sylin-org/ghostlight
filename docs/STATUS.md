@@ -7,6 +7,17 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **Unified action signature medallions are implemented on `dev` (ADR-0083).** One
+  policy-free, signal-aware renderer now gives non-spatial work a consistent corner badge while
+  avoiding the recent pointer, focused and touched regions, scroll direction, and active
+  narration. JavaScript gets an active workwheel with light particles, typing gets a glowing
+  keyboard without exposing typed values, waits show three calm dots for their real duration, and
+  screenshots end with a camera confirmation alongside the capture frame. Start and finish events
+  use the document-aware Presentation Broker and cannot replay into a later document. The complete
+  25-tool coverage and review queue live in `docs/design/tool-visual-signatures.md`. Strict clippy,
+  the full Rust workspace, 112 extension tests, 4 npm launcher tests, JavaScript syntax checks, and
+  formatting pass. Visible browser verification remains owed.
+
 - **The README hero story is implemented, captured, and enabled.** `ghostlight demo-brief`
   drives `https://sylin.org/ghostlight/demo/brief/` through the ordinary relay: one visible page
   read, five exact paced ref writes, submit, and a held local completion state. The stage is

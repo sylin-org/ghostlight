@@ -132,6 +132,28 @@ test("navigation replays state but retires old-document events", async () => {
   assert.equal(h.delivered.slice(3).every((entry) => entry.documentId === "doc-b"), true);
 });
 
+test("action signature lifecycle events stay ordered and document-local", async () => {
+  const h = harness();
+  h.broker.documentReady(14, "doc-a");
+  h.broker.publishEvent(
+    14,
+    { type: "AGENT_ACTION_SIGNATURE", kind: "javascript", phase: "start" },
+    { channel: "action-signature", waitForDelivery: false }
+  );
+  h.broker.publishEvent(
+    14,
+    { type: "AGENT_ACTION_SIGNATURE", kind: "javascript", phase: "finish" },
+    { channel: "action-signature", waitForDelivery: false }
+  );
+  await settle();
+  assert.deepEqual(h.delivered.map((entry) => entry.envelope.phase), ["start", "finish"]);
+
+  h.broker.documentLoading(14);
+  h.broker.documentReady(14, "doc-b");
+  await settle();
+  assert.equal(h.delivered.length, 2);
+});
+
 test("a ready message for a new document retires queued effects when loading was missed", async () => {
   const h = harness();
   h.broker.documentReady(3, "doc-a");
@@ -270,7 +292,7 @@ test("destroying a tab erases state, events, and persisted snapshot content", ()
     { type: "AGENT_ATTENTION_REQUIRED", guid: "g" },
     { waitForDelivery: false }
   );
-  h.broker.publishEvent(8, { type: "AGENT_WAIT_PULSE" }, { waitForDelivery: false });
+  h.broker.publishEvent(8, { type: "AGENT_READ_SCAN" }, { waitForDelivery: false });
   assert.equal(h.broker.destroyTab(8), true);
   assert.deepEqual(h.broker.stats(), { tabs: 0, states: 0, events: 0, bytes: 0 });
   assert.deepEqual(h.broker.snapshot().tabs, []);
@@ -312,6 +334,12 @@ test("renderer recovery clears stale roots while preserving visual trust invaria
   assert.match(indicatorSource, /let controlActive = false/);
   assert.match(indicatorSource, /function showControlBorder\(\)/);
   assert.match(indicatorSource, /ghostlight-control-breathe 4s ease-in-out infinite/);
+  assert.match(indicatorSource, /ghostlight-signature-layer/);
+  assert.match(indicatorSource, /function effectiveSignaturePosition\(\)/);
+  assert.match(indicatorSource, /prefers-reduced-motion:reduce/);
+  assert.match(indicatorSource, /if \(signatureLayer\) signatureLayer\.style\.display = v \? "none" : ""/);
+  assert.match(indicatorSource, /keyboard\.textContent = "\\u2328\\uFE0F"/);
+  assert.doesNotMatch(workerSource, /keystrokeCue\(tabId, a\.text, "type"\)/);
   assert.match(indicatorSource, /visibilitychange/);
   assert.doesNotMatch(indicatorSource, /FADE_MS|fadeTimer|setTimeout\(hideControlBorder/);
   assert.doesNotMatch(indicatorSource, /ghostlight-narration-progress/);
@@ -326,6 +354,12 @@ test("worker routes visual effects, state, and capture barriers through one brok
   assert.match(workerSource, /clearMessage: \{ type: "HIDE_AGENT_INDICATORS" \}/);
   assert.equal((workerSource.match(/managedTabs\.add\(/g) || []).length, 1);
   assert.match(workerSource, /presentationBroker\.publishCapture\(tabId, \{ type: "HIDE_FOR_TOOL_USE" \}\)/);
+  assert.match(workerSource, /function startActionSignature\(tabId, kind\)/);
+  assert.match(workerSource, /channel: self\.GhostlightActionSignature\.CHANNEL/);
+  assert.match(workerSource, /finishActionSignature\(tabId, self\.GhostlightActionSignature\.KINDS\.JAVASCRIPT\)/);
+  assert.match(workerSource, /confirmActionSignature\(tabId, self\.GhostlightActionSignature\.KINDS\.SCREENSHOT\)/);
+  assert.match(workerSource, /finishActionSignature\(tabId, self\.GhostlightActionSignature\.KINDS\.TYPING\)/);
+  assert.match(workerSource, /finishActionSignature\(tabId, self\.GhostlightActionSignature\.KINDS\.WAIT\)/);
   assert.doesNotMatch(workerSource, /const narrationStore/);
   assert.doesNotMatch(workerSource, /const attentionStore/);
 });

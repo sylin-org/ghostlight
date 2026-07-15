@@ -54,7 +54,7 @@
     },
     {
       "matches": ["<all_urls>"],
-      "js": ["lib/narration-placement.js", "agent-visual-indicator.js"],
+      "js": ["lib/presentation-placement.js", "lib/action-signature.js", "agent-visual-indicator.js"],
       "run_at": "document_idle",
       "all_frames": false
     }

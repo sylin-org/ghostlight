@@ -25,28 +25,30 @@ consistent on-page treatment: a small visual "dictionary" the phantom cursor spe
 | right-click | a dashed ring (a secondary action) |
 | drag | a comet trail along the path |
 | hover | the cursor glides in with a soft glow, no ring |
-| type | the focused field shimmers, plus a keystroke lozenge of the text |
+| type | the focused field shimmers, plus a signal-aware glowing keyboard medallion; typed text is never shown |
 | key / shortcut | a keystroke lozenge, e.g. `Ctrl` + `A` |
 | scroll | directional chevrons cascading the way the page moves |
-| screenshot | a sky shutter flash, then the frame "files itself" into the bottom-right corner |
+| screenshot | a sky shutter flash, a filing frame, and a signal-aware camera confirmation medallion |
 | zoom | a magnifier frame closes on the captured region |
 | read_page / find / get_page_text | a scan-line sweeps down the page ("the agent is reading") |
-| wait | a soft breathing dot |
+| wait / wait_for | three fading lights for the actual wait lifetime |
+| javascript_tool | a rotating workwheel with three light particles for the actual evaluation lifetime |
 | narrate | a timed, responsive sky-accent Agent ribbon that explains a meaningful workflow phase |
-| ambient | the "agent active" glow while a tool runs, plus an optional action caption (below) |
+| ambient | the persistent controlled-tab border, plus an optional action caption (below) |
 
 The scan-line is ours: no recording tool has it, because none of them is an agent reading a page.
 
 ## Where it lives
 
 - **Render layer:** `extension/agent-visual-indicator.js` (a policy-free content script). Each
-  treatment is a small function that appends an ephemeral, pointer-transparent element to the FX
-  layer and removes it when its animation ends. Narration is the bounded-state exception: the
-  service worker owns its timer and navigation replay. Timings are constants at the top of those
-  files.
+  spatial treatment appends an ephemeral, pointer-transparent element to the FX layer and removes
+  it when its animation ends. The renderer separately owns one bounded action-signature medallion.
+  Narration is timed broker state with navigation replay; signatures are document-local start,
+  finish, and confirmation events with no replay.
 - **Triggers:** `extension/service-worker.js` sends one message per action
   (`AGENT_TARGET_GLOW`, `AGENT_KEYSTROKE`, `AGENT_SCROLL_CUE`, `AGENT_READ_SCAN`,
-  `AGENT_NAVIGATE_PILL`, `AGENT_SCREENSHOT_FX`, `AGENT_ZOOM_FRAME`, `AGENT_WAIT_PULSE`,
+  `AGENT_NAVIGATE_PILL`, `AGENT_SCREENSHOT_FX`, `AGENT_ZOOM_FRAME`,
+  `AGENT_ACTION_SIGNATURE`,
   `AGENT_NARRATION`) at the point
   the action runs. The worker holds mechanism only; the effects carry no policy.
 - **Interactive reference:** the vocabulary was designed and approved in a standalone preview that
@@ -70,6 +72,14 @@ once, away from recent focus, pointer, and scroll activity; explicit edges stay 
 ribbon does not chase the user after it appears. It requires no RAWX capability because it does not
 touch page content. It still follows tab ownership, audit, take-the-wheel, capture hiding, and the
 visual-effects preference.
+
+## Action signature placement
+
+The shared medallion chooses one of four corners when it starts. The pure placement resolver avoids
+recent pointer, focus, touched-control, and scroll activity, and avoids the active narration edge.
+Narration uses the same resolver and avoids an active medallion. Neither presentation chases the
+person after placement. See [tool-visual-signatures.md](tool-visual-signatures.md) for complete tool
+coverage and [visual-language.md](visual-language.md) for the normative vocabulary.
 
 ## Sources
 

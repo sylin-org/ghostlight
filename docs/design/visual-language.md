@@ -22,14 +22,18 @@ courteous guest who narrates what they touch -- visible enough to trust, quiet e
 - **Spring motion.** Enters settle with `cubic-bezier(.22,1,.36,1)` (a gentle overshoot-free
   spring); exits fade with `ease-out`. Durations sit between roughly 500ms (a beat) and 1600ms
   (a phrase). Nothing snaps. The controlled-tab border alone breathes continuously because its
-  scope remains true; transient pulses stay bounded.
+  scope remains true. Active signatures last exactly as long as their operation and retain a
+  bounded stale fallback; confirmation and spatial effects stay brief.
 - **Monospace chrome.** When an effect carries text (captions, keystroke lozenges, guardrails),
   it uses the `ui-monospace` stack -- instrument-panel text, distinct from the page's own type.
 
 ## The vocabulary
 
-One visible treatment per agent action. Each row is implemented as its own function and keyframe
-set in `agent-visual-indicator.js`.
+One coherent treatment per agent action. A treatment may compose spatial and non-spatial parts only
+when they answer different necessary questions, such as a screenshot frame saying what was captured
+and a camera medallion saying that capture completed. Rendering lives in
+`agent-visual-indicator.js`; fixed signature vocabulary and placement scoring live in their pure
+domain modules.
 
 | Effect | Fires on | What it says | Shape |
 | --- | --- | --- | --- |
@@ -39,14 +43,14 @@ set in `agent-visual-indicator.js`.
 | Drag trail | click-drag path | "dragged along this path" | comet trail of fading radial dots |
 | Type shimmer | typing into the focused element | "typing into THIS field" | soft outline pulse on the focused element |
 | Field splash | a form write lands (`form_input`, `form_fill`, `file_upload`, `upload_image`) | "the agent just SET this field" | ring + interior wash hugging the field's own rectangle (borrows its border-radius), settles then releases outward |
-| Keystroke lozenge | `type` / `key` | "these keys were pressed" | bottom-center pill showing the text or chord |
+| Keystroke lozenge | named `key` chords | "these named keys were pressed" | bottom-center pill showing the chord; ordinary typed values never appear |
 | Target glow | ref/coordinate click | "THIS element was the target" | brief radial halo at the point (Playwright-highlight lineage) |
 | Scroll cue | scroll | "scrolled this direction" | cascading chevrons |
 | Read scan | `read_page` / `get_page_text` | "the agent is reading, not touching" | a luminous scan line sweeping down the page |
 | Navigate pill | `navigate` | "leaving for this destination" | top-center pill naming the host/path |
-| Screenshot frame | screenshot taken | "a capture just happened" | frame flashes, files itself into the corner, and shows a brief camera glyph |
+| Screenshot frame | screenshot taken | "this page was captured" | frame flashes and files itself into the corner |
 | Zoom frame | `zoom` | "the agent is inspecting this region" | rectangle converging onto the region |
-| Wait pulse | `wait` | "deliberately pausing" | breathing dot, center-screen |
+| Action signature medallion | non-spatial activity without presentational content | "the agent is doing THIS kind of work" | one signal-aware corner shell: JavaScript workwheel, glowing typing keyboard, three waiting lights, or post-capture camera |
 | Caption track | any action (opt-in) | subtitle naming the action | bottom-center pill; off by default, gorgeous for demos |
 | Narration caption | `narrate` | "the agent wants the watcher to understand this workflow phase" | compact timed sky-accent caption with an Agent label and one three-dot activity cue; auto, top, or bottom |
 | Denial sticker | one enforced denial via `Browser::notify()` | "a guardrail held; here is why" | compact centered sticker, replaced or removed after three seconds |
@@ -64,13 +68,15 @@ than merely pretty.
    its own reflection.
 2. **Untouchable by default.** Transient effects and stickers use `pointer-events:none`. The
    attention overlay's service-provided controls are real, keyboard-focusable `<button>` elements.
-3. **Ephemeral by default.** Action effects are fire-and-fade confirmations (`addEphemeral`: removed on
-   `animationend` with a timeout fallback). An isolated denial lasts three seconds. Narration is
-   bounded state: one caption per tab until its timer expires or a new narration replaces it. The
-   attention overlay persists because its service-owned pause persists. The controlled-tab border
-   persists because the tab remains agent-reachable.
-4. **Reduced motion respected.** Every animated effect has a `-rm` keyframe variant (plain fade,
-   no travel/scale) selected via `prefers-reduced-motion`.
+3. **Ephemeral by default.** Spatial action effects are fire-and-fade confirmations (`addEphemeral`:
+   removed on `animationend` with a timeout fallback). An active signature begins before its action,
+   finishes through that action's `finally` path, and has a stale fallback. A confirmation signature
+   appears only after its action. An isolated denial lasts three seconds. Narration is bounded
+   state: one caption per tab until its timer expires or a new narration replaces it. The attention
+   overlay persists because its service-owned pause persists. The controlled-tab border persists
+   because the tab remains agent-reachable.
+4. **Reduced motion respected.** Animated effects use a plain-fade `-rm` variant or disable their
+   internal motion under `prefers-reduced-motion`.
 5. **Optional decoration; mandatory scope and governance.** The extension options' master switch
    (`ghostlight_effects`) silences decorative action effects and narration. The controlled-tab
    border is exempt because agent reachability must remain visible. Denial and attention
@@ -90,7 +96,8 @@ than merely pretty.
   usually with viewport coordinates. The broker binds it to the current Chrome document,
   activates the packaged renderer on demand, and requires an exact channel/revision/document
   acknowledgement. Controlled scope, narration, notifications, and attention replay while their
-  state remains true. Transient action effects never cross a document change.
+  state remains true. Transient action effects and signature lifecycle events never cross a
+  document change.
 - **The `GhostlightFx` same-world export** (bottom of `agent-visual-indicator.js`): for sibling
   content scripts that know the target ELEMENT (e.g. `content.js`'s form writers calling
   `fieldSplash`). Both scripts share the extension's isolated world, so this is a direct,
@@ -112,6 +119,12 @@ once from recent touched-control, pointer, and scroll signals, then stays put. N
 and overlays use bounded viewport-responsive sizing. The attention overlay is central, visually
 stronger, and never truncates its security text or controls.
 
+Action signatures use fixed, content-free start, finish, and confirm messages from
+`extension/lib/action-signature.js`. The renderer owns one medallion and its bounded timers; broker
+events provide ordered exact-document delivery but no replay. `extension/lib/presentation-placement.js`
+scores narration edges and four signature corners from recent pointer, focus, touched-control,
+scroll, and occupied-presentation signals. Each presentation chooses once and stays put.
+
 ## Adding a new effect
 
 1. Name what it must SAY in one sentence ("the agent just X"). If it says nothing a watcher needs,
@@ -123,7 +136,8 @@ stronger, and never truncates its security text or controls.
    `effectsEnabled`; give its element the `ghostlight-` prefix, and route it through
    `addEphemeral` unless it is genuinely state.
 4. Decide its replacement, timeout, and cleanup owner explicitly.
-5. Add its row to the vocabulary table above. The table and the code move together.
+5. Add its row to the vocabulary table above and its tool/action coverage to
+   [tool-visual-signatures.md](tool-visual-signatures.md). The tables and code move together.
 
 ## Provenance
 

@@ -19,7 +19,7 @@
 // this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
 // ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
 
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
@@ -154,8 +154,10 @@ const dialogStore = self.GhostlightDialog.createDialogStore();
 const NATIVE_HOST = "org.sylin.ghostlight";
 const BROWSER_GENERATION_KEY = "ghostlight_browser_generation";
 const PRESENTATION_STATE_KEY = "ghostlight_presentation_state";
-const VISUAL_SCRIPT_FILES = ["lib/narration-placement.js", "agent-visual-indicator.js"];
+const VISUAL_SCRIPT_FILES = ["lib/presentation-placement.js", "lib/action-signature.js", "agent-visual-indicator.js"];
 const PRESENTATION_EVENT_TTL_MS = 2500;
+const SIGNATURE_EVENT_TTL_MS = 1500;
+const SIGNATURE_DELIVERY_WAIT_MS = 250;
 const NARRATION_DEFAULT_DURATION_MS = 5000;
 // The MCP tab group label shown in Chrome: a ghost emoji (U+1F47B) followed by the brand
 // name. The emoji is written as an escape so this source file stays ASCII; it renders as
@@ -1663,6 +1665,56 @@ function sendToTab(tabId, msg) {
     ttlMs: PRESENTATION_EVENT_TTL_MS,
   });
 }
+// ADR-0083: fixed, content-free signature events. Starts wait only briefly for exact-document
+// acknowledgement so the cue can paint before work begins; presentation failure never fails or
+// meaningfully delays the browser operation. Finish/confirm remain ordered broker events but do
+// not extend the model-facing response path.
+async function startActionSignature(tabId, kind) {
+  try {
+    return await presentationBroker.publishEvent(
+      tabId,
+      self.GhostlightActionSignature.message(
+        kind,
+        self.GhostlightActionSignature.PHASES.START
+      ),
+      {
+        channel: self.GhostlightActionSignature.CHANNEL,
+        ttlMs: SIGNATURE_EVENT_TTL_MS,
+        deliveryWaitMs: SIGNATURE_DELIVERY_WAIT_MS,
+      }
+    );
+  } catch {
+    return { shown: false, reason: "action signature unavailable" };
+  }
+}
+function finishActionSignature(tabId, kind) {
+  presentationBroker.publishEvent(
+    tabId,
+    self.GhostlightActionSignature.message(
+      kind,
+      self.GhostlightActionSignature.PHASES.FINISH
+    ),
+    {
+      channel: self.GhostlightActionSignature.CHANNEL,
+      ttlMs: SIGNATURE_EVENT_TTL_MS,
+      waitForDelivery: false,
+    }
+  );
+}
+function confirmActionSignature(tabId, kind) {
+  presentationBroker.publishEvent(
+    tabId,
+    self.GhostlightActionSignature.message(
+      kind,
+      self.GhostlightActionSignature.PHASES.CONFIRM
+    ),
+    {
+      channel: self.GhostlightActionSignature.CHANNEL,
+      ttlMs: SIGNATURE_EVENT_TTL_MS,
+      waitForDelivery: false,
+    }
+  );
+}
 // Move the phantom cursor to a (rescaled, CSS-px) point and wait for it to settle, so the user sees
 // the pointer arrive before the action fires. Resolves immediately if no indicator is present.
 function moveCursor(tabId, x, y) { return sendToTab(tabId, { type: "UPDATE_PHANTOM_CURSOR", x, y }); }
@@ -1684,7 +1736,6 @@ function readScan(tabId) { sendToTab(tabId, { type: "AGENT_READ_SCAN" }); }
 function navigatePill(tabId, url) { sendToTab(tabId, { type: "AGENT_NAVIGATE_PILL", url }); }
 function screenshotFx(tabId) { sendToTab(tabId, { type: "AGENT_SCREENSHOT_FX" }); }
 function zoomFrameCue(tabId, x0, y0, x1, y1) { sendToTab(tabId, { type: "AGENT_ZOOM_FRAME", x0, y0, x1, y1 }); }
-function waitPulse(tabId) { sendToTab(tabId, { type: "AGENT_WAIT_PULSE" }); }
 // ADR-0072/0081: publish one active narration state. The broker retains the absolute deadline,
 // filters expired restore/replay state, and reports exact current-document acknowledgement.
 function renderNarration(tabId, narration) {
@@ -1846,6 +1897,7 @@ async function computer(a) {
       const caption = "Screenshot captured (jpeg).";
       const shot = await screenshot(tabId);
       screenshotFx(tabId); // shutter flash + viewfinder, AFTER the capture (never in the image)
+      confirmActionSignature(tabId, self.GhostlightActionSignature.KINDS.SCREENSHOT);
       return textImage(shot.note ? caption + " " + shot.note : caption, shot.base64);
     }
     case "zoom": {
@@ -1860,9 +1912,13 @@ async function computer(a) {
       return textImage(`Zoom region (${z.x0}, ${z.y0}) -> (${z.x1}, ${z.y1}) captured (jpeg${z.clamped ? "; clamped to the visible viewport" : ""}).`, z.base64);
     }
     case "wait": {
-      waitPulse(tabId);
       const s = Math.min(a.duration || 1, 30);
-      await sleep(s * 1000);
+      await startActionSignature(tabId, self.GhostlightActionSignature.KINDS.WAIT);
+      try {
+        await sleep(s * 1000);
+      } finally {
+        finishActionSignature(tabId, self.GhostlightActionSignature.KINDS.WAIT);
+      }
       return text(`Waited ${s}s.`);
     }
     case "left_click":
@@ -1895,26 +1951,30 @@ async function computer(a) {
       return withObservation(tabId, { action: "type", targetAssurance: "none" }, async () => {
         await ensureAttached(tabId);
         typeShimmer(tabId);
-        keystrokeCue(tabId, a.text, "type");
-        const chars = Array.from(a.text);
-        for (let i = 0; i < chars.length; i++) {
-          const ch = chars[i];
-          // Windows-style newlines: skip the \r, let the following \n press Enter once.
-          if (ch === "\r" && chars[i + 1] === "\n") continue;
-          const info = charKeyInfo(ch);
-          if (!info) {
-            await cdp(tabId, "Input.insertText", { text: ch });
+        await startActionSignature(tabId, self.GhostlightActionSignature.KINDS.TYPING);
+        try {
+          const chars = Array.from(a.text);
+          for (let i = 0; i < chars.length; i++) {
+            const ch = chars[i];
+            // Windows-style newlines: skip the \r, let the following \n press Enter once.
+            if (ch === "\r" && chars[i + 1] === "\n") continue;
+            const info = charKeyInfo(ch);
+            if (!info) {
+              await cdp(tabId, "Input.insertText", { text: ch });
+              await sleep(8);
+              continue;
+            }
+            const mods = info.shift ? 8 : 0;
+            const evt = {
+              key: info.key, code: info.code, modifiers: mods,
+              windowsVirtualKeyCode: info.vk, nativeVirtualKeyCode: info.vk,
+            };
+            await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyDown", ...evt, text: info.text, unmodifiedText: info.unmodifiedText });
+            await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...evt });
             await sleep(8);
-            continue;
           }
-          const mods = info.shift ? 8 : 0;
-          const evt = {
-            key: info.key, code: info.code, modifiers: mods,
-            windowsVirtualKeyCode: info.vk, nativeVirtualKeyCode: info.vk,
-          };
-          await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyDown", ...evt, text: info.text, unmodifiedText: info.unmodifiedText });
-          await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...evt });
-          await sleep(8);
+        } finally {
+          finishActionSignature(tabId, self.GhostlightActionSignature.KINDS.TYPING);
         }
         return text(`Typed ${a.text.length} character(s).`);
       });
@@ -2404,7 +2464,13 @@ const handlers = {
       throw hopError("page", `timeout_ms ${timeout_ms} exceeds the 30000ms cap`);
     }
     const spec = { selector: a.selector || null, text: a.text || null, state, timeout_ms, min_ms, settle };
-    const r = await content(tabId, { type: "waitFor", spec });
+    await startActionSignature(tabId, self.GhostlightActionSignature.KINDS.WAIT);
+    let r;
+    try {
+      r = await content(tabId, { type: "waitFor", spec });
+    } finally {
+      finishActionSignature(tabId, self.GhostlightActionSignature.KINDS.WAIT);
+    }
     const res = (r && r.result) || {};
     if (res.timeout) {
       // A bare settle wait that never quiets reports the sustained rate; a condition wait names
@@ -2414,7 +2480,6 @@ const handlers = {
       }
       throw hopError("page", `did not settle within ${timeout_ms}ms (still changing at ~${res.rate} mutations/500ms)`);
     }
-    waitPulse(tabId);
     const elapsed = res.elapsedMs;
     const peak = res.peakMutations;
     let s;
@@ -2437,32 +2502,37 @@ const handlers = {
   },
   async javascript_tool(a) {
     const tabId = await effectiveTabId(a.tabId);
-    let r = await cdp(tabId, "Runtime.evaluate", { expression: a.text, returnByValue: true, awaitPromise: true, replMode: true });
-    if (r.exceptionDetails) {
-      const ed = r.exceptionDetails.exception;
-      const probe = (r.exceptionDetails.text || "") + ((ed && ed.description) || "");
-      // A bare top-level "return" is only legal inside a function; retry once wrapped in an
-      // async IIFE, which also preserves top-level await for the wrapped code.
-      if (probe.includes("Illegal return statement")) {
-        const wrapped = "(async () => {\n" + a.text + "\n})()";
-        r = await cdp(tabId, "Runtime.evaluate", { expression: wrapped, returnByValue: true, awaitPromise: true });
+    await startActionSignature(tabId, self.GhostlightActionSignature.KINDS.JAVASCRIPT);
+    try {
+      let r = await cdp(tabId, "Runtime.evaluate", { expression: a.text, returnByValue: true, awaitPromise: true, replMode: true });
+      if (r.exceptionDetails) {
+        const ed = r.exceptionDetails.exception;
+        const probe = (r.exceptionDetails.text || "") + ((ed && ed.description) || "");
+        // A bare top-level "return" is only legal inside a function; retry once wrapped in an
+        // async IIFE, which also preserves top-level await for the wrapped code.
+        if (probe.includes("Illegal return statement")) {
+          const wrapped = "(async () => {\n" + a.text + "\n})()";
+          r = await cdp(tabId, "Runtime.evaluate", { expression: wrapped, returnByValue: true, awaitPromise: true });
+        }
       }
-    }
-    if (r.exceptionDetails) {
-      // r.exceptionDetails.text is CDP's generic top-level label (almost always the bare string
-      // "Uncaught"); the actual message lives on the exception object's own description.
-      const ed = r.exceptionDetails.exception;
-      const msg = (ed && ed.description) || r.exceptionDetails.text || "exception";
-      const result = text(`Error: ${msg}`);
+      if (r.exceptionDetails) {
+        // r.exceptionDetails.text is CDP's generic top-level label (almost always the bare string
+        // "Uncaught"); the actual message lives on the exception object's own description.
+        const ed = r.exceptionDetails.exception;
+        const msg = (ed && ed.description) || r.exceptionDetails.text || "exception";
+        const result = text(`Error: ${msg}`);
+        result.structuredContent = { page: await pageMeta(tabId) };
+        return result;
+      }
+      const v = r.result;
+      let out = v.value !== undefined ? JSON.stringify(v.value) : (v.description || String(v.type));
+      if (out.length > 50 * 1024) out = out.slice(0, 50 * 1024) + "\n[OUTPUT TRUNCATED: Exceeded 50KB limit]";
+      const result = text(out);
       result.structuredContent = { page: await pageMeta(tabId) };
       return result;
+    } finally {
+      finishActionSignature(tabId, self.GhostlightActionSignature.KINDS.JAVASCRIPT);
     }
-    const v = r.result;
-    let out = v.value !== undefined ? JSON.stringify(v.value) : (v.description || String(v.type));
-    if (out.length > 50 * 1024) out = out.slice(0, 50 * 1024) + "\n[OUTPUT TRUNCATED: Exceeded 50KB limit]";
-    const result = text(out);
-    result.structuredContent = { page: await pageMeta(tabId) };
-    return result;
   },
   async read_console_messages(a) {
     const tabId = await effectiveTabId(a.tabId);

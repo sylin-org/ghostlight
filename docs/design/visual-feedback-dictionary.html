@@ -5,8 +5,8 @@
   This began as a verbatim capture of the interactive preview in which the per-action
   visual-feedback vocabulary (docs/design/visual-feedback.md) was designed and
   approved. It plays each treatment on a mock browser stage: click rings and
-  target glow, keystroke lozenges, scroll chevrons, the navigate pill, the
-  screenshot file-away frame, the zoom magnifier, and the read scan-line.
+  target glow, action signatures, keystroke lozenges, scroll chevrons, the
+  navigate pill, screenshot file-away frame, zoom magnifier, and read scan-line.
 
   Source: Claude artifact 73996361-1d1a-4319-a52c-8e9a5b58201f, captured
   2026-07-04. The claude.ai iframe-runtime preamble was stripped; the design
@@ -67,7 +67,7 @@
             <label class="pg-field-label" for="pg-input">First prompt to your agent</label>
             <input class="pg-input" id="pg-input" type="text" placeholder="the agent will type here" readonly />
             <h3>What you get</h3>
-            <p>Your AI agent gets a real browser: your cookies, your logins, your tabs. Fourteen tools &mdash; navigate, click, type, screenshot, read the page &mdash; at byte-parity with the schemas the model was trained on.</p>
+            <p>Your AI agent gets a real browser: your cookies, your logins, your tabs. Twenty-five tools &mdash; navigate, click, type, screenshot, read the page &mdash; with the trained schemas preserved byte-for-byte.</p>
             <p>By default Ghostlight is all-open: no policy, no restrictions, no audit. Governance is an overlay you opt into later, one setting at a time.</p>
             <div class="drag-strip" id="drag-strip">drag across me</div>
             <p>The agent works inside its own tab group, labelled with a ghost, so its activity stays visually separate from yours.</p>
@@ -92,7 +92,7 @@
       </div>
       <div class="rail-group">
         <h4>Input</h4>
-        <button class="entry" data-fx="type"><span class="k">type</span><span class="d">field shimmer + a keystroke lozenge</span></button>
+        <button class="entry" data-fx="type"><span class="k">type</span><span class="d">field shimmer + a glowing keyboard; never the typed value</span></button>
         <button class="entry" data-fx="key"><span class="k">key / shortcut</span><span class="d">a lozenge: <code>Ctrl</code>+<code>A</code></span></button>
       </div>
       <div class="rail-group">
@@ -102,13 +102,14 @@
       </div>
       <div class="rail-group">
         <h4>Capture</h4>
-        <button class="entry" data-fx="screenshot"><span class="k">screenshot</span><span class="d">a sky flash + a camera badge, bottom&#8209;right</span></button>
+        <button class="entry" data-fx="screenshot"><span class="k">screenshot</span><span class="d">a sky flash + a signal&#8209;aware camera medallion</span></button>
         <button class="entry" data-fx="zoom"><span class="k">zoom</span><span class="d">a magnifier frame closes on the region</span></button>
       </div>
       <div class="rail-group">
         <h4>Reading</h4>
         <button class="entry" data-fx="read"><span class="k">read page / find</span><span class="d">a scan&#8209;line sweeps down &mdash; "the agent is reading"</span></button>
-        <button class="entry" data-fx="wait"><span class="k">wait</span><span class="d">a breathing dot while it thinks</span></button>
+        <button class="entry" data-fx="wait"><span class="k">wait</span><span class="d">three fading lights for the actual wait</span></button>
+        <button class="entry" data-fx="javascript"><span class="k">page operation</span><span class="d">a rotating workwheel with light particles</span></button>
       </div>
       <div class="rail-group">
         <h4>Communication</h4>
@@ -388,17 +389,28 @@
     88%  { opacity: 1; transform: scale(.17); border-radius: 16px; }
     100% { opacity: 0; transform: scale(.17); border-radius: 16px; }
   }
-  .camera {
-    position: absolute; right: 16px; bottom: 16px; z-index: 63;
-    display: flex; align-items: center; gap: 8px;
-    font-family: var(--mono); font-size: 11px; color: #eaf6ff;
-    padding: 8px 12px 8px 10px; border-radius: 12px;
-    background: rgba(10, 16, 26, .85); border: 1px solid rgba(var(--sky-rgb), .5);
-    box-shadow: 0 10px 30px -12px rgba(var(--sky-rgb), .8);
-    opacity: 0; animation: camera 1500ms ease-out forwards;
+  .signature {
+    position: absolute; z-index: 63; width: 58px; height: 58px; display: grid; place-items: center;
+    border-radius: 18px; color: var(--sky); font: 27px/1 system-ui;
+    background: rgba(10, 16, 26, .92); border: 1px solid rgba(var(--sky-rgb), .58);
+    box-shadow: 0 12px 32px -14px rgba(var(--sky-rgb), .9), inset 0 1px 0 rgba(255,255,255,.09), 0 0 18px -8px rgba(var(--sky-rgb), .75);
+    opacity: 0; animation: signature 1600ms cubic-bezier(.22,1,.36,1) forwards;
   }
-  .camera svg { width: 20px; height: 20px; }
-  @keyframes camera { 0% { opacity: 0; transform: scale(.7); } 10% { opacity: 1; transform: scale(1); } 66% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.98); } }
+  .signature.top-left { top: 16px; left: 16px; }
+  .signature.top-right { top: 16px; right: 16px; }
+  .signature.bottom-left { bottom: 16px; left: 16px; }
+  .signature.bottom-right { bottom: 16px; right: 16px; }
+  .signature.javascript { animation-duration: 2800ms; }
+  .signature.wait { animation-duration: 3200ms; }
+  .signature .gear { display: block; animation: siggear 1800ms linear infinite; filter: drop-shadow(0 0 7px rgba(var(--sky-rgb), .8)); }
+  .signature .particle { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--sky); box-shadow: 0 0 8px rgba(var(--sky-rgb), .9); animation: sigdot 900ms ease-in-out infinite; }
+  .signature .p1 { top: 8px; right: 8px; }.signature .p2 { right: 7px; bottom: 10px; animation-delay: 150ms; }.signature .p3 { left: 9px; bottom: 7px; animation-delay: 300ms; }
+  .signature .wait-dots { display: flex; gap: 5px; }
+  .signature .wait-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--sky); animation: sigdot 1050ms ease-in-out infinite; }
+  .signature .wait-dots i:nth-child(2) { animation-delay: 150ms; }.signature .wait-dots i:nth-child(3) { animation-delay: 300ms; }
+  @keyframes signature { 0% { opacity: 0; transform: scale(.84); } 15%,72% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.9); } }
+  @keyframes siggear { to { transform: rotate(360deg); } }
+  @keyframes sigdot { 0%,100% { opacity: .25; transform: scale(.7); } 50% { opacity: 1; transform: scale(1.15); } }
 
   .zoomframe {
     position: absolute; z-index: 57; border: 2px solid rgba(var(--sky-rgb), .9); border-radius: 8px;
@@ -426,14 +438,6 @@
   }
   .urlpill .arrow { color: var(--sky); margin-right: 7px; }
   @keyframes urlpill { 0% { opacity: 0; transform: translate(-50%, -14px); } 14% { opacity: 1; transform: translate(-50%, 0); } 82% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, -8px); } }
-
-  .breath {
-    position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; border-radius: 50%;
-    transform: translate(-50%,-50%); z-index: 56; background: var(--sky);
-    box-shadow: 0 0 18px rgba(var(--sky-rgb), .8);
-    animation: breath 1600ms ease-in-out 2; opacity: 0;
-  }
-  @keyframes breath { 0%,100% { opacity: .35; transform: translate(-50%,-50%) scale(.7); } 50% { opacity: 1; transform: translate(-50%,-50%) scale(1.2); } }
 
   /* ---- rail ---- */
   .rail { display: flex; flex-direction: column; gap: 20px; position: sticky; top: 22px; }
@@ -465,7 +469,8 @@
   @media (prefers-reduced-motion: reduce) {
     .cursor { transition: none; }
     .ripple, .trail-dot, .chevrons svg, .zoomframe, .scanline, .streak, .flash { animation-duration: 1ms; }
-    .glow, .narration-preview, .narration-preview .agent-time { animation: none; }
+    .glow, .narration-preview, .narration-preview .agent-time, .signature .gear,
+    .signature .particle, .signature .wait-dots i { animation: none; }
   }
 </style>
 
@@ -496,8 +501,20 @@
     return { x: r.left - v.left, y: r.top - v.top, w: r.width, h: r.height };
   }
   function ephemeral(el, ms) { fx.appendChild(el); setTimeout(function () { el.remove(); }, ms); }
+  var recentPoint = null;
+
+  function signatureBadge(kind, html, avoid, ms) {
+    var point = avoid || recentPoint;
+    var horizontal = point && point.x >= viewport.clientWidth / 2 ? "left" : "right";
+    var vertical = point && point.y >= viewport.clientHeight / 2 ? "top" : "bottom";
+    var el = document.createElement("div");
+    el.className = "signature " + vertical + "-" + horizontal + " " + kind;
+    el.innerHTML = html;
+    ephemeral(el, ms || 1650);
+  }
 
   function moveCursor(x, y) {
+    recentPoint = { x: x, y: y };
     glow.style.opacity = "1";
     clearTimeout(moveCursor._t);
     moveCursor._t = setTimeout(function () { glow.style.opacity = "0"; }, 2600);
@@ -580,7 +597,7 @@
         s.style.left = (r.x - 3) + "px"; s.style.top = (r.y - 3) + "px";
         s.style.width = (r.w + 6) + "px"; s.style.height = (r.h + 6) + "px";
         ephemeral(s, 1150);
-        lozenge(c.x, r.y - 22, "go to example.com and read it back");
+        signatureBadge("keyboard", "&#9000;&#65039;", c, 1650);
       }, reduce ? 0 : 380);
     },
     key: function () {
@@ -607,6 +624,7 @@
       var f = document.createElement("div"); f.className = "flash"; ephemeral(f, 300);
       // the shot is framed, then "filed" -- the frame shrinks into the bottom-right corner
       var cf = document.createElement("div"); cf.className = "capframe"; ephemeral(cf, 1600);
+      signatureBadge("camera", "&#128247;", recentPoint, 1650);
     },
     zoom: function () {
       showCaption("Zoom"); var r = localRect(pgBtn);
@@ -621,7 +639,11 @@
     },
     wait: function () {
       showCaption("Waiting");
-      var b = document.createElement("div"); b.className = "breath"; ephemeral(b, 3300);
+      signatureBadge("wait", "<span class='wait-dots'><i></i><i></i><i></i></span>", recentPoint, 3200);
+    },
+    javascript: function () {
+      showCaption("Working on this page");
+      signatureBadge("javascript", "<span class='gear'>&#9881;</span><i class='particle p1'></i><i class='particle p2'></i><i class='particle p3'></i>", recentPoint, 2800);
     },
     narrate: function () {
       var old = viewport.querySelector(".narration-preview"); if (old) old.remove();
@@ -660,7 +682,7 @@
   });
 
   // The tour: the sequence the real capture script runs, self-narrating.
-  var TOUR = ["narrate", "navigate", "read", "click", "type", "key", "scroll", "zoom", "screenshot"];
+  var TOUR = ["narrate", "navigate", "read", "click", "type", "javascript", "key", "scroll", "zoom", "screenshot"];
   document.getElementById("run-tour").addEventListener("click", function () {
     var i = 0;
     (function step() {
