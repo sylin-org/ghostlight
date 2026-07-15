@@ -7,6 +7,15 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **Firefox and browser adapters now have a research baseline.** Research 19 maps all 25 current
+  tools across Firefox extension-only and hybrid extension plus Marionette/WebDriver BiDi modes,
+  inventories useful Firefox capabilities beyond Ghostlight, and identifies the pairing, trusted
+  input, instrumentation, recording, and launch-security gaps. It proposes a typed semantic
+  operation seam, connection-time capability negotiation, stable schemas plus dynamic adapter
+  guidance, and tab-owner/session-affinity/focus/disambiguation routing. No Firefox support or
+  adapter refactor is authorized yet; the next gate is a two-track, unshipped Linux proof of
+  concept followed by an owner-reviewed ADR.
+
 - **Unified action signature medallions are implemented on `dev` (ADR-0083).** One
   policy-free, signal-aware renderer now gives non-spatial work a consistent corner badge while
   avoiding the recent pointer, focused and touched regions, scroll direction, and active

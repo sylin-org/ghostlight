@@ -65,6 +65,7 @@ cited-sources discipline but are not part of the pre-Phase 0 discovery above.
 | [16-denial-burst-circuit-breaker.md](16-denial-burst-circuit-breaker.md) | Prior art and ADR input for quiet isolated denials plus a real session-scoped pause after a denial burst. Defines counter scope, recovery semantics, threat boundary, audit facts, and evaluation gates. No implementation. |
 | [17-agent-browser-overlap-2026-07.md](17-agent-browser-overlap-2026-07.md) | Mutual capability map against agent-browser v0.31.2 and strategic opportunities through model, user, and governance delight. |
 | [18-free-surface-evaluation-plan-2026-07.md](18-free-surface-evaluation-plan-2026-07.md) | Measurement plan and acceptance gates for ref-linked annotated screenshots and optional owned-tab labels. No public schema change. |
+| [19-firefox-browser-adapter-dossier-2026-07.md](19-firefox-browser-adapter-dossier-2026-07.md) | Firefox extension, Marionette, and WebDriver BiDi capability map; adapter boundary; dynamic explanation; multi-browser selection; security posture; and bounded proof-of-concept gates. No product decision. |
 
 ## Status
 
