@@ -65,7 +65,8 @@ function Resolve-Version {
 
 # One trailing newline, matching the site loader's own normalize().
 function Get-Normalized([string] $Path) {
-    return ((Get-Content -Raw $Path) -replace '\s*$', '') + "`n"
+    $content = (Get-Content -Raw $Path) -replace '\r\n?', "`n"
+    return ($content -replace '\s*$', '') + "`n"
 }
 
 Write-Banner 'Website (sylin.org) refresh'

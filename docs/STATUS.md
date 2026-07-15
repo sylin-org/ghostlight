@@ -9,17 +9,18 @@ when they disagree**, and update it when you land something that changes the pic
 
 - **Branches**: `main` = releases, `dev` = trunk. Work lands on `dev`; the owner reviews
   `dev -> main` PRs and cuts releases.
-- **Latest published release: v0.5.7** (2026-07-13), cut with `scripts/release.ps1 0.5.7`.
-  Shipped and LIVE: GitHub Release (27 assets including the CycloneDX SBOM + attestations), npm
-  `ghostlight@0.5.7`, homebrew tap, **MCP registry (`org.sylin/ghostlight`, 0.5.7 is latest)**,
-  scoop/winget/homebrew manifests committed to main, trust footers restamped, and the sylin.org
-  install-guide fallback refreshed. Release PR #48 merged at `96d1e02`; checksum fill is
-  `49c4c5a` and the trust restamp is `4ddb5af`. v0.5.5 was prepared but never published.
-- **v0.6.0 is prepared on `dev`, not published.** The unpublished 0.5.8 draft was retargeted to a
-  minor release because removal of browser-control web ingress establishes an intentional
-  greenfield boundary. Crates, the unpacked extension, npm/MCP metadata, and package-manager
-  templates identify as 0.6.0. Release checksums still belong to the last published artifacts
-  until the owner runs the release workflow from `main`.
+- **Latest published release: v0.6.0** (2026-07-15), cut with `scripts/release.ps1 0.6.0`.
+  Shipped and LIVE: GitHub Release (28 files: 27 payloads including the CycloneDX SBOM, plus the
+  canonical hash manifest and Sigstore attestations), npm `ghostlight@0.6.0`, Homebrew tap,
+  **MCP registry (`org.sylin/ghostlight`, 0.6.0 is latest)**, filled Scoop/Winget/Homebrew
+  manifests, trust footers, and the current sylin.org install guide. Winget PR
+  `microsoft/winget-pkgs#402692` is open and passed local `winget validate`. Release PR #50 merged
+  at `2d8cb0c`; checksum fill is `aa8d50a` and the trust restamp is `2308b0c`.
+- **v0.6.0 is an intentional greenfield boundary.** The unpublished 0.5.8 draft became this minor
+  release because browser-control web ingress and its scaffolding were removed outright. Public
+  setup starts from a local service, same-user OS IPC, and the interactive user's authenticated
+  Chromium profile. There is no compatibility claim or migration path for the removed web
+  transport.
 - **v0.5.7 includes the expanded installer matrix**: Codex is a first-class lossless-TOML target
   (ADR-0067), and Windsurf, Zed, OpenCode, and Crush join Claude Code/Desktop, Cursor, and VS Code
   as explicit installer targets (ADR-0071). Strict JSON is merged idempotently. Commented JSONC is
@@ -34,17 +35,19 @@ when they disagree**, and update it when you land something that changes the pic
   handoff (ADR-0070), agent narration (ADR-0072), reliable memory-only GIF recording and bounded
   browser transport (ADRs 0073/0074), the cohesive Card Foundry demo story, and the live Foundry
   companion route at `https://sylin.org/ghostlight/demo/foundry/`.
-- **The Chrome Web Store listing is submitted and pending compliance review.** On 2026-07-13 the
-  owner completed the listing, Privacy practices, permission and remote-code justifications,
+- **The Chrome Web Store listing is submitted and pending compliance review at v0.5.7.** On
+  2026-07-13 the owner completed the listing, Privacy practices, permission and remote-code justifications,
   data-use certifications, screenshots, video, and promotional tiles, then submitted v0.5.7 for
   review. Chrome warned that broad host permissions may trigger an in-depth review; that is the
   intentional tradeoff for general-purpose automation across user-selected sites, not a rejected
   submission. No action remains unless the reviewer asks for clarification. Edge was skipped
   because no `EDGE_*` credentials are configured.
-- **CWS credential durability needs one owner-side change**: the Google OAuth consent screen is
-  External/Testing, so its refresh token is short-lived. Move the consent configuration to
-  Production or mint a fresh token before a later publish attempt. Credential locations remain in
-  `local/`; no values belong in tracked documentation.
+- **The v0.6.0 Chrome Web Store update is not submitted.** The automated upload stopped before any
+  store mutation because Google returned `disabled_client`. The authenticated browser account can
+  reach the listing sign-in flow but cannot view the Cloud project that owns that OAuth client.
+  The owner must re-enable or replace the client under the owning account, or reauthenticate to the
+  developer dashboard and upload `ghostlight-extension-v0.6.0.zip` manually. Credential locations
+  remain in `local/`; no values belong in tracked documentation.
 - **The ADR-0056 Lightbox consolidation is complete.** All 27 legacy ignored spawn tests have named
   parity scenarios, the originals and dual shell wrappers are retired, and CI runs the 34-scenario
   Lightbox suite as the sole service-side process-boundary gate. The repaired Playwright job stays
@@ -83,12 +86,12 @@ when they disagree**, and update it when you land something that changes the pic
   publishes the contact, expiry, canonical URL, and Ghostlight security-policy link.
 - **The four-phase public documentation freshness pass is complete in the working tree.** Trust
   material now follows SECURITY.md's best-effort solo-maintainer targets and names only live
-  distribution channels. Present-facing guides use the v0.5.7 service/relay topology, 25-tool
+  distribution channels. Present-facing guides use the current service/relay topology, 25-tool
   inventory, one-stack dev loop, shipped licensing behavior, and managed-tab boundary. The original
   SPEC is explicitly historical, recording privacy names the memory-only retention rules, and the
-  sylin.org source carries a v0.5.7 fallback plus a product-first narrow hero. Ghostlight formatting,
-  local-link and ASCII checks, the website clean build, all generated-site checks, and the rendered
-  390px overflow/navigation/order checks are green.
+  sylin.org source carries the current version-agnostic fallback plus a product-first narrow hero.
+  Ghostlight formatting, local-link and ASCII checks, the website clean build, all generated-site
+  checks, and the rendered 390px overflow/navigation/order checks are green.
 - **The July non-author experience closure is implemented on `dev` (ADR-0079).** An isolated
   denial is now a centered three-second sticker. Repeated enforced denials pause only the producing
   MCP session at a synchronized service send boundary (3 matching/60 seconds or 5 total/120
@@ -207,17 +210,22 @@ when they disagree**, and update it when you land something that changes the pic
 `scripts/release.ps1 <version>` from `main` automates: tag, watch CI, verify assets, fill
 package-manager sums, homebrew tap, npm publish + smoke, trust-footer restamp, extension publish
 (Chrome Web Store + Edge; auto when `CWS_*`/`EDGE_*` creds are set), and the website refresh. The
-v0.5.7 run proved every automated step end to end. The owner later completed the dashboard-only
-CWS metadata and submitted the item manually; Edge remains unconfigured.
+v0.6.0 run published GitHub, Homebrew, npm, the MCP Registry, checksum pins, and trust footers. The
+release workflow's checkout-free publisher needed an explicit repository argument; the release was
+recovered from the already verified and attested immutable bundle without a rebuild or retag, and
+the workflow fix is prepared. The website fallback already matched after newline normalization, so
+no rebuild was needed. Chrome stopped at its disabled OAuth client; Edge remains unconfigured.
 
-CWS API creds are set up on this machine (see local/RELEASE-CREDENTIALS.md; values in
-`~/.ghostlight-release.env`, written by `local/set-credentials.ps1`). Load them before a release:
+CWS API credential values exist on this machine but the configured client is currently disabled
+(see local/RELEASE-CREDENTIALS.md; values in `~/.ghostlight-release.env`, written by
+`local/set-credentials.ps1`). After the owner restores or replaces that client, load them before a
+release:
 `Get-Content "$HOME/.ghostlight-release.env" | % { if ($_ -match '^([A-Z0-9_]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1],$Matches[2]) } }`
 
 Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA). The repository now provides
 `scripts/prepare-winget.ps1`, which materializes the correct submission tree from release manifests
-and runs `winget validate`; v0.5.7 passed that preparation locally. Store submission remains manual
-when its API credentials or dashboard metadata are absent.
+and runs `winget validate`; v0.6.0 passed and is submitted as upstream PR #402692. Store submission
+remains manual when its API credentials or dashboard metadata are absent.
 
 ## Owed engineering work (in rough priority order)
 
@@ -326,8 +334,10 @@ when its API credentials or dashboard metadata are absent.
 
 ## Owner-side gates (agents cannot do these)
 
-- Chrome Web Store: monitor the pending v0.5.7 review and answer any reviewer questions; make the
-  OAuth credentials durable before the next release. Edge Add-ons remains unsubmitted.
+- Chrome Web Store: finish the Google sign-in in the open dashboard tab, then upload and submit the
+  prepared v0.6.0 extension, or restore an OAuth client owned by an accessible Cloud project and
+  rerun `scripts/release.ps1 0.6.0 -From extension`. Continue to monitor the v0.5.7 review. Edge
+  Add-ons remains unsubmitted.
 - Trust center legal: vendor entity name in the MSA (blocked on forming the LLC), the
   cyber-insurance yes/no line, counsel skim of MSA/DPA/LICENSE-GOVERNANCE before first
   EXECUTION (publication already happened by design; drafts are marked as drafts).
@@ -336,7 +346,7 @@ when its API credentials or dashboard metadata are absent.
 ## Standing context worth knowing
 
 - The trust center (`docs/trust/`, 13 docs) is PUBLIC on `main` since 2026-07-11 (PR #27)
-  with footers restamped against v0.5.7. Its claims were red-teamed against the tree; keep code and
+  with footers restamped against v0.6.0. Its claims were red-teamed against the tree; keep code and
   claims in lockstep.
 - managed:// central policy distribution (ADR-0055) is fully implemented through Phase 5.
 - The dev workflow is the one-stack model (ADR-0065): no dev install, no `-dev` host;

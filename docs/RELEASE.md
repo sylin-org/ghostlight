@@ -5,12 +5,13 @@ and what still needs a human. The driver is `scripts/release.ps1 <version>`, run
 the `dev -> main` release PR is merged. Everything downstream of the git tag reacts to the assets
 the Release workflow builds.
 
-The release spans TWO repositories:
+The release spans three first-party repositories plus external registries:
 
 - `sylin-org/ghostlight` (this repo): binaries, the npm launcher, package managers, the browser
   extension, and the MCP registry entry.
 - `sylin-org/website` (sylin.org): the install guide and demo pages. It is designed to auto-track
   this repo, so a release touches it only lightly (see "Website" below).
+- `sylin-org/homebrew-tap`: the Homebrew formula and its release-asset integrity pins.
 
 ## The channel map
 
@@ -27,9 +28,12 @@ The release spans TWO repositories:
 | Website (sylin.org) | refresh the install-guide fallback + trigger a rebuild | Automated | `release.ps1` (`website`) -> `publish-website.ps1` |
 | MCP Registry | `server.json` entry | Automated when `MCP_DNS_PRIVATE_KEY` is set, else skipped | `release.ps1` (`registry`) -> `mcp-publisher` (DNS auth) |
 
+The privileged GitHub publisher deliberately has no repository checkout. Every `gh` mutation in
+that job must therefore pass an explicit repository identity; do not make it depend on `.git` state.
+
 `release.ps1` runs these as ordered, resumable steps: `preflight, tag, watch, verify, sums, tap,
-npm, trust, extension, website, report`. Each step detects whether it is already done and skips, so
-the script is safe to re-run; resume at any step with `-From <step>`.
+npm, registry, trust, extension, website, report`. Each step detects whether it is already done and
+skips, so the script is safe to re-run; resume at any step with `-From <step>`.
 
 ## Prerequisites
 

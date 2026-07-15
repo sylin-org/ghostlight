@@ -300,6 +300,11 @@ The item was submitted for review on 2026-07-13. The store assigned the id
 `cjcmhepmagomefjggkcohdbfemacojoa` (the dev id comes from the pinned manifest `key`, which is
 stripped from the store package).
 
+Current release state (2026-07-15): v0.5.7 remains the submitted package. The prepared v0.6.0
+package has not been uploaded. Google's token endpoint rejected the configured OAuth client as
+disabled before any store mutation, and the developer dashboard requires account reauthentication.
+Do not describe v0.6.0 as submitted until the dashboard or API accepts that upload.
+
 Ordinary `ghostlight install` already registers both the Web Store id and the pinned unpacked-dev
 id in the native host's `allowed_origins`. A store user therefore runs the normal command:
 

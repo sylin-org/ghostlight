@@ -745,7 +745,7 @@ function Step-Extension {
     # publish-extension.ps1 auto-submits to each store whose credentials are present and prints
     # manual instructions for the rest; it never fails the release for a missing credential.
     & pwsh -File $script -Version $Version
-    if ($LASTEXITCODE -ne 0) { Write-Warn2 "publish-extension.ps1 exited $LASTEXITCODE -- review its output above" }
+    if ($LASTEXITCODE -ne 0) { throw "publish-extension.ps1 exited $LASTEXITCODE -- review its output above" }
 }
 
 function Step-Website {
@@ -759,7 +759,7 @@ function Step-Website {
         return
     }
     & pwsh -File $script -Version $Version
-    if ($LASTEXITCODE -ne 0) { Write-Warn2 "publish-website.ps1 exited $LASTEXITCODE -- review its output above" }
+    if ($LASTEXITCODE -ne 0) { throw "publish-website.ps1 exited $LASTEXITCODE -- review its output above" }
 }
 
 function Step-Report {
@@ -772,13 +772,12 @@ function Step-Report {
     - npm publish + smoke$(if ($SkipNpm) { ' (SKIPPED)' })
     - MCP registry publish$(if ($SkipRegistry) { ' (SKIPPED)' }) -- auto when MCP_DNS_PRIVATE_KEY is set, else skipped
     - trust-center footers restamped to v$Version
-    - extension published$(if ($SkipExtension) { ' (SKIPPED)' }) -- auto where store creds are set, else steps printed above
-    - website install-guide fallback refreshed$(if ($SkipWebsite) { ' (SKIPPED)' })
+    - extension publication step completed$(if ($SkipExtension) { ' (SKIPPED)' }) -- auto where store creds are set, else steps printed above
+    - website install-guide refresh step completed$(if ($SkipWebsite) { ' (SKIPPED)' })
 
   Still manual (by nature -- external systems that need a human or a per-version PR):
     - winget: a NEW PR per version to microsoft/winget-pkgs
         (copy the filled packaging/winget/Sylin.Ghostlight.yaml sections; needs the CLA).
-    - MCP Registry: mcp-publisher with DNS auth on the sylin.org apex (founder-side).
     - Extension stores: if you have NOT set the store API credentials, follow the steps this
         script printed above (nothing auto-submitted). See docs/RELEASE.md -> "Extension stores".
     - Verify: https://github.com/$RepoSlug/releases/tag/$Tag
