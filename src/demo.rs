@@ -16,17 +16,18 @@
 //! extension attached (`ghostlight doctor`), and a real, visible browser window -- the effects are
 //! deliberately hidden from screenshots, so this is a watch-your-browser demo.
 
+use crate::demo_client::{
+    all_text, parse_tab_id, Client, RefInventory, DEMO_POLICY, JAVASCRIPT_TOOL,
+};
+#[cfg(test)]
+use crate::demo_client::{
+    first_text, page_content_payload, parse_first_ref, ref_for_name, PageProvenanceContract,
+};
 use anyhow::{anyhow, bail, Context, Result};
-use serde_json::{json, Value};
-use std::collections::BTreeMap;
-use std::process::Stdio;
+use serde_json::json;
+#[cfg(test)]
+use serde_json::Value;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
-use tokio::process::{Child, ChildStdin, ChildStdout};
-
-/// The tighten-only session overlay declared at `initialize` (ADR-0060): grants the public stage
-/// and its explicit loopback preview, while the finale's off-domain navigation remains refused.
-const DEMO_POLICY: &str = include_str!("../examples/demo-policy.json");
 
 /// How long each chapter caption remains visible and how long the demo waits before acting. The
 /// matching values make narration a deliberate chapter card instead of an overlay the next action
@@ -51,17 +52,6 @@ const REPLAY_FILENAME: &str = "aurora-qa-replay.gif";
 /// drag and zoom coordinates stay aligned with ADR-0010 if the source constants change.
 const EXTENSION_CONSTANTS: &str = include_str!("../extension/lib/constants.js");
 
-/// The machine-result tool whose advertised output schema negotiates the ADR-0078 page
-/// provenance contract for this client.
-const JAVASCRIPT_TOOL: &str = "javascript_tool";
-
-/// Prefix shared by the service-authored opening marker and the consumer's marker detection.
-const PAGE_CONTENT_PREFIX: &str = "--- GHOSTLIGHT PAGE CONTENT ";
-
-/// ADR-0078 requires at least 96 bits of service-chosen nonce material. Two lowercase hex
-/// characters encode one byte, so the minimum wire representation is 24 characters.
-const MIN_PAGE_NONCE_HEX_LEN: usize = 24;
-
 /// The demo's three watchability rhythms, all operator-tunable: a short beat after each visible
 /// step, a long hold right after the tab opens (time to resize/position the window before the
 /// tour starts), and a breather between sections so each "test" reads as its own scene.
@@ -81,223 +71,6 @@ pub fn run(base_url: &str, pacing: Pacing) -> Result<()> {
     let base = base_url.trim_end_matches('/').to_string();
     let rt = tokio::runtime::Runtime::new().context("build the demo tokio runtime")?;
     rt.block_on(drive(base, pacing))
-}
-
-/// The page-provenance contract established from `javascript_tool` in `tools/list`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PageProvenanceContract {
-    /// The handshake has not yet inspected the server's advertised tool schema.
-    Unnegotiated,
-    /// A pre-ADR-0078 service advertises `javascript_tool` without requiring page provenance.
-    /// Raw results remain compatible; a fully verified bounded result is a safe additive upgrade.
-    Legacy,
-    /// The service advertises page provenance and every machine result must prove it.
-    Required,
-}
-
-impl PageProvenanceContract {
-    /// Detect the contract from the service's explicit `tools/list` advertisement. Absence of the
-    /// required demo tool is an incompatible service or policy, not evidence of a legacy server.
-    fn from_tools_list(result: &Value) -> Result<Self> {
-        let tools = result
-            .get("tools")
-            .and_then(Value::as_array)
-            .ok_or_else(|| anyhow!("tools/list did not return a tools array"))?;
-        let javascript = tools
-            .iter()
-            .find(|tool| tool.get("name").and_then(Value::as_str) == Some(JAVASCRIPT_TOOL))
-            .ok_or_else(|| anyhow!("tools/list did not advertise the demo's javascript_tool"))?;
-        Ok(
-            if javascript
-                .pointer("/outputSchema/properties/provenance")
-                .is_some()
-            {
-                Self::Required
-            } else {
-                Self::Legacy
-            },
-        )
-    }
-}
-
-/// A minimal MCP client speaking JSON-RPC over a spawned `ghostlight-relay --role agent`.
-struct Client {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: Lines<BufReader<ChildStdout>>,
-    next_id: i64,
-    pause: Duration,
-    page_provenance: PageProvenanceContract,
-}
-
-impl Client {
-    /// Spawn the relay (the sibling binary of this executable) as an agent-role MCP pass-through
-    /// and take its stdio. The relay resolves the same instance this process did (it inherits
-    /// `GHOSTLIGHT_INSTANCE`), so `ghostlight --instance dev demo` drives the dev service.
-    async fn spawn(pause: Duration) -> Result<Self> {
-        let relay = relay_path().context("locate the ghostlight-relay binary")?;
-        let mut child = tokio::process::Command::new(&relay)
-            .arg("--role")
-            .arg("agent")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .with_context(|| format!("spawn {}", relay.display()))?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow!("relay stdin unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow!("relay stdout unavailable"))?;
-        Ok(Self {
-            child,
-            stdin,
-            stdout: BufReader::new(stdout).lines(),
-            next_id: 0,
-            pause,
-            page_provenance: PageProvenanceContract::Unnegotiated,
-        })
-    }
-
-    /// Send a request and await the response with the matching id, skipping notifications and
-    /// unrelated ids. Fails if the relay closes its output before answering.
-    async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
-        self.next_id += 1;
-        let id = self.next_id;
-        let frame = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        self.write(&frame).await?;
-        loop {
-            let line = self
-                .stdout
-                .next_line()
-                .await
-                .context("read from relay")?
-                .ok_or_else(|| anyhow!("relay closed its output while awaiting '{method}'"))?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let msg: Value = match serde_json::from_str(&line) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            if msg.get("id").and_then(Value::as_i64) == Some(id) {
-                if let Some(err) = msg.get("error") {
-                    bail!("'{method}' returned a JSON-RPC error: {err}");
-                }
-                return Ok(msg.get("result").cloned().unwrap_or(Value::Null));
-            }
-        }
-    }
-
-    /// Send a notification (no id, no response awaited).
-    async fn notify(&mut self, method: &str, params: Value) -> Result<()> {
-        self.write(&json!({ "jsonrpc": "2.0", "method": method, "params": params }))
-            .await
-    }
-
-    async fn write(&mut self, frame: &Value) -> Result<()> {
-        let mut line = serde_json::to_string(frame)?;
-        line.push('\n');
-        self.stdin
-            .write_all(line.as_bytes())
-            .await
-            .context("write to relay")?;
-        self.stdin.flush().await.context("flush relay stdin")
-    }
-
-    /// Call a tool and return the first text block of its result. A denial is ordinary text
-    /// beginning `Denied (` (rendered as a successful result), so callers that want to detect the
-    /// guardrail inspect the returned string; a genuine `isError` result is surfaced as an error.
-    async fn call_tool_result(&mut self, name: &str, arguments: Value) -> Result<Value> {
-        let result = self
-            .request(
-                "tools/call",
-                json!({ "name": name, "arguments": arguments }),
-            )
-            .await?;
-        if result.get("isError").and_then(Value::as_bool) == Some(true) {
-            bail!("tool '{name}' reported an error: {}", first_text(&result));
-        }
-        Ok(result)
-    }
-
-    /// Call a tool and return the first text block of its successful result.
-    async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<String> {
-        let result = self.call_tool_result(name, arguments).await?;
-        Ok(first_text(&result))
-    }
-
-    /// Read the advertised `javascript_tool` output contract after initialization. Only an
-    /// explicit legacy advertisement permits unwrapped machine JSON later in the demo.
-    async fn negotiate_page_provenance(&mut self) -> Result<()> {
-        let tools = self
-            .request("tools/list", json!({}))
-            .await
-            .context("negotiate page provenance through tools/list")?;
-        self.page_provenance = PageProvenanceContract::from_tools_list(&tools)?;
-        Ok(())
-    }
-
-    async fn pause(&self) {
-        tokio::time::sleep(self.pause).await;
-    }
-}
-
-/// The first text block of an MCP tool result (`{ content: [ { type, text } ] }`), or "".
-fn first_text(result: &Value) -> String {
-    result
-        .get("content")
-        .and_then(Value::as_array)
-        .and_then(|items| {
-            items
-                .iter()
-                .find(|b| b.get("type").and_then(Value::as_str) == Some("text"))
-        })
-        .and_then(|b| b.get("text").and_then(Value::as_str))
-        .unwrap_or("")
-        .to_string()
-}
-
-/// Join every text content block in result order. Screenshot results carry their ordinary capture
-/// confirmation first and the minted `imageId` instruction in a later block.
-fn all_text(result: &Value) -> String {
-    result
-        .get("content")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
-                .filter_map(|block| block.get("text").and_then(Value::as_str))
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .unwrap_or_default()
-}
-
-/// The `ghostlight-relay` binary sitting next to this executable.
-fn relay_path() -> Result<std::path::PathBuf> {
-    let exe = std::env::current_exe().context("resolve the current executable")?;
-    let dir = exe
-        .parent()
-        .ok_or_else(|| anyhow!("executable has no parent directory"))?;
-    let name = if cfg!(windows) {
-        "ghostlight-relay.exe"
-    } else {
-        "ghostlight-relay"
-    };
-    let path = dir.join(name);
-    if !path.exists() {
-        bail!(
-            "ghostlight-relay not found next to {} (expected {})",
-            exe.display(),
-            path.display()
-        );
-    }
-    Ok(path)
 }
 
 fn step(msg: &str) {
@@ -619,41 +392,6 @@ async fn take_screenshot(c: &mut Client, tab_id: i64) -> Result<String> {
     parse_image_id(&text).ok_or_else(|| anyhow!("screenshot did not report an imageId: {text}"))
 }
 
-/// References for one stable Foundry phase, collected by one meaningful interactive page read.
-/// Reusing them keeps the read-scan effect tied to inspection rather than making it appear before
-/// every click, keystroke, and capture.
-#[derive(Debug)]
-struct RefInventory {
-    refs: BTreeMap<String, String>,
-}
-
-impl RefInventory {
-    /// Read the interactive surface once and require every named control in that snapshot.
-    async fn read(c: &mut Client, tab_id: i64, names: &[&str]) -> Result<Self> {
-        let page = c
-            .call_tool(
-                "read_page",
-                json!({ "tabId": tab_id, "filter": "interactive" }),
-            )
-            .await?;
-        let mut refs = BTreeMap::new();
-        for name in names {
-            let element_ref = ref_for_name(&page, name)
-                .ok_or_else(|| anyhow!("Card Foundry control not found: {name}"))?;
-            refs.insert((*name).to_string(), element_ref);
-        }
-        Ok(Self { refs })
-    }
-
-    /// Require a reference that was declared when this phase inventory was built.
-    fn require(&self, name: &str) -> Result<&str> {
-        self.refs
-            .get(name)
-            .map(String::as_str)
-            .ok_or_else(|| anyhow!("Card Foundry reference was not inventoried: {name}"))
-    }
-}
-
 /// Click one already-inspected control through the ordinary `computer` path.
 async fn click_ref(c: &mut Client, tab_id: i64, element_ref: &str) -> Result<()> {
     c.call_tool(
@@ -722,7 +460,7 @@ async fn model_rect(c: &mut Client, tab_id: i64, selector: &str, padding: f64) -
             json!({ "action": "javascript_exec", "tabId": tab_id, "text": script }),
         )
         .await?;
-    let text = page_content_payload(&result, c.page_provenance)?;
+    let text = c.page_content_payload(&result)?;
     parse_number_array(&text, 4).with_context(|| format!("project zoom rectangle for {selector}"))
 }
 
@@ -742,64 +480,8 @@ async fn model_centers(c: &mut Client, tab_id: i64, selectors: &[&str; 2]) -> Re
             json!({ "action": "javascript_exec", "tabId": tab_id, "text": script }),
         )
         .await?;
-    let text = page_content_payload(&result, c.page_provenance)?;
+    let text = c.page_content_payload(&result)?;
     parse_number_array(&text, 4).context("project Foundry drag centers")
-}
-
-/// Return the payload inside a service-authored page-content boundary for a machine consumer.
-///
-/// Current services provide the same nonce in structured provenance and both text markers. The
-/// demo validates all three before removing the control text. Raw results are accepted only when
-/// `tools/list` explicitly established compatibility with a service from before ADR-0078. Such a
-/// legacy advertisement may still return a fully verified boundary as an additive upgrade, which
-/// is safe to unwrap. Unnegotiated calls fail before inspecting either result shape. Marker-shaped
-/// text without matching structured provenance is never stripped.
-fn page_content_payload(result: &Value, contract: PageProvenanceContract) -> Result<String> {
-    let provenance_required = match contract {
-        PageProvenanceContract::Unnegotiated => {
-            bail!("page provenance was not negotiated through tools/list")
-        }
-        PageProvenanceContract::Legacy => false,
-        PageProvenanceContract::Required => true,
-    };
-    let text = first_text(result);
-    let Some(provenance) = result.pointer("/structuredContent/provenance") else {
-        if text.starts_with(PAGE_CONTENT_PREFIX) {
-            bail!("page-content boundary is missing structured provenance");
-        }
-        if provenance_required {
-            bail!("javascript_tool advertised page provenance but its result omitted it");
-        }
-        return Ok(text);
-    };
-    if provenance.get("pageSourced").and_then(Value::as_bool) != Some(true)
-        || provenance.get("untrusted").and_then(Value::as_bool) != Some(true)
-    {
-        bail!("page-content provenance is missing its untrusted page marker");
-    }
-    let nonce = provenance
-        .get("sessionNonce")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("page-content provenance has no session nonce"))?;
-    if nonce.len() < MIN_PAGE_NONCE_HEX_LEN
-        || nonce.len() % 2 != 0
-        || !nonce
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        bail!("page-content provenance has an invalid session nonce");
-    }
-    let origin = provenance
-        .get("topOrigin")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("page-content provenance has no top origin"))?;
-    let opening = format!("{PAGE_CONTENT_PREFIX}{nonce} origin={origin} UNTRUSTED ---\n");
-    let closing = format!("\n--- END GHOSTLIGHT PAGE CONTENT {nonce} ---");
-    let payload = text
-        .strip_prefix(&opening)
-        .and_then(|body| body.strip_suffix(&closing))
-        .ok_or_else(|| anyhow!("page-content boundary does not match structured provenance"))?;
-    Ok(payload.to_string())
 }
 
 /// Parse a JSON number array returned by `javascript_tool` and pin its expected length.
@@ -822,61 +504,6 @@ fn parse_image_id(text: &str) -> Option<String> {
     let end = rest.find(']')?;
     let value = rest[..end].trim();
     (!value.is_empty()).then(|| value.to_string())
-}
-
-/// Find the ref on the interactive-tree line whose accessible name contains `name`.
-fn ref_for_name(page: &str, name: &str) -> Option<String> {
-    let needle = name.to_ascii_lowercase();
-    page.lines()
-        .find(|line| line.to_ascii_lowercase().contains(&needle))
-        .and_then(parse_first_ref)
-}
-
-/// Pull the first `ref_N` token out of a find/read_page result.
-fn parse_first_ref(text: &str) -> Option<String> {
-    let idx = text.find("ref_")?;
-    let rest = &text[idx..];
-    let end = rest
-        .char_indices()
-        .find(|(_, ch)| !(ch.is_ascii_alphanumeric() || *ch == '_'))
-        .map(|(i, _)| i)
-        .unwrap_or(rest.len());
-    Some(rest[..end].to_string())
-}
-
-/// Pull the composite `tabId` out of a tabs_create_mcp result (either a `"tabId": N` field in the
-/// text, or a bare "Created tab N").
-fn parse_tab_id(text: &str) -> Option<i64> {
-    // tabs_create's human confirmation names the newly created composite id before its diagnostic
-    // tab list, which can contain native `"tabId"` values. Prefer that explicit confirmation.
-    if let Some(idx) = text.find("Created tab ") {
-        return extract_i64(&text[idx + 12..]);
-    }
-    if let Some(idx) = text.find("\"tabId\"") {
-        let rest = &text[idx + 7..];
-        return extract_i64(rest);
-    }
-    extract_i64(text)
-}
-
-/// The first run of ASCII digits (optionally sign-prefixed) parsed as i64.
-fn extract_i64(s: &str) -> Option<i64> {
-    let start = s.find(|c: char| c.is_ascii_digit() || c == '-')?;
-    let rest = &s[start..];
-    let end = rest
-        .char_indices()
-        .skip(1)
-        .find(|(_, ch)| !ch.is_ascii_digit())
-        .map(|(i, _)| i)
-        .unwrap_or(rest.len());
-    rest[..end].parse().ok()
-}
-
-impl Drop for Client {
-    fn drop(&mut self) {
-        // Best-effort: close stdin and reap the relay so it does not linger.
-        let _ = self.child.start_kill();
-    }
 }
 
 #[cfg(test)]

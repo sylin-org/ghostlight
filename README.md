@@ -30,11 +30,12 @@ start, obvious while it acts, clear when it stops, and honest about what it can 
 
 <p align="center"><a href="#try-it"><strong>Install and try it</strong></a> | <a href="docs/guides/installation.md">Every install path</a> | <a href="docs/COMPARISON.md">Compare alternatives</a></p>
 
-<!-- HERO DEMO SLOT: an annotated session GIF captured from Ghostlight's built-in live tour
-     (sky-blue click rings, action labels, compact narration, watermark). Record `ghostlight demo`,
+<!-- HERO DEMO SLOT: a short session GIF captured from Ghostlight's launch-brief story
+     (persistent sky border, page scan, field glows, click rings, and action labels). Record
+     `ghostlight demo-brief`,
      export a GIF under ~5 MB, then uncomment:
-<p align="center"><img src="docs/assets/demo.gif" alt="Ghostlight driving a real browser: sky-blue click ripples, action captions, and a governed session in its own tab group"></p>
-<p align="center"><sub>Ghostlight driving its own live demo stage, including a visible policy guardrail.</sub></p>
+<p align="center"><img src="docs/assets/demo.gif" alt="Ghostlight reading and completing a launch brief in a real browser with visible page, field, and click feedback"></p>
+<p align="center"><sub>Ghostlight reading, filling, and completing a brief in the user's visible browser.</sub></p>
 -->
 
 ## Is this your problem?
@@ -280,6 +281,8 @@ without making the user rebuild their browser session.
 - `config <list|get|set|schema|docs|preset>`: the layered configuration, with sources and locks.
 - `policy <explain|simulate|init>`: render a manifest as plain sentences, replay an audit log
   against a candidate policy, or write a starter manifest.
+- `demo-brief`: run the short public launch-brief story used for the README hero recording.
+- `demo`: run the longer Card Foundry QA and governance story.
 
 **If something is off, start with `doctor`.** It pinpoints unregistered browsers or clients, a
 missing server, a stale endpoint, or an extension that never connected. Extension shows

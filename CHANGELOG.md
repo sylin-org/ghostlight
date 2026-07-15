@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Short launch-brief demo.** `ghostlight demo-brief` drives a public, dark-mode form through the
+  ordinary MCP relay in a compact read, fill, select, and submit story for the README hero. Exact
+  ref writes pace each visible field without model rediscovery. Shared demo-client support keeps
+  relay framing, stable ref inventory, and page-provenance handling in one place while the existing
+  Card Foundry story remains unchanged.
+
 ## [0.6.0] - 2026-07-15
 
 Closed-loop browser actions, calmer visible feedback, local-only transport hardening, and
