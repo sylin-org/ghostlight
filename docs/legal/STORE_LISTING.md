@@ -300,10 +300,10 @@ The item was submitted for review on 2026-07-13. The store assigned the id
 `cjcmhepmagomefjggkcohdbfemacojoa` (the dev id comes from the pinned manifest `key`, which is
 stripped from the store package).
 
-Current release state (2026-07-15): v0.5.7 remains the submitted package. The prepared v0.6.0
-package has not been uploaded. Google's token endpoint rejected the configured OAuth client as
-disabled before any store mutation, and the developer dashboard requires account reauthentication.
-Do not describe v0.6.0 as submitted until the dashboard or API accepts that upload.
+Current release state (2026-07-15): the owner approved cancelling the pending v0.5.7 review after
+Google reinstated the publishing API project. The v0.6.0 package then uploaded successfully and
+Chrome accepted it as `ITEM_PENDING_REVIEW`. Broad host permissions may trigger the expected
+in-depth review. The listing is submitted but is not public until Chrome approves and publishes it.
 
 Ordinary `ghostlight install` already registers both the Web Store id and the pinned unpacked-dev
 id in the native host's `allowed_origins`. A store user therefore runs the normal command:

@@ -139,6 +139,13 @@ Uses the Chrome Web Store API v1.1 (OAuth2). One-time setup:
 Set: `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`, `CWS_ITEM_ID`. The full click-by-click
 walkthrough (kept machine-local) is `local/RELEASE-CREDENTIALS.md`.
 
+If an older package is still awaiting review, Chrome rejects a new upload. Do not cancel that
+review automatically: cancellation loses its queue position and is an owner release decision. If
+the owner approves replacement, use Chrome's v2
+[`publishers.items.cancelSubmission`](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/publishers.items/cancelSubmission)
+method, upload the current package, and submit it again. Record both the cancelled version and the
+accepted replacement in `docs/STATUS.md` and `docs/legal/STORE_LISTING.md`.
+
 ### Edge Add-ons (`EDGE_*`)
 
 Uses the Edge Add-ons API v1.1 (Partner Center). In Partner Center -> the extension ->

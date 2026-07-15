@@ -35,19 +35,16 @@ when they disagree**, and update it when you land something that changes the pic
   handoff (ADR-0070), agent narration (ADR-0072), reliable memory-only GIF recording and bounded
   browser transport (ADRs 0073/0074), the cohesive Card Foundry demo story, and the live Foundry
   companion route at `https://sylin.org/ghostlight/demo/foundry/`.
-- **The Chrome Web Store listing is submitted and pending compliance review at v0.5.7.** On
-  2026-07-13 the owner completed the listing, Privacy practices, permission and remote-code justifications,
-  data-use certifications, screenshots, video, and promotional tiles, then submitted v0.5.7 for
-  review. Chrome warned that broad host permissions may trigger an in-depth review; that is the
-  intentional tradeoff for general-purpose automation across user-selected sites, not a rejected
-  submission. No action remains unless the reviewer asks for clarification. Edge was skipped
-  because no `EDGE_*` credentials are configured.
-- **The v0.6.0 Chrome Web Store update is not submitted.** The automated upload stopped before any
-  store mutation because Google returned `disabled_client`. The authenticated browser account can
-  reach the listing sign-in flow but cannot view the Cloud project that owns that OAuth client.
-  The owner must re-enable or replace the client under the owning account, or reauthenticate to the
-  developer dashboard and upload `ghostlight-extension-v0.6.0.zip` manually. Credential locations
-  remain in `local/`; no values belong in tracked documentation.
+- **The Chrome Web Store listing is submitted at v0.6.0 and pending compliance review.** The owner
+  completed the listing, Privacy practices, permission and remote-code justifications, data-use
+  certifications, screenshots, video, and promotional tiles for the original v0.5.7 submission.
+  After Google reinstated the `ghostlight-release` API project on 2026-07-15, the owner approved
+  cancelling that pending review so the first public package would match the greenfield release.
+  The v0.6.0 package uploaded successfully and Chrome accepted the new submission as
+  `ITEM_PENDING_REVIEW`. Chrome again warned that broad host permissions may trigger an in-depth
+  review; that is the intentional tradeoff for general-purpose automation across user-selected
+  sites, not a rejected submission. Edge was skipped because no `EDGE_*` credentials are
+  configured.
 - **The ADR-0056 Lightbox consolidation is complete.** All 27 legacy ignored spawn tests have named
   parity scenarios, the originals and dual shell wrappers are retired, and CI runs the 34-scenario
   Lightbox suite as the sole service-side process-boundary gate. The repaired Playwright job stays
@@ -214,12 +211,12 @@ v0.6.0 run published GitHub, Homebrew, npm, the MCP Registry, checksum pins, and
 release workflow's checkout-free publisher needed an explicit repository argument; the release was
 recovered from the already verified and attested immutable bundle without a rebuild or retag, and
 the workflow fix is prepared. The website fallback already matched after newline normalization, so
-no rebuild was needed. Chrome stopped at its disabled OAuth client; Edge remains unconfigured.
+no rebuild was needed. Chrome initially stopped at a suspended OAuth project; after Google
+reinstated it, the v0.5.7 review was cancelled and v0.6.0 was uploaded and resubmitted. Edge
+remains unconfigured.
 
-CWS API credential values exist on this machine but the configured client is currently disabled
-(see local/RELEASE-CREDENTIALS.md; values in `~/.ghostlight-release.env`, written by
-`local/set-credentials.ps1`). After the owner restores or replaces that client, load them before a
-release:
+CWS API credentials are working on this machine (see local/RELEASE-CREDENTIALS.md; values in
+`~/.ghostlight-release.env`, written by `local/set-credentials.ps1`). Load them before a release:
 `Get-Content "$HOME/.ghostlight-release.env" | % { if ($_ -match '^([A-Z0-9_]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1],$Matches[2]) } }`
 
 Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA). The repository now provides
@@ -334,9 +331,7 @@ remains manual when its API credentials or dashboard metadata are absent.
 
 ## Owner-side gates (agents cannot do these)
 
-- Chrome Web Store: finish the Google sign-in in the open dashboard tab, then upload and submit the
-  prepared v0.6.0 extension, or restore an OAuth client owned by an accessible Cloud project and
-  rerun `scripts/release.ps1 0.6.0 -From extension`. Continue to monitor the v0.5.7 review. Edge
+- Chrome Web Store: monitor the pending v0.6.0 review and answer any reviewer questions. Edge
   Add-ons remains unsubmitted.
 - Trust center legal: vendor entity name in the MSA (blocked on forming the LLC), the
   cyber-insurance yes/no line, counsel skim of MSA/DPA/LICENSE-GOVERNANCE before first
