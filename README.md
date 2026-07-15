@@ -110,9 +110,9 @@ use its native installer:
 
 [![Add to VS Code](https://img.shields.io/badge/VS_Code-Add_MCP_server-38BDF8?style=flat-square)](vscode:mcp/install?%7B%22name%22%3A%22ghostlight%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22ghostlight%22%5D%7D)
 
-**Current platform state.** Windows is verified end to end against a live browser. macOS and Linux
-build and pass the full test suite in CI, but their live-browser verification is still owed. The
-Chrome Web Store package and listing have been submitted and are pending compliance review.
+**Current platform state.** Windows and Linux are verified end to end against live browsers.
+macOS builds and passes the full test suite in CI; its live-browser verification is still owed.
+The Chrome Web Store listing is under review.
 
 **Other ways to get it.** Homebrew: `brew install sylin-org/tap/ghostlight`. On the
 [MCP registry](https://registry.modelcontextprotocol.io) as `org.sylin/ghostlight`. Every release

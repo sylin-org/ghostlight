@@ -5,10 +5,14 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.8] - 2026-07-14
+## [0.6.0] - 2026-07-15
 
 Closed-loop browser actions, calmer visible feedback, local-only transport hardening, and
 resource-scoped command reliability.
+
+This release establishes Ghostlight's greenfield browser boundary: browser control is local to the
+interactive user's authenticated Chromium session. It does not preserve or replace the removed
+browser-control web transport.
 
 ### Added
 
@@ -23,6 +27,9 @@ resource-scoped command reliability.
 - **Document-aware Presentation Broker (ADR-0081).** Page signage now uses explicit content-script
   readiness, exact document/revision acknowledgements, bounded state and event channels, on-demand
   packaged-renderer activation, navigation replay, and browser-session-only active state.
+- **Linux user-session discovery (ADR-0082).** A relay launched without desktop environment
+  variables securely discovers the owning `/run/user/<uid>` session, restores the user bus, and
+  reaches the same local service endpoint as Chromium's native host.
 
 ### Removed
 
@@ -48,6 +55,9 @@ resource-scoped command reliability.
 - **Atomic execution authority.** Configuration and policy publish as one epoch-bound snapshot;
   URL probes, authorization, dispatch, landing verification, post-processing, and audit use one
   admitted execution context.
+- **Complete JavaScript release gates.** The operating-system matrix discovers every extension
+  test, parses every extension JavaScript file as a whole, and exercises the npm launcher's host,
+  hash, and platform-selection boundaries.
 
 ### Fixed
 
@@ -56,6 +66,13 @@ resource-scoped command reliability.
 - Extension reload on an unchanged page no longer silently disables narration, denial notices, or
   action feedback. The broker reinjects the packaged renderer into managed tabs and verifies the
   current document accepted the presentation.
+- Retained compound intents no longer suppress their own later extension subrequests.
+- Tool completions and auxiliary asynchronous replies remain bound to the native connection that
+  accepted them, even when a replacement connection reuses the same numeric request id.
+- JavaScript dialogs block ref resolution, geometry reads, scroll probes, cursor movement, and
+  direct fallbacks before any page-dependent preparation can stall behind the dialog.
+- The Foundry demo explicitly negotiates current or legacy provenance through `tools/list`,
+  validates the full service-authored boundary, and fails closed on an unnegotiated contract.
 
 ## [0.5.7] - 2026-07-13
 

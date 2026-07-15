@@ -263,7 +263,7 @@ this one is recorded from the outside:
 1. Run `target\release\ghostlight.exe doctor`; continue only when the extension is connected.
 2. Run the `ghostlight demo` command from the promotional-video recipe and record the browser window
    with OBS. The tour self-narrates through timed Agent ribbons, action effects, and the purpose-built
-   demo pages. The submitted v0.5.7 package includes ADR-0072 `narrate`.
+   demo pages. The current package includes ADR-0072 `narrate`.
 3. Extract the peak frame of an effect from the recording (VLC "Take Snapshot", or ffmpeg). Crop to
    1280x800 if the recorder added window chrome. Turning on "Show action captions" in the extension
    popup before recording adds the subtitle line, which reads well in a still.
