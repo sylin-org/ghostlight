@@ -31,6 +31,12 @@ Larger work is organized as task batches under `docs/tasks/<batch>/`, each with 
 a RESUME HERE section). If you are executing a batch, the ledger is the source of truth
 for what is done.
 
+## Cross-session coordination
+
+When the owner says `execute coordination/CHAT.md`, first read and follow
+`coordination/INSTRUCTIONS.md`. The tracked chat carries only messages between active Codex
+sessions; `coordination/RESULTS.md` carries the latest result.
+
 ## What this project is
 
 Ghostlight is a governed browser automation MCP server: a Rust service plus a thin
