@@ -7,9 +7,13 @@
 //! falls through to the user cache silently resolves a different endpoint. This module provides
 //! one security-checked fallback for both endpoint resolution and supervisor self-heal.
 
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use std::path::Path;
+use std::path::PathBuf;
 
+#[cfg(target_os = "linux")]
 const XDG_RUNTIME_DIR_ENV: &str = "XDG_RUNTIME_DIR";
+#[cfg(target_os = "linux")]
 const DBUS_SESSION_BUS_ADDRESS_ENV: &str = "DBUS_SESSION_BUS_ADDRESS";
 
 #[cfg(target_os = "linux")]
@@ -125,7 +129,13 @@ mod tests {
         assert_eq!(secure_linux_runtime_dir(&root, uid), None);
 
         std::fs::set_permissions(&candidate, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(secure_linux_runtime_dir(&root, uid.saturating_add(1)), None);
+        let mismatched_uid = uid.wrapping_add(1);
+        let ownership_mismatch = root.join(mismatched_uid.to_string());
+        std::fs::create_dir(&ownership_mismatch).unwrap();
+        std::fs::set_permissions(&ownership_mismatch, std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        assert_eq!(std::fs::metadata(&ownership_mismatch).unwrap().uid(), uid);
+        assert_eq!(secure_linux_runtime_dir(&root, mismatched_uid), None);
 
         std::fs::remove_dir_all(&root).unwrap();
     }
