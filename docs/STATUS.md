@@ -20,8 +20,13 @@ when they disagree**, and update it when you land something that changes the pic
   plus a validated browser-local MRU, and cannot create a window after an inventory failure.
   Visible Windows verification passed: first-touch work reused the last-clicked window, later
   work stayed pinned there after focus moved elsewhere, and the JavaScript workwheel remained
-  visible during a two-second page-local operation. Visible Linux verification remains in
-  progress.
+  visible during a two-second page-local operation. Visible Linux verification also passed in the
+  ordinary graphical profile with a freshly rebuilt user candidate and explicitly reloaded
+  unpacked extension. A fresh real Codex session reused the last-focused one of two existing
+  normal Chrome windows for first-touch work without creating a third window. Focus then moved to
+  the other window through a natural no-Chrome-focus interval, but a later unaddressed tab-create
+  stayed in the first session workspace. The normal-window count remained two and no product
+  defect appeared.
 
 - **Complete browser-window attention routing and multi-instance ergonomics remain accepted for
   v2 in ADR-0084.** New
