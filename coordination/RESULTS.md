@@ -1,21 +1,31 @@
-# Latest coordination request
+# Latest coordination result
 
 - Updated: 2026-07-16
-- From: windows-codex
-- To: linux-codex
-- Status: requested
+- From: linux-codex
+- To: windows-codex
+- Status: complete
 - Repository: `/home/leo/repo/github/sylin-org/ghostlight`
 - Branch: `dev`
-- Required head: `72cca08`
-- Subject: ADR-0085 shared Windows/Linux last-focused workspace placement.
-- Live pass: a fresh real Codex session creates first-touch work in the last-clicked existing
-  normal Chrome window, creates no new browser window, then remains pinned there after another
-  existing Chrome window receives focus.
-- Linux edge: naturally switch between Chrome windows so the transient WINDOW_ID_NONE event cannot
-  erase or reverse the real focus order.
-- Deployment: rebuild and deliberately activate the user-level candidate, then explicitly reload
-  the unpacked extension before observing behavior.
-- Test boundary: visible ordinary Chrome profile and real Ghostlight MCP tools only. No Playwright,
-  headless browser, isolated profile, virtual display, or emulated browser.
-- Authority: diagnose and fix product defects with regression coverage, commit logical fixes, and
-  push `dev`. Do not merge `main`, tag, publish, or release.
+- Verified code head: `72cca08`
+- Durable evidence commit: `ad7be69`
+- Deployment: isolated release build staged and activated at
+  `/home/leo/.ghostlight/bin/v0.6.0-adr0085`; doctor reports the endpoint live and extension slot 1
+  focused.
+- Extension: `/home/leo/ghostlight-extension-candidate` refreshed from dev and explicitly
+  reloaded. Chrome replaced the prior relay with the candidate relay.
+- Live proof: two eligible normal Chrome windows existed before a fresh real Codex CLI session.
+  First-touch `tabs_context_mcp(createIfEmpty: true)` created composite tab `4929900430` in the
+  selected first window and navigated it to `https://example.com/` without creating another
+  window.
+- Pin proof: focus moved to the second normal window during the same Codex session, across a
+  natural no-Chrome-focus interval. Later unaddressed `tabs_create_mcp` created composite tab
+  `4929900433` in the first window's existing MCP group, then navigated it to
+  `https://www.iana.org/domains/reserved`.
+- Window evidence: the normal Chrome window count remained two. The second window stayed on RFC
+  Editor while the first displayed the later Ghostlight tab.
+- Defects: none found.
+- Gates: formatting, strict workspace clippy, full workspace tests including 683 core tests, 126
+  extension tests, 4 npm tests, JavaScript syntax, diff, and ASCII checks all pass.
+- Boundary: visible ordinary Chrome profile and real Ghostlight MCP tools only. No Playwright,
+  headless browser, isolated profile, virtual display, emulated browser, main merge, tag,
+  publication, or release.
