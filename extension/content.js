@@ -804,6 +804,18 @@
       if (fx && typeof fx.fieldSplash === "function") fx.fieldSplash(target);
     } catch (e) { /* effects are decorative; a form write never fails on them */ }
   }
+  function scrollTargetFx(target) {
+    try {
+      const fx = self.GhostlightFx;
+      if (fx && typeof fx.scrollTarget === "function") fx.scrollTarget(target);
+    } catch (e) { /* effects are decorative; scrolling never fails on them */ }
+  }
+  function imageDropFx(target, x, y) {
+    try {
+      const fx = self.GhostlightFx;
+      if (fx && typeof fx.imageDrop === "function") fx.imageDrop(target, x, y);
+    } catch (e) { /* effects are decorative; image dispatch never fails on them */ }
+  }
   function setFormValue(ref, value) {
     const el = deref(ref);
     if (!el) {
@@ -927,6 +939,7 @@
       const dragOverAccepted = !el.dispatchEvent(new DragEvent("dragover", opts));
       const dropHandled = !el.dispatchEvent(new DragEvent("drop", opts));
       const handled = dragOverAccepted || dropHandled;
+      imageDropFx(el, x, y);
       return {
         success: true,
         accepted: handled,
@@ -1244,6 +1257,7 @@
           return true;
         }
         el.scrollIntoView({ block: "center", behavior: "instant" });
+        scrollTargetFx(el);
         sendResponse({ result: true });
         return true;
       }

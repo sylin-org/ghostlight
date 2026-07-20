@@ -28,6 +28,8 @@ consistent on-page treatment: a small visual "dictionary" the phantom cursor spe
 | type | the focused field shimmers, plus a signal-aware glowing keyboard medallion; typed text is never shown |
 | key / shortcut | a target-aware lozenge: ordinary printable keys stay literal; protected or unobservable targets use an unlabeled glowing keycap |
 | scroll | directional chevrons cascading the way the page moves |
+| scroll_to by ref | chevrons settle into the exact target halo; a prior semantic halo is not repeated |
+| upload_image by coordinate | a fixed photo tile settles into the target halo without filenames or an acceptance claim |
 | screenshot | a sky shutter flash, a filing frame, and a signal-aware camera confirmation medallion |
 | zoom | a magnifier frame closes on the captured region |
 | read_page / get_page_text | a scan-line sweeps down the page ("the agent is reading") |
@@ -52,6 +54,9 @@ The scan-line is ours: no recording tool has it, because none of them is an agen
   `AGENT_ACTION_SIGNATURE`,
   `AGENT_NARRATION`) at the point
   the action runs. The worker holds mechanism only; the effects carry no policy.
+- **Exact destination triggers:** `extension/content.js` calls the isolated-world `GhostlightFx`
+  seam for ref scrolling and coordinate image placement because it already owns the destination
+  element. No image payload or page content enters the renderer.
 - **Interactive reference:** the vocabulary was designed and approved in a standalone preview that
   plays each treatment on a mock browser, preserved and extended at
   [visual-feedback-dictionary.html](visual-feedback-dictionary.html). Open it in a browser and click

@@ -7,6 +7,18 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **The v1 visual-signature inventory is complete (ADR-0089).** Ref-based `computer.scroll_to`
+  now settles three sky chevrons into its exact destination halo; `act_on.scroll_to` retains its
+  semantic cue without repainting the same halo. Coordinate `upload_image` now settles a fixed,
+  content-free photo tile into the target halo while the model-facing result separately reports
+  page-signaled handling or dispatch without a signal. Same-origin iframe geometry is translated
+  to the top viewport. Console and network buffer reads remain intentionally quiet because they do
+  not manipulate the rendered page. Formatting, strict clippy, the full Rust workspace, all 164
+  extension tests, JavaScript syntax, and diff hygiene pass. Visible Windows verification passed
+  both new treatments on the public decision-aid page; the existing Windows signature matrix had
+  already passed border, navigation, read, find, field, typing, key privacy, JavaScript, wait,
+  screenshot, and dual-lane drag treatments. Linux candidate verification remains owed.
+
 - **The repository-controlled OSS adoption readiness repairs are complete in the working tree.**
   `docs/public-status.json` now owns the release, platform, and extension-store truth used by the
   README and the website fallback. CI and release preflight reject local drift; the website

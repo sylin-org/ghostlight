@@ -85,6 +85,8 @@
   const RIPPLE_MS = 620; // one click ring's expand-and-fade duration
   const RIPPLE_STAGGER_MS = 140; // gap between rings of a multi-click, so 2/3 read as a rhythm
   const FIELD_SPLASH_MS = 700; // form-write splash hugging the field just set
+  const DESTINATION_CUE_MS = 1050; // scroll landing and image-drop destination phrase
+  const SEMANTIC_TARGET_DEDUP_MS = 1400; // avoid repainting act_on's just-announced target
   // Extended-vocabulary timings (the visual feedback dictionary).
   const LOZENGE_MS = 1250; // keystroke lozenge (type / key)
   const SCAN_MS = 1450; // read-page scan-line sweep
@@ -139,6 +141,7 @@
   let recentPointer = null;
   let recentTouched = null;
   let recentScroll = null;
+  let recentSemanticTarget = null;
   const scrollOffsets = new WeakMap();
 
   function reduceMotion() {
@@ -183,6 +186,16 @@
       "@keyframes ghostlight-fieldsplash{0%{opacity:0;transform:scale(.97)}18%{opacity:1;transform:scale(1)}62%{opacity:.85}100%{opacity:0;transform:scale(1.05)}}" +
       "@keyframes ghostlight-fieldsplash-rm{0%{opacity:0}30%{opacity:.9}100%{opacity:0}}" +
       "@keyframes ghostlight-targetglow{0%{opacity:0}22%{opacity:1}100%{opacity:0}}" +
+      // ADR-0089 destination cues: motion resolves into the target instead of decorating a
+      // corner. Reduced-motion variants keep the destination disclosure as a bounded fade.
+      "@keyframes ghostlight-scroll-target{0%{opacity:0;transform:translate(-50%,-92%) scale(.92)}" +
+      "28%{opacity:1}72%{opacity:.9;transform:translate(-50%,-50%) scale(.76)}" +
+      "100%{opacity:0;transform:translate(-50%,-42%) scale(.68)}}" +
+      "@keyframes ghostlight-scroll-target-rm{0%{opacity:0}30%{opacity:.9}100%{opacity:0}}" +
+      "@keyframes ghostlight-image-drop{0%{opacity:0;transform:translate(-50%,-115%) rotate(-9deg) scale(.72)}" +
+      "24%{opacity:1}68%{opacity:1;transform:translate(-50%,-50%) rotate(0) scale(1)}" +
+      "100%{opacity:0;transform:translate(-50%,-46%) rotate(0) scale(.92)}}" +
+      "@keyframes ghostlight-image-drop-rm{0%{opacity:0}28%{opacity:1}100%{opacity:0}}" +
       "@keyframes ghostlight-flash{0%{opacity:.42}100%{opacity:0}}" +
       "@keyframes ghostlight-capframe{0%{opacity:0;transform:scale(1.03)}9%{opacity:1;transform:scale(1)}34%{opacity:1;transform:scale(1)}60%{opacity:1;transform:scale(.17);border-radius:16px}88%{opacity:1;transform:scale(.17);border-radius:16px}100%{opacity:0;transform:scale(.17);border-radius:16px}}" +
       "@keyframes ghostlight-zoomframe{0%{opacity:0;transform:scale(1.35)}22%{opacity:1}70%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}" +
@@ -905,6 +918,113 @@
     caption("Filling a field");
   }
 
+  // Convert an element from its owner document into top-viewport coordinates. setImage can
+  // resolve through reachable same-origin iframes, whose getBoundingClientRect() is relative to
+  // the inner viewport. Cross-origin frames remain represented by their outer iframe element.
+  function viewportRectForElement(target) {
+    if (!target || typeof target.getBoundingClientRect !== "function") return null;
+    let raw;
+    try { raw = target.getBoundingClientRect(); } catch (e) { return null; }
+    if (!raw || !Number.isFinite(raw.left) || !Number.isFinite(raw.top) ||
+        !Number.isFinite(raw.width) || !Number.isFinite(raw.height)) return null;
+    let left = raw.left;
+    let top = raw.top;
+    let ownerWindow = target.ownerDocument && target.ownerDocument.defaultView;
+    try {
+      while (ownerWindow && ownerWindow !== window) {
+        const frame = ownerWindow.frameElement;
+        if (!frame || typeof frame.getBoundingClientRect !== "function") return null;
+        const frameRect = frame.getBoundingClientRect();
+        left += frameRect.left + (Number(frame.clientLeft) || 0);
+        top += frameRect.top + (Number(frame.clientTop) || 0);
+        ownerWindow = frame.ownerDocument && frame.ownerDocument.defaultView;
+      }
+    } catch (e) { return null; }
+    return { left, top, width: raw.width, height: raw.height };
+  }
+
+  function sensibleDestinationRect(target, x, y) {
+    const rect = viewportRectForElement(target);
+    if (rect && rect.width >= 2 && rect.height >= 2 &&
+        rect.width <= window.innerWidth * 0.98 && rect.height <= window.innerHeight * 0.98) {
+      return rect;
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { left: x - 24, top: y - 18, width: 48, height: 36 };
+  }
+
+  function destinationHalo(rect, suffix) {
+    const pad = 5;
+    const halo = document.createElement("div");
+    halo.id = FX_LAYER_ID + "-" + suffix + fxSeq++;
+    halo.setAttribute("aria-hidden", "true");
+    halo.style.cssText =
+      "position:fixed;box-sizing:border-box;pointer-events:none;border-radius:9px;" +
+      "left:" + (rect.left - pad) + "px;top:" + (rect.top - pad) + "px;" +
+      "width:" + (rect.width + pad * 2) + "px;height:" + (rect.height + pad * 2) + "px;" +
+      "border:2px solid rgba(" + SKY_RGB + ",.88);background:rgba(" + SKY_RGB + ",.06);" +
+      "box-shadow:0 0 18px rgba(" + SKY_RGB + ",.58),inset 0 0 12px rgba(" + SKY_RGB + ",.2);" +
+      "animation:ghostlight-targetglow 820ms ease-out forwards";
+    addEphemeral(halo, 900);
+  }
+
+  // A ref-based scroll has an honest destination element. Chevrons settle into that element;
+  // act_on already announces the semantic target, so its same-element halo is not painted twice.
+  function scrollTarget(target) {
+    if (hiddenForTool || document.hidden) return;
+    const rect = sensibleDestinationRect(target);
+    if (!rect) return;
+    ensureStyles();
+    const duplicateSemanticTarget = recentSemanticTarget &&
+      Date.now() - recentSemanticTarget.at <= SEMANTIC_TARGET_DEDUP_MS &&
+      recentSemanticTarget.target === target;
+    if (!duplicateSemanticTarget) destinationHalo(rect, "st-h");
+    const cue = document.createElement("div");
+    cue.id = FX_LAYER_ID + "-st" + fxSeq++;
+    cue.setAttribute("aria-hidden", "true");
+    cue.innerHTML = CHEV + CHEV + CHEV;
+    cue.style.cssText =
+      "position:fixed;left:" + (rect.left + rect.width / 2) + "px;top:" +
+      (rect.top + rect.height / 2) + "px;pointer-events:none;display:flex;" +
+      "flex-direction:column;align-items:center;gap:0;filter:drop-shadow(0 0 7px rgba(" +
+      SKY_RGB + ",.75));animation:" +
+      (reduceMotion() ? "ghostlight-scroll-target-rm" : "ghostlight-scroll-target") + " " +
+      DESTINATION_CUE_MS + "ms cubic-bezier(.22,1,.36,1) forwards";
+    for (const child of cue.children) child.style.opacity = "0.9";
+    addEphemeral(cue, DESTINATION_CUE_MS + 80);
+    caption("Scrolled to target");
+  }
+
+  // Coordinate image placement says only that Ghostlight dispatched an image at this target. The
+  // fixed photo tile carries no filename, bytes, MIME type, or assertion that the page accepted it.
+  function imageDrop(target, x, y) {
+    if (hiddenForTool || document.hidden) return;
+    const rect = sensibleDestinationRect(target, x, y);
+    if (!rect) return;
+    ensureStyles();
+    destinationHalo(rect, "id-h");
+    const tile = document.createElement("div");
+    tile.id = FX_LAYER_ID + "-id" + fxSeq++;
+    tile.setAttribute("aria-hidden", "true");
+    tile.innerHTML =
+      "<svg width='34' height='30' viewBox='0 0 34 30' fill='none' aria-hidden='true'>" +
+      "<rect x='2' y='2' width='30' height='26' rx='6' fill='rgba(" + SKY_RGB + ",.14)' " +
+      "stroke='" + SKY + "' stroke-width='2'/>" +
+      "<circle cx='23.5' cy='10' r='3' fill='" + SKY + "'/>" +
+      "<path d='M6 24 L13.5 16.5 L18.5 21 L22 17.5 L29 24' stroke='" + SKY +
+      "' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+    tile.style.cssText =
+      "position:fixed;left:" + (rect.left + rect.width / 2) + "px;top:" +
+      (rect.top + rect.height / 2) + "px;width:48px;height:44px;display:grid;place-items:center;" +
+      "pointer-events:none;border-radius:12px;background:rgba(10,16,26,.92);" +
+      "border:1px solid rgba(" + SKY_RGB + ",.62);box-shadow:0 0 22px rgba(" + SKY_RGB +
+      ",.68),inset 0 1px 0 rgba(255,255,255,.1);animation:" +
+      (reduceMotion() ? "ghostlight-image-drop-rm" : "ghostlight-image-drop") + " " +
+      DESTINATION_CUE_MS + "ms cubic-bezier(.22,1,.36,1) forwards";
+    addEphemeral(tile, DESTINATION_CUE_MS + 80);
+    caption("Image drop dispatched");
+  }
+
   function renderControlBorder() {
     if (!controlActive || hiddenForTool || document.hidden) return;
     ensureStyles();
@@ -1038,10 +1158,12 @@
       "box-shadow:0 0 0 2px rgba(" + SKY_RGB + ",.9),0 0 20px rgba(" + SKY_RGB + ",.55);" +
       "animation:ghostlight-targetglow 720ms ease-out forwards";
     addEphemeral(g, 780);
+    return el;
   }
 
   function semanticTarget(x, y, action) {
-    targetGlow(x, y);
+    const target = targetGlow(x, y);
+    recentSemanticTarget = target ? { target, at: Date.now() } : null;
     const labels = {
       left_click: "Click target",
       right_click: "Context-menu target",
@@ -1677,6 +1799,14 @@
       if (!effectsEnabled) return;
       fieldSplash(target);
     },
+    scrollTarget: function (target) {
+      if (!effectsEnabled) return;
+      scrollTarget(target);
+    },
+    imageDrop: function (target, x, y) {
+      if (!effectsEnabled) return;
+      imageDrop(target, x, y);
+    },
     findResults: function (entries) {
       if (!effectsEnabled) return;
       installFindResults(Array.isArray(entries) ? entries : []);
@@ -1684,6 +1814,7 @@
   };
 
   window.addEventListener("beforeunload", () => {
+    recentSemanticTarget = null;
     hideControlBorder();
     clearNarration();
     removeSignatureNow();
