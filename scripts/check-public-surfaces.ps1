@@ -36,6 +36,11 @@ function Assert-Contains([string] $Label, [string] $Text, [string] $Expected) {
     }
 }
 
+function ConvertFrom-HtmlText([string] $Html) {
+    $WithoutTags = [regex]::Replace($Html, '<[^>]+>', '')
+    return [System.Net.WebUtility]::HtmlDecode($WithoutTags)
+}
+
 if ($Status.schemaVersion -ne 1) { Add-Failure "docs/public-status.json has unsupported schemaVersion '$($Status.schemaVersion)'" }
 if ($Status.release -notmatch '^\d+\.\d+\.\d+$') { Add-Failure "public release '$($Status.release)' is not semantic x.y.z" }
 if ([string]::IsNullOrWhiteSpace($Status.platformSummary)) { Add-Failure 'platformSummary is empty' }
@@ -69,9 +74,10 @@ if ($Online) {
     Assert-Equal 'latest npm release' $Status.release $Registry.version
 
     $Website = (Invoke-WebRequest -UseBasicParsing -Uri 'https://sylin.org/ghostlight/').Content
-    Assert-Contains 'live Ghostlight page version fallback' $Website "v$($Status.release)"
-    Assert-Contains 'live Ghostlight platform state' $Website $Status.platformSummary
-    Assert-Contains 'live Ghostlight extension state' $Website $Status.extensionSummary
+    $WebsiteText = ConvertFrom-HtmlText $Website
+    Assert-Contains 'live Ghostlight page version fallback' $WebsiteText "v$($Status.release)"
+    Assert-Contains 'live Ghostlight platform state' $WebsiteText $Status.platformSummary
+    Assert-Contains 'live Ghostlight extension state' $WebsiteText $Status.extensionSummary
 
     foreach ($Uri in @(
         'https://sylin.org/ghostlight/install.md',

@@ -137,19 +137,16 @@ when they disagree**, and update it when you land something that changes the pic
 
 - **Branches**: `main` = releases, `dev` = trunk. Work lands on `dev`; the owner reviews
   `dev -> main` PRs and cuts releases.
-- **v0.7.0 is prepared on `dev`, not published.** Crates, the unpacked extension, npm/MCP metadata,
-  canonical public status, and package-manager templates identify as 0.7.0. The release is minor
-  because it adds window-placement behavior and a complete visible action language while keeping
-  the trained tool schemas unchanged. Package-manager hashes and npm binary checksums still belong
-  to v0.6.0 until the release workflow builds and verifies the v0.7.0 artifacts. The current Chrome
-  Web Store submission remains under review; the v0.7.0 extension package is not submitted yet.
-- **Latest published release: v0.6.0** (2026-07-15), cut with `scripts/release.ps1 0.6.0`.
-  Shipped and LIVE: GitHub Release (28 files: 27 payloads including the CycloneDX SBOM, plus the
-  canonical hash manifest and Sigstore attestations), npm `ghostlight@0.6.0`, Homebrew tap,
-  **MCP registry (`org.sylin/ghostlight`, 0.6.0 is latest)**, filled Scoop/Winget/Homebrew
-  manifests, trust footers, and the current sylin.org install guide. Winget PR
-  `microsoft/winget-pkgs#402692` is open and passed local `winget validate`. Release PR #50 merged
-  at `2d8cb0c`; checksum fill is `aa8d50a` and the trust restamp is `2308b0c`.
+- **Latest published release: v0.7.0** (2026-07-20), cut with
+  `scripts/release.ps1 0.7.0`. GitHub Actions run `29779474137` passed the full test and four-target
+  build matrix, assembled one immutable release bundle, generated the CycloneDX SBOM, verified the
+  canonical hash manifest, attested provenance, and published all 28 expected assets. npm
+  `ghostlight@0.7.0` is live and its launcher smoke fetched the pinned Windows binary and returned a
+  healthy `doctor`; Homebrew tap commit `2f5244f` and MCP registry `org.sylin/ghostlight` also carry
+  0.7.0. Checksum fill `a53ab31`, trust restamp `bb2c6cd`, and website commits `7fe3bd3` plus
+  `5fb17bf` are published. The synchronized website deploy passed Cloudflare and Socket checks.
+  Winget new-package PR `microsoft/winget-pkgs#400226` now carries the locally validated v0.7.0
+  manifests at `e80dea3`; the redundant v0.6.0 update PR was closed as superseded.
 - **v0.6.0 is an intentional greenfield boundary.** The unpublished 0.5.8 draft became this minor
   release because browser-control web ingress and its scaffolding were removed outright. Public
   setup starts from a local service, same-user OS IPC, and the interactive user's authenticated
@@ -178,8 +175,9 @@ when they disagree**, and update it when you land something that changes the pic
   The v0.6.0 package uploaded successfully and Chrome accepted the new submission as
   `ITEM_PENDING_REVIEW`. Chrome again warned that broad host permissions may trigger an in-depth
   review; that is the intentional tradeoff for general-purpose automation across user-selected
-  sites, not a rejected submission. Edge was skipped because no `EDGE_*` credentials are
-  configured.
+  sites, not a rejected submission. v0.6.0 is compatible, so the owner decided to preserve its
+  certification queue and submit the packaged v0.7.0 extension only after that review completes.
+  Edge remains unsubmitted because no `EDGE_*` credentials are configured.
 - **The ADR-0056 Lightbox consolidation is complete.** All 27 legacy ignored spawn tests have named
   parity scenarios, the originals and dual shell wrappers are retired, and CI runs the 34-scenario
   Lightbox suite as the sole service-side process-boundary gate. The repaired Playwright job stays
