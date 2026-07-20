@@ -14,12 +14,13 @@
 // null) with no matching or interpretation -- the binary's grant enforcement decides.
 //
 // Tab-group-per-session request (H7, ADR-0030 Decision 6/7): { type: "group_request", guid,
-// tabIds, title } gets { type: "group_response", guid, ok } (both id-less; fire-and-forget). The
+// tabIds, title, workspace? } gets { type: "group_response", guid, ok } (both id-less;
+// fire-and-forget). The
 // grouping DECISION (which tabIds get grouped and how) lives in the pure lib/grouping.js module
 // this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
 // ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
 
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/input-events.js", "lib/drag-session.js", "lib/workspace.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/find-visual.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
@@ -128,12 +129,22 @@ function executionItem(msg, port, connectionGeneration) {
 const {
   MAX_SCREENSHOT_B64, JPEG_QUALITY, JPEG_QUALITY_FALLBACK, JPEG_QUALITY_FULL,
   KEEPALIVE_PERIOD_MINUTES, RECONNECT_DELAY_MS, HOLD_REQUEST_TIMEOUT_MS,
-  CAPTURE_SETTLE_MS, CLICK_GAP_MS, NAV_SETTLE_TIMEOUT_MS, MAX_SIDE,
+  CAPTURE_SETTLE_MS, CLICK_GAP_MS, DRAG_INTERCEPT_GRACE_MS, DRAG_INTERCEPT_WAIT_MS,
+  NAV_SETTLE_TIMEOUT_MS, MAX_SIDE,
 } = self.GhostlightConstants;
 // The H7 grouping DECISION (lib/grouping.js): pure, unit-tested in isolation
 // (tests/extension/grouping.test.js), given an injected chrome so it never touches policy.
 const { groupSessionTabs, managedGroupIds, isManagedGroupId, pruneDeadGroups, reclaimGroupsByTitle } =
   self.GhostlightGrouping;
+const {
+  workspaceGroupKey,
+  resolveWorkspaceWindow,
+  resolveWorkspaceGroup,
+  rememberFocusedWindow,
+  forgetWorkspaceWindow,
+  reconcileWorkspaceGroups,
+  tabsInWindow,
+} = self.GhostlightWorkspace;
 // ADR-0081: one policy-free broker owns current-document readiness, presentation replacement,
 // expiry, replay, acknowledgements, and bounded transient events. Chrome APIs remain adapter
 // callbacks; the broker contains no policy or page-content interpretation.
@@ -154,10 +165,12 @@ const dialogStore = self.GhostlightDialog.createDialogStore();
 const NATIVE_HOST = "org.sylin.ghostlight";
 const BROWSER_GENERATION_KEY = "ghostlight_browser_generation";
 const PRESENTATION_STATE_KEY = "ghostlight_presentation_state";
-const VISUAL_SCRIPT_FILES = ["lib/presentation-placement.js", "lib/action-signature.js", "agent-visual-indicator.js"];
+const VISUAL_SCRIPT_FILES = ["lib/presentation-placement.js", "lib/action-signature.js", "lib/find-visual.js", "lib/keys.js", "agent-visual-indicator.js"];
 const PRESENTATION_EVENT_TTL_MS = 2500;
 const SIGNATURE_EVENT_TTL_MS = 1500;
 const SIGNATURE_DELIVERY_WAIT_MS = 250;
+const FIND_EVENT_TTL_MS = 3500;
+const FIND_DELIVERY_WAIT_MS = 250;
 const NARRATION_DEFAULT_DURATION_MS = 5000;
 // The MCP tab group label shown in Chrome: a ghost emoji (U+1F47B) followed by the brand
 // name. The emoji is written as an escape so this source file stays ASCII; it renders as
@@ -173,11 +186,11 @@ let groupId = null;
 // session (and its composite tab ids) by, so identity survives relay reconnects and worker deaths
 // and never collides on a degraded pid=0.
 const browserIdentity = self.GhostlightIdentity.createBrowserIdentity(chrome.storage.local);
-// ADR-0066 D1 (amends ADR-0047 D1): the presentation map is now keyed on the CLIENT, not the
-// per-process session guid -- `clientKey -> Chrome tab-group id`, where clientKey is the wire
-// `clientKey` (falling back to `guid`, then the legacy global group). Every session of the same
-// client reuses ONE durable group instead of minting a fresh one, so the browser stops
-// accumulating orphan groups. The single-group access-control gate
+// ADR-0085 (amending ADR-0066 D1): the presentation map is keyed on the user-placed workspace,
+// `browser window + clientKey -> Chrome tab-group id`. Sessions of the same client reuse one
+// group IN A GIVEN WINDOW, while deliberate placement in another window gets another group instead
+// of moving old tabs or spawning a new browser window. Legacy stored client-only keys are upgraded
+// from the live group's window during rehydrate. The single-group access-control gate
 // (groupTabs/inGroup/effectiveTabId) still CONSULTS this map through the managed-surface predicate
 // (lib/grouping.js managedGroupIds/isManagedGroupId): a tab is in-surface when it sits in the
 // global `groupId` group OR any group recorded here OR (ADR-0066 D5) in `managedTabs` below.
@@ -234,6 +247,8 @@ const networkBuffer = new Map(); // tabId -> { host, items: [{ requestId, method
 const screenshotCtx = new Map(); // tabId -> { vpW, vpH, shotW, shotH, offX, offY, regionW, regionH } (set on each screenshot/zoom)
 const tabHost = new Map(); // tabId -> hostname of the tab's current URL ("" when none)
 const tabUrl = new Map(); // tabId -> the tab's current full URL ("" when none); fallback location
+const dragCoordinator = self.GhostlightDragSession.createDragCoordinator(DRAG_INTERCEPT_WAIT_MS);
+const activeDragOperations = new Map(); // tabId -> transient pointer/native cleanup state
 // context for exceptionText() when a CDP exceptionDetails/callFrame carries no url of its own
 // (routine for exceptions thrown from a deferred callback rather than a freshly-parsed script).
 // Set true by rehydrate() when a prior session was recovered; consumed (and cleared) by the next
@@ -342,14 +357,34 @@ async function connect() {
       // given the injected `chrome`) and persists the updated per-session map; fire-and-forget --
       // neither this request nor its reply carries an `id`, so nothing here awaits a correlated
       // response.
-      // ADR-0066 D3: key the group on the CLIENT (clientKey) when present, falling back to the guid
-      // for a legacy caller. Every named tab is also recorded in `managedTabs` (D5) so it stays
-      // reachable if the user later drags it out of the group.
-      const groupKey = (msg && (msg.clientKey || msg.guid)) || null;
+      // ADR-0085: a pinned request keys presentation on client + window. Tabs the user moved to a
+      // different window stay reachable through `managedTabs` but are not dragged back by this
+      // presentation request. A legacy caller without workspace metadata keeps client/guid keying.
+      const clientKey = (msg && (msg.clientKey || msg.guid)) || null;
+      const workspaceWindowId = msg && msg.workspace && msg.workspace.windowId;
+      const groupKey = Number.isSafeInteger(workspaceWindowId)
+        ? workspaceGroupKey(clientKey, workspaceWindowId)
+        : clientKey;
       if (msg && msg.type === "group_request" && typeof groupKey === "string" && groupKey) {
-        const tabIds = Array.isArray(msg.tabIds) ? msg.tabIds : [];
-        for (const t of tabIds) markTabManaged(t);
-        groupSessionTabs(chrome, clientGroups, groupKey, tabIds, msg.title || GROUP_TITLE)
+        const namedTabIds = Array.isArray(msg.tabIds) ? msg.tabIds : [];
+        for (const t of namedTabIds) markTabManaged(t);
+        Promise.resolve()
+          .then(async () => {
+            if (Number.isSafeInteger(workspaceWindowId)) {
+              // Re-key a group the user moved before attempting reuse. Otherwise Chrome could
+              // reject a cross-window group operation or undo the user's placement.
+              await workspaceGroupId(clientKey, workspaceWindowId);
+              return tabsInWindow(chrome, namedTabIds, workspaceWindowId);
+            }
+            return namedTabIds;
+          })
+          .then((tabIds) => groupSessionTabs(
+            chrome,
+            clientGroups,
+            groupKey,
+            tabIds,
+            msg.title || GROUP_TITLE
+          ))
           .then(() => persistSessionState())
           .then(() => {
             connectedResponder.post({ type: "group_response", guid: msg.guid, ok: true });
@@ -556,12 +591,21 @@ function reportFocus() {
 async function reportFocusIfFocused() {
   try {
     const win = await chrome.windows.getLastFocused();
-    if (win && win.focused) reportFocus();
+    if (win && win.focused) {
+      rememberFocusedWindow(chrome, win.id).catch(() => {});
+      reportFocus();
+    }
   } catch { /* no windows yet, or the API is unavailable on this platform */ }
 }
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
-  if (windowId !== chrome.windows.WINDOW_ID_NONE) reportFocus();
+  if (windowId !== chrome.windows.WINDOW_ID_NONE) {
+    rememberFocusedWindow(chrome, windowId).catch(() => {});
+    reportFocus();
+  }
+});
+chrome.windows.onRemoved.addListener((windowId) => {
+  forgetWorkspaceWindow(chrome, windowId).catch(() => {});
 });
 
 // --- Take-the-wheel hold (g10): mechanism only. The binary holds the flag and decides;
@@ -762,6 +806,8 @@ async function killSession() {
 
   attached.clear();
   attaching.clear();
+  dragCoordinator.clear();
+  activeDragOperations.clear(); // debugger detachment above releases every transient input state
   consoleBuffer.clear();
   networkBuffer.clear();
   screenshotCtx.clear();
@@ -1059,6 +1105,10 @@ async function enableDomain(tabId, domain) {
 // Remove every transient mechanism record for one tab. Idempotent so explicit `tab_control.close`
 // and Chrome's onRemoved event can both call it without widening the close to a group or window.
 function clearTabState(tabId) {
+  dragCoordinator.cancel(tabId);
+  const drag = activeDragOperations.get(tabId);
+  if (drag) drag.cancelled = true;
+  activeDragOperations.delete(tabId);
   const cast = gifCast.get(tabId);
   if (cast) stopGifCast(tabId, cast, "browser_detached");
   if (attached.has(tabId)) {
@@ -1092,6 +1142,10 @@ chrome.debugger.onDetach.addListener((src) => {
   const cast = gifCast.get(src.tabId);
   if (cast) stopGifCast(src.tabId, cast, "browser_detached");
   attached.delete(src.tabId);
+  dragCoordinator.cancel(src.tabId);
+  const drag = activeDragOperations.get(src.tabId);
+  if (drag) drag.cancelled = true;
+  activeDragOperations.delete(src.tabId);
   dialogStore.remove(src.tabId);
 });
 
@@ -1101,6 +1155,7 @@ function hostOf(url) {
 }
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === "loading" && managedTabs.has(tabId)) {
+    void cancelActiveDrag(tabId);
     presentationBroker.documentLoading(tabId);
   }
   if (info.url !== undefined) {
@@ -1144,6 +1199,10 @@ function exceptionText(details, fallbackUrl) {
 }
 chrome.debugger.onEvent.addListener((src, method, params) => {
   const tabId = src.tabId;
+  if (method === "Input.dragIntercepted") {
+    dragCoordinator.intercepted(tabId, params && params.data);
+    return;
+  }
   if (method === "Page.javascriptDialogOpening") {
     dialogStore.opened(tabId, params);
     return;
@@ -1217,7 +1276,7 @@ async function persistSessionState() {
   try {
     await chrome.storage.session.set({
       sessionState: { groupId, tabIds },
-      // ADR-0066 D1: the clientKey -> groupId map, persisted under its OWN key -- ADDITIVE
+      // ADR-0085: the workspace-key -> groupId map, persisted under its OWN key -- ADDITIVE
       // alongside `sessionState`, whose own shape is unchanged -- so a service-worker restart
       // recovers client groups too (a browser restart clears it, and rehydrate reclaims by title).
       clientGroupsState: Array.from(clientGroups.entries()),
@@ -1254,32 +1313,58 @@ async function ensureGroup(create) {
   await persistSessionState();
 }
 
-// Client-group birth/reuse (ADR-0047 D3 as amended by ADR-0066 D1): create a tab directly inside
-// `key`'s group -- `key` is the client's stable clientKey (or a legacy guid). When the client
-// already has a group (this session OR a prior one, since the map is keyed on the client), the tab
-// is born in that group's window and grouped immediately: reuse, no new group. Only a client with
-// no existing group creates a fresh window+group (no about:blank litter). The GROUP_TITLE
-// placeholder is retitled by the service's next group_request (client-name title, ADR-0047 D4).
-// The created tab is recorded in `managedTabs` (ADR-0066 D5) so it stays reachable if detached.
-async function createTabInSessionGroup(key) {
-  let gid = clientGroups.has(key) ? clientGroups.get(key) : null;
-  if (gid !== null) {
-    try { await chrome.tabGroups.get(gid); } catch { gid = null; }
+class WorkspaceWindowGoneError extends Error {}
+
+function withWorkspaceResult(result, windowId) {
+  if (result && typeof result === "object") {
+    result._ghostlightWorkspace = { windowId };
   }
+  return result;
+}
+
+async function workspaceGroupId(clientKey, windowId) {
+  const state = await resolveWorkspaceGroup(chrome, clientGroups, clientKey, windowId);
+  return { key: state.key, gid: state.groupId, changed: state.changed };
+}
+
+async function createTabInResolvedWorkspace(clientKey, resolved) {
+  const windowId = resolved.window.id;
+  const state = await workspaceGroupId(clientKey, windowId);
   let tab;
+  if (resolved.created && resolved.window.tabs && resolved.window.tabs[0] && state.gid === null) {
+    tab = resolved.window.tabs[0];
+  } else {
+    try {
+      tab = await chrome.tabs.create({ active: true, windowId });
+    } catch (error) {
+      throw new WorkspaceWindowGoneError((error && error.message) || String(error));
+    }
+  }
+
+  let gid = state.gid;
   if (gid === null) {
-    const win = await chrome.windows.create({ focused: true });
-    tab = win.tabs[0];
     gid = await chrome.tabs.group({ tabIds: [tab.id] });
     await chrome.tabGroups.update(gid, { title: GROUP_TITLE, color: "blue" });
   } else {
-    const group = await chrome.tabGroups.get(gid);
-    tab = await chrome.tabs.create({ active: true, windowId: group.windowId });
     await chrome.tabs.group({ tabIds: [tab.id], groupId: gid });
   }
-  clientGroups.set(key, gid);
+  clientGroups.set(state.key, gid);
   markTabManaged(tab.id);
-  return { tab, gid };
+  return { tab, gid, windowId };
+}
+
+// Resolve the service-requested placement and create a tab without moving existing tabs. An
+// automatic target may disappear between getLastFocused and tabs.create; retry that pre-mutation
+// race once. A pinned target never silently fails over.
+async function createTabInSessionGroup(clientKey, workspaceRequest, initialTarget) {
+  const first = initialTarget || await resolveWorkspaceWindow(chrome, workspaceRequest);
+  try {
+    return await createTabInResolvedWorkspace(clientKey, first);
+  } catch (error) {
+    if (first.pinned || !(error instanceof WorkspaceWindowGoneError)) throw error;
+    const second = await resolveWorkspaceWindow(chrome, workspaceRequest);
+    return createTabInResolvedWorkspace(clientKey, second);
+  }
 }
 async function groupTabs() {
   const ids = managedGroupIds(groupId, clientGroups);
@@ -1333,7 +1418,7 @@ async function rehydrate() {
     ]);
     presentationBroker.restore(stored && stored[PRESENTATION_STATE_KEY]);
     const sessionState = stored && stored.sessionState;
-    // ADR-0066 D1: restore the client-group map independently of the legacy single-group
+    // ADR-0085: restore the workspace-group map independently of the legacy single-group
     // `sessionState` below -- a fresh install has neither, but either one being absent must not
     // block recovering the other.
     if (Array.isArray(stored && stored.clientGroupsState)) {
@@ -1346,9 +1431,16 @@ async function rehydrate() {
     // ADR-0047 D5: drop any restored groups whose Chrome group died while the worker was asleep,
     // so the managed surface never names a stale group id.
     await pruneDeadGroups(chrome, clientGroups);
-    // ADR-0066 D4: re-attach to groups Chrome restored after a browser restart (which cleared the
-    // persisted map) by matching their titles back to clientKeys -- reads only live state.
-    await reclaimGroupsByTitle(chrome, clientGroups, CLIENT_TITLE_PREFIX);
+    // ADR-0085: upgrade legacy client-only keys and repair a group's key after the user moved it.
+    // Then re-attach to groups Chrome restored after a browser restart by combining each title's
+    // client key with the group's CURRENT live window id.
+    await reconcileWorkspaceGroups(chrome, clientGroups);
+    await reclaimGroupsByTitle(
+      chrome,
+      clientGroups,
+      CLIENT_TITLE_PREFIX,
+      workspaceGroupKey
+    );
     // ADR-0066 D5: re-seed managedTabs from the live members of every managed group (covers the
     // browser-restart case where Chrome renumbered tab ids), then drop any managed id that no
     // longer exists (tabs closed while the worker was asleep).
@@ -1417,20 +1509,34 @@ async function effectiveTabId(rawTabId) {
 // of them, effectiveTabId's helpful "not a tab Ghostlight manages" error stands -- a wrong tabId is
 // a real mistake, not a bootstrap. Client-scoped when a `key` is present (ADR-0066: clientKey, or a
 // legacy guid), else the legacy global group for guid-less native callers.
-async function navigateTabId(rawTabId, key) {
+async function navigateTabId(rawTabId, key, workspaceRequest) {
+  if (rawTabId !== undefined && rawTabId !== null) {
+    return { tabId: await effectiveTabId(rawTabId), windowId: null };
+  }
+  if (typeof key === "string" && key) {
+    const resolved = await resolveWorkspaceWindow(chrome, workspaceRequest);
+    const state = await workspaceGroupId(key, resolved.window.id);
+    if (state.changed) await persistSessionState();
+    if (state.gid !== null) {
+      const tabs = await chrome.tabs.query({ groupId: state.gid });
+      if (tabs.length) {
+        const active = tabs.find((tab) => tab.active) || tabs[0];
+        return { tabId: active.id, windowId: resolved.window.id };
+      }
+    }
+    const { tab, windowId } = await createTabInSessionGroup(key, workspaceRequest, resolved);
+    await persistSessionState();
+    return { tabId: tab.id, windowId };
+  }
+
   await ensureGroup(false);
   const tabs = await groupTabs();
-  if (tabs.length) return effectiveTabId(rawTabId);
-  if (typeof key === "string" && key) {
-    const { tab } = await createTabInSessionGroup(key);
-    await persistSessionState();
-    return tab.id;
-  }
+  if (tabs.length) return { tabId: await effectiveTabId(rawTabId), windowId: null };
   await ensureGroup(true);
   const tab = await chrome.tabs.create({ active: true });
   await chrome.tabs.group({ tabIds: [tab.id], groupId });
   await persistSessionState();
-  return tab.id;
+  return { tabId: tab.id, windowId: null };
 }
 function tabContext(tabs, reportGroupId) {
   const gid = reportGroupId === undefined ? groupId : reportGroupId;
@@ -1446,7 +1552,7 @@ async function content(tabId, message) {
     return await chrome.tabs.sendMessage(tabId, message);
   } catch {
     try {
-      await chrome.scripting.executeScript({ target: { tabId }, files: ["lib/settle.js", "lib/observation.js", "lib/receipt.js", "lib/treediff.js", "lib/fileset.js", "lib/actionable.js", "content.js"] });
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["lib/settle.js", "lib/observation.js", "lib/receipt.js", "lib/treediff.js", "lib/fileset.js", "lib/actionable.js", "lib/keys.js", "lib/drag-session.js", "content.js"] });
       return await chrome.tabs.sendMessage(tabId, message);
     } catch (e) {
       throw hopError(
@@ -1715,6 +1821,49 @@ function confirmActionSignature(tabId, kind) {
     }
   );
 }
+// ADR-0086: find uses its own broker channel. The start cue waits only long enough to make the
+// agent's intent visible before DOM work begins. Result events carry only an aggregate count;
+// matched text and geometry never leave the isolated page world for presentation.
+async function startFindVisual(tabId) {
+  try {
+    return await presentationBroker.publishEvent(
+      tabId,
+      self.GhostlightFindVisual.message(self.GhostlightFindVisual.PHASES.START),
+      {
+        channel: self.GhostlightFindVisual.CHANNEL,
+        ttlMs: FIND_EVENT_TTL_MS,
+        deliveryWaitMs: FIND_DELIVERY_WAIT_MS,
+      }
+    );
+  } catch {
+    return { shown: false, reason: "find visual unavailable" };
+  }
+}
+function finishFindVisual(tabId, count, more) {
+  const phase = count > 0
+    ? self.GhostlightFindVisual.PHASES.FOUND
+    : self.GhostlightFindVisual.PHASES.EMPTY;
+  presentationBroker.publishEvent(
+    tabId,
+    self.GhostlightFindVisual.message(phase, count, more),
+    {
+      channel: self.GhostlightFindVisual.CHANNEL,
+      ttlMs: FIND_EVENT_TTL_MS,
+      waitForDelivery: false,
+    }
+  );
+}
+function cancelFindVisual(tabId) {
+  presentationBroker.publishEvent(
+    tabId,
+    self.GhostlightFindVisual.message(self.GhostlightFindVisual.PHASES.CANCEL),
+    {
+      channel: self.GhostlightFindVisual.CHANNEL,
+      ttlMs: FIND_EVENT_TTL_MS,
+      waitForDelivery: false,
+    }
+  );
+}
 // Move the phantom cursor to a (rescaled, CSS-px) point and wait for it to settle, so the user sees
 // the pointer arrive before the action fires. Resolves immediately if no indicator is present.
 function moveCursor(tabId, x, y) { return sendToTab(tabId, { type: "UPDATE_PHANTOM_CURSOR", x, y }); }
@@ -1730,7 +1879,52 @@ function targetGlow(tabId, x, y) { sendToTab(tabId, { type: "AGENT_TARGET_GLOW",
 function semanticTargetCue(tabId, x, y, action) {
   return sendToTab(tabId, { type: "AGENT_SEMANTIC_TARGET", x, y, action });
 }
-function keystrokeCue(tabId, text, kind) { sendToTab(tabId, { type: "AGENT_KEYSTROKE", text, kind }); }
+function keystrokeCue(tabId, cue) {
+  sendToTab(tabId, { type: "AGENT_KEYSTROKE", cue });
+}
+async function beginKeyCueObservation(tabId, expectedCount) {
+  try {
+    const response = await content(tabId, {
+      type: KEY_CUE_OBSERVATION_MESSAGES.BEGIN,
+      expectedCount,
+    });
+    return response && response.result && response.result.token;
+  } catch {
+    return null;
+  }
+}
+async function finishKeyCueObservation(tabId, token) {
+  if (token === null || token === undefined) return [];
+  try {
+    const response = await content(tabId, { type: KEY_CUE_OBSERVATION_MESSAGES.FINISH, token });
+    const result = response && response.result;
+    if (!result || result.overflow || !Array.isArray(result.targetStates)) return [];
+    return result.targetStates;
+  } catch {
+    return [];
+  }
+}
+async function beginDragObservation(tabId) {
+  try {
+    const response = await content(tabId, { type: DRAG_OBSERVATION_MESSAGES.BEGIN });
+    return response && response.result && response.result.token;
+  } catch {
+    return null;
+  }
+}
+async function finishDragObservation(tabId, token) {
+  if (token === null || token === undefined) return { started: false, cancelled: false };
+  try {
+    const response = await content(tabId, { type: DRAG_OBSERVATION_MESSAGES.FINISH, token });
+    const result = response && response.result;
+    if (!result || typeof result.started !== "boolean" || typeof result.cancelled !== "boolean") {
+      return { started: false, cancelled: false };
+    }
+    return result;
+  } catch {
+    return { started: false, cancelled: false };
+  }
+}
 function scrollCue(tabId, direction) { sendToTab(tabId, { type: "AGENT_SCROLL_CUE", direction }); }
 function readScan(tabId) { sendToTab(tabId, { type: "AGENT_READ_SCAN" }); }
 function navigatePill(tabId, url) { sendToTab(tabId, { type: "AGENT_NAVIGATE_PILL", url }); }
@@ -1750,21 +1944,22 @@ function renderNarration(tabId, narration) {
     clearMessage: { type: "AGENT_NARRATION_CLEAR" },
   });
 }
-const { KEY_MAP, BUTTON_BITS, modifierBits, keyCode, VK_NAMED, VK_PUNCT, CODE_PUNCT, vkCode, SHIFT_BASE, charKeyInfo } = self.GhostlightKeys;
+const { modifierBits, KEY_CUE_OBSERVATION_MESSAGES, keyCuePresentation, textDispatchPlan, keyDispatchPlan } = self.GhostlightKeys;
+const { BUTTON_BITS, mouseMoveEvent, mouseButtonEvent, mouseWheelEvent, dragEvent } = self.GhostlightInputEvents;
+const { DRAG_SESSION_PHASES, DRAG_OBSERVATION_MESSAGES } = self.GhostlightDragSession;
 // CLICK_GAP_MS (press/release + inter-click spacing) comes from lib/constants.js.
 async function click(tabId, x, y, opts) {
   const modifiers = opts.modifiers || 0, button = opts.button || "left", clickCount = opts.clickCount || 1;
-  const bit = BUTTON_BITS[button] || 0;
-  await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, modifiers, buttons: 0, force: 0 });
+  await cdp(tabId, "Input.dispatchMouseEvent", mouseMoveEvent(x, y, modifiers));
   clickRipple(tabId, x, y, clickCount, button);
   targetGlow(tabId, x, y); // glow the element under the point -- confirm WHAT was acted on
   await sleep(CLICK_GAP_MS);
   // Real N-clicks are N press/release pairs with clickCount incrementing 1..N, not one pair with
   // clickCount set to N.
   for (let i = 1; i <= clickCount; i++) {
-    await cdp(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, clickCount: i, modifiers, buttons: bit, force: 0.5 });
+    await cdp(tabId, "Input.dispatchMouseEvent", mouseButtonEvent("mousePressed", x, y, button, modifiers, i));
     await sleep(CLICK_GAP_MS);
-    await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, clickCount: i, modifiers, buttons: 0, force: 0 });
+    await cdp(tabId, "Input.dispatchMouseEvent", mouseButtonEvent("mouseReleased", x, y, button, modifiers, i));
     if (i < clickCount) await sleep(CLICK_GAP_MS);
   }
 }
@@ -1843,37 +2038,131 @@ async function directScrollFallback(tabId, x, y, dx, dy) {
   }
 }
 async function pressKey(tabId, combo) {
-  const parts = combo.split("+").map((p) => p.trim().toLowerCase());
-  let modifiers = 0;
-  let key = combo;
-  if (parts.length > 1) {
-    key = "";
-    for (const p of parts) {
-      if (p === "ctrl" || p === "control") modifiers |= 2;
-      else if (p === "alt") modifiers |= 1;
-      else if (p === "shift") modifiers |= 8;
-      else if (["meta", "cmd", "command", "win", "windows"].includes(p)) modifiers |= 4;
-      else key = KEY_MAP[p] || p;
-    }
-  } else {
-    key = KEY_MAP[parts[0]] || combo;
-  }
-  // Reload chords (ctrl/cmd+r, F5): Chrome will not reload from a synthetic key event delivered to
-  // the renderer, so intercept and drive the reload directly (shift => bypass cache / hard reload).
-  const bare = (key || "").toLowerCase();
-  const ctrlOrCmd = (modifiers & 2) !== 0 || (modifiers & 4) !== 0;
-  if ((ctrlOrCmd && bare === "r") || bare === "f5") {
-    await chrome.tabs.reload(tabId, { bypassCache: (modifiers & 8) !== 0 });
+  const plan = keyDispatchPlan(combo);
+  if (plan.reload) {
+    await chrome.tabs.reload(tabId, plan.reload);
     return;
   }
-  // Include the Windows virtual key code so Chrome maps modified combos (ctrl+a, ctrl+c, ...) to
-  // real editing commands; without it a modified keyDown arrives but triggers no edit action.
-  const code = keyCode(key);
-  const vk = vkCode(key);
-  const evt = { key, code, modifiers, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
-  await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyDown", ...evt });
-  await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...evt });
+  await cdp(tabId, "Input.dispatchKeyEvent", plan.keyDown);
+  await cdp(tabId, "Input.dispatchKeyEvent", plan.keyUp);
   await sleep(20);
+}
+function dragInterceptUnsupported(error) {
+  return /unknown method|wasn't found|not supported/i.test(String(error && error.message || error));
+}
+async function cancelActiveDrag(tabId) {
+  dragCoordinator.cancel(tabId);
+  const operation = activeDragOperations.get(tabId);
+  if (!operation) return;
+  operation.cancelled = true;
+  activeDragOperations.delete(tabId);
+
+  // Navigation destroys the old document and its structural observer. Retire CDP input state
+  // directly, without the content() reinjection fallback that could install an observer in the
+  // replacement document.
+  const interceptEnabled = operation.interceptEnabled;
+  const pressed = operation.pressed;
+  operation.interceptEnabled = false;
+  operation.pressed = false;
+  if (!attached.has(tabId)) return;
+  if (interceptEnabled) {
+    try {
+      await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: false });
+    } catch { /* navigation or detach already retired interception */ }
+  }
+  try {
+    await chrome.debugger.sendCommand({ tabId }, "Input.cancelDragging", {});
+  } catch { /* no active native drag */ }
+  if (pressed) {
+    try {
+      await chrome.debugger.sendCommand(
+        { tabId },
+        "Input.dispatchMouseEvent",
+        mouseButtonEvent("mouseReleased", operation.x, operation.y, "left", operation.modifiers, 1)
+      );
+    } catch { /* navigation or detach already released the pointer */ }
+  }
+}
+async function pointerDrag(tabId, sx, sy, ex, ey, modifiers) {
+  let observationToken = await beginDragObservation(tabId);
+  let interceptSession = dragCoordinator.begin(tabId);
+  const operation = {
+    cancelled: false,
+    interceptEnabled: false,
+    pressed: false,
+    x: sx,
+    y: sy,
+    modifiers,
+  };
+  activeDragOperations.set(tabId, operation);
+  try {
+    try {
+      await cdp(tabId, "Input.setInterceptDrags", { enabled: true });
+      operation.interceptEnabled = true;
+    } catch (error) {
+      dragCoordinator.cancel(tabId);
+      interceptSession = null;
+      if (!dragInterceptUnsupported(error)) throw error;
+    }
+
+    await cdp(tabId, "Input.dispatchMouseEvent", mouseMoveEvent(sx, sy, modifiers));
+    await sleep(CAPTURE_SETTLE_MS);
+    await cdp(tabId, "Input.dispatchMouseEvent", mouseButtonEvent("mousePressed", sx, sy, "left", modifiers, 1));
+    operation.pressed = true;
+    await sleep(CAPTURE_SETTLE_MS);
+    for (let i = 1; i <= 10; i++) {
+      if (operation.cancelled) throw new Error("Drag cancelled because the tab document changed.");
+      const tx = sx + ((ex - sx) * i) / 10;
+      const ty = sy + ((ey - sy) * i) / 10;
+      operation.x = tx;
+      operation.y = ty;
+      await cdp(tabId, "Input.dispatchMouseEvent", mouseMoveEvent(tx, ty, modifiers, BUTTON_BITS.left));
+      dragTrail(tabId, tx, ty);
+      await sleep(16);
+    }
+
+    const observation = await finishDragObservation(tabId, observationToken);
+    observationToken = null;
+    const nativeExpected = observation.started && !observation.cancelled;
+    const interceptResult = interceptSession
+      ? await dragCoordinator.finish(
+        interceptSession,
+        nativeExpected ? DRAG_INTERCEPT_WAIT_MS : DRAG_INTERCEPT_GRACE_MS
+      )
+      : { mode: DRAG_SESSION_PHASES.POINTER };
+    interceptSession = null;
+    if (operation.cancelled) throw new Error("Drag cancelled because the tab document changed.");
+    if (operation.interceptEnabled) {
+      await cdp(tabId, "Input.setInterceptDrags", { enabled: false });
+      operation.interceptEnabled = false;
+    }
+    if (interceptResult.mode === DRAG_SESSION_PHASES.NATIVE) {
+      await cdp(tabId, "Input.dispatchDragEvent", dragEvent("dragEnter", ex, ey, interceptResult.data, modifiers));
+      await cdp(tabId, "Input.dispatchDragEvent", dragEvent("dragOver", ex, ey, interceptResult.data, modifiers));
+      await cdp(tabId, "Input.dispatchDragEvent", dragEvent("drop", ex, ey, interceptResult.data, modifiers));
+    }
+    await cdp(tabId, "Input.dispatchMouseEvent", mouseButtonEvent("mouseReleased", ex, ey, "left", modifiers, 1));
+    operation.pressed = false;
+    if (activeDragOperations.get(tabId) === operation) activeDragOperations.delete(tabId);
+    return { nativeDrag: interceptResult.mode === DRAG_SESSION_PHASES.NATIVE };
+  } catch (error) {
+    dragCoordinator.cancel(tabId);
+    if (!operation.cancelled) await finishDragObservation(tabId, observationToken);
+    observationToken = null;
+    if (operation.interceptEnabled) {
+      try { await cdp(tabId, "Input.setInterceptDrags", { enabled: false }); } catch { /* detached */ }
+      operation.interceptEnabled = false;
+    }
+    try { await cdp(tabId, "Input.cancelDragging"); } catch { /* no active native drag */ }
+    if (operation.pressed) {
+      try {
+        await cdp(tabId, "Input.dispatchMouseEvent", mouseButtonEvent("mouseReleased", operation.x, operation.y, "left", modifiers, 1));
+      } catch { /* detached */ }
+      operation.pressed = false;
+    }
+    if (activeDragOperations.get(tabId) === operation) activeDragOperations.delete(tabId);
+    throw error;
+  }
 }
 function waitForLoad(tabId) {
   return new Promise((resolve) => {
@@ -1937,7 +2226,7 @@ async function computer(a) {
         if (!c) return text("coordinate or ref is required.");
         await moveCursor(tabId, c[0], c[1]); // show the pointer arrive before acting
         if (a.action === "hover") {
-          await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: c[0], y: c[1], modifiers });
+          await cdp(tabId, "Input.dispatchMouseEvent", mouseMoveEvent(c[0], c[1], modifiers));
           return text(`Hovered at (${c[0]}, ${c[1]}).`);
         }
         const button = a.action === "right_click" ? "right" : "left";
@@ -1952,41 +2241,33 @@ async function computer(a) {
         await ensureAttached(tabId);
         typeShimmer(tabId);
         await startActionSignature(tabId, self.GhostlightActionSignature.KINDS.TYPING);
+        const dispatch = textDispatchPlan(a.text);
         try {
-          const chars = Array.from(a.text);
-          for (let i = 0; i < chars.length; i++) {
-            const ch = chars[i];
-            // Windows-style newlines: skip the \r, let the following \n press Enter once.
-            if (ch === "\r" && chars[i + 1] === "\n") continue;
-            const info = charKeyInfo(ch);
-            if (!info) {
-              await cdp(tabId, "Input.insertText", { text: ch });
-              await sleep(8);
-              continue;
-            }
-            const mods = info.shift ? 8 : 0;
-            const evt = {
-              key: info.key, code: info.code, modifiers: mods,
-              windowsVirtualKeyCode: info.vk, nativeVirtualKeyCode: info.vk,
-            };
-            await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyDown", ...evt, text: info.text, unmodifiedText: info.unmodifiedText });
-            await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...evt });
+          for (const operation of dispatch.operations) {
+            await cdp(tabId, operation.method, operation.params);
             await sleep(8);
           }
         } finally {
           finishActionSignature(tabId, self.GhostlightActionSignature.KINDS.TYPING);
         }
-        return text(`Typed ${a.text.length} character(s).`);
+        return text(`Typed ${dispatch.characterCount} character(s).`);
       });
     }
     case "key": {
       if (!a.text) return text("text is required for key.");
       return withObservation(tabId, { action: "key", targetAssurance: "none" }, async () => {
         await ensureAttached(tabId);
-        keystrokeCue(tabId, a.text, "key");
         const repeat = Math.min(a.repeat || 1, 100);
-        for (let i = 0; i < repeat; i++) {
-          for (const combo of a.text.split(" ").filter(Boolean)) await pressKey(tabId, combo);
+        const combos = a.text.split(" ").filter(Boolean);
+        const observationToken = await beginKeyCueObservation(tabId, combos.length * repeat);
+        let observedTargets = [];
+        try {
+          for (let i = 0; i < repeat; i++) {
+            for (const combo of combos) await pressKey(tabId, combo);
+          }
+        } finally {
+          observedTargets = await finishKeyCueObservation(tabId, observationToken);
+          keystrokeCue(tabId, keyCuePresentation(a.text, observedTargets, repeat));
         }
         return text(`Pressed: ${a.text} (x${repeat}).`);
       });
@@ -2005,7 +2286,7 @@ async function computer(a) {
         const before = await probeScrollState(tabId, c[0], c[1]);
         await moveCursor(tabId, c[0], c[1]);
         scrollCue(tabId, dir);
-        await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseWheel", x: c[0], y: c[1], deltaX, deltaY, modifiers });
+        await cdp(tabId, "Input.dispatchMouseEvent", mouseWheelEvent(c[0], c[1], deltaX, deltaY, modifiers));
         const scrolled = `Scrolled ${dir} by ${amount}.`;
         if (before === null) {
           // Verification unavailable (for example a mid-navigation page): same blind claim as before.
@@ -2045,6 +2326,7 @@ async function computer(a) {
       });
     }
     case "scroll_to": {
+      if (!a.ref && !a.coordinate) return text("ref or coordinate is required for scroll_to.");
       return withObservation(tabId, {
         action: "scroll_to",
         ref: a.ref,
@@ -2072,18 +2354,8 @@ async function computer(a) {
       const [ex, ey] = rescaleCoord(tabId, a.coordinate[0], a.coordinate[1]);
       return withObservation(tabId, { action: "left_click_drag", targetAssurance: "coordinate" }, async () => {
         await moveCursor(tabId, sx, sy);
-        await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: sx, y: sy, modifiers, buttons: 0, force: 0 });
-        await sleep(CAPTURE_SETTLE_MS);
-        await cdp(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x: sx, y: sy, button: "left", modifiers, buttons: BUTTON_BITS.left, force: 0.5 });
-        await sleep(CAPTURE_SETTLE_MS);
-        for (let i = 1; i <= 10; i++) {
-          const tx = sx + ((ex - sx) * i) / 10, ty = sy + ((ey - sy) * i) / 10;
-          await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: tx, y: ty, modifiers, buttons: BUTTON_BITS.left, force: 0.5 });
-          dragTrail(tabId, tx, ty);
-          await sleep(16);
-        }
+        await pointerDrag(tabId, sx, sy, ex, ey, modifiers);
         await moveCursor(tabId, ex, ey);
-        await cdp(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: ex, y: ey, button: "left", modifiers, buttons: 0, force: 0 });
         return text(`Dragged (${sx}, ${sy}) -> (${ex}, ${ey}).`);
       });
     }
@@ -2142,34 +2414,45 @@ async function pageMeta(tabId) {
 }
 
 const handlers = {
-  // `key` is the client's stable clientKey (ADR-0066), falling back to the guid, or absent for a
-  // legacy/hand-rolled native caller (the global-group path).
-  async tabs_context_mcp(a, key) {
+  // `key` is the client's stable clientKey, falling back to the guid. `workspaceRequest` is a
+  // private service instruction: either select the most recently focused normal window or use the
+  // session's already-pinned window.
+  async tabs_context_mcp(a, key, workspaceRequest) {
     if (typeof key !== "string" || !key) return tabsContextLegacy(a);
-    let gid = clientGroups.has(key) ? clientGroups.get(key) : null;
-    if (gid !== null) {
-      try { await chrome.tabGroups.get(gid); } catch { gid = null; }
-    }
+    const resolved = await resolveWorkspaceWindow(chrome, workspaceRequest);
+    let workspaceWindowId = resolved.window.id;
+    const group = await workspaceGroupId(key, resolved.window.id);
+    let { gid } = group;
+    if (group.changed) await persistSessionState();
     if (gid === null) {
       if (!a.createIfEmpty) {
-        return text("No Ghostlight tab group for this session. Call tabs_context_mcp with createIfEmpty: true, or create a tab with tabs_create_mcp.");
+        return withWorkspaceResult(
+          text("No Ghostlight tab group in this session workspace. Call tabs_context_mcp with createIfEmpty: true, or create a tab with tabs_create_mcp."),
+          resolved.window.id
+        );
       }
-      gid = (await createTabInSessionGroup(key)).gid;
+      const created = await createTabInSessionGroup(key, workspaceRequest, resolved);
+      gid = created.gid;
+      workspaceWindowId = created.windowId;
       await persistSessionState();
     }
-    return tabContext(await chrome.tabs.query({ groupId: gid }), gid);
+    return withWorkspaceResult(
+      tabContext(await chrome.tabs.query({ groupId: gid }), gid),
+      workspaceWindowId
+    );
   },
-  async tabs_create_mcp(_a, key) {
+  async tabs_create_mcp(_a, key, workspaceRequest) {
     if (typeof key !== "string" || !key) return tabsCreateLegacy();
-    const { tab, gid } = await createTabInSessionGroup(key);
+    const { tab, gid, windowId } = await createTabInSessionGroup(key, workspaceRequest);
     await persistSessionState();
     const r = tabContext(await chrome.tabs.query({ groupId: gid }), gid);
     r.content[0].text = `Created tab ${tab.id}.\n` + r.content[0].text;
     r.structuredContent = { tabId: tab.id, tabs: r.structuredContent.tabs };
-    return r;
+    return withWorkspaceResult(r, windowId);
   },
-  async navigate(a, key) {
-    const tabId = await navigateTabId(a.tabId, key);
+  async navigate(a, key, workspaceRequest) {
+    const navigation = await navigateTabId(a.tabId, key, workspaceRequest);
+    const { tabId } = navigation;
     if (a.url === "back") {
       await chrome.tabs.goBack(tabId);
     } else if (a.url === "forward") {
@@ -2187,7 +2470,7 @@ const handlers = {
     navigatePill(tabId, tab.url); // destination pill on the freshly loaded page
     const r = text(`Navigated to ${tab.url}${tab.status !== "complete" ? " (still loading)" : ""}.`);
     r.structuredContent = { tabId, url: tab.url, title: tab.title || "" };
-    return r;
+    return navigation.windowId === null ? r : withWorkspaceResult(r, navigation.windowId);
   },
   async dialog(a) {
     const tabId = await effectiveTabId(a.tabId);
@@ -2276,11 +2559,18 @@ const handlers = {
   },
   async find(a) {
     const tabId = await effectiveTabId(a.tabId);
-    readScan(tabId);
-    const r = await content(tabId, { type: "find", query: a.query });
+    await startFindVisual(tabId);
+    let r;
+    try {
+      r = await content(tabId, { type: "find", query: a.query, present: true });
+    } catch (error) {
+      cancelFindVisual(tabId);
+      throw error;
+    }
     const data = (r && r.result) || { results: [] };
     const results = data.results || [];
     const more = !!data.more;
+    finishFindVisual(tabId, results.length, more);
     let out;
     if (!results.length) {
       out = text(`No elements matching "${a.query}".`);
@@ -2697,7 +2987,7 @@ async function dispatch(item) {
   try {
     // ADR-0066: `key` is the client's clientKey (or a legacy guid); the grouping handlers use it
     // to reuse the client's durable tab group. Every other handler ignores its second argument.
-    reply(item.response, await handler(args, key));
+    reply(item.response, await handler(args, key, request.workspace));
   } catch (e) {
     if (e instanceof TabAccessError) return reply(item.response, text(e.message));
     // Hop-tagged errors (cdp/page) pass through as-is; untagged errors keep the tool-name prefix.

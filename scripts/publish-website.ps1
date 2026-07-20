@@ -1,8 +1,8 @@
 #Requires -Version 7
 <#
 .SYNOPSIS
-    Refresh the sylin.org website's Ghostlight install-guide fallback and trigger a rebuild, so the
-    published site tracks a new release.
+    Refresh the sylin.org website's Ghostlight fallbacks and trigger a rebuild, so the published
+    site tracks a new release and its verified public status.
 
 .DESCRIPTION
     The website (sylin-org/website, an Eleventy site) is DESIGNED to auto-track this repo: at build
@@ -12,13 +12,14 @@
     static, and the install guide is version-agnostic (no version/download strings to bump), so a
     release needs no per-version content edits.
 
-    What a release DOES need: (1) the fallback snapshot kept fresh, and (2) a website rebuild so the
-    live fetch re-runs. The site deploys via an external host that builds on push to the website
-    repo's main, so this script:
+    The project page also consumes a committed public-status fallback owned by this repository.
+    It carries the current release, live-platform evidence, and extension-store state. A release
+    needs both fallbacks kept fresh and a website rebuild so the live install fetch re-runs. The
+    site deploys via an external host that builds on push to the website repo's main, so this script:
       - clones the website repo,
-      - copies this repo's llms-install.md over the committed fallback,
-      - commits + pushes IF the fallback changed (which triggers the rebuild).
-    If the fallback is unchanged, the live site already serves the current guide and no rebuild is
+      - copies this repo's install guide and public status over the committed fallbacks,
+      - commits + pushes IF either fallback changed (which triggers the rebuild).
+    If both fallbacks are unchanged, the live site already serves the current guide and status; no rebuild is
     needed -- pass -ForceRebuild to push an empty commit and rebuild anyway.
 
     This never edits the website's demo pages or layout; it touches ONLY the fallback snapshot.
@@ -71,8 +72,10 @@ function Get-Normalized([string] $Path) {
 
 Write-Banner 'Website (sylin.org) refresh'
 
-$source = Join-Path $RepoRoot 'llms-install.md'
-if (-not (Test-Path $source)) { throw "llms-install.md not found at $source (the site's install guide source)" }
+$installSource = Join-Path $RepoRoot 'llms-install.md'
+$statusSource = Join-Path $RepoRoot 'docs/public-status.json'
+if (-not (Test-Path $installSource)) { throw "llms-install.md not found at $installSource (the site's install guide source)" }
+if (-not (Test-Path $statusSource)) { throw "docs/public-status.json not found at $statusSource (the site's public-status source)" }
 
 foreach ($tool in @('git', 'gh')) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "required tool not found: $tool" }
@@ -86,22 +89,32 @@ Write-Info "cloning $WebsiteSlug"
 & gh repo clone $WebsiteSlug $tmp -- --depth 1
 if ($LASTEXITCODE -ne 0) { throw "failed to clone $WebsiteSlug" }
 
-$fallback = Join-Path $tmp 'src/_data/ghostlight-install.fallback.md'
-if (-not (Test-Path $fallback)) {
-    throw "fallback snapshot not found at src/_data/ghostlight-install.fallback.md in $WebsiteSlug (site layout changed?)"
+$installFallback = Join-Path $tmp 'src/_data/ghostlight-install.fallback.md'
+$statusFallback = Join-Path $tmp 'src/_data/ghostlight-public-status.fallback.json'
+if (-not (Test-Path $installFallback)) {
+    throw "install fallback not found at src/_data/ghostlight-install.fallback.md in $WebsiteSlug (site layout changed?)"
+}
+if (-not (Test-Path $statusFallback)) {
+    throw "public-status fallback not found at src/_data/ghostlight-public-status.fallback.json in $WebsiteSlug (site layout changed?)"
 }
 
-$new = Get-Normalized $source
-$old = Get-Normalized $fallback
-$changed = ($new -ne $old)
+$installNew = Get-Normalized $installSource
+$installOld = Get-Normalized $installFallback
+$statusNew = Get-Normalized $statusSource
+$statusOld = Get-Normalized $statusFallback
+$installChanged = ($installNew -ne $installOld)
+$statusChanged = ($statusNew -ne $statusOld)
+$changed = $installChanged -or $statusChanged
 
 if ($changed) {
-    Write-Info 'the install guide changed since the committed fallback snapshot'
-    if ($DryRun) { Write-Would "write the refreshed fallback, commit, and push (triggers a site rebuild)"; return }
-    [System.IO.File]::WriteAllText($fallback, $new)
+    if ($installChanged) { Write-Info 'the install guide changed since the committed fallback snapshot' }
+    if ($statusChanged) { Write-Info 'the public status changed since the committed fallback snapshot' }
+    if ($DryRun) { Write-Would "write the refreshed fallback(s), commit, and push (triggers a site rebuild)"; return }
+    if ($installChanged) { [System.IO.File]::WriteAllText($installFallback, $installNew) }
+    if ($statusChanged) { [System.IO.File]::WriteAllText($statusFallback, $statusNew) }
 }
 else {
-    Write-Info 'the fallback snapshot already matches this repo''s install guide'
+    Write-Info 'the fallback snapshots already match this repo''s install guide and public status'
     if (-not $ForceRebuild) {
         Write-Skip 'nothing to refresh; the live site already serves the current guide (use -ForceRebuild to rebuild anyway)'
         return
@@ -112,8 +125,8 @@ else {
 Push-Location $tmp
 try {
     if ($changed) {
-        & git add 'src/_data/ghostlight-install.fallback.md'
-        & git commit -m "chore(ghostlight): refresh install-guide fallback for v$ver"
+        & git add 'src/_data/ghostlight-install.fallback.md' 'src/_data/ghostlight-public-status.fallback.json'
+        & git commit -m "chore(ghostlight): refresh public fallbacks for v$ver"
     }
     else {
         # -ForceRebuild with no content change: an empty commit is the host-agnostic rebuild trigger.
@@ -122,7 +135,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'commit failed' }
     & git push
     if ($LASTEXITCODE -ne 0) { throw 'push to the website repo failed' }
-    Write-Ok "pushed to $WebsiteSlug -- the external host rebuilds on push and the site re-fetches llms-install.md"
+    Write-Ok "pushed to $WebsiteSlug -- the external host rebuilds on push and serves the current Ghostlight truth"
 }
 finally { Pop-Location }
 

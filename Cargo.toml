@@ -1,6 +1,6 @@
 [package]
 name = "ghostlight"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 description = "Governed browser automation over the user's own authenticated Chromium session -- for AI coding agents."
 publish = false

@@ -1,23 +1,85 @@
 # STATUS -- where the project stands
 
-Last updated: 2026-07-15. This file is a point-in-time snapshot maintained by whoever
+Last updated: 2026-07-20. This file is a point-in-time snapshot maintained by whoever
 finishes significant work. It exists so a fresh agent (or human) can orient without any
 prior session context. **Trust the tree, `git log`, and the batch LEDGERs over this file
 when they disagree**, and update it when you land something that changes the picture.
 
 ## Now
 
-- **Browser-window attention routing and multi-instance ergonomics are accepted for v2 in
-  ADR-0084.** New
+- **The v1 visual-signature inventory is complete (ADR-0089).** Ref-based `computer.scroll_to`
+  now settles three sky chevrons into its exact destination halo; `act_on.scroll_to` retains its
+  semantic cue without repainting the same halo. Coordinate `upload_image` now settles a fixed,
+  content-free photo tile into the target halo while the model-facing result separately reports
+  page-signaled handling or dispatch without a signal. Same-origin iframe geometry is translated
+  to the top viewport. Console and network buffer reads remain intentionally quiet because they do
+  not manipulate the rendered page. Formatting, strict clippy, the full Rust workspace, all 164
+  extension tests, JavaScript syntax, and diff hygiene pass. Visible Windows verification passed
+  both new treatments on the public decision-aid page; the existing Windows signature matrix had
+  already passed border, navigation, read, find, field, typing, key privacy, JavaScript, wait,
+  screenshot, and dual-lane drag treatments. The Linux candidate also passed the automated gate
+  (164 extension tests, 4 launcher tests, strict clippy, and the full Rust workspace including 683
+  core tests) and the owner's manual visible-browser acceptance pass. The Linux environment is
+  release-ready.
+
+- **The repository-controlled OSS adoption readiness repairs are complete on `dev`.**
+  `docs/public-status.json` now owns the release, platform, and extension-store truth used by the
+  README and the website fallback. CI and release preflight reject local drift; the website
+  publisher refreshes both install and status fallbacks, and an optional online check verifies the
+  deployed site, GitHub release, npm, install guide, decision aid, and privacy route. Structured
+  bug and install forms, a PR template, root support/governance routers, the README decision-aid
+  path, a 1280x640 social preview, a greenfield cohort contract, and an honest OSPS Baseline
+  2026.02.19 self-assessment are prepared. Website deployment, social-preview upload, Chrome Web
+  Store review, non-author cohort evidence, and macOS live proof remain external gates. The OSPS
+  review also records that direct pushes are not blocked, GitHub secret scanning/push protection
+  are disabled, and privileged-account MFA still needs owner verification; no compliance badge is
+  claimed.
+
+- **Open-source publication-path research and a draft Ghostlight awareness plan are complete.**
+  Research 20 establishes that GitHub Trending and social trend bots are downstream amplifiers,
+  not submission channels, and traces six projects through creator audiences, problem communities,
+  host ecosystems, MCP directories, technical media, and category-level demand. The draft plan in
+  `docs/design/public-awareness-plan-2026-07.md` separates conversion readiness, targeted proof
+  users, ecosystem seeding, a founder-present anchor launch, audience-native follow-ons, earned
+  amplification, and privacy-compatible measurement. The derived project-agnostic guide at
+  `docs/guides/open-source-publication.md` covers 14 project archetypes, repository and release
+  readiness, proof, trust, community, channel strategy, measurement, funding, maintainer capacity,
+  reusable templates, decision trees, and three risk-scaled publication tracks. Broad Ghostlight
+  publication should wait for the Chrome Web Store path and clean greenfield install to be
+  verified. No external publication is authorized by these documents.
+
+- **Window-placed Chromium workspaces are implemented on `dev` (ADR-0085).** The first
+  unaddressed tab-context, tab-create, or navigation call reuses Chrome's last-focused eligible
+  normal window and pins that browser/window for the MCP session. A new window is created only
+  when no eligible normal window exists. Groups are keyed by browser window plus client, moved
+  tabs and groups stay where the user put them, and private native-window metadata never enters
+  the MCP result. The visible group is organization, not the authority boundary; service tab
+  ownership and the extension managed-surface guard remain intact. Extension tests and focused
+  Rust pin/wire tests pass. Formatting, strict workspace clippy, the full Rust workspace suite,
+  all 126 extension tests, JavaScript syntax, and every Lightbox process scenario pass. The
+  fallback now distinguishes unknown inventory from a proven empty browser, consults live focus
+  plus a validated browser-local MRU, and cannot create a window after an inventory failure.
+  Visible Windows verification passed: first-touch work reused the last-clicked window, later
+  work stayed pinned there after focus moved elsewhere, and the JavaScript workwheel remained
+  visible during a two-second page-local operation. Visible Linux verification also passed in the
+  ordinary graphical profile with a freshly rebuilt user candidate and explicitly reloaded
+  unpacked extension. A fresh real Codex session reused the last-focused one of two existing
+  normal Chrome windows for first-touch work without creating a third window. Focus then moved to
+  the other window through a natural no-Chrome-focus interval, but a later unaddressed tab-create
+  stayed in the first session workspace. The normal-window count remained two and no product
+  defect appeared.
+
+- **Complete browser-window attention routing and multi-instance ergonomics remain accepted for
+  v2 in ADR-0084.** New
   unaddressed work follows a service-owned move-to-front queue of eligible browser windows; focus
   carries the window ID, while connection and reconnect no longer count as attention. Tab owners,
   pinned workflows, and explicit selection remain stronger than recent attention, and ambiguity or
   capability mismatch never silently moves work into another authenticated browser context. The
   model-facing vocabulary separates `browserRef`, `browserName`, `engine`, `displayName`,
   `adapterMode`, and `state`, with compact browser provenance and a connected-browser directory.
-  The complete implementation is deliberately parked for v2. The v1 service still promotes on
-  attach, stores browser-only focus, discards `windowId`, and has no browser directory or explicit
-  selection surface; no partial v1 retrofit is planned.
+  The complete implementation is deliberately parked for v2. The current narrow Chromium slice
+  still uses the existing coarse browser-profile selector, has no global window MRU, browser
+  directory, or explicit selection surface, and does not expose browser provenance.
 
 - **Firefox and browser adapters now have a research baseline.** Research 19 maps all 25 current
   tools across Firefox extension-only and hybrid extension plus Marionette/WebDriver BiDi modes,
@@ -26,6 +88,30 @@ when they disagree**, and update it when you land something that changes the pic
   operation seam, connection-time capability negotiation, stable schemas plus dynamic adapter
   guidance, and tab-owner/session-affinity/focus/disambiguation routing. Firefox support, adapter
   refactoring, the proof of concept, and multi-browser selection are one deferred v2 workstream.
+
+- **Target-aware privacy-safe key presentation is implemented on `dev` (ADR-0087).**
+  `computer.key` observes only the structural class of each actual trusted keydown target after
+  focus resolution. Ordinary printable keys remain literal; native password and platform-marked
+  sensitive fields use an unlabeled glowing keycap. Unobservable targets fail private. Named
+  navigation keys and real command shortcuts remain readable, and multi-chord sequences retain
+  their distinct groups. The raw fallback token, event key, target element, and field value never
+  enter the content observer or presentation message. Initial live verification passed the
+  distinct ordinary and protected cues. Browser event execution is being reverified under
+  ADR-0088.
+
+- **Browser input event fidelity is repaired on `dev` (ADR-0088).** Pure keyboard and
+  pointer domains now own complete CDP packets. Printable `computer.key` calls insert text while
+  protected-field cues remain private; function keys and standalone modifiers carry correct
+  identity; `computer.type` counts Unicode code points after CRLF normalization. Drag execution is
+  dual-lane: ordinary pointer gestures stay on complete held-button packets, while native HTML
+  drag and drop uses a bounded per-tab CDP interception/replay session. Content observation retains
+  only trusted dragstart/cancellation booleans, and opaque drag data never leaves the worker. Empty
+  `scroll_to` calls fail, and coordinate image placement distinguishes dispatch from page-signaled
+  handling. All 160 extension tests, JavaScript syntax, Rust formatting, and diff checks pass. The
+  keyboard, typing, click, hover, and shortcut live matrix passes. Native HTML drag live proof
+  preserved the page-authored payload and observed dragstart, dragenter, dragover, drop, and
+  dragend. Pointer-only proof moved a range from 10 to 84 through ten input events with a complete
+  held-button sequence and no additional native drag lifecycle.
 
 - **Unified action signature medallions are implemented on `dev` (ADR-0083).** One
   policy-free, signal-aware renderer now gives non-spatial work a consistent corner badge while
@@ -36,7 +122,8 @@ when they disagree**, and update it when you land something that changes the pic
   use the document-aware Presentation Broker and cannot replay into a later document. The complete
   25-tool coverage and review queue live in `docs/design/tool-visual-signatures.md`. Strict clippy,
   the full Rust workspace, 112 extension tests, 4 npm launcher tests, JavaScript syntax checks, and
-  formatting pass. Visible browser verification remains owed.
+  formatting pass. The full Windows visible matrix passed, and the owner accepted the final Linux
+  visible candidate.
 
 - **The README hero story is implemented, captured, and enabled.** `ghostlight demo-brief`
   drives `https://sylin.org/ghostlight/demo/brief/` through the ordinary relay: one visible page
@@ -50,6 +137,12 @@ when they disagree**, and update it when you land something that changes the pic
 
 - **Branches**: `main` = releases, `dev` = trunk. Work lands on `dev`; the owner reviews
   `dev -> main` PRs and cuts releases.
+- **v0.7.0 is prepared on `dev`, not published.** Crates, the unpacked extension, npm/MCP metadata,
+  canonical public status, and package-manager templates identify as 0.7.0. The release is minor
+  because it adds window-placement behavior and a complete visible action language while keeping
+  the trained tool schemas unchanged. Package-manager hashes and npm binary checksums still belong
+  to v0.6.0 until the release workflow builds and verifies the v0.7.0 artifacts. The current Chrome
+  Web Store submission remains under review; the v0.7.0 extension package is not submitted yet.
 - **Latest published release: v0.6.0** (2026-07-15), cut with `scripts/release.ps1 0.6.0`.
   Shipped and LIVE: GitHub Release (28 files: 27 payloads including the CycloneDX SBOM, plus the
   canonical hash manifest and Sigstore attestations), npm `ghostlight@0.6.0`, Homebrew tap,
@@ -123,7 +216,7 @@ when they disagree**, and update it when you land something that changes the pic
   The privileged job only downloads, verifies the exact file set and hashes, attests, and releases.
 - **The public vulnerability-disclosure endpoint is live.** `https://sylin.org/.well-known/security.txt`
   publishes the contact, expiry, canonical URL, and Ghostlight security-policy link.
-- **The four-phase public documentation freshness pass is complete in the working tree.** Trust
+- **The four-phase public documentation freshness pass is complete on `dev`.** Trust
   material now follows SECURITY.md's best-effort solo-maintainer targets and names only live
   distribution channels. Present-facing guides use the current service/relay topology, 25-tool
   inventory, one-stack dev loop, shipped licensing behavior, and managed-tab boundary. The original
@@ -378,7 +471,8 @@ remains manual when its API credentials or dashboard metadata are absent.
 - Trust center legal: vendor entity name in the MSA (blocked on forming the LLC), the
   cyber-insurance yes/no line, counsel skim of MSA/DPA/LICENSE-GOVERNANCE before first
   EXECUTION (publication already happened by design; drafts are marked as drafts).
-- Key backup + a second npm publisher; one non-author human through the install flow.
+- Key backup + a second npm publisher; five to ten non-author humans through the tracked clean
+  first-success cohort.
 
 ## Standing context worth knowing
 

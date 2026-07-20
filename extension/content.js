@@ -175,6 +175,118 @@
     return SENSITIVE_AUTOCOMPLETE.some((s) => ac.indexOf(s) !== -1);
   }
 
+  // ADR-0087: observe the actual trusted keydown target, not document.activeElement before the
+  // action. Focus may move while a chord is dispatched. Retain only a bounded structural target
+  // class; never retain the key, field value, element, or any page text.
+  const KEY_CUE_OBSERVATION_MAX_EVENTS = 600;
+  const KEY_CUE_OBSERVATION_MESSAGES = self.GhostlightKeys.KEY_CUE_OBSERVATION_MESSAGES;
+  let keyCueObservationSequence = 0;
+  let activeKeyCueObservation = null;
+
+  function keyCueTarget(event) {
+    const targets = self.GhostlightKeys && self.GhostlightKeys.KEY_CUE_TARGETS;
+    if (!targets) return "unknown";
+    let target = null;
+    if (typeof event.composedPath === "function") {
+      target = event.composedPath().find((node) => node instanceof Element) || null;
+    }
+    if (!target && event.target instanceof Element) target = event.target;
+    if (!target) return targets.UNKNOWN;
+    const tag = target.tagName.toLowerCase();
+    if ((tag === "input" || tag === "textarea") && sensitive(target)) {
+      return targets.PROTECTED;
+    }
+    return targets.ORDINARY;
+  }
+
+  function stopKeyCueObservation() {
+    if (!activeKeyCueObservation) return null;
+    document.removeEventListener("keydown", activeKeyCueObservation.listener, true);
+    const stopped = activeKeyCueObservation;
+    activeKeyCueObservation = null;
+    return stopped;
+  }
+
+  function beginKeyCueObservation(expectedCount) {
+    stopKeyCueObservation();
+    const token = ++keyCueObservationSequence;
+    const limit = Math.min(
+      Math.max(0, Number.isInteger(expectedCount) ? expectedCount : 0),
+      KEY_CUE_OBSERVATION_MAX_EVENTS
+    );
+    const observation = { token, limit, targetStates: [], overflow: false, listener: null };
+    observation.listener = (event) => {
+      if (!event.isTrusted) return;
+      if (observation.targetStates.length >= observation.limit) {
+        observation.overflow = true;
+        return;
+      }
+      observation.targetStates.push(keyCueTarget(event));
+    };
+    activeKeyCueObservation = observation;
+    document.addEventListener("keydown", observation.listener, true);
+    return { token };
+  }
+
+  function finishKeyCueObservation(token) {
+    if (!activeKeyCueObservation || activeKeyCueObservation.token !== token) {
+      stopKeyCueObservation();
+      return { targetStates: [], overflow: true };
+    }
+    const observation = stopKeyCueObservation();
+    return {
+      targetStates: observation.targetStates.slice(),
+      overflow: observation.overflow,
+    };
+  }
+
+  // ADR-0088: distinguish a native HTML drag from pointer-only gestures without inspecting the
+  // dragged element or its payload. The listener retains only whether a trusted dragstart occurred
+  // and whether the page cancelled it. The post-dispatch microtask observes defaultPrevented after
+  // bubble listeners have run.
+  const DRAG_OBSERVATION_MESSAGES = self.GhostlightDragSession.DRAG_OBSERVATION_MESSAGES;
+  let dragObservationSequence = 0;
+  let activeDragObservation = null;
+
+  function stopDragObservation() {
+    if (!activeDragObservation) return null;
+    document.removeEventListener("dragstart", activeDragObservation.listener, true);
+    const stopped = activeDragObservation;
+    activeDragObservation = null;
+    return stopped;
+  }
+
+  function beginDragObservation() {
+    stopDragObservation();
+    const observation = {
+      token: ++dragObservationSequence,
+      started: false,
+      cancelled: false,
+      pending: Promise.resolve(),
+      listener: null,
+    };
+    observation.listener = (event) => {
+      if (!event.isTrusted || observation.started) return;
+      observation.started = true;
+      observation.pending = Promise.resolve().then(() => {
+        observation.cancelled = event.defaultPrevented;
+      });
+    };
+    activeDragObservation = observation;
+    document.addEventListener("dragstart", observation.listener, true);
+    return { token: observation.token };
+  }
+
+  async function finishDragObservation(token) {
+    if (!activeDragObservation || activeDragObservation.token !== token) {
+      stopDragObservation();
+      return { started: false, cancelled: false };
+    }
+    const observation = stopDragObservation();
+    await observation.pending;
+    return { started: observation.started, cancelled: observation.cancelled };
+  }
+
   // ADR-0078 D2: one compact element vocabulary shared by find, targeted read_page, and later
   // semantic action resolution. These are mechanism facts only. In particular,
   // `mechanicalActions` never means a governance grant allows the action.
@@ -520,10 +632,93 @@
     return result;
   }
 
-  function find(query) {
+  const FIND_VISUAL_RANGES_PER_RESULT = 8;
+  const FIND_VISUAL_TOTAL_RANGES = 80;
+
+  function findVisualTextNodes(root) {
+    const nodes = [];
+    const visit = (scope) => {
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        const parent = node.parentElement;
+        if (!parent || !node.nodeValue) continue;
+        if (parent.closest && parent.closest('[id^="ghostlight-"]')) continue;
+        if (["script", "style", "noscript", "template"].includes(parent.tagName.toLowerCase())) continue;
+        nodes.push(node);
+      }
+      const elements = scope.querySelectorAll ? scope.querySelectorAll("*") : [];
+      for (const element of elements) {
+        if (element.shadowRoot) visit(element.shadowRoot);
+      }
+    };
+    visit(root);
+    return nodes;
+  }
+
+  function findVisualRanges(element, needles, seen, remaining) {
+    const ranges = [];
+    for (const rawNeedle of needles) {
+      const needle = String(rawNeedle || "").trim().toLocaleLowerCase();
+      if (!needle) continue;
+      for (const node of findVisualTextNodes(element)) {
+        const source = node.nodeValue || "";
+        const haystack = source.toLocaleLowerCase();
+        let start = 0;
+        while (ranges.length < FIND_VISUAL_RANGES_PER_RESULT && ranges.length < remaining) {
+          const index = haystack.indexOf(needle, start);
+          if (index < 0) break;
+          start = index + Math.max(needle.length, 1);
+          let offsets = seen.get(node);
+          if (!offsets) { offsets = new Set(); seen.set(node, offsets); }
+          const key = `${index}:${index + needle.length}`;
+          if (offsets.has(key)) continue;
+          try {
+            const range = document.createRange();
+            range.setStart(node, index);
+            range.setEnd(node, index + needle.length);
+            if (Array.from(range.getClientRects()).some((rect) => rect.width > 0 && rect.height > 0)) {
+              offsets.add(key);
+              ranges.push(range);
+            }
+          } catch (_error) { /* a live page changed between ranking and presentation */ }
+        }
+        if (ranges.length >= FIND_VISUAL_RANGES_PER_RESULT || ranges.length >= remaining) break;
+      }
+      if (ranges.length) break;
+    }
+    return ranges;
+  }
+
+  function presentFindResults(selected, query, more) {
+    if (!self.GhostlightFx || typeof self.GhostlightFx.findResults !== "function") return;
+    try {
+      const seen = new WeakMap();
+      let rangeCount = 0;
+      const entries = selected.map((candidate, index) => {
+        const element = deref(candidate.ref);
+        if (!element) return null;
+        const ranges = findVisualRanges(
+          element,
+          [query, candidate.name],
+          seen,
+          FIND_VISUAL_TOTAL_RANGES - rangeCount
+        );
+        rangeCount += ranges.length;
+        return { element, ranges, strongest: index === 0 };
+      }).filter(Boolean);
+      self.GhostlightFx.findResults(entries, { more: !!more });
+    } catch (_error) {
+      // Presentation is best-effort and must never alter the find result.
+    }
+  }
+
+  function find(query, present) {
     const ranked = (self.GhostlightActionable || GhostlightActionable).rankCandidates(query, actionableCandidates());
     const more = ranked.length > 20;
-    const results = ranked.slice(0, 20).map(publicCandidate);
+    const selected = ranked.slice(0, 20);
+    const results = selected.map(publicCandidate);
+    if (present) presentFindResults(selected, query, more);
     return { results, more };
   }
 
@@ -608,6 +803,18 @@
       const fx = self.GhostlightFx;
       if (fx && typeof fx.fieldSplash === "function") fx.fieldSplash(target);
     } catch (e) { /* effects are decorative; a form write never fails on them */ }
+  }
+  function scrollTargetFx(target) {
+    try {
+      const fx = self.GhostlightFx;
+      if (fx && typeof fx.scrollTarget === "function") fx.scrollTarget(target);
+    } catch (e) { /* effects are decorative; scrolling never fails on them */ }
+  }
+  function imageDropFx(target, x, y) {
+    try {
+      const fx = self.GhostlightFx;
+      if (fx && typeof fx.imageDrop === "function") fx.imageDrop(target, x, y);
+    } catch (e) { /* effects are decorative; image dispatch never fails on them */ }
   }
   function setFormValue(ref, value) {
     const el = deref(ref);
@@ -729,9 +936,18 @@
       if (!el) return { error: "No element at coordinate [" + x + ", " + y + "]." };
       const opts = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, dataTransfer: dt };
       el.dispatchEvent(new DragEvent("dragenter", opts));
-      el.dispatchEvent(new DragEvent("dragover", opts));
-      el.dispatchEvent(new DragEvent("drop", opts));
-      return { success: true, output: "Dropped screenshot (" + name + ") at [" + x + ", " + y + "]." };
+      const dragOverAccepted = !el.dispatchEvent(new DragEvent("dragover", opts));
+      const dropHandled = !el.dispatchEvent(new DragEvent("drop", opts));
+      const handled = dragOverAccepted || dropHandled;
+      imageDropFx(el, x, y);
+      return {
+        success: true,
+        accepted: handled,
+        output: handled
+          ? "Page signaled handling for screenshot drag/drop (" + name + ") at [" + x + ", " + y + "]."
+          : "Dispatched screenshot drag/drop (" + name + ") at [" + x + ", " + y
+            + "]; the page did not signal handling.",
+      };
     }
 
     return { error: "Either ref or coordinate is required." };
@@ -1026,7 +1242,7 @@
         return true;
       }
       case "pageText": sendResponse({ result: pageText(msg.max_chars) }); return true;
-      case "find": sendResponse({ result: find(msg.query) }); return true;
+      case "find": sendResponse({ result: find(msg.query, msg.present === true) }); return true;
       case "resolveActionable": sendResponse({ result: resolveActionable(msg.target || {}) }); return true;
       case "pageMeta": sendResponse({ result: currentPageMeta() }); return true;
       case "setFormValue": sendResponse({ result: setFormValue(msg.ref, msg.value) }); return true;
@@ -1041,6 +1257,7 @@
           return true;
         }
         el.scrollIntoView({ block: "center", behavior: "instant" });
+        scrollTargetFx(el);
         sendResponse({ result: true });
         return true;
       }
@@ -1053,6 +1270,14 @@
         observeSample(msg.before || {}, msg.meta || {}).then((result) => sendResponse({ result }));
         return true;
       }
+      case KEY_CUE_OBSERVATION_MESSAGES.BEGIN:
+        sendResponse({ result: beginKeyCueObservation(msg.expectedCount) }); return true;
+      case KEY_CUE_OBSERVATION_MESSAGES.FINISH:
+        sendResponse({ result: finishKeyCueObservation(msg.token) }); return true;
+      case DRAG_OBSERVATION_MESSAGES.BEGIN:
+        sendResponse({ result: beginDragObservation() }); return true;
+      case DRAG_OBSERVATION_MESSAGES.FINISH:
+        finishDragObservation(msg.token).then((result) => sendResponse({ result })); return true;
       case "formStructure": sendResponse({ result: formStructure() }); return true;
       default:
         return false; // not ours -- let the visual-indicator content script handle it

@@ -1,0 +1,59 @@
+name: Installation friction
+description: Report a blocked or confusing path to first success
+title: "install: "
+labels: [installation]
+body:
+  - type: markdown
+    attributes:
+      value: This form is for the public installation journey. Never include credentials, browser data, private configuration values, or unredacted personal paths.
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where did the journey stop?
+      options:
+        - Installing the service
+        - Adding the browser extension
+        - Restarting or registering the MCP client
+        - Running doctor
+        - Completing the first browser task
+        - Updating or uninstalling
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Chromium browser, MCP client, and Ghostlight version.
+    validations:
+      required: true
+  - type: dropdown
+    id: extension
+    attributes:
+      label: Extension path
+      options:
+        - Chrome Web Store
+        - Unpacked release extension
+        - Repository checkout
+        - Not reached
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What did you try?
+      description: Include the public instruction you followed and the last successful step.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What did Ghostlight report?
+      description: Paste safe, redacted installer or doctor output and explain what you expected next.
+    validations:
+      required: true
+  - type: textarea
+    id: intervention
+    attributes:
+      label: Did you need private help or an undocumented step?
+      description: If yes, describe the missing explanation. That is an onboarding defect even if installation eventually worked.
+

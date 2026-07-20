@@ -43,10 +43,13 @@ domain modules.
 | Drag trail | click-drag path | "dragged along this path" | comet trail of fading radial dots |
 | Type shimmer | typing into the focused element | "typing into THIS field" | soft outline pulse on the focused element |
 | Field splash | a form write lands (`form_input`, `form_fill`, `file_upload`, `upload_image`) | "the agent just SET this field" | ring + interior wash hugging the field's own rectangle (borrows its border-radius), settles then releases outward |
-| Keystroke lozenge | named `key` chords | "these named keys were pressed" | bottom-center pill showing the chord; ordinary typed values never appear |
+| Keystroke lozenge | `computer.key` | "these keys were pressed, without exposing protected input" | bottom-center chord groups; ordinary printable keys stay literal, protected or unobservable keys become an unlabeled glowing keycap |
 | Target glow | ref/coordinate click | "THIS element was the target" | brief radial halo at the point (Playwright-highlight lineage) |
 | Scroll cue | scroll | "scrolled this direction" | cascading chevrons |
+| Scroll destination | ref-based `scroll_to` | "arrived at THIS element" | chevrons settle into an exact target halo; semantic composition does not repeat the halo |
+| Image drop | coordinate `upload_image` | "dispatched an image HERE" | fixed photo tile settles into the destination halo without image metadata or an acceptance claim |
 | Read scan | `read_page` / `get_page_text` | "the agent is reading, not touching" | a luminous scan line sweeping down the page |
+| Find | `find` | "the agent is searching; these are its ranked results" | signal-aware lens badge, native text highlights, shape fallback, and top/bottom horizon glows |
 | Navigate pill | `navigate` | "leaving for this destination" | top-center pill naming the host/path |
 | Screenshot frame | screenshot taken | "this page was captured" | frame flashes and files itself into the corner |
 | Zoom frame | `zoom` | "the agent is inspecting this region" | rectangle converging onto the region |
@@ -100,7 +103,8 @@ than merely pretty.
   document change.
 - **The `GhostlightFx` same-world export** (bottom of `agent-visual-indicator.js`): for sibling
   content scripts that know the target ELEMENT (e.g. `content.js`'s form writers calling
-  `fieldSplash`). Both scripts share the extension's isolated world, so this is a direct,
+  `fieldSplash`, ref scrolling calling `scrollTarget`, or coordinate image placement calling
+  `imageDrop`). Both scripts share the extension's isolated world, so this is a direct,
   page-unreachable call -- deliberately NOT a DOM `CustomEvent`, which any page could forge. Use
   this seam when the trigger's natural home is in-page and a rect would otherwise have to ride a
   wire message.
@@ -124,6 +128,18 @@ Action signatures use fixed, content-free start, finish, and confirm messages fr
 events provide ordered exact-document delivery but no replay. `extension/lib/presentation-placement.js`
 scores narration edges and four signature corners from recent pointer, focus, touched-control,
 scroll, and occupied-presentation signals. Each presentation chooses once and stays put.
+
+Key lozenges use the privacy-safe presentation structure from `extension/lib/keys.js`. The worker
+derives it after trusted target observation and before publishing `AGENT_KEYSTROKE`; raw fallback
+text never enters the page renderer. Named keys and command shortcuts retain their labels.
+Printable keys remain literal on ordinary targets, while protected or unobservable targets use an
+unlabeled glowing keycap.
+
+Destination cues use the same-world seam so exact element geometry stays inside the current page.
+Ref scrolling settles chevrons into the element and deduplicates a just-published semantic halo.
+Coordinate image placement shows a fixed photo tile at the destination but never receives the
+image payload or page-acceptance result. Console and network buffer reads remain intentionally
+quiet because they do not manipulate the rendered document.
 
 ## Adding a new effect
 

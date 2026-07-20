@@ -28,8 +28,11 @@ test("timing tunables are positive numbers", () => {
     HOLD_REQUEST_TIMEOUT_MS: C.HOLD_REQUEST_TIMEOUT_MS,
     CAPTURE_SETTLE_MS: C.CAPTURE_SETTLE_MS,
     CLICK_GAP_MS: C.CLICK_GAP_MS,
+    DRAG_INTERCEPT_GRACE_MS: C.DRAG_INTERCEPT_GRACE_MS,
+    DRAG_INTERCEPT_WAIT_MS: C.DRAG_INTERCEPT_WAIT_MS,
     NAV_SETTLE_TIMEOUT_MS: C.NAV_SETTLE_TIMEOUT_MS,
   })) {
     assert.ok(typeof v === "number" && v > 0, `${name} must be a positive number, got ${v}`);
   }
+  assert.ok(C.DRAG_INTERCEPT_GRACE_MS < C.DRAG_INTERCEPT_WAIT_MS);
 });

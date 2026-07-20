@@ -63,6 +63,7 @@
 //! example) is a new `class`/`icon` value at an existing call site, not a new message type.
 
 use super::diagnostics::Diagnostic;
+use super::workspace::{WorkspaceRegistry, WorkspaceTarget};
 use crate::browser::directory::{SchedulingScope, ToolDescriptor};
 use crate::hub::scheduling::{
     BrowserSurface, CommandScheduler, ExecutionContext, ProducerId, RetirementReason,
@@ -216,6 +217,13 @@ fn merge_tab_id(args: &Value, native: i64) -> Value {
         obj.insert("tabId".to_string(), json!(native));
     }
     owned
+}
+
+/// Whether this extension request may establish or reuse the calling session's browser-window
+/// workspace. Ordinary addressed calls route only by tab id and carry no window metadata.
+fn uses_workspace(tool: &str, args: &Value) -> bool {
+    matches!(tool, "tabs_context_mcp" | "tabs_create_mcp")
+        || (tool == "navigate" && args.get("tabId").is_none())
 }
 
 fn is_recording_internal_tool(tool: &str) -> bool {
@@ -425,6 +433,10 @@ pub struct Browser {
     /// sends no `clientKey`, and the extension falls back to guid-keying. Bounded by the number of
     /// distinct sessions this service lifetime; never evicted (tiny, like the slot map).
     client_keys: Arc<Mutex<HashMap<String, String>>>,
+    /// Per-MCP-session browser-window placement. The first unaddressed topology call pins a
+    /// service-assigned browser slot plus an adapter-native window id. This is ergonomic routing
+    /// only; tab ownership and governance remain authoritative.
+    workspaces: WorkspaceRegistry,
     /// Session/surface/generation-scoped, memory-only GIF recordings (ADR-0073).
     recordings: Arc<crate::recording::RecordingCoordinator>,
     /// Starts the one process-local deadline and health-lease supervisor lazily.
@@ -463,6 +475,7 @@ impl Browser {
             next_hook_id: Arc::new(AtomicU64::new(1)),
             screenshot_cache: Arc::new(Mutex::new(HashMap::new())),
             client_keys: Arc::new(Mutex::new(HashMap::new())),
+            workspaces: WorkspaceRegistry::default(),
             recordings: Arc::new(crate::recording::RecordingCoordinator::new()),
             recording_supervisor_started: Arc::new(AtomicBool::new(false)),
             attention_sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -497,7 +510,18 @@ impl Browser {
                     .await
             }
             SchedulingScope::ClientTopology => {
-                let (slot, _) = self.resolve_target(composite_tab);
+                let slot = if uses_workspace(descriptor.tool, args) && composite_tab.is_none() {
+                    // Before first selection, all concurrent topology calls from this client use
+                    // the slot-zero bootstrap queue. This prevents two browser profiles from
+                    // racing to establish different first-workspace pins. Dispatch resolves the
+                    // live profile only after this lease is held. Once pinned, ordinary
+                    // browser-local topology scheduling resumes on the selected slot.
+                    self.workspaces
+                        .get(guid)
+                        .map(|workspace| workspace.browser_slot)
+                } else {
+                    self.resolve_target(composite_tab).0
+                };
                 // Slot zero is a disconnected sentinel. It lets policy and audit run before the
                 // existing transport layer returns its canonical not-connected error, while no
                 // real browser resource can collide with it (assigned slots start at one).
@@ -669,6 +693,65 @@ impl Browser {
         self.client_keys.lock().unwrap().get(guid).cloned()
     }
 
+    /// Add the private workspace instruction for an unaddressed topology request. A session with
+    /// no pin asks the adapter to pull Chrome's most recently focused eligible normal window; a
+    /// pinned session names its exact native window. Neither shape is model-facing.
+    fn stamp_workspace_request(
+        &self,
+        request: &mut Value,
+        guid: &str,
+        tool: &str,
+        args: &Value,
+        target: u32,
+    ) {
+        if !uses_workspace(tool, args) {
+            return;
+        }
+        let workspace = match self.workspaces.get(guid) {
+            Some(workspace) if workspace.browser_slot == target => json!({
+                crate::constants::workspace::WINDOW_ID: workspace.native_window_id,
+            }),
+            _ => json!({
+                crate::constants::workspace::SELECT:
+                    crate::constants::workspace::LAST_FOCUSED_NORMAL,
+            }),
+        };
+        request[crate::constants::workspace::REQUEST] = workspace;
+    }
+
+    /// Consume the extension's private native-window metadata and pin the session. The metadata is
+    /// removed unconditionally before encoding or returning the tool result, preserving the public
+    /// structured-result surface and its token cost.
+    fn capture_workspace_result(
+        &self,
+        guid: &str,
+        tool: &str,
+        args: &Value,
+        target: u32,
+        result: &mut Value,
+    ) {
+        let metadata = result
+            .as_object_mut()
+            .and_then(|object| object.remove(crate::constants::workspace::RESULT_META));
+        if !uses_workspace(tool, args) {
+            return;
+        }
+        let Some(native_window_id) = metadata
+            .as_ref()
+            .and_then(|value| value.get(crate::constants::workspace::WINDOW_ID))
+            .and_then(Value::as_i64)
+        else {
+            return;
+        };
+        self.workspaces.pin(
+            guid,
+            WorkspaceTarget {
+                browser_slot: target,
+                native_window_id,
+            },
+        );
+    }
+
     /// The observability sink (used by the mcp-server to record the MCP boundary).
     pub fn debug(&self) -> &DebugSink {
         &self.debug
@@ -834,6 +917,23 @@ impl Browser {
         (self.focus_front_live(), None)
     }
 
+    /// Resolve an unaddressed workspace operation to its session-pinned browser when one exists.
+    /// Addressed operations remain tab-authoritative. A missing pinned browser is returned as-is
+    /// so the transport reports the truthful disconnect instead of silently changing workspace.
+    fn resolve_workspace_target(
+        &self,
+        guid: &str,
+        composite_tab_id: Option<i64>,
+    ) -> (Option<u32>, Option<i64>) {
+        if composite_tab_id.is_some() {
+            return self.resolve_target(composite_tab_id);
+        }
+        self.workspaces
+            .get(guid)
+            .map(|workspace| (Some(workspace.browser_slot), None))
+            .unwrap_or_else(|| self.resolve_target(None))
+    }
+
     /// The most-recently-active LIVE slot (ADR-0061): the focus-chain front that is still attached,
     /// or the smallest live slot as a deterministic floor, or `None` when no browser is attached.
     /// Because the focus chain is seeded on attach and pruned on detach, and slots are never 0, this
@@ -937,7 +1037,11 @@ impl Browser {
         // that recurses back through the governance chokepoint with its OWN, still-composite
         // copy (`browser_batch`/`script` sub-steps) must see the untouched original.
         let composite = args.get("tabId").and_then(Value::as_i64);
-        let (target, native_tab) = self.resolve_target(composite);
+        let (target, native_tab) = if uses_workspace(tool, args) {
+            self.resolve_workspace_target(guid, composite)
+        } else {
+            self.resolve_target(composite)
+        };
         let Some(target) = target else {
             let err = ToolError::extension("Browser extension not connected");
             self.debug.tool_begin("-", tool);
@@ -1000,7 +1104,11 @@ impl Browser {
         }
 
         let composite = args.get("tabId").and_then(Value::as_i64);
-        let (target, native_tab) = self.resolve_target(composite);
+        let (target, native_tab) = if uses_workspace(tool, args) {
+            self.resolve_workspace_target(guid, composite)
+        } else {
+            self.resolve_target(composite)
+        };
         let Some(target) = target else {
             return Err(DeliveryFailure {
                 error: ToolError::extension("Browser extension not connected"),
@@ -1032,6 +1140,7 @@ impl Browser {
         if let Some(client_key) = self.client_key_for(guid) {
             request["clientKey"] = json!(client_key);
         }
+        self.stamp_workspace_request(&mut request, guid, tool, call_args, target);
         let payload = serde_json::to_vec(&request)
             .map(Zeroizing::new)
             .map_err(|error| DeliveryFailure {
@@ -1053,7 +1162,8 @@ impl Browser {
                 activity_surface.expect("admitted activity has a surface"),
             );
         }
-        let result = result?;
+        let mut result = result?;
+        self.capture_workspace_result(guid, tool, call_args, target, &mut result);
         let result = self.encode_tab_ids(result, target);
         Ok(self.cache_and_inject_screenshot(guid, tool, result))
     }
@@ -1092,6 +1202,7 @@ impl Browser {
         if let Some(client_key) = self.client_key_for(guid) {
             request["clientKey"] = json!(client_key);
         }
+        self.stamp_workspace_request(&mut request, guid, tool, args, target);
         let payload = match serde_json::to_vec(&request) {
             Ok(payload) => Zeroizing::new(payload),
             Err(e) => {
@@ -1102,8 +1213,11 @@ impl Browser {
             }
         };
         let frames = self.outbound_frames(target, &id, &payload)?;
-        self.send_and_await(id, frames, tool, target, timeout, Some(guid))
-            .await
+        let mut result = self
+            .send_and_await(id, frames, tool, target, timeout, Some(guid))
+            .await?;
+        self.capture_workspace_result(guid, tool, args, target, &mut result);
+        Ok(result)
     }
 
     fn outbound_frames(
@@ -1622,6 +1736,15 @@ impl Browser {
         if let Some(client_key) = self.client_key_for(guid) {
             request["clientKey"] = json!(client_key);
         }
+        if let Some(workspace) = self
+            .workspaces
+            .get(guid)
+            .filter(|workspace| workspace.browser_slot == target)
+        {
+            request[crate::constants::workspace::REQUEST] = json!({
+                crate::constants::workspace::WINDOW_ID: workspace.native_window_id,
+            });
+        }
         let Ok(bytes) = serde_json::to_vec(&request) else {
             return;
         };
@@ -1983,6 +2106,7 @@ impl Browser {
             // ADR-0080 D6: a changed browser-process generation is proof that old tabs and the
             // old executor can no longer act, so it is one of only three quarantine-clear paths.
             self.scheduler.destroy_browser(slot);
+            self.workspaces.clear_browser(slot);
         }
 
         let (tx, mut rx) = mpsc::unbounded_channel::<Zeroizing<Vec<u8>>>();
@@ -2560,6 +2684,115 @@ mod tests {
             .unwrap();
         assert_eq!(result, json!({ "echoed": "navigate" }));
         fake_ext.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn workspace_selection_pins_privately_and_is_reused_by_grouping() {
+        let browser = Browser::new();
+        let guid = "workspace-guid";
+        browser.set_client_key(guid, "test-client");
+        let (mut ext_side, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+
+        let fake_ext = tokio::spawn(async move {
+            let first = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let first: Value = serde_json::from_slice(&first).unwrap();
+            assert_eq!(
+                first[crate::constants::workspace::REQUEST],
+                json!({
+                    crate::constants::workspace::SELECT:
+                        crate::constants::workspace::LAST_FOCUSED_NORMAL,
+                })
+            );
+            let first_reply = json!({
+                "id": first["id"],
+                "type": "tool_response",
+                "result": {
+                    "ok": true,
+                    crate::constants::workspace::RESULT_META: {
+                        crate::constants::workspace::WINDOW_ID: 17,
+                    },
+                },
+            });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&first_reply).unwrap())
+                .await
+                .unwrap();
+
+            let second = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let second: Value = serde_json::from_slice(&second).unwrap();
+            assert_eq!(
+                second[crate::constants::workspace::REQUEST],
+                json!({ crate::constants::workspace::WINDOW_ID: 17 })
+            );
+            let second_reply = json!({
+                "id": second["id"],
+                "type": "tool_response",
+                "result": { "ok": true },
+            });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&second_reply).unwrap())
+                .await
+                .unwrap();
+
+            let group = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let group: Value = serde_json::from_slice(&group).unwrap();
+            assert_eq!(
+                group[crate::constants::workspace::REQUEST],
+                json!({ crate::constants::workspace::WINDOW_ID: 17 })
+            );
+        });
+
+        let first = browser
+            .call(guid, "tabs_create_mcp", &json!({}))
+            .await
+            .unwrap();
+        assert_eq!(first, json!({ "ok": true }));
+        let second = browser
+            .call(guid, "tabs_create_mcp", &json!({}))
+            .await
+            .unwrap();
+        assert_eq!(second, json!({ "ok": true }));
+        browser.request_group(
+            guid,
+            &[crate::constants::tab_id::encode(slot, 101)],
+            "title",
+        );
+        fake_ext.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn workspace_bootstrap_schedules_globally_then_on_the_pinned_browser() {
+        let browser = Browser::new();
+        let descriptor = crate::browser::directory::descriptor("tabs_create_mcp").unwrap();
+        let bootstrap = browser
+            .acquire_execution(descriptor, "guid", &json!({}), 0, None)
+            .await
+            .unwrap();
+        assert!(matches!(
+            bootstrap.key(),
+            Some(ScheduleKey::ClientTopology {
+                browser_slot: 0,
+                ..
+            })
+        ));
+        drop(bootstrap);
+
+        browser.workspaces.pin(
+            "guid",
+            WorkspaceTarget {
+                browser_slot: 7,
+                native_window_id: 17,
+            },
+        );
+        let pinned = browser
+            .acquire_execution(descriptor, "guid", &json!({}), 0, None)
+            .await
+            .unwrap();
+        assert!(matches!(
+            pinned.key(),
+            Some(ScheduleKey::ClientTopology {
+                browser_slot: 7,
+                ..
+            })
+        ));
     }
 
     #[test]

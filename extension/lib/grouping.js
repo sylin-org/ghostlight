@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-// Ghostlight -- H7 tab-group-per-session presentation: the PURE grouping DECISION (ADR-0030
+// Ghostlight -- managed tab-group presentation: the PURE grouping DECISION (ADR-0030
 // Decision 6/7; docs/tasks/hub/H7-tab-group-per-session.md; docs/tasks/hub/PINS.md SS6).
 //
-// Given an injected `chrome`-like object, a session-GUID -> Chrome tab-group-id map, and a
-// `group_request`'s named tabIds/title, groups EXACTLY those tabIds into that session's Chrome
+// Given an injected `chrome`-like object, an adapter-chosen workspace-key -> Chrome tab-group-id
+// map, and a `group_request`'s named tabIds/title, groups EXACTLY those tabIds into that workspace's
+// Chrome
 // tab group -- creating one on first use, reusing it (idempotent) on every later request for the
-// SAME guid, and titling it every call. Makes NO policy decision: it never reads a tab's
+// SAME workspace key, and titling it every call. Makes NO policy decision: it never reads a tab's
 // url/host/domain/grant to decide membership -- it groups the tabIds the caller named, full stop
 // (ADR-0030 Decision 6: "The extension's per-group checks remain defense-in-depth only"; Migration
 // H7: "groups on request only"). Since ADR-0047 D1 this module is no longer merely additive: the
@@ -22,7 +23,7 @@
 (function () {
 
 // Group EXACTLY `tabIds` (a plain array of Chrome tab ids) into the Chrome tab group belonging to
-// `guid` in `sessionGroups` (a `Map<string, number>`, guid -> chrome tab-group id -- mutated in
+// `key` in `sessionGroups` (a `Map<string, number>`, workspace key -> chrome tab-group id -- mutated in
 // place so the caller's map stays the single source of truth for reuse/persistence). `title` is
 // applied every call (idempotent: `chrome.tabGroups.update` on an unchanged title is a no-op from
 // the caller's point of view). Returns the group id used, or `null` if every named tab was gone.
@@ -31,7 +32,7 @@
 // policy decision (mirrors the existing `chrome.tabs.get` failure posture elsewhere in this
 // worker): this function probes each tabId with `chrome.tabs.get` ONLY to check it still exists,
 // never reading any field (`.url` included) off the result.
-async function groupSessionTabs(chrome, sessionGroups, guid, tabIds, title) {
+async function groupSessionTabs(chrome, sessionGroups, key, tabIds, title) {
   const liveTabIds = [];
   for (const tabId of tabIds) {
     try {
@@ -41,11 +42,11 @@ async function groupSessionTabs(chrome, sessionGroups, guid, tabIds, title) {
       // the tab no longer exists: a liveness fact, not a policy decision -- drop it silently.
     }
   }
-  if (liveTabIds.length === 0) return sessionGroups.has(guid) ? sessionGroups.get(guid) : null;
+  if (liveTabIds.length === 0) return sessionGroups.has(key) ? sessionGroups.get(key) : null;
 
   let groupId = null;
-  if (sessionGroups.has(guid)) {
-    const existingGroupId = sessionGroups.get(guid);
+  if (sessionGroups.has(key)) {
+    const existingGroupId = sessionGroups.get(key);
     try {
       await chrome.tabGroups.get(existingGroupId);
       groupId = existingGroupId; // still live: reuse it (idempotent)
@@ -60,12 +61,12 @@ async function groupSessionTabs(chrome, sessionGroups, guid, tabIds, title) {
     await chrome.tabs.group({ tabIds: liveTabIds, groupId });
   }
   await chrome.tabGroups.update(groupId, { title, color: "blue" });
-  sessionGroups.set(guid, groupId);
+  sessionGroups.set(key, groupId);
   return groupId;
 }
 
 // The managed surface (ADR-0047 D1): every Chrome tab-group id this extension manages -- the
-// legacy global group (when set) plus every per-session group it created on service request.
+// legacy global group (when set) plus every workspace group it created on service request.
 function managedGroupIds(globalGroupId, sessionGroups) {
   const ids = new Set();
   if (globalGroupId !== null && globalGroupId !== undefined) ids.add(globalGroupId);
@@ -105,7 +106,10 @@ async function pruneDeadGroups(chrome, sessionGroups) {
 // already claimed, is left untouched (first title wins), so legacy litter titled `... (2)` maps to
 // its own distinct key and is never re-created for a fresh session. Returns true when it added
 // anything (the caller persists). Best-effort: no tabGroups access, or none, yields no change.
-async function reclaimGroupsByTitle(chrome, sessionGroups, prefix) {
+// `keyFor` optionally combines that client key with the live group window. This is how the current
+// adapter reclaims identical client titles in several user-arranged windows without relying on a
+// persisted native window id. Legacy callers omit it and retain the old client-only key.
+async function reclaimGroupsByTitle(chrome, sessionGroups, prefix, keyFor) {
   let groups;
   try {
     groups = await chrome.tabGroups.query({});
@@ -117,7 +121,8 @@ async function reclaimGroupsByTitle(chrome, sessionGroups, prefix) {
   for (const g of groups) {
     const title = (g && g.title) || "";
     if (!title.startsWith(prefix)) continue;
-    const key = title.slice(prefix.length);
+    const clientKey = title.slice(prefix.length);
+    const key = keyFor ? keyFor(clientKey, g.windowId) : clientKey;
     if (!key || sessionGroups.has(key) || mapped.has(g.id)) continue;
     sessionGroups.set(key, g.id);
     mapped.add(g.id);

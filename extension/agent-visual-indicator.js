@@ -47,6 +47,12 @@
     const stale = document.getElementById(id);
     if (stale) stale.remove();
   }
+  try {
+    if (window.CSS && window.CSS.highlights) {
+      window.CSS.highlights.delete("ghostlight-find-primary");
+      window.CSS.highlights.delete("ghostlight-find-secondary");
+    }
+  } catch (_error) { /* CSS Custom Highlight API is unavailable */ }
 
   const CURSOR_ID = "ghostlight-cursor";
   const GLOW_ID = "ghostlight-active";
@@ -59,6 +65,9 @@
   const ACTION_SIGNATURE_TYPE = actionSignature
     ? actionSignature.TYPE
     : "AGENT_ACTION_SIGNATURE";
+  const findVisual = window.GhostlightFindVisual;
+  const FIND_VISUAL_TYPE = findVisual ? findVisual.TYPE : "AGENT_FIND_VISUAL";
+  const keyPresentation = window.GhostlightKeys;
   // Ghostlight brand accent: a luminous sky blue. SKY_RGB is the same color for rgba() shadows.
   const SKY = "#38bdf8";
   const SKY_RGB = "56,189,248";
@@ -76,6 +85,8 @@
   const RIPPLE_MS = 620; // one click ring's expand-and-fade duration
   const RIPPLE_STAGGER_MS = 140; // gap between rings of a multi-click, so 2/3 read as a rhythm
   const FIELD_SPLASH_MS = 700; // form-write splash hugging the field just set
+  const DESTINATION_CUE_MS = 1050; // scroll landing and image-drop destination phrase
+  const SEMANTIC_TARGET_DEDUP_MS = 1400; // avoid repainting act_on's just-announced target
   // Extended-vocabulary timings (the visual feedback dictionary).
   const LOZENGE_MS = 1250; // keystroke lozenge (type / key)
   const SCAN_MS = 1450; // read-page scan-line sweep
@@ -87,6 +98,8 @@
   const SIGNATURE_EXIT_MS = 460;
   const SIGNATURE_STALE_MS = 61000;
   const SIGNATURE_PAINT_FALLBACK_MS = 80;
+  const FIND_RESULT_MS = 3200;
+  const FIND_STALE_MS = 10000;
   // Notification sticker timings (ADR-0079): a denial is transient, replaces any older sticker,
   // and expires on its own. Repeated denials may open the separately rendered attention overlay.
   const NOTIF_GROW_MS = 320; // band unfurls from its center line
@@ -103,6 +116,14 @@
   let signatureFinishTimer = null;
   let signatureRemoveTimer = null;
   let signatureStaleTimer = null;
+  let activeFindEl = null;
+  let activeFindPosition = null;
+  let activeFindEntries = [];
+  let findTopEdge = null;
+  let findBottomEdge = null;
+  let findResultTimer = null;
+  let findStaleTimer = null;
+  let findGeometryFrame = null;
   let fxSeq = 0;
   let controlActive = false; // durable managed-tab scope, independent of capture-hiding
   let hiddenForTool = false; // suppressed during a screenshot capture
@@ -120,6 +141,7 @@
   let recentPointer = null;
   let recentTouched = null;
   let recentScroll = null;
+  let recentSemanticTarget = null;
   const scrollOffsets = new WeakMap();
 
   function reduceMotion() {
@@ -164,6 +186,16 @@
       "@keyframes ghostlight-fieldsplash{0%{opacity:0;transform:scale(.97)}18%{opacity:1;transform:scale(1)}62%{opacity:.85}100%{opacity:0;transform:scale(1.05)}}" +
       "@keyframes ghostlight-fieldsplash-rm{0%{opacity:0}30%{opacity:.9}100%{opacity:0}}" +
       "@keyframes ghostlight-targetglow{0%{opacity:0}22%{opacity:1}100%{opacity:0}}" +
+      // ADR-0089 destination cues: motion resolves into the target instead of decorating a
+      // corner. Reduced-motion variants keep the destination disclosure as a bounded fade.
+      "@keyframes ghostlight-scroll-target{0%{opacity:0;transform:translate(-50%,-92%) scale(.92)}" +
+      "28%{opacity:1}72%{opacity:.9;transform:translate(-50%,-50%) scale(.76)}" +
+      "100%{opacity:0;transform:translate(-50%,-42%) scale(.68)}}" +
+      "@keyframes ghostlight-scroll-target-rm{0%{opacity:0}30%{opacity:.9}100%{opacity:0}}" +
+      "@keyframes ghostlight-image-drop{0%{opacity:0;transform:translate(-50%,-115%) rotate(-9deg) scale(.72)}" +
+      "24%{opacity:1}68%{opacity:1;transform:translate(-50%,-50%) rotate(0) scale(1)}" +
+      "100%{opacity:0;transform:translate(-50%,-46%) rotate(0) scale(.92)}}" +
+      "@keyframes ghostlight-image-drop-rm{0%{opacity:0}28%{opacity:1}100%{opacity:0}}" +
       "@keyframes ghostlight-flash{0%{opacity:.42}100%{opacity:0}}" +
       "@keyframes ghostlight-capframe{0%{opacity:0;transform:scale(1.03)}9%{opacity:1;transform:scale(1)}34%{opacity:1;transform:scale(1)}60%{opacity:1;transform:scale(.17);border-radius:16px}88%{opacity:1;transform:scale(.17);border-radius:16px}100%{opacity:0;transform:scale(.17);border-radius:16px}}" +
       "@keyframes ghostlight-zoomframe{0%{opacity:0;transform:scale(1.35)}22%{opacity:1}70%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}" +
@@ -214,6 +246,32 @@
       ".ghostlight-signature-medallion.completing .ghostlight-signature-glint," +
       ".ghostlight-signature-medallion.confirming .ghostlight-signature-glint{" +
       "animation:ghostlight-signature-glint 520ms cubic-bezier(.22,1,.36,1) 1}" +
+      // ADR-0086 find treatment: the badge explains the action; ranked highlights and quiet
+      // horizon glows explain its outcome without changing page layout or intercepting input.
+      "@keyframes ghostlight-find-lens{0%,100%{transform:translate(-1px,-1px) rotate(-7deg)}50%{transform:translate(2px,2px) rotate(5deg)}}" +
+      "@keyframes ghostlight-find-primary{0%,100%{opacity:.82;box-shadow:0 0 7px rgba(" + SKY_RGB + ",.55)}" +
+      "50%{opacity:1;box-shadow:0 0 16px rgba(" + SKY_RGB + ",.9)}}" +
+      "@keyframes ghostlight-find-edge{0%,100%{opacity:.46;transform:scaleX(.94)}50%{opacity:.82;transform:scaleX(1)}}" +
+      "@keyframes ghostlight-find-count-in{0%{opacity:0;transform:scale(.55)}70%{transform:scale(1.12)}100%{opacity:1;transform:scale(1)}}" +
+      "::highlight(ghostlight-find-secondary){color:#fff;background-color:rgba(3,105,161,.72);text-shadow:0 0 6px rgba(" + SKY_RGB + ",.8)}" +
+      "::highlight(ghostlight-find-primary){color:#fff;background-color:rgba(3,105,161,.94);text-shadow:0 0 9px rgba(" + SKY_RGB + ",1)}" +
+      ".ghostlight-find-badge .ghostlight-find-lens{width:31px;height:31px;animation:ghostlight-find-lens 1250ms ease-in-out infinite;" +
+      "filter:drop-shadow(0 0 6px rgba(" + SKY_RGB + ",.75))}" +
+      ".ghostlight-find-badge.settled .ghostlight-find-lens{animation:none}" +
+      ".ghostlight-find-count{position:absolute;right:-8px;bottom:-7px;min-width:22px;height:22px;padding:0 5px;box-sizing:border-box;" +
+      "display:grid;place-items:center;border-radius:11px;color:#fff;background:#075985;border:1px solid rgba(255,255,255,.72);" +
+      "box-shadow:0 4px 12px rgba(0,0,0,.45),0 0 10px rgba(" + SKY_RGB + ",.8);font:800 11px/1 ui-monospace,monospace;" +
+      "animation:ghostlight-find-count-in 260ms cubic-bezier(.22,1,.36,1) 1}" +
+      ".ghostlight-find-halo{position:fixed;box-sizing:border-box;pointer-events:none;border-radius:7px;" +
+      "border:1px solid rgba(" + SKY_RGB + ",.46);background:rgba(" + SKY_RGB + ",.055);" +
+      "box-shadow:0 0 8px rgba(" + SKY_RGB + ",.22),inset 0 0 8px rgba(" + SKY_RGB + ",.08)}" +
+      ".ghostlight-find-halo.strongest{border-width:2px;border-color:rgba(" + SKY_RGB + ",.92);background:rgba(" + SKY_RGB + ",.1);" +
+      "animation:ghostlight-find-primary 1500ms ease-in-out infinite}" +
+      ".ghostlight-find-edge{position:fixed;left:16%;width:68%;height:36px;pointer-events:none;opacity:0;" +
+      "filter:blur(3px);animation:ghostlight-find-edge 1700ms ease-in-out infinite}" +
+      ".ghostlight-find-edge.top{top:-13px;background:radial-gradient(ellipse at top,rgba(" + SKY_RGB + ",.85),rgba(" + SKY_RGB + ",.24) 38%,transparent 72%)}" +
+      ".ghostlight-find-edge.bottom{bottom:-13px;background:radial-gradient(ellipse at bottom,rgba(" + SKY_RGB + ",.85),rgba(" + SKY_RGB + ",.24) 38%,transparent 72%)}" +
+      ".ghostlight-find-edge.visible{opacity:.68}.ghostlight-find-edge.strongest{filter:blur(2px) saturate(1.25)}" +
       // The denial sticker unfurls once, then its bounded timer removes it. The -rm variant is a
       // plain fade for reduced-motion users.
       "@keyframes ghostlight-notif-grow{0%{opacity:0;transform:scaleY(0)}100%{opacity:1;transform:scaleY(1)}}" +
@@ -286,7 +344,7 @@
       "width:clamp(28px,4.5vh,38px);height:clamp(28px,4.5vh,38px);border-radius:50%;transition:background-color 120ms ease-out}" +
       ".ghostlight-notif-close:hover{background:rgba(255,255,255,.16)}" +
       ".ghostlight-notif-close:focus-visible{outline:2px solid " + NOTIF_TEXT + ";outline-offset:2px;background:rgba(255,255,255,.16)}" +
-      ".ghostlight-cap{color:" + SKY + "}.ghostlight-arrow{color:" + SKY + ";margin-right:7px}" +
+      ".ghostlight-cap{color:" + SKY + "}.ghostlight-private-keycap{display:inline-block;box-sizing:border-box;width:16px;height:14px;border:1px solid rgba(" + SKY_RGB + ",.72);border-radius:4px;background:rgba(" + SKY_RGB + ",.12);box-shadow:0 0 9px rgba(" + SKY_RGB + ",.56),inset 0 -2px 0 rgba(" + SKY_RGB + ",.18)}.ghostlight-arrow{color:" + SKY + ";margin-right:7px}" +
       // ADR-0079: compact captions, transient centered denial stickers, and a true pause overlay.
       "@keyframes ghostlight-dots{0%,20%{opacity:.25}50%{opacity:1}80%,100%{opacity:.25}}" +
       ".ghostlight-narration-card{width:auto;max-width:min(84vw,900px);min-height:0;padding:10px 16px;border-radius:12px;" +
@@ -303,7 +361,8 @@
       "@media (prefers-reduced-motion:reduce){#" + GLOW_ID + "{animation:none}#" + CURSOR_ID + "{transition:none}" +
       ".ghostlight-signature-medallion{transition:opacity 180ms ease-out}" +
       ".ghostlight-signature-workwheel,.ghostlight-signature-particle,.ghostlight-signature-keyboard," +
-      ".ghostlight-signature-wait span,.ghostlight-signature-glint{animation:none!important}}";
+      ".ghostlight-signature-wait span,.ghostlight-signature-glint,.ghostlight-find-lens,.ghostlight-find-halo," +
+      ".ghostlight-find-edge,.ghostlight-find-count{animation:none!important}}";
     (document.head || document.documentElement).appendChild(s);
   }
 
@@ -470,6 +529,7 @@
   }
 
   function beginSignature(kind, confirming) {
+    clearFindVisual();
     if (!effectsEnabled) {
       removeSignatureNow();
       return Promise.resolve({ shown: false, reason: "visual effects are disabled" });
@@ -528,6 +588,227 @@
       return Promise.resolve(finishSignature(msg.kind));
     }
     return beginSignature(msg.kind, msg.phase === actionSignature.PHASES.CONFIRM);
+  }
+
+  function clearFindHighlights() {
+    try {
+      if (window.CSS && window.CSS.highlights) {
+        window.CSS.highlights.delete("ghostlight-find-primary");
+        window.CSS.highlights.delete("ghostlight-find-secondary");
+      }
+    } catch (_error) { /* CSS Custom Highlight API is unavailable */ }
+  }
+
+  function clearFindVisual() {
+    clearTimeout(findResultTimer);
+    clearTimeout(findStaleTimer);
+    findResultTimer = null;
+    findStaleTimer = null;
+    if (findGeometryFrame !== null) cancelAnimationFrame(findGeometryFrame);
+    findGeometryFrame = null;
+    clearFindHighlights();
+    for (const entry of activeFindEntries) {
+      if (entry.halo) entry.halo.remove();
+    }
+    activeFindEntries = [];
+    if (findTopEdge) findTopEdge.remove();
+    if (findBottomEdge) findBottomEdge.remove();
+    findTopEdge = null;
+    findBottomEdge = null;
+    if (activeFindEl) activeFindEl.remove();
+    activeFindEl = null;
+    activeFindPosition = null;
+  }
+
+  function makeFindBadge() {
+    const badge = document.createElement("div");
+    badge.id = "ghostlight-find-signature";
+    badge.setAttribute("aria-hidden", "true");
+    badge.className = "ghostlight-signature-medallion ghostlight-find-badge entering";
+    const lens = document.createElement("span");
+    lens.className = "ghostlight-find-lens";
+    lens.innerHTML =
+      "<svg viewBox='0 0 40 40' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='3.4' stroke-linecap='round'>" +
+      "<circle cx='17' cy='17' r='10.5'/><path d='M25 25l9 9'/><path d='M11 17h12' opacity='.45'/></svg>";
+    badge.appendChild(lens);
+    return badge;
+  }
+
+  function beginFindVisual() {
+    clearFindVisual();
+    if (!effectsEnabled || hiddenForTool || document.hidden || attentionLayer) {
+      return Promise.resolve({ shown: false, reason: "the tab cannot show a find visual" });
+    }
+    ensureStyles();
+    const position = effectiveSignaturePosition();
+    activeFindEl = makeFindBadge();
+    activeFindEl.classList.add(position);
+    activeFindPosition = position;
+    ensureSignatureLayer().appendChild(activeFindEl);
+    requestAnimationFrame(function () {
+      if (activeFindEl) activeFindEl.classList.remove("entering");
+    });
+    caption("Finding on this page");
+    findStaleTimer = setTimeout(clearFindVisual, FIND_STALE_MS);
+    return waitForSignaturePaint({ shown: true, position });
+  }
+
+  function settleFindBadge(count, more, empty) {
+    if (!activeFindEl || !activeFindEl.isConnected) return;
+    activeFindEl.classList.add("settled");
+    const previous = activeFindEl.querySelector(".ghostlight-find-count");
+    if (previous) previous.remove();
+    const countEl = document.createElement("span");
+    countEl.className = "ghostlight-find-count";
+    countEl.textContent = empty ? "?" : String(count) + (more ? "+" : "");
+    activeFindEl.appendChild(countEl);
+  }
+
+  function finishFindPresentation(msg) {
+    clearTimeout(findStaleTimer);
+    findStaleTimer = null;
+    const empty = msg.phase === findVisual.PHASES.EMPTY;
+    if (empty) {
+      clearFindHighlights();
+      for (const entry of activeFindEntries) if (entry.halo) entry.halo.remove();
+      activeFindEntries = [];
+      renderFindGeometry();
+    }
+    settleFindBadge(msg.count || 0, !!msg.more, empty);
+    if (empty) caption("No match");
+    else caption(String(msg.count) + (msg.more ? "+" : "") + (msg.count === 1 ? " match" : " matches"));
+    findResultTimer = setTimeout(clearFindVisual, FIND_RESULT_MS);
+    return { shown: !!activeFindEl, position: activeFindPosition };
+  }
+
+  function showFindVisual(msg) {
+    if (!findVisual || !findVisual.isMessage(msg)) {
+      return Promise.resolve({ shown: false, reason: "invalid find visual" });
+    }
+    if (msg.phase === findVisual.PHASES.START) return beginFindVisual();
+    if (msg.phase === findVisual.PHASES.CANCEL) {
+      clearFindVisual();
+      return Promise.resolve({ shown: false, reason: "find was cancelled" });
+    }
+    return Promise.resolve(finishFindPresentation(msg));
+  }
+
+  function ensureFindEdge(direction) {
+    const current = direction === "top" ? findTopEdge : findBottomEdge;
+    if (current && current.isConnected) return current;
+    const edge = document.createElement("div");
+    edge.id = "ghostlight-find-edge-" + direction;
+    edge.setAttribute("aria-hidden", "true");
+    edge.className = "ghostlight-find-edge " + direction;
+    ensureFxLayer().appendChild(edge);
+    if (direction === "top") findTopEdge = edge;
+    else findBottomEdge = edge;
+    return edge;
+  }
+
+  function paintFindHighlights(entries) {
+    clearFindHighlights();
+    if (!window.CSS || !window.CSS.highlights || typeof window.Highlight !== "function") return;
+    const primary = [];
+    const secondary = [];
+    for (const entry of entries) {
+      const destination = entry.strongest ? primary : secondary;
+      destination.push(...entry.ranges);
+    }
+    try {
+      if (secondary.length) {
+        const highlight = new window.Highlight(...secondary);
+        highlight.priority = 1;
+        window.CSS.highlights.set("ghostlight-find-secondary", highlight);
+      }
+      if (primary.length) {
+        const highlight = new window.Highlight(...primary);
+        highlight.priority = 2;
+        window.CSS.highlights.set("ghostlight-find-primary", highlight);
+      }
+    } catch (_error) { clearFindHighlights(); }
+  }
+
+  function renderFindGeometry() {
+    findGeometryFrame = null;
+    if (!activeFindEntries.length) {
+      if (findTopEdge) findTopEdge.classList.remove("visible", "strongest");
+      if (findBottomEdge) findBottomEdge.classList.remove("visible", "strongest");
+      return;
+    }
+    let above = false;
+    let below = false;
+    let strongestAbove = false;
+    let strongestBelow = false;
+    for (const entry of activeFindEntries) {
+      const element = entry.element;
+      if (!element || !element.isConnected) {
+        if (entry.halo) entry.halo.style.display = "none";
+        continue;
+      }
+      let rect;
+      let style;
+      try {
+        rect = element.getBoundingClientRect();
+        style = getComputedStyle(element);
+      } catch (_error) { continue; }
+      const paintable = rect && rect.width > 0 && rect.height > 0 && style.display !== "none" &&
+        style.visibility !== "hidden" && style.opacity !== "0";
+      if (!paintable) {
+        if (entry.halo) entry.halo.style.display = "none";
+        continue;
+      }
+      const inViewport = rect.bottom > 0 && rect.top < window.innerHeight &&
+        rect.right > 0 && rect.left < window.innerWidth;
+      if (entry.halo) {
+        entry.halo.style.display = inViewport ? "block" : "none";
+        if (inViewport) {
+          entry.halo.style.left = Math.max(0, rect.left - 3) + "px";
+          entry.halo.style.top = Math.max(0, rect.top - 3) + "px";
+          entry.halo.style.width = Math.min(window.innerWidth - Math.max(0, rect.left - 3), rect.width + 6) + "px";
+          entry.halo.style.height = Math.min(window.innerHeight - Math.max(0, rect.top - 3), rect.height + 6) + "px";
+          entry.halo.style.borderRadius = style.borderRadius || "7px";
+        }
+      }
+      if (rect.bottom <= 0) {
+        above = true;
+        strongestAbove = strongestAbove || entry.strongest;
+      } else if (rect.top >= window.innerHeight) {
+        below = true;
+        strongestBelow = strongestBelow || entry.strongest;
+      }
+    }
+    const top = ensureFindEdge("top");
+    const bottom = ensureFindEdge("bottom");
+    top.classList.toggle("visible", above);
+    top.classList.toggle("strongest", strongestAbove);
+    bottom.classList.toggle("visible", below);
+    bottom.classList.toggle("strongest", strongestBelow);
+  }
+
+  function scheduleFindGeometry() {
+    if (!activeFindEntries.length || findGeometryFrame !== null) return;
+    findGeometryFrame = requestAnimationFrame(renderFindGeometry);
+  }
+
+  function installFindResults(entries) {
+    if (!effectsEnabled || hiddenForTool || document.hidden) return;
+    ensureStyles();
+    for (const oldEntry of activeFindEntries) if (oldEntry.halo) oldEntry.halo.remove();
+    activeFindEntries = entries.slice(0, 20).map(function (entry) {
+      const ranges = Array.isArray(entry.ranges) ? entry.ranges : [];
+      let halo = null;
+      if (!ranges.length) {
+        halo = document.createElement("div");
+        halo.id = "ghostlight-find-halo-" + fxSeq++;
+        halo.setAttribute("aria-hidden", "true");
+        halo.className = "ghostlight-find-halo" + (entry.strongest ? " strongest" : "");
+        ensureFxLayer().appendChild(halo);
+      }
+      return { element: entry.element, ranges, strongest: !!entry.strongest, halo };
+    });
+    paintFindHighlights(activeFindEntries);
+    renderFindGeometry();
   }
 
   function addRipple(x, y, dashed) {
@@ -637,6 +918,113 @@
     caption("Filling a field");
   }
 
+  // Convert an element from its owner document into top-viewport coordinates. setImage can
+  // resolve through reachable same-origin iframes, whose getBoundingClientRect() is relative to
+  // the inner viewport. Cross-origin frames remain represented by their outer iframe element.
+  function viewportRectForElement(target) {
+    if (!target || typeof target.getBoundingClientRect !== "function") return null;
+    let raw;
+    try { raw = target.getBoundingClientRect(); } catch (e) { return null; }
+    if (!raw || !Number.isFinite(raw.left) || !Number.isFinite(raw.top) ||
+        !Number.isFinite(raw.width) || !Number.isFinite(raw.height)) return null;
+    let left = raw.left;
+    let top = raw.top;
+    let ownerWindow = target.ownerDocument && target.ownerDocument.defaultView;
+    try {
+      while (ownerWindow && ownerWindow !== window) {
+        const frame = ownerWindow.frameElement;
+        if (!frame || typeof frame.getBoundingClientRect !== "function") return null;
+        const frameRect = frame.getBoundingClientRect();
+        left += frameRect.left + (Number(frame.clientLeft) || 0);
+        top += frameRect.top + (Number(frame.clientTop) || 0);
+        ownerWindow = frame.ownerDocument && frame.ownerDocument.defaultView;
+      }
+    } catch (e) { return null; }
+    return { left, top, width: raw.width, height: raw.height };
+  }
+
+  function sensibleDestinationRect(target, x, y) {
+    const rect = viewportRectForElement(target);
+    if (rect && rect.width >= 2 && rect.height >= 2 &&
+        rect.width <= window.innerWidth * 0.98 && rect.height <= window.innerHeight * 0.98) {
+      return rect;
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { left: x - 24, top: y - 18, width: 48, height: 36 };
+  }
+
+  function destinationHalo(rect, suffix) {
+    const pad = 5;
+    const halo = document.createElement("div");
+    halo.id = FX_LAYER_ID + "-" + suffix + fxSeq++;
+    halo.setAttribute("aria-hidden", "true");
+    halo.style.cssText =
+      "position:fixed;box-sizing:border-box;pointer-events:none;border-radius:9px;" +
+      "left:" + (rect.left - pad) + "px;top:" + (rect.top - pad) + "px;" +
+      "width:" + (rect.width + pad * 2) + "px;height:" + (rect.height + pad * 2) + "px;" +
+      "border:2px solid rgba(" + SKY_RGB + ",.88);background:rgba(" + SKY_RGB + ",.06);" +
+      "box-shadow:0 0 18px rgba(" + SKY_RGB + ",.58),inset 0 0 12px rgba(" + SKY_RGB + ",.2);" +
+      "animation:ghostlight-targetglow 820ms ease-out forwards";
+    addEphemeral(halo, 900);
+  }
+
+  // A ref-based scroll has an honest destination element. Chevrons settle into that element;
+  // act_on already announces the semantic target, so its same-element halo is not painted twice.
+  function scrollTarget(target) {
+    if (hiddenForTool || document.hidden) return;
+    const rect = sensibleDestinationRect(target);
+    if (!rect) return;
+    ensureStyles();
+    const duplicateSemanticTarget = recentSemanticTarget &&
+      Date.now() - recentSemanticTarget.at <= SEMANTIC_TARGET_DEDUP_MS &&
+      recentSemanticTarget.target === target;
+    if (!duplicateSemanticTarget) destinationHalo(rect, "st-h");
+    const cue = document.createElement("div");
+    cue.id = FX_LAYER_ID + "-st" + fxSeq++;
+    cue.setAttribute("aria-hidden", "true");
+    cue.innerHTML = CHEV + CHEV + CHEV;
+    cue.style.cssText =
+      "position:fixed;left:" + (rect.left + rect.width / 2) + "px;top:" +
+      (rect.top + rect.height / 2) + "px;pointer-events:none;display:flex;" +
+      "flex-direction:column;align-items:center;gap:0;filter:drop-shadow(0 0 7px rgba(" +
+      SKY_RGB + ",.75));animation:" +
+      (reduceMotion() ? "ghostlight-scroll-target-rm" : "ghostlight-scroll-target") + " " +
+      DESTINATION_CUE_MS + "ms cubic-bezier(.22,1,.36,1) forwards";
+    for (const child of cue.children) child.style.opacity = "0.9";
+    addEphemeral(cue, DESTINATION_CUE_MS + 80);
+    caption("Scrolled to target");
+  }
+
+  // Coordinate image placement says only that Ghostlight dispatched an image at this target. The
+  // fixed photo tile carries no filename, bytes, MIME type, or assertion that the page accepted it.
+  function imageDrop(target, x, y) {
+    if (hiddenForTool || document.hidden) return;
+    const rect = sensibleDestinationRect(target, x, y);
+    if (!rect) return;
+    ensureStyles();
+    destinationHalo(rect, "id-h");
+    const tile = document.createElement("div");
+    tile.id = FX_LAYER_ID + "-id" + fxSeq++;
+    tile.setAttribute("aria-hidden", "true");
+    tile.innerHTML =
+      "<svg width='34' height='30' viewBox='0 0 34 30' fill='none' aria-hidden='true'>" +
+      "<rect x='2' y='2' width='30' height='26' rx='6' fill='rgba(" + SKY_RGB + ",.14)' " +
+      "stroke='" + SKY + "' stroke-width='2'/>" +
+      "<circle cx='23.5' cy='10' r='3' fill='" + SKY + "'/>" +
+      "<path d='M6 24 L13.5 16.5 L18.5 21 L22 17.5 L29 24' stroke='" + SKY +
+      "' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+    tile.style.cssText =
+      "position:fixed;left:" + (rect.left + rect.width / 2) + "px;top:" +
+      (rect.top + rect.height / 2) + "px;width:48px;height:44px;display:grid;place-items:center;" +
+      "pointer-events:none;border-radius:12px;background:rgba(10,16,26,.92);" +
+      "border:1px solid rgba(" + SKY_RGB + ",.62);box-shadow:0 0 22px rgba(" + SKY_RGB +
+      ",.68),inset 0 1px 0 rgba(255,255,255,.1);animation:" +
+      (reduceMotion() ? "ghostlight-image-drop-rm" : "ghostlight-image-drop") + " " +
+      DESTINATION_CUE_MS + "ms cubic-bezier(.22,1,.36,1) forwards";
+    addEphemeral(tile, DESTINATION_CUE_MS + 80);
+    caption("Image drop dispatched");
+  }
+
   function renderControlBorder() {
     if (!controlActive || hiddenForTool || document.hidden) return;
     ensureStyles();
@@ -679,6 +1067,7 @@
 
   function setHiddenForTool(v) {
     hiddenForTool = v;
+    if (v) clearFindVisual();
     if (cursorEl) cursorEl.style.display = v ? "none" : "";
     if (captionEl) captionEl.style.display = v ? "none" : ""; // keep the subtitle out of the agent's own capture
 
@@ -769,10 +1158,12 @@
       "box-shadow:0 0 0 2px rgba(" + SKY_RGB + ",.9),0 0 20px rgba(" + SKY_RGB + ",.55);" +
       "animation:ghostlight-targetglow 720ms ease-out forwards";
     addEphemeral(g, 780);
+    return el;
   }
 
   function semanticTarget(x, y, action) {
-    targetGlow(x, y);
+    const target = targetGlow(x, y);
+    recentSemanticTarget = target ? { target, at: Date.now() } : null;
     const labels = {
       left_click: "Click target",
       right_click: "Context-menu target",
@@ -784,20 +1175,53 @@
     caption(labels[action] || "Action target");
   }
 
-  // Named key chords remain useful content. Ordinary typing uses ADR-0083's content-free keyboard
-  // medallion instead, so a visual effect can never disclose a password or masked form value.
-  function keystrokeLozenge(textStr, kind) {
+  // ADR-0087: the worker supplies only target-classified chord labels. Ordinary targets may carry
+  // one printable key; protected or unobservable targets carry an unlabeled keycap token instead.
+  // Distinct chord groups stay visually distinct.
+  function keystrokeLozenge(cue) {
     if (hiddenForTool || document.hidden) return;
     ensureStyles();
-    if (kind !== "key") return;
-    const html = String(textStr).split(/[+ ]/).filter(Boolean)
-      .map(function (k) { return "<span class='ghostlight-cap'>" + escapeHtml(k) + "</span>"; }).join(" + ");
+    if (!keyPresentation || !keyPresentation.isKeyCuePresentation(cue) || !cue.chords.length) return;
     const el = document.createElement("div");
     el.id = FX_LAYER_ID + "-k" + fxSeq++;
     el.setAttribute("aria-hidden", "true");
-    el.innerHTML = html;
+    cue.chords.forEach(function (chord, chordIndex) {
+      if (chordIndex > 0) {
+        const sequenceSeparator = document.createElement("span");
+        sequenceSeparator.textContent = "then";
+        sequenceSeparator.style.cssText = "color:#94a3b8;font-weight:500;font-size:11px";
+        el.appendChild(sequenceSeparator);
+      }
+      const group = document.createElement("span");
+      group.style.cssText = "display:inline-flex;align-items:center;gap:5px";
+      const safeTokens = chord.tokens.slice(0, 5);
+      safeTokens.forEach(function (token, tokenIndex) {
+        if (tokenIndex > 0) {
+          const plus = document.createElement("span");
+          plus.textContent = "+";
+          plus.style.color = "#94a3b8";
+          group.appendChild(plus);
+        }
+        const cap = document.createElement("span");
+        if (token === keyPresentation.KEY_CUE_PRIVATE_TOKEN) {
+          cap.className = "ghostlight-private-keycap";
+        } else {
+          cap.className = "ghostlight-cap";
+          cap.textContent = String(token).slice(0, 16);
+        }
+        group.appendChild(cap);
+      });
+      el.appendChild(group);
+    });
+    if (cue.more) {
+      const remainder = document.createElement("span");
+      remainder.textContent = "...";
+      remainder.style.color = "#94a3b8";
+      el.appendChild(remainder);
+    }
     el.style.cssText =
       "position:fixed;left:50%;bottom:64px;z-index:2147483645;pointer-events:none;white-space:nowrap;" +
+      "display:flex;align-items:center;gap:10px;" +
       "font:600 14px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#eaf6ff;" +
       "padding:8px 14px;border-radius:10px;background:rgba(12,20,32,.9);border:1px solid rgba(" + SKY_RGB + ",.55);" +
       "box-shadow:0 10px 30px -12px rgba(" + SKY_RGB + ",.8);" +
@@ -826,7 +1250,7 @@
     caption("Scroll " + direction);
   }
 
-  // read_page / find / get_page_text: a scan-line sweeps down -- "the agent is reading" (ours alone).
+  // read_page / get_page_text: a scan-line sweeps down -- "the agent is reading" (ours alone).
   function readScan() {
     if (hiddenForTool || document.hidden) return;
     ensureStyles();
@@ -1132,7 +1556,7 @@
       touched: recentTouched,
       focused: visibleElementCenter(document.activeElement),
       scroll: recentScroll,
-      signaturePosition: activeSignaturePosition,
+      signaturePosition: activeSignaturePosition || activeFindPosition,
     });
   }
 
@@ -1244,6 +1668,10 @@
           removeSignatureNow();
           sendResponse({ shown: false, reason: "visual effects are disabled" });
           return true;
+        case FIND_VISUAL_TYPE:
+          clearFindVisual();
+          sendResponse({ shown: false, reason: "visual effects are disabled" });
+          return true;
       }
     }
     switch (msg && msg.type) {
@@ -1261,7 +1689,7 @@
       case "AGENT_SEMANTIC_TARGET":
         semanticTarget(msg.x, msg.y, msg.action); sendResponse({ success: true }); return true;
       case "AGENT_KEYSTROKE":
-        keystrokeLozenge(msg.text, msg.kind); sendResponse({ success: true }); return true;
+        keystrokeLozenge(msg.cue); sendResponse({ success: true }); return true;
       case "AGENT_SCROLL_CUE":
         scrollCue(msg.direction); sendResponse({ success: true }); return true;
       case "AGENT_READ_SCAN":
@@ -1274,6 +1702,8 @@
         zoomFrame(msg.x0, msg.y0, msg.x1, msg.y1); sendResponse({ success: true }); return true;
       case ACTION_SIGNATURE_TYPE:
         showActionSignature(msg).then(sendResponse); return true;
+      case FIND_VISUAL_TYPE:
+        showFindVisual(msg).then(sendResponse); return true;
       case "AGENT_NOTIFICATION":
         showNotification(msg.class, msg.icon, msg.title, msg.description, msg.durationMs); sendResponse({ success: true }); return true;
       case "AGENT_NOTIFICATION_CLEAR":
@@ -1319,7 +1749,7 @@
       if (area !== "local") return;
       if (changes.ghostlight_effects) {
         effectsEnabled = changes.ghostlight_effects.newValue !== false;
-        if (!effectsEnabled) { clearNarration(); removeSignatureNow(); }
+        if (!effectsEnabled) { clearNarration(); removeSignatureNow(); clearFindVisual(); }
       }
       if (changes.ghostlight_captions) captionsEnabled = !!changes.ghostlight_captions.newValue;
     });
@@ -1340,6 +1770,7 @@
     if (event.deltaY !== 0) noteScroll(event.deltaY > 0 ? "down" : "up");
   }, { capture: true, passive: true });
   document.addEventListener("scroll", function (event) {
+    scheduleFindGeometry();
     const target = event.target === document ? document.documentElement : event.target;
     if (!target || typeof target !== "object") return;
     const offset = target === document.documentElement ? window.scrollY : Number(target.scrollTop);
@@ -1350,6 +1781,7 @@
       noteScroll(offset > previous ? "down" : "up");
     }
   }, { capture: true, passive: true });
+  window.addEventListener("resize", scheduleFindGeometry, { passive: true });
 
   // A broker state may arrive while the tab is in the background. The exact document has still
   // acknowledged control scope, but DOM work is deferred until the person can actually see it.
@@ -1367,12 +1799,26 @@
       if (!effectsEnabled) return;
       fieldSplash(target);
     },
+    scrollTarget: function (target) {
+      if (!effectsEnabled) return;
+      scrollTarget(target);
+    },
+    imageDrop: function (target, x, y) {
+      if (!effectsEnabled) return;
+      imageDrop(target, x, y);
+    },
+    findResults: function (entries) {
+      if (!effectsEnabled) return;
+      installFindResults(Array.isArray(entries) ? entries : []);
+    },
   };
 
   window.addEventListener("beforeunload", () => {
+    recentSemanticTarget = null;
     hideControlBorder();
     clearNarration();
     removeSignatureNow();
+    clearFindVisual();
     clearAttention();
   });
 })();

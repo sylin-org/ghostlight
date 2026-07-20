@@ -47,6 +47,7 @@ local-only architecture.
 | [controls.md](controls.md) | Framework orientation: ISO/IEC 27001 Annex A, SOC 2 criteria, and the AI frameworks. |
 | [questionnaire.md](questionnaire.md) | A CAIQ v4-shaped self-assessment you can file as vendor due diligence. |
 | [support-policy.md](support-policy.md) | Support channel, acknowledgment commitments, and scope. |
+| [openssf-self-assessment.md](openssf-self-assessment.md) | Point-in-time OSPS Baseline Level 1 evidence map, open checks, and claim boundary. |
 | [msa.md](msa.md) | The master software agreement template (draft, pending counsel review). |
 | [dpa.md](dpa.md) | The data processing addendum template (draft, pending counsel review). |
 | [tiers.md](tiers.md) | Each pricing-page claim mapped to the shipped feature and its evidence. |

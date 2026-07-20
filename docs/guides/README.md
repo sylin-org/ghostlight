@@ -6,7 +6,9 @@ mechanics guides instead of repeating them, so nothing here drifts out of sync w
 | If you want to...                          | Read                                                       |
 | ------------------------------------------ | ---------------------------------------------------------- |
 | Install Ghostlight and verify it works     | [installation.md](installation.md)                         |
+| Run the non-author first-success gate      | [greenfield-first-success.md](../testing/greenfield-first-success.md) |
 | Get going fast as a solo developer         | [solo-developer.md](solo-developer.md)                     |
+| Publish and grow any open-source project   | [open-source-publication.md](open-source-publication.md)   |
 | Write and apply a governance policy        | [governance-configuration.md](governance-configuration.md) |
 | Roll governance out across an organization | [compliance-team.md](compliance-team.md)                   |
 | Send the audit trail to your SIEM          | [siem-integration.md](siem-integration.md)                 |

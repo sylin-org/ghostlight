@@ -14,6 +14,14 @@ permissions:
   contents: read
 
 jobs:
+  public-surfaces:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check public release and platform claims
+        shell: pwsh
+        run: ./scripts/check-public-surfaces.ps1
+
   fmt:
     runs-on: ubuntu-latest
     steps:

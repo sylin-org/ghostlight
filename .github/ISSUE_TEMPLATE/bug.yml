@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible Ghostlight defect
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never include credentials, cookies, private page content, audit payloads, or unredacted personal paths. Suspected vulnerabilities belong in a private security report.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the smallest safe sequence of commands or tool calls that reproduces the defect.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Ghostlight version
+      placeholder: "0.6.0"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, browser and version, MCP client and version, and install path.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Safe diagnostics
+      description: Paste relevant doctor output or redacted logs. Remove page data, identities, and local secrets.
+

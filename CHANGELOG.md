@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-20
+
+Window-aware browser placement, a cohesive visible action language, and browser input that behaves
+like real user input. The trained tool schemas remain unchanged.
+
 ### Added
 
 - **Short launch-brief demo.** `ghostlight demo-brief` drives a public, dark-mode form through the
@@ -14,6 +19,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ref writes pace each visible field without model rediscovery. Shared demo-client support keeps
   relay framing, stable ref inventory, and page-provenance handling in one place while the existing
   Card Foundry story remains unchanged.
+- **Unified action signatures (ADR-0083).** Non-spatial work now uses one signal-aware medallion
+  language: a workwheel for JavaScript, a glowing keyboard for typing, calm dots for waits, and a
+  camera confirmation for screenshots. The controlled-tab border remains visible while a tab is
+  under Ghostlight control.
+- **Ranked find presentation (ADR-0086).** Find highlights every visible match, gives the strongest
+  match more definition, and uses top or bottom horizon glows when more matches sit outside the
+  viewport. Not-found feedback stays distinct without exposing the query through presentation
+  messages.
+- **Destination-aware spatial cues (ADR-0089).** Ref-based scrolls settle chevrons into the exact
+  destination halo. Coordinate image placement settles a fixed, content-free photo tile into the
+  drop target while the tool result separately reports whether the page signaled handling.
+
+### Changed
+
+- **Window-placed workspaces (ADR-0085).** First-touch work reuses the last-focused eligible normal
+  Chrome window and pins that window for the MCP session. A new browser window is created only when
+  none is eligible, so prepared desktop layouts and recording positions stay intact.
+- **Developer-facing front door.** The README now leads with the live browser story, the short hero
+  capture, practitioner setup, and the decision aid. Public readiness material adds structured
+  support routes, an OpenSSF self-assessment, greenfield first-success criteria, and a reusable
+  open-source publication guide.
+- `ghostlight install --help` now names every supported MCP client, including Codex, VS Code,
+  OpenCode, Zed, Windsurf, and Crush.
+
+### Fixed
+
+- **Browser input fidelity (ADRs 0087 and 0088).** Printable key actions insert characters,
+  protected fields retain content-free key feedback, named keys preserve their identity, and typed
+  character counts follow Unicode code points after line-ending normalization.
+- Pointer-only drags now keep complete held-button packets, while native HTML drag and drop uses a
+  bounded per-tab interception and replay lane that preserves page-authored drag data without
+  exposing it to the service.
+- Coordinate image placement now distinguishes successful dispatch from page-signaled handling,
+  and empty scroll targets fail instead of producing an ambiguous no-op.
+- Branch CI no longer duplicates the same validation on a pull request while required security and
+  release gates remain enforced on the PR.
 
 ## [0.6.0] - 2026-07-15
 

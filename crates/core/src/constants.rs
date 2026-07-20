@@ -26,6 +26,22 @@ pub mod notification {
     }
 }
 
+/// Private native-envelope vocabulary for session-pinned browser placement. These fields never
+/// enter the trained MCP schemas or model-facing results; the browser boundary strips the result
+/// metadata after recording the native window target.
+pub mod workspace {
+    /// Top-level `tool_request` member carrying the placement instruction.
+    pub const REQUEST: &str = "workspace";
+    /// A pinned adapter-native window id inside a workspace request or private result metadata.
+    pub const WINDOW_ID: &str = "windowId";
+    /// Selector member used before a session has a pinned native window.
+    pub const SELECT: &str = "select";
+    /// Pull-based Chromium selector: query the most recently focused eligible normal window.
+    pub const LAST_FOCUSED_NORMAL: &str = "last_focused_normal";
+    /// Private extension-result member consumed and removed by the browser boundary.
+    pub const RESULT_META: &str = "_ghostlightWorkspace";
+}
+
 /// Composite tab identifiers (ADR-0058, amended by ADR-0061): a `tabId` that crosses the wire to
 /// the MCP client encodes BOTH the owning browser's service-assigned `slot` and the extension's own
 /// native Chrome tab id, as a single JSON number -- so routing a later call needs no server-side

@@ -28,6 +28,15 @@ Collaboration and process -- this file is their canonical home:
 - **The browser product stays in the local user's context.** Ghostlight is for visible work in the
   user's existing authenticated Chromium profile. Headless, isolated-profile, cloud, and remote
   browser execution are product exclusions, not missing parity work.
+- **Browser placement belongs to the user.** Reuse the last-focused eligible normal window for new
+  work and pin the MCP session there. Create a browser window only when none is eligible. A tab
+  group is visible organization, not a user-facing security boundary; never move tabs or groups
+  back after the user places them elsewhere (ADR-0085).
+- **A Ghostlight test is a live test.** Test Ghostlight by calling its MCP tools from the active
+  client against the real local engine, extension, and user's visible authenticated browser. For
+  cross-platform proof, run that same live path on each target OS, including Windows and Linux.
+  Do not substitute Playwright, a disposable browser profile, or an emulated harness unless the
+  explicit subject is that harness or CI boundary.
 - **Repository content is practitioner-first.** Developers should see the product, installation,
   first useful task, and exact no-account/free-core facts before organization procurement depth.
   Product pages and the Trust Center carry the buyer-focused material.
@@ -54,6 +63,11 @@ file does not restate them -- follow AGENTS.md.
 - **Distribution is automated and credential-gated** in `scripts/release.ps1`; the MCP registry
   publish is DNS-authed on the sylin.org apex; canonical URLs are `sylin.org` (the github.io site
   is retired, redirect-stubbed). Off-tree/secret change history is in `local/AUDIT-LOG.md`.
+- **Public release and platform truth is product-owned.** `docs/public-status.json` is the
+  canonical machine-readable release fallback, live-platform statement, and extension-store
+  statement. The README must contain its exact public claims; the website consumes a synchronized
+  fallback through `scripts/publish-website.ps1`. Run `scripts/check-public-surfaces.ps1` locally
+  and with `-Online` after deployment instead of repairing either surface independently.
 - **Remote-code claims distinguish extension logic from page automation.** All extension logic
   ships in the reviewed package, but `javascript_tool` carries an explicit local MCP-client
   instruction to CDP `Runtime.evaluate` in the attached page. Never collapse those two facts into

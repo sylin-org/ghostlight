@@ -17,7 +17,7 @@
 <p align="center"><img src="docs/assets/demo.gif" alt="Ghostlight reading and completing a launch brief in a real browser with visible page, field, and click feedback" width="838" height="766"></p>
 <p align="center"><sub>Ghostlight reading, filling, and completing a brief in the user's visible browser.</sub></p>
 
-<p align="center"><a href="#try-it"><strong>Install and try it</strong></a> | <a href="docs/guides/installation.md">Every install path</a> | <a href="docs/COMPARISON.md">Compare alternatives</a></p>
+<p align="center"><a href="#try-it"><strong>Install and try it</strong></a> | <a href="docs/guides/installation.md">Every install path</a> | <a href="https://sylin.org/ghostlight/decision-aid/">Choose a browser-control approach</a> | <a href="docs/COMPARISON.md">Compare alternatives</a></p>
 
 Ghostlight lets an AI agent use the Chromium profile where you are already signed in, inside a
 dedicated tab group that stays separate from your ordinary tabs. Actions happen in front of you. It
@@ -45,7 +45,9 @@ Ghostlight is worth trying when:
 
 It is probably not the right tool for a headless scraping farm, stealth automation, an isolated
 cloud browser, or a Claude-only setup already served by Anthropic's first-party integration. The
-[comparison guide](docs/COMPARISON.md) is candid about those choices.
+interactive [browser-control decision aid](https://sylin.org/ghostlight/decision-aid/) helps you
+choose by operating model. The [comparison guide](docs/COMPARISON.md) provides the detailed
+capability evidence behind those choices.
 
 ## What makes it feel different
 
@@ -106,9 +108,11 @@ use its native installer:
 
 [![Add to VS Code](https://img.shields.io/badge/VS_Code-Add_MCP_server-38BDF8?style=flat-square)](vscode:mcp/install?%7B%22name%22%3A%22ghostlight%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22ghostlight%22%5D%7D)
 
-**Current platform state.** Windows and Linux are verified end to end against live browsers.
-macOS builds and passes the full test suite in CI; its live-browser verification is still owed.
-The Chrome Web Store listing is under review.
+**Current platform state.** Windows and Linux are verified end to end against live browsers. macOS
+builds and passes the full test suite in CI; its live-browser verification is still owed.
+
+**Extension state.** The Chrome Web Store listing remains under compliance review; until it is
+public, the install guide provides the current release-extension path.
 
 **Other ways to get it.** Homebrew: `brew install sylin-org/tap/ghostlight`. On the
 [MCP registry](https://registry.modelcontextprotocol.io) as `org.sylin/ghostlight`. Every release

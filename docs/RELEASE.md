@@ -9,8 +9,9 @@ The release spans three first-party repositories plus external registries:
 
 - `sylin-org/ghostlight` (this repo): binaries, the npm launcher, package managers, the browser
   extension, and the MCP registry entry.
-- `sylin-org/website` (sylin.org): the install guide and demo pages. It is designed to auto-track
-  this repo, so a release touches it only lightly (see "Website" below).
+- `sylin-org/website` (sylin.org): the install guide, canonical public-status fallback, and demo
+  pages. It is designed to auto-track this repo, so a release touches it only lightly (see
+  "Website" below).
 - `sylin-org/homebrew-tap`: the Homebrew formula and its release-asset integrity pins.
 
 ## The channel map
@@ -25,7 +26,7 @@ The release spans three first-party repositories plus external registries:
 | Chrome Web Store | the extension zip (`key` stripped, dev files excluded) | Automated when store creds are set, else printed steps | `release.ps1` (`extension`) -> `publish-extension.ps1` |
 | Edge Add-ons | the same zip | Automated when store creds are set, else printed steps | `release.ps1` (`extension`) -> `publish-extension.ps1` |
 | Trust center (`docs/trust/`) | "reviewed against vX.Y.Z" footer restamp | Automated | `release.ps1` (`trust`) |
-| Website (sylin.org) | refresh the install-guide fallback + trigger a rebuild | Automated | `release.ps1` (`website`) -> `publish-website.ps1` |
+| Website (sylin.org) | refresh install-guide and public-status fallbacks + trigger a rebuild | Automated | `release.ps1` (`website`) -> `publish-website.ps1` |
 | MCP Registry | `server.json` entry | Automated when `MCP_DNS_PRIVATE_KEY` is set, else skipped | `release.ps1` (`registry`) -> `mcp-publisher` (DNS auth) |
 
 The privileged GitHub publisher deliberately has no repository checkout. Every `gh` mutation in
@@ -43,7 +44,10 @@ Every release needs these (the script checks them in `preflight`):
 - You are on `main`, the tree is clean, and `main == origin/main`.
 - All version files agree on the release version (bump them on `dev` before the release PR; the
   same list `release.ps1` checks: the four `Cargo.toml`s, `extension/manifest.json`,
-  `packaging/npm/package.json`, `server.json`, the scoop/winget/homebrew manifests).
+  `packaging/npm/package.json`, `server.json`, the scoop/winget/homebrew manifests, and
+  `docs/public-status.json`).
+- `scripts/check-public-surfaces.ps1` confirms the README uses the canonical platform, extension,
+  and decision-path claims.
 - `CHANGELOG.md` has a `## [<version>]` section.
 
 Optional, for the automated extension and website steps (see "One-time credential setup" below).
@@ -63,7 +67,7 @@ Without them, the extension step prints exact manual submission instructions ins
    The live run: tags `v<version>` (this fires the Release workflow), watches it green, verifies
    every expected asset, fills and commits the package-manager checksums, updates the homebrew tap,
    publishes npm and smoke-tests the launcher, restamps the trust footers, publishes the extension
-   (auto or printed steps), and refreshes the website fallback.
+   (auto or printed steps), and refreshes the website fallbacks.
 
 3. Do the one remaining manual channel (the `report` step reminds you):
    - **Winget**: run `scripts/prepare-winget.ps1`. It writes the three-file
@@ -108,17 +112,19 @@ pwsh -File scripts/publish-extension.ps1 -Target trustedTesters -SkipEdge
 ## Website (sylin.org)
 
 The website (`sylin-org/website`, an Eleventy site deployed by an external host that builds on push
-to its `main`) is built to auto-track this repo: `src/_data/ghostlightInstall.js` fetches
+to its `main`) is built to auto-track this repo. `src/_data/ghostlightInstall.js` fetches
 `llms-install.md` from ghostlight's `main` at build time and republishes it at
-`sylin.org/ghostlight/install.md`, with a committed fallback snapshot as a safety net. The install
-guide is version-agnostic and the demo pages are static, so there are NO version or download strings
-to bump.
+`sylin.org/ghostlight/install.md`, with a committed fallback snapshot as a safety net.
+`docs/public-status.json` is the canonical source for the release fallback, platform proof, and
+extension-store state shown on the project page. The website consumes a committed synchronized
+fallback so a failed network fetch cannot invent or retain a different product story.
 
-`scripts/publish-website.ps1` therefore does the one thing a release needs: clone the website repo,
-copy this repo's `llms-install.md` over the committed fallback, and push if it changed (which
-triggers the host's rebuild, and the rebuild re-fetches the live guide). If the guide is unchanged,
-the live site already serves it and nothing is pushed; `-ForceRebuild` pushes an empty commit to
-rebuild anyway.
+`scripts/publish-website.ps1` clones the website repo, copies this repo's install guide and public
+status over their committed fallbacks, and pushes if either changed. That triggers the host rebuild
+and a live install-guide fetch. If both fallbacks are unchanged, nothing is pushed;
+`-ForceRebuild` pushes an empty commit to rebuild anyway. After deployment, run
+`scripts/check-public-surfaces.ps1 -Online` to verify GitHub, npm, the rendered project page, the
+install guide, the decision aid, and the privacy route.
 
 ## One-time credential setup (for the automated store/website steps)
 

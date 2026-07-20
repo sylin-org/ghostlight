@@ -1,13 +1,13 @@
 {
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Governed browser automation over your own authenticated Chromium session, for AI coding agents (MCP).",
   "homepage": "https://sylin.org/ghostlight/",
   "license": "Apache-2.0 OR MIT (engine); Ghostlight Commercial License (governance module, source-available)",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/sylin-org/ghostlight/releases/download/v0.6.0/ghostlight-v0.6.0-x86_64-pc-windows-msvc.zip",
+      "url": "https://github.com/sylin-org/ghostlight/releases/download/v0.7.0/ghostlight-v0.7.0-x86_64-pc-windows-msvc.zip",
       "hash": "e742d9f6e1012b1a1c871a1c2cdc2d7a60c4f6d19af69c0f30378299247e4cc8",
-      "extract_dir": "ghostlight-v0.6.0-x86_64-pc-windows-msvc"
+      "extract_dir": "ghostlight-v0.7.0-x86_64-pc-windows-msvc"
     }
   },
   "bin": ["ghostlight.exe", "ghostlight-relay.exe"],

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, ideas, and workflows
+    url: https://github.com/sylin-org/ghostlight/discussions
+    about: Ask for help, propose a feature, share a policy pattern, or show what you built.
+  - name: Security report
+    url: https://github.com/sylin-org/ghostlight/security/advisories/new
+    about: Report a suspected vulnerability privately.
+  - name: Licensing or private support
+    url: https://github.com/sylin-org/ghostlight/blob/main/SUPPORT.md
+    about: Read the support routes, including the email lane for matters that cannot be public.

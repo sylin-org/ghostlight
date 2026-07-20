@@ -142,12 +142,12 @@ pub fn release_owned_tab(
 
 /// The stable per-CLIENT presentation key (ADR-0066 D1/D3): the MCP `clientInfo.name` the agent
 /// presented, or the literal `Ghostlight` when no clientInfo was captured. This -- not the
-/// per-process GUID -- is what the extension keys its `clientKey -> chromeGroupId` map on, so every
-/// session of the same client (sequential OR concurrent) presents into the SAME Chrome tab group
-/// instead of minting a fresh one. Deliberately just the name: `clientInfo` carries no
-/// per-workspace discriminator, and "one group per client" is the owner-chosen behavior; this is
-/// the single place to refine the key if a client ever reports a richer identity. Carries no GUID,
-/// so it never touches ADR-0030 Decision 4's redaction path.
+/// per-process GUID -- is the client dimension of the extension's ADR-0085
+/// `window + clientKey -> chromeGroupId` map, so every session of the same client in the same
+/// browser window presents into the SAME Chrome tab group instead of minting a fresh one.
+/// Deliberately just the name: window placement is adapter metadata, and this remains the single
+/// place to refine client identity if a client ever reports a richer one. Carries no GUID, so it
+/// never touches ADR-0030 Decision 4's redaction path.
 pub fn client_key(client_name: Option<&str>) -> String {
     client_name.unwrap_or("Ghostlight").to_string()
 }

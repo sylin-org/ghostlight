@@ -29,6 +29,8 @@ const GhostlightConstants = {
   HOLD_REQUEST_TIMEOUT_MS: 1500, // take-the-wheel hold query timeout.
   CAPTURE_SETTLE_MS: 40,         // wait after hiding the on-page indicator before a screenshot.
   CLICK_GAP_MS: 40,              // press/release and inter-click spacing.
+  DRAG_INTERCEPT_GRACE_MS: 40,   // event-order allowance when no native dragstart was observed.
+  DRAG_INTERCEPT_WAIT_MS: 250,   // late allowance for CDP's native drag-intercept event.
   NAV_SETTLE_TIMEOUT_MS: 10000,  // max wait for a navigation to report complete.
 };
 if (typeof module !== "undefined" && module.exports) {

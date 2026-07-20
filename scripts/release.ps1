@@ -45,7 +45,7 @@
     skipped automatically when extension/ did not change since the previous tag.
 
 .PARAMETER SkipWebsite
-    Do not refresh the sylin.org website (the install-guide fallback + rebuild trigger).
+    Do not refresh the sylin.org website (install-guide and public-status fallbacks + rebuild).
 
 .PARAMETER SkipRegistry
     Do not publish to the MCP registry. The registry step also self-skips when the
@@ -202,6 +202,7 @@ function Test-VersionConsistency {
     Check 'packaging/scoop/ghostlight.json' 'scoop version' '"version":\s*"(?<v>[^"]+)"'
     Check 'packaging/winget/Sylin.Ghostlight.yaml' 'winget PackageVersion' '(?m)^PackageVersion:\s*(?<v>\S+)' 3
     Check 'packaging/homebrew/ghostlight.rb' 'homebrew version' 'version "(?<v>[^"]+)"'
+    Check 'docs/public-status.json' 'canonical public status' '"release":\s*"(?<v>[^"]+)"'
 
     return $problems
 }
@@ -289,6 +290,9 @@ function Step-Preflight {
         throw 'fix version files before releasing'
     }
     Write-Ok "all version files agree on $Version"
+
+    & pwsh -File (Join-Path $PSScriptRoot 'check-public-surfaces.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'public surfaces are inconsistent' }
 
     # CHANGELOG section.
     $changelog = Join-Path $RepoRoot 'CHANGELOG.md'
@@ -754,7 +758,7 @@ function Step-Website {
 
     $script = Join-Path $PSScriptRoot 'publish-website.ps1'
     if ($DryRun) {
-        Write-Would "pwsh $script -Version $Version -DryRun  (refresh the install-guide fallback; push only if it changed)"
+        Write-Would "pwsh $script -Version $Version -DryRun  (refresh public fallbacks; push only if changed)"
         & pwsh -File $script -Version $Version -DryRun
         return
     }
@@ -773,7 +777,7 @@ function Step-Report {
     - MCP registry publish$(if ($SkipRegistry) { ' (SKIPPED)' }) -- auto when MCP_DNS_PRIVATE_KEY is set, else skipped
     - trust-center footers restamped to v$Version
     - extension publication step completed$(if ($SkipExtension) { ' (SKIPPED)' }) -- auto where store creds are set, else steps printed above
-    - website install-guide refresh step completed$(if ($SkipWebsite) { ' (SKIPPED)' })
+    - website install-guide and public-status refresh completed$(if ($SkipWebsite) { ' (SKIPPED)' })
 
   Still manual (by nature -- external systems that need a human or a per-version PR):
     - winget: a NEW PR per version to microsoft/winget-pkgs
@@ -781,6 +785,7 @@ function Step-Report {
     - Extension stores: if you have NOT set the store API credentials, follow the steps this
         script printed above (nothing auto-submitted). See docs/RELEASE.md -> "Extension stores".
     - Verify: https://github.com/$RepoSlug/releases/tag/$Tag
+    - Verify live public surfaces: pwsh -File scripts/check-public-surfaces.ps1 -Online
 
   The complete channel-by-channel map is docs/RELEASE.md.
 "@

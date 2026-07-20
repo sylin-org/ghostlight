@@ -16,6 +16,7 @@
 
 pub mod browser;
 pub mod diagnostics;
+mod workspace;
 
 use crate::browser::directory::{AgentGuide, ToolDescriptor};
 use std::sync::Arc;

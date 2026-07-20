@@ -66,6 +66,12 @@ cited-sources discipline but are not part of the pre-Phase 0 discovery above.
 | [17-agent-browser-overlap-2026-07.md](17-agent-browser-overlap-2026-07.md) | Mutual capability map against agent-browser v0.31.2 and strategic opportunities through model, user, and governance delight. |
 | [18-free-surface-evaluation-plan-2026-07.md](18-free-surface-evaluation-plan-2026-07.md) | Measurement plan and acceptance gates for ref-linked annotated screenshots and optional owned-tab labels. No public schema change. |
 | [19-firefox-browser-adapter-dossier-2026-07.md](19-firefox-browser-adapter-dossier-2026-07.md) | Firefox extension, Marionette, and WebDriver BiDi capability map; adapter boundary; dynamic explanation; multi-browser selection; security posture; and bounded proof-of-concept gates. No product decision. |
+| [20-open-source-publication-paths-2026-07.md](20-open-source-publication-paths-2026-07.md) | Publication-path forensics across six open-source projects: upstream discovery, downstream trending bots, channel fit, message anatomy, adoption evidence, anti-patterns, and inputs to a staged Ghostlight public-awareness plan. No external publication. |
+
+The project-agnostic practitioner artifact derived from Research 20 is
+[Getting an open-source project out and about](../guides/open-source-publication.md). It turns the
+case findings into a reusable end-to-end publication, adoption, community, security, funding, and
+maintainer-sustainability playbook.
 
 ## Status
 

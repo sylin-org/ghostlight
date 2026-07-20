@@ -62,7 +62,8 @@ What it can do, on instruction from that local application:
 - Place files and captured screenshots into a page's file inputs and drop targets, using data the
   local application supplies (the extension never reads your disk).
 - Inspect console messages and network request metadata.
-- Open, navigate, group, and manage tabs in a dedicated, clearly labeled automation window.
+- Open, navigate, group, and manage tabs in a clearly labeled automation group inside the browser
+  window the user most recently attended.
 
 Governed by design:
 - The native application is the policy and audit layer. It classifies every action (read, act,
@@ -304,6 +305,11 @@ Current release state (2026-07-15): the owner approved cancelling the pending v0
 Google reinstated the publishing API project. The v0.6.0 package then uploaded successfully and
 Chrome accepted it as `ITEM_PENDING_REVIEW`. Broad host permissions may trigger the expected
 in-depth review. The listing is submitted but is not public until Chrome approves and publishes it.
+
+Release-candidate state (2026-07-20): v0.7.0 is prepared but not yet submitted. Its extension
+changes require a new package. Before the release extension step can upload it, cancel the pending
+v0.6.0 submission through the owner-approved dashboard or API path documented in `docs/RELEASE.md`.
+Until Chrome accepts the replacement, v0.6.0 remains the last recorded store state.
 
 Ordinary `ghostlight install` already registers both the Web Store id and the pinned unpacked-dev
 id in the native host's `allowed_origins`. A store user therefore runs the normal command:

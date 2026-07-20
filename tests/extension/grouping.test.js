@@ -14,6 +14,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
 const { groupSessionTabs, managedGroupIds, isManagedGroupId, pruneDeadGroups, reclaimGroupsByTitle } = require("../../extension/lib/grouping.js");
+const { workspaceGroupKey } = require("../../extension/lib/workspace.js");
 
 // A minimal fake `chrome.tabs`/`chrome.tabGroups` recording every `chrome.tabs.group` call
 // (`groupCalls`, in the shape `{ tabIds: [...], groupId: <number|null> }`) and every
@@ -215,4 +216,27 @@ test("reclaim_does_not_overwrite_a_live_mapping_or_double_claim_a_group_id", asy
     [["Claude Code", 99], ["Cursor", 12]],
     "a present key is not overwritten, and an already-claimed group id is not re-mapped"
   );
+});
+
+test("reclaim_distinguishes_same-client groups in different windows", async () => {
+  const PREFIX = "\u{1F47B} ";
+  const chrome = {
+    tabGroups: {
+      async query() {
+        return [
+          { id: 41, windowId: 7, title: PREFIX + "ghostlight-demo" },
+          { id: 42, windowId: 8, title: PREFIX + "ghostlight-demo" },
+        ];
+      },
+    },
+  };
+  const groups = new Map();
+  assert.strictEqual(
+    await reclaimGroupsByTitle(chrome, groups, PREFIX, workspaceGroupKey),
+    true
+  );
+  assert.deepStrictEqual(Array.from(groups.entries()).sort(), [
+    [workspaceGroupKey("ghostlight-demo", 7), 41],
+    [workspaceGroupKey("ghostlight-demo", 8), 42],
+  ]);
 });

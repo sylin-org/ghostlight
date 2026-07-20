@@ -98,12 +98,14 @@
       <div class="rail-group">
         <h4>Motion</h4>
         <button class="entry" data-fx="scroll"><span class="k">scroll</span><span class="d">directional chevrons + a soft streak</span></button>
+        <button class="entry" data-fx="scrolltarget"><span class="k">scroll to target</span><span class="d">chevrons settle into the destination halo</span></button>
         <button class="entry" data-fx="navigate"><span class="k">navigate</span><span class="d">a destination pill + a loading sweep</span></button>
       </div>
       <div class="rail-group">
         <h4>Capture</h4>
         <button class="entry" data-fx="screenshot"><span class="k">screenshot</span><span class="d">a sky flash + a signal&#8209;aware camera medallion</span></button>
         <button class="entry" data-fx="zoom"><span class="k">zoom</span><span class="d">a magnifier frame closes on the region</span></button>
+        <button class="entry" data-fx="imagedrop"><span class="k">place image</span><span class="d">a photo tile settles into the destination halo</span></button>
       </div>
       <div class="rail-group">
         <h4>Reading</h4>
@@ -327,6 +329,31 @@
     animation: target-glow 720ms ease-out forwards;
   }
   @keyframes target-glow { 0% { opacity: 0; } 22% { opacity: 1; } 100% { opacity: 0; } }
+  .scroll-target {
+    position: absolute; z-index: 58; display: flex; flex-direction: column; align-items: center;
+    filter: drop-shadow(0 0 7px rgba(var(--sky-rgb), .75));
+    animation: scroll-target 1050ms cubic-bezier(.22,1,.36,1) forwards;
+  }
+  .scroll-target svg { width: 40px; height: 24px; opacity: .9; }
+  @keyframes scroll-target {
+    0% { opacity: 0; transform: translate(-50%,-92%) scale(.92); }
+    28% { opacity: 1; }
+    72% { opacity: .9; transform: translate(-50%,-50%) scale(.76); }
+    100% { opacity: 0; transform: translate(-50%,-42%) scale(.68); }
+  }
+  .image-drop {
+    position: absolute; z-index: 59; width: 48px; height: 44px; display: grid; place-items: center;
+    border-radius: 12px; background: rgba(10,16,26,.92);
+    border: 1px solid rgba(var(--sky-rgb),.62);
+    box-shadow: 0 0 22px rgba(var(--sky-rgb),.68), inset 0 1px 0 rgba(255,255,255,.1);
+    animation: image-drop 1050ms cubic-bezier(.22,1,.36,1) forwards;
+  }
+  @keyframes image-drop {
+    0% { opacity: 0; transform: translate(-50%,-115%) rotate(-9deg) scale(.72); }
+    24% { opacity: 1; }
+    68% { opacity: 1; transform: translate(-50%,-50%) rotate(0) scale(1); }
+    100% { opacity: 0; transform: translate(-50%,-46%) rotate(0) scale(.92); }
+  }
 
   .trail-dot {
     position: absolute; width: 15px; height: 15px; border-radius: 50%; transform: translate(-50%,-50%);
@@ -468,7 +495,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .cursor { transition: none; }
-    .ripple, .trail-dot, .chevrons svg, .zoomframe, .scanline, .streak, .flash { animation-duration: 1ms; }
+    .ripple, .trail-dot, .chevrons svg, .scroll-target, .image-drop, .zoomframe, .scanline, .streak, .flash { animation-duration: 1ms; }
     .glow, .narration-preview, .narration-preview .agent-time, .signature .gear,
     .signature .particle, .signature .wait-dots i { animation: none; }
   }
@@ -553,6 +580,7 @@
   var CHEV_UP = "<svg viewBox='0 0 40 24' fill='none'><path d='M6 18 L20 6 L34 18' stroke='#38bdf8' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'/></svg>";
   var CAMERA = "<svg viewBox='0 0 24 24' fill='none'><rect x='2.5' y='6.5' width='19' height='13' rx='2.5' stroke='#38bdf8' stroke-width='1.7'/><path d='M8.5 6.5 L9.6 4.5 H14.4 L15.5 6.5' stroke='#38bdf8' stroke-width='1.7' stroke-linejoin='round'/><circle cx='12' cy='13' r='3.4' stroke='#38bdf8' stroke-width='1.7'/></svg>";
   var LENS = "<svg viewBox='0 0 24 24' fill='none'><circle cx='10' cy='10' r='6.5' stroke='#38bdf8' stroke-width='2'/><path d='M15 15 L21 21' stroke='#38bdf8' stroke-width='2.4' stroke-linecap='round'/></svg>";
+  var PHOTO = "<svg width='34' height='30' viewBox='0 0 34 30' fill='none'><rect x='2' y='2' width='30' height='26' rx='6' fill='rgba(56,189,248,.14)' stroke='#38bdf8' stroke-width='2'/><circle cx='23.5' cy='10' r='3' fill='#38bdf8'/><path d='M6 24 L13.5 16.5 L18.5 21 L22 17.5 L29 24' stroke='#38bdf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>";
 
   var pgBtn = document.getElementById("pg-btn");
   var pgInput = document.getElementById("pg-input");
@@ -612,6 +640,19 @@
       page.style.transform = "translateY(-70px)";
       setTimeout(function () { page.style.transform = "translateY(0)"; }, 1300);
     },
+    scrolltarget: function () {
+      showCaption("Scrolled to target");
+      page.style.transform = "translateY(-46px)";
+      setTimeout(function () {
+        var r = localRect(pgInput);
+        targetGlow(pgInput);
+        var cue = document.createElement("div"); cue.className = "scroll-target";
+        cue.innerHTML = CHEV_DOWN + CHEV_DOWN + CHEV_DOWN;
+        cue.style.left = (r.x + r.w / 2) + "px"; cue.style.top = (r.y + r.h / 2) + "px";
+        ephemeral(cue, 1130);
+      }, reduce ? 0 : 420);
+      setTimeout(function () { page.style.transform = "translateY(0)"; }, 1450);
+    },
     navigate: function () {
       showCaption("Navigate");
       var p = document.createElement("div"); p.className = "urlpill";
@@ -632,6 +673,15 @@
       z.style.left = (r.x - 14) + "px"; z.style.top = (r.y - 12) + "px";
       z.style.width = (r.w + 28) + "px"; z.style.height = (r.h + 24) + "px";
       z.innerHTML = LENS; ephemeral(z, 1150);
+    },
+    imagedrop: function () {
+      showCaption("Image drop dispatched");
+      var r = localRect(dragStrip);
+      targetGlow(dragStrip);
+      var tile = document.createElement("div"); tile.className = "image-drop";
+      tile.innerHTML = PHOTO;
+      tile.style.left = (r.x + r.w / 2) + "px"; tile.style.top = (r.y + r.h / 2) + "px";
+      ephemeral(tile, 1130);
     },
     read: function () {
       showCaption("Reading page");
@@ -682,7 +732,7 @@
   });
 
   // The tour: the sequence the real capture script runs, self-narrating.
-  var TOUR = ["narrate", "navigate", "read", "click", "type", "javascript", "key", "scroll", "zoom", "screenshot"];
+  var TOUR = ["narrate", "navigate", "read", "click", "type", "javascript", "key", "scroll", "scrolltarget", "imagedrop", "zoom", "screenshot"];
   document.getElementById("run-tour").addEventListener("click", function () {
     var i = 0;
     (function step() {
