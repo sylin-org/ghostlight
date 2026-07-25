@@ -2,6 +2,6 @@
   "name": "ghostlight-e2e",
   "private": true,
   "devDependencies": {
-    "playwright": "^1.61.1"
+    "playwright": "^1.62.0"
   }
 }
