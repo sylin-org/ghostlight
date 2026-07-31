@@ -10,8 +10,16 @@
 const KEY_VERSION = "v1";
 const LAST_FOCUSED_NORMAL = "last_focused_normal";
 const FOCUS_MRU_KEY = "ghostlight_workspace_focus_mru_v1";
+const WINDOW_INELIGIBLE_CODE = "workspace_window_ineligible";
 const MAX_FOCUS_MRU = 32;
 let focusMutationTail = Promise.resolve();
+
+class WorkspaceWindowIneligibleError extends Error {
+  constructor() {
+    super("That Ghostlight workspace is no longer available");
+    this.code = WINDOW_INELIGIBLE_CODE;
+  }
+}
 
 function eligibleNormalWindow(win) {
   return !!win && Number.isSafeInteger(win.id) && win.type === "normal" && win.incognito !== true;
@@ -38,7 +46,7 @@ async function getEligibleWindow(chrome, windowId) {
   let win;
   try { win = await chrome.windows.get(windowId); } catch { win = null; }
   if (!eligibleNormalWindow(win)) {
-    throw new Error("The selected Ghostlight workspace window is no longer eligible");
+    throw new WorkspaceWindowIneligibleError();
   }
   return win;
 }
@@ -199,6 +207,8 @@ async function tabsInWindow(chrome, tabIds, windowId) {
 const GhostlightWorkspace = {
   LAST_FOCUSED_NORMAL,
   FOCUS_MRU_KEY,
+  WINDOW_INELIGIBLE_CODE,
+  WorkspaceWindowIneligibleError,
   eligibleNormalWindow,
   workspaceGroupKey,
   parseWorkspaceGroupKey,

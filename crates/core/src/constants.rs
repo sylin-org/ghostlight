@@ -40,6 +40,8 @@ pub mod workspace {
     pub const LAST_FOCUSED_NORMAL: &str = "last_focused_normal";
     /// Private extension-result member consumed and removed by the browser boundary.
     pub const RESULT_META: &str = "_ghostlightWorkspace";
+    /// Conclusive extension error: the pinned normal window disappeared or became ineligible.
+    pub const WINDOW_INELIGIBLE_ERROR: &str = "workspace_window_ineligible";
 }
 
 /// Composite tab identifiers (ADR-0058, amended by ADR-0061): a `tabId` that crosses the wire to

@@ -32,6 +32,9 @@ Collaboration and process -- this file is their canonical home:
   work and pin the MCP session there. Create a browser window only when none is eligible. A tab
   group is visible organization, not a user-facing security boundary; never move tabs or groups
   back after the user places them elsewhere (ADR-0085).
+- **A stale workspace recovers only through explicit tab creation.** Known Ghostlight tab ids stay
+  authoritative. `tabs_create_mcp` may replace a conclusively dead window pin after safely creating
+  a fresh blank tab; other calls never switch workspaces automatically (ADR-0090).
 - **A Ghostlight test is a live test.** Test Ghostlight by calling its MCP tools from the active
   client against the real local engine, extension, and user's visible authenticated browser. For
   cross-platform proof, run that same live path on each target OS, including Windows and Linux.

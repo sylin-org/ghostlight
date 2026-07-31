@@ -48,6 +48,24 @@ impl WorkspaceRegistry {
             .or_insert(target)
     }
 
+    /// Replace `expected` with `replacement` for one session after explicit recovery succeeds.
+    pub(super) fn replace_if(
+        &self,
+        guid: &str,
+        expected: WorkspaceTarget,
+        replacement: WorkspaceTarget,
+    ) -> bool {
+        let mut targets = self.targets.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(current) = targets.get_mut(guid) else {
+            return false;
+        };
+        if *current != expected {
+            return false;
+        }
+        *current = replacement;
+        true
+    }
+
     /// Remove pins whose native window ids were invalidated by a browser-process restart.
     pub(super) fn clear_browser(&self, browser_slot: u32) {
         self.targets
@@ -95,5 +113,31 @@ mod tests {
         registry.clear_browser(1);
         assert_eq!(registry.get("a"), None);
         assert_eq!(registry.get("b"), Some(other));
+    }
+
+    #[test]
+    fn explicit_recovery_replaces_only_the_expected_pin() {
+        let registry = WorkspaceRegistry::default();
+        let stale = WorkspaceTarget {
+            browser_slot: 1,
+            native_window_id: 7,
+        };
+        let fresh = WorkspaceTarget {
+            browser_slot: 1,
+            native_window_id: 9,
+        };
+        registry.pin("session", stale);
+
+        assert!(!registry.replace_if(
+            "session",
+            WorkspaceTarget {
+                browser_slot: 1,
+                native_window_id: 8,
+            },
+            fresh,
+        ));
+        assert_eq!(registry.get("session"), Some(stale));
+        assert!(registry.replace_if("session", stale, fresh));
+        assert_eq!(registry.get("session"), Some(fresh));
     }
 }

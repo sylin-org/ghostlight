@@ -1,11 +1,17 @@
 # STATUS -- where the project stands
 
-Last updated: 2026-07-20. This file is a point-in-time snapshot maintained by whoever
+Last updated: 2026-07-31. This file is a point-in-time snapshot maintained by whoever
 finishes significant work. It exists so a fresh agent (or human) can orient without any
 prior session context. **Trust the tree, `git log`, and the batch LEDGERs over this file
 when they disagree**, and update it when you land something that changes the picture.
 
 ## Now
+
+- **Stale Chrome workspaces now recover through explicit tab creation (ADR-0090).** A known
+  Ghostlight `tabId` continues directly. Otherwise `tabs_create_mcp` retries the safe blank-tab
+  operation once, selects an eligible normal window in the same browser profile, and replaces the
+  dead session pin. Other calls never switch workspaces automatically. The agent-facing error is
+  short and points directly to `tabs_create_mcp`.
 
 - **The v1 visual-signature inventory is complete (ADR-0089).** Ref-based `computer.scroll_to`
   now settles three sky chevrons into its exact destination halo; `act_on.scroll_to` retains its

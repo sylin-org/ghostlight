@@ -2990,8 +2990,8 @@ async function dispatch(item) {
     reply(item.response, await handler(args, key, request.workspace));
   } catch (e) {
     if (e instanceof TabAccessError) return reply(item.response, text(e.message));
-    // Hop-tagged errors (cdp/page) pass through as-is; untagged errors keep the tool-name prefix.
-    if (e && e.hop) fail(item.response, e);
+    // Typed and hop-tagged errors are already self-contained; generic errors keep the tool prefix.
+    if (e && (e.hop || e.code)) fail(item.response, e);
     else fail(item.response, `${tool} failed: ${(e && e.message) || e}`);
   }
 }
