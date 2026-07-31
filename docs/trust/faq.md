@@ -362,4 +362,4 @@ See the [licensing guide](../guides/licensing.md),
 
 Evidence: docs/guides/licensing.md; ADR-0027 (open-core split, source-available governance); ADR-0028 (expiry changes only the audit stamp); lightbox scenario license-expiry-continuity (same governed decision and audit fields, with only the expired marker added).
 
-Last reviewed: 2026-07-14 against v0.7.0 | Contact: support@sylin.org
+Last reviewed: 2026-07-14 against v0.7.1 | Contact: support@sylin.org
