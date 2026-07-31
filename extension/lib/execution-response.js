@@ -45,6 +45,7 @@
       };
       if (error && error.hop) message.hop = error.hop;
       if (error && error.detail) message.detail = error.detail;
+      if (error && error.code) message.code = error.code;
       post(scope, message);
     }
 

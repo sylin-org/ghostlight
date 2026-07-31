@@ -32,6 +32,7 @@ test("responses stay on their original connection when request ids are reused", 
   const newError = new Error("new failure");
   newError.hop = "page";
   newError.detail = "new detail";
+  newError.code = "workspace_window_ineligible";
   responder.fail(newScope, newError);
   oldGate.resolve();
   await oldCompletion;
@@ -51,6 +52,7 @@ test("responses stay on their original connection when request ids are reused", 
     error: "new failure",
     hop: "page",
     detail: "new detail",
+    code: "workspace_window_ineligible",
     commandId: "new-command",
     executorGeneration: "executor-generation",
   }]);

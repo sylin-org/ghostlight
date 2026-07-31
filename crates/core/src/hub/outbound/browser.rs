@@ -9,7 +9,7 @@
 //! Wire protocol (see also `transport/native/messages.rs`): the mcp-server sends
 //! `{ "id", "type": "tool_request", "tool", "args" }`; the extension replies with
 //! `{ "id", "type": "tool_response", "result" }` or
-//! `{ "id", "type": "tool_error", "error", "hop"?, "detail"? }`. A `tool_error` is mapped to a
+//! `{ "id", "type": "tool_error", "error", "hop"?, "detail"?, "code"? }`. A `tool_error` is mapped to a
 //! hop-attributed [`ToolError`] (see [`ToolError::from_extension_wire`]); `detail`, if present, is
 //! logged with `tracing::debug!` and never reaches the tool result. Messages without an `id`
 //! (events, heartbeats) are ignored here (Phase 3 buffers events).
@@ -729,6 +729,7 @@ impl Browser {
         args: &Value,
         target: u32,
         result: &mut Value,
+        replace: Option<WorkspaceTarget>,
     ) {
         let metadata = result
             .as_object_mut()
@@ -743,13 +744,15 @@ impl Browser {
         else {
             return;
         };
-        self.workspaces.pin(
-            guid,
-            WorkspaceTarget {
-                browser_slot: target,
-                native_window_id,
-            },
-        );
+        let selected = WorkspaceTarget {
+            browser_slot: target,
+            native_window_id,
+        };
+        if let Some(expected) = replace {
+            self.workspaces.replace_if(guid, expected, selected);
+        } else {
+            self.workspaces.pin(guid, selected);
+        }
     }
 
     /// The observability sink (used by the mcp-server to record the MCP boundary).
@@ -1134,28 +1137,56 @@ impl Browser {
         self.note_gif_action(guid, tool, call_args, target, execution)
             .await;
 
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
-        let mut request = json!({ "id": id, "type": "tool_request", "tool": tool, "args": call_args, "guid": guid });
-        request["execution"] = execution_wire(execution);
-        if let Some(client_key) = self.client_key_for(guid) {
-            request["clientKey"] = json!(client_key);
-        }
-        self.stamp_workspace_request(&mut request, guid, tool, call_args, target);
-        let payload = serde_json::to_vec(&request)
-            .map(Zeroizing::new)
-            .map_err(|error| DeliveryFailure {
-                error: ToolError::binary(format!("failed to encode the tool request: {error}")),
-                outcome_unknown: false,
-            })?;
-        let frames = self
-            .outbound_frames(target, &id, &payload)
-            .map_err(|error| DeliveryFailure {
-                error,
-                outcome_unknown: false,
-            })?;
-        let result = self
-            .send_and_await_delivery(id, frames, tool, target, TOOL_TIMEOUT, Some(guid))
-            .await;
+        let pinned_workspace = self
+            .workspaces
+            .get(guid)
+            .filter(|workspace| workspace.browser_slot == target);
+        let mut recovery_from = None;
+        let result = loop {
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
+            let mut request = json!({ "id": id, "type": "tool_request", "tool": tool, "args": call_args, "guid": guid });
+            request["execution"] = execution_wire(execution);
+            if let Some(client_key) = self.client_key_for(guid) {
+                request["clientKey"] = json!(client_key);
+            }
+            self.stamp_workspace_request(&mut request, guid, tool, call_args, target);
+            if recovery_from.is_some() {
+                request[crate::constants::workspace::REQUEST] = json!({
+                    crate::constants::workspace::SELECT:
+                        crate::constants::workspace::LAST_FOCUSED_NORMAL,
+                });
+            }
+            let payload = serde_json::to_vec(&request)
+                .map(Zeroizing::new)
+                .map_err(|error| DeliveryFailure {
+                    error: ToolError::binary(format!("failed to encode the tool request: {error}")),
+                    outcome_unknown: false,
+                })?;
+            let frames = self
+                .outbound_frames(target, &id, &payload)
+                .map_err(|error| DeliveryFailure {
+                    error,
+                    outcome_unknown: false,
+                })?;
+            let attempt = self
+                .send_and_await_delivery(id, frames, tool, target, TOOL_TIMEOUT, Some(guid))
+                .await;
+            let should_recover = recovery_from.is_none()
+                && tool == "tabs_create_mcp"
+                && pinned_workspace.is_some()
+                && matches!(
+                    &attempt,
+                    Err(failure)
+                        if !failure.outcome_unknown
+                            && failure.error.extension_code()
+                                == Some(crate::constants::workspace::WINDOW_INELIGIBLE_ERROR)
+                );
+            if should_recover {
+                recovery_from = pinned_workspace;
+                continue;
+            }
+            break attempt;
+        };
         if activity_admitted {
             self.recordings.finish_activity(
                 guid,
@@ -1163,7 +1194,7 @@ impl Browser {
             );
         }
         let mut result = result?;
-        self.capture_workspace_result(guid, tool, call_args, target, &mut result);
+        self.capture_workspace_result(guid, tool, call_args, target, &mut result, recovery_from);
         let result = self.encode_tab_ids(result, target);
         Ok(self.cache_and_inject_screenshot(guid, tool, result))
     }
@@ -1216,7 +1247,7 @@ impl Browser {
         let mut result = self
             .send_and_await(id, frames, tool, target, timeout, Some(guid))
             .await?;
-        self.capture_workspace_result(guid, tool, args, target, &mut result);
+        self.capture_workspace_result(guid, tool, args, target, &mut result, None);
         Ok(result)
     }
 
@@ -2376,10 +2407,24 @@ impl Browser {
                     .unwrap_or("tool execution failed")
                     .to_string();
                 let hop = reply.get("hop").and_then(Value::as_str);
+                let code = reply
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
                 if reply.get("detail").is_some() {
                     tracing::debug!("extension supplied redacted error detail");
                 }
-                Err(ToolError::from_extension_wire(hop, message))
+                let error = ToolError::from_extension_wire(hop, code, message);
+                let error = if error.extension_code()
+                    == Some(crate::constants::workspace::WINDOW_INELIGIBLE_ERROR)
+                {
+                    error.next_step(
+                        "call tabs_create_mcp to open a fresh tab, or keep using a known Ghostlight tabId",
+                    )
+                } else {
+                    error
+                };
+                Err(error)
             }
             _ => Ok(reply.get("result").cloned().unwrap_or(Value::Null)),
         };
@@ -2759,6 +2804,168 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_tab_creation_recovers_a_stale_workspace() {
+        let browser = Browser::new();
+        let guid = "workspace-recovery-guid";
+        browser.set_client_key(guid, "test-client");
+        let (mut ext_side, _) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+
+        let fake_ext = tokio::spawn(async move {
+            let first = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let first: Value = serde_json::from_slice(&first).unwrap();
+            assert_eq!(
+                first[crate::constants::workspace::REQUEST],
+                json!({
+                    crate::constants::workspace::SELECT:
+                        crate::constants::workspace::LAST_FOCUSED_NORMAL,
+                })
+            );
+            let reply = json!({
+                "id": first["id"],
+                "type": "tool_response",
+                "result": {
+                    "ok": "initial",
+                    crate::constants::workspace::RESULT_META: {
+                        crate::constants::workspace::WINDOW_ID: 17,
+                    },
+                },
+            });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+
+            let stale = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let stale: Value = serde_json::from_slice(&stale).unwrap();
+            assert_eq!(
+                stale[crate::constants::workspace::REQUEST],
+                json!({ crate::constants::workspace::WINDOW_ID: 17 })
+            );
+            let reply = json!({
+                "id": stale["id"],
+                "type": "tool_error",
+                "error": "That Ghostlight workspace is no longer available",
+                "code": crate::constants::workspace::WINDOW_INELIGIBLE_ERROR,
+            });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+
+            let recovery = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let recovery: Value = serde_json::from_slice(&recovery).unwrap();
+            assert_eq!(
+                recovery[crate::constants::workspace::REQUEST],
+                json!({
+                    crate::constants::workspace::SELECT:
+                        crate::constants::workspace::LAST_FOCUSED_NORMAL,
+                })
+            );
+            let reply = json!({
+                "id": recovery["id"],
+                "type": "tool_response",
+                "result": {
+                    "ok": "recovered",
+                    crate::constants::workspace::RESULT_META: {
+                        crate::constants::workspace::WINDOW_ID: 23,
+                    },
+                },
+            });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+
+            let context = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let context: Value = serde_json::from_slice(&context).unwrap();
+            assert_eq!(
+                context[crate::constants::workspace::REQUEST],
+                json!({ crate::constants::workspace::WINDOW_ID: 23 })
+            );
+            let reply = json!({
+                "id": context["id"],
+                "type": "tool_response",
+                "result": { "ok": "context" },
+            });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+        });
+
+        let execution = ExecutionContext::safety_protocol();
+        let initial = browser
+            .call_with_delivery_outcome(guid, "tabs_create_mcp", &json!({}), &execution)
+            .await
+            .unwrap_or_else(|failure| panic!("{}", failure.error));
+        assert_eq!(initial, json!({ "ok": "initial" }));
+
+        let recovered = browser
+            .call_with_delivery_outcome(guid, "tabs_create_mcp", &json!({}), &execution)
+            .await
+            .unwrap_or_else(|failure| panic!("{}", failure.error));
+        assert_eq!(recovered, json!({ "ok": "recovered" }));
+
+        let context = browser
+            .call_with_delivery_outcome(guid, "tabs_context_mcp", &json!({}), &execution)
+            .await
+            .unwrap_or_else(|failure| panic!("{}", failure.error));
+        assert_eq!(context, json!({ "ok": "context" }));
+        fake_ext.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn context_read_does_not_recover_a_stale_workspace() {
+        let browser = Browser::new();
+        let guid = "workspace-no-recovery-guid";
+        let (mut ext_side, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        browser.workspaces.pin(
+            guid,
+            WorkspaceTarget {
+                browser_slot: slot,
+                native_window_id: 17,
+            },
+        );
+
+        let fake_ext = tokio::spawn(async move {
+            let request = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let request: Value = serde_json::from_slice(&request).unwrap();
+            assert_eq!(
+                request[crate::constants::workspace::REQUEST],
+                json!({ crate::constants::workspace::WINDOW_ID: 17 })
+            );
+            let reply = json!({
+                "id": request["id"],
+                "type": "tool_error",
+                "error": "That Ghostlight workspace is no longer available",
+                "code": crate::constants::workspace::WINDOW_INELIGIBLE_ERROR,
+            });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), host::read_message(&mut ext_side),)
+                    .await
+                    .is_err(),
+                "context reads must not retry in another workspace"
+            );
+        });
+
+        let failure = browser
+            .call_with_delivery_outcome(
+                guid,
+                "tabs_context_mcp",
+                &json!({}),
+                &ExecutionContext::safety_protocol(),
+            )
+            .await
+            .expect_err("the stale context read must fail");
+        assert!(!failure.outcome_unknown);
+        assert_eq!(
+            failure.error.extension_code(),
+            Some(crate::constants::workspace::WINDOW_INELIGIBLE_ERROR)
+        );
+        assert_eq!(browser.workspaces.get(guid).unwrap().native_window_id, 17);
+        fake_ext.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn workspace_bootstrap_schedules_globally_then_on_the_pinned_browser() {
         let browser = Browser::new();
         let descriptor = crate::browser::directory::descriptor("tabs_create_mcp").unwrap();
@@ -2839,6 +3046,35 @@ mod tests {
         let text = err.to_string();
         assert!(text.starts_with("[hop: extension]"), "{text}");
         assert!(text.contains("boom"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn stale_workspace_error_points_to_a_fresh_tab() {
+        let browser = Browser::new();
+        let mut ext_side = attach_fake_extension(&browser).await;
+
+        tokio::spawn(async move {
+            let request = host::read_message(&mut ext_side).await.unwrap().unwrap();
+            let request: Value = serde_json::from_slice(&request).unwrap();
+            let reply = json!({
+                "id": request["id"],
+                "type": "tool_error",
+                "error": "That Ghostlight workspace is no longer available",
+                "code": crate::constants::workspace::WINDOW_INELIGIBLE_ERROR,
+            });
+            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
+                .await
+                .unwrap();
+        });
+
+        let error = browser
+            .call("test-guid", "tabs_context_mcp", &json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "[hop: extension] That Ghostlight workspace is no longer available. Next step: call tabs_create_mcp to open a fresh tab, or keep using a known Ghostlight tabId."
+        );
     }
 
     #[tokio::test]

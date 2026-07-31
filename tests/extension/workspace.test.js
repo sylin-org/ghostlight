@@ -4,6 +4,7 @@ const assert = require("node:assert");
 const {
   LAST_FOCUSED_NORMAL,
   FOCUS_MRU_KEY,
+  WINDOW_INELIGIBLE_CODE,
   workspaceGroupKey,
   parseWorkspaceGroupKey,
   resolveWorkspaceWindow,
@@ -151,10 +152,11 @@ test("a pinned window is validated and never silently replaced", async () => {
       },
     },
   };
-  await assert.rejects(
-    resolveWorkspaceWindow(chrome, { windowId: 11 }),
-    /no longer eligible/
-  );
+  await assert.rejects(resolveWorkspaceWindow(chrome, { windowId: 11 }), (error) => {
+    assert.strictEqual(error.code, WINDOW_INELIGIBLE_CODE);
+    assert.strictEqual(error.message, "That Ghostlight workspace is no longer available");
+    return true;
+  });
 });
 
 test("a new window is created only when no eligible normal window exists", async () => {

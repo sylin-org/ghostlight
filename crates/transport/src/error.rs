@@ -113,6 +113,8 @@ pub enum ToolError {
         message: String,
         /// One imperative clause describing what the caller should try next.
         next_step: String,
+        /// Optional machine-readable extension state used for safe, narrow recovery.
+        code: Option<String>,
     },
     /// A Chrome DevTools Protocol command the extension issued was rejected.
     #[error("[hop: cdp] {message}. Next step: {next_step}.")]
@@ -178,6 +180,7 @@ impl ToolError {
         Self::Extension {
             message: message.into(),
             next_step: "check chrome://extensions and that Chrome is running".into(),
+            code: None,
         }
     }
 
@@ -229,9 +232,10 @@ impl ToolError {
                 message,
                 next_step: step,
             },
-            Self::Extension { message, .. } => Self::Extension {
+            Self::Extension { message, code, .. } => Self::Extension {
                 message,
                 next_step: step,
+                code,
             },
             Self::Cdp { message, .. } => Self::Cdp {
                 message,
@@ -257,11 +261,23 @@ impl ToolError {
     /// tags `hop` as `"cdp"` or `"page"`; anything else (including a missing `hop`, which is the
     /// common case for the extension's own untagged internal errors) is attributed to the
     /// `extension` hop itself.
-    pub fn from_extension_wire(hop: Option<&str>, message: String) -> Self {
+    pub fn from_extension_wire(hop: Option<&str>, code: Option<String>, message: String) -> Self {
         match hop {
             Some("cdp") => Self::cdp(message),
             Some("page") => Self::page(message),
-            _ => Self::extension(message),
+            _ => Self::Extension {
+                message,
+                next_step: "check chrome://extensions and that Chrome is running".into(),
+                code,
+            },
+        }
+    }
+
+    /// Return the extension's machine-readable state code, when one was supplied.
+    pub fn extension_code(&self) -> Option<&str> {
+        match self {
+            Self::Extension { code, .. } => code.as_deref(),
+            _ => None,
         }
     }
 }
@@ -326,26 +342,36 @@ mod tool_error_tests {
 
     #[test]
     fn from_extension_wire_maps_cdp() {
-        let err = ToolError::from_extension_wire(Some("cdp"), "boom".into());
+        let err = ToolError::from_extension_wire(Some("cdp"), None, "boom".into());
         assert!(err.to_string().starts_with("[hop: cdp]"));
     }
 
     #[test]
     fn from_extension_wire_maps_page() {
-        let err = ToolError::from_extension_wire(Some("page"), "boom".into());
+        let err = ToolError::from_extension_wire(Some("page"), None, "boom".into());
         assert!(err.to_string().starts_with("[hop: page]"));
     }
 
     #[test]
     fn from_extension_wire_defaults_untagged_to_extension() {
-        let err = ToolError::from_extension_wire(None, "boom".into());
+        let err = ToolError::from_extension_wire(None, None, "boom".into());
         assert!(err.to_string().starts_with("[hop: extension]"));
     }
 
     #[test]
     fn from_extension_wire_defaults_unknown_hop_to_extension() {
-        let err = ToolError::from_extension_wire(Some("bogus"), "boom".into());
+        let err = ToolError::from_extension_wire(Some("bogus"), None, "boom".into());
         assert!(err.to_string().starts_with("[hop: extension]"));
+    }
+
+    #[test]
+    fn from_extension_wire_preserves_an_extension_state_code() {
+        let err = ToolError::from_extension_wire(
+            None,
+            Some("workspace_window_ineligible".into()),
+            "boom".into(),
+        );
+        assert_eq!(err.extension_code(), Some("workspace_window_ineligible"));
     }
 
     #[test]

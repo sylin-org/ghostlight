@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-31
+
+### Fixed
+
+- **Stale workspace recovery (ADR-0090).** When a selected Chrome workspace disappears,
+  `tabs_create_mcp` can open a fresh tab in another eligible normal window and replace the stale
+  session pin. Other calls stay put, and the short error points agents directly to tab creation.
+
 ## [0.7.0] - 2026-07-20
 
 Window-aware browser placement, a cohesive visible action language, and browser input that behaves
