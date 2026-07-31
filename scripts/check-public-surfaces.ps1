@@ -36,6 +36,12 @@ function Assert-Contains([string] $Label, [string] $Text, [string] $Expected) {
     }
 }
 
+function Assert-NotMatch([string] $Label, [string] $Text, [string] $Pattern) {
+    if ($Text -match $Pattern) {
+        Add-Failure "$Label contains retired installation guidance matching: $Pattern"
+    }
+}
+
 function ConvertFrom-HtmlText([string] $Html) {
     $WithoutTags = [regex]::Replace($Html, '<[^>]+>', '')
     return [System.Net.WebUtility]::HtmlDecode($WithoutTags)
@@ -64,6 +70,25 @@ $Readme = Get-Content -Raw (Join-Path $RepoRoot 'README.md')
 Assert-Contains 'README platform state' $Readme $Status.platformSummary
 Assert-Contains 'README extension state' $Readme $Status.extensionSummary
 Assert-Contains 'README decision path' $Readme 'https://sylin.org/ghostlight/decision-aid/'
+
+$RetiredInstallPattern = '(?i)manual (?:extension )?install|manual installation|install by hand|release-extension|ghostlight-extension-v[^\s`]*\.zip|get the extension archive|read the manual path'
+Assert-NotMatch 'README install path' $Readme $RetiredInstallPattern
+
+$AgentInstall = Get-Content -Raw (Join-Path $RepoRoot 'llms-install.md')
+$SoloInstall = Get-Content -Raw (Join-Path $RepoRoot 'docs/guides/solo-developer.md')
+$PublicStatusText = Get-Content -Raw $StatusPath
+foreach ($Surface in @(
+    @{ Label = 'agent install guide'; Text = $AgentInstall },
+    @{ Label = 'solo-developer guide'; Text = $SoloInstall },
+    @{ Label = 'public status'; Text = $PublicStatusText }
+)) {
+    Assert-NotMatch $Surface.Label $Surface.Text $RetiredInstallPattern
+    Assert-NotMatch $Surface.Label $Surface.Text '(?i)load unpacked|chrome://extensions|sideload|side-load'
+}
+
+$SourceGuide = Get-Content -Raw (Join-Path $RepoRoot 'docs/guides/installation.md')
+Assert-Contains 'README source-development exception' $Readme 'Build from source and test locally'
+Assert-Contains 'installation guide source-development exception' $SourceGuide 'To test the source tree immediately'
 
 if ($Online) {
     $Headers = @{ 'User-Agent' = 'ghostlight-public-surface-check'; Accept = 'application/vnd.github+json' }

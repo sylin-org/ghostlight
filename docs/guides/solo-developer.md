@@ -32,9 +32,9 @@ service running.
    The command is idempotent and opens the current browser-extension walkthrough. Use `--dry-run`
    if you want to see every planned change first, or `--no-open` for a quiet installation.
 
-2. Install the extension using that walkthrough. Until the Chrome Web Store listing is public,
-   download the extension archive from the latest GitHub release and load it unpacked at
-   `chrome://extensions`.
+2. Install
+   [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
+   from the Chrome Web Store using that walkthrough.
 
 3. Restart your MCP client. If you want to verify the whole chain:
 

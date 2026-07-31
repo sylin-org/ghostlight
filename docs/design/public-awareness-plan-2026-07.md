@@ -40,8 +40,8 @@ call Ghostlight a headless browser, a cloud browser, an autonomous employee, or 
 
 - The Chrome Web Store listing is public and the current release installs successfully from it.
 - A clean Windows and Linux user can complete the greenfield install instructions.
-- The store path, manual path, npm package, MCP Registry entry, website, and README agree on the
-  current version and supported browsers.
+- The store path, npm package, MCP Registry entry, website, and README agree on the current version
+  and supported browsers.
 - The hero GIF loads from `main` and the live demo remains available.
 - The first task works from at least two representative MCP clients without project-owner help.
 - `ghostlight doctor` identifies the common broken states in plain language.
@@ -50,11 +50,10 @@ call Ghostlight a headless browser, a cloud browser, an autonomous employee, or 
   examples.
 - The owner can remain available for questions during the anchor launch window.
 
-### Allowed before the broad launch
+### Source-development exception
 
-A small advanced-user proof round may use the manual unpacked extension. It must be described as a
-pre-release installation path, sent only to people who knowingly accept the friction, and used to
-repair onboarding. It is not the general launch.
+Contributors building Ghostlight from source may load the repository extension directly so they can
+test local changes immediately. This is a development workflow, not a public installation path.
 
 ## Audiences in order
 
@@ -305,8 +304,7 @@ voluntary conversations.
 
 Before external publication, decide:
 
-1. whether to run a manual-extension proof cohort before the Chrome Web Store clears;
-2. which personal account will be the durable founder voice on each social channel;
-3. whether GitHub Discussions or Issues is the preferred public first-use feedback surface;
-4. whether Product Hunt is worth the later attention cost;
-5. which date can be protected for founder presence during the anchor launch.
+1. which personal account will be the durable founder voice on each social channel;
+2. whether GitHub Discussions or Issues is the preferred public first-use feedback surface;
+3. whether Product Hunt is worth the later attention cost;
+4. which date can be protected for founder presence during the anchor launch.

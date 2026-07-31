@@ -7,6 +7,12 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **End-user extension installation is store-only (ADR-0091).** The README, agent install guide,
+  human guides, current design notes, test recipes, public status, and website source now point
+  packaged users to the Chrome Web Store. Source builders retain one clearly labeled development
+  extension workflow for immediate local testing. Repository and rendered-site checks reject
+  alternate end-user installation language on public surfaces.
+
 - **Stale Chrome workspaces now recover through explicit tab creation (ADR-0090).** A known
   Ghostlight `tabId` continues directly. Otherwise `tabs_create_mcp` retries the safe blank-tab
   operation once, selects an eligible normal window in the same browser profile, and replaces the
@@ -69,7 +75,7 @@ when they disagree**, and update it when you land something that changes the pic
   work stayed pinned there after focus moved elsewhere, and the JavaScript workwheel remained
   visible during a two-second page-local operation. Visible Linux verification also passed in the
   ordinary graphical profile with a freshly rebuilt user candidate and explicitly reloaded
-  unpacked extension. A fresh real Codex session reused the last-focused one of two existing
+  development extension. A fresh real Codex session reused the last-focused one of two existing
   normal Chrome windows for first-touch work without creating a third window. Focus then moved to
   the other window through a natural no-Chrome-focus interval, but a later unaddressed tab-create
   stayed in the first session workspace. The normal-window count remained two and no product
@@ -143,16 +149,16 @@ when they disagree**, and update it when you land something that changes the pic
 
 - **Branches**: `main` = releases, `dev` = trunk. Work lands on `dev`; the owner reviews
   `dev -> main` PRs and cuts releases.
-- **Latest published release: v0.7.0** (2026-07-20), cut with
-  `scripts/release.ps1 0.7.0`. GitHub Actions run `29779474137` passed the full test and four-target
+- **Latest published release: v0.7.1** (2026-07-31), cut with
+  `scripts/release.ps1 0.7.1`. GitHub Actions run `30666104207` passed the full test and four-target
   build matrix, assembled one immutable release bundle, generated the CycloneDX SBOM, verified the
   canonical hash manifest, attested provenance, and published all 28 expected assets. npm
-  `ghostlight@0.7.0` is live and its launcher smoke fetched the pinned Windows binary and returned a
-  healthy `doctor`; Homebrew tap commit `2f5244f` and MCP registry `org.sylin/ghostlight` also carry
-  0.7.0. Checksum fill `a53ab31`, trust restamp `bb2c6cd`, and website commits `7fe3bd3` plus
-  `5fb17bf` are published. The synchronized website deploy passed Cloudflare and Socket checks.
-  Winget new-package PR `microsoft/winget-pkgs#400226` now carries the locally validated v0.7.0
-  manifests at `e80dea3`; the redundant v0.6.0 update PR was closed as superseded.
+  `ghostlight@0.7.1` is live and its launcher smoke fetched the pinned Windows binary and returned a
+  healthy `doctor`; Homebrew tap commit `d25be3c` and active MCP registry entry
+  `org.sylin/ghostlight` also carry 0.7.1. Checksum fill `5b88777`, trust restamp `21945d4`, and
+  website fallback commit `6dc7421` are published. Winget new-package PR
+  `microsoft/winget-pkgs#400226` was approved, merged, and published for v0.7.0; a new v0.7.1
+  submission remains due.
 - **v0.6.0 is an intentional greenfield boundary.** The unpublished 0.5.8 draft became this minor
   release because browser-control web ingress and its scaffolding were removed outright. Public
   setup starts from a local service, same-user OS IPC, and the interactive user's authenticated
@@ -173,17 +179,18 @@ when they disagree**, and update it when you land something that changes the pic
   handoff (ADR-0070), agent narration (ADR-0072), reliable memory-only GIF recording and bounded
   browser transport (ADRs 0073/0074), the cohesive Card Foundry demo story, and the live Foundry
   companion route at `https://sylin.org/ghostlight/demo/foundry/`.
-- **The Chrome Web Store listing is submitted at v0.6.0 and pending compliance review.** The owner
+- **The Chrome Web Store listing is public at v0.6.0; v0.7.1 is pending review.** The owner
   completed the listing, Privacy practices, permission and remote-code justifications, data-use
   certifications, screenshots, video, and promotional tiles for the original v0.5.7 submission.
   After Google reinstated the `ghostlight-release` API project on 2026-07-15, the owner approved
   cancelling that pending review so the first public package would match the greenfield release.
   The v0.6.0 package uploaded successfully and Chrome accepted the new submission as
-  `ITEM_PENDING_REVIEW`. Chrome again warned that broad host permissions may trigger an in-depth
+  `ITEM_PENDING_REVIEW`. Chrome approved and published v0.6.0 by 2026-07-31. The v0.7.1 release
+  then uploaded successfully and the publish API accepted it with `[OK] OK.`; the public listing
+  remains at v0.6.0 while that update is reviewed. Broad host permissions can trigger an in-depth
   review; that is the intentional tradeoff for general-purpose automation across user-selected
-  sites, not a rejected submission. v0.6.0 is compatible, so the owner decided to preserve its
-  certification queue and submit the packaged v0.7.0 extension only after that review completes.
-  Edge remains unsubmitted because no `EDGE_*` credentials are configured.
+  sites, not a rejected submission. Edge remains unsubmitted because no `EDGE_*` credentials are
+  configured.
 - **The ADR-0056 Lightbox consolidation is complete.** All 27 legacy ignored spawn tests have named
   parity scenarios, the originals and dual shell wrappers are retired, and CI runs the 34-scenario
   Lightbox suite as the sole service-side process-boundary gate. The repaired Playwright job stays
@@ -234,7 +241,7 @@ when they disagree**, and update it when you land something that changes the pic
   seconds), then show a closed-shadow overlay and popup controls. Compact narration drops the
   progress meter; screenshot and recording feedback are quieter and tied to real capture state.
   Attention transitions are content-free audit records. The README and install guide now expose
-  the four-stage practitioner journey, no-account/free-core facts, pre-release extension path, and
+  the four-stage practitioner journey, no-account/free-core facts, visible extension step, and
   a read-only first proof. The full Rust suite, strict clippy, 93 extension tests, JS syntax checks,
   and formatting are green. Repository-actionable work is complete; a consented follow-up human
   review remains an owner-side evidence gate.
@@ -328,7 +335,7 @@ when they disagree**, and update it when you land something that changes the pic
   requires Read; page placement by ref or coordinate requires Write. A timeout or disconnect after
   enqueue reports `outcome_unknown` and `retry_safe: false` instead of inviting a duplicate page
   effect. Formatting, strict clippy, all 72 extension tests, and the full Rust workspace suite are
-  green. The rebuilt service and reloaded unpacked extension passed a real MCP browser verification:
+  green. The rebuilt service and reloaded development extension passed a real MCP browser verification:
   20 accepted frames (2,707,795 compressed bytes) encoded to a 7,046,417-byte GIF, crossed the
   bounded chunk transport, and returned `dispatched` with `unverified` acceptance and
   `retry_safe: false`. The test recording was cleared and its synthetic page overlay removed.

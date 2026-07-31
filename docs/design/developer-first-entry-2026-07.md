@@ -77,25 +77,12 @@ The mascot can walk across the four stages as a guide. Completion states should 
 Ghostlight mark, color tokens, and vocabulary rather than separate illustrations that look like
 different products.
 
-## Pre-release extension path
+## Browser extension path
 
-Until the Chrome Web Store listing is live, the main product and repository entrances should show
-the manual extension step inline, not merely say that an install guide exists:
-
-1. Download the extension archive from the latest Ghostlight release.
-2. Unzip it to a stable local folder.
-3. Open `chrome://extensions` in a Chromium browser.
-4. Turn on Developer mode.
-5. Choose `Load unpacked` and select the extracted extension folder.
-
-The primary CTA should link directly to the current release archive or to a stable Ghostlight page
-that immediately resolves it. A secondary `See every installation option` link can lead to the full
-guide. Label the transition `Continue on GitHub to download the pre-release extension` so the visual
-change does not resemble a site identity failure.
-
-When the store listing becomes public, replace the primary CTA with `Add to Chrome` and retain the
-manual path as a clearly secondary development option. Do not leave release-version asset names in
-evergreen copy.
+The Chrome Web Store listing is public. Main product and repository entrances should link directly
+to it and should not present a release archive as an end-user installation choice. Source builders
+may load the repository's `extension/` directory as a development extension so they can test their
+local build immediately. Keep that workflow inside source-development documentation.
 
 ## No-account explanation
 
@@ -123,14 +110,13 @@ Recommended transitions:
 | From | Primary copy | Destination cue |
 | --- | --- | --- |
 | Product page | `Install Ghostlight` | Local service installer |
-| Service post-install | `Add the browser extension` | `Continue on GitHub` or `Open Chrome Web Store` |
+| Service post-install | `Add the browser extension` | `Open Chrome Web Store` |
 | Extension post-install | `Connect your MCP client` | Name detected clients and restart requirement |
 | Doctor output | `Finish the browser step` | Print and optionally open the same stable guide |
 | Ready state | `Try your first browser task` | Copyable client prompt |
 
-Chrome internal pages and GitHub releases cannot share Ghostlight styling. Use a small screenshot
-or annotated illustration before the transition so the user knows what `Developer mode` and `Load
-unpacked` will look like.
+The Chrome Web Store cannot share Ghostlight styling. Use a small screenshot or annotated
+illustration before the transition so the user recognizes the listing and the Ghostlight mascot.
 
 ## First useful task
 

@@ -15,7 +15,7 @@ copied. See [../docs/adr/](../docs/adr/) for the decisions behind it.
 - `content.js`: DOM reads (accessibility tree, `find`, `form_input` (shadow DOM), `get_page_text`).
 - `native-messaging-host.json`: host-manifest template (fill in the binary path + extension ID).
 
-## Setup
+## Source-development setup
 
 The binary self-registers everything:
 
@@ -29,9 +29,8 @@ The binary self-registers everything:
    `ghostlight doctor` verifies the setup; `ghostlight uninstall` reverses it.
 4. **Restart the browser** (native-messaging host configs are read at startup).
 
-Prefer to wire it by hand? See the public
-[installation guide](../docs/guides/installation.md) for supported paths and troubleshooting.
-Platform-specific registration details remain in the installer source and ADRs.
+See the public [installation guide](../docs/guides/installation.md) for packaged installation and
+troubleshooting. Platform-specific registration details remain in the installer source and ADRs.
 
 ## Verify
 Ask the agent to *navigate to a page and take a screenshot*: the Ghostlight tab group opens

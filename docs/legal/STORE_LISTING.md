@@ -301,16 +301,11 @@ The item was submitted for review on 2026-07-13. The store assigned the id
 `cjcmhepmagomefjggkcohdbfemacojoa` (the dev id comes from the pinned manifest `key`, which is
 stripped from the store package).
 
-Current release state (2026-07-15): the owner approved cancelling the pending v0.5.7 review after
-Google reinstated the publishing API project. The v0.6.0 package then uploaded successfully and
-Chrome accepted it as `ITEM_PENDING_REVIEW`. Broad host permissions may trigger the expected
-in-depth review. The listing is submitted but is not public until Chrome approves and publishes it.
-
-Release-candidate state (2026-07-31): v0.7.1 supersedes the unsubmitted v0.7.0 candidate. Its
-extension changes require a new package. Before the release extension step can upload it, cancel
-the pending v0.6.0 submission through the owner-approved dashboard or API path documented in
-`docs/RELEASE.md`. Until Chrome accepts the replacement, v0.6.0 remains the last recorded store
-state.
+Current release state (2026-07-31): Google approved and published v0.6.0. The public listing serves
+that version and offers `Add to Chrome`. The v0.7.1 package then uploaded successfully through the
+release pipeline and Chrome accepted its publish request with `[OK] OK.`. The public listing will
+remain at v0.6.0 while Chrome reviews the update. Broad host permissions may trigger the expected
+in-depth review.
 
 Ordinary `ghostlight install` already registers both the Web Store id and the pinned unpacked-dev
 id in the native host's `allowed_origins`. A store user therefore runs the normal command:

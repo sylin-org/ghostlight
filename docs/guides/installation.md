@@ -40,16 +40,9 @@ compile.
    `--client codex` to target Codex only, `--dry-run` to inspect the plan, or `--no-open` for a
    quiet installation. A first install opens the extension walkthrough.
 
-2. **Add the extension.** Until the Chrome Web Store listing is public, download
-   `ghostlight-extension-v*.zip` from the
-   [latest release](https://github.com/sylin-org/ghostlight/releases/latest), unzip it, and load it
-   unpacked at `chrome://extensions` (Developer mode, then Load unpacked). The walkthrough always
-   presents the current path.
-
-   The GitHub release page is an intentional handoff from Ghostlight documentation. Choose the
-   extension ZIP attached to the newest release, extract it to a folder you will keep, open
-   `chrome://extensions`, enable Developer mode, choose `Load unpacked`, and select that extracted
-   folder. Chrome shows Ghostlight's blue mascot when the correct folder is loaded.
+2. **Add the extension.** Install
+   [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
+   from the Chrome Web Store. Chrome shows Ghostlight's blue mascot when it is ready.
 
 3. **Restart your MCP clients,** then try this read-only proof before asking it to act:
 
@@ -60,8 +53,8 @@ compile.
 
        npx -y ghostlight doctor
 
-For an MCP client the installer does not recognize, add this stdio entry manually, then run the
-same install command for the browser side:
+For an MCP client the installer does not recognize, add this stdio entry, then run the same install
+command for the browser side:
 
     { "command": "npx", "args": ["-y", "ghostlight"] }
 
@@ -75,8 +68,9 @@ The path when you want to read what you are running.
 
 The build produces two executables. `ghostlight` is the CLI and the persistent service.
 `ghostlight-relay` is the thin pass-through your MCP client and Chrome actually launch; it depends
-on almost nothing, so rebuilding the service never forces it to relink. Load the extension as in
-Path A step 2 (from the local `extension/` directory), then register:
+on almost nothing, so rebuilding the service never forces it to relink. To test the source tree
+immediately, open `chrome://extensions`, enable Developer mode, choose `Load unpacked`, and select
+the local `extension/` directory. Then register:
 
     ./target/release/ghostlight install --extension-id cjcmhepmagomefjggkcohdbfemacojoa
 
@@ -94,8 +88,8 @@ might expect." For each browser and client it targets, `install`:
   the part to trust: it re-reads the file at write time and changes only the one entry it owns, so
   it never clobbers a hand-edited config and never duplicates itself if you run it twice.
   If comments make a JSONC file unsafe to merge automatically, the installer leaves it untouched
-  and prints the exact entry as a manual step. Guidance is reported separately from failure.
-- **Allow-lists the extension** by id. The Web Store and unpacked-dev ids are always allowed;
+  and prints the exact entry to add. Guidance is reported separately from failure.
+- **Allow-lists the extension** by id. The Web Store and source-development ids are always allowed;
   `--extension-id` adds another.
 - **Registers an auto-start supervisor** so the service is there when a client asks for it. Skip it
   with `--no-supervisor`.
@@ -112,8 +106,8 @@ binary by hand; the client and the browser do.
 `brave`, `chromium`). That list is smaller than the set of clients Ghostlight *works* with, and the
 gap is worth understanding. Any stdio MCP client can use Ghostlight; the installer only knows how
 to write config for these nine because each location and dialect is handled specifically. For
-anything else (Cline and the rest), add the stdio server entry from the Path A example by hand and
-it behaves the same. The installer's job is convenience, not gatekeeping.
+anything else (Cline and the rest), add the stdio server entry from the Path A example and it
+behaves the same. The installer's job is convenience, not gatekeeping.
 
 ### Useful flags
 
@@ -145,8 +139,10 @@ supervisor. `--dry-run` shows the plan first.
 ## Troubleshooting
 
 - **Start with `doctor`.** It pinpoints the common failures by name.
-- **Extension shows disconnected?** Reload it at `chrome://extensions`. A service worker can be
-  evicted; reloading re-establishes the link.
+- **Store extension shows disconnected?** Confirm that it is enabled in the browser's extension
+  manager, then restart the browser if needed.
+- **Source-development extension shows disconnected?** Reload it at `chrome://extensions`. A
+  service worker can be evicted; reloading re-establishes the link.
 - **Developing on Windows?** Use the isolated engine swap in
   [DEV-LOOP.md](../DEV-LOOP.md). It builds away from locked release executables, swaps only the
   service holding the one endpoint, and lets the stable relays reconnect automatically.
