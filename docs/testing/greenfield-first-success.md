@@ -107,9 +107,8 @@ Broad publication is ready when all of these are true:
 - successful participants accurately describe the visible, local, user-context boundary;
 - the current default extension path has one clean install-to-doctor-to-first-task pass.
 
-If the Chrome Web Store listing clears during the cohort, treat the store path as a new journey.
-Do not combine its results with the unpacked-extension path until the store path has its own clean
-acceptance pass.
+Use the Chrome Web Store extension for every cohort run. Source-development extension results do
+not count toward the packaged greenfield acceptance threshold.
 
 ## Failure handling
 
@@ -120,4 +119,3 @@ rewrite a failed record into a success, and do not lower the threshold to preser
 The deeper packaged-product lifecycle remains in
 [linux-live-lifecycle.md](linux-live-lifecycle.md). This cohort proves first success, not every
 restart, upgrade, recovery, or uninstall behavior.
-

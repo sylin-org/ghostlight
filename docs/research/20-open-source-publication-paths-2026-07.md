@@ -371,10 +371,11 @@ Ghostlight already has several strong distribution primitives:
 - governance and trust material for the second half of the journey;
 - a decision aid for people comparing deployment shapes.
 
-The largest current risk is conversion timing. The Chrome Web Store listing is still pending. A
-manual unpacked-extension path is acceptable for a small, advanced feedback cohort, but broad
-attention should wait until a stranger can install without founder guidance. The non-author review
-already established that manual installation was understandable but cumbersome.
+At the time of this research, the largest risk was conversion timing because the Chrome Web Store
+listing was still pending. A pre-store development-extension path was acceptable for a small,
+advanced feedback cohort, but broad attention needed to wait until a stranger could install without
+founder guidance. The non-author review established that the pre-store setup was understandable but
+cumbersome. ADR-0091 now makes the public store listing the only end-user extension path.
 
 The recommended sequence is captured separately in
 [the Ghostlight public-awareness plan](../design/public-awareness-plan-2026-07.md). It is a draft

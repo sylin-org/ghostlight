@@ -43,6 +43,9 @@ Collaboration and process -- this file is their canonical home:
 - **Repository content is practitioner-first.** Developers should see the product, installation,
   first useful task, and exact no-account/free-core facts before organization procurement depth.
   Product pages and the Trust Center carry the buyer-focused material.
+- **End-user extension installation is store-only.** Packaged and public paths point to the Chrome
+  Web Store. Only source-development docs may explain loading the repository extension directly for
+  immediate local testing (ADR-0091).
 - **Persist before context loss.** On a "prep for compaction" / "handoff" / "save state" request,
   first update memory + durable docs (this file, STATUS, ADRs/LEDGERs) and commit, THEN emit a
   self-contained continuation prompt -- persist first, answer second.

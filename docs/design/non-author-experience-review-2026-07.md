@@ -18,7 +18,8 @@ otherwise. Do not publish the participant's quotations or identity without her c
 
 ### The product became useful quickly after installation
 
-The participant found the manual extension path straightforward, although predictably cumbersome.
+The participant found the pre-store extension path straightforward, although predictably
+cumbersome.
 Once both halves were installed, Kline recognized Ghostlight quickly. Her comparison, "It's just
 like Claude Cowork!", was an immediate recognition moment: Ghostlight made a familiar browser-agent
 experience available in another MCP client without requiring a Ghostlight account.
@@ -43,14 +44,13 @@ it should not become the symbol of governance authority.
 
 ### Installation was discoverable only after the owner supplied the right starting point
 
-The participant could not find the pre-release extension download instructions from the main
-product page. The current manual process was understandable once found, but the journey crossed
-surfaces whose visual identity differed enough that she wondered whether they belonged to
-different sites.
+The participant could not find the pre-store extension instructions from the main product page.
+The process was understandable once found, but the journey crossed surfaces whose visual identity
+differed enough that she wondered whether they belonged to different sites.
 
 This is assisted discovery followed by unassisted execution, not a fully unassisted install win.
-The product page should show the complete journey and link directly to the current extension
-archive while the store listing is unavailable.
+The product page should show the complete journey and link directly to the supported extension
+listing.
 
 ### Narration looked and behaved heavier than its meaning
 

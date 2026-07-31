@@ -524,7 +524,8 @@ Three artifacts, all pushed through existing IT channels:
 ### 8.2. Personal/Developer Deployment
 
 1. Download the binary.
-2. Load the extension unpacked in the browser (`chrome://extensions` -> Developer mode -> Load unpacked).
+2. Install the extension from the Chrome Web Store. Source builders testing local changes may load
+   the repository's `extension/` directory as a development extension.
 3. Register native messaging host (a one-line install script, as in the reference implementation).
 4. Add to MCP client: `claude mcp add ghostlight -- /path/to/ghostlight`
 5. No manifest needed. The binary defaults to `unlisted_domains: "observe"`, audit to stderr.

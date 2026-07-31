@@ -42,14 +42,13 @@ client; its CLI process and TOML registration provide a terminal-driven comparis
 
 Test the packaged product, not a repository checkout:
 
-1. Begin with the latest published Linux archive and packaged extension.
+1. Begin with the latest published Linux archive and the Chrome Web Store extension.
 2. Complete one clean lifecycle against that release.
 3. Upgrade in place to the candidate archive produced by CI.
 4. Repeat only the affected lifecycle stages after a fix.
 
-The extension is installed through visible Chrome UI. Use the Web Store build if it is public;
-otherwise unpack the packaged release extension into a stable user-owned directory and use Load
-unpacked. Do not load the repository's `extension/` directory for the packaged-product pass.
+Install the extension from the Chrome Web Store through visible Chrome UI. Do not load the
+repository's `extension/` directory for the packaged-product pass.
 
 ## Access handoff
 

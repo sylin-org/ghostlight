@@ -88,10 +88,9 @@ service is native Rust; there is no Node service to keep alive and nothing to co
    Claude Code, Claude Desktop, Cursor, VS Code, Codex, Windsurf, Zed, OpenCode, and Crush. Use
    `--client <id>` to target one client, or `--dry-run` to inspect every planned change first.
 
-2. **Add the extension.** Until the Chrome Web Store listing is public, download
-   `ghostlight-extension-v*.zip` from the
-   [latest release](https://github.com/sylin-org/ghostlight/releases/latest) and load it unpacked
-   at `chrome://extensions`. The walkthrough opened by the installer shows the same current path.
+2. **Add the extension.** Install
+   [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
+   from the Chrome Web Store.
 
 3. **Restart your MCP clients.** The browser tools appear. Try:
 
@@ -99,20 +98,18 @@ service is native Rust; there is no Node service to keep alive and nothing to co
    > or change anything.
 
 If anything looks off, `npx ghostlight doctor` tells you exactly what. Prebuilt archives, building
-from source, and every other path live in the
-[installation guide](docs/guides/installation.md) and the manual steps below.
+from source, and every other path live in the [installation guide](docs/guides/installation.md).
 
 For an unsupported client, add `{ "command": "npx", "args": ["-y", "ghostlight"] }` as a stdio
-MCP server, then run the installer for the browser side. If VS Code reports a manual client step,
-use its native installer:
+MCP server, then run the installer for the browser side. For VS Code, use its native installer:
 
 [![Add to VS Code](https://img.shields.io/badge/VS_Code-Add_MCP_server-38BDF8?style=flat-square)](vscode:mcp/install?%7B%22name%22%3A%22ghostlight%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22ghostlight%22%5D%7D)
 
 **Current platform state.** Windows and Linux are verified end to end against live browsers. macOS
 builds and passes the full test suite in CI; its live-browser verification is still owed.
 
-**Extension state.** The Chrome Web Store listing remains under compliance review; until it is
-public, the install guide provides the current release-extension path.
+**Extension state.** The Chrome Web Store listing is public at v0.6.0; the v0.7.1 update has been
+accepted for review. Install the extension from the public listing.
 
 **Other ways to get it.** Homebrew: `brew install sylin-org/tap/ghostlight`. On the
 [MCP registry](https://registry.modelcontextprotocol.io) as `org.sylin/ghostlight`. Every release
@@ -120,18 +117,16 @@ also ships prebuilt binaries and checksums on the
 [Releases page](https://github.com/sylin-org/ghostlight/releases/latest).
 
 <details>
-<summary><strong>Manual install (inspect everything)</strong></summary>
+<summary><strong>Build from source and test locally</strong></summary>
 
-1. **Get the binary.** Download a prebuilt archive from the
-   [Releases page](https://github.com/sylin-org/ghostlight/releases/latest) (each carries a
-   SHA-256 checksum and a signed build-provenance attestation:
-   `gh attestation verify <archive> --repo sylin-org/ghostlight`), or build from source with a
-   stable Rust toolchain: `cargo build --release`. The build produces two executables:
+1. **Build the binary.** Clone this repository and run `cargo build --release` with a stable Rust
+   toolchain. The build produces two executables:
    `ghostlight` (the CLI) and `ghostlight-relay`, the thin pass-through that your MCP client
    and Chrome launch.
-2. **Load the extension.** `chrome://extensions` -> Developer mode -> Load unpacked -> the
-   `extension/` directory. The committed manifest key pins the extension ID, and the installer
-   already allows it, so there is nothing to copy.
+2. **Load the development extension for immediate testing.** Open `chrome://extensions`, enable
+   Developer mode, choose `Load unpacked`, and select this repository's `extension/` directory.
+   The committed manifest key pins the development extension ID, and the installer already allows
+   it, so there is nothing to copy.
 3. **Register.** `./target/release/ghostlight install`. Useful flags: `--dry-run` (print the
    plan, write nothing), `--browser <id>` / `--client <id>` (limit scope; repeatable),
    `--all-browsers` / `--all-clients`, `--no-open`, `--debug` (observability on), and `--system`
@@ -272,7 +267,7 @@ without making the user rebuild their browser session.
 <summary><strong>CLI and troubleshooting</strong></summary>
 
 - No subcommand: prints a short hint and exits. The MCP server role now lives in `ghostlight-relay`
-  (your client launches `ghostlight-relay --role agent`; you never run it by hand).
+  (your client launches `ghostlight-relay --role agent`; you never launch it directly).
 - `install` / `uninstall`: register or remove everything (both support `--dry-run`).
 - `doctor [--verbose]`: read-only diagnosis of the whole chain with a truthful exit code.
 - `status [--json]`: a running server's live inner state (requires `--debug` /
@@ -284,9 +279,10 @@ without making the user rebuild their browser session.
 - `demo`: run the longer Card Foundry QA and governance story.
 
 **If something is off, start with `doctor`.** It pinpoints unregistered browsers or clients, a
-missing server, a stale endpoint, or an extension that never connected. Extension shows
-disconnected? Reload it at `chrome://extensions`. Developing on Windows? Use the isolated engine
-swap in [docs/DEV-LOOP.md](docs/DEV-LOOP.md); live clients and the browser reconnect around it.
+missing server, a stale endpoint, or an extension that never connected. If the store extension is
+disabled, enable it from the browser's extension manager. Developing on Windows? Use the isolated
+engine swap in [docs/DEV-LOOP.md](docs/DEV-LOOP.md); live clients and the browser reconnect around
+it.
 
 </details>
 
