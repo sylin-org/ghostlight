@@ -64,4 +64,4 @@ This addendum runs concurrently with the agreement it accompanies and terminates
 post-termination data return or deletion obligations arise, because the Vendor holds no
 Customer personal data to return or delete.
 
-Last reviewed: 2026-07-10 against v0.7.1 | Contact: support@sylin.org
+Last reviewed: 2026-07-10 against v0.7.2 | Contact: support@sylin.org

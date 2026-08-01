@@ -60,4 +60,4 @@ discharge them.
 See the [compliance team guide](../guides/compliance-team.md) and the
 [governance configuration guide](../guides/governance-configuration.md).
 
-Last reviewed: 2026-07-14 against v0.7.1 | Contact: support@sylin.org
+Last reviewed: 2026-07-14 against v0.7.2 | Contact: support@sylin.org
