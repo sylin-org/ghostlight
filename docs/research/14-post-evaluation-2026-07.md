@@ -59,7 +59,7 @@ As of dev @ 656259c (2026-07-07), tagged v0.2.0 on main (2026-07-05):
   pinned observations) has not been run. v0.2.0 is tagged but has no published GitHub release
   (v0.1.0 is still "Latest"). The Chrome Web Store listing is drafted but not submitted
   (screenshots + privacy tab owed). macOS/Linux live verification, e2e-smoke unquarantine, and
-  the LICENSE-GOVERNANCE legal skim remain open.
+  the commercial-license legal skim remain open.
 
 Versus the world research 13 described, Ghostlight closed the gaps that study implied: it renamed
 (Ghostlight, ADR-0021), led with governance, shipped a real release, and added the composition
@@ -246,7 +246,7 @@ safely is exactly a governance problem. No implementation now; Chrome 150 alread
 API once, it is too early to build against.
 
 **P10. Close the standing verification debts (S/M).** Run composition LIVE-VERIFY.md (13
-observations), macOS/Linux live verification, e2e-smoke unquarantine, LICENSE-GOVERNANCE legal
+observations), macOS/Linux live verification, e2e-smoke unquarantine, commercial-license legal
 skim. None are landscape-driven; all of them gate the credibility of P1/P8 claims.
 
 ## Outcome (added 2026-07-07)

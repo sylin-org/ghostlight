@@ -7,6 +7,14 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **The license layout now supports conventional repository discovery without blurring the
+  open-core boundary.** Root `LICENSE` contains the standard Apache-2.0 text so repository
+  scanners can classify the permissive engine. The alternative MIT text and Ghostlight
+  Commercial License live under `docs/licenses/`; `LICENSING.md` maps each source boundary to its
+  governing text, and file-level SPDX identifiers remain authoritative. ADR-0027 carries the
+  marked layout amendment. Third-party recognition must be checked after this reaches the default
+  branch because downstream metadata services generally do not index development branches.
+
 - **Chrome adapters now version independently from the service (ADR-0093).**
   `compatibility.json` maps each adapter to an inclusive service range. Release packaging names the
   extension artifact from `extension/manifest.json`; preflight and public-surface checks require
@@ -501,7 +509,7 @@ remains manual when its API credentials or dashboard metadata are absent.
 - Chrome Web Store: monitor the pending v0.7.1 review and answer any reviewer questions. Edge
   Add-ons remains unsubmitted.
 - Trust center legal: vendor entity name in the MSA (blocked on forming the LLC), the
-  cyber-insurance yes/no line, counsel skim of MSA/DPA/LICENSE-GOVERNANCE before first
+  cyber-insurance yes/no line, counsel skim of MSA/DPA and the commercial license before first
   EXECUTION (publication already happened by design; drafts are marked as drafts).
 - Key backup + a second npm publisher; gather first-use evidence through public channels because a
   private greenfield cohort is not currently available.

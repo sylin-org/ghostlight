@@ -5,8 +5,8 @@ edition = "2021"
 description = "Governed browser automation over the user's own authenticated Chromium session -- for AI coding agents."
 publish = false
 # Open-core (ADR-0027): engine is Apache-2.0 OR MIT; src/governance/ is the Ghostlight
-# Commercial License. LICENSE at the repo root holds the split notice.
-license-file = "LICENSE"
+# Commercial License. LICENSING.md defines the split and points to each governing text.
+license-file = "LICENSING.md"
 
 # cargo-binstall support: `cargo binstall --git https://github.com/sylin-org/ghostlight ghostlight`
 # fetches the prebuilt release archives instead of building from source. Naming matches

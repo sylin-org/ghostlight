@@ -19,7 +19,7 @@ docs/business/PLAN.md). Check items off in place; add dates.
       print its verifying key with
       `cargo run --features license-admin -- license pubkey --key ghostlight-signing-gen1.bin`
       and add it as keygen 1 in src/governance/license.rs (one-line constant; commit).
-- [ ] Legal skim of LICENSE-GOVERNANCE (standing flag since ADR-0027). Free options:
+- [ ] Legal skim of `docs/licenses/LicenseRef-Ghostlight-Commercial.txt` (standing flag since ADR-0027). Free options:
       careful self-review against the EE-template family it derives from; a startup
       legal clinic if available.
 - [ ] Approve or amend: pricing numbers, tier names, the Continuity Promise wording
@@ -58,7 +58,7 @@ docs/business/PLAN.md). Check items off in place; add dates.
       (see the DISTRIBUTION.md npm step and the 2026-07-09 decision-log entry below).
 - [ ] **Post-eval verification debts (P10; these gate the credibility of the claims above).**
       Run docs/tasks/composition/LIVE-VERIFY.md (13 pinned observations); live-verify macOS and
-      Linux; unquarantine e2e-smoke or record the design decision; the LICENSE-GOVERNANCE
+      Linux; unquarantine e2e-smoke or record the design decision; the commercial-license
       legal skim is already listed under Phase 0 above.
 - [ ] **Official-extension re-baseline (P7, operator-assisted).** Research 12 pinned
       v1.0.78; the official surface has since added browser_batch, GIF recording, scheduled

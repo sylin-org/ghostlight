@@ -101,7 +101,7 @@ All zero-dollar, all frontier-authored, all public under docs/ or the site:
   and SOC 2 language. The EU AI Act high-risk obligations phase in from August 2026;
   a date-pegged post that month is free, timely reach.
 - Standard agreement: adapted from Common Paper's free CC-licensed templates rather
-  than a paid first draft. The one real legal task is the LICENSE-GOVERNANCE skim
+  than a paid first draft. The one real legal task is the commercial-license skim
   (standing flag).
 
 ## License operations (ADR-0028 Decision 8)
@@ -203,6 +203,6 @@ All zero-dollar, all frontier-authored, all public under docs/ or the site:
 - The two non-zero spends: CWS developer fee ($5, unavoidable for the store listing);
   trademark filing (~$250-350, deferred by decision to first paid license; use (TM)
   meanwhile).
-- LICENSE-GOVERNANCE still needs its legal skim (standing flag since ADR-0027).
+- `docs/licenses/LicenseRef-Ghostlight-Commercial.txt` still needs its legal skim (standing flag since ADR-0027).
 - The Node/CLI quirk noted in the maturity-1 ledger (extension-unit CI job) is
   unverified on CI until the first push with Actions enabled.
