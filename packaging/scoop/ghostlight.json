@@ -6,7 +6,7 @@
   "architecture": {
     "64bit": {
       "url": "https://github.com/sylin-org/ghostlight/releases/download/v0.7.3/ghostlight-v0.7.3-x86_64-pc-windows-msvc.zip",
-      "hash": "3cc96bc412392849ae2896411967ffd4c04731bad0a0b3c678c821b5c80c9554",
+      "hash": "0b5a8ea09424c1db9f1dd191f246eaeed13a6f84dae6ca1417c4666da16a9219",
       "extract_dir": "ghostlight-v0.7.3-x86_64-pc-windows-msvc"
     }
   },

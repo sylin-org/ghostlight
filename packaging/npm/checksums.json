@@ -1,14 +1,14 @@
 {
-  "version": "0.7.2",
+  "version": "0.7.3",
   "algorithm": "sha256",
   "binaries": {
-    "ghostlight-x86_64-pc-windows-msvc.exe": "25c864b2b5c7eaf190c5b1f15ff9dc49c793bc8c61729cd2c0abc1addddc4b67",
-    "ghostlight-relay-x86_64-pc-windows-msvc.exe": "fb100ae5910d223daa222993d4715fcf6fd056b366c1d37d0de631d301cd7ad6",
-    "ghostlight-aarch64-apple-darwin": "17f9569d748b063cb7a365a31826347f1bad2ddc479493c7c2b28525cf89f188",
-    "ghostlight-relay-aarch64-apple-darwin": "58558c06098adc9be37aaf9d2d17cf37dc029d6a6276e40e7e3cd6c6d1968190",
-    "ghostlight-x86_64-apple-darwin": "8df1752f8a3436df42f5ecfcc7459032c0058fee43391d499a2fede5fda35da7",
-    "ghostlight-relay-x86_64-apple-darwin": "80c4de7424c4f12fed3f7be8e2519240797e3b0fdf21d3f73672f869cb8f99f9",
-    "ghostlight-x86_64-unknown-linux-gnu": "df099ea26bebac02a5f4ff59cda180661f7eaec160dbc2481dbabba1cec5ac4e",
-    "ghostlight-relay-x86_64-unknown-linux-gnu": "254ce74425efb58231559a891b796b70f18a469e9efcc99d5448dd3a2684c712"
+    "ghostlight-x86_64-pc-windows-msvc.exe": "6acca4300e20bbd38a3a5b1f59bddc91daba48d9f8ffc502a8ad4201eaa38cf5",
+    "ghostlight-relay-x86_64-pc-windows-msvc.exe": "651712a140f2952bd94c5be66f464955a9cbf50bfba50af7aaa783bdf0798c69",
+    "ghostlight-aarch64-apple-darwin": "e44b303e40fbd2b5b5369e2bb1fa5fe13d127ee31061a4cdb14383696cd089be",
+    "ghostlight-relay-aarch64-apple-darwin": "a01455610f1c53c47f1e6507290b96a8655511dc93380a3760b5b60bcd359af1",
+    "ghostlight-x86_64-apple-darwin": "5c97d9e089c8e126c25fdce85c7dec69899f11aa372573287bafc74982e42691",
+    "ghostlight-relay-x86_64-apple-darwin": "27d9f262b6fbb60562c83531662cfa087a5172be45b2d5ce0fbe8732becd10a2",
+    "ghostlight-x86_64-unknown-linux-gnu": "4c247d4454c5fd46c394634982148753dfc0998b95b0ec85add1d190eb83bc21",
+    "ghostlight-relay-x86_64-unknown-linux-gnu": "455e5b4e68e82448a31da31c07b9c749fc27a7cc5162acd0c37c0e708244564a"
   }
 }
