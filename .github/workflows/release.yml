@@ -22,16 +22,25 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
+      adapter_version: ${{ steps.meta.outputs.adapter_version }}
     steps:
       - uses: actions/checkout@v7
       - name: Extract version
         id: meta
         shell: bash
         run: |
+          set -euo pipefail
           VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          ADAPTER_VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' extension/manifest.json | head -n1)
+          test -n "$ADAPTER_VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "adapter_version=$ADAPTER_VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
+          echo "Chrome adapter: $ADAPTER_VERSION"
+      - name: Check service and adapter compatibility
+        shell: pwsh
+        run: ./scripts/check-public-surfaces.ps1
 
   test:
     runs-on: ubuntu-latest
@@ -176,17 +185,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${{ needs.prepare.outputs.version }}"
-          TAG="${{ needs.prepare.outputs.tag }}"
-          pwsh -File scripts/package-extension.ps1 -Version "$VERSION"
-          EXTENSION="artifacts/${BIN_NAME}-extension-${TAG}.zip"
-          cp "dist/${BIN_NAME}-extension-v${VERSION}.zip" "$EXTENSION"
+          ADAPTER_VERSION="${{ needs.prepare.outputs.adapter_version }}"
+          pwsh -File scripts/package-extension.ps1 -Version "$ADAPTER_VERSION"
+          EXTENSION="artifacts/${BIN_NAME}-extension-v${ADAPTER_VERSION}.zip"
+          cp "dist/${BIN_NAME}-extension-v${ADAPTER_VERSION}.zip" "$EXTENSION"
           sha256sum "$EXTENSION" > "${EXTENSION}.sha256"
 
       - name: Assemble immutable release bundle
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.tag }}
+          ADAPTER_VERSION: ${{ needs.prepare.outputs.adapter_version }}
         run: |
           set -euo pipefail
           mkdir -p bundle/assets
@@ -203,6 +212,7 @@ jobs:
 
           TEMPLATE=$(cat .github/release-template.md)
           NOTES="${TEMPLATE//\$\{VERSION\}/$VERSION}"
+          NOTES="${NOTES//\$\{ADAPTER_VERSION\}/$ADAPTER_VERSION}"
           CHECKSUMS=$(cat bundle/SHA256SUMS)
           NOTES="${NOTES//\$\{CHECKSUMS\}/$CHECKSUMS}"
           printf '%s\n' "$NOTES" > bundle/release-notes.md

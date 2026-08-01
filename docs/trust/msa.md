@@ -25,7 +25,7 @@ than a single subscription license.
 of the Ghostlight software. "Customer" means the organization
 identified in the executed order. "Engine" means the Ghostlight automation engine, licensed
 Apache-2.0 OR MIT. "Governance Module" means the Ghostlight governance components licensed under
-the Ghostlight Commercial License (LICENSE-GOVERNANCE). "Software" means the Engine and the
+the Ghostlight Commercial License (`docs/licenses/LicenseRef-Ghostlight-Commercial.txt`). "Software" means the Engine and the
 Governance Module together. "Documentation" means the materials published in this repository,
 including the trust center. "Order" means the ordering document that references this Agreement.
 
@@ -33,10 +33,10 @@ including the trust center. "Order" means the ordering document that references 
 
 The Engine is licensed under Apache-2.0 OR MIT, and nothing in this Agreement narrows the
 rights those licenses grant. The Governance Module is licensed under the Ghostlight Commercial
-License (LICENSE-GOVERNANCE) for the term and scope stated in the Order. The Governance Module
+License (`docs/licenses/LicenseRef-Ghostlight-Commercial.txt`) for the term and scope stated in the Order. The Governance Module
 is source-available: Customer may read and audit its source. The license is granted for
 Customer's internal use in accordance with the Order; use restrictions on the Governance Module
-are those stated in LICENSE-GOVERNANCE, and this Agreement adds none beyond them.
+are those stated in `docs/licenses/LicenseRef-Ghostlight-Commercial.txt`, and this Agreement adds none beyond them.
 
 ## 3. Deployment and operation
 

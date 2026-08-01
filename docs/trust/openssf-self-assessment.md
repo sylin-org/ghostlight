@@ -44,8 +44,8 @@ Status vocabulary:
 | OSPS-GV-03.01 | Met | `CONTRIBUTING.md` explains contribution terms, validation, design boundaries, and the DCO/CLA split. |
 | OSPS-LE-02.01 | Not met | The automation engine is Apache-2.0 OR MIT, but the repository also contains the deliberately source-available governance module under a commercial license. A claim that all project source meets the OSI/FSF definition would be false. `LICENSING.md` defines the boundary. |
 | OSPS-LE-02.02 | Not met | Public release binaries contain both the permissively licensed engine and the separately licensed governance module. The license is clear and included, but not every released-software license meets the OSI/FSF definition required by this control. |
-| OSPS-LE-03.01 | Met | Root `LICENSE`, `LICENSE-APACHE`, `LICENSE-MIT`, `LICENSE-GOVERNANCE`, and `LICENSING.md` keep each source boundary in a standard location. |
-| OSPS-LE-03.02 | Met | Source archives carry the root license files; release packaging and the hash manifest associate assets with the release. |
+| OSPS-LE-03.01 | Met | Root `LICENSE`, `docs/licenses/MIT.txt`, `docs/licenses/LicenseRef-Ghostlight-Commercial.txt`, and `LICENSING.md` identify each source boundary and its governing text. |
+| OSPS-LE-03.02 | Met | Source archives carry all license texts; release packaging and the hash manifest associate assets with the release. |
 | OSPS-QA-01.01 | Met | The authoritative source is publicly readable at `https://github.com/sylin-org/ghostlight`. |
 | OSPS-QA-01.02 | Met | Git history publicly records changes, authors, and timestamps. Pull requests and signed-off commits provide additional review history. |
 | OSPS-QA-02.01 | Met | `Cargo.toml`, `Cargo.lock`, and npm package manifests enumerate direct language dependencies. |

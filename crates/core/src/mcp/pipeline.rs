@@ -17,8 +17,8 @@
 //! 7. Sacred check: STEP B (current tab) is argument-driven (any call carrying a numeric
 //!    `tabId`); STEP C (target host) fires iff the descriptor's resource shape is `TargetArg`.
 //!    The empty-list fast path stays.
-//! 8. Free-action short-circuit (unchanged: keyed on the looked-up requires) and
-//!    `Handler::Local` dispatch (`explain`), in the position pinned by stage 3.
+//! 8. Free-action short-circuit (unchanged: keyed on the looked-up requires) and free-action
+//!    `Handler::Local` dispatch, in the position pinned by stage 3.
 //! 9. Governance authorization (ADR-0024 Decision 3), with resource resolution driven by the
 //!    descriptor's resource shape and skipped entirely when ungoverned or requires is empty.
 //! 10. Bounded first-call wait; dispatch via `Handler` (`ExtensionForward` -> `Browser::call`,
@@ -583,14 +583,14 @@ pub(crate) async fn run_tool_call(
     // sacred check (step 1) and BEFORE grant enforcement, which the resource-resolution gate
     // below skips for these tools, so no `tab_url` probe ever fires for them (the sharp case is
     // `computer` `wait`: requirement `[]`, yet it carries a `tabId`). A `Handler::Local` tool
-    // whose `action: None` variant requires nothing (`explain`; C7's `script`) is answered right
-    // here, with no extension frame ever produced; a `Handler::Local` tool that does NOT qualify
-    // ([`is_free_local_action`] false -- C10's `form_fill`) falls through to grant enforcement
-    // below and dispatches at the post-grant Local position instead. Every OTHER free action
-    // (`tabs_create_mcp`, `resize_window`, `update_plan`, `narrate`, `computer` `wait`) falls through to an
-    // ordinary allowed `ExtensionForward` dispatch below, and to `governance.authorize`'s own
-    // free-action arm. All are audited as an allow with no grant attribution and a real (not
-    // hardcoded) `duration_ms`.
+    // whose `action: None` variant requires nothing (`explain`, `update_plan`; C7's `script`) is
+    // answered right here, with no extension frame ever produced; a `Handler::Local` tool that
+    // does NOT qualify ([`is_free_local_action`] false -- C10's `form_fill`) falls through to
+    // grant enforcement below and dispatches at the post-grant Local position instead. Every
+    // OTHER free action (`tabs_create_mcp`, `resize_window`, `narrate`, `computer` `wait`) falls
+    // through to an ordinary allowed `ExtensionForward` dispatch below, and to
+    // `governance.authorize`'s own free-action arm. All are audited as an allow with no grant
+    // attribution and a real (not hardcoded) `duration_ms`.
     if is_free_local_action(descriptor) {
         let directory::Handler::Local(f) = descriptor.handler else {
             unreachable!("is_free_local_action only returns true for Handler::Local");
@@ -2633,8 +2633,8 @@ mod tests {
              with reference ids.",
             "resize_window: requires nothing. Resize the browser window; browser state only, \
              touches no page content.",
-            "update_plan: requires nothing. Present a plan of intended actions to the user; \
-             informational only.",
+            "update_plan: requires nothing. Echo an informational plan of intended actions; \
+             changes no permissions.",
             "narrate: requires nothing. Show temporary agent commentary in an owned tab; \
              touches no page content and requires no RAWX capability.",
             "wait_for: requires read. Wait for a condition and page settlement; observes the \

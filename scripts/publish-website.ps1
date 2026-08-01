@@ -25,7 +25,8 @@
     This never edits the website's demo pages or layout; it touches ONLY the fallback snapshot.
 
 .PARAMETER Version
-    The release version, used only in the commit message. Defaults to extension/manifest.json.
+    The service release version, used only in the commit message. Defaults to
+    docs/public-status.json.
 
 .PARAMETER WebsiteSlug
     The website repo (owner/name). Default: sylin-org/website.
@@ -60,8 +61,9 @@ function Write-Would([string] $Text) { Write-Host "  [dry]  would: $Text" -Foreg
 
 function Resolve-Version {
     if ($Version) { return $Version }
-    $manifest = Get-Content (Join-Path $RepoRoot 'extension/manifest.json') -Raw | ConvertFrom-Json
-    return $manifest.version
+    $status = Get-Content (Join-Path $RepoRoot 'docs/public-status.json') -Raw | ConvertFrom-Json
+    if (-not $status.release) { throw 'no release in docs/public-status.json' }
+    return $status.release
 }
 
 # One trailing newline, matching the site loader's own normalize().

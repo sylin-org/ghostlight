@@ -25,7 +25,8 @@
     secrets in your shell/session env or a secret manager, NEVER in the repo.
 
 .PARAMETER Version
-    The version to publish (without a leading v). Defaults to the version in extension/manifest.json.
+    The expected Chrome adapter version (without a leading v). When supplied, it must match
+    extension/manifest.json. The manifest remains the source of truth.
 
 .PARAMETER Zip
     Path to an already-built store zip. Defaults to dist/ghostlight-extension-v<Version>.zip, which
@@ -85,9 +86,11 @@ function Write-Steps([string] $Text) { Write-Host $Text -ForegroundColor Yellow 
 # --- Version + zip ---------------------------------------------------------------------
 
 function Resolve-Version {
-    if ($Version) { return $Version }
     $manifest = Get-Content (Join-Path $RepoRoot 'extension/manifest.json') -Raw | ConvertFrom-Json
-    if (-not $manifest.version) { throw 'no version in extension/manifest.json and no -Version given' }
+    if (-not $manifest.version) { throw 'no version in extension/manifest.json' }
+    if ($Version -and $Version -ne $manifest.version) {
+        throw "requested Chrome adapter version $Version does not match manifest version $($manifest.version)"
+    }
     return $manifest.version
 }
 

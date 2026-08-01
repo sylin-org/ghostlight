@@ -91,6 +91,8 @@ $RepoSlug = 'sylin-org/ghostlight'
 $TapSlug = 'sylin-org/homebrew-tap'
 $Tag = "v$Version"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'adapter-compatibility.ps1')
+$ChromeAdapterVersion = Get-GhostlightChromeAdapterVersion $RepoRoot
 
 # MCP registry publish (ADR/RELEASE.md): the pinned mcp-publisher release the registry step
 # downloads on demand (bump deliberately), and the production registry it targets.
@@ -153,7 +155,7 @@ function Get-ExpectedAssets {
             $names.Add("$raw.sha256")
         }
     }
-    $ext = "ghostlight-extension-$Tag.zip"
+    $ext = "ghostlight-extension-v$ChromeAdapterVersion.zip"
     $names.Add($ext)
     $names.Add("$ext.sha256")
     $names.Add("ghostlight-$Tag-sbom.cyclonedx.json")
@@ -196,13 +198,28 @@ function Test-VersionConsistency {
     Check 'crates/core/Cargo.toml' 'core crate' '(?m)^version = "(?<v>[^"]+)"'
     Check 'crates/relay/Cargo.toml' 'relay crate' '(?m)^version = "(?<v>[^"]+)"'
     Check 'crates/transport/Cargo.toml' 'transport crate' '(?m)^version = "(?<v>[^"]+)"'
-    Check 'extension/manifest.json' 'extension manifest' '"version":\s*"(?<v>[^"]+)"'
     Check 'packaging/npm/package.json' 'npm package' '"version":\s*"(?<v>[^"]+)"'
     Check 'server.json' 'server.json (2 fields)' '"version":\s*"(?<v>[^"]+)"' 2
     Check 'packaging/scoop/ghostlight.json' 'scoop version' '"version":\s*"(?<v>[^"]+)"'
     Check 'packaging/winget/Sylin.Ghostlight.yaml' 'winget PackageVersion' '(?m)^PackageVersion:\s*(?<v>\S+)' 3
     Check 'packaging/homebrew/ghostlight.rb' 'homebrew version' 'version "(?<v>[^"]+)"'
     Check 'docs/public-status.json' 'canonical public status' '"release":\s*"(?<v>[^"]+)"'
+
+    try {
+        $compatibility = Read-GhostlightAdapterCompatibility $RepoRoot
+        [void](Assert-GhostlightChromeAdapterCoversService $compatibility $ChromeAdapterVersion $Version)
+
+        $status = Get-Content -Raw (Join-Path $RepoRoot 'docs/public-status.json') | ConvertFrom-Json
+        [void](Assert-GhostlightChromeAdapterCoversService $compatibility $status.chromeStore.publicAdapterVersion $Version)
+        $pendingProperty = $status.chromeStore.PSObject.Properties['pendingAdapterVersion']
+        $pendingAdapterVersion = if ($pendingProperty) { [string]$pendingProperty.Value } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($pendingAdapterVersion)) {
+            [void](Assert-GhostlightChromeAdapterCoversService $compatibility $pendingAdapterVersion $Version)
+        }
+    }
+    catch {
+        $problems.Add("Chrome adapter compatibility: $($_.Exception.Message)")
+    }
 
     return $problems
 }
@@ -289,7 +306,10 @@ function Step-Preflight {
         $problems | ForEach-Object { Write-Host "         $_" }
         throw 'fix version files before releasing'
     }
-    Write-Ok "all version files agree on $Version"
+    Write-Ok "all service version files agree on $Version"
+    $coverage = Assert-GhostlightChromeAdapterCoversService `
+        (Read-GhostlightAdapterCompatibility $RepoRoot) $ChromeAdapterVersion $Version
+    Write-Ok (Format-GhostlightChromeAdapterCoverage $coverage)
 
     & pwsh -File (Join-Path $PSScriptRoot 'check-public-surfaces.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'public surfaces are inconsistent' }
@@ -742,13 +762,13 @@ function Step-Extension {
 
     $script = Join-Path $PSScriptRoot 'publish-extension.ps1'
     if ($DryRun) {
-        Write-Would "pwsh $script -Version $Version -DryRun  (auto-publishes where store creds are set, else prints steps)"
-        & pwsh -File $script -Version $Version -DryRun
+        Write-Would "pwsh $script -Version $ChromeAdapterVersion -DryRun  (auto-publishes where store creds are set, else prints steps)"
+        & pwsh -File $script -Version $ChromeAdapterVersion -DryRun
         return
     }
     # publish-extension.ps1 auto-submits to each store whose credentials are present and prints
     # manual instructions for the rest; it never fails the release for a missing credential.
-    & pwsh -File $script -Version $Version
+    & pwsh -File $script -Version $ChromeAdapterVersion
     if ($LASTEXITCODE -ne 0) { throw "publish-extension.ps1 exited $LASTEXITCODE -- review its output above" }
 }
 
@@ -776,7 +796,7 @@ function Step-Report {
     - npm publish + smoke$(if ($SkipNpm) { ' (SKIPPED)' })
     - MCP registry publish$(if ($SkipRegistry) { ' (SKIPPED)' }) -- auto when MCP_DNS_PRIVATE_KEY is set, else skipped
     - trust-center footers restamped to v$Version
-    - extension publication step completed$(if ($SkipExtension) { ' (SKIPPED)' }) -- auto where store creds are set, else steps printed above
+    - Chrome adapter v$ChromeAdapterVersion publication step completed$(if ($SkipExtension) { ' (SKIPPED)' }) -- auto where store creds are set, else steps printed above
     - website install-guide and public-status refresh completed$(if ($SkipWebsite) { ' (SKIPPED)' })
 
   Still manual (by nature -- external systems that need a human or a per-version PR):

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-08-01
+
+### Added
+
+- **Agent-readable MCP definitions (ADR-0094).** All 25 tools now publish standard display titles
+  and conservative read-only, destructive, idempotent, and open-world hints. Focused descriptions
+  distinguish overlapping tools and name the actual callable tab helpers.
+
+### Changed
+
+- `update_plan` is now a truthful service-local informational echo. It changes no permissions and
+  requires no Chrome adapter update.
+- **Independent Chrome adapter versions (ADR-0093).** `compatibility.json` now states which
+  Ghostlight service versions each Chrome adapter covers. Service-only releases extend that map
+  without changing the extension manifest or restarting store review. Release artifacts, store
+  tooling, public status, and preflight checks now use the adapter version explicitly.
+- **Conventional license discovery.** The repository root now carries the standard Apache-2.0
+  license text, while `LICENSING.md` and `docs/licenses/` retain the exact open-core boundary and
+  alternative license texts.
+
 ## [0.7.2] - 2026-08-01
 
 ### Fixed

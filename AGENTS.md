@@ -75,15 +75,20 @@ If an older document draws a single-binary `src/` tree, trust the live tree over
 
 ## The one inviolable constraint
 
-**The trained tool-schema surface is sacred** (ADR-0007, amended by ADR-0034 Decision 7).
-The 13 tool schemas harvested from the reference extension -- names, parameter names,
-types, description strings, enums -- stay byte-stable. Models were trained against them.
+**The trained tool identity surface is stable** (ADR-0007, amended by ADR-0034 Decision 7,
+ADR-0050 Decision 6, and ADR-0094). The 13 tool names, parameter names, types, and enums harvested
+from the reference extension remain compatible. Descriptions are model guidance, not frozen
+identity: improve them deliberately when clearer purpose, side effects, or tool choice will help
+agents succeed.
 
-- Never rename, remove, paraphrase, or reorder anything a trained model relies on.
+- Never rename, remove, or reorder a trained tool, parameter, type, or enum value.
+- Keep descriptions concise and truthful. Name the actual callable tool, distinguish overlapping
+  tools, and state material side effects. Refresh the regression snapshot when guidance changes.
 - Growth is additive only: new tools join via the capability registry (`explain`, `script`,
   `form_fill`, `wait_for` are sanctioned precedents), and new OPTIONAL parameters may be
   added to existing tools.
-- Schemas live as const string literals (raw JSON) in the code, not built programmatically.
+- Tool declarations and their inline JSON schemas live in the registry, not behind an MCP SDK or
+  a second generated source of truth.
 - `tests/tool_schema_fidelity.rs` is the regression snapshot over the declared surface.
 
 Two more standing product constraints: **never phone home** (no telemetry, activation
@@ -125,6 +130,10 @@ reload at `chrome://extensions`) is in [docs/DEV-LOOP.md](docs/DEV-LOOP.md). One
 (ADR-0065): one native host, one endpoint, one `ghostlight` MCP entry; the engine is
 whichever service holds the endpoint. Named instances (`--instance`) are a test-isolation
 seam only, not a user or dev workflow.
+
+The Chrome adapter and service version independently (ADR-0093). The manifest owns the adapter
+version; `compatibility.json` owns its inclusive service range. Do not bump the manifest for a
+service-only release.
 
 ## Code style
 

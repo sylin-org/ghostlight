@@ -185,3 +185,22 @@ revenue line that does not touch the code boundary.
   are unaffected.
 - Execution is scheduled by ADR-0026 Decision 1 (the LICENSE files, the crate
   license fields, and replacing the stale "TBD (intended open-source)" strings).
+
+## Amendment: standard license discovery layout (2026-08-01)
+
+The license boundary and grants above are unchanged. The file layout is amended so conventional
+third-party repository scanners can recognize the permissive engine license without interpreting
+a project-specific dispatch notice:
+
+- Root `LICENSE` contains the complete Apache License 2.0 text.
+- `docs/licenses/MIT.txt` contains the alternative MIT text for engine files carrying
+  `SPDX-License-Identifier: Apache-2.0 OR MIT`.
+- `docs/licenses/LicenseRef-Ghostlight-Commercial.txt` contains the commercial text for files
+  carrying `SPDX-License-Identifier: LicenseRef-Ghostlight-Commercial`.
+- `LICENSING.md` remains the human-readable map of the open-core boundary and links all three
+  governing texts.
+
+This supersedes the root-file placement named in this ADR and ADR-0026, but not their licensing
+decisions. Mixed, unpublished Cargo packages point their `license-file` metadata at the boundary
+guide; the commercial-only Lightbox points directly at the commercial text. File-level SPDX
+identifiers remain authoritative for individual source files.

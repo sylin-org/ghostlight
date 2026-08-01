@@ -1,24 +1,19 @@
 Ghostlight ${VERSION} -- governed browser automation for AI agents.
 
-A single Rust binary plus a thin Chromium extension that gives an AI agent controlled
+A native Rust service plus a thin Chromium adapter that gives an AI agent controlled
 access to your real, authenticated browser session, with an opt-in governance layer
 (capability grants, sacred domains, audit). See the README and docs/guides/ for the
 full walkthrough.
 
 ## Install
 
-1. Download the archive for your platform below and extract it; put the `ghostlight`
-   binary on your PATH.
-2. Load the extension: in Chrome open `chrome://extensions`, enable Developer mode, and
-   "Load unpacked" the `extension/` directory (from the source tree, or the
-   `ghostlight-extension-${VERSION}.zip` below). The pinned extension id is
-   `cjcmhepmagomefjggkcohdbfemacojoa`.
-3. Register the native host and your MCP client:
-   `ghostlight install --extension-id cjcmhepmagomefjggkcohdbfemacojoa`
-4. Verify the whole chain: `ghostlight doctor`.
+1. Install the service and register detected MCP clients: `npx -y ghostlight install`.
+2. Install [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
+   from the Chrome Web Store.
+3. Restart your MCP client, then verify the whole chain with `npx ghostlight doctor`.
 
-End-to-end verified on Windows; the binary also builds and passes the test suite on
-macOS and Linux (live browser verification on those platforms is on the roadmap).
+End-to-end verified on Windows and Linux. macOS builds and passes the full test suite in CI;
+live-browser verification there is still owed.
 
 ## Verify
 
@@ -40,7 +35,7 @@ The SHA-256 checksums are below (the attestation is the stronger, signed check).
 | macOS | Apple Silicon | `ghostlight-${VERSION}-aarch64-apple-darwin.tar.gz` |
 | macOS | Intel | `ghostlight-${VERSION}-x86_64-apple-darwin.tar.gz` |
 | Linux | x86_64 | `ghostlight-${VERSION}-x86_64-unknown-linux-gnu.tar.gz` |
-| Extension | any | `ghostlight-extension-${VERSION}.zip` |
+| Chrome adapter | any | `ghostlight-extension-v${ADAPTER_VERSION}.zip` |
 
 ## Checksums (SHA-256)
 
