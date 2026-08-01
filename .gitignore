@@ -22,6 +22,7 @@ Thumbs.db
 # under the log dir; see src/observability.rs). Never source.
 /debug-state-*.json
 /debug-events-*.jsonl
+/debug.log
 
 # Local Claude Code settings (machine-specific paths, personal permission grants). Not shared.
 /.claude/
