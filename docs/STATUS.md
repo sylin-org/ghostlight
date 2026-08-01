@@ -20,16 +20,16 @@ when they disagree**, and update it when you land something that changes the pic
   improvable guidance. Formatting, strict workspace clippy, the full Rust workspace suite, and
   the focused 14-test fidelity suite pass. A guarded Windows dev-loop swap and real-relay probe
   also passed with the Chrome extension attached. PR #75 merged the change to `main`, and the
-  official MCP Registry now carries v0.7.3. Glama and other directory scores depend on their next
-  crawl and introspection pass.
+  official MCP Registry now carries v0.7.3. Glama's post-release card scores Ghostlight A for
+  license, A for quality, and B for maintenance across 25 tools.
 
 - **The license layout now supports conventional repository discovery without blurring the
   open-core boundary.** Root `LICENSE` contains the standard Apache-2.0 text so repository
   scanners can classify the permissive engine. The alternative MIT text and Ghostlight
   Commercial License live under `docs/licenses/`; `LICENSING.md` maps each source boundary to its
   governing text, and file-level SPDX identifiers remain authoritative. ADR-0027 carries the
-  marked layout amendment. The layout shipped in v0.7.3; downstream license recognition now
-  depends on each service's next crawl.
+  marked layout amendment. The layout shipped in v0.7.3, and Glama now scores its license metadata
+  A. Other downstream services still depend on their next crawl.
 
 - **Chrome adapters now version independently from the service (ADR-0093).**
   `compatibility.json` maps each adapter to an inclusive service range. Release packaging names the
