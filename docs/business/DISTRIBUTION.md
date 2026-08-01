@@ -42,13 +42,25 @@ resolves the relay as a sibling.
       pending compliance review. Store id: `lejccfmoeogmhemakeknjjdhkfkgncdl`.
 - [ ] **Edge Add-ons store.** Submit the same packaged extension after configuring the Edge
       publisher credentials.
-- [ ] **MCP Registry (official).** Install `mcp-publisher`, validate `server.json`
-      (repo root), authenticate via the GitHub method, publish. The registry feeds client
-      UIs; the npm package must be live first.
-- [ ] **Cline MCP marketplace.** Submit per their repo's process (issue/PR with the npm
-      identifier + logo). Cline users are exactly the persona the first-party path excludes.
-- [ ] **Directory listings** (each ~10 minutes, all free): Smithery, Glama, mcp.so,
-      PulseMCP. Then a PR to `punkpeye/awesome-mcp-servers` (one line, browser category).
+- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v0.7.1 was active and
+      latest on 2026-07-31. The release pipeline publishes future versions after npm.
+- [ ] **GitHub MCP Registry / VS Code `@mcp` discovery.** The founder sent the one-time
+      onboarding request to `partnerships@github.com` on 2026-07-31. Initial admission is
+      manually curated; later versions sync from the official MCP Registry. Monitor the GitHub
+      catalog and VS Code discovery. If Ghostlight is not listed and GitHub has not replied,
+      follow up on the same email thread on 2026-08-28.
+- [ ] **Cline MCP marketplace.** Submission issue
+      [#1989](https://github.com/cline/mcp-marketplace/issues/1989) was updated with the live
+      package, extension, and install path on 2026-08-01; awaiting maintainer review.
+- [ ] **Directory listings.** Glama indexes Ghostlight, and ownership was verified on 2026-08-01
+      through the root `glama.json`. Its Docker introspection configuration is saved; Glama's
+      builder is still resolving the base image after the first test exposed the Linux release's
+      glibc 2.39 floor. Smithery is deferred because its local-server path requires a maintained
+      MCPB bundle while its main audience and value are hosted integrations; revisit only if MCPB
+      becomes a useful product channel on its own. Draft PR
+      [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) adds Ghostlight to
+      `punkpeye/awesome-mcp-servers` under Browser Automation; its Glama badge check passes, while
+      the quality score waits for introspection. mcp.so and PulseMCP remain open.
 - [ ] **winget PR.** Copy `packaging/winget/Sylin.Ghostlight.yaml` into the three-file
       layout under `manifests/s/Sylin/Ghostlight/<version>/` in a fork of microsoft/winget-pkgs,
       fill the sha256 from the release `.sha256` asset, `winget validate`, open the PR.
