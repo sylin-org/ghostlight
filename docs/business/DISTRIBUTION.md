@@ -12,8 +12,9 @@ in the session record and docs/research/14 (P1 was "ship the distribution alread
 - `packaging/npm/`: the `ghostlight` npm launcher (name verified FREE on npm as of
   2026-07-07). Downloads the version-matched binary on first run; stderr-only chatter.
 - cargo-binstall metadata in Cargo.toml.
-- `site/`: the landing + install pages (GitHub Pages via `.github/workflows/pages.yml`);
-  the extension opens `install.html?from=extension` on first install.
+- `site/`: redirect fallbacks for the canonical `https://sylin.org/ghostlight/` pages;
+  the extension opens `https://sylin.org/ghostlight/chromium-extension/post-install/` on first
+  install.
 - README quick-install block with Cursor/VS Code deeplink buttons and the npx snippet.
 - `server.json` (MCP registry descriptor), `packaging/winget/`, `packaging/scoop/`,
   `packaging/homebrew/` (templates; hashes come from release assets).
@@ -30,20 +31,14 @@ resolves the relay as a sibling.
 
 ## Founder: accounts and publishes (order matters)
 
-- [x] **npm: claim the name.** DONE 2026-07-09: `ghostlight@0.4.0` published (unscoped, public)
-      under user `lbotinelly`; `npx -y ghostlight@0.4.0 doctor` smoke-tested green (the launcher
-      fetches the versioned release binaries from `releases/download/v0.4.0/`). The name was
-      unclaimed on 2026-07-07. NOTE for future publishes: npm 2FA here is Windows Hello
-      (WebAuthn), which yields NO CLI `--otp` code, so `npm publish --otp=` fails -- publish with
-      a classic **Automation token** (Access Tokens -> Classic -> Automation; it bypasses 2FA),
-      set via `npm config set //registry.npmjs.org/:_authToken=<token>`. Reuse that same token as
-      a GitHub Actions `NPM_TOKEN` secret if you later wire `npm publish` into release.yml.
-- [x] **Chrome Web Store: submit.** The complete v0.5.7 listing was submitted on 2026-07-13 and is
-      pending compliance review. Store id: `lejccfmoeogmhemakeknjjdhkfkgncdl`.
+- [x] **npm.** `ghostlight@0.7.3` is live at `latest`. The release pipeline publishes it and smoke
+      tests the launcher against the integrity-pinned release binary.
+- [x] **Chrome Web Store.** Adapter v0.6.0 is public and v0.7.1 is pending review. Store id:
+      `lejccfmoeogmhemakeknjjdhkfkgncdl`.
 - [ ] **Edge Add-ons store.** Submit the same packaged extension after configuring the Edge
       publisher credentials.
-- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v0.7.1 was active and
-      latest on 2026-07-31. The release pipeline publishes future versions after npm.
+- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v0.7.3 is active and
+      latest. The release pipeline publishes each service version after npm.
 - [ ] **GitHub MCP Registry / VS Code `@mcp` discovery.** The founder sent the one-time
       onboarding request to `partnerships@github.com` on 2026-07-31. Initial admission is
       manually curated; later versions sync from the official MCP Registry. Monitor the GitHub
@@ -55,26 +50,26 @@ resolves the relay as a sibling.
 - [ ] **Directory listings.** Glama indexes Ghostlight, and ownership was verified on 2026-08-01
       through the root `glama.json`. Its Docker introspection configuration is saved; Glama's
       builder is still resolving the base image after the first test exposed the Linux release's
-      glibc 2.39 floor. Smithery is deferred because its local-server path requires a maintained
-      MCPB bundle while its main audience and value are hosted integrations; revisit only if MCPB
-      becomes a useful product channel on its own. Draft PR
+      glibc 2.39 floor. The v0.7.3 tool-definition improvements are on `main` and published; their
+      Glama scores depend on its next successful crawl and introspection. Smithery is deferred
+      because its local-server path requires a maintained MCPB bundle while its main audience and
+      value are hosted integrations; revisit only if MCPB becomes a useful product channel on its
+      own. Draft PR
       [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) adds Ghostlight to
       `punkpeye/awesome-mcp-servers` under Browser Automation; its Glama badge check passes, while
       the quality score waits for introspection. mcp.so and PulseMCP remain open.
-- [ ] **winget PR.** Copy `packaging/winget/Sylin.Ghostlight.yaml` into the three-file
-      layout under `manifests/s/Sylin/Ghostlight/<version>/` in a fork of microsoft/winget-pkgs,
-      fill the sha256 from the release `.sha256` asset, `winget validate`, open the PR.
-- [ ] **Homebrew tap.** Create the public repo `sylin-org/homebrew-tap`, add
-      `Formula/ghostlight.rb` from `packaging/homebrew/ghostlight.rb` with the three sha256
-      values filled. Users then `brew install sylin-org/tap/ghostlight`.
+- [ ] **Winget.** v0.7.2 PR #410996 merged and is publicly discoverable. The v0.7.3 manifest
+      validates locally and PR #411087 is open and mergeable; its CLA check passes while Microsoft
+      validation and review remain pending.
+- [x] **Homebrew tap.** `sylin-org/homebrew-tap` is live. Release v0.7.3 was published in commit
+      `5055db1`; users install it with `brew install sylin-org/tap/ghostlight`.
 - [ ] **Scoop.** `packaging/scoop/ghostlight.json` with the sha filled can be installed
       directly by URL (`scoop install <raw-url>`); optionally submit to the scoop `extras`
       bucket later. The manifest carries autoupdate, so it is a one-time fill.
-- [ ] **Pages custom domain (optional).** Map `ghostlight.sylin.org` (or keep github.io;
-      the extension and scripts point at github.io, which redirects automatically once a
-      custom domain is set).
+- [x] **Canonical website.** `https://sylin.org/ghostlight/` is live. The old GitHub Pages paths
+      are redirect fallbacks, and extension/install entry points use the canonical domain.
 
-## Founder: the launch moment (do these together, after CWS approval)
+## Founder: the launch moment
 
 - [ ] Record the sub-90-second demo (`ghostlight demo` + OBS) using the exact recipe in
       `docs/legal/STORE_LISTING.md`; upload it unlisted to YouTube for CWS and export the README

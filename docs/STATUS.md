@@ -7,7 +7,7 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
-- **Agent-readable tool definitions and standard MCP annotations are implemented on `dev`
+- **Agent-readable tool definitions and standard MCP annotations shipped in v0.7.3
   (ADR-0094).** All 25 tools now publish display titles plus conservative read-only, destructive,
   idempotent, and open-world hints. The mixed `computer` tool publishes MCP's conservative
   whole-tool risk values while Ghostlight retains precise per-action enforcement. Focused
@@ -19,16 +19,17 @@ when they disagree**, and update it when you land something that changes the pic
   tool names, parameter names, parameter types, and enums; descriptions are deliberately
   improvable guidance. Formatting, strict workspace clippy, the full Rust workspace suite, and
   the focused 14-test fidelity suite pass. A guarded Windows dev-loop swap and real-relay probe
-  also passed with the Chrome extension attached. External registry rescoring waits until the
-  change reaches the default branch.
+  also passed with the Chrome extension attached. PR #75 merged the change to `main`, and the
+  official MCP Registry now carries v0.7.3. Glama and other directory scores depend on their next
+  crawl and introspection pass.
 
 - **The license layout now supports conventional repository discovery without blurring the
   open-core boundary.** Root `LICENSE` contains the standard Apache-2.0 text so repository
   scanners can classify the permissive engine. The alternative MIT text and Ghostlight
   Commercial License live under `docs/licenses/`; `LICENSING.md` maps each source boundary to its
   governing text, and file-level SPDX identifiers remain authoritative. ADR-0027 carries the
-  marked layout amendment. Third-party recognition must be checked after this reaches the default
-  branch because downstream metadata services generally do not index development branches.
+  marked layout amendment. The layout shipped in v0.7.3; downstream license recognition now
+  depends on each service's next crawl.
 
 - **Chrome adapters now version independently from the service (ADR-0093).**
   `compatibility.json` maps each adapter to an inclusive service range. Release packaging names the
@@ -36,7 +37,7 @@ when they disagree**, and update it when you land something that changes the pic
   the source, public-store, and pending adapters to cover the service release. Service-only
   releases extend the map without changing the adapter manifest or restarting store review. The
   current source adapter remains v0.7.2, the public store serves v0.6.0, and v0.7.1 is pending;
-  all three cover the v0.7.3 service candidate.
+  all three cover the published v0.7.3 service.
 
 - **v0.7.2 ships safe installed-engine activation (ADR-0092).** Windows identifies the
   exact adapter-pipe owner, verifies that its executable belongs to the managed Ghostlight install
@@ -191,18 +192,15 @@ when they disagree**, and update it when you land something that changes the pic
 
 - **Branches**: `main` = releases, `dev` = trunk. Work lands on `dev`; the owner reviews
   `dev -> main` PRs and cuts releases.
-- **Latest published release: v0.7.2** (2026-08-01), cut with
-  `scripts/release.ps1 0.7.2 -SkipExtension`. GitHub Actions run `30710482484` passed the full test
-  and four-target build matrix, assembled one immutable release bundle, generated the CycloneDX
-  SBOM, verified the canonical hash manifest, attested provenance, and published all 28 expected
-  assets. npm
-  `ghostlight@0.7.2` is live at the `latest` tag and its launcher fetched the integrity-pinned
-  Windows binary; Homebrew tap commit `3525eea` and active MCP registry entry
-  `org.sylin/ghostlight` also carry 0.7.2. Checksum fill `3f52814`, trust restamp `bff7b99`, and
-  website fallback commit `5186afa` are published. The Chrome Web Store was not resubmitted because
-  v0.7.2 has no extension behavior change and the v0.7.1 package remains in review. The required
-  Winget per-version submission is open as `microsoft/winget-pkgs#410996`; local `winget validate`
-  and its CLA check pass, while Microsoft controls review and merge.
+- **Latest published release: v0.7.3** (2026-08-01). PR #75 merged at tag commit `8bf3b3f`.
+  GitHub Actions run `30722958396` passed and published all 28 expected release assets. npm
+  `ghostlight@0.7.3` is live at the `latest` tag, and its launcher fetched the integrity-pinned
+  Windows binary and passed `doctor`. Homebrew tap commit `5055db1` and the official MCP Registry
+  entry `org.sylin/ghostlight` also carry 0.7.3. Checksum fill `fc5b087`, trust restamp `2a26e1d`,
+  and website fallback commit `bc0e022` are published; the online public-surface check passes.
+  Chrome and Edge submission were skipped because the source adapter remains v0.7.2. Winget serves
+  v0.7.2 after PR #410996 merged; the validated v0.7.3 update is open as PR #411087, mergeable with
+  its CLA check green while Microsoft controls the remaining validation and merge.
 - **v0.6.0 is an intentional greenfield boundary.** The unpublished 0.5.8 draft became this minor
   release because browser-control web ingress and its scaffolding were removed outright. Public
   setup starts from a local service, same-user OS IPC, and the interactive user's authenticated
@@ -399,22 +397,20 @@ when they disagree**, and update it when you land something that changes the pic
 `scripts/release.ps1 <version>` from `main` automates: tag, watch CI, verify assets, fill
 package-manager sums, homebrew tap, npm publish + smoke, trust-footer restamp, extension publish
 (Chrome Web Store + Edge; auto when `CWS_*`/`EDGE_*` creds are set), and the website refresh. The
-v0.6.0 run published GitHub, Homebrew, npm, the MCP Registry, checksum pins, and trust footers. The
-release workflow's checkout-free publisher needed an explicit repository argument; the release was
-recovered from the already verified and attested immutable bundle without a rebuild or retag, and
-the workflow fix is prepared. The website fallback already matched after newline normalization, so
-no rebuild was needed. Chrome initially stopped at a suspended OAuth project; after Google
-reinstated it, the v0.5.7 review was cancelled and v0.6.0 was uploaded and resubmitted. Edge
-remains unconfigured.
+v0.7.3 run completed the GitHub, Homebrew, npm, MCP Registry, checksum, trust-footer, and website
+paths successfully. Its online public-surface check and published npm launcher smoke both pass.
+Because this was a service-only release and the source adapter stayed at v0.7.2, the pipeline
+correctly skipped Chrome and Edge submission.
 
 CWS API credentials are working on this machine (see local/RELEASE-CREDENTIALS.md; values in
 `~/.ghostlight-release.env`, written by `local/set-credentials.ps1`). Load them before a release:
 `Get-Content "$HOME/.ghostlight-release.env" | % { if ($_ -match '^([A-Z0-9_]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1],$Matches[2]) } }`
 
-Still manual per release: a winget PR to `microsoft/winget-pkgs` (CLA). The repository now provides
-`scripts/prepare-winget.ps1`, which materializes the correct submission tree from release manifests
-and runs `winget validate`; v0.6.0 passed and is submitted as upstream PR #402692. Store submission
-remains manual when its API credentials or dashboard metadata are absent.
+Winget remains one manual PR per release. `scripts/prepare-winget.ps1` materializes the submission
+tree from release manifests and runs `winget validate`. v0.7.2 PR #410996 merged and Winget serves
+that version. The v0.7.3 manifest validates locally and PR #411087 is open; its CLA check passes
+while Microsoft controls the remaining validation and merge. Store submission remains manual when
+its API credentials or dashboard metadata are absent.
 
 ## Owed engineering work (in rough priority order)
 
