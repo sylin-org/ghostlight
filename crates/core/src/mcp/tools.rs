@@ -9,8 +9,8 @@
 use crate::browser::directory;
 
 /// The `tools/list` advertisement: the complete `tools` array with each tool's name,
-/// description, inputSchema, and example (when present), in registry order. Rendered from
-/// the code-declared registry -- no fixture file.
+/// description, inputSchema, standard annotations, and example (when present), in registry order.
+/// Rendered from the code-declared registry -- no fixture file.
 pub fn advertised_tools_json() -> serde_json::Value {
     directory::advertised_tools_json()
 }
@@ -60,6 +60,7 @@ mod tests {
             assert_eq!(entry["name"], desc.tool);
             assert!(entry.get("description").is_some());
             assert!(entry.get("inputSchema").is_some());
+            assert!(entry.get("annotations").is_some());
         }
     }
 }

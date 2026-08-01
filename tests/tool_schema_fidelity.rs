@@ -202,6 +202,69 @@ fn every_tool_is_well_formed() {
             Some("object"),
             "{name}: inputSchema.type must be \"object\""
         );
+        assert!(
+            t["annotations"].is_object(),
+            "{name}: annotations must be an object"
+        );
+    }
+}
+
+/// ADR-0094: every tool carries the complete standard MCP behavior-hint quartet. Mixed-action
+/// tools use conservative whole-tool values while per-action governance stays authoritative.
+#[test]
+fn tool_annotations_are_complete_and_conservative() {
+    #[rustfmt::skip]
+    let expected = [
+        ("tabs_context_mcp", "List Ghostlight Tabs", false, false, true, true),
+        ("tabs_create_mcp", "Create Ghostlight Tab", false, false, false, true),
+        ("navigate", "Navigate", false, true, false, true),
+        ("computer", "Browser Input and Screenshots", false, true, false, true),
+        ("find", "Find Page Elements", true, false, true, true),
+        ("form_input", "Set Form Value", false, true, false, true),
+        ("get_page_text", "Read Page Text", true, false, true, true),
+        ("javascript_tool", "Run Page JavaScript", false, true, false, true),
+        ("read_console_messages", "Read Console Messages", true, false, true, true),
+        ("read_network_requests", "Read Network Requests", true, false, true, true),
+        ("read_page", "Read Page Structure", true, false, true, true),
+        ("resize_window", "Resize Browser Window", false, false, true, false),
+        ("update_plan", "Report Browser Plan", true, false, true, false),
+        ("narrate", "Narrate Browser Work", false, false, false, false),
+        ("wait_for", "Wait for Page State", true, false, true, true),
+        ("script", "Run Dependent Browser Steps", false, true, false, true),
+        ("form_fill", "Fill Form", false, true, false, true),
+        ("act_on", "Act on Page Element", false, true, false, true),
+        ("dialog", "Handle Page Dialog", false, true, false, true),
+        ("tab_control", "Control Ghostlight Tab", false, true, false, true),
+        ("file_upload", "Upload Files", false, true, false, true),
+        ("browser_batch", "Run Browser Batch", false, true, false, true),
+        ("upload_image", "Upload Captured Image", false, true, false, true),
+        ("gif_creator", "Record Browser GIF", false, true, false, true),
+        ("explain", "Explain Browser Permissions", true, false, true, false),
+    ];
+
+    for (name, title, read_only, destructive, idempotent, open_world) in expected {
+        let annotations = tool(name)["annotations"].clone();
+        assert_eq!(annotations["title"], title, "{name}: title");
+        assert_eq!(
+            annotations["readOnlyHint"].as_bool(),
+            Some(read_only),
+            "{name}: readOnlyHint"
+        );
+        assert_eq!(
+            annotations["destructiveHint"].as_bool(),
+            Some(destructive),
+            "{name}: destructiveHint"
+        );
+        assert_eq!(
+            annotations["idempotentHint"].as_bool(),
+            Some(idempotent),
+            "{name}: idempotentHint"
+        );
+        assert_eq!(
+            annotations["openWorldHint"].as_bool(),
+            Some(open_world),
+            "{name}: openWorldHint"
+        );
     }
 }
 
@@ -338,35 +401,37 @@ fn official_v1_0_78_schema_corrections_present() {
     );
 }
 
-/// A7: the official references the tab tools by their BARE names (`tabs_context`, `tabs_create`)
-/// in every description string -- the `_mcp` suffix appears only on the tool `name` fields. This
-/// reproduces the trained tokens exactly. No description (tool-level or param-level) may contain
-/// the `_mcp`-suffixed names.
+/// ADR-0094: guidance names the tools agents can actually call. Removing the valid `_mcp` forms
+/// from each string must leave no stale bare alias behind.
 #[test]
-fn descriptions_reference_bare_tab_tool_names() {
+fn descriptions_reference_callable_tab_tool_names() {
     for t in tools() {
         let name = t["name"].as_str().unwrap_or("<unknown>");
 
         let tool_desc = t["description"].as_str().unwrap_or("");
         assert!(
-            !tool_desc.contains("tabs_context_mcp"),
-            "{name}: description must use bare `tabs_context`, not `tabs_context_mcp`"
+            !tool_desc
+                .replace("tabs_context_mcp", "")
+                .contains("tabs_context"),
+            "{name}: description must name callable `tabs_context_mcp`"
         );
         assert!(
-            !tool_desc.contains("tabs_create_mcp"),
-            "{name}: description must use bare `tabs_create`, not `tabs_create_mcp`"
+            !tool_desc
+                .replace("tabs_create_mcp", "")
+                .contains("tabs_create"),
+            "{name}: description must name callable `tabs_create_mcp`"
         );
 
         if let Some(props) = t["inputSchema"]["properties"].as_object() {
             for (pname, p) in props {
                 let d = p["description"].as_str().unwrap_or("");
                 assert!(
-                    !d.contains("tabs_context_mcp"),
-                    "{name}.{pname}: param description must use bare `tabs_context`"
+                    !d.replace("tabs_context_mcp", "").contains("tabs_context"),
+                    "{name}.{pname}: param description must name callable `tabs_context_mcp`"
                 );
                 assert!(
-                    !d.contains("tabs_create_mcp"),
-                    "{name}.{pname}: param description must use bare `tabs_create`"
+                    !d.replace("tabs_create_mcp", "").contains("tabs_create"),
+                    "{name}.{pname}: param description must name callable `tabs_create_mcp`"
                 );
             }
         }

@@ -25,6 +25,9 @@ Collaboration and process -- this file is their canonical home:
   tags are the owner's call.
 - **Prefer the root fix over the spot fix.** If a spot fix is genuinely unavoidable, say so
   explicitly in the commit message so the debt stays visible.
+- **Keep tool identity stable and guidance current.** Tool names, parameters, types, and enums are
+  compatibility contracts. Descriptions and additive response guidance should improve when they
+  can make purpose, side effects, recovery, or tool choice clearer (ADR-0094).
 - **The browser product stays in the local user's context.** Ghostlight is for visible work in the
   user's existing authenticated Chromium profile. Headless, isolated-profile, cloud, and remote
   browser execution are product exclusions, not missing parity work.

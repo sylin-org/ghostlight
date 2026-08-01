@@ -71,7 +71,8 @@ pub enum Handler {
     /// The default: forward to the extension over native messaging via `Browser::call`. Most
     /// registry rows use this.
     ExtensionForward,
-    /// Answered entirely inside the binary: `explain`, and (additively) `script`/`form_fill`.
+    /// Answered entirely inside the binary: `explain`, `update_plan`, and (additively)
+    /// `script`/`form_fill`.
     /// An async, context-bearing handler (ADR-0035 Decision 6): receives a [`LocalCtx`] and
     /// returns a [`crate::mcp::outcome::CallOutcome`] behind a boxed, pinned future,
     /// since Rust has no native `async fn` pointer type. Dispatch position depends on the
@@ -197,6 +198,70 @@ pub struct ActionVariant {
     pub directory_description: &'static str,
 }
 
+/// Standard MCP hints describing a tool's user-visible behavior. These are advisory metadata for
+/// clients, never an enforcement input; the registry's per-action capability requirements remain
+/// authoritative. Mixed-action tools use the conservative whole-tool value MCP clients would
+/// otherwise infer from the standard defaults.
+#[derive(Debug, Clone, Copy)]
+pub struct ToolAnnotations {
+    /// Short display name for clients that present tools to people.
+    pub title: &'static str,
+    /// Whether every call leaves its environment unchanged.
+    pub read_only_hint: bool,
+    /// Whether a mutating call may make a destructive change.
+    pub destructive_hint: bool,
+    /// Whether repeating the same call adds no further effect.
+    pub idempotent_hint: bool,
+    /// Whether the tool interacts with page or other open-world content.
+    pub open_world_hint: bool,
+}
+
+impl ToolAnnotations {
+    const fn open_read(title: &'static str) -> Self {
+        Self {
+            title,
+            read_only_hint: true,
+            destructive_hint: false,
+            idempotent_hint: true,
+            open_world_hint: true,
+        }
+    }
+
+    const fn open_action(title: &'static str) -> Self {
+        Self::open_change(title, true, false)
+    }
+
+    const fn open_change(title: &'static str, destructive: bool, idempotent: bool) -> Self {
+        Self {
+            title,
+            read_only_hint: false,
+            destructive_hint: destructive,
+            idempotent_hint: idempotent,
+            open_world_hint: true,
+        }
+    }
+
+    const fn closed_read(title: &'static str) -> Self {
+        Self {
+            title,
+            read_only_hint: true,
+            destructive_hint: false,
+            idempotent_hint: true,
+            open_world_hint: false,
+        }
+    }
+
+    const fn closed_change(title: &'static str, idempotent: bool) -> Self {
+        Self {
+            title,
+            read_only_hint: false,
+            destructive_hint: false,
+            idempotent_hint: idempotent,
+            open_world_hint: false,
+        }
+    }
+}
+
 /// One row of the tool registry (ADR-0024 Decision 1, extended by ADR-0034 Decision 4): the
 /// single per-tool authority for validity, classification, advertisement, validation, explain,
 /// resource shape, dispatch kind, and result post-processing. Descriptors are DATA; the pipeline
@@ -212,6 +277,8 @@ pub struct ToolDescriptor {
     /// The JSON-Schema for this tool's arguments, as an inline JSON literal. The wire target
     /// format -- no DSL, no escape hatch (ADR-0034 Decision 4).
     pub input_schema: fn() -> serde_json::Value,
+    /// Standard, advisory MCP behavior hints emitted in `tools/list`.
+    pub annotations: ToolAnnotations,
     /// The agent-facing example (ADR-0031 Decision 2). `None` only on `explain`.
     pub example: Option<ToolExample>,
     /// The argument that selects this tool's action variant. `None` means any action-like
@@ -382,13 +449,14 @@ fn output_schema_with_provenance(descriptor: &ToolDescriptor) -> Value {
 pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "tabs_context_mcp",
-        advertised_description: "Get context information about the current MCP tab group. Returns all tab IDs inside the group if it exists. CRITICAL: You must get the context at least once before using other browser automation tools so you know what tabs exist. Each new conversation should create its own new tab (using tabs_create) rather than reusing existing tabs, unless the user explicitly asks to use an existing tab.",
+        advertised_description: "List the tabs owned by this Ghostlight session and return their IDs, titles, and URLs. Use it before tab-scoped tools when you do not already have a valid tab ID. With createIfEmpty:true, it creates a blank tab when the selected workspace has no Ghostlight tab and may create a normal Chrome window if none is eligible. To recover an unavailable workspace, use tabs_create_mcp instead.",
+        annotations: ToolAnnotations::open_change("List Ghostlight Tabs", false, true),
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "createIfEmpty": {
                     "type": "boolean",
-                    "description": "Creates a new MCP tab group if none exists, creates a new Window with a new tab group containing an empty tab (which can be used for this conversation). If a MCP tab group already exists, this parameter has no effect."
+                    "description": "Create a blank tab only when the selected workspace has no Ghostlight tab. Ghostlight reuses an eligible normal Chrome window when possible and creates one only when none exists. Use tabs_create_mcp instead to recover an unavailable workspace."
                 }
             },
             "required": [],
@@ -396,7 +464,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         }),
         example: Some(ToolExample {
             call: r#"{"createIfEmpty":true}"#,
-            returns: Some("Returns the tab group id and the tabs it contains (tabId, title, url for each). Call this first to get the tabId every other tool needs."),
+            returns: Some("Returns the tab group id and the tabs it contains (tabId, title, url for each). Use a returned tabId with tab-scoped tools."),
         }),
         action_key: None,
         variants: &[ActionVariant {
@@ -435,7 +503,8 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "tabs_create_mcp",
-        advertised_description: "Creates a new empty tab in the MCP tab group.",
+        advertised_description: "Create and focus a fresh blank tab owned by this Ghostlight session. Returns its tab ID and the session's current tab list. Use it to start separate work or recover an unavailable workspace; call navigate afterward to load a URL.",
+        annotations: ToolAnnotations::open_change("Create Ghostlight Tab", false, false),
         input_schema: || json!({
             "type": "object",
             "properties": {},
@@ -482,7 +551,8 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "navigate",
-        advertised_description: "Navigate to a URL, or go forward/back in browser history. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
+        advertised_description: "Load a URL in a Ghostlight-owned tab, or move forward or back through its history. Use it for top-level navigation, not same-page clicks. Get a tab ID from tabs_context_mcp when needed. Navigation can leave the current page; force:true also discards unsaved changes when Chrome asks for confirmation.",
+        annotations: ToolAnnotations::open_action("Navigate"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -492,7 +562,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 },
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to navigate. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to navigate. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 },
                 "force": {
                     "type": "boolean",
@@ -532,7 +602,8 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "computer",
-        advertised_description: "Use a mouse and keyboard to interact with a web browser, and take screenshots. If you don't have a valid tab ID, use tabs_context first to get available tabs.\n* Whenever you intend to click on an element like an icon, you should consult a screenshot to determine the coordinates of the element before moving the cursor.\n* If you tried clicking on a program or link but it failed to load, even after waiting, try adjusting your click location so that the tip of the cursor visually falls on the element that you want to click.\n* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.",
+        advertised_description: "Take screenshots and perform low-level mouse, keyboard, scroll, hover, and zoom actions in one Ghostlight tab. Use it for coordinate-based interaction; prefer act_on for one semantic target and form_fill or form_input for forms. Get a tab ID from tabs_context_mcp when needed, and take a screenshot before coordinate actions. Input actions can change page state and should not be blindly retried.",
+        annotations: ToolAnnotations::open_action("Browser Input and Screenshots"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -543,7 +614,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 },
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to execute the action on. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to execute the action on. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 },
                 "coordinate": {
                     "type": "array",
@@ -688,7 +759,8 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "find",
-        advertised_description: "Find elements on the page using natural language. Can search for elements by their purpose (e.g., \"search bar\", \"login button\") or by text content (e.g., \"organic mango product\"). Returns up to 20 matching elements with references that can be used with other tools. If more than 20 matches exist, you'll be notified to use a more specific query. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
+        advertised_description: "Find elements on the page using natural language. Can search for elements by their purpose (e.g., \"search bar\", \"login button\") or by text content (e.g., \"organic mango product\"). Returns up to 20 matching elements with references that can be used with other tools. If more than 20 matches exist, you'll be notified to use a more specific query. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+        annotations: ToolAnnotations::open_read("Find Page Elements"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -698,7 +770,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 },
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to search in. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to search in. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 }
             },
             "required": ["query", "tabId"],
@@ -740,7 +812,8 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "form_input",
-        advertised_description: "Set values in form elements using element reference ID from the read_page or find tools. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
+        advertised_description: "Set one form control using a fresh element ref from read_page or find. Use it when the exact element is already known; prefer form_fill for several fields matched by label. The tool dispatches the page's normal input and change events, so page handlers may react. Get a tab ID from tabs_context_mcp when needed.",
+        annotations: ToolAnnotations::open_action("Set Form Value"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -754,7 +827,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 },
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to set form value in. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to set form value in. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 }
             },
             "required": ["ref", "value", "tabId"],
@@ -780,13 +853,14 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "get_page_text",
-        advertised_description: "Extract raw text content from the page, prioritizing article content. Ideal for reading articles, blog posts, or other text-heavy pages. Returns plain text without HTML formatting. If you don't have a valid tab ID, use tabs_context first to get available tabs. Output is limited to 50000 characters by default; if it exceeds the limit it is truncated with a note giving the full size.",
+        advertised_description: "Extract raw text content from the page, prioritizing article content. Ideal for reading articles, blog posts, or other text-heavy pages. Returns plain text without HTML formatting. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. Output is limited to 50000 characters by default; if it exceeds the limit it is truncated with a note giving the full size.",
+        annotations: ToolAnnotations::open_read("Read Page Text"),
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to extract text from. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to extract text from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 },
                 "max_chars": {
                     "type": "number",
@@ -816,7 +890,8 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "javascript_tool",
-        advertised_description: "Execute JavaScript code in the context of the current page. The code runs in the page's context and can interact with the DOM, window object, and page variables. Returns the result of the last expression or any thrown errors. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
+        advertised_description: "Execute JavaScript code in the context of the current page. The code runs in the page's context and can interact with the DOM, window object, and page variables. Returns the result of the last expression or any thrown errors. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+        annotations: ToolAnnotations::open_action("Run Page JavaScript"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -830,7 +905,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 },
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to execute the code in. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to execute the code in. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 }
             },
             "required": ["action", "text", "tabId"],
@@ -857,13 +932,14 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "read_console_messages",
-        advertised_description: "Read browser console messages (console.log, console.error, console.warn, etc.) from a specific tab. Useful for debugging JavaScript errors, viewing application logs, or understanding what's happening in the browser console. Returns console messages from the current domain only. If you don't have a valid tab ID, use tabs_context first to get available tabs. IMPORTANT: Always provide a pattern to filter messages - without a pattern, you may get too many irrelevant messages.",
+        advertised_description: "Read browser console messages (console.log, console.error, console.warn, etc.) from a specific tab. Useful for debugging JavaScript errors, viewing application logs, or understanding what's happening in the browser console. Returns console messages from the current domain only. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. IMPORTANT: Always provide a pattern to filter messages - without a pattern, you may get too many irrelevant messages.",
+        annotations: ToolAnnotations::open_read("Read Console Messages"),
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to read console messages from. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to read console messages from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 },
                 "pattern": {
                     "type": "string",
@@ -905,13 +981,14 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "read_network_requests",
-        advertised_description: "Read HTTP network requests (XHR, Fetch, documents, images, etc.) from a specific tab. Useful for debugging API calls, monitoring network activity, or understanding what requests a page is making. Returns all network requests made by the current page, including cross-origin requests. Requests are automatically cleared when the page navigates to a different domain. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
+        advertised_description: "Read HTTP network requests (XHR, Fetch, documents, images, etc.) from a specific tab. Useful for debugging API calls, monitoring network activity, or understanding what requests a page is making. Returns all network requests made by the current page, including cross-origin requests. Requests are automatically cleared when the page navigates to a different domain. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+        annotations: ToolAnnotations::open_read("Read Network Requests"),
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to read network requests from. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to read network requests from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 },
                 "urlPattern": {
                     "type": "string",
@@ -949,13 +1026,14 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "read_page",
-        advertised_description: "Get an accessibility tree representation of elements on the page. By default returns all elements including non-visible ones. Can optionally filter for only interactive elements, limit tree depth, or focus on a specific element. Returns a structured tree that represents how screen readers see the page content. If you don't have a valid tab ID, use tabs_context first to get available tabs. Output is limited to 50000 characters -- if exceeded, the tree is truncated at a line boundary with a note giving the full size; pass a larger max_chars, or use depth/ref_id to focus.",
+        advertised_description: "Get an accessibility tree representation of elements on the page. By default returns all elements including non-visible ones. Can optionally filter for only interactive elements, limit tree depth, or focus on a specific element. Returns a structured tree that represents how screen readers see the page content. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. Output is limited to 50000 characters -- if exceeded, the tree is truncated at a line boundary with a note giving the full size; pass a larger max_chars, or use depth/ref_id to focus.",
+        annotations: ToolAnnotations::open_read("Read Page Structure"),
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to read from. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to read from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 },
                 "filter": {
                     "type": "string",
@@ -1009,7 +1087,8 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "resize_window",
-        advertised_description: "Resize the current browser window to specified dimensions. Useful for testing responsive designs or setting up specific screen sizes. If you don't have a valid tab ID, use tabs_context first to get available tabs.",
+        advertised_description: "Resize the current browser window to specified dimensions. Useful for testing responsive designs or setting up specific screen sizes. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+        annotations: ToolAnnotations::closed_change("Resize Browser Window", true),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -1023,7 +1102,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 },
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to get the window for. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to get the window for. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 }
             },
             "required": ["width", "height", "tabId"],
@@ -1049,14 +1128,15 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "update_plan",
-        advertised_description: "Present a plan to the user for approval before taking actions. The user will see the domains you intend to visit and your approach. Once approved, you can proceed with actions on the approved domains without additional permission prompts.",
+        advertised_description: "Echo a concise plan of intended browser work. This compatibility tool is informational: it does not request approval, change permissions, or authorize domains. Use it only when the client or workflow expects an explicit plan.",
+        annotations: ToolAnnotations::closed_read("Report Browser Plan"),
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "domains": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "List of domains you will visit (e.g., ['github.com', 'stackoverflow.com']). These domains will be approved for the session when the user accepts the plan."
+                    "description": "Domains the plan says it may visit (e.g., ['github.com', 'stackoverflow.com']). This field does not authorize them."
                 },
                 "approach": {
                     "type": "array",
@@ -1069,17 +1149,18 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         }),
         example: Some(ToolExample {
             call: r#"{"domains":["example.com"],"approach":["read the page","report the main heading"]}"#,
-            returns: Some("Returns the plan echoed back; auto-approved by the engine. The user sees it in their client."),
+            returns: Some("Returns the informational plan echoed back. It does not change permissions."),
         }),
         action_key: None,
         variants: &[ActionVariant {
             action: None,
             requires: &[],
-            directory_description: "Present a plan of intended actions to the user; informational only.",
+            directory_description:
+                "Echo an informational plan of intended actions; changes no permissions.",
         }],
         resource: ResourceShape::DomainLess,
         scheduling: Scheduling::LOCAL,
-        handler: Handler::ExtensionForward,
+        handler: Handler::Local(crate::mcp::update_plan::update_plan_handler),
         postprocess: None,
         page_output: PageOutput::None,
         post_dispatch: PostDispatch::None,
@@ -1088,6 +1169,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "narrate",
         advertised_description: "Show a short, temporary narration ribbon in the controlled browser tab so the person watching understands the current workflow phase. Use it for meaningful phase changes, not routine clicks or keystrokes. A new narration replaces the current one.",
+        annotations: ToolAnnotations::closed_change("Narrate Browser Work", false),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -1151,12 +1233,13 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "wait_for",
         advertised_description: "Wait until the page is ready. By default waits for BOTH your condition and page settlement (DOM mutation rate decayed). Provide selector (CSS) or text (visible substring) with state visible|present|gone, or call with neither to wait for settlement alone. min_ms sets a minimum elapsed time; settle:false gates on the condition only. Returns elapsed_ms, settle diagnostics, and the matched element's ref for follow-up clicks. Times out with an error naming what WAS on the page.",
+        annotations: ToolAnnotations::open_read("Wait for Page State"),
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID to wait on. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID to wait on. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID."
                 },
                 "selector": {
                     "type": "string",
@@ -1221,13 +1304,14 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "script",
-        advertised_description: "Run a sequence of tool calls in one request. Steps execute in order; each step is validated, authorized, and audited exactly as if called individually. Step arguments may reference a prior step's structured result: $prev.field for the previous step, $N.field for step N (1-indexed), with .0-style numeric segments indexing arrays (example: $prev.results.0.ref after find). Write $$ for a literal leading $. Only tools with structured results (find, tabs_context, tabs_create, navigate, wait_for) can be referenced. Steps may not include script itself. Use wait_for between navigate and reads on dynamic pages.",
+        advertised_description: "Run dependent tool calls in one request when later steps need structured results from earlier ones. Use browser_batch when every step's input is known before the call. Steps execute in order; each step is validated, authorized, and audited exactly as if called individually. Step arguments may reference a prior step's structured result: $prev.field for the previous step, $N.field for step N (1-indexed), with .0-style numeric segments indexing arrays (example: $prev.results.0.ref after find). Write $$ for a literal leading $. Only a prior step that returned structuredContent can be referenced. Steps may not include script itself. Use wait_for between navigate and reads on dynamic pages.",
+        annotations: ToolAnnotations::open_action("Run Dependent Browser Steps"),
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID the steps run against. Steps inherit this tabId when their own args omit it. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID the steps run against. Steps inherit this tabId when their own args omit it. Use tabs_context_mcp first if you don't have a valid tab ID."
                 },
                 "steps": {
                     "type": "array",
@@ -1305,13 +1389,14 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "form_fill",
-        advertised_description: "Fill a form by field labels in one call. Provide fields as a map from a label, placeholder, or name attribute to the value (string, number, or boolean for checkboxes). Matching is case-insensitive and specificity-ordered; ambiguous keys are returned unmatched with candidates instead of guessed. submit:true clicks the form's own submit control after filling. Passwords are masked in the result. Falls back cleanly: anything unmatched can be filled with form_input using the refs in the result.",
+        advertised_description: "Fill a form by field labels in one call. Provide fields as a map from a label, placeholder, or name attribute to the value (string, number, or boolean for checkboxes). Matching is case-insensitive and specificity-ordered; ambiguous keys are returned unmatched with candidates instead of guessed. submit:true clicks the form's own submit control after filling. Passwords are masked in the result. Use this for several fields matched by meaning; use form_input when you already have one exact element ref. Unmatched fields include refs for that fallback.",
+        annotations: ToolAnnotations::open_action("Fill Form"),
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID the form lives in. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID the form lives in. Use tabs_context_mcp first if you don't have a valid tab ID."
                 },
                 "fields": {
                     "type": "object",
@@ -1403,13 +1488,14 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "act_on",
-        advertised_description: "Resolve one visible element by ref or accessible meaning, perform one action, and return a bounded observation receipt. Use this when the target should be unique and you want to avoid a separate find, action, and wait loop. Ambiguous semantic matches are reported without acting.",
+        advertised_description: "Resolve one visible element by ref or accessible meaning, perform one action, and return a bounded observation receipt. Use this when the target should be unique and you want to avoid a separate find, action, and wait loop. Use computer instead for screenshots or coordinate-level pointer and keyboard work. Ambiguous semantic matches are reported without acting.",
+        annotations: ToolAnnotations::open_action("Act on Page Element"),
         input_schema: || json!({
             "type": "object",
             "properties": {
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID containing the target. Use tabs_context first if you do not have one."
+                    "description": "Tab ID containing the target. Use tabs_context_mcp first if you do not have one."
                 },
                 "target": {
                     "type": "object",
@@ -1507,6 +1593,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "dialog",
         advertised_description: "Inspect or explicitly resolve the JavaScript dialog blocking one owned tab. Use status when the dialog state is unknown. Never accept, dismiss, or respond without intent from the current task.",
+        annotations: ToolAnnotations::open_action("Handle Page Dialog"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -1573,6 +1660,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "tab_control",
         advertised_description: "Focus, reload, or close one tab owned by this Ghostlight session. Close is always explicit and never affects a user-owned tab or automatically deletes the containing tab group.",
+        annotations: ToolAnnotations::open_action("Control Ghostlight Tab"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -1621,7 +1709,8 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "file_upload",
-        advertised_description: "Upload one or multiple files to a file input element on the page. Do not click on file upload buttons or file inputs -- clicking opens a native file picker dialog that you cannot see or interact with. Instead, use read_page or find to locate the file input element, then use this tool with its ref to upload files directly.",
+        advertised_description: "Upload one or multiple client-supplied files to a file input element on the page. Do not click file upload buttons or file inputs -- that opens a native file picker you cannot see or control. Use read_page or find to locate the file input, then pass its ref here. Use upload_image instead only for a screenshot already captured by Ghostlight.",
+        annotations: ToolAnnotations::open_action("Upload Files"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -1649,7 +1738,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 },
                 "tabId": {
                     "type": "number",
-                    "description": "Tab ID where the file input is located. Use tabs_context first if you don't have a valid tab ID."
+                    "description": "Tab ID where the file input is located. Use tabs_context_mcp first if you don't have a valid tab ID."
                 }
             },
             "required": ["ref", "tabId"],
@@ -1676,7 +1765,8 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "browser_batch",
-        advertised_description: "Execute a sequence of browser tool calls in ONE round trip. Each item is {name, input} where input is exactly what you'd pass to that tool standalone. Actions execute SEQUENTIALLY (not in parallel) and stop on the first error. Use this tool extensively to quickly execute work whenever you can predict two or more steps ahead -- e.g. navigate, click a field, type, press Return, screenshot. Each tool's own permission check runs per item -- if an action navigates to a domain without permission, the next item's check fails and the batch stops. Screenshots and other images are returned interleaved with outputs; coordinates you write in THIS batch refer to the screenshot taken BEFORE this call. browser_batch cannot be nested.",
+        advertised_description: "Execute a sequence of browser tool calls in ONE round trip. Each item is {name, input} where input is exactly what you'd pass to that tool standalone. Actions execute SEQUENTIALLY (not in parallel) and stop on the first error. Use this tool extensively to quickly execute work whenever you can predict two or more steps ahead -- e.g. navigate, click a field, type, press Return, screenshot. Each tool's own permission check runs per item -- if an action navigates to a domain without permission, the next item's check fails and the batch stops. Screenshots and other images are returned interleaved with outputs; coordinates you write in THIS batch refer to the screenshot taken BEFORE this call. browser_batch cannot be nested. Use script instead when a later step needs structured output from an earlier one.",
+        annotations: ToolAnnotations::open_action("Run Browser Batch"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -1686,7 +1776,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                     "items": {
                         "type": "object",
                         "properties": {
-                            "name": { "type": "string", "description": "Tool name (e.g. computer, navigate, find, tabs_create). browser_batch cannot be nested." },
+                            "name": { "type": "string", "description": "Tool name (e.g. computer, navigate, find, tabs_create_mcp). browser_batch cannot be nested." },
                             "input": { "type": "object", "description": "That tool's input -- same shape you'd pass when calling it directly." }
                         },
                         "required": ["name", "input"]
@@ -1718,7 +1808,8 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "upload_image",
-        advertised_description: "Upload a previously captured screenshot to a file input or drag & drop target. Supports two approaches: (1) ref -- for targeting specific elements, especially hidden file inputs, (2) coordinate -- for drag & drop to visible locations like Google Docs. Provide either ref or coordinate, not both.",
+        advertised_description: "Upload a screenshot already captured by Ghostlight to a file input or drag-and-drop target. Use file_upload for client-supplied files. Target a specific element, especially a hidden file input, with ref; target a visible drop location with coordinate. Provide either ref or coordinate, not both.",
+        annotations: ToolAnnotations::open_action("Upload Captured Image"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -1756,6 +1847,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         // happy path to start -> ordinary browser work -> export; stop remains an optional explicit
         // boundary, and status exposes the reliable lifecycle without touching the live page.
         advertised_description: "Create a short, memory-only GIF of browser work. Call start_recording, use browser tools normally, then call export; export stops capture automatically. Recording also auto-stops after 30 seconds idle or 120 seconds total. Use status to inspect state, stop_recording for an optional explicit boundary, or clear to erase immediately. Export can return the GIF to the client (download:true) or place it on the page with ref or coordinate.",
+        annotations: ToolAnnotations::open_action("Record Browser GIF"),
         input_schema: || json!({
             "type": "object",
             "properties": {
@@ -1822,6 +1914,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "explain",
         advertised_description: "Returns this server's action directory: every available action, the capability it requires (read, action, write, or execute; some require none), and a short description of what it does, plus definitions of the capability vocabulary. Use it to learn what you are allowed to do in this session. It does not read, summarize, or explain web pages.",
+        annotations: ToolAnnotations::closed_read("Explain Browser Permissions"),
         input_schema: || json!({
             "type": "object",
             "properties": {},
@@ -1916,9 +2009,9 @@ pub fn agent_guide_text() -> String {
 }
 
 /// Render the `tools/list` advertisement JSON from the registry (ADR-0034 Decision 5): the
-/// complete `tools` array with each tool's `name`, `description`, `inputSchema`, and `example`
-/// (when present), in registry order. This is the single source of the advertised surface --
-/// no separate fixture file.
+/// complete `tools` array with each tool's `name`, `description`, `inputSchema`, standard
+/// `annotations`, and `example` (when present), in registry order. This is the single source of
+/// the advertised surface -- no separate fixture file.
 pub fn advertised_tools_json() -> Value {
     let tools: Vec<Value> = REGISTRY
         .iter()
@@ -1927,6 +2020,13 @@ pub fn advertised_tools_json() -> Value {
                 "name": d.tool,
                 "description": d.advertised_description,
                 "inputSchema": (d.input_schema)(),
+            });
+            entry["annotations"] = json!({
+                "title": d.annotations.title,
+                "readOnlyHint": d.annotations.read_only_hint,
+                "destructiveHint": d.annotations.destructive_hint,
+                "idempotentHint": d.annotations.idempotent_hint,
+                "openWorldHint": d.annotations.open_world_hint,
             });
             if let Some(ex) = d.example {
                 let call: Value = serde_json::from_str(ex.call).unwrap_or(json!({}));
@@ -2596,7 +2696,7 @@ mod tests {
                 "update_plan",
                 None,
                 ResourceShape::DomainLess,
-                false,
+                true,
                 false,
                 PostDispatch::None,
             ),

@@ -178,7 +178,7 @@ Session housekeeping. Always available regardless of access tier.
 | Tool | Description | Notes |
 |---|---|---|
 | `resize_window` | Resize browser window | No security implication. |
-| `update_plan` | Present plan to user (auto-approved) | Informational pass-through. |
+| `update_plan` | Echo an informational plan | Does not request approval or change permissions. |
 
 #### Compose Tier
 
@@ -224,6 +224,19 @@ The `computer` enum has **13 actions** (verified in Phase 0): `left_click`, `rig
 - **Mutate actions:** `left_click`, `right_click`, `double_click`, `triple_click`, `type`, `key`, `scroll`, `hover`, `left_click_drag`, `scroll_to` (dispatch input or move the viewport)
 
 `scroll` is classified as Mutate despite not modifying application state, because it is an input action dispatched via CDP `Input.dispatchMouseEvent`. Splitting `computer` sub-actions across tiers at the MCP schema level would break the trained tool interface. Instead, the binary inspects the `action` parameter and applies tier enforcement internally. If the current domain's grant is Observe-only, a `computer` call with `action: "left_click"` is denied; a `computer` call with `action: "screenshot"` is permitted.
+
+### 3.4. Agent-readable definitions and annotations
+
+Tool names, parameter names, parameter types, and enum values are compatibility contracts.
+Descriptions are current agent guidance: they name the actual callable tools, distinguish nearby
+choices, and state material side effects. See [ADR-0094](adr/0094-agent-readable-tool-definitions.md).
+
+Every tool advertises the standard MCP `annotations` object with a display title and conservative
+behavior hints. These hints improve client confirmation, retry, and trust-boundary UX; they never
+participate in Ghostlight authorization. The binary's per-action RAWX classification remains the
+enforcement authority. `computer` publishes conservative whole-tool values (`readOnlyHint:false`,
+`destructiveHint:true`) because its action enum spans both read-only screenshots and mutating
+input; governance still classifies each action separately.
 
 ---
 

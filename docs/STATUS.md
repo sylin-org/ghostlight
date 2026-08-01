@@ -7,6 +7,21 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **Agent-readable tool definitions and standard MCP annotations are implemented on `dev`
+  (ADR-0094).** All 25 tools now publish display titles plus conservative read-only, destructive,
+  idempotent, and open-world hints. The mixed `computer` tool publishes MCP's conservative
+  whole-tool risk values while Ghostlight retains precise per-action enforcement. Focused
+  descriptions now distinguish semantic and low-level interaction, dependent and fixed-input
+  batches, form strategies, and the two upload paths.
+  Guidance names the actual callable `_mcp` tab tools, and `tabs_create_mcp` advertises its
+  stale-workspace recovery role. `update_plan` is now a truthful service-local informational
+  echo, so this change requires no browser-adapter release. The compatibility boundary remains
+  tool names, parameter names, parameter types, and enums; descriptions are deliberately
+  improvable guidance. Formatting, strict workspace clippy, the full Rust workspace suite, and
+  the focused 14-test fidelity suite pass. A guarded Windows dev-loop swap and real-relay probe
+  also passed with the Chrome extension attached. External registry rescoring waits until the
+  change reaches the default branch.
+
 - **The license layout now supports conventional repository discovery without blurring the
   open-core boundary.** Root `LICENSE` contains the standard Apache-2.0 text so repository
   scanners can classify the permissive engine. The alternative MIT text and Ghostlight
