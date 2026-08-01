@@ -7,8 +7,8 @@ the Release workflow builds.
 
 The release spans three first-party repositories plus external registries:
 
-- `sylin-org/ghostlight` (this repo): binaries, the npm launcher, package managers, the browser
-  extension, and the MCP registry entry.
+- `sylin-org/ghostlight` (this repo): binaries, the npm launcher, package managers, the independently
+  versioned browser adapter, and the MCP registry entry.
 - `sylin-org/website` (sylin.org): the install guide, canonical public-status fallback, and demo
   pages. It is designed to auto-track this repo, so a release touches it only lightly (see
   "Website" below).
@@ -18,7 +18,7 @@ The release spans three first-party repositories plus external registries:
 
 | Channel | What ships | Automation | Driven by |
 | --- | --- | --- | --- |
-| GitHub Release | cross-platform binaries, raw per-target bins, SBOM, the store-ready extension zip, checksums, Sigstore attestations | Automated | tag push -> `.github/workflows/release.yml`; `release.ps1` tags, watches, verifies |
+| GitHub Release | cross-platform binaries, raw per-target bins, SBOM, the store-ready adapter zip, checksums, Sigstore attestations | Automated | tag push -> `.github/workflows/release.yml`; `release.ps1` tags, watches, verifies |
 | npm (`ghostlight`) | the launcher that fetches the matching release binary, integrity-pinned | Automated | `release.ps1` (`sums` writes `checksums.json`, `npm` publishes) |
 | Homebrew tap (`sylin-org/homebrew-tap`) | the formula (version + macOS/Linux sums) | Automated | `release.ps1` (`tap`) |
 | Scoop | in-repo manifest `packaging/scoop/ghostlight.json` | Automated | `release.ps1` (`sums`) |
@@ -42,10 +42,11 @@ Every release needs these (the script checks them in `preflight`):
 
 - `git`, `gh` (authenticated: `gh auth status`), and `npm` (logged in: `npm whoami`) on PATH.
 - You are on `main`, the tree is clean, and `main == origin/main`.
-- All version files agree on the release version (bump them on `dev` before the release PR; the
-  same list `release.ps1` checks: the four `Cargo.toml`s, `extension/manifest.json`,
-  `packaging/npm/package.json`, `server.json`, the scoop/winget/homebrew manifests, and
-  `docs/public-status.json`).
+- All service version files agree on the release version (bump them on `dev` before the release PR;
+  the same list `release.ps1` checks: the four `Cargo.toml`s, `packaging/npm/package.json`,
+  `server.json`, the scoop/winget/homebrew manifests, and `docs/public-status.json`).
+- The source, public-store, and pending Chrome adapter versions each have a `compatibility.json`
+  row that covers the service release.
 - `scripts/check-public-surfaces.ps1` confirms the README uses the canonical platform, extension,
   and decision-path claims.
 - `CHANGELOG.md` has a `## [<version>]` section.
@@ -55,8 +56,10 @@ Without them, the extension step prints exact manual submission instructions ins
 
 ## Cutting a release
 
-1. Land everything on `dev`, bump every version surface, write the CHANGELOG section, and merge the
-   `dev -> main` PR (CI green). `main` now carries the release commit.
+1. Land everything on `dev`, bump every service version surface, write the CHANGELOG section, and
+   merge the `dev -> main` PR (CI green). For a service-only release, leave
+   `extension/manifest.json` alone and extend the adapter range in `compatibility.json`. `main` now
+   carries the release commit.
 2. From `main`:
 
    ```
@@ -92,14 +95,28 @@ the step skips (not fatal).
 
 The store zip is one artifact, produced by `scripts/package-extension.ps1`: it stages `extension/`,
 excludes dev-only files, and STRIPS the manifest `key` field (the Chrome Web Store rejects a `key`
-on upload). The Release workflow builds this exact zip as the `ghostlight-extension-v<version>.zip`
-release asset (via `pwsh` on the runner), so the shipped asset is directly submittable.
+on upload). Its version comes from `extension/manifest.json`, not the service release. The Release
+workflow builds this exact zip as the `ghostlight-extension-v<adapter-version>.zip` release asset
+(via `pwsh` on the runner), so the shipped asset is directly submittable.
 
 `scripts/publish-extension.ps1` publishes it. For each store, if the credentials are present in the
 environment it uploads and publishes via the store's API; otherwise it prints the manual dashboard
 steps (pointing at the built zip). It never fails a release for a missing credential. The
 `release.ps1` `extension` step runs it ONLY when `extension/` actually changed since the previous
 tag (a Rust-only release needs no store resubmission).
+
+### Adapter compatibility
+
+`compatibility.json` is the canonical support map. Each Chrome adapter row gives an inclusive
+minimum and maximum service version. Read it as: "Chrome adapter X covers Ghostlight service
+versions Y-Z." The current source adapter version comes from `extension/manifest.json`; the public
+and pending store versions come from `docs/public-status.json`.
+
+On a service-only release, extend the applicable rows through the new service version. Do not bump
+the adapter manifest. On a real extension change, bump the manifest, add a compatibility row, and
+update the public or pending store state when the submission changes. Release preflight and public
+surface CI reject uncovered combinations. Runtime version reporting remains deferred until a real
+adapter update adds truthful version evidence to the browser handshake (ADR-0093).
 
 Run it standalone any time:
 

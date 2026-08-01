@@ -16,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'adapter-compatibility.ps1')
 $StatusPath = Join-Path $RepoRoot 'docs/public-status.json'
 $Status = Get-Content -Raw $StatusPath | ConvertFrom-Json
 $Failures = [System.Collections.Generic.List[string]]::new()
@@ -57,7 +58,37 @@ $CargoVersion = [regex]::Match($Cargo, '(?m)^version = "([^"]+)"').Groups[1].Val
 Assert-Equal 'Cargo.toml version' $Status.release $CargoVersion
 
 $Manifest = Get-Content -Raw (Join-Path $RepoRoot 'extension/manifest.json') | ConvertFrom-Json
-Assert-Equal 'extension manifest version' $Status.release $Manifest.version
+$SourceAdapterVersion = $Manifest.version
+
+try {
+    $Compatibility = Read-GhostlightAdapterCompatibility $RepoRoot
+    $SourceCoverage = Assert-GhostlightChromeAdapterCoversService `
+        $Compatibility $SourceAdapterVersion $Status.release
+
+    if (-not $Status.PSObject.Properties['chromeStore']) {
+        throw 'docs/public-status.json has no chromeStore object'
+    }
+    $PublicAdapterVersion = $Status.chromeStore.publicAdapterVersion
+    if ([string]::IsNullOrWhiteSpace($PublicAdapterVersion)) {
+        throw 'docs/public-status.json has no public Chrome adapter version'
+    }
+    $PublicCoverage = Assert-GhostlightChromeAdapterCoversService `
+        $Compatibility $PublicAdapterVersion $Status.release
+    Assert-Contains 'extension summary public compatibility' $Status.extensionSummary `
+        (Format-GhostlightChromeAdapterCoverage $PublicCoverage)
+
+    $PendingProperty = $Status.chromeStore.PSObject.Properties['pendingAdapterVersion']
+    $PendingAdapterVersion = if ($PendingProperty) { [string]$PendingProperty.Value } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($PendingAdapterVersion)) {
+        $PendingCoverage = Assert-GhostlightChromeAdapterCoversService `
+            $Compatibility $PendingAdapterVersion $Status.release
+        Assert-Contains 'extension summary pending compatibility' $Status.extensionSummary `
+            (Format-GhostlightChromeAdapterCoverage $PendingCoverage)
+    }
+}
+catch {
+    Add-Failure "Chrome adapter compatibility: $($_.Exception.Message)"
+}
 
 $Npm = Get-Content -Raw (Join-Path $RepoRoot 'packaging/npm/package.json') | ConvertFrom-Json
 Assert-Equal 'npm package version' $Status.release $Npm.version
@@ -76,6 +107,7 @@ Assert-NotMatch 'README install path' $Readme $RetiredInstallPattern
 
 $AgentInstall = Get-Content -Raw (Join-Path $RepoRoot 'llms-install.md')
 $SoloInstall = Get-Content -Raw (Join-Path $RepoRoot 'docs/guides/solo-developer.md')
+$ReleaseTemplate = Get-Content -Raw (Join-Path $RepoRoot '.github/release-template.md')
 $PublicStatusText = Get-Content -Raw $StatusPath
 foreach ($Surface in @(
     @{ Label = 'agent install guide'; Text = $AgentInstall },
@@ -85,6 +117,8 @@ foreach ($Surface in @(
     Assert-NotMatch $Surface.Label $Surface.Text $RetiredInstallPattern
     Assert-NotMatch $Surface.Label $Surface.Text '(?i)load unpacked|chrome://extensions|sideload|side-load'
 }
+Assert-NotMatch 'release notes template' $ReleaseTemplate `
+    '(?i)manual (?:extension )?install|manual installation|install by hand|load unpacked|chrome://extensions|sideload|side-load'
 
 $SourceGuide = Get-Content -Raw (Join-Path $RepoRoot 'docs/guides/installation.md')
 Assert-Contains 'README source-development exception' $Readme 'Build from source and test locally'
@@ -120,4 +154,4 @@ if ($Failures.Count -gt 0) {
 }
 
 $Mode = if ($Online) { 'local and live' } else { 'local' }
-Write-Host "Public-surface check passed ($Mode): v$($Status.release), platform, extension, and entry-path claims agree."
+Write-Host "Public-surface check passed ($Mode): service v$($Status.release), source Chrome adapter v$SourceAdapterVersion, platform, extension, and entry-path claims agree."

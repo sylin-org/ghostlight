@@ -8,7 +8,8 @@ justifications live in [PERMISSION_JUSTIFICATIONS.md](PERMISSION_JUSTIFICATIONS.
 privacy policy in [PRIVACY.md](PRIVACY.md); this file does not restate them.
 
 The package to upload is produced by `scripts/package-extension.ps1` at
-`dist/ghostlight-extension-v<version>.zip`. That zip already has the local-dev `key` stripped, so
+`dist/ghostlight-extension-v<adapter-version>.zip`. That zip already has the local-dev `key`
+stripped, so
 it is valid for a first upload (the store rejects a `key` field on the first upload and assigns the
 extension id itself).
 
@@ -288,7 +289,7 @@ audience. Capture the terminal window with the OS and crop to 1280x800.
 ## Submission steps (founder actions)
 
 1. Create a Chrome Web Store developer account (one-time 5 USD fee). Agent cannot do this.
-2. Add new item; upload `dist/ghostlight-extension-v<version>.zip`.
+2. Add new item; upload `dist/ghostlight-extension-v<adapter-version>.zip`.
 3. Fill the Store listing and Privacy tabs from this file; upload at least one screenshot and the
    required small promo tile, then paste the YouTube promotional-video URL.
 4. Submit for review. Expect extra scrutiny on `debugger` + `<all_urls>` + `nativeMessaging`; the

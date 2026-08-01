@@ -126,6 +126,10 @@ reload at `chrome://extensions`) is in [docs/DEV-LOOP.md](docs/DEV-LOOP.md). One
 whichever service holds the endpoint. Named instances (`--instance`) are a test-isolation
 seam only, not a user or dev workflow.
 
+The Chrome adapter and service version independently (ADR-0093). The manifest owns the adapter
+version; `compatibility.json` owns its inclusive service range. Do not bump the manifest for a
+service-only release.
+
 ## Code style
 
 - Rust 2021. `thiserror` for typed library errors, `anyhow` in main/integration code.

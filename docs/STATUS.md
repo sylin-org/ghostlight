@@ -7,6 +7,14 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **Chrome adapters now version independently from the service (ADR-0093).**
+  `compatibility.json` maps each adapter to an inclusive service range. Release packaging names the
+  extension artifact from `extension/manifest.json`; preflight and public-surface checks require
+  the source, public-store, and pending adapters to cover the service release. Service-only
+  releases extend the map without changing the adapter manifest or restarting store review. The
+  current source adapter remains v0.7.2, the public store serves v0.6.0, and v0.7.1 is pending;
+  all three cover service v0.7.2.
+
 - **v0.7.2 ships safe installed-engine activation (ADR-0092).** Windows identifies the
   exact adapter-pipe owner, verifies that its executable belongs to the managed Ghostlight install
   tree, quiesces lock-aware installed relays with owned deploy locks, replaces the predecessor,

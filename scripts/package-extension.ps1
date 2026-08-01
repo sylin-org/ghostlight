@@ -10,8 +10,8 @@
   root as the Chrome Web Store requires.
 
 .PARAMETER Version
-  Overrides the version used in the output filename. Defaults to the version
-  field read from extension/manifest.json.
+  The expected Chrome adapter version. When supplied, it must match the version
+  in extension/manifest.json. The manifest remains the source of truth.
 
 .EXAMPLE
   pwsh -File scripts\package-extension.ps1
@@ -34,8 +34,12 @@ if (-not (Test-Path $ManifestPath)) {
   throw "manifest.json not found at $ManifestPath"
 }
 $manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
-if (-not $Version) { $Version = $manifest.version }
-if (-not $Version) { throw "No version found in $ManifestPath and no -Version override given." }
+$ManifestVersion = $manifest.version
+if (-not $ManifestVersion) { throw "No version found in $ManifestPath." }
+if ($Version -and $Version -ne $ManifestVersion) {
+  throw "Requested Chrome adapter version $Version does not match manifest version $ManifestVersion."
+}
+$Version = $ManifestVersion
 
 # Files not wanted in the store package: native-messaging-host.json is a
 # local-install template, README.md is developer-facing docs, and the icon

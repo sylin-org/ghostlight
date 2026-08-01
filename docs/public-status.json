@@ -2,6 +2,10 @@
   "schemaVersion": 1,
   "release": "0.7.2",
   "platformSummary": "Windows and Linux are verified end to end against live browsers. macOS builds and passes the full test suite in CI; its live-browser verification is still owed.",
-  "extensionSummary": "The Chrome Web Store listing is public at v0.6.0; the v0.7.1 update has been accepted for review. Install the extension from the public listing.",
+  "extensionSummary": "The Chrome Web Store serves Chrome adapter v0.6.0. Chrome adapter v0.6.0 covers Ghostlight service versions v0.6.0-v0.7.2. Chrome adapter v0.7.1 is pending review. Chrome adapter v0.7.1 covers Ghostlight service versions v0.7.1-v0.7.2. Install the extension from the public listing.",
+  "chromeStore": {
+    "publicAdapterVersion": "0.6.0",
+    "pendingAdapterVersion": "0.7.1"
+  },
   "lastVerified": "2026-08-01"
 }

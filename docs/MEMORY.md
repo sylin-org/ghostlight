@@ -46,6 +46,10 @@ Collaboration and process -- this file is their canonical home:
 - **End-user extension installation is store-only.** Packaged and public paths point to the Chrome
   Web Store. Only source-development docs may explain loading the repository extension directly for
   immediate local testing (ADR-0091).
+- **The Chrome adapter versions independently from the service.** `extension/manifest.json` owns
+  the adapter version; `compatibility.json` is the canonical inclusive service coverage map. A
+  service-only release extends coverage and does not bump the manifest or reset store review
+  (ADR-0093).
 - **Persist before context loss.** On a "prep for compaction" / "handoff" / "save state" request,
   first update memory + durable docs (this file, STATUS, ADRs/LEDGERs) and commit, THEN emit a
   self-contained continuation prompt -- persist first, answer second.
@@ -74,8 +78,8 @@ file does not restate them -- follow AGENTS.md.
   publish is DNS-authed on the sylin.org apex; canonical URLs are `sylin.org` (the github.io site
   is retired, redirect-stubbed). Off-tree/secret change history is in `local/AUDIT-LOG.md`.
 - **Public release and platform truth is product-owned.** `docs/public-status.json` is the
-  canonical machine-readable release fallback, live-platform statement, and extension-store
-  statement. The README must contain its exact public claims; the website consumes a synchronized
+  canonical machine-readable service release fallback, live-platform statement, and Chrome store
+  adapter state. The README must contain its exact public claims; the website consumes a synchronized
   fallback through `scripts/publish-website.ps1`. Run `scripts/check-public-surfaces.ps1` locally
   and with `-Online` after deployment instead of repairing either surface independently.
 - **Remote-code claims distinguish extension logic from page automation.** All extension logic

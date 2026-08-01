@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Independent Chrome adapter versions (ADR-0093).** `compatibility.json` now states which
+  Ghostlight service versions each Chrome adapter covers. Service-only releases extend that map
+  without changing the extension manifest or restarting store review. Release artifacts, store
+  tooling, public status, and preflight checks now use the adapter version explicitly.
+
 ## [0.7.2] - 2026-08-01
 
 ### Fixed
