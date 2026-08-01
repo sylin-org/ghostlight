@@ -99,6 +99,7 @@ history live here.
 | [0089](0089-destination-aware-spatial-cues.md) | Destination-aware spatial cues: ref scrolls settle into their exact target, coordinate image placement shows a content-free photo drop, semantic composition suppresses duplicate halos, and backstage diagnostic reads stay intentionally quiet | Accepted (completes [0083](0083-unified-action-signature-medallions.md) D7's deferred presentation review; builds on [0081](0081-document-aware-presentation-broker.md)) |
 | [0090](0090-explicit-stale-workspace-recovery.md) | Explicit stale-workspace recovery: a known tab id stays authoritative, while `tabs_create_mcp` may safely select a fresh eligible window and replace a dead session pin | Accepted (amends [0085](0085-window-placed-client-workspaces.md) D2) |
 | [0091](0091-store-only-end-user-extension-installation.md) | Store-only end-user extension installation: every packaged and public path points to the Chrome Web Store; direct loading remains only for source-development testing | Accepted (amends [0070](0070-bidirectional-install-handoff.md) D1/D3 and consequences) |
+| [0092](0092-install-activates-selected-engine.md) | Install activates the selected engine: replace a verified managed endpoint owner under deploy locks, preserve external/dev engines, and verify the new owner rather than trusting a spawn | Accepted (amends [0054](0054-zero-elevation-windows-autostart.md) D2 and Linux H9; builds on [0063](0063-deploy-quiesce-lock.md)/[0065](0065-one-stack-endpoint-is-the-engine.md)) |
 
 ## Conventions
 

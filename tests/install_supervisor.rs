@@ -19,8 +19,8 @@ fn test_ctx() -> PlanCtx {
 
 /// PINNED (ADR-0054, supersedes the H9 schtasks pin): registration is zero-elevation -- no
 /// scheduled-task creation anywhere (an onlogon task requires elevation, issue #17); the HKCU Run
-/// value carries the pinned name and a quoted `"<exe>" service` launch string; the service starts
-/// once, detached.
+/// value carries the pinned name and a quoted `"<exe>" service` launch string; the selected
+/// installed service is activated immediately.
 #[cfg(windows)]
 #[test]
 fn windows_registration_is_zero_elevation_run_key() {
@@ -50,8 +50,8 @@ fn windows_registration_is_zero_elevation_run_key() {
     assert!(
         steps
             .iter()
-            .any(|s| matches!(s, SupervisorStep::StartDetached { .. })),
-        "the service starts once, detached"
+            .any(|s| matches!(s, SupervisorStep::ActivateInstalled { .. })),
+        "the selected installed service is activated"
     );
 }
 
@@ -92,4 +92,15 @@ fn linux_unit_names_the_service_subcommand() {
     assert!(unit.contains("ExecStart="));
     assert!(unit.contains("service"));
     assert!(unit.contains("Restart=on-failure"));
+    assert!(steps.iter().any(|step| matches!(
+        step,
+        SupervisorStep::Run(command)
+            if command.program == "systemctl"
+                && command.args
+                    == vec![
+                        "--user".to_string(),
+                        "restart".to_string(),
+                        "ghostlight.service".to_string()
+                    ]
+    )));
 }

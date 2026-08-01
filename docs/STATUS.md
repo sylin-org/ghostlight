@@ -1,11 +1,21 @@
 # STATUS -- where the project stands
 
-Last updated: 2026-07-31. This file is a point-in-time snapshot maintained by whoever
+Last updated: 2026-08-01. This file is a point-in-time snapshot maintained by whoever
 finishes significant work. It exists so a fresh agent (or human) can orient without any
 prior session context. **Trust the tree, `git log`, and the batch LEDGERs over this file
 when they disagree**, and update it when you land something that changes the picture.
 
 ## Now
+
+- **Installing a release now activates that engine safely (ADR-0092).** Windows identifies the
+  exact adapter-pipe owner, verifies that its executable belongs to the managed Ghostlight install
+  tree, quiesces lock-aware installed relays with owned deploy locks, replaces the predecessor,
+  and verifies the selected executable claimed the endpoint. An external repository/dev engine
+  is preserved. Linux explicitly restarts its updated user unit; macOS retains its forced kickstart.
+  The same cleanup also makes `tabs_create_mcp` use one composite tab ID in its leading prose,
+  embedded JSON inventory, and structured result. Formatting, strict workspace clippy, all 693
+  core unit tests, the complete Rust workspace suite, 164 extension tests, 4 npm launcher tests,
+  and all 34 Lightbox process scenarios pass on Windows.
 
 - **End-user extension installation is store-only (ADR-0091).** The README, agent install guide,
   human guides, current design notes, test recipes, public status, and website source now point
@@ -477,13 +487,13 @@ remains manual when its API credentials or dashboard metadata are absent.
 
 ## Owner-side gates (agents cannot do these)
 
-- Chrome Web Store: monitor the pending v0.6.0 review and answer any reviewer questions. Edge
+- Chrome Web Store: monitor the pending v0.7.1 review and answer any reviewer questions. Edge
   Add-ons remains unsubmitted.
 - Trust center legal: vendor entity name in the MSA (blocked on forming the LLC), the
   cyber-insurance yes/no line, counsel skim of MSA/DPA/LICENSE-GOVERNANCE before first
   EXECUTION (publication already happened by design; drafts are marked as drafts).
-- Key backup + a second npm publisher; five to ten non-author humans through the tracked clean
-  first-success cohort.
+- Key backup + a second npm publisher; gather first-use evidence through public channels because a
+  private greenfield cohort is not currently available.
 
 ## Standing context worth knowing
 

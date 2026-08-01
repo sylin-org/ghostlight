@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-01
+
+### Fixed
+
+- **Immediate upgrade activation (ADR-0092).** Installing a new release now replaces a verified
+  managed Windows service under deploy locks and confirms that the selected executable owns the
+  endpoint. External repository/dev engines stay in place. Linux explicitly restarts its updated
+  user service; macOS retains its existing forced kickstart.
+- `tabs_create_mcp` now reports one composite tab ID consistently in its leading prose, embedded
+  JSON inventory, and structured result.
+
 ## [0.7.1] - 2026-07-31
 
 ### Fixed

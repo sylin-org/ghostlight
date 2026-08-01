@@ -1,6 +1,6 @@
 [package]
 name = "ghostlight-transport"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 description = "Ghostlight transport: the stable substrate shared by the role executables (ADR-0046)."
 publish = false
@@ -24,6 +24,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_Threading",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Pipes",
 ] }
 
 [target.'cfg(unix)'.dependencies]
