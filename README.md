@@ -14,6 +14,12 @@
   <a href="https://github.com/sylin-org/homebrew-tap"><img src="https://img.shields.io/badge/Homebrew-sylin--org%2Ftap-38BDF8" alt="Homebrew tap"></a>
 </p>
 
+<p align="center">
+  <a href="https://glama.ai/mcp/servers/sylin-org/ghostlight">
+    <img src="https://glama.ai/mcp/servers/sylin-org/ghostlight/badges/card.svg" alt="Ghostlight score on Glama" width="380">
+  </a>
+</p>
+
 <p align="center"><img src="docs/assets/demo.gif" alt="Ghostlight reading and completing a launch brief in a real browser with visible page, field, and click feedback" width="838" height="766"></p>
 <p align="center"><sub>Ghostlight reading, filling, and completing a brief in the user's visible browser.</sub></p>
 

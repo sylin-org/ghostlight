@@ -52,10 +52,10 @@ resolves the relay as a sibling.
       and scored Ghostlight A for license, A for quality, and B for maintenance. Maintenance is the
       only below-A dimension. Smithery is deferred because its local-server path requires a
       maintained MCPB bundle while its main audience and value are hosted integrations; revisit
-      only if MCPB becomes a useful product channel on its own. Draft PR
+      only if MCPB becomes a useful product channel on its own. PR
       [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) adds Ghostlight to
-      `punkpeye/awesome-mcp-servers` under Browser Automation, and its Glama badge check passes.
-      mcp.so and PulseMCP remain open.
+      `punkpeye/awesome-mcp-servers` under Browser Automation. Its Glama badge check passes, and the
+      PR was marked ready for maintainer review on 2026-08-01. mcp.so and PulseMCP remain open.
 - [ ] **Winget.** v0.7.2 PR #410996 merged and is publicly discoverable. The v0.7.3 manifest
       validates locally and PR #411087 is open and mergeable; its CLA check passes while Microsoft
       validation and review remain pending.
