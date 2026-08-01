@@ -82,4 +82,4 @@ explicit Baseline interpretation.
 This assessment should be reviewed when repository ownership, branch rules, release workflows,
 licensing boundaries, or the current OSPS Baseline version changes.
 
-Last reviewed: 2026-07-18 against v0.7.2 | Contact: support@sylin.org
+Last reviewed: 2026-07-18 against v0.7.3 | Contact: support@sylin.org

@@ -71,4 +71,4 @@ target in [SECURITY.md](../../SECURITY.md).
 
 See [security-overview.md](security-overview.md) for the vendor-side security posture.
 
-Last reviewed: 2026-07-14 against v0.7.2 | Contact: support@sylin.org
+Last reviewed: 2026-07-14 against v0.7.3 | Contact: support@sylin.org
