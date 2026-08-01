@@ -36,7 +36,7 @@ when they disagree**, and update it when you land something that changes the pic
   the source, public-store, and pending adapters to cover the service release. Service-only
   releases extend the map without changing the adapter manifest or restarting store review. The
   current source adapter remains v0.7.2, the public store serves v0.6.0, and v0.7.1 is pending;
-  all three cover service v0.7.2.
+  all three cover the v0.7.3 service candidate.
 
 - **v0.7.2 ships safe installed-engine activation (ADR-0092).** Windows identifies the
   exact adapter-pipe owner, verifies that its executable belongs to the managed Ghostlight install
