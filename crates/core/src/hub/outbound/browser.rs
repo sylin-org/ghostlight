@@ -276,10 +276,10 @@ fn execution_wire(context: &ExecutionContext) -> Value {
 /// `content[].text` block whose text happens to parse as JSON (`tabs_context_mcp`/
 /// `tabs_create_mcp` report their tab list this way, as a JSON-stringified text block AND as
 /// `structuredContent`). A text block that is not valid JSON has its `Created tab {native}.` prose
-/// prefix rewritten too (see [`encode_created_tab_prose`]) so a consumer reading the human text gets
-/// the SAME composite id structuredContent carries; any other prose is left untouched. Generic on
-/// purpose: covers every current tabId-reporting tool and any future one without a matching manual
-/// edit here.
+/// prefix and appended JSON rewritten too (see [`encode_created_tab_prose`]) so a consumer reading
+/// the human text gets the SAME composite ids structuredContent carries; any other prose is left
+/// untouched. Generic on purpose: covers every current tabId-reporting tool and any future one
+/// without a matching manual edit here.
 fn encode_tab_ids_in_value(v: &mut Value, target: u32) {
     match v {
         Value::Object(map) => {
@@ -321,9 +321,10 @@ fn encode_tab_ids_in_value(v: &mut Value, target: u32) {
 /// consumer that reads the prose (our own `demo`/scripts/smoke parsers, or a model reading the text
 /// rather than structuredContent) would route by an un-encoded id -- which only works by the slot-0
 /// focus fallback and mis-routes with more than one browser attached. Returns the rewritten string
-/// only when the exact `Created tab <digits>` prefix is present; every other prose is untouched.
-/// Deliberately narrow (one known phrase, not a fuzzy number sweep) so it never rewrites an
-/// unrelated integer that happens to appear in some other tool's text.
+/// only when the exact `Created tab <digits>` prefix is present; every other prose is untouched. If
+/// the prefix is followed by the extension's JSON tab inventory, that JSON is parsed and walked by
+/// [`encode_tab_ids_in_value`] too. Deliberately narrow (one known phrase, not a fuzzy number sweep)
+/// so it never rewrites an unrelated integer that happens to appear in some other tool's text.
 fn encode_created_tab_prose(text: &str, target: u32) -> Option<String> {
     const PREFIX: &str = "Created tab ";
     let digits_start = text.find(PREFIX)? + PREFIX.len();
@@ -335,6 +336,16 @@ fn encode_created_tab_prose(text: &str, target: u32) -> Option<String> {
     }
     let native: i64 = text[digits_start..digits_end].parse().ok()?;
     let composite = crate::constants::tab_id::encode(target, native);
+
+    if let Some(json_text) = text[digits_end..].strip_prefix(".\n") {
+        if let Ok(mut parsed) = serde_json::from_str::<Value>(json_text) {
+            encode_tab_ids_in_value(&mut parsed, target);
+            if let Ok(rendered) = serde_json::to_string_pretty(&parsed) {
+                return Some(format!("{}{composite}.\n{rendered}", &text[..digits_start]));
+            }
+        }
+    }
+
     Some(format!(
         "{}{}{}",
         &text[..digits_start],
@@ -3964,10 +3975,21 @@ mod tests {
         let native = 1_246_199_443i64;
         let composite = crate::constants::tab_id::encode(slot, native);
 
-        // The tabs_create result shape: a prose text block + structuredContent, both native.
+        // The exact tabs_create result shape: a prose prefix, a JSON-stringified tab inventory,
+        // and structuredContent. Every copy starts native and must finish composite.
+        let inventory = json!({
+            "mcpGroupId": 17,
+            "tabs": [{ "tabId": native, "title": "Example", "url": "https://example.com/" }]
+        });
         let mut result = json!({
-            "content": [{ "type": "text", "text": format!("Created tab {native}.\nThe group has 1 tab.") }],
-            "structuredContent": { "tabId": native, "tabs": [] }
+            "content": [{
+                "type": "text",
+                "text": format!("Created tab {native}.\n{}", serde_json::to_string_pretty(&inventory).unwrap())
+            }],
+            "structuredContent": {
+                "tabId": native,
+                "tabs": [{ "tabId": native, "title": "Example", "url": "https://example.com/" }]
+            }
         });
         encode_tab_ids_in_value(&mut result, slot);
 
@@ -3976,14 +3998,25 @@ mod tests {
             text.starts_with(&format!("Created tab {composite}.")),
             "the prose id is now composite: {text}"
         );
-        assert!(
-            text.ends_with("The group has 1 tab."),
-            "the rest of the prose is preserved: {text}"
+        let (_, encoded_inventory) = text
+            .split_once(".\n")
+            .expect("created-tab prose is followed by its JSON inventory");
+        let encoded_inventory: Value =
+            serde_json::from_str(encoded_inventory).expect("the inventory stays valid JSON");
+        assert_eq!(
+            encoded_inventory["tabs"][0]["tabId"].as_i64(),
+            Some(composite),
+            "the JSON text inventory uses the same composite id"
         );
         assert_eq!(
             result["structuredContent"]["tabId"].as_i64(),
             Some(composite),
             "structuredContent stays consistent with the prose"
+        );
+        assert_eq!(
+            result["structuredContent"]["tabs"][0]["tabId"].as_i64(),
+            Some(composite),
+            "the structured tab inventory uses the same composite id"
         );
 
         // A prose with no `Created tab` prefix, and the prefix with no number, are both untouched.
@@ -3992,6 +4025,14 @@ mod tests {
             None
         );
         assert_eq!(encode_created_tab_prose("Created tab .", slot), None);
+        assert_eq!(
+            encode_created_tab_prose(
+                &format!("Created tab {native}.\nThe group has 1 tab."),
+                slot
+            ),
+            Some(format!("Created tab {composite}.\nThe group has 1 tab.")),
+            "non-JSON trailing prose is preserved"
+        );
         // The round trip decodes back to (slot, native).
         assert_eq!(crate::constants::tab_id::decode(composite), (slot, native));
     }

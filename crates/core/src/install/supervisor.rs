@@ -6,9 +6,10 @@
 //! (`ghostlight_transport::supervisor`), so there is one source of truth for the names both sides
 //! address. Every mechanism is per-user and genuinely zero-admin -- NEVER elevated (Decision 8):
 //! an HKCU Run key + detached start on Windows (a schtasks logon task needs elevation, issue #17),
-//! a user launchd LaunchAgent on macOS, a systemd --user unit on Linux. Applying these steps is
-//! best-effort: a failure here is logged and never aborts the surrounding install/uninstall (the
-//! adapter self-heal and manual `ghostlight service` remain fallbacks).
+//! a user launchd LaunchAgent on macOS, a systemd --user unit on Linux. Registration also activates
+//! the selected installed engine immediately (ADR-0092). Applying these steps is best-effort: a
+//! failure here is logged and never aborts the surrounding install/uninstall (the adapter self-heal
+//! and manual `ghostlight service` remain fallbacks).
 
 use super::{native_host, PlanCtx};
 #[cfg(target_os = "macos")]
@@ -69,11 +70,12 @@ pub enum SupervisorStep {
     RemoveRunValue {
         name: String,
     },
-    /// Spawn `<exe> service` fully detached so the service is up immediately after install
-    /// (ADR-0054 Decision 2; the same helper the adapter self-heal uses).
+    /// Make `<exe> service` the active installed engine. A current installed predecessor is
+    /// replaced under deploy locks; an external repository/dev engine is left in place.
     #[cfg(windows)]
-    StartDetached {
+    ActivateInstalled {
         exe: PathBuf,
+        install_root: PathBuf,
     },
 }
 
@@ -94,7 +96,7 @@ pub fn run_value_data(exe: &Path) -> String {
 /// detached. The Run key is the one Windows logon-start mechanism a non-admin user can always
 /// write -- `schtasks /sc onlogon` requires elevation (issue #17).
 #[cfg(windows)]
-pub fn register_steps(exe: &Path, _ctx: &PlanCtx) -> Vec<SupervisorStep> {
+pub fn register_steps(exe: &Path, ctx: &PlanCtx) -> Vec<SupervisorStep> {
     let exe = native_host::normalize_exe_path(exe);
     vec![
         // Legacy migration (ADR-0054 D3): an elevated install from <=0.5.0 may hold the old task;
@@ -112,7 +114,10 @@ pub fn register_steps(exe: &Path, _ctx: &PlanCtx) -> Vec<SupervisorStep> {
             name: supervisor_task_name(),
             data: run_value_data(&exe),
         },
-        SupervisorStep::StartDetached { exe },
+        SupervisorStep::ActivateInstalled {
+            exe,
+            install_root: ctx.home.join(".ghostlight").join("bin"),
+        },
     ]
 }
 
@@ -248,8 +253,8 @@ WantedBy=default.target\n",
     )
 }
 
-/// PINNED: write the unit, then `systemctl --user daemon-reload`, then
-/// `systemctl --user enable --now ghostlight.service`.
+/// PINNED: write the unit, then `systemctl --user daemon-reload`, enable it, and restart it so an
+/// already-running predecessor cannot keep serving after an upgrade.
 #[cfg(all(unix, not(target_os = "macos")))]
 pub fn register_steps(exe: &Path, ctx: &PlanCtx) -> Vec<SupervisorStep> {
     let exe = native_host::normalize_exe_path(exe);
@@ -271,6 +276,10 @@ pub fn register_steps(exe: &Path, ctx: &PlanCtx) -> Vec<SupervisorStep> {
                 supervisor_unit(),
             ],
         )),
+        SupervisorStep::Run(SupervisorCommand::new(
+            "systemctl",
+            vec!["--user".into(), "restart".into(), supervisor_unit()],
+        )),
     ]
 }
 
@@ -291,6 +300,334 @@ pub fn unregister_steps(ctx: &PlanCtx) -> Vec<SupervisorStep> {
             path: unit_path(ctx),
         },
     ]
+}
+
+// --- Windows installed-engine activation (ADR-0092) ---
+
+/// Upgrade activation is its own small lifecycle domain: it owns the endpoint-owner decision,
+/// deploy-lock scope, exact process replacement, and bounded verification. Keeping those states in
+/// one module prevents installer output or supervisor planning from becoming process-policy code.
+#[cfg(windows)]
+mod activation {
+    use super::native_host;
+    use ghostlight_transport::ipc::{self, EndpointProbe};
+    use ghostlight_transport::proc::{self, ProcId};
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    const SERVICE_EXE_NAME: &str = "ghostlight.exe";
+    const RELAY_EXE_NAME: &str = "ghostlight-relay.exe";
+    const OWNER_RETRIES: usize = 10;
+    const OWNER_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+    const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(3);
+    const ACTIVATION_POLL_INTERVAL: Duration = Duration::from_millis(50);
+    const LOCK_CONTENTS: &[u8] = b"ghostlight install\n";
+
+    /// The externally meaningful end state of one activation attempt.
+    pub(super) enum Outcome {
+        Started,
+        Replaced { previous: PathBuf },
+        AlreadyCurrent,
+        PreservedExternal { active: PathBuf },
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum OwnerKind {
+        Current,
+        InstalledPredecessor,
+        External,
+    }
+
+    /// Locks created by this activation attempt. Drop removes only files this process created with
+    /// `create_new`; a pre-existing deploy lock aborts activation and is never adopted or removed.
+    struct DeployLocks {
+        paths: Vec<PathBuf>,
+    }
+
+    impl DeployLocks {
+        fn acquire(install_root: &Path) -> std::result::Result<Self, String> {
+            let mut locks = Self { paths: Vec::new() };
+            for directory in installed_engine_directories(install_root)? {
+                let path = directory.join(ghostlight_transport::supervisor::DEPLOY_LOCK_NAME);
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .map_err(|e| {
+                        format!(
+                            "cannot acquire deploy lock {}: {e}; another deploy may be active",
+                            path.display()
+                        )
+                    })?;
+                locks.paths.push(path.clone());
+                file.write_all(LOCK_CONTENTS)
+                    .map_err(|e| format!("cannot write deploy lock {}: {e}", path.display()))?;
+                file.sync_all()
+                    .map_err(|e| format!("cannot flush deploy lock {}: {e}", path.display()))?;
+            }
+            Ok(locks)
+        }
+    }
+
+    impl Drop for DeployLocks {
+        fn drop(&mut self) {
+            for path in &self.paths {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+
+    /// Activate `exe` without displacing an explicitly running repository/dev engine. Only the
+    /// exact owner of the resolved adapter endpoint may be replaced, and only after its executable
+    /// path proves that it belongs to `install_root`.
+    pub(super) fn activate(
+        exe: &Path,
+        install_root: &Path,
+    ) -> std::result::Result<Outcome, String> {
+        let exe = native_host::normalize_exe_path(exe);
+        let install_root = native_host::normalize_exe_path(install_root);
+        let _locks = DeployLocks::acquire(&install_root)?;
+        let control_endpoint = ipc::adapter_endpoint_name(&ipc::default_endpoint());
+
+        match active_owner(&control_endpoint)? {
+            None => {
+                start_and_verify(&exe, &control_endpoint)?;
+                Ok(Outcome::Started)
+            }
+            Some((owner, active)) => match classify_owner(&active, &exe, &install_root) {
+                OwnerKind::Current => Ok(Outcome::AlreadyCurrent),
+                OwnerKind::External => Ok(Outcome::PreservedExternal { active }),
+                OwnerKind::InstalledPredecessor => {
+                    let confirmed = active_owner(&control_endpoint)?
+                        .filter(|(current, path)| current == &owner && same_path(path, &active))
+                        .ok_or_else(|| {
+                            "the endpoint owner changed while upgrade activation was being prepared"
+                                .to_string()
+                        })?;
+                    debug_assert_eq!(confirmed.0, owner);
+                    if !proc::is_alive(owner) {
+                        return Err(format!(
+                            "installed service pid {} exited before it could be replaced",
+                            owner.pid
+                        ));
+                    }
+                    if !proc::terminate(owner.pid) {
+                        return Err(format!(
+                            "could not stop installed service pid {} ({})",
+                            owner.pid,
+                            active.display()
+                        ));
+                    }
+                    wait_for_exit(owner)?;
+                    start_and_verify(&exe, &control_endpoint)?;
+                    Ok(Outcome::Replaced { previous: active })
+                }
+            },
+        }
+    }
+
+    fn active_owner(endpoint: &str) -> std::result::Result<Option<(ProcId, PathBuf)>, String> {
+        for attempt in 0..OWNER_RETRIES {
+            if let Some(pid) = ipc::named_pipe_server_process_id(endpoint) {
+                let path = proc::executable_path(pid).ok_or_else(|| {
+                    format!("cannot verify the executable for endpoint owner pid {pid}")
+                })?;
+                return Ok(Some((ProcId::of(pid), path)));
+            }
+            if matches!(ipc::probe_endpoint(endpoint), EndpointProbe::Absent) {
+                return Ok(None);
+            }
+            if attempt + 1 < OWNER_RETRIES {
+                std::thread::sleep(OWNER_RETRY_INTERVAL);
+            }
+        }
+        Err(format!(
+            "cannot identify the process serving endpoint {}",
+            ipc::endpoint_display(endpoint)
+        ))
+    }
+
+    fn start_and_verify(exe: &Path, endpoint: &str) -> std::result::Result<(), String> {
+        ghostlight_transport::supervisor::spawn_service_detached(exe)
+            .map_err(|e| format!("cannot start \"{}\" service: {e}", exe.display()))?;
+        let deadline = Instant::now() + ACTIVATION_TIMEOUT;
+        loop {
+            match active_owner(endpoint) {
+                Ok(Some((_owner, active))) if same_path(&active, exe) => return Ok(()),
+                Ok(Some((_owner, active))) => {
+                    if Instant::now() >= deadline {
+                        return Err(format!(
+                            "{} still owns the endpoint after starting {}",
+                            active.display(),
+                            exe.display()
+                        ));
+                    }
+                }
+                Ok(None) | Err(_) => {
+                    if Instant::now() >= deadline {
+                        return Err(format!(
+                            "{} did not claim the endpoint within {} seconds",
+                            exe.display(),
+                            ACTIVATION_TIMEOUT.as_secs()
+                        ));
+                    }
+                }
+            }
+            std::thread::sleep(ACTIVATION_POLL_INTERVAL);
+        }
+    }
+
+    fn wait_for_exit(owner: ProcId) -> std::result::Result<(), String> {
+        let deadline = Instant::now() + ACTIVATION_TIMEOUT;
+        while proc::is_alive(owner) {
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "installed service pid {} did not stop within {} seconds",
+                    owner.pid,
+                    ACTIVATION_TIMEOUT.as_secs()
+                ));
+            }
+            std::thread::sleep(ACTIVATION_POLL_INTERVAL);
+        }
+        Ok(())
+    }
+
+    fn installed_engine_directories(
+        install_root: &Path,
+    ) -> std::result::Result<Vec<PathBuf>, String> {
+        if !install_root.exists() {
+            return Ok(Vec::new());
+        }
+        let mut directories = Vec::new();
+        if contains_engine(install_root) {
+            directories.push(install_root.to_path_buf());
+        }
+        let entries = std::fs::read_dir(install_root).map_err(|e| {
+            format!(
+                "cannot inspect installed engine directory {}: {e}",
+                install_root.display()
+            )
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|e| {
+                format!(
+                    "cannot inspect an entry under {}: {e}",
+                    install_root.display()
+                )
+            })?;
+            let path = entry.path();
+            if path.is_dir() && contains_engine(&path) {
+                directories.push(path);
+            }
+        }
+        directories.sort();
+        directories.dedup();
+        Ok(directories)
+    }
+
+    fn contains_engine(directory: &Path) -> bool {
+        directory.join(SERVICE_EXE_NAME).is_file() || directory.join(RELAY_EXE_NAME).is_file()
+    }
+
+    fn path_key(path: &Path) -> String {
+        native_host::normalize_exe_path(path)
+            .to_string_lossy()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase()
+    }
+
+    fn same_path(left: &Path, right: &Path) -> bool {
+        path_key(left) == path_key(right)
+    }
+
+    fn classify_owner(active: &Path, current: &Path, install_root: &Path) -> OwnerKind {
+        if same_path(active, current) {
+            OwnerKind::Current
+        } else if inside_root(active, install_root) {
+            OwnerKind::InstalledPredecessor
+        } else {
+            OwnerKind::External
+        }
+    }
+
+    fn inside_root(path: &Path, root: &Path) -> bool {
+        let path = path_key(path);
+        let mut root = path_key(root);
+        root.push('\\');
+        path.starts_with(&root)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn path_checks_distinguish_installed_current_and_external_engines() {
+            let root = Path::new(r"C:\Users\u\.ghostlight\bin");
+            let old = Path::new(r"C:\Users\u\.ghostlight\bin\v0.7.0\ghostlight.exe");
+            let current = Path::new(r"c:/users/u/.ghostlight/bin/v0.7.1/ghostlight.exe");
+            let current_same = Path::new(r"C:\USERS\U\.GHOSTLIGHT\BIN\V0.7.1\GHOSTLIGHT.EXE");
+            let external = Path::new(r"F:\repo\browser-mcp\target\release\ghostlight.exe");
+            let prefix_collision = Path::new(r"C:\Users\u\.ghostlight\binary\ghostlight.exe");
+
+            assert!(inside_root(old, root));
+            assert!(inside_root(current, root));
+            assert!(same_path(current, current_same));
+            assert!(!inside_root(external, root));
+            assert!(!inside_root(prefix_collision, root));
+            assert_eq!(
+                classify_owner(current_same, current, root),
+                OwnerKind::Current
+            );
+            assert_eq!(
+                classify_owner(old, current, root),
+                OwnerKind::InstalledPredecessor
+            );
+            assert_eq!(classify_owner(external, current, root), OwnerKind::External);
+        }
+
+        #[test]
+        fn deploy_locks_cover_every_installed_engine_and_preserve_foreign_locks() {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock is after the Unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "ghostlight-activation-locks-{}-{unique}",
+                std::process::id()
+            ));
+            let old = root.join("v0.7.0");
+            let current = root.join("v0.7.1");
+            std::fs::create_dir_all(&old).expect("create old engine directory");
+            std::fs::create_dir_all(&current).expect("create current engine directory");
+            std::fs::write(old.join(SERVICE_EXE_NAME), b"old").expect("write old engine marker");
+            std::fs::write(current.join(RELAY_EXE_NAME), b"current")
+                .expect("write current relay marker");
+            let old_lock = old.join(ghostlight_transport::supervisor::DEPLOY_LOCK_NAME);
+            let current_lock = current.join(ghostlight_transport::supervisor::DEPLOY_LOCK_NAME);
+
+            let locks = DeployLocks::acquire(&root).expect("acquire every engine lock");
+            assert!(old_lock.is_file());
+            assert!(current_lock.is_file());
+            drop(locks);
+            assert!(!old_lock.exists());
+            assert!(!current_lock.exists());
+
+            std::fs::write(&old_lock, b"someone else\n").expect("write foreign lock");
+            let error = DeployLocks::acquire(&root)
+                .err()
+                .expect("a foreign lock refuses activation");
+            assert!(error.contains("another deploy may be active"));
+            assert_eq!(
+                std::fs::read(&old_lock).expect("foreign lock remains readable"),
+                b"someone else\n"
+            );
+
+            std::fs::remove_dir_all(&root).expect("remove owned activation test directory");
+        }
+    }
 }
 
 // --- Apply (best-effort; never returns an error) ---
@@ -415,21 +752,34 @@ pub fn apply_steps(label: &str, steps: &[SupervisorStep], dry_run: bool) {
                 }
             }
             #[cfg(windows)]
-            SupervisorStep::StartDetached { exe } => {
+            SupervisorStep::ActivateInstalled { exe, install_root } => {
                 if dry_run {
                     println!(
-                        "  [plan] {label:<28} start detached: \"{}\" service",
-                        exe.display()
+                        "  [plan] {label:<28} activate installed service: \"{}\"",
+                        exe.display(),
                     );
                     continue;
                 }
-                match ghostlight_transport::supervisor::spawn_service_detached(exe) {
-                    Ok(()) => println!(
-                        "  [ok]   {label:<28} started detached: \"{}\" service",
+                match activation::activate(exe, install_root) {
+                    Ok(activation::Outcome::Started) => println!(
+                        "  [ok]   {label:<28} activated: \"{}\" service",
                         exe.display()
                     ),
+                    Ok(activation::Outcome::Replaced { previous }) => println!(
+                        "  [ok]   {label:<28} replaced {} with \"{}\" service",
+                        previous.display(),
+                        exe.display()
+                    ),
+                    Ok(activation::Outcome::AlreadyCurrent) => println!(
+                        "  [noop] {label:<28} \"{}\" already owns the endpoint",
+                        exe.display()
+                    ),
+                    Ok(activation::Outcome::PreservedExternal { active }) => println!(
+                        "  [noop] {label:<28} preserved external engine {} (the registered service was not forced over it)",
+                        active.display()
+                    ),
                     Err(e) => println!(
-                        "  [warn] {label:<28} could not start the service: {e} (best-effort; ignored -- start it manually with 'ghostlight service')"
+                        "  [warn] {label:<28} could not activate the installed service: {e} (best-effort; ignored -- start it manually with 'ghostlight service')"
                     ),
                 }
             }
@@ -458,7 +808,7 @@ mod tests {
     fn windows_register_steps_are_zero_elevation() {
         // ADR-0054: the schtasks logon task is GONE from registration (creating one requires
         // elevation, issue #17); what remains is the legacy-cleanup delete (quiet), the HKCU Run
-        // value, and the detached start.
+        // value, and installed-engine activation.
         let ctx = test_ctx();
         let steps = register_steps(Path::new(r"C:\abs\ghostlight.exe"), &ctx);
         assert!(
@@ -480,8 +830,8 @@ mod tests {
         assert!(
             steps
                 .iter()
-                .any(|s| matches!(s, SupervisorStep::StartDetached { .. })),
-            "the service starts once, detached, right after install"
+                .any(|s| matches!(s, SupervisorStep::ActivateInstalled { .. })),
+            "the selected installed service is activated right after install"
         );
         let legacy = steps
             .iter()

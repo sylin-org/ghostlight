@@ -62,6 +62,10 @@ file does not restate them -- follow AGENTS.md.
   clients continuously respawn `ghostlight-relay.exe` and a running service holds `target/*.exe`
   against the linker, so a plain `cargo build`/`test` can relink-fail (Windows os error 5) and
   silently leave a STALE binary.
+- **An upgrade is not active until the selected engine owns the endpoint.** Registering new paths
+  and successfully spawning a singleton loser are not enough. Verify the endpoint owner, quiesce
+  old self-heal paths, replace only a proven managed predecessor, and preserve an external/dev
+  engine (ADR-0092).
 - **The extension's tab-group membership gate -- not only the service -- keeps the agent out of the
   user's OWN tabs.** The service first-touch-adopts any unowned tabId (`claim_tab_live`), so the
   extension's "is this tab one we manage?" check is load-bearing scoping, not just defense in

@@ -854,6 +854,29 @@ pub fn pipe_path(endpoint: &str) -> String {
     format!(r"\\.\pipe\{endpoint}")
 }
 
+/// The process id of the Windows process serving `endpoint`, or `None` when the named pipe cannot
+/// be opened or its owner cannot be queried. The caller supplies the exact endpoint name (for the
+/// service control plane, [`adapter_endpoint_name`] of the base endpoint). This is the trusted OS
+/// ownership primitive the installer pairs with process-image verification before replacing an
+/// installed service during an upgrade.
+#[cfg(windows)]
+pub fn named_pipe_server_process_id(endpoint: &str) -> Option<u32> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
+
+    let path = pipe_path(endpoint);
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .ok()?;
+    let mut pid = 0u32;
+    // Safety: `file` owns a valid named-pipe client handle for this call's duration and `pid` is
+    // valid writable stack storage. The handle is closed normally when `file` drops.
+    let ok = unsafe { GetNamedPipeServerProcessId(file.as_raw_handle() as _, &mut pid) };
+    (ok != 0 && pid != 0).then_some(pid)
+}
+
 /// Synchronously probe the named pipe (no tokio; used by `ghostlight doctor`, which runs with no
 /// async runtime). Opens the pipe for read+write and immediately drops the handle -- no bytes are
 /// written or read. Known, harmless side effect: probing a live *idle* server briefly wins the accept
@@ -1019,6 +1042,30 @@ mod tests {
     fn probe_reports_absent_for_an_unused_endpoint() {
         let endpoint = format!("ghostlight-test-probe-absent-{}", std::process::id());
         assert_eq!(probe_endpoint(&endpoint), EndpointProbe::Absent);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn named_pipe_server_process_id_reports_the_exact_owner() {
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        let endpoint = format!(
+            "ghostlight-test-owner-{}-{}",
+            std::process::id(),
+            crate::session_guid::SessionGuid::mint().as_str()
+        );
+        let server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(pipe_path(&endpoint))
+            .expect("create private named-pipe server");
+        let lookup_endpoint = endpoint.clone();
+        let lookup =
+            tokio::task::spawn_blocking(move || named_pipe_server_process_id(&lookup_endpoint));
+        server.connect().await.expect("accept owner-query client");
+        assert_eq!(
+            lookup.await.expect("owner-query task completed"),
+            Some(std::process::id())
+        );
     }
 
     /// ADR-0048 D2: candidate precedence -- the single override, the list override, then the

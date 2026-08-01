@@ -58,8 +58,22 @@ pub fn creation_time(pid: u32) -> Option<u64> {
     imp::creation_time(pid)
 }
 
+/// The absolute executable path for a live Windows process, or `None` when the process is gone or
+/// cannot be inspected. This is intentionally Windows-only: the installer uses it to prove that
+/// the process owning Ghostlight's named pipe belongs to the managed install tree before replacing
+/// that process during an upgrade.
+#[cfg(windows)]
+pub fn executable_path(pid: u32) -> Option<std::path::PathBuf> {
+    if pid == 0 {
+        return None;
+    }
+    imp::executable_path(pid)
+}
+
 /// Best-effort terminate a process by pid. Returns `true` if the OS reported success. The caller is
-/// responsible for never passing its own pid and for the ADR-0029 "parent-dead orphans only" rule.
+/// responsible for never passing its own pid and for proving that the target is the exact process
+/// it is authorized to stop. The orphan reaper applies ADR-0029's parent-dead rule; the installer
+/// separately applies ADR-0092's endpoint-owner plus managed-image proof.
 pub fn terminate(pid: u32) -> bool {
     pid != 0 && imp::terminate(pid)
 }
@@ -102,6 +116,7 @@ pub fn orphaned(original_parent: ProcId) -> bool {
 #[cfg(windows)]
 mod imp {
     use super::ProcId;
+    use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::Foundation::{
         CloseHandle, GetLastError, ERROR_ACCESS_DENIED, FILETIME, INVALID_HANDLE_VALUE,
     };
@@ -110,8 +125,8 @@ mod imp {
         TH32CS_SNAPPROCESS,
     };
     use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, TerminateProcess, WaitForSingleObject,
-        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+        GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
+        WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
     };
 
     /// SYNCHRONIZE access (to wait on a process handle) and the WaitForSingleObject "still running"
@@ -200,6 +215,31 @@ mod imp {
             } else {
                 None
             }
+        }
+    }
+
+    pub(super) fn executable_path(pid: u32) -> Option<std::path::PathBuf> {
+        // Windows' maximum extended path is 32,767 UTF-16 code units. Querying with one buffer
+        // avoids a size race and keeps the handle lifetime simple. Safety: the process handle is
+        // checked and closed on every path; `buffer` is valid writable storage and `size` starts at
+        // its capacity as QueryFullProcessImageNameW requires.
+        const MAX_EXTENDED_PATH: usize = 32_767;
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return None;
+            }
+            let mut buffer = vec![0u16; MAX_EXTENDED_PATH];
+            let mut size = buffer.len() as u32;
+            let ok = QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size);
+            CloseHandle(handle);
+            if ok == 0 || size == 0 {
+                return None;
+            }
+            buffer.truncate(size as usize);
+            Some(std::path::PathBuf::from(std::ffi::OsString::from_wide(
+                &buffer,
+            )))
         }
     }
 
@@ -298,6 +338,17 @@ mod tests {
         let me = ProcId::of(std::process::id());
         assert!(pid_exists(me.pid));
         assert!(is_alive(me));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn current_process_executable_path_is_exact() {
+        let reported = executable_path(std::process::id()).expect("own image path is readable");
+        let current = std::env::current_exe().expect("own current exe is readable");
+        assert_eq!(
+            std::fs::canonicalize(reported).expect("reported image path canonicalizes"),
+            std::fs::canonicalize(current).expect("current exe path canonicalizes")
+        );
     }
 
     #[test]
