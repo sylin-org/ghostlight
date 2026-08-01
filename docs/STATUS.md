@@ -7,7 +7,7 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
-- **Installing a release now activates that engine safely (ADR-0092).** Windows identifies the
+- **v0.7.2 ships safe installed-engine activation (ADR-0092).** Windows identifies the
   exact adapter-pipe owner, verifies that its executable belongs to the managed Ghostlight install
   tree, quiesces lock-aware installed relays with owned deploy locks, replaces the predecessor,
   and verifies the selected executable claimed the endpoint. An external repository/dev engine
@@ -15,7 +15,8 @@ when they disagree**, and update it when you land something that changes the pic
   The same cleanup also makes `tabs_create_mcp` use one composite tab ID in its leading prose,
   embedded JSON inventory, and structured result. Formatting, strict workspace clippy, all 693
   core unit tests, the complete Rust workspace suite, 164 extension tests, 4 npm launcher tests,
-  and all 34 Lightbox process scenarios pass on Windows.
+  and all 34 Lightbox process scenarios pass on Windows. PR `#73` passed the complete GitHub CI
+  matrix and merged to `main` before the release tag was cut.
 
 - **End-user extension installation is store-only (ADR-0091).** The README, agent install guide,
   human guides, current design notes, test recipes, public status, and website source now point
@@ -159,16 +160,18 @@ when they disagree**, and update it when you land something that changes the pic
 
 - **Branches**: `main` = releases, `dev` = trunk. Work lands on `dev`; the owner reviews
   `dev -> main` PRs and cuts releases.
-- **Latest published release: v0.7.1** (2026-07-31), cut with
-  `scripts/release.ps1 0.7.1`. GitHub Actions run `30666104207` passed the full test and four-target
-  build matrix, assembled one immutable release bundle, generated the CycloneDX SBOM, verified the
-  canonical hash manifest, attested provenance, and published all 28 expected assets. npm
-  `ghostlight@0.7.1` is live and its launcher smoke fetched the pinned Windows binary and returned a
-  healthy `doctor`; Homebrew tap commit `d25be3c` and active MCP registry entry
-  `org.sylin/ghostlight` also carry 0.7.1. Checksum fill `5b88777`, trust restamp `21945d4`, and
-  website fallback commit `6dc7421` are published. Winget new-package PR
-  `microsoft/winget-pkgs#400226` was approved, merged, and published for v0.7.0; a new v0.7.1
-  submission remains due.
+- **Latest published release: v0.7.2** (2026-08-01), cut with
+  `scripts/release.ps1 0.7.2 -SkipExtension`. GitHub Actions run `30710482484` passed the full test
+  and four-target build matrix, assembled one immutable release bundle, generated the CycloneDX
+  SBOM, verified the canonical hash manifest, attested provenance, and published all 28 expected
+  assets. npm
+  `ghostlight@0.7.2` is live at the `latest` tag and its launcher fetched the integrity-pinned
+  Windows binary; Homebrew tap commit `3525eea` and active MCP registry entry
+  `org.sylin/ghostlight` also carry 0.7.2. Checksum fill `3f52814`, trust restamp `bff7b99`, and
+  website fallback commit `5186afa` are published. The Chrome Web Store was not resubmitted because
+  v0.7.2 has no extension behavior change and the v0.7.1 package remains in review. The required
+  Winget per-version submission is open as `microsoft/winget-pkgs#410996`; local `winget validate`
+  and its CLA check pass, while Microsoft controls review and merge.
 - **v0.6.0 is an intentional greenfield boundary.** The unpublished 0.5.8 draft became this minor
   release because browser-control web ingress and its scaffolding were removed outright. Public
   setup starts from a local service, same-user OS IPC, and the interactive user's authenticated
