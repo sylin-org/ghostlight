@@ -4,93 +4,112 @@ Personal checklist for actions only the founder can take. Agentic work is NOT tr
 here (it lives in docs/tasks/licensing-1/ and the frontier queue in
 docs/business/PLAN.md). Check items off in place; add dates.
 
-## Now (Phase 0, unblocks everything else)
+Last reconciled: 2026-08-01. This checklist is current through Ghostlight v0.7.3.
 
-- [ ] Cloudflare Email Routing on sylin.org; single sink address hello@sylin.org
-      (decided 2026-07-04; aliases can come later); Gmail send-as for outbound.
-      (~1 hour. Blocks: founding applications, the SECURITY.md contact going live,
-      renewal emails. PRICING.md and SECURITY.md already publish hello@sylin.org.)
-- [ ] Create the PRIVATE GitHub repo `ghostlight-licensing`; copy
-      docs/business/templates/expiry-reminder-workflow.yml into
-      .github/workflows/ there; create the issued/ directory.
-- [ ] Generate the production signing seed OFFLINE:
-      `openssl rand -out ghostlight-signing-gen1.bin 32`; store the file offline with
-      one encrypted backup (never in any repo, never in CI). After licensing-1 lands,
-      print its verifying key with
-      `cargo run --features license-admin -- license pubkey --key ghostlight-signing-gen1.bin`
-      and add it as keygen 1 in src/governance/license.rs (one-line constant; commit).
-- [ ] Legal skim of `docs/licenses/LicenseRef-Ghostlight-Commercial.txt` (standing flag since ADR-0027). Free options:
-      careful self-review against the EE-template family it derives from; a startup
-      legal clinic if available.
-- [ ] Approve or amend: pricing numbers, tier names, the Continuity Promise wording
-      (ADR-0028 Decisions 5-6), and the founding agreement template (after l06 lands).
+## Now (owner-only foundations)
 
-## Launch window (Phase 1)
+- [ ] Verify Gmail send-as for `hello@sylin.org`. Cloudflare Email Routing, MX, and SPF are live;
+      inbound delivery is no longer a blocker.
+- [ ] Review and approve the five license-operations templates after the agentic `l06` task is
+      refreshed and landed. The preserved task predates ADR-0028 Decision 10 and still names
+      Stripe, so do not transcribe it verbatim.
+- [ ] After those templates exist, create the PRIVATE `ghostlight-licensing` GitHub repo. Copy the
+      expiry-reminder workflow into `.github/workflows/` and create `issued/`. Commit only claims
+      JSON inside `issued/` -- never seeds or signed license files.
+- [ ] Create production key generation 1 on an air-gapped machine by following
+      `docs/business/issuing-licenses.md`. Production signing requires TWO offline 32-byte seeds:
+      Ed25519 and ML-DSA-65. Back both up offline, print both public keys with `--seed` and
+      `--mldsa-seed`, then approve the public-key commit in
+      `crates/core/src/governance/license/crypto.rs`. Never put either seed in a repo, CI, synced
+      folder, or online service.
+- [ ] Legal review: `docs/licenses/LicenseRef-Ghostlight-Commercial.txt`, the MSA, DPA, and the
+      founding-organization agreement after its template lands. Resolve the vendor entity name and
+      cyber-insurance yes/no line before the first commercial execution.
+- [x] Pricing, tier names, and the Continuity Promise are published and frozen as the initial
+      offer (2026-07-04). Future changes require a new explicit decision.
+- [ ] Verify privileged-account MFA. Decide and configure branch/direct-push protection, GitHub
+      secret scanning and push protection, and Dependabot security updates.
+- [ ] Add a second trusted npm publisher and verify recovery for the GitHub, npm, and CWS publisher
+      accounts. Define offline recovery for any future Verified CRX private key before opting in.
+      This is separate from the air-gapped production signing-seed backup above.
 
-- [x] First tagged release -- **v0.1.0 shipped 2026-07-04**
-      (https://github.com/sylin-org/ghostlight/releases/tag/v0.1.0): 4 platform binaries
-      + extension zip, checksums, signed build-provenance. CI/release infra harvested
-      from Koi. (Agent-driven; listed here only as the milestone marker.)
-- [ ] GitHub Pages site skeleton + sylin.org DNS (half a day; content arrives from the
-      frontier queue).
-- [ ] Stripe account; draft (unpublished) payment links for team and enterprise.
-- [x] **Chrome Web Store listing submitted.** On 2026-07-13 the completed v0.5.7 listing for
-      **"Ghostlight in Browser"** was submitted under store id
-      **lejccfmoeogmhemakeknjjdhkfkgncdl**. Privacy practices, permission and remote-code
-      justifications, data-use certifications, screenshots, the unlisted video, and both
-      promotional tiles are present. It is pending compliance review; broad host permissions may
-      make that review more detailed.
-- [ ] **Verified CRX uploads -- future hardening, NOT at launch.** The CWS "Verified CRX
-      uploads" opt-in ties item updates to a private signing key you hold (blocks account-
-      takeover -> poisoned update). Deferred deliberately: it forces signed-CRX uploads from
-      the next upload on, and losing the key locks you out of updating your own item. Turn it
-      on once the release cadence is stable, paired with the same offline key-management
-      discipline as the licensing signing seed above.
-- [x] **v0.3.0 release (supersedes the v0.2.0-release item, post-eval P1).** The v0.2.0 tag's
-      release run FAILED on a known flaky test (rewritten under ADR-0032; the tag predates the
-      fix) and the tag also predates the 17-tool composition surface the docs advertise. The
-      2026-07-07 distribution session fixed dev CI (proc.rs/supervisor.rs cross-platform
-      compile, console truncation lingering-close, e2e-smoke 6h-hang cap) and cut v0.3.0 from
-      dev instead. Verify the release run went green end to end, then work
-      **docs/business/DISTRIBUTION.md** top to bottom (npm name claim FIRST -- `ghostlight`
-      was unclaimed on npm as of 2026-07-07).
-      DONE: v0.3.0 shipped 2026-07-08; v0.4.0 released + `ghostlight` published to npm 2026-07-09
-      (see the DISTRIBUTION.md npm step and the 2026-07-09 decision-log entry below).
-- [ ] **Post-eval verification debts (P10; these gate the credibility of the claims above).**
-      Run docs/tasks/composition/LIVE-VERIFY.md (13 pinned observations); live-verify macOS and
-      Linux; unquarantine e2e-smoke or record the design decision; the commercial-license
-      legal skim is already listed under Phase 0 above.
-- [ ] **Official-extension re-baseline (P7, operator-assisted).** Research 12 pinned
-      v1.0.78; the official surface has since added browser_batch, GIF recording, scheduled
-      tasks, and escalating flags. Update the installed extension, let an agent session re-run
-      the research-12 harvest against it, and confirm the fidelity snapshot still passes.
-      Output: a delta note in docs/research/, before any harvest ADR (ADR-0041 D2).
-- [ ] Record the demo: run `ghostlight demo` under OBS using `docs/legal/STORE_LISTING.md`, keep it
-      below 90 seconds, upload the MP4 unlisted to YouTube for CWS, and export a GIF for the README.
-      (One recording, three uses.)
-- [ ] Write the Show HN post yourself (founder voice; HN detects ghostwriting). Post
-      it; stay in the thread all day; DM the "we need this at work" commenters.
-- [ ] Submit the free listings: official MCP servers directory, Smithery, Glama,
-      mcp.so, PulseMCP, relevant Awesome lists.
-- [ ] Enable GitHub Discussions on the repo (Settings -> Features) and post a short
-      welcome pinned thread pointing at CONTRIBUTING.md's three lanes; enable the
-      Q&A and Ideas categories.
+## Public launch and distribution
 
-## Ongoing (Phase 2 onward)
+- [x] The canonical `https://sylin.org/ghostlight/` site, DNS, install routes, privacy route, and
+      GitHub description, homepage, and discovery topics are live.
+- [ ] Upload `docs/assets/social-preview.png` as the repository's custom social preview. GitHub
+      still reports the generated default image as of 2026-08-01.
+- [x] Ghostlight v0.7.3 is published on GitHub, npm, Homebrew, the official MCP Registry, and the
+      website. The release and live-install checks passed on 2026-08-01.
+- [x] **Chrome Web Store is public.** Adapter v0.6.0 is live under store id
+      `lejccfmoeogmhemakeknjjdhkfkgncdl`; the v0.7.1 adapter is pending review.
+- [ ] Monitor the v0.7.1 Chrome review and answer reviewer questions. Keep Verified CRX uploads
+      deferred until release cadence and offline key recovery are stable; losing that key would
+      prevent future updates.
+- [x] The CWS video evidence is present in the listing and the README hero GIF is published.
+- [x] Client showcase posts are live in
+      [Codex Show and tell](https://github.com/openai/codex/discussions/36424) and
+      [Zed Show and tell](https://github.com/zed-industries/zed/discussions/62035).
+- [ ] Reuse the existing recordings and GIFs as native proof in suitable public posts. The
+      recording prerequisite shipped in v0.5.7; this is a distribution loop, not a product task.
+- [ ] Write and post the Show HN entry in founder voice. Protect the active window, stay in the
+      thread, and follow up personally with serious users.
+- [x] GitHub Discussions, Q&A, and Ideas are enabled for Ghostlight.
+- [ ] Post and pin the first Ghostlight welcome Discussion, pointing to CONTRIBUTING.md's three
+      participation lanes.
+- [x] The official MCP Registry and Glama listings are live. Glama recognizes all 25 tools and
+      scores Ghostlight A for license, A for quality, and B for maintenance.
+- [ ] Submit the remaining directory entries to mcp.so and PulseMCP.
+- [ ] Monitor the open external submissions: Winget
+      [#411087](https://github.com/microsoft/winget-pkgs/pull/411087), Cline Marketplace
+      [#1989](https://github.com/cline/mcp-marketplace/issues/1989), and
+      `awesome-mcp-servers` [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306).
+- [ ] Follow up on the GitHub MCP Registry / VS Code discovery email on 2026-08-28 if there is no
+      reply and Ghostlight remains absent from the catalog.
+- [ ] Configure Edge Add-ons publisher credentials and submit the current compatible adapter.
+- [ ] Optionally submit the already working v0.7.3 Scoop manifest to Scoop Extras.
+- [ ] Send client-specific founder outreach to Cursor, Zed, and Cline using a concrete proof, not
+      a generic launch announcement.
+- [ ] Watch relevant `hangwin/mcp-chrome` and `BrowserMCP/mcp` discussions for genuine
+      "is this maintained?" questions. Reply only when useful; never seed or spam threads.
+- [ ] Recruit first users through public channels and collect consented first-use evidence. A
+      private greenfield cohort is not expected.
+- [ ] Present RAWX as a vendor-neutral capability vocabulary when an appropriate MCP or agent
+      community call appears; the goal is vocabulary adoption, not a product pitch.
 
-- [ ] Respond to hello@ founding applications; sign the one-page agreement; issue founding
-      licenses (sign with the gen-1 seed; commit claims JSON to ghostlight-licensing).
-- [ ] Quarterly: email the founding questionnaire (docs/business/templates/
-      founding-questionnaire.md) to each founding org; harvest an anonymized policy
-      pattern from the replies into the examples/ cookbook.
-- [ ] Renewal emails when the private repo's Action opens a T-30/T-7 issue (templates:
-      docs/business/templates/). Lead with the Continuity Promise, always.
-- [ ] Monthly tagged release; watch the first CI run of every new workflow
-      (ci.yml jobs, release.yml SBOM) since none has executed on GitHub yet.
-- [ ] Trademark: use (TM) on "Ghostlight" now; file (~$250-350) when the first paid
-      license lands.
-- [ ] August 2026: publish the EU AI Act piece (date-pegged; high-risk obligations
-      phase in that month).
+## Owner-assisted verification
+
+- [ ] After an agent refreshes `docs/tasks/composition/LIVE-VERIFY.md` for the current 25-tool
+      surface and green e2e baseline, supervise the updated 13-observation run. Do not execute the
+      preserved checklist verbatim; it still assumes quarantined e2e and the old tool set.
+- [ ] Run the ADR-0047 stage-2 supervised real-browser verification.
+- [ ] Complete the repeated-model visible baseline evidence.
+- [ ] Arrange and capture a consented follow-up non-author review.
+- [ ] Live-verify macOS when suitable hardware is available. Linux verification and release CI are
+      complete.
+- [x] The official-extension rebaseline completed against v1.0.80; the resulting fidelity work is
+      shipped.
+- [ ] Decide whether to approve the drafted WebMCP response, join Chrome's early preview, and choose
+      a controlled experiment origin. This would authorize feedback and a bounded experiment, not
+      product support.
+
+## Commercial setup and ongoing work
+
+- [ ] Create a Polar.sh account and draft unpublished team and enterprise checkout links. Polar is
+      the merchant of record; Lemon Squeezy is the fallback. Do not use Stripe as the primary
+      checkout and never use a vendor's online license-key validation.
+- [ ] Decide the funding-link recipient, entity, provider, and accounting/tax treatment. Keep
+      repository funding links unset until all four are clear.
+- [ ] Respond to founding applications after the agreement and production generation are ready;
+      issue licenses offline and commit only claims JSON to `ghostlight-licensing`.
+- [ ] Once founding organizations exist, send the quarterly questionnaire and harvest a consented,
+      anonymized policy pattern into the examples cookbook.
+- [ ] Send renewal mail when the private ledger opens T-30/T-7 reminders. Lead with the Continuity
+      Promise every time.
+- [ ] Continue monthly tagged releases and inspect every new or changed workflow's first live run.
+- [ ] Use `Ghostlight (TM)` now; file the trademark when the first paid license lands.
+- [ ] Publish the EU AI Act piece in August 2026.
+- [ ] Publish the UW-study audit-trail article on the planned content cadence.
 
 ## Decision log (fill in as items close)
 
@@ -129,3 +148,10 @@ docs/business/PLAN.md). Check items off in place; add dates.
   ADR-0044 (named instances), ADR-0045 (resilient reconnect), ADR-0046 (three role executables),
   ADR-0047 (tab identity), ADR-0048 (development override + the per-user hub-key fix), and
   ADR-0049 (the MCP protocol-conformance pass).
+- 2026-08-01: **v0.7.3 SHIPPED.** GitHub, npm, Homebrew, the official MCP Registry, and the
+  canonical website agree on the service release. Chrome Web Store v0.6.0 is public; adapter
+  v0.7.1 remains under review. Codex and Zed Show and tell posts are live, Glama scores Ghostlight
+  A/A/B across all 25 tools. The awesome-mcp, Cline, and Winget paths are in external review; the
+  GitHub catalog request was submitted and is pending a response, with Ghostlight still absent.
+  The founder checklist was reconciled to current composite signing, Polar.sh, public-channel
+  recruitment, and the remaining owner-only gates.

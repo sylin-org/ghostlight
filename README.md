@@ -12,11 +12,8 @@
   <a href="https://github.com/sylin-org/ghostlight/releases/latest"><img src="https://img.shields.io/github/v/release/sylin-org/ghostlight?color=38BDF8&label=release" alt="release"></a>
   <a href="https://registry.modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP_registry-org.sylin%2Fghostlight-38BDF8" alt="MCP registry"></a>
   <a href="https://github.com/sylin-org/homebrew-tap"><img src="https://img.shields.io/badge/Homebrew-sylin--org%2Ftap-38BDF8" alt="Homebrew tap"></a>
-</p>
-
-<p align="center">
   <a href="https://glama.ai/mcp/servers/sylin-org/ghostlight">
-    <img src="https://glama.ai/mcp/servers/sylin-org/ghostlight/badges/card.svg" alt="Ghostlight score on Glama" width="380">
+    <img src="https://glama.ai/mcp/servers/sylin-org/ghostlight/badges/score.svg" alt="Ghostlight score on Glama">
   </a>
 </p>
 
@@ -175,33 +172,33 @@ action and the capability it requires.
 <details>
 <summary><strong>The full tool table</strong></summary>
 
-| Tool                    | What it does                                     | Capability                 |
-| ----------------------- | ------------------------------------------------ | -------------------------- |
-| `navigate`              | Go to a URL, or forward/back in history          | read                       |
-| `computer`              | Mouse, keyboard, and screenshots (13 actions)    | read or action, per action |
-| `read_page`             | Accessibility-tree view of the page              | read                       |
-| `get_page_text`         | Visible text extraction                          | read                       |
-| `find`                  | Locate elements on the page                      | read                       |
-| `form_input`            | Fill form fields, including shadow DOM           | write                      |
-| `javascript_tool`       | Run JavaScript in the page context               | execute                    |
-| `tabs_context_mcp`      | List tabs in the MCP tab group                   | read                       |
-| `tabs_create_mcp`       | Create a tab in the MCP tab group                | none                       |
-| `read_console_messages` | Recent console output                            | read                       |
-| `read_network_requests` | Recent network activity                          | read                       |
-| `resize_window`         | Resize the browser window                        | none                       |
-| `update_plan`           | Record the agent's working plan                  | none                       |
-| `narrate`               | Show timed agent commentary without touching page content | none              |
-| `wait_for`              | Wait for a page condition and settlement         | read                       |
-| `script`                | Run a sequence of tool calls in one request (with optional `dry_run`) | none |
-| `form_fill`             | Fill a form by field labels in one call          | read + write (or read + write + action when `submit: true`) |
-| `act_on`                | Resolve, act on, and observe one semantic target | read, action, or write, per action |
-| `dialog`                | Inspect or explicitly resolve a JavaScript dialog | read or action, per action |
-| `tab_control`           | Focus, reload, or close one owned tab            | none or action, per action |
-| `file_upload`           | Upload file bytes to a file `<input>` on the page | write                     |
-| `browser_batch`         | Run a batch of browser actions in one call       | none                       |
-| `upload_image`          | Place a captured screenshot into a file input or drop target | write          |
-| `gif_creator`           | Record a session and export it as an animated GIF | read or write, per action |
-| `explain`               | List every action and the capability it requires | none                       |
+| Tool                    | What it does                                                          | Capability                                                  |
+| ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `navigate`              | Go to a URL, or forward/back in history                               | read                                                        |
+| `computer`              | Mouse, keyboard, and screenshots (13 actions)                         | read or action, per action                                  |
+| `read_page`             | Accessibility-tree view of the page                                   | read                                                        |
+| `get_page_text`         | Visible text extraction                                               | read                                                        |
+| `find`                  | Locate elements on the page                                           | read                                                        |
+| `form_input`            | Fill form fields, including shadow DOM                                | write                                                       |
+| `javascript_tool`       | Run JavaScript in the page context                                    | execute                                                     |
+| `tabs_context_mcp`      | List tabs in the MCP tab group                                        | read                                                        |
+| `tabs_create_mcp`       | Create a tab in the MCP tab group                                     | none                                                        |
+| `read_console_messages` | Recent console output                                                 | read                                                        |
+| `read_network_requests` | Recent network activity                                               | read                                                        |
+| `resize_window`         | Resize the browser window                                             | none                                                        |
+| `update_plan`           | Record the agent's working plan                                       | none                                                        |
+| `narrate`               | Show timed agent commentary without touching page content             | none                                                        |
+| `wait_for`              | Wait for a page condition and settlement                              | read                                                        |
+| `script`                | Run a sequence of tool calls in one request (with optional `dry_run`) | none                                                        |
+| `form_fill`             | Fill a form by field labels in one call                               | read + write (or read + write + action when `submit: true`) |
+| `act_on`                | Resolve, act on, and observe one semantic target                      | read, action, or write, per action                          |
+| `dialog`                | Inspect or explicitly resolve a JavaScript dialog                     | read or action, per action                                  |
+| `tab_control`           | Focus, reload, or close one owned tab                                 | none or action, per action                                  |
+| `file_upload`           | Upload file bytes to a file `<input>` on the page                     | write                                                       |
+| `browser_batch`         | Run a batch of browser actions in one call                            | none                                                        |
+| `upload_image`          | Place a captured screenshot into a file input or drop target          | write                                                       |
+| `gif_creator`           | Record a session and export it as an animated GIF                     | read or write, per action                                   |
+| `explain`               | List every action and the capability it requires                      | none                                                        |
 
 For `computer`, the read-only actions (`screenshot`, `scroll`, `zoom`, `scroll_to`, `hover`)
 require `read`, the input actions (`left_click`, `right_click`, `type`, `key`,
@@ -222,12 +219,18 @@ capabilities (`read`, `action`, `write`, `execute`) to an identity on the hosts 
   "version": "2026.07.0",
   "identity": { "resolved_by": "local_file", "principal": "dev@acme" },
   "grants": [
-    { "id": "acme-apps",
+    {
+      "id": "acme-apps",
       "hosts": { "allow": ["*.acme.com"], "deny": ["payroll.acme.com"] },
-      "allowed": ["read", "action", "write"] }
+      "allowed": ["read", "action", "write"]
+    }
   ],
   "config": [
-    { "key": "content.security.sacred_domains", "value": ["*.mybank.com"], "level": "mandatory" }
+    {
+      "key": "content.security.sacred_domains",
+      "value": ["*.mybank.com"],
+      "level": "mandatory"
+    }
   ]
 }
 ```
@@ -238,7 +241,7 @@ capabilities (`read`, `action`, `write`, `execute`) to an identity on the hosts 
   vocabulary is published as an open, vendor-neutral spec: the
   [RAWX capability model](open-spec/rawx-capability-model.md) (`rwx` for agents).
 - **Observe before you enforce.** `observe` mode dispatches everything and records what enforce
-  *would have* denied; `enforce` blocks. Sacred never-touch domains always enforce.
+  _would have_ denied; `enforce` blocks. Sacred never-touch domains always enforce.
 - **Evidence built in.** Every call, whether permitted, denied, or shadow-denied, emits one
   structured JSON-Lines audit record: identity, host, capability, grant, decision, duration. The
   recorder is on by default even in all-open mode, so a session always leaves a trail. Stream it to
@@ -246,7 +249,7 @@ capabilities (`read`, `action`, `write`, `execute`) to an identity on the hosts 
 - **Live and layered.** Manifests hot-reload without a restart (failing closed on a bad edit);
   configuration resolves through defaults, org policy, and user layers, with org locks.
 
-A governed client only *sees* the tools its grants permit, plus `explain`. Start from a ready
+A governed client only _sees_ the tools its grants permit, plus `explain`. Start from a ready
 manifest in [`examples/`](examples/), preview any file with `ghostlight policy explain <file>`,
 and see the [governance configuration guide](docs/guides/governance-configuration.md) for the
 mechanics, with the [solo-developer](docs/guides/solo-developer.md) and
@@ -296,20 +299,20 @@ it.
 
 ## Documentation
 
-| Doc                                                                 | What it is                                                              |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| [Guides & how-tos](docs/guides/)                                    | Install, configure governance, roll it out to a team, ship audit to a SIEM, manage a license. |
-| [docs/COMPARISON.md](docs/COMPARISON.md)                            | A candid comparison with the alternatives.                               |
-| [ROADMAP.md](ROADMAP.md)                                            | What we are building next, and the direction behind it.                  |
-| [PRICING.md](PRICING.md)                                            | Editions, the founding program, and the Continuity Promise.              |
-| [CONTRIBUTING.md](CONTRIBUTING.md)                                  | How to ask questions, request features, and contribute code.             |
-| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)                            | The standards for participating in this community.                       |
-| [SECURITY.md](SECURITY.md)                                          | Vulnerability reporting and what to expect.                              |
-| [MAINTENANCE.md](MAINTENANCE.md)                                    | Who maintains it, the Continuity Promise, and how to pick it up.         |
-| [Trust Center](docs/trust/README.md)                                | Procurement and security review, all public: FAQ, security overview, a CAIQ-shaped questionnaire, and MSA/DPA templates. |
-| [docs/SPEC.md](docs/SPEC.md)                                        | The original deep design specification; ADRs and the live tree supersede it where they differ. |
-| [docs/adr/](docs/adr/)                                              | Authoritative architecture decisions and amendments.                     |
-| [open-spec/](open-spec/)                                            | Open specs we publish for the ecosystem (starts with RAWX).              |
+| Doc                                      | What it is                                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| [Guides & how-tos](docs/guides/)         | Install, configure governance, roll it out to a team, ship audit to a SIEM, manage a license.                            |
+| [docs/COMPARISON.md](docs/COMPARISON.md) | A candid comparison with the alternatives.                                                                               |
+| [ROADMAP.md](ROADMAP.md)                 | What we are building next, and the direction behind it.                                                                  |
+| [PRICING.md](PRICING.md)                 | Editions, the founding program, and the Continuity Promise.                                                              |
+| [CONTRIBUTING.md](CONTRIBUTING.md)       | How to ask questions, request features, and contribute code.                                                             |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | The standards for participating in this community.                                                                       |
+| [SECURITY.md](SECURITY.md)               | Vulnerability reporting and what to expect.                                                                              |
+| [MAINTENANCE.md](MAINTENANCE.md)         | Who maintains it, the Continuity Promise, and how to pick it up.                                                         |
+| [Trust Center](docs/trust/README.md)     | Procurement and security review, all public: FAQ, security overview, a CAIQ-shaped questionnaire, and MSA/DPA templates. |
+| [docs/SPEC.md](docs/SPEC.md)             | The original deep design specification; ADRs and the live tree supersede it where they differ.                           |
+| [docs/adr/](docs/adr/)                   | Authoritative architecture decisions and amendments.                                                                     |
+| [open-spec/](open-spec/)                 | Open specs we publish for the ecosystem (starts with RAWX).                                                              |
 
 ## Questions, requests, and contributing
 
