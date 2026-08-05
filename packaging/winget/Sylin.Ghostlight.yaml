@@ -5,33 +5,33 @@
 ---
 # Sylin.Ghostlight.yaml (version manifest)
 PackageIdentifier: Sylin.Ghostlight
-PackageVersion: 0.7.3
+PackageVersion: 0.8.0
 DefaultLocale: en-US
 ManifestType: version
 ManifestVersion: 1.6.0
 ---
 # Sylin.Ghostlight.installer.yaml
 PackageIdentifier: Sylin.Ghostlight
-PackageVersion: 0.7.3
+PackageVersion: 0.8.0
 InstallerType: zip
 NestedInstallerType: portable
 NestedInstallerFiles:
-  - RelativeFilePath: ghostlight-v0.7.3-x86_64-pc-windows-msvc\ghostlight.exe
+  - RelativeFilePath: ghostlight-v0.8.0-x86_64-pc-windows-msvc\ghostlight.exe
     PortableCommandAlias: ghostlight
-  - RelativeFilePath: ghostlight-v0.7.3-x86_64-pc-windows-msvc\ghostlight-mcp-connector.exe
+  - RelativeFilePath: ghostlight-v0.8.0-x86_64-pc-windows-msvc\ghostlight-mcp-connector.exe
     PortableCommandAlias: ghostlight-mcp-connector
-  - RelativeFilePath: ghostlight-v0.7.3-x86_64-pc-windows-msvc\ghostlight-browser-connector.exe
+  - RelativeFilePath: ghostlight-v0.8.0-x86_64-pc-windows-msvc\ghostlight-browser-connector.exe
     PortableCommandAlias: ghostlight-browser-connector
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/sylin-org/ghostlight/releases/download/v0.7.3/ghostlight-v0.7.3-x86_64-pc-windows-msvc.zip
-    InstallerSha256: 0b5a8ea09424c1db9f1dd191f246eaeed13a6f84dae6ca1417c4666da16a9219
+    InstallerUrl: https://github.com/sylin-org/ghostlight/releases/download/v0.8.0/ghostlight-v0.8.0-x86_64-pc-windows-msvc.zip
+    InstallerSha256: TODO_RELEASE_SHA256
 ManifestType: installer
 ManifestVersion: 1.6.0
 ---
 # Sylin.Ghostlight.locale.en-US.yaml
 PackageIdentifier: Sylin.Ghostlight
-PackageVersion: 0.7.3
+PackageVersion: 0.8.0
 PackageLocale: en-US
 Publisher: Sylin
 PublisherUrl: https://sylin.org/

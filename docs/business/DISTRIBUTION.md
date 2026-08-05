@@ -32,7 +32,7 @@ winget/scoop/homebrew templates place them together in one directory. MCP-client
 
 - [x] **npm.** `ghostlight@0.7.3` is live at `latest`. The release pipeline publishes it and smoke
       tests the launcher against the integrity-pinned release binaries.
-- [x] **Chrome Web Store.** Adapter v0.6.0 is public and v0.7.1 is pending review. Store id:
+- [x] **Chrome Web Store.** Adapter v0.7.1 is public. There is no pending submission. Store id:
       `lejccfmoeogmhemakeknjjdhkfkgncdl`.
 - [ ] **Edge Add-ons store.** Submit the same packaged extension after configuring the Edge
       publisher credentials.

@@ -212,6 +212,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           ADAPTER_VERSION: ${{ needs.prepare.outputs.adapter_version }}
         run: |
           set -euo pipefail
@@ -230,6 +231,10 @@ jobs:
           TEMPLATE=$(cat .github/release-template.md)
           NOTES="${TEMPLATE//\$\{VERSION\}/$VERSION}"
           NOTES="${NOTES//\$\{ADAPTER_VERSION\}/$ADAPTER_VERSION}"
+          CHANGELOG=$(pwsh -NoProfile -Command \
+            '. ./scripts/release.ps1 $env:RELEASE_VERSION; Get-ChangelogSection $env:RELEASE_VERSION')
+          test -n "${CHANGELOG//[[:space:]]/}"
+          NOTES="${NOTES//\$\{CHANGELOG\}/$CHANGELOG}"
           CHECKSUMS=$(cat bundle/SHA256SUMS)
           NOTES="${NOTES//\$\{CHECKSUMS\}/$CHECKSUMS}"
           printf '%s\n' "$NOTES" > bundle/release-notes.md

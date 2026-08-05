@@ -5,6 +5,10 @@ agent controlled access to your real, authenticated browser session, with an opt
 layer (capability grants, sacred domains, audit). See the README and docs/guides/ for the
 full walkthrough.
 
+## What's changed
+
+${CHANGELOG}
+
 ## Install
 
 1. Install the service and register detected MCP clients: `npx -y ghostlight install`.

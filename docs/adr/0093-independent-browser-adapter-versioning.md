@@ -51,3 +51,20 @@ next service-only release.
   version numbers.
 - Every service release makes adapter support an explicit reviewed claim.
 - Full runtime enforcement waits for truthful version evidence from the adapter itself.
+
+## Amendment: compatibility blocks from 0.8 onward
+
+- Date: 2026-08-05
+
+Starting with 0.8.0, the compatibility contract is the major/minor version block. An adapter row
+with `"serviceVersionBlock": "0.8"` covers every 0.8.x service patch. Adapter 0.8.0 therefore
+covers service 0.8.0, 0.8.29, and every other 0.8 patch. It does not cover 0.7.x or 0.9.x.
+
+Service and adapter patch versions remain independent. A compatible implementation fix increments
+only the component that changed. A contract change increments the minor version and requires both
+components to declare the new block. Historical published rows retain their explicit inclusive
+ranges; the unpublished 0.7.3 bridge row is removed.
+
+This replaces Decision 2, Decision 3, and the compatibility part of Decision 4 for 0.8 and later.
+Release checks require the source adapter to cover the source service, and the public adapter to
+cover the public service. A pending adapter must cover the candidate service.

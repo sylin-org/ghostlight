@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Chrome Web Store Listing
 
-Last updated: 2026-07-13
+Last updated: 2026-08-05
 
 Paste-ready copy for every text field in the Chrome Web Store developer dashboard, plus the
 non-text asset checklist and the submission steps only the founder can take. Permission
@@ -302,11 +302,11 @@ The item was submitted for review on 2026-07-13. The store assigned the id
 `cjcmhepmagomefjggkcohdbfemacojoa` (the dev id comes from the pinned manifest `key`, which is
 stripped from the store package).
 
-Current release state (2026-07-31): Google approved and published v0.6.0. The public listing serves
-that version and offers `Add to Chrome`. The v0.7.1 package then uploaded successfully through the
-release pipeline and Chrome accepted its publish request with `[OK] OK.`. The public listing will
-remain at v0.6.0 while Chrome reviews the update. Broad host permissions may trigger the expected
-in-depth review.
+Current release state (2026-08-05): Google approved and published v0.7.1. The public listing serves
+that version, reports an update date of 2026-08-02, and offers `Add to Chrome`. There is no pending
+submission. Source adapter v0.8.0 is the next review candidate. It covers every service v0.8.x
+patch under the 0.8 contract block. Broad host permissions may trigger
+the expected in-depth review.
 
 Ordinary `ghostlight install` already registers both the Web Store id and the pinned unpacked-dev
 id in the native host's `allowed_origins`. A store user therefore runs the normal command:

@@ -181,6 +181,7 @@ function Publish-Chrome([string] $ZipPath, [string] $Ver) {
         throw "Chrome Web Store publish returned [$statuses]: $((@($pub.statusDetail)) -join '; ')"
     }
     Write-Info 'the store re-reviews the new version; live rollout follows review (usually hours to a few days).'
+    Write-Info "record the accepted review with: pwsh -File scripts/reconcile-chrome-store.ps1 -PendingVersion $Ver"
 }
 
 function Write-ChromeInstructions([string] $ZipPath, [string] $Ver) {
@@ -193,6 +194,8 @@ function Write-ChromeInstructions([string] $ZipPath, [string] $Ver) {
     4. Fill any changed store-listing fields from docs/legal/STORE_LISTING.md,
        docs/legal/PRIVACY.md, and docs/legal/PERMISSION_JUSTIFICATIONS.md.
     5. "Submit for review". Publishing is gated on Google's review.
+    6. Record the accepted review in the source tree:
+         pwsh -File scripts/reconcile-chrome-store.ps1 -PendingVersion $Ver
 
   To automate this next time, set these env vars and re-run this script (see docs/RELEASE.md):
     CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN, CWS_ITEM_ID

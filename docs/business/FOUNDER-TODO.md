@@ -41,9 +41,10 @@ Last reconciled: 2026-08-04. This checklist is current through Ghostlight v0.7.3
       still reports the generated default image as of 2026-08-01.
 - [x] Ghostlight v0.7.3 is published on GitHub, npm, Homebrew, the official MCP Registry, and the
       website. The release and live-install checks passed on 2026-08-01.
-- [x] **Chrome Web Store is public.** Adapter v0.6.0 is live under store id
-      `lejccfmoeogmhemakeknjjdhkfkgncdl`; the v0.7.1 adapter is pending review.
-- [ ] Monitor the v0.7.1 Chrome review and answer reviewer questions. Keep Verified CRX uploads
+- [x] **Chrome Web Store is public.** Adapter v0.7.1 is live under store id
+      `lejccfmoeogmhemakeknjjdhkfkgncdl`; there is no pending submission.
+- [ ] Submit source adapter v0.8.0 for review before publishing service v0.8.0. The 0.8 contract
+      block permits independent adapter and service patches after that. Keep Verified CRX uploads
       deferred until release cadence and offline key recovery are stable; losing that key would
       prevent future updates.
 - [x] The CWS video evidence is present in the listing and the README hero GIF is published.
@@ -159,8 +160,8 @@ Last reconciled: 2026-08-04. This checklist is current through Ghostlight v0.7.3
   ADR-0047 (tab identity), ADR-0048 (development override + the per-user hub-key fix), and
   ADR-0049 (the MCP protocol-conformance pass).
 - 2026-08-01: **v0.7.3 SHIPPED.** GitHub, npm, Homebrew, the official MCP Registry, and the
-  canonical website agree on the service release. Chrome Web Store v0.6.0 is public; adapter
-  v0.7.1 remains under review. Codex and Zed Show and tell posts are live, Glama scores Ghostlight
+  canonical website agree on the service release. Chrome Web Store v0.7.1 is now public. Codex
+  and Zed Show and tell posts are live, Glama scores Ghostlight
   A/A/B across all 25 tools. The awesome-mcp, Cline, and Winget paths are in external review; the
   GitHub catalog request was submitted and is pending a response, with Ghostlight still absent.
   The founder checklist was reconciled to current composite signing, Polar.sh, public-channel
@@ -176,3 +177,6 @@ Last reconciled: 2026-08-04. This checklist is current through Ghostlight v0.7.3
   open-core bundle was not misrepresented or submitted; an eligibility inquiry is ready. OpenAI's
   public plugin submission requires a public HTTPS MCP server, so it remains incompatible with
   Ghostlight's local-only ingress boundary. No remote proxy will be added for a listing.
+- 2026-08-05: **CHROME ADAPTER v0.7.1 PUBLISHED.** The public listing reports v0.7.1, updated
+  2026-08-02. The repository's stale pending-review state was reconciled. Source adapter v0.8.0
+  is the next submission and covers every v0.8.x service patch under the 0.8 contract block.

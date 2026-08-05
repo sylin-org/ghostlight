@@ -15,10 +15,10 @@ the Chrome Web Store.
 Build a package from downloaded raw release artifacts:
 
 ```powershell
-pwsh -File scripts/package-mcpb.ps1 -Version 0.7.3 -ArtifactsDir artifacts
+pwsh -File scripts/package-mcpb.ps1 -Version 0.8.0 -ArtifactsDir artifacts
 ```
 
-The result is `dist/ghostlight-v0.7.3.mcpb`.
+The result is `dist/ghostlight-v0.8.0.mcpb`.
 
 ## Privacy Policy
 

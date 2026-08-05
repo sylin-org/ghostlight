@@ -7,6 +7,38 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **The v0.8.0 release candidate is being prepared without weakening the adapter gate.** The live
+  Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02, with no
+  pending submission. The stale v0.6.0/pending-v0.7.1 canonical state and current runbooks are
+  corrected. Online public-surface checks now compare the tracked adapter with Chrome's public
+  update feed, and `reconcile-chrome-store.ps1` handles both accepted-review and became-public
+  transitions without publishing anything. GitHub release assembly now takes `What's changed`
+  from the existing versioned changelog instead of publishing only a static template. The
+  `[Unreleased]` section carries the v0.8.0 candidate notes. Source adapter and service are now
+  v0.8.0. Their compatibility row declares the 0.8 contract block: every 0.8 adapter patch covers
+  every 0.8 service patch. Public adapter v0.7.1 remains capped at service v0.7.3, so preflight
+  blocks the service release until adapter v0.8.0 is public. The store-ready v0.8.0 zip is 137,689
+  bytes with SHA-256 `54119b6820f942071053927e0a309e7745629f1d7b992530d3386113d1f46535`.
+  No store submission, website publication, release tag, or registry publication has occurred.
+  The online audit now passes the live Chrome comparison and fails only because the public website
+  still carries the old extension summary pending an explicitly confirmed refresh.
+
+- **Browser-created tab continuity is implemented and live-verified in the working tree
+  (ADR-0099).** Browser requests explicitly opt into bounded `tabDeltaV1` results. The extension
+  passively adopts a new child only from an exact, uniquely owned opener and preserves Chrome's
+  chosen window, group, and focus. The service validates and atomically claims still-open child
+  ids before exposing the result, then adds concise follow-up guidance for an observed active
+  child. A controlled `_blank` click returned composite tab id 5541182481 and an immediate
+  `get_page_text` call on that id succeeded without an intervening context refresh. In the exact
+  Google account-switch scenario, selecting `sylin`/`sylin.org` manually kept source tab
+  5541182500 on the Developer Agreement page and opened dashboard child 5541182503 in the same
+  window. The extension trace correlated native child 1246215207 to native opener 1246215204;
+  the next context inventory exposed the child and a direct focus call succeeded. Because the
+  Google selection was a manual browser action, no Ghostlight call falsely claimed it caused the
+  child. The source adapter is now v0.8.0 with a 0.8 compatibility block. All 164 extension
+  tests, changed JavaScript syntax checks, focused Rust tests, the full workspace suite, and strict
+  workspace Clippy pass.
+
 - **The official conformance runner stdio side quest is implemented and dogfooded locally.** The
   `sylin-org/conformance` fork now has branch `feat/stdio-server-runner` in the sibling local
   checkout. One target abstraction selects an existing HTTP endpoint or a runner-owned stdio
@@ -151,8 +183,8 @@ when they disagree**, and update it when you land something that changes the pic
   extension artifact from `extension/manifest.json`; preflight and public-surface checks require
   the source, public-store, and pending adapters to cover the service release. Service-only
   releases extend the map without changing the adapter manifest or restarting store review. The
-  current source adapter remains v0.7.2, the public store serves v0.6.0, and v0.7.1 is pending;
-  all three cover the published v0.7.3 service.
+  current source adapter is v0.7.3 and the public store serves v0.7.1 with no pending submission;
+  both cover the published v0.7.3 service.
 
 - **v0.7.2 ships safe installed-engine activation (ADR-0092).** Windows identifies the
   exact adapter-pipe owner, verifies that its executable belongs to the managed Ghostlight install
@@ -337,18 +369,17 @@ when they disagree**, and update it when you land something that changes the pic
   handoff (ADR-0070), agent narration (ADR-0072), reliable memory-only GIF recording and bounded
   browser transport (ADRs 0073/0074), the cohesive Card Foundry demo story, and the live Foundry
   companion route at `https://sylin.org/ghostlight/demo/foundry/`.
-- **The Chrome Web Store listing is public at v0.6.0; v0.7.1 is pending review.** The owner
+- **The Chrome Web Store listing is public at v0.7.1 with no pending submission.** The owner
   completed the listing, Privacy practices, permission and remote-code justifications, data-use
   certifications, screenshots, video, and promotional tiles for the original v0.5.7 submission.
   After Google reinstated the `ghostlight-release` API project on 2026-07-15, the owner approved
   cancelling that pending review so the first public package would match the greenfield release.
   The v0.6.0 package uploaded successfully and Chrome accepted the new submission as
   `ITEM_PENDING_REVIEW`. Chrome approved and published v0.6.0 by 2026-07-31. The v0.7.1 release
-  then uploaded successfully and the publish API accepted it with `[OK] OK.`; the public listing
-  remains at v0.6.0 while that update is reviewed. Broad host permissions can trigger an in-depth
-  review; that is the intentional tradeoff for general-purpose automation across user-selected
-  sites, not a rejected submission. Edge remains unsubmitted because no `EDGE_*` credentials are
-  configured.
+  then uploaded successfully and the publish API accepted it with `[OK] OK.`. The public listing
+  reports v0.7.1 updated on 2026-08-02. Broad host permissions can trigger an in-depth review;
+  that remains the intentional tradeoff for general-purpose automation across user-selected
+  sites. Edge remains unsubmitted because no `EDGE_*` credentials are configured.
 - **The ADR-0056 Lightbox consolidation is complete.** All 27 legacy ignored spawn tests have named
   parity scenarios, the originals and dual shell wrappers are retired, and CI runs the 34-scenario
   Lightbox suite as the sole service-side process-boundary gate. The repaired Playwright job stays
@@ -630,8 +661,8 @@ its API credentials or dashboard metadata are absent.
 
 ## Owner-side gates (agents cannot do these)
 
-- Chrome Web Store: monitor the pending v0.7.1 review and answer any reviewer questions. Edge
-  Add-ons remains unsubmitted.
+- Chrome Web Store: submit source adapter v0.8.0 and wait for it to become public before service
+  v0.8.0. Edge Add-ons remains unsubmitted.
 - Trust center legal: vendor entity name in the MSA (blocked on forming the LLC), the
   cyber-insurance yes/no line, counsel skim of MSA/DPA and the commercial license before first
   EXECUTION (publication already happened by design; drafts are marked as drafts).

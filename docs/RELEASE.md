@@ -23,7 +23,7 @@ The release spans three first-party repositories plus external registries:
 | Homebrew tap (`sylin-org/homebrew-tap`) | the formula (version + macOS/Linux sums) | Automated | `release.ps1` (`tap`) |
 | Scoop | in-repo manifest `packaging/scoop/ghostlight.json` | Automated | `release.ps1` (`sums`) |
 | Winget | in-repo manifest `packaging/winget/Sylin.Ghostlight.yaml` | Semi: sums filled automatically; a PR to `microsoft/winget-pkgs` is manual, per version | `release.ps1` fills; you open the PR |
-| Chrome Web Store | the extension zip (`key` stripped, dev files excluded) | Automated when store creds are set, else printed steps | `release.ps1` (`extension`) -> `publish-extension.ps1` |
+| Chrome Web Store | the extension zip (`key` stripped, dev files excluded) | Submission automated when store creds are set; public-state reconciliation is explicit after review | `release.ps1` (`extension`) -> `publish-extension.ps1`; after approval -> `reconcile-chrome-store.ps1` |
 | Edge Add-ons | the same zip | Automated when store creds are set, else printed steps | `release.ps1` (`extension`) -> `publish-extension.ps1` |
 | Trust center (`docs/trust/`) | "reviewed against vX.Y.Z" footer restamp | Automated | `release.ps1` (`trust`) |
 | Website (sylin.org) | refresh install-guide and public-status fallbacks + trigger a rebuild | Automated | `release.ps1` (`website`) -> `publish-website.ps1` |
@@ -57,8 +57,9 @@ Without them, the extension step prints exact manual submission instructions ins
 ## Cutting a release
 
 1. Land everything on `dev`, bump every service version surface, write the CHANGELOG section, and
-   merge the `dev -> main` PR (CI green). For a service-only release, leave
-   `extension/manifest.json` alone and extend the adapter range in `compatibility.json`. `main` now
+   merge the `dev -> main` PR (CI green). For a service-only patch within the current contract
+   block, leave `extension/manifest.json` and `compatibility.json` alone. The
+   versioned changelog section becomes the `What's changed` body in the GitHub Release. `main` now
    carries the release commit.
 2. From `main`:
 
@@ -107,16 +108,18 @@ tag (a Rust-only release needs no store resubmission).
 
 ### Adapter compatibility
 
-`compatibility.json` is the canonical support map. Each Chrome adapter row gives an inclusive
-minimum and maximum service version. Read it as: "Chrome adapter X covers Ghostlight service
-versions Y-Z." The current source adapter version comes from `extension/manifest.json`; the public
-and pending store versions come from `docs/public-status.json`.
+`compatibility.json` is the canonical support map. Historical Chrome adapter rows retain explicit
+inclusive service ranges. From 0.8 onward, each row gives a major/minor service block. Read
+`"serviceVersionBlock": "0.8"` as: "this adapter covers every 0.8.x service patch." The current
+source adapter version comes from `extension/manifest.json`; the public and pending store versions
+come from `docs/public-status.json`.
 
-On a service-only release, extend the applicable rows through the new service version. Do not bump
-the adapter manifest. On a real extension change, bump the manifest, add a compatibility row, and
-update the public or pending store state when the submission changes. Release preflight and public
-surface CI reject uncovered combinations. Runtime version reporting remains deferred until a real
-adapter update adds truthful version evidence to the browser handshake (ADR-0093).
+On a compatible patch, bump only the component that changed. Do not edit the compatibility row or
+bump the other component. When the adapter/service contract changes, advance the minor, bump both
+components into that block, add the new compatibility row, and get the adapter public before the
+service release. Release preflight and public-surface CI reject uncovered combinations. Runtime
+version reporting remains deferred until a real adapter update adds truthful version evidence to
+the browser handshake (ADR-0093).
 
 Run it standalone any time:
 
@@ -169,6 +172,23 @@ the owner approves replacement, use Chrome's v2
 method, upload the current package, and submit it again. Record both the cancelled version and the
 accepted replacement in `docs/STATUS.md` and `docs/legal/STORE_LISTING.md`.
 
+Chrome review completes after the release process has returned. When Google reports approval,
+reconcile the public version from Chrome's machine-readable update endpoint instead of editing
+version prose by hand:
+
+```
+pwsh -File scripts/reconcile-chrome-store.ps1 -PendingVersion <adapter-version>
+pwsh -File scripts/reconcile-chrome-store.ps1 -ExpectedVersion <adapter-version> -DryRun
+pwsh -File scripts/reconcile-chrome-store.ps1 -ExpectedVersion <adapter-version>
+```
+
+Run the `-PendingVersion` form immediately after the store accepts a submission. The command always
+reads the public version, validates compatibility, updates `docs/public-status.json` and the README,
+clears a pending version once it is live, and runs the local public-surface check. Review and commit
+those changes, then run `scripts/publish-website.ps1` after the usual outward-publication
+confirmation. The online public-surface check independently compares the tracked version with
+Chrome's public update feed.
+
 ### Edge Add-ons (`EDGE_*`)
 
 Uses the Edge Add-ons API v1.1 (Partner Center). In Partner Center -> the extension ->
@@ -186,6 +206,7 @@ website repo.
 
 - **CHANGELOG date / next cycle**: start the next `## [Unreleased]` section on `dev` as work lands.
 - **Chrome/Edge review latency**: store publishing is queued for review (hours to a few days); the
-  automated step returns as soon as the store accepts the submission, not when it goes live.
+  automated step returns as soon as the store accepts the submission, not when it goes live. After
+  Chrome approval, run `reconcile-chrome-store.ps1` as described above.
 - **Verify**: the GitHub release page, `npm view ghostlight version`, `brew info sylin-org/tap/ghostlight`,
   and `sylin.org/ghostlight/install.md`.

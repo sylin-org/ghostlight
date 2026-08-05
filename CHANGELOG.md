@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The v0.8.0 candidate makes the MCP edge explicitly protocol-versioned, leaves the service kernel
+protocol-neutral, and makes browser tab continuity match what users see in Chrome.
+
+### Added
+
+- **MCP 2026-07-28 support (ADR-0096).** The local stdio edge implements the 2026 discovery and
+  request-metadata lifecycle alongside MCP 2025-11-25. The protocol-neutral service does not parse
+  MCP JSON-RPC or retain MCP request ids.
+- **Local MCPB packaging (ADR-0095).** Release assembly now produces a self-contained Claude
+  Desktop package with the same local-only service and Chrome Web Store adapter boundary.
+- **Browser-created tab continuity (ADR-0099).** Opted-in browser results report a bounded tab
+  delta. The service validates and claims a still-open child before returning its composite tab id,
+  so an agent can use that id immediately without a separate context refresh.
+
+### Changed
+
+- **Three explicit executable roles (ADR-0096).** MCP clients launch
+  `ghostlight-mcp-connector`, the persistent protocol-neutral service remains `ghostlight`, and
+  Chromium launches `ghostlight-browser-connector`. The old dual-role `ghostlight-relay` path is
+  removed rather than retained as a compatibility alias.
+- **Extension-owned Chrome topology (ADR-0098).** The extension owns native Chrome window, group,
+  and placement mechanism. The service sends only logical workspace authority and presentation
+  intent, so user-moved tabs and groups stay where the user put them.
+- **Major/minor adapter contract (ADR-0093).** Chrome adapter v0.8.0 covers every Ghostlight
+  service v0.8.x patch. Compatible adapter and service patches can ship independently; a contract
+  change advances the minor for both components.
+- Exact-title tab groups are reused for presentation without merging workspace authority or tab
+  inventories.
+
+### Fixed
+
+- A browser-created child with one exact managed opener is passively adopted into that workspace,
+  while guessed, ambiguous, and cross-workspace tabs remain inaccessible.
+- Closed MCP transports now tell the agent to reconnect through its current client instead of
+  spawning a standalone connector that creates a different workspace and duplicate browser tabs.
+- Moving a managed tab or whole group into another Chrome window no longer causes context lookup
+  or addressed navigation to create replacement tabs or groups.
+
 ## [0.7.3] - 2026-08-01
 
 ### Added

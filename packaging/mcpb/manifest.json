@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "ghostlight",
   "display_name": "Ghostlight",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "description": "Use your signed-in Chromium browser from Claude with local execution and optional governance.",
   "long_description": "Ghostlight connects Claude to the Chromium browser you already use. It can navigate, read pages, fill forms, upload files, inspect console and network activity, and run multi-step browser workflows. The service, MCP connector, and browser connector run on your machine. Optional governance adds capability grants, protected domains, and structured local audit logs. The Ghostlight in Browser extension from the Chrome Web Store is required.",
   "author": {

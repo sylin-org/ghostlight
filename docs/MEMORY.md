@@ -55,9 +55,9 @@ Collaboration and process -- this file is their canonical home:
   Web Store. Only source-development docs may explain loading the repository extension directly for
   immediate local testing (ADR-0091).
 - **The Chrome adapter versions independently from the service.** `extension/manifest.json` owns
-  the adapter version; `compatibility.json` is the canonical inclusive service coverage map. A
-  service-only release extends coverage and does not bump the manifest or reset store review
-  (ADR-0093).
+  the adapter version. From 0.8 onward, `compatibility.json` declares a major/minor contract block:
+  any 0.8 adapter patch covers any 0.8 service patch. Patch releases do not reset store review. A
+  contract change advances the minor for both components (ADR-0093).
 - **Persist before context loss.** On a "prep for compaction" / "handoff" / "save state" request,
   first update memory + durable docs (this file, STATUS, ADRs/LEDGERs) and commit, THEN emit a
   self-contained continuation prompt -- persist first, answer second.
@@ -93,17 +93,19 @@ file does not restate them -- follow AGENTS.md.
   Chrome window or group ids. The extension owns live placement and one per-workspace tab/group
   record. It follows user-moved owned tabs and groups in their current windows, never moves an
   existing tab back, and may reuse an exact-title group for presentation without sharing authority
-  or tab inventory (ADR-0098).
+  or tab inventory. A browser-created child is adopted only when its exact opener belongs to one
+  unambiguous workspace; adoption preserves Chrome's chosen window, group, and focus (ADR-0098/0099).
 - **An upgrade is not active until the selected engine owns the endpoint.** Registering new paths
   and successfully spawning a singleton loser are not enough. Verify the endpoint owner, quiesce
   old self-heal paths, replace only a proven managed predecessor, and preserve an external/dev
   engine (ADR-0092).
 - **Tab authority is established at the browser shore, never from an input handle.** An explicit
   `tabId` is verification-only: the current live workspace must already own it, and unknown and
-  cross-workspace ids fail identically before any browser frame. Only successful, correlated
-  `tabs_context_mcp` and `tabs_create_mcp` results may atomically add exact declared tab ids to a
-  workspace. The extension's managed-tab gate remains defense-in-depth for those owned tabs and
-  still keeps guessed user tabs out (ADR-0066/0096).
+  cross-workspace ids fail identically before any browser frame. Successful, correlated creator
+  inventories and strict opted-in `tabDelta` results may atomically add exact declared tab ids to
+  a workspace. A passively adopted browser child becomes service-authoritative only when a later
+  creator inventory confirms it. The extension's managed-tab gate remains defense-in-depth for
+  those owned tabs and still keeps guessed user tabs out (ADR-0066/0096/0099).
 - **Distribution is automated and credential-gated** in `scripts/release.ps1`; the MCP registry
   publish is DNS-authed on the sylin.org apex; canonical URLs are `sylin.org` (the github.io site
   is retired, redirect-stubbed). Off-tree/secret change history is in `local/AUDIT-LOG.md`.
@@ -111,7 +113,12 @@ file does not restate them -- follow AGENTS.md.
   canonical machine-readable service release fallback, live-platform statement, and Chrome store
   adapter state. The README must contain its exact public claims; the website consumes a synchronized
   fallback through `scripts/publish-website.ps1`. Run `scripts/check-public-surfaces.ps1` locally
-  and with `-Online` after deployment instead of repairing either surface independently.
+  and with `-Online` after deployment instead of repairing either surface independently. Chrome
+  review completes asynchronously: use `scripts/reconcile-chrome-store.ps1` after submission and
+  approval so the public version, pending version, README, and compatibility claim move together.
+- **The changelog owns release changes.** Keep `CHANGELOG.md` current as work lands. Release
+  preflight requires a non-empty version section, and GitHub release assembly inserts that exact
+  section under `What's changed`; do not maintain a second hand-written release summary.
 - **Remote-code claims distinguish extension logic from page automation.** All extension logic
   ships in the reviewed package, but `javascript_tool` carries an explicit local MCP-client
   instruction to CDP `Runtime.evaluate` in the attached page. Never collapse those two facts into

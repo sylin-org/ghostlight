@@ -262,6 +262,35 @@ function Set-HomebrewShaForTarget([string] $Path, [string] $Target, [string] $Ha
     Set-Content -Path $Path -Value $new -NoNewline
 }
 
+function Get-ChangelogSection([string] $Ver) {
+    [void](ConvertTo-GhostlightVersion $Ver 'changelog version')
+    $path = Join-Path $RepoRoot 'CHANGELOG.md'
+    if (-not (Test-Path -LiteralPath $path)) { throw "CHANGELOG.md is missing at $path" }
+
+    $lines = @(Get-Content -LiteralPath $path)
+    $header = '^## \[' + [regex]::Escape($Ver) + '\](?: - \d{4}-\d{2}-\d{2})?$'
+    $start = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match $header) { $start = $i + 1; break }
+    }
+    if ($start -lt 0) { throw "CHANGELOG.md has no '## [$Ver]' section" }
+
+    $end = $lines.Count
+    for ($i = $start; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^## \[') { $end = $i; break }
+    }
+    if ($end -le $start) { throw "CHANGELOG.md section [$Ver] is empty" }
+
+    $body = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in $lines[$start..($end - 1)]) { $body.Add($line) }
+    while ($body.Count -gt 0 -and [string]::IsNullOrWhiteSpace($body[0])) { $body.RemoveAt(0) }
+    while ($body.Count -gt 0 -and [string]::IsNullOrWhiteSpace($body[$body.Count - 1])) {
+        $body.RemoveAt($body.Count - 1)
+    }
+    if ($body.Count -eq 0) { throw "CHANGELOG.md section [$Ver] is empty" }
+    return $body -join [Environment]::NewLine
+}
+
 # =======================================================================================
 # STEPS
 # =======================================================================================
@@ -323,11 +352,9 @@ function Step-Preflight {
     & pwsh -File (Join-Path $PSScriptRoot 'check-public-surfaces.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'public surfaces are inconsistent' }
 
-    # CHANGELOG section.
-    $changelog = Join-Path $RepoRoot 'CHANGELOG.md'
-    $hasSection = Select-String -Path $changelog -Pattern "^## \[$([regex]::Escape($Version))\]" -Quiet
-    if (-not $hasSection) { throw "CHANGELOG.md has no '## [$Version]' section" }
-    Write-Ok "CHANGELOG has a [$Version] section"
+    # CHANGELOG section. The same parser supplies the GitHub release notes.
+    $changelogSection = Get-ChangelogSection $Version
+    Write-Ok "CHANGELOG has a non-empty [$Version] section ($($changelogSection.Length) characters)"
 
     # Tag must not already exist (unless resuming).
     Push-Location $RepoRoot
