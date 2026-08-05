@@ -27,6 +27,11 @@ dedicated tab group that stays separate from your ordinary tabs. Actions happen 
 works wide open for personal use or under inspectable policy when stronger boundaries are useful.
 Everything runs locally, and nothing phones home.
 
+**MCP compatibility.** Ghostlight supports the `2025-11-25` and `2026-07-28` MCP protocols over
+local stdio. Each revision has its own protocol state machine at the connector, while the service
+and browser pipeline stay protocol-neutral; advertised behavior is tested against the exact
+published wire schema for that revision.
+
 **No account and no subscription trap.** The local browser automation core is Apache-2.0 OR MIT
 and runs without a Ghostlight login, activation server, telemetry, or subscription. Organizational
 governance is a separately licensed source-available layer. Personal use, evaluation, development,
