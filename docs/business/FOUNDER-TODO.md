@@ -4,7 +4,7 @@ Personal checklist for actions only the founder can take. Agentic work is NOT tr
 here (it lives in docs/tasks/licensing-1/ and the frontier queue in
 docs/business/PLAN.md). Check items off in place; add dates.
 
-Last reconciled: 2026-08-04. This checklist is current through Ghostlight v0.7.3.
+Last reconciled: 2026-08-05. This checklist is current through Ghostlight v0.7.3.
 
 ## Now (owner-only foundations)
 
@@ -79,7 +79,10 @@ Last reconciled: 2026-08-04. This checklist is current through Ghostlight v0.7.3
       `awesome-mcp-servers` [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306).
 - [x] GitHub approved Ghostlight for inclusion in the GitHub MCP Registry on 2026-08-03. GitHub
       will add the server to the catalog; no further founder action is required.
-- [ ] Configure Edge Add-ons publisher credentials and submit the current compatible adapter.
+- [ ] Edge Add-ons is deferred. Individual enrollment makes the contact address customer-visible,
+      and the owner will not publish a home address. Revisit only after a legitimate non-home public
+      address exists. Until then, Edge users can install the public Chrome Web Store adapter through
+      Microsoft's supported other-store path.
 - [ ] Optionally submit the already working v0.7.3 Scoop manifest to Scoop Extras.
 - [ ] Send client-specific founder outreach to Cursor, Zed, and Cline using a concrete proof, not
       a generic launch announcement.

@@ -16,18 +16,23 @@ when they disagree**, and update it when you land something that changes the pic
   comparison evidence was refreshed on 2026-08-05. Public counters did not move; search, Glama,
   and mcpservers.org caches still show older source text. The safe brief, browser-created child,
   and Foundry diagnosis recipes passed through this Codex client and visible Chromium. For the
-  authenticated recipe, the owner selected the Chrome Developer Dashboard and switched to the
+  Chrome dashboard proof, the owner selected the Chrome Developer Dashboard and switched to the
   `sylin` account. Ghostlight inventoried the exact browser-created dashboard child, but Chrome
   blocks extension inspection on Web Store pages. The owner screenshot showed `Ghostlight in
-  Browser` 0.8.0 with two users, no rating, and `Pending review`. A full agent read still needs a
-  selected signed-in page that permits inspection. Exact commits, store implications, each
-  proposed destination, release order, and recovery
+  Browser` 0.8.0 with two users, no rating, and `Pending review`. The authenticated-read recipe
+  subsequently passed on the owner-selected signed-in Microsoft Partner Center home: Ghostlight
+  read its navigation and workspace state without a proof mutation, and no private contact value
+  was retained in project evidence. Edge Add-ons enrollment was investigated but not completed.
+  Its form makes the contact address customer-visible, so the owner deferred the native listing
+  rather than publish a home address. Edge users can use the public Chrome Web Store adapter
+  through Microsoft's supported other-store path after the pending adapter is approved. Exact
+  commits, store implications, each proposed destination, release order, and recovery
   live in `docs/business/PUBLICATION-PACKET-0.8.md`; the manual release/7-day/30-day reception
   record and owner-gated Discussion draft live in
   `docs/research/public-reception-loop-0.8.md`. No product push, merge, release, store action,
   registry publication, directory edit, Discussion, showcase edit, or social post occurred in E6.
-  The release now waits on Chrome review. A scriptable signed-in source can finish the read proof;
-  every publication action still needs separate owner approval.
+  The release now waits on Chrome review. Every publication action still needs separate owner
+  approval.
 
 - **The v0.8.0 service candidate is locally release-ready without weakening the adapter gate.** The live
   Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter

@@ -61,7 +61,7 @@ owner-approved adapter and status reconciliation lands on `main`, rerun the dry 
 | Recipe | Result | Evidence boundary |
 | --- | --- | --- |
 | Safe launch brief | PASS in this Codex client and visible Chromium. Filled the five authorized fields and submitted only the public synthetic form. The page reported `Moonlight Notes is ready for review.` | Tab `5541182605`; `https://sylin.org/ghostlight/demo/brief/` |
-| Authenticated read | QUALIFIED, NOT COMPLETE. The owner selected the Chrome Web Store Developer Dashboard. Ghostlight opened the default-account agreement page, the owner manually selected `sylin`, and Ghostlight immediately inventoried the exact browser-created dashboard child. Chrome blocks extension inspection and debugger attachment on Web Store pages, so the agent could not read its contents. The owner's screenshot showed publisher `sylin.org`, `Ghostlight in Browser` 0.8.0, two users, no rating, and `Pending review`. | Signed-in session continuity and exact child adoption passed. A full agent-read proof still needs an owner-selected signed-in page that allows extension inspection. No dashboard control was activated. |
+| Authenticated read | PASS. The owner selected the signed-in Microsoft Partner Center home. `get_page_text` returned its workspace state and `read_page` returned its navigation and controls. The earlier Chrome Web Store Dashboard attempt separately proved signed-in continuity and exact child adoption, but Chrome correctly blocked extension inspection there. | The successful proof was read-only. No private contact value was retained in project evidence. The Chrome dashboard screenshot separately showed publisher `sylin.org`, `Ghostlight in Browser` 0.8.0, two users, no rating, and `Pending review`. |
 | Browser-created child | PASS in this Codex client and visible Chromium. A measured click on the temporary `Open child proof` link returned exactly one child in `tabDelta`; the next direct call read child tab `5541182622` at `https://example.org/` without a context refresh. The source tab remained at `https://example.com/`. | Temporary DOM change on the disposable source tab only; both public example tabs remain open. |
 | Foundry diagnosis | PASS. Tracking began before one explicit reload. The page read showed the synthetic QA blocker, no console message matched `error|warning|foundry`, and all 11 captured `sylin.org` requests returned 200. | Read-only public synthetic page; no page mutation. |
 
@@ -75,7 +75,8 @@ identified the link and exact child. Neither failure repeated three times.
 
 Approval must name each allowed item. One approval does not cover the others.
 
-- [ ] Select and authorize one scriptable signed-in page for the full read-only recipe above.
+- [x] Select and authorize one scriptable signed-in page for the full read-only recipe above. The
+  owner-selected Microsoft Partner Center home passed without retaining private contact values.
 - [x] Recheck the Chrome owner dashboard. The 2026-08-05 owner screenshot records adapter 0.8.0 as
   `Pending review`.
 - [ ] If approved, publish the already-submitted adapter 0.8.0 with deferred publication. Do not
@@ -98,15 +99,18 @@ Approval must name each allowed item. One approval does not cover the others.
 - Adapter 0.8.x covers service 0.8.x, while public adapter 0.7.1 stops at service 0.7.3. Publish the
   service promptly after the 0.8 adapter becomes public and the release commit is ready. Do not
   describe the short channel transition as simultaneous.
-- Edge Add-ons is not configured or submitted. It is outside this publication authorization.
+- Edge Add-ons is not configured or submitted. Individual enrollment makes the contact address
+  customer-visible, so the owner deferred the native listing rather than publish a home address.
+  Microsoft supports installing Chrome Web Store extensions in Edge through its other-store path;
+  that is Ghostlight's Edge end-user route after Chrome approval. Revisit a native listing only
+  after a legitimate non-home public address exists.
 
 ## Ordered publication runbook
 
 Each numbered mutation needs explicit owner confirmation.
 
-1. Finish the owner-selected authenticated read on a page that permits extension inspection.
-   Recheck the Chrome dashboard after its state changes. It currently says `Pending review`, so
-   stop here and keep service 0.8.0 unreleased.
+1. The owner-selected authenticated read is complete. Recheck the Chrome dashboard after its state
+   changes. It currently says `Pending review`, so stop here and keep service 0.8.0 unreleased.
 2. Publish the already-approved Chrome adapter 0.8.0 through deferred publishing. Make no listing
    copy change.
 3. Wait for the public update feed to report 0.8.0. Run:
@@ -170,8 +174,10 @@ clear current-status note over attempting to hide a broken immutable version.
 ## Remaining caveats
 
 - macOS still lacks live-browser verification.
-- The authenticated proof needs an owner-selected signed-in page that permits extension
-  inspection. Chrome Web Store pages do not.
+- The authenticated proof passed on Microsoft Partner Center. Chrome Web Store pages remain
+  protected from extension inspection, so their owner-only state still needs dashboard evidence.
+- Edge Add-ons is deferred because its individual enrollment makes the contact address
+  customer-visible. No enrollment or store submission completed.
 - The owner dashboard was rechecked by screenshot on 2026-08-05 and still says `Pending review`.
 - Glama and mcpservers.org are stale; search caches still show older Sylin content.
 - GitHub catalog approval is owner-recorded, but a public catalog entry was not located.

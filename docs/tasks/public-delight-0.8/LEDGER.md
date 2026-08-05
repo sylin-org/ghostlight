@@ -317,7 +317,15 @@ commit hashes, external drafts, and numbered deviations.
   the Chrome Developer Dashboard and manually switched to `sylin`. Ghostlight immediately
   inventoried the exact browser-created dashboard child, but Chrome blocks extension inspection
   and debugger attachment on Web Store pages. The owner screenshot supplied the visible item and
-  status evidence. A full agent read still needs a selected signed-in page that permits inspection.
+  status evidence. The full authenticated read subsequently passed on the owner-selected signed-in
+  Microsoft Partner Center home: `get_page_text` returned the workspace state and `read_page`
+  returned the page controls. The proof itself was read-only, and no private contact value was
+  retained in project evidence.
+- Edge distribution: the owner authorized an Edge Add-ons enrollment investigation. No program
+  enrollment or store submission completed. The individual-account form states that the contact
+  address is customer-visible, so the owner deferred the native listing rather than publish a home
+  address. Microsoft supports installing Chrome Web Store extensions in Edge through its
+  other-store path; that remains Ghostlight's Edge end-user route after Chrome approval.
 - Packet: `docs/business/PUBLICATION-PACKET-0.8.md` records exact commits, evidence, every proposed
   destination, store implications, caveats, ordered release steps, and channel recovery.
   `docs/research/public-reception-loop-0.8.md` holds the release/7-day/30-day manual template and
@@ -332,8 +340,9 @@ commit hashes, external drafts, and numbered deviations.
   and `git diff --check` passed. Current public and owner-only evidence endpoints, website routes,
   directory pages, Chrome update/listing pages, and primary comparison sources were fetched during
   the dated recheck.
-- External state: no product push, merge, release tag, store action, registry publication,
-  directory edit, issue/PR comment, Discussion, showcase update, or social post occurred in E6.
+- External state: no product push, merge, release tag, store submission or publication, registry
+  publication, directory edit, issue/PR comment, Discussion, showcase update, or social post
+  occurred in E6. Edge enrollment stopped before agreement acceptance and completion.
 - Deviations: one transient fresh-tab request changed nothing; the existing owned blank tab
   completed the safe proof. The child recipe's first semantic lookup omitted the newly injected
   link; an exact measured coordinate action completed the proof and returned the unambiguous child.

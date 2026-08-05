@@ -58,6 +58,10 @@ Collaboration and process -- this file is their canonical home:
 - **End-user extension installation is store-only.** Packaged and public paths point to the Chrome
   Web Store. Only source-development docs may explain loading the repository extension directly for
   immediate local testing (ADR-0091).
+- **Do not publish the founder's home address.** If a distribution channel makes a mailing address
+  customer-visible, defer that native listing until a legitimate non-home public address exists.
+  Use supported store interoperability in the meantime. For Edge, the Chrome Web Store adapter is
+  the end-user path.
 - **The Chrome adapter versions independently from the service.** `extension/manifest.json` owns
   the adapter version. From 0.8 onward, `compatibility.json` declares a major/minor contract block:
   any 0.8 adapter patch covers any 0.8 service patch. Patch releases do not reset store review. A
