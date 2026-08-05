@@ -3,8 +3,8 @@
   "name": "ghostlight",
   "display_name": "Ghostlight",
   "version": "0.8.0",
-  "description": "Use your signed-in Chromium browser from Claude with local execution and optional governance.",
-  "long_description": "Ghostlight connects Claude to the Chromium browser you already use. It can navigate, read pages, fill forms, upload files, inspect console and network activity, and run multi-step browser workflows. The service, MCP connector, and browser connector run on your machine. Optional governance adds capability grants, protected domains, and structured local audit logs. The Ghostlight in Browser extension from the Chrome Web Store is required.",
+  "description": "Use signed-in Chromium from Claude with visible local execution and optional policy and audit.",
+  "long_description": "Ghostlight lets Claude work in the signed-in Chromium profile you already use. Browser work stays visible in a dedicated workspace, and you can interrupt or take over. It can read pages, navigate, fill forms, handle files and dialogs, follow supported browser-created child tabs, and inspect page, console, and network evidence. The MCP connector, persistent service, browser connector, and extension run locally, with no Ghostlight account, telemetry, or hosted control plane. Personal use is complete without a policy manifest; optional capability and domain policy can add structured local audit for work that needs stronger boundaries. Ghostlight in Browser from the Chrome Web Store is required.",
   "author": {
     "name": "Sylin",
     "email": "hello@sylin.org",

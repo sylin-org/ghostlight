@@ -5,11 +5,13 @@ conversation history.
 
 ## RESUME HERE
 
-- State: E4 is complete; E5 has not started
-- Current pass: E5
-- Next action: read `E5-website-and-directory-surfaces.md`, adapt the approved message architecture
-  to the website and directory drafts, and keep every publishing action owner-gated
-- External actions: none authorized beyond preparing website work on a non-publishing branch
+- State: E5 is complete when the remote non-publishing website branch matches commit `bda3791`
+- Current pass: E6
+- Next action: verify the E5 website branch ref, then read
+  `E6-release-reconciliation-and-reception-loop.md` before any further public-surface work
+- External actions: the owner authorized pushing website branch
+  `work/ghostlight-public-delight-e5`; no merge, deployment, store edit, registry publication,
+  directory edit, showcase update, or other external post is authorized
 
 ## Status
 
@@ -19,7 +21,7 @@ conversation history.
 | E2 | Message and content architecture | DONE | this pass's `docs(public): define 0.8 message architecture` commit | - | none |
 | E3 | Core public surfaces | DONE | this pass's `docs(public): reshape core first-success surfaces` commit | - | none |
 | E4 | Agent guidance and metadata | DONE | this pass's `docs(tools): sharpen agent guidance` commit | - | none |
-| E5 | Website and directory surfaces | pending | - | - | - |
+| E5 | Website and directory surfaces | DONE | this pass's `docs(public): prepare E5 discovery surfaces` commit | `bda3791` | none |
 | E6 | Release reconciliation and reception loop | pending | - | - | - |
 
 Status values: `pending`, `in-progress`, `DONE`, or `BLOCKED`.
@@ -230,3 +232,54 @@ commit hashes, external drafts, and numbered deviations.
 | `upload_image` | keep | Already distinguishes captured images from client files and makes target choice exclusive. |
 | `gif_creator` | keep | Already explains the bounded lifecycle, automatic stops, memory ownership, and export choices. |
 | `explain` | keep | Its ADR-pinned description already distinguishes permission explanation from page explanation. |
+
+### E5 -- website and directory surfaces -- 2026-08-05
+
+- Product commit: see this pass's `docs(public): prepare E5 discovery surfaces` commit.
+- Website commit: `bda3791` (`feat(ghostlight): align public discovery story`) on
+  `work/ghostlight-public-delight-e5`. The final E5 action is the owner-authorized push of that
+  exact non-publishing branch. A matching remote ref completes this record without another
+  product edit. No website deployment branch was changed.
+- Website story: the hero now names useful signed-in Chromium work, visibility and takeover, local
+  ownership, and optional policy in the settled order. Fit and anti-fit guidance names Playwright,
+  DevTools, Firefox, hosted, headless, stealth, and scraping boundaries without a feature-count
+  comparison. The current three-executable path appears below the product story.
+- Website proof: one read-only first task and four accessible disclosure recipes cover a safe
+  synthetic form, a user-chosen authenticated read, an exact browser-created child, and combined
+  page/console/network diagnosis. Each recipe states an expected result and success boundary.
+- Discovery: direct project routes now have qualified titles and descriptions, canonical and
+  social metadata, social-image alt text, and optional structured data. The enhanced carousel
+  updates title, description, canonical, Open Graph, Twitter, image, alt, and structured data when
+  the selected project changes, while direct links remain complete without JavaScript.
+- Synchronization: the website's public-status and install-guide fallbacks are byte-identical to
+  `docs/public-status.json` and `llms-install.md`. No new fetcher, CMS, analytics, beacon, or client
+  version lookup was added. Site checks reject the stale relay topology and governance-first demo
+  copy on every generated HTML, Markdown, and text route.
+- Package metadata: the local 0.8 npm description now identifies the artifact as an installer and
+  launcher. The 87-character official MCP Registry description and 94-character MCPB description
+  share the visible, local, signed-in-browser story. The MCPB long description names visible work,
+  continuity, the exact local roles, complete personal use, and optional policy and audit.
+- Draft packet: `docs/business/PUBLIC-COPY-DRAFTS-0.8.md` carries field-specific, owner-gated copy
+  for npm, the official registry, MCPB/Claude, Chrome Web Store, Glama, mcpservers.org, Cline issue
+  1989, awesome-mcp-servers PR 11306, GitHub MCP Registry, mcp.so, PulseMCP, and the Codex and Zed
+  showcases. It records current format sources, review cost, release sequencing, and the difference
+  between project-authored distribution and reception.
+- Website verification: changed JavaScript syntax checks, `git diff --check`, production
+  `npm test`, generated metadata inspection, all-route stale-copy checks, fallback byte parity,
+  direct Ghostlight and Agyo routes without JavaScript, in-page next/back metadata lifecycle,
+  desktop visual review, and an exact 390 CSS-pixel mobile review passed. The exact mobile page and
+  body widths were 390, the proof section stayed within x=32..358, and four disclosure controls
+  rendered without page overflow.
+- Product verification: all changed manifests parse as JSON; description lengths are 127, 87, and
+  94 characters; seven npm launcher tests and five MCPB launcher tests pass; the pinned
+  `@anthropic-ai/mcpb@2.1.2` validator accepts the manifest with only its existing advisory to use
+  a 512px icon; local public-surface reconciliation, relative links, ASCII, formatting, strict
+  workspace Clippy, full fast-tier workspace tests, and `git diff --check` pass in isolated target
+  `.target-e1`.
+- External state: no Chrome copy was edited while adapter 0.8.0 is pending. No package, service,
+  registry, directory, issue, pull request, discussion, tag, website deployment, or release was
+  published. The required website branch push is source transfer only and does not deploy.
+- Deviations: none. Sandbox restrictions required approved runs for website dependency/build
+  output, headless visual verification, Git metadata, and the pinned npm-fetched MCPB validator;
+  these were environment constraints, not product findings. `npm ci` reported one high-severity
+  dependency advisory in the website tree; no dependency or lockfile change was authorized in E5.

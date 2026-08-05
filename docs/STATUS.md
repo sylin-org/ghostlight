@@ -7,19 +7,21 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
-- **The public-documentation delight batch completed E4 with reviewed agent guidance for all 25
-  tools.** Eight legacy descriptions now distinguish nearby tools, name material side effects, and
-  give useful recovery for stale refs, first-use debug buffers, responsive rerenders, or partially
-  completed batches. The other 17 descriptions and all parameter guidance, titles, annotations,
-  examples, and result metadata were explicitly kept. An unavailable workspace now points to
-  `tabs_create_mcp`; both protocol shores retain their exact transport-closed recovery contract.
-  Every description has an intentional fingerprint, and a new structural golden covers every
-  non-prose input-schema field of the trained 13 tools. The 2025 shore proves exact declaration
-  preservation; the 2026 shore proves guidance survives its sanctioned `workspaceId` augmentation.
-  Formatting, strict Clippy, full workspace tests, both revision suites, fidelity tests, ASCII, and
-  diff checks pass in an isolated target. E5 is next in
-  `docs/tasks/public-delight-0.8/LEDGER.md`. No trained identity, runtime result, browser behavior,
-  package metadata, website, or external surface changed.
+- **The public-documentation delight batch completed E5 across product and website source.** The
+  Ghostlight page now leads with signed-in browser work, visible control, local ownership, fit and
+  anti-fit guidance, a read-only first task, and four bounded proof recipes. Direct routes carry
+  qualified search, social, canonical, and SoftwareApplication metadata; the in-page carousel
+  updates or removes that metadata with the selected project. Current public-status and install
+  fallbacks remain byte-aligned with their product owners. Website commit `bda3791` lives on the
+  non-publishing branch `work/ghostlight-public-delight-e5`; the user-authorized final E5 action is
+  a push of that exact branch, not a merge or deployment. npm, MCP Registry, and MCPB candidate
+  descriptions now share the same factual core. Owner-gated store, directory, Cline, awesome list,
+  Codex, and Zed drafts live in `docs/business/PUBLIC-COPY-DRAFTS-0.8.md`. Website production tests,
+  exact 390px and desktop checks, navigation and metadata checks, package tests, the MCPB validator,
+  public-surface reconciliation, formatting, strict Clippy, workspace tests, ASCII, links, and diff
+  hygiene pass. No store resubmission, registry publication, directory edit, showcase post, website
+  merge, or live deployment occurred. E6 is next in
+  `docs/tasks/public-delight-0.8/LEDGER.md`.
 
 - **The v0.8.0 service candidate is locally release-ready without weakening the adapter gate.** The live
   Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter
