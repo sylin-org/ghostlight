@@ -7,7 +7,7 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
-- **The v0.8.0 release candidate is being prepared without weakening the adapter gate.** The live
+- **The v0.8.0 service candidate is locally release-ready without weakening the adapter gate.** The live
   Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter
   v0.8.0 was submitted for review on 2026-08-05 with deferred publishing. The stale
   v0.6.0/pending-v0.7.1 canonical state and current runbooks are
@@ -15,13 +15,21 @@ when they disagree**, and update it when you land something that changes the pic
   update feed, and `reconcile-chrome-store.ps1` handles both accepted-review and became-public
   transitions without publishing anything. GitHub release assembly now takes `What's changed`
   from the existing versioned changelog instead of publishing only a static template. The
-  `[Unreleased]` section carries the v0.8.0 candidate notes. Source adapter and service are now
+  changelog now has the release-owned `[0.8.0]` section without a premature date. Source adapter
+  and service are now
   v0.8.0. Their compatibility row declares the 0.8 contract block: every 0.8 adapter patch covers
   every 0.8 service patch. Public adapter v0.7.1 remains capped at service v0.7.3, so preflight
   blocks the service release until adapter v0.8.0 is public. The store-ready v0.8.0 zip is 137,689
   bytes with SHA-256 `54119b6820f942071053927e0a309e7745629f1d7b992530d3386113d1f46535`.
-  Google accepted the store submission. No website publication, release tag, or registry
-  publication has occurred.
+  Google accepted the store submission. The pinned official MCP publisher validates `server.json`;
+  its description was shortened to the registry's 100-character limit. Formatting, strict Clippy,
+  the full workspace build and test suite, all 31 Lightbox process scenarios, 164 extension tests,
+  seven npm launcher tests, five MCPB launcher tests, four e2e baseline tests, npm package dry-run,
+  RustSec audit, cargo-deny policy, and an optimized Windows three-binary build all pass. The pure
+  release preflight reports exactly two intentional blockers: public service status is still
+  v0.7.3 and public adapter v0.7.1 does not cover service v0.8.0. Package-manager hashes remain
+  placeholders until GitHub produces the immutable release assets. No website publication,
+  release tag, or registry publication has occurred.
   The online audit now passes the live Chrome comparison and fails only because the public website
   still carries the old extension summary pending an explicitly confirmed refresh.
 

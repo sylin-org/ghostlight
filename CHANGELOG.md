@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0]
+
 The v0.8.0 candidate makes the MCP edge explicitly protocol-versioned, leaves the service kernel
 protocol-neutral, and makes browser tab continuity match what users see in Chrome.
 
