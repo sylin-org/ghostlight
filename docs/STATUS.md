@@ -7,14 +7,24 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **The public README is shorter and Glama is synchronized; a larger delight pass is drafted on
+  `dev`.** With explicit owner approval, focused public commit
+  `dca064a9d60fbb01f3ef3ac75d2717557503869b` shortened the released-topology README and corrected
+  its public adapter fallback. No release code moved. Glama's maintainer sync then ingested that
+  exact commit; its anonymous overview shows the shorter copy. The current `dev` draft goes
+  further: it removes named-competitor promotion and the fit/anti-fit checklist, leads through
+  recognition, first success, coherent work, visible control, optional boundaries, and onward
+  routes, and remains unpublished pending owner review.
+
 - **The public-documentation delight batch is at E6's owner-review gate.** The live website is
   deployed from exact commit `1568538ba5ca217e46b917688b41d17b7e672488`; its `main` and E5 work
   branch match. The Ghostlight page and repeated project-route fallbacks now carry the current
   public 0.7.3 service, public 0.7.1 adapter, pending 0.8.0 adapter, platform proof, three-role
   topology, fit guidance, read-only first task, and four bounded recipes. The online public-surface
   reconciliation passes. npm, GitHub, Chrome, registry, directory, search, traffic, and primary
-  comparison evidence was refreshed on 2026-08-05. Public counters did not move; search, Glama,
-  and mcpservers.org caches still show older source text. The safe brief, browser-created child,
+  comparison evidence was refreshed on 2026-08-05. Public counters did not move; search and
+  mcpservers.org caches still show older source text. Glama was manually synchronized after the
+  focused README publication. The safe brief, browser-created child,
   and Foundry diagnosis recipes passed through this Codex client and visible Chromium. For the
   Chrome dashboard proof, the owner selected the Chrome Developer Dashboard and switched to the
   `sylin` account. Ghostlight inventoried the exact browser-created dashboard child, but Chrome
@@ -29,8 +39,9 @@ when they disagree**, and update it when you land something that changes the pic
   commits, store implications, each proposed destination, release order, and recovery
   live in `docs/business/PUBLICATION-PACKET-0.8.md`; the manual release/7-day/30-day reception
   record and owner-gated Discussion draft live in
-  `docs/research/public-reception-loop-0.8.md`. No product push, merge, release, store action,
-  registry publication, directory edit, Discussion, showcase edit, or social post occurred in E6.
+  `docs/research/public-reception-loop-0.8.md`. Apart from the separately owner-approved focused
+  README/status push and Glama sync, no release, store action, registry publication, directory
+  edit, Discussion, showcase edit, or social post occurred in E6.
   The release now waits on Chrome review. Every publication action still needs separate owner
   approval.
 

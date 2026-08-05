@@ -340,9 +340,12 @@ commit hashes, external drafts, and numbered deviations.
   and `git diff --check` passed. Current public and owner-only evidence endpoints, website routes,
   directory pages, Chrome update/listing pages, and primary comparison sources were fetched during
   the dated recheck.
-- External state: no product push, merge, release tag, store submission or publication, registry
-  publication, directory edit, issue/PR comment, Discussion, showcase update, or social post
-  occurred in E6. Edge enrollment stopped before agreement acceptance and completion.
+- External state: the owner later approved a focused public README/status push and a Glama manual
+  sync. Public `main` now includes commit `dca064a9d60fbb01f3ef3ac75d2717557503869b`, and Glama's
+  repository admin plus anonymous overview expose that exact commit. No release tag, store
+  submission or publication, registry publication, issue/PR comment, Discussion, showcase update,
+  or social post occurred in E6. Edge enrollment stopped before agreement acceptance and
+  completion.
 - Deviations: one transient fresh-tab request changed nothing; the existing owned blank tab
   completed the safe proof. The child recipe's first semantic lookup omitted the newly injected
   link; an exact measured coordinate action completed the proof and returned the unambiguous child.

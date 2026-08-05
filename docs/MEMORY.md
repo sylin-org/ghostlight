@@ -53,8 +53,10 @@ Collaboration and process -- this file is their canonical home:
 - **Public content is warm, practitioner-first, and delight-led.** Developers should see the
   product, fit, installation, first useful task, and recovery before organization procurement
   depth. Lead with useful work, visibility, and control; do not make personal use sound incomplete
-  or governance sound punitive. Product pages and the Trust Center carry deeper buyer material
-  (ADR-0100).
+  or governance sound punitive. A front door should invite the reader into the experience, not
+  become a qualification checklist, apology, excuse catalog, or directory of competing products.
+  Product pages, decision aids, comparison guides, and the Trust Center carry deeper material at
+  the point where a reader asks for it (ADR-0100).
 - **End-user extension installation is store-only.** Packaged and public paths point to the Chrome
   Web Store. Only source-development docs may explain loading the repository extension directly for
   immediate local testing (ADR-0091).
