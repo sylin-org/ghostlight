@@ -7,7 +7,7 @@ an organization of more than five people is what requires a license
 
 ## What you are governing
 
-Ghostlight gives AI agents (any MCP client) controlled access to employees' real,
+Ghostlight gives compatible local stdio MCP clients controlled access to employees' real,
 authenticated browser sessions. Every one of its actions carries an intrinsic
 capability classification:
 
@@ -18,8 +18,7 @@ capability classification:
 - `execute` -- arbitrary code in the page (`javascript_tool`).
 
 Policy grants capabilities on hosts; it never has to name tools. The agent-facing
-`explain` tool (and the table in the [README](../../README.md)) is the authoritative
-directory of which action requires what.
+`explain` tool is the authoritative in-session directory of which action requires what.
 
 ## The policy document
 

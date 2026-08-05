@@ -7,18 +7,19 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
-- **The public-documentation delight batch completed E2 with one evidence-linked 0.8 message
-  architecture.** `docs/design/public-message-0.8.md` now carries the canonical story, short and
-  long adaptations, six outcome pillars, four audience routes, fit and anti-fit language, a
-  13-claim evidence matrix, and one primary job per public surface. Reusable copy covers
-  recognition, fit, first success, and recovery without leading on topology, licensing, governance,
-  or tool count. Four bounded proof recipes cover a synthetic form, user-chosen authenticated
-  reading, exact browser-created child continuity, and page/console/network diagnosis. Qualified
-  page, search, social-card, and directory drafts are ready but remain internal. The copy states
-  when Playwright MCP, Chrome DevTools MCP, a first-party integration, or a hosted/headless browser
-  is a better fit; it does not claim signed-in access is unique. E1 remains the dated public truth
-  and reception baseline. E3 is next in `docs/tasks/public-delight-0.8/LEDGER.md`. No public front
-  door or external surface changed, and publication gates remain in force.
+- **The public-documentation delight batch completed E3 with a concise product-repository path to
+  first success.** README recognition, fit, store-only install, one copyable example.com proof,
+  visible/local experience, and recovery now precede compatibility and architecture; the page fell
+  from 354 to 184 lines by routing tool, policy, CLI, trust, and procurement depth to their owners.
+  The human install guide and agent guide share that bounded proof and symptom-led recovery for
+  missing tools, browser disconnect, stale workspace, closed transport, denial, and uncertain side
+  effects. The agent guide adds a compact tool-choice ladder without creating a second registry.
+  The comparison drops mutable star counts and a feature-scorecard grid, names better-fit uses for
+  current alternatives, and treats signed-in access as shared. Contributor and practitioner guides
+  now preserve trained structure while allowing deliberate guidance improvements and say
+  compatible local stdio clients instead of every client. Public-state checks, repository gates,
+  and link checks pass. E4 is next in `docs/tasks/public-delight-0.8/LEDGER.md`; no runtime, tool
+  declaration, package metadata, website, or external surface changed.
 
 - **The v0.8.0 service candidate is locally release-ready without weakening the adapter gate.** The live
   Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter

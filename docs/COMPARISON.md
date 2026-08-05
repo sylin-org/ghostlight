@@ -1,113 +1,143 @@
-# How Ghostlight compares
+# Choosing a browser-control approach
 
-Updated 2026-07-14 from the post-evaluation landscape sweep and the current agent-browser
-one-to-one capability rebaseline
-([docs/research/14](research/14-post-evaluation-2026-07.md); the original study is
-[docs/research/13](research/13-competitive-landscape.md); detailed overlap map is
-[docs/research/17](research/17-agent-browser-overlap-2026-07.md)). The honest summary: "an extension
-that drives your real, logged-in Chrome from any MCP client" is a crowded idea, and the
-strongest version of it now ships first-party from Anthropic. The combination that stays
-uncontested is that model PLUS a fused governance layer, open and local-first. This page is a
-decision guide, not a scorecard: several of the projects below are excellent, and if one fits
-your case better, use it.
+Updated 2026-08-05 from the
+[public truth and reception baseline](research/public-reception-2026-08.md) and the linked primary
+sources below. This is a decision guide, not a scorecard. Existing signed-in browser access is a
+shared capability, not a Ghostlight uniqueness claim.
 
-The four properties, together, are the product:
+## The short answer
 
-1. Automates YOUR authenticated Chromium profile (real cookies and real SSO) inside a dedicated,
-   managed tab group via a thin extension -- never a fresh profile, a profile copy, a cloud
-   browser, or arbitrary access to ordinary tabs.
-2. Client-agnostic MCP server: Claude Code, Cursor, VS Code, anything.
-3. Governance fused in: capability classification per action, identity-bound host
-   grants, sacred never-touch domains, observe/enforce modes, structured audit -- with
-   all-open as a first-class default.
-4. Open and local-first: a Rust service with thin relays; the governance module's source is
-   readable.
+Choose Ghostlight when an agent should work in the person's visible signed-in Chromium browser,
+the same local browser capability should serve compatible MCP clients, and explicit recovery or
+optional capability, domain, and audit boundaries matter.
 
-## The first-party path: Claude Code + Claude in Chrome
+Choose another approach when its primary job matches yours more closely:
 
-Anthropic's own integration (`claude --chrome`) connects Claude Code to the official Claude in
-Chrome extension: real logged-in session, native messaging, site-level permissions, and
-read-vs-write gating of browser calls in plan mode. It is well built, and its permission
-design independently converges on the same read/write/action vocabulary Ghostlight formalizes
-as RAWX -- which we take as validation, not competition.
+- [Playwright MCP](https://github.com/microsoft/playwright-mcp) for deterministic browser testing,
+  isolated contexts, and Playwright-native automation. Its extension can also connect to selected
+  existing tabs in the default signed-in profile.
+- [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) for Chrome debugging,
+  performance analysis, console/network inspection, and DevTools workflows.
+- [Claude in Chrome](https://code.claude.com/docs/en/chrome) when Claude is the supported
+  environment and Anthropic's first-party browser workflow already meets the need.
+- A hosted or headless browser product when work must run away from the person's visible local
+  browser, at scale, or inside disposable test sessions.
+- A generic governance gateway when the organization needs one policy layer across many tools and
+  browser-specific intent is not required.
 
-**Use the first-party path when** you are on a direct Anthropic plan (Pro/Max/Team/
-Enterprise), Claude Code is your only agent, and per-site permissions in the extension are
-governance enough.
+## Where Ghostlight is narrower
 
-**Use Ghostlight when** any of these are true: your agent is not Claude Code (Cursor, Zed,
-Cline, or anything MCP); your Claude access runs through Bedrock, Vertex, or Foundry (the
-first-party path requires a direct plan); you need a structured audit trail of what the agent
-did; you want policy as code (grants, capability floors, simulate/shadow/enforce, org locks)
-rather than a site list; or you need the whole thing self-hosted and inspectable. The 13 trained
-tool schemas are preserved verbatim so models can reuse that learned interface, while Ghostlight's
-additive tools and governance remain its own surface.
+Ghostlight is a local Chromium workspace product. It does not target Firefox, stealth automation,
+scraping farms, remote browser hosting, or a shared multi-tenant browser service. It is also not a
+replacement for Playwright test authoring or Chrome performance tooling.
 
-## Against the closest neighbors
+Its supported combination is:
 
-**hangwin/mcp-chrome** (~12k stars, MIT) -- the closest architectural twin: extension +
-native messaging, model-agnostic. No access control, no capability classification, no
-domain limits, no audit; development has been quiet since January 2026. Its privacy story is
-"it runs locally"; Ghostlight's is "it runs locally, and here is the policy engine, the
-denial ids, and the audit trail your security team asked for."
+1. a dedicated visible workspace in the Chromium profile the person already uses;
+2. a stable tool surface for supported and compatible local stdio MCP clients;
+3. coherent browser work with explicit stale-workspace, child-tab, and transport recovery;
+4. optional identity-bound capability and domain policy plus structured audit; and
+5. a local runtime with no Ghostlight account, hosted control plane, or telemetry.
 
-**Microsoft Playwright MCP, extension mode** (~35k stars) -- the best-funded project
-on the automation axis; its `--extension` mode reuses a real logged-in tab, and it ships
-steadily. Node-based, no governance layer, and browser automation is a side feature of a
-testing tool. Ghostlight is purpose-built for the governed-agent case: a native Rust runtime with
-no Node service, policy and audit at the dispatch chokepoint.
+Personal and all-open operation is complete without governance. Ghostlight is open-core: the
+engine is Apache-2.0 OR MIT, while the governance module is source-available under the Ghostlight
+Commercial License. See [LICENSING.md](../LICENSING.md) for the exact boundary.
 
-**vercel-labs/agent-browser** (~38k stars) -- a broad Rust browser runtime and CLI with an MCP
-server, compact default tool profile, domain and action policy, isolated/restorable sessions,
-CDP auto-connect, cloud providers, testing controls, and specialist diagnostics. It can attach to
-a running browser or select a profile, but its default product model launches and owns a separate
-browser session. It does not provide Ghostlight's managed-tab boundary, declared organization
-identity, RAWX grant model, or identity-bound policy audit. It is excellent for testing and
-sandboxed tasks. Ghostlight remains the narrower choice for "use my already-open browser from any
-MCP client, make each intent visible, and govern it locally." The detailed map explains which
-agent-browser features are mutual, candidates, specialist complements, or deliberate exclusions.
+## Closest approaches
 
-**browsermcp.io ("Browser MCP", ~7k stars)** -- extension-driven real session, but
-unmaintained (last push April 2025) and the extension itself is closed source; only the npm
-server is open.
+### Playwright MCP
 
-**Google chrome-devtools-mcp** (~46k stars) -- debugging and inspection altitude; can
-attach to a running Chrome but defaults to a dedicated profile, and its own docs warn it
-exposes all browser data to the client. Different job.
+Playwright MCP is a strong fit when the browser is part of a repeatable test or automation system.
+Its official Chrome extension path can connect to existing selected tabs and use the default
+profile's logged-in state. Do not choose Ghostlight merely because a job needs an authenticated
+tab.
 
-**browser-use** (~103k stars) -- the biggest OSS "make the browser do things" framework,
-now with a Rust-backed core agent (0.13.0). Drives its own Playwright browser by default
-(real-profile and extension modes exist), and its enterprise controls live in the paid
-cloud, not the local server. The one to watch: if it ships local governance it becomes the
-most credible neighbor.
+Choose Ghostlight instead when the primary product is the person's visible browser workspace and
+you need Ghostlight's exact continuity, local policy, or audit model across compatible MCP clients.
+Choose Playwright MCP when Playwright contexts, selectors, test tooling, or deterministic browser
+ownership are the better abstraction.
 
-**Generic agent-governance layers** (Microsoft Agent Governance Toolkit, Lasso, ToolHive,
-MintMCP, and others) -- real policy and audit for ANY agent or MCP tool call, as a gateway or
-runtime. We see these as allies that grow the category, not rivals: they set a shared
-vocabulary (OWASP agentic risks, policy-as-code) that Ghostlight meets -- see the RAWX
-mapping in [open-spec/](../open-spec/). What a generic layer cannot do is make
-browser-semantic decisions: it sees `computer(left_click)` as an opaque call, while fused
-governance classifies it by intrinsic capability, binds grants to the tab's actual host at
-decision time, and filters the advertised tool set. A gateway composes fine in front of
-Ghostlight if you already run one.
+Sources: [Playwright MCP](https://github.com/microsoft/playwright-mcp) and the
+[Playwright extension guide](https://github.com/microsoft/playwright/blob/main/packages/extension/README.md).
 
-**Enterprise browsers** (Island, LayerX, Prisma Access Browser, and others) -- they govern
-and audit agent activity inside the browser, credibly. They are closed SaaS, several replace
-your browser outright, and they oversee agents rather than expose an automation API to your
-own MCP client. Different deployment universe (and price class).
+### Chrome DevTools MCP
 
-## The grid
+Chrome DevTools MCP focuses on automation plus browser debugging and performance analysis. It can
+connect to a running Chrome instance and is the natural choice when traces, DevTools diagnostics,
+or performance evidence are the result you need. Its documentation also explains its usage
+statistics and performance-data controls; review those settings against your environment.
 
-| | Real session | Any MCP client | Governance + audit | Open + local runtime |
-|---|---|---|---|---|
-| Ghostlight | yes | yes | yes | yes |
-| Claude Code + Claude in Chrome | yes | no (Claude only) | site permissions, no audit | no (closed) |
-| mcp-chrome | yes | yes | no | no (Node) |
-| Playwright MCP (ext. mode) | yes | yes | no | no (Node) |
-| agent-browser | optional (CDP/profile) | yes | action policy, no equivalent audit | yes (Rust) |
-| browser-use | opt-in | yes | cloud-only | no (framework) |
-| Generic governance layers | n/a (proxy/runtime) | yes | yes (opaque calls) | varies |
-| Enterprise browsers | yes | no | yes | no (closed SaaS) |
+Choose Ghostlight when the central job is a visible user-session workflow with optional local
+capability/domain policy and structured audit. Ghostlight exposes console and network evidence but
+does not try to replace Chrome's performance toolchain.
 
-Star counts and activity are as of 2026-07-14 and will drift; the research notes carry the
-sources. Corrections welcome: hello@sylin.org.
+Source: [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp).
+
+### Claude in Chrome
+
+Anthropic's first-party integration works in a signed-in visible browser and supports forms,
+debugging, and GIF capture from supported Claude surfaces. It is the simplest choice when Claude
+is the only assistant, its plan and platform requirements fit, and its browser permission model is
+enough.
+
+Choose Ghostlight when the same browser capability must work through compatible non-Anthropic MCP
+clients, or when local capability/domain manifests and structured audit are part of the operating
+model.
+
+Sources: [Claude in Chrome documentation](https://code.claude.com/docs/en/chrome) and
+[Anthropic's setup guide](https://support.claude.com/en/articles/12012173-get-started-with-claude-in-chrome).
+
+### Browser Bridge
+
+Browser Bridge is another local native-host and extension approach. Its public material advertises
+compatible MCP clients, real Chrome tabs and logins, per-site approval, high-risk confirmation,
+and no analytics. That means local signed-in multi-client access is not a Ghostlight-only idea.
+
+Compare the control model you need. Ghostlight's defensible distinction is its complete stable
+tool surface, explicit workspace and child-tab recovery, capability/domain grants, and structured
+local audit. Browser Bridge may be the simpler fit when its per-site and confirmation model is
+enough.
+
+Sources: [Browser Bridge repository](https://github.com/whg517/browser-bridge) and
+[Chrome Web Store listing](https://chromewebstore.google.com/detail/browser-bridge/dgccjfjjilfpkbdllclmkiicajndkfcd).
+
+### agent-browser and browser frameworks
+
+[agent-browser](https://github.com/vercel-labs/agent-browser) and frameworks such as
+[browser-use](https://github.com/browser-use/browser-use) cover broader browser ownership,
+isolated sessions, testing controls, cloud providers, and specialist automation. They are better
+fits when the agent should own a separate browser lifecycle or the project needs a framework for
+building a browser agent.
+
+Ghostlight stays narrower: use the person's local visible Chromium profile from compatible MCP
+clients, keep exact workspace authority, and optionally govern each browser intent at dispatch.
+
+## Governance depth
+
+Generic MCP and agent gateways can provide valuable organization-wide policy, identity, and audit.
+They compose in front of Ghostlight. Their tradeoff is browser semantics: a generic gateway sees a
+tool call, while Ghostlight classifies the requested browser action, resolves the current tab host,
+filters the advertised surface, and records the decision at the browser-work dispatch boundary.
+
+Enterprise browsers can govern agent activity inside a managed browser, often with deeper fleet
+administration. They are a different deployment choice: the browser or enterprise service owns
+the environment, while Ghostlight exposes a local automation capability to the person's chosen
+MCP client.
+
+See the [RAWX capability model](../open-spec/rawx-capability-model.md),
+[governance configuration guide](guides/governance-configuration.md), and
+[Trust Center](trust/README.md) for Ghostlight's exact claims and limits.
+
+## Questions to decide with
+
+1. Must the work happen in this person's existing visible Chromium profile?
+2. Should the browser be user-owned, test-owned, or remotely hosted?
+3. Is the primary result task completion, deterministic testing, or browser diagnosis?
+4. Which clients must connect, and which have actually been verified?
+5. Are per-site prompts enough, or are capability, identity, domain, and audit records required?
+6. What should happen when a tab, popup, window, or MCP connection changes?
+7. Does the runtime's telemetry, cloud, licensing, and continuity boundary fit the environment?
+
+The [interactive decision aid](https://sylin.org/ghostlight/decision-aid/) applies the same
+operating-model questions. Corrections are welcome through
+[GitHub Discussions](https://github.com/sylin-org/ghostlight/discussions) or hello@sylin.org.

@@ -5,10 +5,10 @@ conversation history.
 
 ## RESUME HERE
 
-- State: E2 is complete; E3 has not started
-- Current pass: E3
-- Next action: read `E3-core-public-surfaces.md` and adapt the approved message architecture to the
-  product repository front doors and first-success path
+- State: E3 is complete; E4 has not started
+- Current pass: E4
+- Next action: read `E4-agent-guidance-and-metadata.md`, inventory all 25 tool descriptors, and
+  preserve the trained identity projection while improving only useful guidance
 - External actions: none authorized beyond preparing website work on a non-publishing branch
 
 ## Status
@@ -17,7 +17,7 @@ conversation history.
 | --- | --- | --- | --- | --- | --- |
 | E1 | Truth and reception baseline | DONE | this pass's `docs(public): establish E1 public truth baseline` commit | - | none |
 | E2 | Message and content architecture | DONE | this pass's `docs(public): define 0.8 message architecture` commit | - | none |
-| E3 | Core public surfaces | pending | - | - | - |
+| E3 | Core public surfaces | DONE | this pass's `docs(public): reshape core first-success surfaces` commit | - | none |
 | E4 | Agent guidance and metadata | pending | - | - | - |
 | E5 | Website and directory surfaces | pending | - | - | - |
 | E6 | Release reconciliation and reception loop | pending | - | - | - |
@@ -137,4 +137,38 @@ commit hashes, external drafts, and numbered deviations.
 - Gates: `cargo fmt --all -- --check`; strict workspace Clippy; full fast-tier workspace tests;
   ASCII scan; relative-link validation; external proof-page and exact-marker checks; and
   `git diff --check` all passed.
+- Deviations: none.
+
+### E3 -- core public surfaces -- 2026-08-05
+
+- Commit: see this pass's `docs(public): reshape core first-success surfaces` commit.
+- README: reduced from 354 to 184 lines. Recognition, fit, one store-only install path, a copyable
+  example.com proof, visible/local experience, and recovery now precede compatibility and the
+  three-executable architecture. The full tool table, policy example, CLI inventory, and extended
+  procurement copy were removed in favor of links to their canonical owners. The opening keeps
+  four release/availability badges and no external score badge.
+- Installation: the human guide now opens on a green `ghostlight doctor` outcome, uses the same
+  bounded first proof, and maps missing tools, disconnected extension, stale workspace, closed
+  transport, denial, development, and bare-CLI symptoms to concrete next actions.
+- Agent guidance: `llms-install.md` now presents personal use as complete, keeps the Chrome Web
+  Store as the sole end-user extension path, gives a compact tool-choice ladder without duplicating
+  the registry, and tells the agent how to recover without arbitrary tabs, standalone connectors,
+  blind retries, or policy evasion.
+- Comparison: mutable star counts and the binary feature grid are gone. Current primary-source
+  guidance states when Playwright MCP, Chrome DevTools MCP, Claude in Chrome, Browser Bridge,
+  agent-browser, browser-use, hosted/headless products, or generic governance are better fits.
+- Compatibility and contributor truth: README state matches `docs/public-status.json`,
+  `compatibility.json`, and exact source-candidate MCP dates. `CONTRIBUTING.md` now preserves the
+  trained structural identity while allowing deliberate description and metadata improvements per
+  ADR-0094. The solo and compliance guides now say compatible local stdio clients and no longer
+  depend on a removed README tool table.
+- Files changed: README, installation guide, agent install guide, comparison, contributing guide,
+  solo-developer guide, compliance-team guide, this ledger, and `docs/STATUS.md`. No runtime code,
+  tool declaration, schema snapshot, package metadata, website, store, directory, or other external
+  surface changed.
+- Gates: local `scripts/check-public-surfaces.ps1`; `cargo fmt --all -- --check`; strict workspace
+  Clippy; full fast-tier workspace tests; ASCII scan; relative-link validation; stale/frozen phrase
+  scan; external-link checks; primary-source comparison checks; and `git diff --check` passed. All
+  fetched public links returned HTTP 200 except npm's human web page, which returned its automated
+  access 403; the official npm registry API remains the package/version evidence.
 - Deviations: none.

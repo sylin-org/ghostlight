@@ -6,8 +6,8 @@ Input is genuinely wanted -- questions, requests, and contributions have three l
 
 | Lane                                    | Use it for                                                                                                                                                                 |
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [GitHub Issues](../../issues)           | Bugs, defects, anything reproducible.                                                                                                                                      |
-| [GitHub Discussions](../../discussions) | Questions, ideas, feature requests, policy patterns, show-and-tell.                                                                                                        |
+| [GitHub Issues](https://github.com/sylin-org/ghostlight/issues)           | Bugs, defects, anything reproducible.                                                                                                                                      |
+| [GitHub Discussions](https://github.com/sylin-org/ghostlight/discussions) | Questions, ideas, feature requests, policy patterns, show-and-tell.                                                                                                        |
 | hello@sylin.org                         | Anything that cannot be public: security reports (see [SECURITY.md](SECURITY.md)), licensing and founding-program matters, or a compliance team that cannot post publicly. |
 
 Public lanes are preferred when possible: an answered question becomes documentation,
@@ -24,16 +24,15 @@ recorded vision, not taste of the day:
 - **User delight first; governance that never punishes the ungoverned.** All-open stays
   first-class. Features that make the free path worse to upsell the paid one are
   declined on principle.
-- **The sacred tool surface.** The 13 trained tool schemas are the byte-pinned reference shape
+- **The trained compatibility boundary.** The original 13 tool identities keep their names,
+  parameter names, parameter types, enum values, ordering, requiredness, and structural schemas
   ([ADR-0007](docs/adr/0007-sacred-tool-surface.md),
-  [ADR-0022](docs/adr/0022-intent-calibrated-capabilities.md)): their names, parameter names, types,
-  and descriptions are preserved exactly so a trained agent behaves as expected. Additive tools
-  (`wait_for`, `script`, `form_fill`) and additive optional parameters on existing tools (e.g.
-  `read_page` `diff`) are sanctioned via the capability registry
-  ([ADR-0034](docs/adr/0034-capability-transport-registry.md) Decision 7;
-  [ADR-0035](docs/adr/0035-script-tool.md) -- [ADR-0038](docs/adr/0038-structured-results.md)).
-  Requests to rename or reshape the trained 13 are declined; requests to add new tools or additive
-  parameters are evaluated against the additive-growth criteria.
+  [ADR-0094](docs/adr/0094-agent-readable-tool-definitions.md)). Descriptions and metadata are
+  guidance: they may improve deliberately when clearer purpose, tool choice, side effects, or
+  recovery helps an agent. New tools and optional parameters grow additively through the
+  capability registry ([ADR-0034](docs/adr/0034-capability-transport-registry.md) Decision 7).
+  Requests to rename or reshape a trained identity are declined; guidance and additive-growth
+  proposals are evaluated against the current registry and fidelity tests.
 - **Never phone home.** Telemetry, activation servers, and update pings are permanently
   out ([ADR-0028](docs/adr/0028-tripwire-licensing-and-continuity-promise.md)).
 - **Lean engine.** Fewer, more meaningful moving parts win over feature count. Scope
