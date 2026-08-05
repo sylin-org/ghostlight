@@ -7,15 +7,18 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
-- **The public-documentation delight strategy is accepted and ready for a fresh-session epic
-  pass.** ADR-0100 makes recognition, fit, first success, and recovery the public documentation
-  contract for 0.8. It keeps trained tool names, parameters, types, enums, ordering, and structural
-  contracts stable while authorizing richer descriptions, examples, annotations, output guidance,
-  and package/directory metadata across all 25 tools. The six-pass execution batch lives at
-  `docs/tasks/public-delight-0.8/`; its ledger is the durable handoff. Work in
-  `sylin-org/website` is authorized on a non-publishing branch. Website deployment, store
-  resubmission, directory posts, release publication, and other outward actions still require the
-  standing explicit owner confirmation.
+- **The public-documentation delight batch completed E1 with a dated truth and reception
+  baseline.** The baseline separates product proof, distribution, and reception; maps capabilities
+  by user outcome; records current package, store, GitHub, registry, directory, search, and
+  alternative evidence; and names uncertainty instead of turning unavailable evidence into zero.
+  It corrects the runbooks for the live but stale mcpservers.org listing, Glama's A/A/A grades and
+  one favorite, the merged Winget 0.7.3 submission, and the pending Chrome adapter 0.8.0 owner
+  state. The live Sylin page and two unrelated Sylin routes still repeat obsolete adapter and
+  topology text; Glama, mcpservers.org, and the official registry also carry stale copy. No
+  independent written review or user-authored workflow was located in the bounded searches, so no
+  adoption claim was invented. E2 is next in `docs/tasks/public-delight-0.8/LEDGER.md`. Website
+  deployment, store resubmission, directory posts, release publication, and other outward actions
+  still require explicit owner confirmation.
 
 - **The v0.8.0 service candidate is locally release-ready without weakening the adapter gate.** The live
   Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter
@@ -166,9 +169,10 @@ when they disagree**, and update it when you land something that changes the pic
   strict workspace clippy, the full Rust workspace suite, five MCPB launcher tests, archive-layout
   packaging, PowerShell syntax checks, ASCII checks, and diff hygiene pass.
 
-- **Ghostlight was submitted to mcpservers.org on 2026-08-04.** The free Development-category
-  submission uses the canonical GitHub repository and `hello@sylin.org` contact. mcpservers.org
-  confirmed receipt and quoted a 12-hour review window; the listing is not yet claimed live.
+- **Ghostlight's mcpservers.org Development listing is live but stale.** The listing at
+  `https://mcpservers.org/servers/sylin-org/ghostlight` was verified on 2026-08-05. Its copied
+  project text still describes the old relay topology and development extension path. Correct the
+  canonical public copy before asking the directory to refresh.
 
 - **GitHub approved Ghostlight for inclusion in the GitHub MCP Registry on 2026-08-03.** The
   manually curated review of `org.sylin/ghostlight` is complete. GitHub will add the server to
@@ -187,8 +191,9 @@ when they disagree**, and update it when you land something that changes the pic
   improvable guidance. Formatting, strict workspace clippy, the full Rust workspace suite, and
   the focused 14-test fidelity suite pass. A guarded Windows dev-loop swap and real-relay probe
   also passed with the Chrome extension attached. PR #75 merged the change to `main`, and the
-  official MCP Registry now carries v0.7.3. Glama's post-release card scores Ghostlight A for
-  license, A for quality, and B for maintenance across 25 tools.
+  official MCP Registry now carries v0.7.3. On 2026-08-05 Glama scored Ghostlight A for license,
+  A for quality, and A for maintenance; it showed one favorite and graded `computer` B. Its
+  ingested project copy remains stale.
 
 - **The license layout now supports conventional repository discovery without blurring the
   open-core boundary.** Root `LICENSE` contains the standard Apache-2.0 text so repository

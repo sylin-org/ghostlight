@@ -1,9 +1,27 @@
 # MCP directory submissions
 
-Last checked: 2026-08-04.
+Last checked: 2026-08-05.
 
 This file separates facts, ready copy, and external gates for the Claude and OpenAI directory
 paths. It is not proof that a submission was sent or accepted.
+
+## Current public directory state
+
+These are distribution observations, not user reception. The dated evidence and caveats live in
+[the August 2026 public-reception baseline](../research/public-reception-2026-08.md).
+
+| Surface | State observed 2026-08-05 |
+| --- | --- |
+| Official MCP Registry | `org.sylin/ghostlight` 0.7.3 is active and latest. Its description still says `one portable binary`. |
+| Glama | Listed with A license, A quality, A maintenance, one favorite, and B for `computer`; its copied project text is stale. |
+| mcpservers.org | Development listing is live at `https://mcpservers.org/servers/sylin-org/ghostlight`; its copied project text is stale. |
+| Cline marketplace | Submission issue [#1989](https://github.com/cline/mcp-marketplace/issues/1989) remains open. |
+| awesome-mcp-servers | PR [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) remains open and ready for review. |
+| GitHub MCP Registry | Owner records say approval completed 2026-08-03. No public catalog record was independently located, so do not claim public discoverability yet. |
+| mcp.so and PulseMCP | Not submitted. |
+
+Do not edit a directory or contact its maintainer without explicit owner confirmation. Canonical
+source and website text should be corrected before asking stale crawlers to refresh.
 
 ## Claude Connectors Directory
 

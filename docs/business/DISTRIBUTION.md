@@ -1,5 +1,7 @@
 # Distribution runbook
 
+Last checked: 2026-08-05.
+
 The distribution push (2026-07-07 session; agentic Tier 0-2 implemented in-repo, external
 submissions and Tier 3 are founder actions). Ordered: each step assumes the ones above it.
 Check off in place with dates, like FOUNDER-TODO.md. The strategy note behind this list lives
@@ -32,7 +34,9 @@ winget/scoop/homebrew templates place them together in one directory. MCP-client
 
 - [x] **npm.** `ghostlight@0.7.3` is live at `latest`. The release pipeline publishes it and smoke
       tests the launcher against the integrity-pinned release binaries.
-- [x] **Chrome Web Store.** Adapter v0.7.1 is public. There is no pending submission. Store id:
+- [x] **Chrome Web Store.** Adapter v0.7.1 is public. Adapter v0.8.0 is accepted for review with
+      deferred publication according to the owner dashboard and `docs/public-status.json`.
+      Recheck both before any release or store claim. Store id:
       `lejccfmoeogmhemakeknjjdhkfkgncdl`.
 - [ ] **Edge Add-ons store.** Submit the same packaged extension after configuring the Edge
       publisher credentials.
@@ -46,10 +50,11 @@ winget/scoop/homebrew templates place them together in one directory. MCP-client
       [#1989](https://github.com/cline/mcp-marketplace/issues/1989) was updated with the live
       package, extension, and install path on 2026-08-01; awaiting maintainer review.
 - [ ] **Directory listings.** Glama indexes Ghostlight, and ownership was verified on 2026-08-01
-      through the root `glama.json`. After v0.7.3 reached `main`, Glama's card reported all 25 tools
-      and scored Ghostlight A for license, A for quality, and B for maintenance. Maintenance is the
-      only below-A dimension. The free mcpservers.org Development listing was submitted on
-      2026-08-04 and is pending review; the site quoted a 12-hour review window. A self-contained
+      through the root `glama.json`. On 2026-08-05 its card scored Ghostlight A for license, A for
+      quality, and A for maintenance, showed one favorite, and graded `computer` B. Its ingested
+      project copy remains stale. The free mcpservers.org Development listing is live at
+      `https://mcpservers.org/servers/sylin-org/ghostlight`, but its copied project text is also
+      stale. A self-contained
       Windows/macOS MCPB source, launcher, release packager, and validation gate now prepare the
       Claude Desktop path. Anthropic submission remains gated on a released asset and clarification
       of the live form's MIT-only requirement because Ghostlight is open-core. OpenAI's public
@@ -60,9 +65,9 @@ winget/scoop/homebrew templates place them together in one directory. MCP-client
       [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) adds Ghostlight to
       `punkpeye/awesome-mcp-servers` under Browser Automation. Its Glama badge check passes, and the
       PR was marked ready for maintainer review on 2026-08-01. mcp.so and PulseMCP remain open.
-- [ ] **Winget.** v0.7.2 PR #410996 merged and is publicly discoverable. The v0.7.3 manifest
-      validates locally and PR #411087 is open and mergeable; its CLA check passes while Microsoft
-      validation and review remain pending.
+- [x] **Winget.** v0.7.2 PR #410996 merged and is publicly discoverable. The v0.7.3 manifest
+      validates locally, and PR [#411087](https://github.com/microsoft/winget-pkgs/pull/411087)
+      merged on 2026-08-02. The merge proves catalog ingestion, not installs.
 - [x] **Homebrew tap.** `sylin-org/homebrew-tap` is live. Release v0.7.3 was published in commit
       `5055db1`; users install it with `brew install sylin-org/tap/ghostlight`.
 - [ ] **Scoop.** `packaging/scoop/ghostlight.json` with the sha filled can be installed

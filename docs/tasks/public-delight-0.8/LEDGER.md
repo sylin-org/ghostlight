@@ -5,17 +5,17 @@ conversation history.
 
 ## RESUME HERE
 
-- State: execution package authored; no execution pass has started
-- Current pass: E1
-- Next action: read `E1-truth-and-reception-baseline.md`, reverify its seeded external observations,
-  and create the dated evidence baseline
+- State: E1 is complete; E2 has not started
+- Current pass: E2
+- Next action: read `E2-message-and-content-architecture.md` and turn the E1 evidence into the
+  shared message and content architecture
 - External actions: none authorized beyond preparing website work on a non-publishing branch
 
 ## Status
 
 | Pass | Title | Status | Product commit | Website commit | Deviations |
 | --- | --- | --- | --- | --- | --- |
-| E1 | Truth and reception baseline | pending | - | - | - |
+| E1 | Truth and reception baseline | DONE | this pass's `docs(public): establish E1 public truth baseline` commit | - | none |
 | E2 | Message and content architecture | pending | - | - | - |
 | E3 | Core public surfaces | pending | - | - | - |
 | E4 | Agent guidance and metadata | pending | - | - | - |
@@ -71,3 +71,41 @@ cited in the dated baseline.
 
 Append one section per completed or blocked pass. Include verified facts, files changed, gates run,
 commit hashes, external drafts, and numbered deviations.
+
+### E1 -- truth and reception baseline -- 2026-08-05
+
+- Commit: see this pass's `docs(public): establish E1 public truth baseline` commit.
+- Baseline: `docs/research/public-reception-2026-08.md`, observed 2026-08-05.
+- Verified product facts: public service 0.7.3; source service 0.8.0; public adapter 0.7.1;
+  source and pending adapter 0.8.0; 25 registry tools; nine installer clients; Windows and Linux
+  live-browser proof; macOS CI proof with live-browser verification still owed; exact 2025-11-25
+  and 2026-07-28 source-candidate MCP shores.
+- Verified reception measurements: npm 538 downloads for 2026-07-29 through 2026-08-04 and 2,009
+  for 2026-07-06 through 2026-08-04; Chrome Web Store two users with no ratings or written
+  reviews; GitHub 0 stars, 0 forks, 0 open issues, 62 aggregate v0.7.3 asset downloads, and one
+  project-authored discussion; Glama one favorite. The baseline records the required automation,
+  aggregation, and absence-of-evidence caveats.
+- Owner-access measurements: Chrome adapter 0.8.0 is accepted for review with deferred
+  publication. GitHub's 14-day owner-only window ending 2026-08-04 reported 13 views from 10
+  unique visitors, 848 clones from 157 unique cloners, and one view/one unique each from Google and
+  github.com in qualifying referrers. Recheck the owner dashboard and traffic APIs before reuse.
+- Distribution corrections: Glama is A/A/A with `computer` B but has stale copy; mcpservers.org is
+  live but stale; Winget v0.7.3 merged on 2026-08-02; Cline issue 1989 and awesome-mcp-servers PR
+  11306 remain open; GitHub MCP Registry approval is owner-recorded but public catalog visibility
+  was not independently located.
+- Discovery result: the canonical Sylin page and the `/agyo/` and `/zen-garden/` routes expose old
+  adapter or topology text. Bounded searches located no independent written review,
+  user-authored workflow, or case study. This was recorded as unavailable evidence, not zero.
+- Defensible comparison: existing signed-in tabs, visible browser work, form actions, debugging,
+  GIFs, and local multi-client access are not unique primitives. The supported distinction is the
+  combined visible, recoverable, governed, audited, multi-client local experience.
+- Files changed: the dated baseline, both distribution runbooks, this ledger, and `docs/STATUS.md`.
+  No README, website, tool definition, or external surface changed.
+- Gates: `cargo fmt --all -- --check`; strict workspace Clippy; full fast-tier workspace tests;
+  ASCII scan; relative-link validation; `git diff --check`; and live external evidence-link fetches
+  all passed. The three owner-only GitHub traffic links returned the expected anonymous 401 after
+  their authenticated observations were captured. The pre-existing future `main` MCPB form URL
+  remains 404 until that release gate lands.
+- Deviation 1: the first Clippy attempt could not create Cargo's temporary sibling beside
+  `F:\tmp\ghostlight-e1-target`. It was rerun successfully in the isolated workspace target
+  `.target-e1`; this was an environment-path failure, not a code finding.
