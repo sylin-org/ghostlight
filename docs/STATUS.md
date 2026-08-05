@@ -7,6 +7,16 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **The public-documentation delight strategy is accepted and ready for a fresh-session epic
+  pass.** ADR-0100 makes recognition, fit, first success, and recovery the public documentation
+  contract for 0.8. It keeps trained tool names, parameters, types, enums, ordering, and structural
+  contracts stable while authorizing richer descriptions, examples, annotations, output guidance,
+  and package/directory metadata across all 25 tools. The six-pass execution batch lives at
+  `docs/tasks/public-delight-0.8/`; its ledger is the durable handoff. Work in
+  `sylin-org/website` is authorized on a non-publishing branch. Website deployment, store
+  resubmission, directory posts, release publication, and other outward actions still require the
+  standing explicit owner confirmation.
+
 - **The v0.8.0 service candidate is locally release-ready without weakening the adapter gate.** The live
   Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter
   v0.8.0 was submitted for review on 2026-08-05 with deferred publishing. The stale

@@ -30,9 +30,11 @@ Collaboration and process -- this file is their canonical home:
   trust, version, or correctness need. Preserve product capability and safety, not incidental
   compatibility. A break-and-rebuild is welcome when it produces a smaller, clearer, better
   system (ADR-0096).
-- **Keep tool identity stable and guidance current.** Tool names, parameters, types, and enums are
-  compatibility contracts. Descriptions and additive response guidance should improve when they
-  can make purpose, side effects, recovery, or tool choice clearer (ADR-0094).
+- **Keep tool identity stable and guidance current.** Tool names, parameters, types, enums, and
+  ordering are compatibility contracts. Descriptions, examples, annotations, and additive response
+  guidance should improve when they can make purpose, side effects, recovery, or tool choice
+  clearer. External grades are diagnostics, never permission to reshape a trained signature
+  (ADR-0094/0100).
 - **The browser product stays in the local user's context.** Ghostlight is for visible work in the
   user's existing authenticated Chromium profile. Headless, isolated-profile, cloud, and remote
   browser execution are product exclusions, not missing parity work.
@@ -48,9 +50,11 @@ Collaboration and process -- this file is their canonical home:
   cross-platform proof, run that same live path on each target OS, including Windows and Linux.
   Do not substitute Playwright, a disposable browser profile, or an emulated harness unless the
   explicit subject is that harness or CI boundary.
-- **Repository content is practitioner-first.** Developers should see the product, installation,
-  first useful task, and exact no-account/free-core facts before organization procurement depth.
-  Product pages and the Trust Center carry the buyer-focused material.
+- **Public content is warm, practitioner-first, and delight-led.** Developers should see the
+  product, fit, installation, first useful task, and recovery before organization procurement
+  depth. Lead with useful work, visibility, and control; do not make personal use sound incomplete
+  or governance sound punitive. Product pages and the Trust Center carry deeper buyer material
+  (ADR-0100).
 - **End-user extension installation is store-only.** Packaged and public paths point to the Chrome
   Web Store. Only source-development docs may explain loading the repository extension directly for
   immediate local testing (ADR-0091).
