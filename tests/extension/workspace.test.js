@@ -9,6 +9,7 @@ const {
   replaceWorkspaceTabs,
   addWorkspaceTab,
   removeWorkspaceTab,
+  workspaceIdForTab,
   workspaceGroupIds,
   isWorkspaceGroupId,
   liveWorkspaceTabs,
@@ -263,6 +264,16 @@ test("shared presentation keeps workspace tab inventories separate", async () =>
   assert.deepStrictEqual(Array.from(index.get("workspace-b").tabIds), [3]);
   assert.deepStrictEqual(Array.from(workspaceGroupIds(index)), [55]);
   assert.strictEqual(isWorkspaceGroupId(index, 55), true);
+});
+
+test("reverse lookup returns only one unambiguous workspace owner", () => {
+  const index = new Map();
+  replaceWorkspaceTabs(index, "workspace-a", [1, 2], 55);
+  replaceWorkspaceTabs(index, "workspace-b", [3], 55);
+  assert.strictEqual(workspaceIdForTab(index, 2), "workspace-a");
+  assert.strictEqual(workspaceIdForTab(index, 99), null);
+  addWorkspaceTab(index, "workspace-b", 2, 55);
+  assert.strictEqual(workspaceIdForTab(index, 2), null);
 });
 
 test("topology serialization round-trips tab sets and shared groups", () => {

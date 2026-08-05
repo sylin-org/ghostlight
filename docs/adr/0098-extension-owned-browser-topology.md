@@ -94,6 +94,9 @@ Otherwise a group is created there. Existing tabs are never moved to satisfy a p
 
 ### 4. Creator completion is the only membership synchronization
 
+Amended by ADR-0099: exact browser-created children may also establish continuity through their
+managed opener, with service adoption required before their ids are exposed.
+
 `tabs_context_mcp`, `tabs_create_mcp`, and unaddressed `navigate` update extension topology
 atomically while handling the correlated tool request. The service validates creator results and
 adopts their composite tab ids into its authoritative registry as before.

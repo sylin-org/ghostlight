@@ -126,6 +126,8 @@ const MAX_CHUNKED_REQUEST_BYTES: usize = 32 * 1024 * 1024;
 const BROWSER_WRITER_QUEUE_CAPACITY: usize = 64;
 const CHUNKED_HOST_MESSAGES_V1: &str = "chunkedHostMessagesV1";
 const SURFACE_EXECUTOR_V1: &str = "surfaceExecutorV1";
+const TAB_DELTA_V1: &str = "tabDeltaV1";
+const TAB_DELTA_MAX_ITEMS: usize = 16;
 
 /// Bounded reconnect grace window (ADR-0030 Decision 3, "D1 -- the honest singleton queue":
 /// "truthful failure on a real drop"; PINNED in PINS.md SS4). STRICTLY LESS THAN
@@ -216,11 +218,16 @@ struct PendingEntry {
     sender: oneshot::Sender<CallResult>,
     target_slot: u32,
     target_generation: u64,
-    workspace_adoption: Option<ghostlight_transport::workspace_id::WorkspaceId>,
+    workspace_adoption: Option<WorkspaceAdoption>,
     executor_generation: Option<String>,
     execution: Option<PendingExecution>,
     terminal_seen: bool,
     dispatched: bool,
+}
+
+struct WorkspaceAdoption {
+    workspace: ghostlight_transport::workspace_id::WorkspaceId,
+    creator_inventory: bool,
 }
 
 type Pending = Arc<Mutex<HashMap<String, PendingEntry>>>;
@@ -372,6 +379,106 @@ fn creator_result_tab_ids(result: &Value, browser_slot: u32) -> Vec<i64> {
     tab_ids
 }
 
+fn malformed_tab_delta(detail: &str) -> ToolError {
+    ToolError::extension(format!(
+        "Browser extension returned malformed tabDelta: {detail}"
+    ))
+}
+
+fn tab_delta_tab_ids(
+    result: &Value,
+    browser_slot: u32,
+) -> std::result::Result<Vec<i64>, ToolError> {
+    let Some(delta) = result.pointer("/structuredContent/tabDelta") else {
+        return Ok(Vec::new());
+    };
+    let Some(delta) = delta.as_object() else {
+        return Err(malformed_tab_delta("expected an object"));
+    };
+    let Some(opened) = delta.get("opened").and_then(Value::as_array) else {
+        return Err(malformed_tab_delta("opened must be an array"));
+    };
+    let Some(closed) = delta.get("closed").and_then(Value::as_array) else {
+        return Err(malformed_tab_delta("closed must be an array"));
+    };
+    if opened.len() > TAB_DELTA_MAX_ITEMS || closed.len() > TAB_DELTA_MAX_ITEMS {
+        return Err(malformed_tab_delta("item limit exceeded"));
+    }
+    if !delta.get("more").is_some_and(Value::is_boolean) {
+        return Err(malformed_tab_delta("more must be a boolean"));
+    }
+
+    let mut closed_native = Vec::with_capacity(closed.len());
+    for item in closed {
+        let Some(tab_id) = item.as_i64().filter(|tab_id| *tab_id >= 0) else {
+            return Err(malformed_tab_delta(
+                "closed entries must be non-negative tab ids",
+            ));
+        };
+        closed_native.push(tab_id);
+    }
+
+    let mut opened_native = Vec::with_capacity(opened.len());
+    let mut active_native = Vec::new();
+    for item in opened {
+        let Some(tab_id) = item
+            .get("tabId")
+            .and_then(Value::as_i64)
+            .filter(|tab_id| *tab_id >= 0)
+        else {
+            return Err(malformed_tab_delta(
+                "opened entries must contain a non-negative tabId",
+            ));
+        };
+        let Some(active) = item.get("active").and_then(Value::as_bool) else {
+            return Err(malformed_tab_delta(
+                "opened entries must contain an active boolean",
+            ));
+        };
+        if !closed_native.contains(&tab_id) {
+            opened_native.push(tab_id);
+            if active {
+                active_native.push(tab_id);
+            }
+        }
+    }
+
+    if let Some(active) = delta.get("activeTabId") {
+        let Some(active) = active.as_i64().filter(|tab_id| *tab_id >= 0) else {
+            return Err(malformed_tab_delta(
+                "activeTabId must be a non-negative tab id",
+            ));
+        };
+        if !active_native.contains(&active) {
+            return Err(malformed_tab_delta(
+                "activeTabId must name a still-open active opened tab",
+            ));
+        }
+    }
+
+    let mut tab_ids = opened_native
+        .into_iter()
+        .map(|native_id| crate::constants::tab_id::encode(browser_slot, native_id))
+        .collect::<Vec<_>>();
+    tab_ids.sort_unstable();
+    tab_ids.dedup();
+    Ok(tab_ids)
+}
+
+fn workspace_result_tab_ids(
+    result: &Value,
+    browser_slot: u32,
+    creator_inventory: bool,
+) -> std::result::Result<Vec<i64>, ToolError> {
+    let mut tab_ids = tab_delta_tab_ids(result, browser_slot)?;
+    if creator_inventory {
+        tab_ids.extend(creator_result_tab_ids(result, browser_slot));
+    }
+    tab_ids.sort_unstable();
+    tab_ids.dedup();
+    Ok(tab_ids)
+}
+
 fn chunk_transport_not_negotiated() -> ToolError {
     ToolError::extension("This Ghostlight extension is too old for bounded large-value transport")
         .next_step("update or reload the Ghostlight extension, then retry")
@@ -447,6 +554,31 @@ fn encode_tab_ids_in_value(v: &mut Value, target: u32) {
             }
         }
         _ => {}
+    }
+}
+
+/// Encode the two tab-delta id positions that are not carried under a `tabId` object key. Opened
+/// rows are handled by [`encode_tab_ids_in_value`]; this exact-path helper covers the active id and
+/// the compact array of closed ids without rewriting unrelated numbers elsewhere in a result.
+fn encode_tab_delta_ids(result: &mut Value, target: u32) {
+    let Some(delta) = result
+        .pointer_mut("/structuredContent/tabDelta")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    if let Some(native) = delta.get("activeTabId").and_then(Value::as_i64) {
+        delta.insert(
+            "activeTabId".to_string(),
+            json!(crate::constants::tab_id::encode(target, native)),
+        );
+    }
+    if let Some(closed) = delta.get_mut("closed").and_then(Value::as_array_mut) {
+        for tab_id in closed {
+            if let Some(native) = tab_id.as_i64() {
+                *tab_id = json!(crate::constants::tab_id::encode(target, native));
+            }
+        }
     }
 }
 
@@ -1356,7 +1488,14 @@ impl Browser {
             .await;
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
-        let mut request = json!({ "id": id, "type": "tool_request", "tool": tool, "args": call_args, "guid": guid });
+        let mut request = json!({
+            "id": id,
+            "type": "tool_request",
+            "tool": tool,
+            "args": call_args,
+            "guid": guid,
+            "resultFeatures": [TAB_DELTA_V1]
+        });
         request["execution"] = execution_wire(execution);
         self.stamp_workspace_request(&mut request, guid, tool, call_args);
         let payload = serde_json::to_vec(&request)
@@ -1425,8 +1564,14 @@ impl Browser {
         execution: &ExecutionContext,
     ) -> std::result::Result<Value, ToolError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
-        let mut request =
-            json!({ "id": id, "type": "tool_request", "tool": tool, "args": args, "guid": guid });
+        let mut request = json!({
+            "id": id,
+            "type": "tool_request",
+            "tool": tool,
+            "args": args,
+            "guid": guid,
+            "resultFeatures": [TAB_DELTA_V1]
+        });
         request["execution"] = execution_wire(execution);
         self.stamp_workspace_request(&mut request, guid, tool, args);
         let payload = match serde_json::to_vec(&request) {
@@ -1790,6 +1935,7 @@ impl Browser {
     /// (ADR-0058), using the browser this call was actually routed to. See
     /// [`encode_tab_ids_in_value`] for the walk itself; this is just the `Browser::call` hook.
     fn encode_tab_ids(&self, mut result: Value, target: u32) -> Value {
+        encode_tab_delta_ids(&mut result, target);
         encode_tab_ids_in_value(&mut result, target);
         result
     }
@@ -2184,13 +2330,13 @@ impl Browser {
                     sender: tx,
                     target_slot: target,
                     target_generation: session.generation,
-                    workspace_adoption: creates_workspace_membership(request.debug_label)
-                        .then(|| {
-                            request
-                                .attention_guid
-                                .and_then(ghostlight_transport::workspace_id::WorkspaceId::parse)
-                        })
-                        .flatten(),
+                    workspace_adoption: request
+                        .attention_guid
+                        .and_then(ghostlight_transport::workspace_id::WorkspaceId::parse)
+                        .map(|workspace| WorkspaceAdoption {
+                            workspace,
+                            creator_inventory: creates_workspace_membership(request.debug_label),
+                        }),
                     executor_generation,
                     execution,
                     terminal_seen: false,
@@ -2834,9 +2980,14 @@ impl Browser {
             }
             _ => Ok(reply.get("result").cloned().unwrap_or(Value::Null)),
         };
-        if let (Ok(value), Some(workspace)) = (&result, entry.workspace_adoption.as_ref()) {
+        if let (Ok(value), Some(adoption)) = (&result, entry.workspace_adoption.as_ref()) {
             result = self
-                .adopt_creator_result(workspace, slot, value)
+                .adopt_workspace_result(
+                    &adoption.workspace,
+                    slot,
+                    value,
+                    adoption.creator_inventory,
+                )
                 .map(|()| value.clone())
                 .map_err(|error| DeliveryFailure {
                     error,
@@ -2846,16 +2997,20 @@ impl Browser {
         let _ = entry.sender.send(result);
     }
 
-    fn adopt_creator_result(
+    fn adopt_workspace_result(
         &self,
         workspace: &ghostlight_transport::workspace_id::WorkspaceId,
         browser_slot: u32,
         result: &Value,
+        creator_inventory: bool,
     ) -> std::result::Result<(), ToolError> {
+        let tab_ids = workspace_result_tab_ids(result, browser_slot, creator_inventory)?;
+        if tab_ids.is_empty() {
+            return Ok(());
+        }
         let registry = self.workspace_registry.get().ok_or_else(|| {
             ToolError::binary("workspace registry is unavailable at browser result settlement")
         })?;
-        let tab_ids = creator_result_tab_ids(result, browser_slot);
         match registry.claim_tabs(workspace, &tab_ids) {
             crate::hub::workspace::TabClaim::Adopted => Ok(()),
             crate::hub::workspace::TabClaim::Owned => Ok(()),
@@ -3257,6 +3412,7 @@ mod tests {
             let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
             let v: Value = serde_json::from_slice(&req).unwrap();
             let id = v["id"].as_str().unwrap();
+            assert_eq!(v["resultFeatures"], json!([TAB_DELTA_V1]));
             let accepted = json!({ "id": id, "type": "tool_accepted", "commandId": "1" });
             host::write_message(&mut ext_side, &serde_json::to_vec(&accepted).unwrap())
                 .await
@@ -3496,6 +3652,49 @@ mod tests {
     }
 
     #[test]
+    fn tab_delta_membership_adopts_only_tabs_still_open_at_reply_time() {
+        let slot = 3;
+        assert_eq!(
+            tab_delta_tab_ids(
+                &json!({
+                    "structuredContent": {
+                        "tabDelta": {
+                            "opened": [
+                                {"tabId": 7, "active": false},
+                                {"tabId": 8, "active": true}
+                            ],
+                            "closed": [7],
+                            "activeTabId": 8,
+                            "more": false
+                        }
+                    }
+                }),
+                slot,
+            )
+            .unwrap(),
+            vec![crate::constants::tab_id::encode(slot, 8)]
+        );
+    }
+
+    #[test]
+    fn malformed_tab_delta_is_rejected_before_membership_changes() {
+        let error = tab_delta_tab_ids(
+            &json!({
+                "structuredContent": {
+                    "tabDelta": {
+                        "opened": [{"tabId": 8, "active": "yes"}],
+                        "closed": [],
+                        "more": false
+                    }
+                }
+            }),
+            1,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("malformed tabDelta"));
+    }
+
+    #[test]
     fn creator_result_adoption_is_atomic_across_workspaces() {
         let browser = Browser::new();
         let registry = WorkspaceRegistry::new(Arc::new(Mutex::new(HashMap::new())));
@@ -3510,10 +3709,11 @@ mod tests {
         );
 
         let error = browser
-            .adopt_creator_result(
+            .adopt_workspace_result(
                 &second,
                 1,
                 &json!({"structuredContent": {"tabs": [{"tabId": 8}, {"tabId": 7}]}}),
+                true,
             )
             .unwrap_err();
         assert!(error
@@ -3568,6 +3768,74 @@ mod tests {
             registry.owned_tabs(&workspace),
             vec![crate::constants::tab_id::encode(slot, 7)]
         );
+    }
+
+    #[tokio::test]
+    async fn action_reply_adopts_and_encodes_observed_child_before_returning() {
+        let browser = Browser::new();
+        let registry = WorkspaceRegistry::new(Arc::new(Mutex::new(HashMap::new())));
+        browser.bind_workspace_registry(registry.clone());
+        let owner = crate::hub::peer::PeerUser("owner".to_string());
+        let workspace = registry.mint(&owner, false).unwrap();
+        let (mut extension, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        let source = crate::constants::tab_id::encode(slot, 7);
+        let child = crate::constants::tab_id::encode(slot, 8);
+        assert_eq!(
+            registry.claim_tab(&workspace, source),
+            crate::hub::workspace::TabClaim::Adopted
+        );
+
+        let caller = browser.clone();
+        let workspace_for_call = workspace.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .call(
+                    workspace_for_call.as_str(),
+                    "computer",
+                    &json!({"tabId": source, "action": "left_click"}),
+                )
+                .await
+        });
+        let request = host::read_message(&mut extension).await.unwrap().unwrap();
+        let request: Value = serde_json::from_slice(&request).unwrap();
+        assert_eq!(request["args"]["tabId"], 7);
+        assert_eq!(request["resultFeatures"], json!([TAB_DELTA_V1]));
+        host::write_message(
+            &mut extension,
+            &serde_json::to_vec(&json!({
+                "id": request["id"],
+                "type": "tool_response",
+                "result": {
+                    "content": [{"type": "text", "text": "Clicked."}],
+                    "structuredContent": {
+                        "tabDelta": {
+                            "opened": [{"tabId": 8, "active": true}],
+                            "closed": [9],
+                            "activeTabId": 8,
+                            "more": false
+                        }
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let result = call.await.unwrap().unwrap();
+        assert_eq!(
+            result.pointer("/structuredContent/tabDelta/opened/0/tabId"),
+            Some(&json!(child))
+        );
+        assert_eq!(
+            result.pointer("/structuredContent/tabDelta/activeTabId"),
+            Some(&json!(child))
+        );
+        assert_eq!(
+            result.pointer("/structuredContent/tabDelta/closed/0"),
+            Some(&json!(crate::constants::tab_id::encode(slot, 9)))
+        );
+        assert!(registry.owns_tab(&workspace, child));
     }
 
     #[tokio::test]

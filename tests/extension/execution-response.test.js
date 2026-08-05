@@ -131,7 +131,8 @@ test("worker carries response scopes instead of looking up raw request ids", () 
   assert.match(source, /execute: async \(item\) => \{\s*await dispatch\(item\)/);
   assert.match(source, /const key = request\.guid;/);
   assert.doesNotMatch(source, /request\.clientKey\s*\|\|/);
-  assert.match(source, /reply\(item\.response, await handler\(args, key, request\.workspace\)\)/);
+  assert.match(source, /const result = await handler\(args, key, request\.workspace\)/);
+  assert.match(source, /reply\(item\.response, result\)/);
   assert.match(
     source,
     /createResponseScope\(requestId, connectedPort\)/,

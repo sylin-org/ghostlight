@@ -37,6 +37,9 @@ test("tab close and browser close share idempotent transient cleanup", () => {
     "utf8"
   );
   assert.match(source, /function clearTabState\(tabId\)/);
-  assert.match(source, /chrome\.tabs\.onRemoved\.addListener\(\(tabId\) => \{\s*clearTabState\(tabId\)/);
+  assert.match(
+    source,
+    /chrome\.tabs\.onRemoved\.addListener\(\(tabId\) => \{[\s\S]{0,500}clearTabState\(tabId\)/
+  );
   assert.match(source, /chrome\.tabs\.remove\(tabId\);\s*clearTabState\(tabId\)/);
 });

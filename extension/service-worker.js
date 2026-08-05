@@ -13,7 +13,7 @@
 // { id, type: "tab_url_response", result: { url } }, reporting chrome.tabs.get(tabId).url (or
 // null) with no matching or interpretation -- the binary's grant enforcement decides.
 //
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/input-events.js", "lib/drag-session.js", "lib/workspace.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/find-visual.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/input-events.js", "lib/drag-session.js", "lib/workspace.js", "lib/tab-effects.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/find-visual.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
@@ -131,6 +131,7 @@ const {
   replaceWorkspaceTabs,
   addWorkspaceTab,
   removeWorkspaceTab,
+  workspaceIdForTab,
   workspaceGroupIds,
   isWorkspaceGroupId,
   liveWorkspaceTabs,
@@ -186,6 +187,10 @@ const browserIdentity = self.GhostlightIdentity.createBrowserIdentity(chrome.sto
 // ADR-0098: one browser-session record per WorkspaceId owns Chrome-native topology. Several
 // records may reference one visible group while their exact tab inventories remain separate.
 const workspaceTopology = new Map();
+// ADR-0099: one bounded, memory-only observation journal. It correlates Chrome tab lifecycle with
+// an exact managed opener while a service-opted-in request is in flight. The service remains the
+// authority that accepts or refuses the reported native ids before any model sees them.
+const tabEffectJournal = self.GhostlightTabEffects.createTabEffectJournal();
 // ADR-0066 D5: the set of tabIds this extension has placed in a managed group. A tab the user
 // drags OUT of the group (detached, or moved to another window -- both ungroup it in Chrome) stays
 // drivable because it is still one of OUR tabs, while a tab we never managed (the user's own,
@@ -1070,7 +1075,31 @@ function clearTabState(tabId) {
   presentationBroker.destroyTab(tabId);
   persistSessionState();
 }
+chrome.tabs.onCreated.addListener((tab) => {
+  if (!tab || !Number.isSafeInteger(tab.id) || !Number.isSafeInteger(tab.openerTabId)) return;
+  const workspaceId = workspaceIdForTab(workspaceTopology, tab.openerTabId);
+  if (!workspaceId) return;
+
+  // Preserve Chrome's placement exactly. Browser-created popups and account-selection windows are
+  // adopted into logical workspace ownership, but are never moved into a window or tab group.
+  addWorkspaceTab(workspaceTopology, workspaceId, tab.id);
+  markTabManaged(tab.id);
+  tabEffectJournal.opened(workspaceId, tab.openerTabId, tab);
+  void sendDebugEvent("managed_tab_opened", {
+    tabId: tab.id,
+    openerTabId: tab.openerTabId,
+    windowId: tab.windowId,
+    groupId: tab.groupId,
+    active: tab.active === true,
+  });
+  void persistSessionState();
+});
 chrome.tabs.onRemoved.addListener((tabId) => {
+  const workspaceId = workspaceIdForTab(workspaceTopology, tabId);
+  if (workspaceId) {
+    tabEffectJournal.closed(workspaceId, tabId);
+    void sendDebugEvent("managed_tab_closed", { tabId });
+  }
   clearTabState(tabId);
   if (executorBrowserSlot !== null) {
     surfaceExecutor.destroyKey(`surface:${executorBrowserSlot}:${tabId}`);
@@ -1098,7 +1127,7 @@ chrome.debugger.onDetach.addListener((src) => {
 function hostOf(url) {
   try { return new URL(url).hostname; } catch { return ""; }
 }
-chrome.tabs.onUpdated.addListener((tabId, info) => {
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.status === "loading" && managedTabs.has(tabId)) {
     void cancelActiveDrag(tabId);
     presentationBroker.documentLoading(tabId);
@@ -1107,10 +1136,40 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
     tabHost.set(tabId, hostOf(info.url));
     tabUrl.set(tabId, info.url);
     dialogStore.remove(tabId);
+    if (managedTabs.has(tabId)) {
+      void sendDebugEvent("managed_tab_url_changed", {
+        tabId,
+        windowId: tab && tab.windowId,
+        status: info.status || null,
+      });
+    }
   }
   if (info.status === "complete" && managedTabs.has(tabId)) {
     presentationBroker.activateTab(tabId);
   }
+});
+chrome.tabs.onAttached.addListener((tabId, info) => {
+  if (!managedTabs.has(tabId)) return;
+  void sendDebugEvent("managed_tab_attached", {
+    tabId,
+    windowId: info.newWindowId,
+    position: info.newPosition,
+  });
+});
+chrome.tabs.onDetached.addListener((tabId, info) => {
+  if (!managedTabs.has(tabId)) return;
+  void sendDebugEvent("managed_tab_detached", {
+    tabId,
+    windowId: info.oldWindowId,
+    position: info.oldPosition,
+  });
+});
+chrome.tabs.onActivated.addListener((info) => {
+  if (!info || !managedTabs.has(info.tabId)) return;
+  void sendDebugEvent("managed_tab_activated", {
+    tabId: info.tabId,
+    windowId: info.windowId,
+  });
 });
 // Render an uncaught-exception CDP event as one single-line string: base message, then an
 // optional (url:line) location, then an optional compact [at frame, frame, ...] stack.
@@ -2910,10 +2969,22 @@ async function dispatch(item) {
   const key = request.guid;
   const handler = handlers[tool];
   if (!handler) return fail(item.response, `Unknown tool: ${tool}`);
+  const tabEffectCursor = tabEffectJournal.cursor();
   try {
     // `guid` carries the opaque WorkspaceId on current tool frames. A human client label is never
     // accepted as topology authority. Guid-less legacy callers use the explicit global path.
-    reply(item.response, await handler(args, key, request.workspace));
+    const result = await handler(args, key, request.workspace);
+    if (self.GhostlightTabEffects.requestsTabDelta(request) &&
+        typeof key === "string" && key && Number.isSafeInteger(args.tabId)) {
+      // Give a synchronously requested Chrome tab event one event-loop turn to reach onCreated.
+      // Delayed page behavior remains outside this action window and appears on later inventory.
+      await sleep(0);
+      self.GhostlightTabEffects.attachTabDelta(
+        result,
+        tabEffectJournal.deltaSince(tabEffectCursor, key, args.tabId)
+      );
+    }
+    reply(item.response, result);
   } catch (e) {
     if (e instanceof TabAccessError) return reply(item.response, text(e.message));
     // Typed and hop-tagged errors are already self-contained; generic errors keep the tool prefix.

@@ -139,6 +139,20 @@ function removeWorkspaceTab(index, tabId) {
   }
 }
 
+// Return the one workspace that owns this native tab id. Ambiguous topology is never resolved by
+// guessing: the service owns real authority, while this extension helper only supplies a safe
+// browser-shore correlation fact.
+function workspaceIdForTab(index, tabId) {
+  if (!Number.isSafeInteger(tabId)) return null;
+  let found = null;
+  for (const [workspaceId, record] of index.entries()) {
+    if (!record.tabIds.has(tabId)) continue;
+    if (found !== null) return null;
+    found = workspaceId;
+  }
+  return found;
+}
+
 function workspaceGroupIds(index) {
   return new Set(Array.from(index.values())
     .map((record) => record.groupId)
@@ -315,6 +329,7 @@ const GhostlightWorkspace = {
   replaceWorkspaceTabs,
   addWorkspaceTab,
   removeWorkspaceTab,
+  workspaceIdForTab,
   workspaceGroupIds,
   isWorkspaceGroupId,
   liveWorkspaceTabs,

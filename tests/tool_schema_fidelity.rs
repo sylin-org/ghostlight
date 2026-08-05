@@ -575,3 +575,18 @@ fn output_schemas_present_exactly_where_declared() {
         );
     }
 }
+
+#[test]
+fn workspace_tool_outputs_declare_the_optional_bounded_tab_delta() {
+    let schema = &tool("computer")["outputSchema"]["properties"]["tabDelta"];
+    assert_eq!(schema["type"], "object");
+    assert_eq!(schema["properties"]["opened"]["maxItems"], 16);
+    assert_eq!(schema["properties"]["closed"]["maxItems"], 16);
+    assert_eq!(schema["required"], json!(["opened", "closed", "more"]));
+    assert!(
+        tool("explain")["outputSchema"]["properties"]
+            .get("tabDelta")
+            .is_none(),
+        "workspace-independent tools must not advertise browser transitions"
+    );
+}

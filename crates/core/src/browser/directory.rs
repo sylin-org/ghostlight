@@ -428,6 +428,34 @@ fn receipt_output_schema() -> Value {
     })
 }
 
+fn tab_delta_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "opened": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tabId": { "type": "number" },
+                        "active": { "type": "boolean" }
+                    },
+                    "required": ["tabId", "active"]
+                }
+            },
+            "closed": {
+                "type": "array",
+                "maxItems": 16,
+                "items": { "type": "number" }
+            },
+            "activeTabId": { "type": "number" },
+            "more": { "type": "boolean" }
+        },
+        "required": ["opened", "closed", "more"]
+    })
+}
+
 fn provenance_schema() -> Value {
     json!({
         "type": "object",
@@ -451,6 +479,9 @@ fn output_schema_with_provenance(descriptor: &ToolDescriptor) -> Value {
     if descriptor.page_output == PageOutput::Receipt {
         schema["properties"]["interactionReceipt"]["properties"]["provenance"] =
             provenance_schema();
+    }
+    if descriptor.workspace_use != WorkspaceUse::Independent {
+        schema["properties"]["tabDelta"] = tab_delta_schema();
     }
     schema
 }

@@ -9,7 +9,7 @@
 //!
 //! ## binary -> extension
 //! ```json
-//! { "id": "<string>", "type": "tool_request", "tool": "<tool name>", "args": { ... }, "guid": "<workspace id>" }
+//! { "id": "<string>", "type": "tool_request", "tool": "<tool name>", "args": { ... }, "guid": "<workspace id>", "resultFeatures": ["tabDeltaV1"] }
 //! ```
 //!
 //! ## extension -> binary
@@ -30,6 +30,24 @@
 //! surfaced to the MCP client.
 //! `code` carries a small machine-readable extension state only where the service has a safe,
 //! explicit recovery path; unknown codes are ignored.
+//!
+//! ## Browser tab transition result (ADR-0099)
+//!
+//! `resultFeatures` is an additive per-request compatibility opt-in. When it contains
+//! `"tabDeltaV1"`, the extension may add this bounded observation to `structuredContent`:
+//! ```json
+//! { "tabDelta": {
+//!   "opened": [{ "tabId": 42, "active": true }],
+//!   "closed": [],
+//!   "activeTabId": 42,
+//!   "more": false
+//! } }
+//! ```
+//! The extension emits only transitions correlated with the exact managed opener tab and opaque
+//! workspace while the request ran. It reports observation, not causality. The service validates
+//! and atomically adopts every still-open `opened` tab before converting native ids to composite
+//! ids and returning the result. An older extension ignores the request member; a newer extension
+//! never exposes the result to an older service that did not opt in.
 //!
 //! ## Take-the-wheel hold (g10, ADR-0018 step 2)
 //!
@@ -132,7 +150,8 @@
 //!
 //! Sent ONLY when the extension's own `chrome.storage.local` debug flag is on (default off,
 //! toggled from the options page); never sent otherwise, so a normal install produces zero
-//! extra traffic. `event` is a short name (`"connect_attempt"`, `"connect_disconnect"` today);
+//! extra traffic. `event` is a short name (`"connect_attempt"`, `"connect_disconnect"`, or a
+//! `"managed_tab_*"` browser-topology lifecycle name);
 //! `detail` is optional, freeform, and never policy-bearing -- purely a developer breadcrumb.
 //! The binary appends it verbatim into [`crate::hub::outbound::browser::Browser`]'s existing
 //! debug-state event ring (the SAME file `ghostlight doctor`/a raw `debug-state-<pid>.json`

@@ -1020,6 +1020,7 @@ pub(crate) async fn run_tool_call(
                 append_wait_note(result, waited);
             }
             crate::tool::provenance::apply(result, descriptor.page_output, guid);
+            append_tab_delta_note(result);
         }
         audit.complete();
         if cancellation.is_some_and(CancellationToken::is_cancelled)
@@ -1165,6 +1166,7 @@ pub(crate) async fn run_tool_call(
                 append_wait_note(&mut result, waited);
             }
             crate::tool::provenance::apply(&mut result, descriptor.page_output, guid);
+            append_tab_delta_note(&mut result);
             CallOutcome::Success { result }
         }
         // A tool execution failure stays a typed engine outcome for the protocol edge to render.
@@ -1467,6 +1469,57 @@ fn append_wait_note(result: &mut Value, waited: Duration) {
     }
 }
 
+/// Add concise service-authored routing guidance for still-open tabs observed while the browser
+/// call ran. This runs after page provenance so the guidance can never be wrapped or presented as
+/// page-sourced content, and deliberately says "observed" rather than claiming action causality.
+fn append_tab_delta_note(result: &mut Value) {
+    let Some(opened) = result
+        .pointer("/structuredContent/tabDelta/opened")
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    let closed = result
+        .pointer("/structuredContent/tabDelta/closed")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let still_open = opened
+        .iter()
+        .filter_map(|item| item.get("tabId").and_then(Value::as_i64))
+        .filter(|tab_id| !closed.iter().any(|closed| closed.as_i64() == Some(*tab_id)))
+        .collect::<Vec<_>>();
+    if still_open.is_empty() {
+        return;
+    }
+    let active = result
+        .pointer("/structuredContent/tabDelta/activeTabId")
+        .and_then(Value::as_i64)
+        .filter(|tab_id| still_open.contains(tab_id));
+    let note = if let Some(tab_id) = active {
+        format!(
+            "Browser context changed while this call ran. Observed new active tab {tab_id}. Use that tabId for follow-up calls."
+        )
+    } else if still_open.len() == 1 {
+        format!(
+            "Browser context changed while this call ran. Observed new tab {}. Use that tabId for follow-up calls.",
+            still_open[0]
+        )
+    } else {
+        let ids = still_open
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "Browser context changed while this call ran. Observed new tabs: {ids}. Use these tabIds for follow-up calls."
+        )
+    };
+    if let Some(content) = result.get_mut("content").and_then(Value::as_array_mut) {
+        content.push(json!({ "type": "text", "text": note }));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1480,6 +1533,28 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration as StdDuration;
 
+    #[test]
+    fn tab_delta_guidance_is_service_authored_and_ignores_already_closed_tabs() {
+        let mut result = json!({
+            "content": [{"type": "text", "text": "Clicked."}],
+            "structuredContent": {
+                "tabDelta": {
+                    "opened": [
+                        {"tabId": 11, "active": false},
+                        {"tabId": 12, "active": true}
+                    ],
+                    "closed": [11],
+                    "activeTabId": 12,
+                    "more": false
+                }
+            }
+        });
+        append_tab_delta_note(&mut result);
+        assert_eq!(
+            result["content"][1]["text"],
+            "Browser context changed while this call ran. Observed new active tab 12. Use that tabId for follow-up calls."
+        );
+    }
     fn temp_audit_path(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "ghostlight-server-audit-test-{}-{tag}.jsonl",
