@@ -56,7 +56,7 @@ Field order is stable and part of the format. Absent values are `null`, not omit
 | `duration_ms` | number | Dispatch-to-result wall time. |
 | `manifest` | object or null | `{name, version, hash}` of the policy in force. |
 | `held` | boolean | True when answered with the take-the-wheel pause text. |
-| `attention_required` | boolean | True when this MCP session's denial circuit refused dispatch pending a human disposition. |
+| `attention_required` | boolean | True when this workspace's denial circuit refused dispatch pending a human disposition. |
 | `orchestrator` | string or null | `script` or `form_fill` on an internal execution. |
 | `batch_id` | string or null | Correlates an orchestrator parent with its internal executions. |
 | `step` | number or null | One-indexed internal execution position. |
@@ -71,7 +71,7 @@ Attention transitions also share the stream and carry `event` values `attention_
 `attention_resumed`, `attention_quieted`, or `attention_ended`. Their stable content-free fields
 are `event_id`, `ts`, `client`, `event`, `category`, `capability`, `domain`, `threshold`, `count`,
 `window_ms`, and `disposition`. Null threshold/count/window values identify a closing disposition.
-These records do not contain the opaque session guid, full URL, tool arguments, denial message, or
+These records do not contain the opaque workspace id, full URL, tool arguments, denial message, or
 page content.
 
 A `license` field is additionally appended to tool-call records only while an organization-managed

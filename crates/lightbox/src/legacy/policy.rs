@@ -2,38 +2,32 @@
 //! Injected local-policy boot and live-reload parity scenarios.
 
 use std::ffi::OsString;
-use std::sync::Once;
 use std::time::Duration;
 
-use anyhow::{anyhow, ensure};
+use anyhow::ensure;
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 
-use ghostlight_core::browser::pattern;
+use ghostlight_core::browser::{directory, pattern};
 use ghostlight_core::governance::config::reload::PolicySource;
 use ghostlight_core::governance::manifest::source;
 use ghostlight_core::governance::paths::GovernancePaths;
+use ghostlight_core::governance::ports::ClientInfo;
 use ghostlight_core::hub::outbound::browser::Browser;
-use ghostlight_core::hub::session::SessionGuid;
+use ghostlight_core::hub::peer::PeerUser;
 use ghostlight_core::hub::ServiceContext;
-use ghostlight_core::mcp::server::serve_session;
+use ghostlight_core::tool::outcome::CallOutcome;
+use ghostlight_core::work::{CancellationToken, WorkContext};
 use ghostlight_transport::observability::DebugSink;
-use ghostlight_transport::role::{set_role, Role};
+use ghostlight_transport::workspace_id::WorkspaceId;
 
 use crate::scenarios::Scenario;
 use crate::support::TempRoot;
-
-static ROLE_ONCE: Once = Once::new();
 
 pub(super) fn registry() -> Vec<Scenario> {
     vec![
         ("legacy-org-policy-boot", org_policy_boot),
         ("legacy-org-policy-hot-reload", org_policy_hot_reload),
     ]
-}
-
-fn ensure_service_role() {
-    ROLE_ONCE.call_once(|| set_role(Role::Service));
 }
 
 fn manifest(capabilities: &[&str]) -> Value {
@@ -109,22 +103,7 @@ fn expanded_tools() -> Vec<String> {
     .collect()
 }
 
-fn tool_names(response: &Value) -> anyhow::Result<Vec<String>> {
-    response["result"]["tools"]
-        .as_array()
-        .ok_or_else(|| anyhow!("tools/list returned no tools: {response}"))?
-        .iter()
-        .map(|tool| {
-            tool["name"]
-                .as_str()
-                .map(str::to_string)
-                .ok_or_else(|| anyhow!("tool has no name: {tool}"))
-        })
-        .collect()
-}
-
 fn build_context(paths: &GovernancePaths) -> anyhow::Result<ServiceContext> {
-    ensure_service_role();
     let loaded = source::load_policy_at(&paths.org_policy, None, pattern::is_valid_pattern)?;
     ensure!(
         loaded.manifest.is_some(),
@@ -142,105 +121,99 @@ fn build_context(paths: &GovernancePaths) -> anyhow::Result<ServiceContext> {
     )?)
 }
 
-struct SessionDriver {
-    writer: tokio::io::WriteHalf<tokio::io::DuplexStream>,
-    replies: tokio::sync::mpsc::UnboundedReceiver<Value>,
-    history: Vec<Value>,
-    session: tokio::task::JoinHandle<()>,
-    reader: tokio::task::JoinHandle<()>,
+struct WorkDriver {
+    context: ServiceContext,
+    owner: PeerUser,
+    workspace: WorkspaceId,
+    client: Option<ClientInfo>,
 }
 
-impl SessionDriver {
-    async fn start(context: ServiceContext) -> Self {
-        let (client, server) = tokio::io::duplex(256 * 1024);
-        let session = tokio::spawn(async move {
-            let _ = serve_session(server, context, SessionGuid::mint()).await;
-        });
-        let (read_half, writer) = tokio::io::split(client);
-        let (sender, replies) = tokio::sync::mpsc::unbounded_channel();
-        let reader = tokio::spawn(async move {
-            let mut lines = BufReader::new(read_half).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let Ok(value) = serde_json::from_str(&line) else {
-                    break;
-                };
-                if sender.send(value).is_err() {
-                    break;
-                }
-            }
-        });
-        Self {
-            writer,
-            replies,
-            history: Vec::new(),
-            session,
-            reader,
-        }
+impl WorkDriver {
+    fn start(context: ServiceContext, client: Option<ClientInfo>) -> anyhow::Result<Self> {
+        let owner = PeerUser("lightbox-local-policy".to_string());
+        let workspace = context.workspaces.mint(&owner, true)?;
+        Ok(Self {
+            context,
+            owner,
+            workspace,
+            client,
+        })
     }
 
-    async fn send(&mut self, value: &Value) -> anyhow::Result<()> {
-        self.writer.write_all(&serde_json::to_vec(value)?).await?;
-        self.writer.write_all(b"\n").await?;
-        self.writer.flush().await?;
-        Ok(())
+    fn generation(&self) -> u64 {
+        *self.context.catalog_generation.borrow()
     }
 
-    async fn receive_id(&mut self, id: i64, within: Duration) -> anyhow::Result<Value> {
-        let receive = async {
-            loop {
-                let value = self
-                    .replies
-                    .recv()
-                    .await
-                    .ok_or_else(|| anyhow!("session output closed"))?;
-                self.history.push(value.clone());
-                if value["id"] == id {
-                    return Ok(value);
-                }
-            }
+    fn tool_names(&self) -> Vec<String> {
+        let authority = self.context.authority.current();
+        ghostlight_core::tool::catalog::project_catalog(
+            &authority.governance,
+            None,
+            self.generation(),
+        )
+        .tools
+        .into_iter()
+        .map(|tool| {
+            tool.declaration["name"]
+                .as_str()
+                .expect("canonical tool declaration has a name")
+                .to_string()
+        })
+        .collect()
+    }
+
+    async fn call(&self, operation: &str, arguments: &Value) -> CallOutcome {
+        let workspace = match directory::descriptor(operation).map(|tool| tool.workspace_use) {
+            Some(directory::WorkspaceUse::Independent) => None,
+            _ => Some(self.workspace.clone()),
         };
-        tokio::time::timeout(within, receive)
-            .await
-            .map_err(|_| anyhow!("no response for id {id} within {within:?}"))?
-    }
-
-    async fn request(&mut self, id: i64, method: &str, params: Value) -> anyhow::Result<Value> {
-        self.send(&json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        }))
-        .await?;
-        self.receive_id(id, Duration::from_secs(15)).await
+        let lease = workspace.as_ref().map(|workspace| {
+            self.context
+                .workspaces
+                .lease(workspace, &self.owner)
+                .expect("live Lightbox workspace leases")
+        });
+        let work = WorkContext::new(workspace, operation.to_string(), self.client.clone(), None);
+        let cancellation = CancellationToken::new();
+        let outcome = ghostlight_core::tool::pipeline::run_work(
+            &self.context.browser,
+            &self.context.store,
+            &self.context.authority,
+            &self.context.workspaces,
+            &work,
+            &cancellation,
+            arguments,
+        )
+        .await;
+        drop(lease);
+        outcome
     }
 
     async fn poll_tools_until(
-        &mut self,
-        next_id: &mut i64,
+        &self,
         expected: &[String],
+        after_generation: Option<u64>,
     ) -> anyhow::Result<()> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
         loop {
-            let id = *next_id;
-            *next_id += 1;
-            let response = self.request(id, "tools/list", json!({})).await?;
-            if tool_names(&response)? == expected {
+            let actual = self.tool_names();
+            let generation = self.generation();
+            if actual == expected && after_generation.is_none_or(|previous| generation > previous) {
                 return Ok(());
             }
             ensure!(
                 tokio::time::Instant::now() < deadline,
-                "advertised tools never matched {expected:?}; last response: {response}"
+                "advertised tools never matched {expected:?} after {after_generation:?}; last generation: {generation}; last projection: {actual:?}"
             );
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
     }
 
-    async fn finish(mut self) {
-        let _ = self.writer.shutdown().await;
-        drop(self.writer);
-        let _ = self.session.await;
-        let _ = self.reader.await;
+    fn finish(self) -> anyhow::Result<()> {
+        self.context
+            .workspaces
+            .release(&self.workspace, &self.owner)?;
+        Ok(())
     }
 }
 
@@ -274,12 +247,10 @@ fn org_policy_boot() -> anyhow::Result<()> {
         let paths = GovernancePaths::under(tmp.path());
         std::fs::write(&paths.org_policy, serde_json::to_vec(&manifest(&["read"]))?)?;
         let context = build_context(&paths)?;
-        let mut driver = SessionDriver::start(context).await;
-        let initialized = driver.request(1, "initialize", json!({})).await?;
-        ensure!(initialized["result"].is_object(), "{initialized}");
-        let tools = driver.request(2, "tools/list", json!({})).await?;
-        ensure!(tool_names(&tools)? == read_only_tools(), "{tools}");
-        driver.finish().await;
+        let driver = WorkDriver::start(context, None)?;
+        let tools = driver.tool_names();
+        ensure!(tools == read_only_tools(), "{tools:?}");
+        driver.finish()?;
         Ok(())
     })
 }
@@ -292,49 +263,44 @@ fn org_policy_hot_reload() -> anyhow::Result<()> {
         let paths = GovernancePaths::under(tmp.path());
         std::fs::write(&paths.org_policy, serde_json::to_vec(&manifest(&["read"]))?)?;
         let context = build_context(&paths)?;
-        let mut driver = SessionDriver::start(context).await;
-        let initialized = driver
-            .request(
-                1,
-                "initialize",
-                json!({"clientInfo":{"name":"lightbox-hot-reload","version":"1.2.3"}}),
-            )
-            .await?;
-        ensure!(initialized["result"].is_object(), "{initialized}");
-        let initial = driver.request(2, "tools/list", json!({})).await?;
-        ensure!(tool_names(&initial)? == read_only_tools());
+        let driver = WorkDriver::start(
+            context,
+            Some(ClientInfo {
+                name: "lightbox-hot-reload".to_string(),
+                version: "1.2.3".to_string(),
+            }),
+        )?;
+        ensure!(driver.tool_names() == read_only_tools());
+        let initial_generation = driver.generation();
 
         std::fs::write(
             &paths.org_policy,
             serde_json::to_vec(&manifest(&["read", "action", "write"]))?,
         )?;
-        let mut next_id = 3;
         driver
-            .poll_tools_until(&mut next_id, &expanded_tools())
+            .poll_tools_until(&expanded_tools(), Some(initial_generation))
             .await?;
-        let call_id = 9_000;
-        let call = driver
-            .request(
-                call_id,
-                "tools/call",
-                json!({"name":"tabs_create_mcp","arguments":{}}),
-            )
-            .await?;
-        ensure!(call["id"] == call_id);
+        let expanded_generation = driver.generation();
+        let _ = driver.call("tabs_create_mcp", &json!({})).await;
 
         std::fs::remove_file(&paths.org_policy)?;
         let all_open: Vec<String> = ghostlight_core::browser::directory::advertised_tool_names()
             .into_iter()
             .map(str::to_string)
             .collect();
-        driver.poll_tools_until(&mut next_id, &all_open).await?;
-        let notifications = driver
-            .history
-            .iter()
-            .filter(|value| value["method"] == "notifications/tools/list_changed")
-            .count();
-        ensure!(notifications == 2, "notifications: {:?}", driver.history);
-        driver.finish().await;
+        driver
+            .poll_tools_until(&all_open, Some(expanded_generation))
+            .await?;
+        let all_open_generation = driver.generation();
+        ensure!(
+            expanded_generation == initial_generation + 1,
+            "first catalog generation did not advance exactly once: {initial_generation} -> {expanded_generation}"
+        );
+        ensure!(
+            all_open_generation == expanded_generation + 1,
+            "second catalog generation did not advance exactly once: {expanded_generation} -> {all_open_generation}"
+        );
+        driver.finish()?;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         let audit_path = tmp.path().join("audit.jsonl");

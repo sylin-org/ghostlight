@@ -1,11 +1,102 @@
 # STATUS -- where the project stands
 
-Last updated: 2026-08-01. This file is a point-in-time snapshot maintained by whoever
+Last updated: 2026-08-05. This file is a point-in-time snapshot maintained by whoever
 finishes significant work. It exists so a fresh agent (or human) can orient without any
 prior session context. **Trust the tree, `git log`, and the batch LEDGERs over this file
 when they disagree**, and update it when you land something that changes the picture.
 
 ## Now
+
+- **Browser topology now belongs entirely to the extension in the working tree (ADR-0098).** The
+  service owns logical `WorkspaceId` authority, exact tab ownership, governance, scheduling, and
+  browser-profile routing. Its private tool instruction carries only the desired `groupTitle`; it
+  stores and sends no native Chrome window or group ids. The extension owns one browser-session
+  workspace topology record, derives current placement from live owned tabs, follows a tab or
+  whole group that the user moves to another window, and reuses an exact-title visible group
+  without merging workspace authority. The old asynchronous `group_request` path, stale-window
+  retry, and separate window-qualified maps are removed. Formatting, diff hygiene, JavaScript
+  syntax, all 158 extension tests, strict workspace Clippy, the complete Rust workspace suite, and
+  all 31 real-process Lightbox scenarios pass. The repository release build is live and doctor
+  reports its extension connection and three aggregate MCP edges healthy. After an explicit
+  extension reload, a controlled call created tab 5541182382 in group 399144999. The user moved
+  the whole group to another Chrome window; a creation-disabled context call returned that exact
+  group and tab from its live location without creating or recovering anything. The candidate is
+  complete in the working tree. A subsequent `navigate` routed to that same moved tab and loaded
+  `https://example.com/`, proving ordinary addressed work follows it too.
+
+- **Closed MCP transport recovery is explicit and verified in the working tree.** A live
+  connector-name cutover showed that an MCP client can retain cached Ghostlight tools after its
+  host-owned stdio connector is gone. `Transport closed` is real for that client even while the
+  shared service, browser extension, and other MCP edges remain healthy. Both date-named MCP
+  shores now instruct the model to stop, reconnect through its current client, avoid standalone
+  connector workarounds, and inspect state before retrying effectful work. Install explains the
+  same cache/liveness distinction. Doctor renders the existing aggregate live-edge count, treats
+  zero as informational, and no longer attributes a persistent service to an exited launcher or
+  historical MCP client. No process, endpoint, registry, persisted state, workspace rule, or tab
+  cleanup behavior was added. Strict workspace Clippy and the full fast-tier workspace suite pass;
+  focused results include 48 MCP-edge tests, 28 doctor tests, and 13 installer tests. A read-only
+  live doctor probe confirmed one connected browser, two aggregate live MCP edges, and a truthful
+  persistent-service row. The affected Codex connection still requires its client-owned MCP
+  reconnect before live tool verification. The upstream conformance-runner side quest remains
+  paused; no fork or external post was created.
+
+- **The ADR-0096 three-executable cutover is implemented and fully verified in the working tree.**
+  Its naming amendment uses `ghostlight-mcp-connector`, `ghostlight`, and
+  `ghostlight-browser-connector`, with matching `crates/mcp-connector/` and
+  `crates/browser-connector/` source boundaries. This is a rename of the two existing shores, not
+  a fourth process or compatibility alias.
+  MCP clients now launch `ghostlight-mcp-connector`, whose exact-date
+  `mcp_2025_11_25` and `mcp_2026_07_28` modules own stdio, JSON-RPC lifecycle, revision metadata,
+  correlation, cancellation, response rendering, and future-call reconnect. A typed owner-only
+  bridge carries normalized catalog and work messages to the persistent `ghostlight` service.
+  The service owns `WorkspaceId`, the canonical catalog, governance, audit, scheduling, browser
+  coordination, and protocol-neutral outcomes; it does not parse MCP or retain JSON-RPC ids.
+  `ghostlight-browser-connector` is browser-only and the agent role is gone. Executable entry points and crate
+  dependencies enforce the split; the process-global role marker was removed. Browser frames use
+  `WorkspaceId` in compatibility `guid` as their sole routing key, while human client labels are
+  presentation/audit context only and current tool/group frames omit the former top-level
+  presentation/routing `clientKey`. A nested scheduler resource may retain that legacy wire name
+  while carrying `WorkspaceId` for covered adapter skew. Installers, doctor, demos, release
+  archives, package-manager templates, npm, MCPB, the dev loop, Lightbox, and client configuration
+  now use the three sibling executables. Older MCP revisions, pre-initialize calls, raw handshake
+  replay, and replay/response recovery across an edge reconnect are intentionally removed. A
+  surviving service still drains the same bounded per-call future after one outward
+  `outcome_unknown`, so landing checks, audit, and leases settle without a result registry. The
+  adversarial runtime pass also binds quarantine recovery to exact executor-generation proof,
+  bounds browser writes, orders hold/panic against final enqueue, purges restarted-browser tab
+  ownership, preserves replacement focus across stale detach, keeps active work alive past edge
+  loss, and rechecks chunk negotiation on the exact final browser connection. Explicit input tab
+  ids are verification-only; only exact successful context/create results establish membership at
+  the browser shore. Browser relay dial, hello, and identity replay are one bounded reconnect
+  attempt, closing the reproduced stale Windows-pipe race. Official MCP Tasks remain unadvertised
+  and require a later ADR. Protocol verification uses immutable dated-schema/spec-driven review
+  plus exact stdio transcript tests. Formatting, strict locked workspace clippy, the complete
+  workspace suite, all 31 Lightbox process scenarios, 164 extension tests, npm/MCPB tests,
+  Anthropic's pinned MCPB validator, public-surface checks, syntax checks, diff hygiene, and ASCII
+  checks pass. The connector-name follow-up reran strict workspace Clippy, the full workspace
+  suite, all 31 Lightbox process scenarios, 164 extension tests, npm/MCPB launcher tests, and
+  Anthropic's pinned MCPB validator. The official conformance server runner was not run because it currently
+  accepts an HTTP URL rather than a stdio command. The batch ledger records exact gate evidence;
+  do not treat this working-tree cutover as a published release.
+
+- **The local directory packaging path is implemented but not externally submitted.** ADR-0095
+  adds a self-contained Windows/macOS MCPB with a protocol-clean Node launcher, an installer mode
+  that leaves MCP-client configuration to the package host, release assembly, and CI coverage.
+  Anthropic's official validator accepts the manifest. The live Anthropic form also says submitted
+  extensions must be MIT licensed; Ghostlight's complete bundle is open-core, so submission is
+  correctly gated on an eligibility answer and a new released MCPB asset. OpenAI's public plugin
+  form requires a public production HTTPS MCP endpoint and remains incompatible with ADR-0077.
+  Ready copy and inquiry drafts live in `docs/business/DIRECTORY-SUBMISSIONS.md`. Formatting,
+  strict workspace clippy, the full Rust workspace suite, five MCPB launcher tests, archive-layout
+  packaging, PowerShell syntax checks, ASCII checks, and diff hygiene pass.
+
+- **Ghostlight was submitted to mcpservers.org on 2026-08-04.** The free Development-category
+  submission uses the canonical GitHub repository and `hello@sylin.org` contact. mcpservers.org
+  confirmed receipt and quoted a 12-hour review window; the listing is not yet claimed live.
+
+- **GitHub approved Ghostlight for inclusion in the GitHub MCP Registry on 2026-08-03.** The
+  manually curated review of `org.sylin/ghostlight` is complete. GitHub will add the server to
+  its catalog, and no further owner action is required.
 
 - **Agent-readable tool definitions and standard MCP annotations shipped in v0.7.3
   (ADR-0094).** All 25 tools now publish display titles plus conservative read-only, destructive,
@@ -105,11 +196,12 @@ when they disagree**, and update it when you land something that changes the pic
 
 - **Window-placed Chromium workspaces are implemented on `dev` (ADR-0085).** The first
   unaddressed tab-context, tab-create, or navigation call reuses Chrome's last-focused eligible
-  normal window and pins that browser/window for the MCP session. A new window is created only
-  when no eligible normal window exists. Groups are keyed by browser window plus client, moved
-  tabs and groups stay where the user put them, and private native-window metadata never enters
-  the MCP result. The visible group is organization, not the authority boundary; service tab
-  ownership and the extension managed-surface guard remain intact. Extension tests and focused
+  normal window and pins that browser/window for the Ghostlight workspace. A new window is created
+  only when no eligible normal window exists. Groups are keyed by browser window plus workspace;
+  their human client label is presentation only. Moved tabs and groups stay where the user put
+  them, and private native-window metadata never enters the MCP result. The visible group is
+  organization, not the authority boundary; service tab ownership and the extension
+  managed-surface guard remain intact. Extension tests and focused
   Rust pin/wire tests pass. Formatting, strict workspace clippy, the full Rust workspace suite,
   all 126 extension tests, JavaScript syntax, and every Lightbox process scenario pass. The
   fallback now distinguishes unknown inventory from a proven empty browser, consults live focus
@@ -279,7 +371,7 @@ when they disagree**, and update it when you land something that changes the pic
   checks, and the rendered 390px overflow/navigation/order checks are green.
 - **The July non-author experience closure is implemented on `dev` (ADR-0079).** An isolated
   denial is now a centered three-second sticker. Repeated enforced denials pause only the producing
-  MCP session at a synchronized service send boundary (3 matching/60 seconds or 5 total/120
+  producing workspace at a synchronized service send boundary (3 matching/60 seconds or 5 total/120
   seconds), then show a closed-shadow overlay and popup controls. Compact narration drops the
   progress meter; screenshot and recording feedback are quieter and tied to real capture state.
   Attention transitions are content-free audit records. The README and install guide now expose
@@ -465,9 +557,6 @@ its API credentials or dashboard metadata are absent.
   `ghostlight install` opens the stable extension walkthrough once; `--no-open`, dry-run,
   CI, failed, and idempotent paths stay quiet. The canonical service-first page is live at
   `sylin.org/ghostlight/service/post-install/`; the website publication gate is complete.
-- **Scoped MCP cancellation is proposed and deferred** (ADR-0068): first verify that supported
-  clients emit `notifications/cancelled`. If demand exists, stop `script`/`browser_batch` only
-  between steps, let the active step settle, preserve audit, and never claim rollback.
 - **Content / URL consistency pass (owner-driven, mostly DONE)**: swept outward-facing content
   for stale/branded URLs and moved the post-install UX onto the site. What landed:
   - **github.io fully retired.** The canonical home is `sylin.org/ghostlight`. Every reference to

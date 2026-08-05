@@ -93,7 +93,7 @@ fn resolve_inner(config: &Config) -> Option<Inner> {
 }
 
 impl Recorder {
-    /// Build the recorder from the initial resolved config. Called once at mcp-server
+    /// Build the recorder from the initial resolved config. Called once at service
     /// startup; [`Self::reload`] re-resolves it on every subsequent config change.
     pub fn from_config(config: &Config) -> Self {
         Self {
@@ -131,7 +131,7 @@ impl Recorder {
     }
 
     /// Install the license stamp appended to every subsequent record (ADR-0028 Decision 3). Called
-    /// once at mcp-server startup, and ONLY when governance is operationally in effect; the recorder
+    /// once at service startup, and ONLY when governance is operationally in effect; the recorder
     /// treats the value as opaque and simply appends it under the `"license"` key. `None` clears it.
     pub fn set_license_stamp(&self, stamp: Option<&'static str>) {
         *self
@@ -160,7 +160,7 @@ impl Recorder {
     }
 
     /// Re-resolve the destination from a fresh config snapshot and swap it in. Called by the
-    /// mcp-server's config-change watcher (A5's `ConfigStore::subscribe`) so an
+    /// service's config-change watcher (A5's `ConfigStore::subscribe`) so an
     /// `audit.enabled` / `audit.destination` / `audit.file.path` edit takes effect with no
     /// restart (RECONCILIATION.md section 3): the old destination is simply replaced, which is
     /// "close old, open new" for a file sink (no handle is held open between records; see

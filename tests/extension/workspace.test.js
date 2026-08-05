@@ -2,65 +2,48 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
 const {
-  LAST_FOCUSED_NORMAL,
   FOCUS_MRU_KEY,
-  WINDOW_INELIGIBLE_CODE,
-  workspaceGroupKey,
-  parseWorkspaceGroupKey,
   resolveWorkspaceWindow,
   rememberFocusedWindow,
   forgetWorkspaceWindow,
-  resolveWorkspaceGroup,
-  reconcileWorkspaceGroups,
-  tabsInWindow,
+  replaceWorkspaceTabs,
+  addWorkspaceTab,
+  removeWorkspaceTab,
+  workspaceGroupIds,
+  isWorkspaceGroupId,
+  liveWorkspaceTabs,
+  liveWorkspaceGroup,
+  preferredNamedGroup,
+  resolveWorkspacePlacement,
+  pruneWorkspaceGroups,
+  serializeWorkspaceTopology,
+  restoreWorkspaceTopology,
+  migrateLegacyWorkspaceTopology,
 } = require("../../extension/lib/workspace.js");
 
 function normal(id, extra = {}) {
   return { id, type: "normal", incognito: false, ...extra };
 }
 
-test("workspace group keys preserve client and window identity", () => {
-  const key = workspaceGroupKey("ghostlight-demo", 42);
-  assert.deepStrictEqual(parseWorkspaceGroupKey(key), {
-    windowId: 42,
-    clientKey: "ghostlight-demo",
-  });
-  assert.strictEqual(parseWorkspaceGroupKey("ghostlight-demo"), null);
-});
-
-test("automatic selection pulls the most recently focused normal window", async () => {
+test("initial placement pulls the most recently focused normal window", async () => {
   let created = 0;
   const chrome = {
     windows: {
       async getLastFocused(options) {
         assert.deepStrictEqual(options, { windowTypes: ["normal"] });
-        return normal(7, { focused: false });
+        return normal(7);
       },
       async getAll() { throw new Error("inventory should not be needed"); },
       async create() { created += 1; return normal(9); },
     },
   };
-  const resolved = await resolveWorkspaceWindow(chrome, { select: LAST_FOCUSED_NORMAL });
+  const resolved = await resolveWorkspaceWindow(chrome);
   assert.strictEqual(resolved.window.id, 7);
   assert.strictEqual(resolved.created, false);
   assert.strictEqual(created, 0);
 });
 
-test("live inventory focused state recovers when getLastFocused fails", async () => {
-  const chrome = {
-    windows: {
-      async getLastFocused() { throw new Error("temporarily unavailable"); },
-      async getAll() { return [normal(1), normal(2, { focused: true })]; },
-      async create() { throw new Error("must not create"); },
-    },
-    storage: { session: { async get() { return {}; } } },
-  };
-  const resolved = await resolveWorkspaceWindow(chrome, { select: LAST_FOCUSED_NORMAL });
-  assert.strictEqual(resolved.window.id, 2);
-  assert.strictEqual(resolved.created, false);
-});
-
-test("validated local focus MRU recovers without inventory ordering", async () => {
+test("validated focus MRU recovers without inventory ordering", async () => {
   const chrome = {
     windows: {
       WINDOW_ID_NONE: -1,
@@ -78,7 +61,7 @@ test("validated local focus MRU recovers without inventory ordering", async () =
     },
   };
   assert.strictEqual(await rememberFocusedWindow(chrome, 2), true);
-  const resolved = await resolveWorkspaceWindow(chrome, { select: LAST_FOCUSED_NORMAL });
+  const resolved = await resolveWorkspaceWindow(chrome);
   assert.strictEqual(resolved.window.id, 2);
   assert.deepStrictEqual(chrome.storage.session.value[FOCUS_MRU_KEY], [2]);
   assert.strictEqual(await forgetWorkspaceWindow(chrome, 2), true);
@@ -102,28 +85,7 @@ test("focus events retain receipt order across asynchronous storage", async () =
       },
     },
   };
-  const first = rememberFocusedWindow(chrome, 1);
-  const second = rememberFocusedWindow(chrome, 2);
-  await Promise.all([first, second]);
-  assert.deepStrictEqual(chrome.storage.session.value[FOCUS_MRU_KEY], [2, 1]);
-});
-
-test("Linux WINDOW_ID_NONE before a window switch does not erase focus order", async () => {
-  const chrome = {
-    windows: {
-      WINDOW_ID_NONE: -1,
-      async get(id) { return normal(id); },
-    },
-    storage: {
-      session: {
-        value: { [FOCUS_MRU_KEY]: [1] },
-        async get(key) { return { [key]: this.value[key] }; },
-        async set(update) { Object.assign(this.value, update); },
-      },
-    },
-  };
-  assert.strictEqual(await rememberFocusedWindow(chrome, -1), false);
-  assert.strictEqual(await rememberFocusedWindow(chrome, 2), true);
+  await Promise.all([rememberFocusedWindow(chrome, 1), rememberFocusedWindow(chrome, 2)]);
   assert.deepStrictEqual(chrome.storage.session.value[FOCUS_MRU_KEY], [2, 1]);
 });
 
@@ -136,99 +98,206 @@ test("inventory failure never authorizes a new window", async () => {
       async create() { creates += 1; },
     },
   };
-  await assert.rejects(
-    resolveWorkspaceWindow(chrome, { select: LAST_FOCUSED_NORMAL }),
-    /will not create another one/
-  );
+  await assert.rejects(resolveWorkspaceWindow(chrome), /will not create another one/);
   assert.strictEqual(creates, 0);
 });
 
-test("a pinned window is validated and never silently replaced", async () => {
-  const chrome = {
-    windows: {
-      async get(id) {
-        assert.strictEqual(id, 11);
-        throw new Error("closed");
-      },
-    },
-  };
-  await assert.rejects(resolveWorkspaceWindow(chrome, { windowId: 11 }), (error) => {
-    assert.strictEqual(error.code, WINDOW_INELIGIBLE_CODE);
-    assert.strictEqual(error.message, "That Ghostlight workspace is no longer available");
-    return true;
-  });
-});
-
 test("a new window is created only when no eligible normal window exists", async () => {
-  let created = 0;
   const chrome = {
     windows: {
       async getLastFocused() { throw new Error("none"); },
       async getAll() { return []; },
       async create(options) {
-        created += 1;
         assert.deepStrictEqual(options, { focused: true, type: "normal" });
         return normal(23, { tabs: [{ id: 101, windowId: 23 }] });
       },
     },
   };
-  const resolved = await resolveWorkspaceWindow(chrome, { select: LAST_FOCUSED_NORMAL });
+  const resolved = await resolveWorkspaceWindow(chrome);
   assert.strictEqual(resolved.window.id, 23);
   assert.strictEqual(resolved.created, true);
-  assert.strictEqual(created, 1);
 });
 
-test("ambiguous inventory is not treated as an ordering signal", async () => {
+test("a new workspace adopts an exact-title group only in its selected window", async () => {
+  const index = new Map();
   const chrome = {
     windows: {
-      async getLastFocused() { throw new Error("unknown"); },
-      async getAll() { return [normal(1), normal(2)]; },
-      async create() { throw new Error("must not create"); },
+      async getLastFocused() { return normal(8); },
     },
-  };
-  await assert.rejects(
-    resolveWorkspaceWindow(chrome, { select: LAST_FOCUSED_NORMAL }),
-    /Several normal browser windows/
-  );
-});
-
-test("stored client groups migrate to window-scoped keys", async () => {
-  const groups = new Map([["ghostlight-demo", 55]]);
-  const chrome = {
     tabGroups: {
-      async get(id) { return { id, windowId: 8 }; },
-    },
-  };
-  assert.strictEqual(await reconcileWorkspaceGroups(chrome, groups), true);
-  assert.deepStrictEqual(Array.from(groups.entries()), [
-    [workspaceGroupKey("ghostlight-demo", 8), 55],
-  ]);
-});
-
-test("a user-moved group is re-keyed and never pulled back", async () => {
-  const original = workspaceGroupKey("ghostlight-demo", 8);
-  const moved = workspaceGroupKey("ghostlight-demo", 12);
-  const groups = new Map([[original, 55]]);
-  const chrome = {
-    tabGroups: {
-      async get(id) { return { id, windowId: 12 }; },
-    },
-  };
-  assert.deepStrictEqual(
-    await resolveWorkspaceGroup(chrome, groups, "ghostlight-demo", 8),
-    { key: original, groupId: null, changed: true }
-  );
-  assert.deepStrictEqual(Array.from(groups.entries()), [[moved, 55]]);
-});
-
-test("window filtering never moves a named tab from another window", async () => {
-  const chrome = {
-    tabs: {
-      async get(id) {
-        if (id === 3) throw new Error("closed");
-        return { id, windowId: id === 1 ? 10 : 20 };
+      async query(query) {
+        assert.deepStrictEqual(query, { title: "Ghostlight - Codex", windowId: 8 });
+        return [
+          { id: 55, windowId: 8, title: query.title },
+          { id: 66, windowId: 9, title: query.title },
+        ];
       },
     },
   };
-  assert.deepStrictEqual(await tabsInWindow(chrome, [1, 2, 3], 10), [1]);
+  const placement = await resolveWorkspacePlacement(
+    chrome,
+    index,
+    "workspace-new",
+    "Ghostlight - Codex"
+  );
+  assert.strictEqual(placement.windowId, 8);
+  assert.strictEqual(placement.group.id, 55);
+});
+
+test("a moved whole group becomes the workspace placement without consulting focus", async () => {
+  const index = new Map();
+  addWorkspaceTab(index, "workspace", 1, 55);
+  const chrome = {
+    tabs: {
+      async get(id) { return { id, windowId: 12, groupId: 55, lastAccessed: 7 }; },
+    },
+    tabGroups: {
+      async get(id) { return { id, windowId: 12, title: "Ghostlight - Codex" }; },
+      async query() { throw new Error("the live group already decides placement"); },
+    },
+    windows: {
+      async getLastFocused() { throw new Error("focus must not override live placement"); },
+    },
+  };
+  const placement = await resolveWorkspacePlacement(
+    chrome,
+    index,
+    "workspace",
+    "Ghostlight - Codex"
+  );
+  assert.strictEqual(placement.windowId, 12);
+  assert.strictEqual(placement.group.id, 55);
+  assert.deepStrictEqual(placement.tabs.map((tab) => tab.id), [1]);
+});
+
+test("a detached owned tab stays put and anchors later placement in its new window", async () => {
+  const index = new Map();
+  addWorkspaceTab(index, "workspace", 1, 55);
+  const chrome = {
+    tabs: {
+      async get(id) { return { id, windowId: 12, groupId: -1, lastAccessed: 9 }; },
+    },
+    tabGroups: {
+      async query(query) {
+        assert.deepStrictEqual(query, { title: "Ghostlight - Codex", windowId: 12 });
+        return [{ id: 77, windowId: 12, title: query.title }];
+      },
+    },
+  };
+  const placement = await resolveWorkspacePlacement(
+    chrome,
+    index,
+    "workspace",
+    "Ghostlight - Codex"
+  );
+  assert.strictEqual(placement.windowId, 12);
+  assert.strictEqual(placement.group.id, 77);
+  assert.strictEqual(index.get("workspace").groupId, null);
+});
+
+test("the most recently accessed grouped owned tab chooses among split groups", async () => {
+  const index = new Map();
+  replaceWorkspaceTabs(index, "workspace", [1, 2], 55);
+  const chrome = {
+    tabs: {
+      async get(id) {
+        return id === 1
+          ? { id, windowId: 8, groupId: 55, lastAccessed: 4 }
+          : { id, windowId: 12, groupId: 77, lastAccessed: 9 };
+      },
+    },
+    tabGroups: {
+      async get(id) { return { id, windowId: id === 55 ? 8 : 12 }; },
+    },
+  };
+  const group = await liveWorkspaceGroup(
+    chrome,
+    index,
+    "workspace",
+    await liveWorkspaceTabs(chrome, index, "workspace")
+  );
+  assert.strictEqual(group.id, 77);
+  assert.strictEqual(index.get("workspace").groupId, 77);
+});
+
+test("managed exact-title groups win deterministic adoption", async () => {
+  const index = new Map();
+  replaceWorkspaceTabs(index, "old", [1], 90);
+  const chrome = {
+    tabGroups: {
+      async query() {
+        return [
+          { id: 40, windowId: 8 },
+          { id: 90, windowId: 8 },
+        ];
+      },
+    },
+  };
+  const selected = await preferredNamedGroup(chrome, index, 8, "Ghostlight - Codex");
+  assert.strictEqual(selected.id, 90);
+});
+
+test("shared presentation keeps workspace tab inventories separate", async () => {
+  const index = new Map();
+  replaceWorkspaceTabs(index, "workspace-a", [1, 2], 55);
+  replaceWorkspaceTabs(index, "workspace-b", [3], 55);
+  addWorkspaceTab(index, "workspace-a", 4, 55);
+  const chrome = {
+    tabs: {
+      async get(id) {
+        if (id === 2) throw new Error("closed");
+        return { id, groupId: 55, title: `tab-${id}` };
+      },
+    },
+  };
+  assert.deepStrictEqual(
+    (await liveWorkspaceTabs(chrome, index, "workspace-a")).map((tab) => tab.id),
+    [1, 4]
+  );
+  assert.deepStrictEqual(
+    (await liveWorkspaceTabs(chrome, index, "workspace-b")).map((tab) => tab.id),
+    [3]
+  );
+  removeWorkspaceTab(index, 1);
+  assert.deepStrictEqual(Array.from(index.get("workspace-a").tabIds), [4]);
+  assert.deepStrictEqual(Array.from(index.get("workspace-b").tabIds), [3]);
+  assert.deepStrictEqual(Array.from(workspaceGroupIds(index)), [55]);
+  assert.strictEqual(isWorkspaceGroupId(index, 55), true);
+});
+
+test("topology serialization round-trips tab sets and shared groups", () => {
+  const source = new Map();
+  replaceWorkspaceTabs(source, "a", [1, 2], 55);
+  replaceWorkspaceTabs(source, "b", [3], 55);
+  const restored = new Map();
+  assert.strictEqual(
+    restoreWorkspaceTopology(restored, serializeWorkspaceTopology(source)),
+    true
+  );
+  assert.deepStrictEqual(Array.from(restored.get("a").tabIds), [1, 2]);
+  assert.strictEqual(restored.get("a").groupId, 55);
+  assert.deepStrictEqual(Array.from(restored.get("b").tabIds), [3]);
+});
+
+test("legacy window-qualified maps migrate into one workspace record", () => {
+  const oldWindow = JSON.stringify(["v1", 8, "workspace"]);
+  const movedWindow = JSON.stringify(["v1", 12, "workspace"]);
+  const index = new Map();
+  assert.strictEqual(migrateLegacyWorkspaceTopology(index, {
+    clientGroupsState: [[movedWindow, 55]],
+    workspaceTabsState: [[oldWindow, [1, 2]]],
+  }), true);
+  assert.deepStrictEqual(Array.from(index.get("workspace").tabIds), [1, 2]);
+  assert.strictEqual(index.get("workspace").groupId, 55);
+});
+
+test("dead groups are pruned without losing workspace tab ownership", async () => {
+  const index = new Map();
+  replaceWorkspaceTabs(index, "workspace", [1], 55);
+  const chrome = {
+    tabGroups: { async get() { throw new Error("gone"); } },
+  };
+  assert.strictEqual(await pruneWorkspaceGroups(chrome, index), true);
+  assert.strictEqual(index.get("workspace").groupId, null);
+  assert.deepStrictEqual(Array.from(index.get("workspace").tabIds), [1]);
 });

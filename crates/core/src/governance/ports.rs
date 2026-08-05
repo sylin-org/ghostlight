@@ -68,7 +68,7 @@ pub fn call_label(tool: &str, action: Option<&str>) -> String {
 /// The `user_manifest_ignored` session-event TRANSITION gate (ADR-0025 Decision 5): true only
 /// when the condition NEWLY holds (it was false and is now true), never on a repeat while it
 /// stays true across consecutive reloads. Pure so the gating rule is testable independent of
-/// the manifest-reload subscription task that calls it (`transport::mcp::server`).
+/// the service authority watcher that calls it (`crate::hub`).
 pub fn user_manifest_ignored_transitioned(previously_ignored: bool, now_ignored: bool) -> bool {
     !previously_ignored && now_ignored
 }
@@ -175,9 +175,9 @@ pub struct Identity {
     pub resolved_by: String,
 }
 
-/// The `client` object of an audit record: `{ "name": ..., "version": ... }` from the MCP
-/// `initialize` request's `clientInfo` (shared format doc section 6.1). Captured once per
-/// session, first-wins.
+/// The `client` object of an audit record: `{ "name": ..., "version": ... }` supplied by the MCP
+/// edge for the current call (shared format doc section 6.1). The `2025-11-25` edge derives it
+/// from `initialize.clientInfo`; the service does not own that protocol lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ClientInfo {
     pub name: String,
@@ -198,8 +198,7 @@ pub struct AuditRecord {
     /// From the active manifest's `identity` block; always `None` until the manifest task
     /// (g12) lands.
     pub identity: Option<Identity>,
-    /// MCP client identity from the `initialize` request's `clientInfo`; `None` if the client
-    /// did not provide it. Captured once per session.
+    /// MCP edge-supplied client presentation for this call; `None` if the client did not provide it.
     pub client: Option<ClientInfo>,
     /// MCP tool name as received.
     pub tool: String,
@@ -231,7 +230,7 @@ pub struct AuditRecord {
     /// executing (a user hold, g10); on a held record `decision` is `"allow"` and
     /// `duration_ms` is `0`. `false` on every other record; always present, never omitted.
     pub held: bool,
-    /// `true` when this session's denial circuit refused the call before dispatch.
+    /// `true` when this workspace's denial circuit refused the call before dispatch.
     pub attention_required: bool,
     /// `"script"` | `"form_fill"` | `None`. Present only on orchestrated internal executions.
     pub orchestrator: Option<&'static str>,
@@ -268,8 +267,7 @@ pub struct SessionEventRecord {
     /// From the active manifest's `identity` block; always `None` until the manifest task
     /// (g12) lands.
     pub identity: Option<Identity>,
-    /// MCP client identity from the `initialize` request's `clientInfo`; `None` if the client
-    /// did not provide it. Captured once per session.
+    /// MCP edge-supplied client presentation for the event; `None` when unavailable.
     pub client: Option<ClientInfo>,
     /// The event discriminator: `"session_killed"` (g11, the panic kill switch), or, as of
     /// ADR-0025, `"manifest_reload"` (a successful manifest hot-reload swap) and
@@ -289,7 +287,7 @@ pub struct AttentionEventRecord {
     pub event_id: String,
     /// RFC 3339 UTC timestamp, millisecond precision.
     pub ts: String,
-    /// MCP client identity captured for this session, when supplied.
+    /// MCP edge-supplied client presentation for the workspace event, when supplied.
     pub client: Option<ClientInfo>,
     /// `attention_opened`, `attention_resumed`, `attention_quieted`, or `attention_ended`.
     pub event: &'static str,

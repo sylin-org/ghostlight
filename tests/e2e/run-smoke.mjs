@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-// Headless smoke: real extension + real binary over native messaging, driven as an MCP server
-// over stdio (ADR-0026 Decision 6). See docs/tasks/maturity-1/00-design.md "Headless smoke (m06)"
-// for the pinned architecture this file implements.
+// Headless smoke: real extension and the three shipping executables. The MCP client drives
+// ghostlight-mcp-connector over stdio, ghostlight owns the service, and Chromium launches the
+// browser-only ghostlight-browser-connector native host (ADR-0096).
 //
 // Wired into CI as the `e2e-smoke` job (.github/workflows/ci.yml), blocking, no
 // continue-on-error. Previously retired (2026-07) after hanging to the runner ceiling; the root
@@ -44,18 +44,26 @@ function fail(reason, code) {
 // Step 1: resolve the repo root (done above) and locate the binary, building it if absent.
 function resolveBinaryPath() {
   const exeName = process.platform === "win32" ? "ghostlight.exe" : "ghostlight";
-  const binPath = path.join(REPO_ROOT, "target", "debug", exeName);
-  if (existsSync(binPath)) return binPath;
+  const targetRoot = process.env.CARGO_TARGET_DIR
+    ? path.resolve(REPO_ROOT, process.env.CARGO_TARGET_DIR)
+    : path.join(REPO_ROOT, "target");
+  const binPath = path.join(targetRoot, "debug", exeName);
+  const mcpPath = siblingBin(binPath, "ghostlight-mcp-connector");
+  const relayPath = siblingBin(binPath, "ghostlight-browser-connector");
+  if (existsSync(binPath) && existsSync(mcpPath) && existsSync(relayPath)) return binPath;
   const build = spawnSync("cargo", ["build", "--workspace"], { cwd: REPO_ROOT, stdio: "inherit" });
-  if (build.status !== 0 || !existsSync(binPath)) {
-    fail(`cargo build did not produce ${binPath}`);
+  if (
+    build.status !== 0 ||
+    !existsSync(binPath) ||
+    !existsSync(mcpPath) ||
+    !existsSync(relayPath)
+  ) {
+    fail(`cargo build did not produce the three Ghostlight executables beside ${binPath}`);
   }
   return binPath;
 }
 
-// Derive the sibling `ghostlight-relay` executable (ADR-0051 Phase 3) beside the resolved
-// `ghostlight` binary: same dir, platform suffix. `cargo build --workspace` builds both bins into
-// target/debug; role (agent vs. browser) is selected at launch, not by binary name.
+// Derive either shipping shore beside the resolved `ghostlight` service executable.
 function siblingBin(binaryPath, name) {
   const exe = process.platform === "win32" ? `${name}.exe` : name;
   return path.join(path.dirname(binaryPath), exe);
@@ -377,15 +385,17 @@ function reExecUnderXvfb() {
 }
 
 async function runDryRun(binaryPath, endpoint) {
-  // Chrome launches the native host, so the manifest/wrapper wraps ghostlight-relay; the browser
-  // role auto-detects from the chrome-extension:// origin Chrome passes (ADR-0051 Phase 3).
-  const browserBin = siblingBin(binaryPath, "ghostlight-relay");
+  // Chrome launches the browser-only native host from the manifest wrapper.
+  const browserBin = siblingBin(binaryPath, "ghostlight-browser-connector");
+  const mcpBin = siblingBin(binaryPath, "ghostlight-mcp-connector");
   const selectedFixture = FREE_SURFACE_BASELINE ? FREE_SURFACE_FIXTURE_PATH : FIXTURE_PATH;
   const { server, url: fixtureUrl } = await startFixtureServer(selectedFixture);
   const { userDataDir, wrapperPath, manifestPath } = buildProfile(endpoint, browserBin);
   const plan = {
     repoRoot: REPO_ROOT,
     binaryPath,
+    mcpBin,
+    browserBin,
     endpoint,
     fixtureUrl,
     mode: FREE_SURFACE_BASELINE ? "free-surface-baseline" : "smoke",
@@ -402,26 +412,24 @@ async function runDryRun(binaryPath, endpoint) {
 }
 
 async function runLive(binaryPath, endpoint) {
-  // ADR-0051 Phase 3: both roles are the same ghostlight-relay binary. Chrome launches it via the
-  // native-messaging manifest (browser role auto-detected from the chrome-extension:// origin);
-  // the MCP client launches it with an explicit `--role agent`. The `service` spawn below stays on
-  // the separate `ghostlight` bin.
-  const browserBin = siblingBin(binaryPath, "ghostlight-relay");
-  const agentBin = siblingBin(binaryPath, "ghostlight-relay");
+  // ADR-0096: each process has one lifecycle. Chromium launches ghostlight-browser-connector, the
+  // test's MCP client launches ghostlight-mcp-connector, and ghostlight remains the persistent service.
+  const browserBin = siblingBin(binaryPath, "ghostlight-browser-connector");
+  const mcpBin = siblingBin(binaryPath, "ghostlight-mcp-connector");
   const selectedFixture = FREE_SURFACE_BASELINE ? FREE_SURFACE_FIXTURE_PATH : FIXTURE_PATH;
   const { server, url: fixtureUrl } = await startFixtureServer(selectedFixture);
   const { userDataDir } = buildProfile(endpoint, browserBin);
 
-  // The hub model (ADR-0030): a standalone SERVICE owns the browser link, and both the
-  // extension's native-messaging host and this test's MCP client are thin ADAPTERS that dial it.
+  // The hub model (ADR-0030/0096): a standalone service owns browser and workspace state. The
+  // browser native host and MCP protocol edge each dial their own local service shore.
   // In production the installer registers the service to auto-start; CI has no OS supervisor, so
-  // spawn it explicitly. Without it, an adapter's auto-start self-heal looks for a systemd unit
+  // spawn it explicitly. Without it, shore auto-start self-heal looks for a systemd unit
   // that does not exist and the connection fails.
   const service = spawn(binaryPath, ["service"], {
     stdio: ["ignore", "inherit", "inherit"],
     env: { ...process.env, GHOSTLIGHT_ENDPOINT: endpoint },
   });
-  // Give the service a moment to claim its endpoint before the extension and adapter dial it.
+  // Give the service a moment to claim its endpoints before both shores dial it.
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
   let cleanup = async () => {
@@ -467,7 +475,7 @@ async function runLive(binaryPath, endpoint) {
     fail("no extension service worker appeared within the retry budget", 3);
   }
 
-  const child = spawn(agentBin, ["--role", "agent"], {
+  const child = spawn(mcpBin, [], {
     stdio: ["pipe", "pipe", "inherit"],
     env: { ...process.env, GHOSTLIGHT_ENDPOINT: endpoint },
   });
@@ -490,7 +498,11 @@ async function runLive(binaryPath, endpoint) {
   };
 
   try {
-    const init = await rpc.call("initialize", {});
+    const init = await rpc.call("initialize", {
+      protocolVersion: "2025-11-25",
+      capabilities: {},
+      clientInfo: { name: "ghostlight-e2e", version: "1.0.0" },
+    });
     if (!init.result) throw new Error(`initialize did not return a result: ${JSON.stringify(init)}`);
     rpc.notify("notifications/initialized", {});
 

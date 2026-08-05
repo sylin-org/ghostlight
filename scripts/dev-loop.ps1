@@ -13,11 +13,11 @@
                             (if none is installed, the next client's self-heal finds nothing
                             to revive and reports the endpoint down -- run install first).
 
-  Relays (your editor's agent relay, the browser's native-messaging relay) are NEVER killed:
-  they are dumb pipes that reconnect to whoever owns the endpoint (ADR-0045 / ADR-0062).
-  Running relay EXEs are renamed aside (Windows allows renaming a running image) so the build
-  can write fresh binaries; deploy.lock files (ADR-0063) in every candidate engine directory
-  keep relay self-heal from respawning the OLD engine during the swap window.
+  MCP edges and browser native-messaging relays are NEVER killed. Both reconnect to the service
+  that owns the endpoint (ADR-0096). Their running EXEs are renamed aside (Windows allows
+  renaming a running image) so the build can write fresh binaries; deploy.lock files (ADR-0063)
+  in every candidate engine directory keep self-heal from respawning the OLD engine during the
+  swap window.
 
   Identification safety: only processes whose executable path is under this repo's target\
   directory or under the well-known install root (~\.ghostlight\bin) are ever stopped --
@@ -59,13 +59,12 @@ try {
     $profileFlag = if ($Configuration -eq "Release") { "--release" } else { "" }
     $targetDir = if ($Configuration -eq "Release") { "target\release" } else { "target\debug" }
     $ghostlightExe = Join-Path $repoRoot "$targetDir\ghostlight.exe"
-    $relayExe = Join-Path $repoRoot "$targetDir\ghostlight-relay.exe"
+    $mcpExe = Join-Path $repoRoot "$targetDir\ghostlight-mcp-connector.exe"
+    $browserConnectorExe = Join-Path $repoRoot "$targetDir\ghostlight-browser-connector.exe"
 
-    # -Restore only considers releases new enough for the one-stack swap (ADR-0065). A release
-    # older than this floor predates the relay reconnect (ADR-0062) and the deploy.lock quiesce
-    # (ADR-0063): its relays cannot see the lock and self-heal the OLD engine back mid-swap, and
-    # its engine cannot parse the current extension's identity frame (ADR-0061). Restoring one
-    # reintroduces exactly the endpoint fight the swap is designed to avoid.
+    # -Restore requires both the established one-stack floor and all three ADR-0096 executables.
+    # Older releases predate relay reconnect, deploy.lock quiesce, or the current extension wire;
+    # later two-executable releases still cannot satisfy the current MCP launcher path.
     $minRestoreVersion = [version]"0.5.5"
 
     # Every directory that may hold an engine a relay could self-heal: the repo build dir plus
@@ -81,7 +80,15 @@ try {
                 $v = $null
                 if ($_.Name -match '^v(\d+\.\d+\.\d+)$' -and [version]::TryParse($Matches[1], [ref]$v)) {
                     $exe = Join-Path $_.FullName "ghostlight.exe"
-                    if (Test-Path $exe) { [pscustomobject]@{ Version = $v; Exe = $exe } }
+                    if (Test-Path $exe) {
+                        $mcp = Join-Path $_.FullName "ghostlight-mcp-connector.exe"
+                        $browserConnector = Join-Path $_.FullName "ghostlight-browser-connector.exe"
+                        [pscustomobject]@{
+                            Version = $v
+                            Exe = $exe
+                            ThreeProcess = (Test-Path $mcp) -and (Test-Path $browserConnector)
+                        }
+                    }
                 }
             } |
             Sort-Object Version -Descending)
@@ -123,13 +130,15 @@ try {
     }
 
     if ($Restore) {
-        $candidate = $installed | Where-Object { $_.Version -ge $minRestoreVersion } | Select-Object -First 1
+        $candidate = $installed |
+            Where-Object { $_.Version -ge $minRestoreVersion -and $_.ThreeProcess } |
+            Select-Object -First 1
         if (-not $candidate) {
             $found = if ($installed) { ($installed | ForEach-Object { "v$($_.Version)" }) -join ", " } else { "none" }
-            Write-Host "No installed release is one-stack capable (>= v$minRestoreVersion) under $installRoot (found: $found)."
-            Write-Host "A pre-v$minRestoreVersion release predates the relay reconnect (ADR-0062) and the deploy.lock"
-            Write-Host "quiesce (ADR-0063); restoring one would fight the swap and cannot talk to the current"
-            Write-Host "extension. Install a current release first -- the repo build stays the engine for now."
+            Write-Host "No installed release is three-process capable (>= v$minRestoreVersion) under $installRoot (found: $found)."
+            Write-Host "The restore target must contain ghostlight-mcp-connector.exe, ghostlight.exe, and ghostlight-browser-connector.exe,"
+            Write-Host "and must retain the one-stack reconnect and deploy.lock behavior. Install a current release"
+            Write-Host "first -- the repo build stays the engine for now."
             exit 1
         }
         Write-Host "[1/3] Quiescing self-heal and stopping the repo-built engine..."
@@ -147,24 +156,32 @@ try {
         exit 0
     }
 
-    Write-Host "[1/5] Quiescing self-heal (deploy.lock in every engine dir) and moving relay EXEs aside..."
+    Write-Host "[1/5] Quiescing self-heal and moving running shore EXEs aside..."
     Set-DeployLocks
-    if (Test-Path $relayExe) {
-        $aside = "$relayExe.$([System.Guid]::NewGuid().ToString('N')).old"
-        try { Rename-Item -Path $relayExe -NewName (Split-Path $aside -Leaf) -Force } catch { Write-Host "  (relay.exe not moved: $($_.Exception.Message))" }
+    foreach ($shoreExe in @($mcpExe, $browserConnectorExe)) {
+        if (Test-Path $shoreExe) {
+            $aside = "$shoreExe.$([System.Guid]::NewGuid().ToString('N')).old"
+            try {
+                Rename-Item -Path $shoreExe -NewName (Split-Path $aside -Leaf) -Force
+            } catch {
+                Write-Host "  ($([System.IO.Path]::GetFileName($shoreExe)) not moved: $($_.Exception.Message))"
+            }
+        }
     }
 
-    Write-Host "[2/5] Stopping the current engine (repo-built or installed; relays stay up)..."
+    Write-Host "[2/5] Stopping the current engine (MCP edges and browser relays stay up)..."
     Stop-Engines (@($repoRoot) + @($installRoot | Where-Object { Test-Path $_ }))
 
-    Write-Host "[3/5] Building ghostlight + ghostlight-relay + lightbox ($Configuration)..."
+    Write-Host "[3/5] Building ghostlight-mcp-connector + ghostlight + ghostlight-browser-connector + lightbox ($Configuration)..."
     if ($profileFlag) {
-        cargo build $profileFlag -p ghostlight -p ghostlight-relay -p ghostlight-lightbox
+        cargo build $profileFlag -p ghostlight-mcp-connector -p ghostlight -p ghostlight-browser-connector -p ghostlight-lightbox
     } else {
-        cargo build -p ghostlight -p ghostlight-relay -p ghostlight-lightbox
+        cargo build -p ghostlight-mcp-connector -p ghostlight -p ghostlight-browser-connector -p ghostlight-lightbox
     }
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed (exit $LASTEXITCODE)" }
-    Get-ChildItem -Path (Split-Path $relayExe) -Filter "ghostlight-relay.exe.*.old" -ErrorAction SilentlyContinue |
+    Get-ChildItem -Path (Split-Path $browserConnectorExe) -Filter "ghostlight-browser-connector.exe.*.old" -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+    Get-ChildItem -Path (Split-Path $mcpExe) -Filter "ghostlight-mcp-connector.exe.*.old" -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
 
     Write-Host "[4/5] Starting the fresh build as THE engine..."
@@ -181,7 +198,7 @@ try {
     if (-not (Wait-Healthy $ghostlightExe)) {
         throw "the engine never reported healthy within ${TimeoutSec}s; run '$ghostlightExe doctor' by hand"
     }
-    Write-Host "The fresh build holds the endpoint. Relays, editors, and browsers reconnect on their own."
+    Write-Host "The fresh build holds the endpoint. MCP edges and browser relays reconnect on their own."
 
     Write-Host ""
     Write-Host "Offline smoke check (lightbox fake-browser, no Chrome needed)..."

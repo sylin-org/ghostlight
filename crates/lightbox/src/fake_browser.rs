@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Ghostlight-Commercial
 //! `lightbox fake-browser` (ADR-0059): an interactive, offline stand-in for the real
-//! `ghostlight-relay` browser role + Chrome extension. Dials a REAL running service's extension
+//! browser-only `ghostlight-browser-connector` + Chrome extension. Dials a REAL running service's extension
 //! endpoint exactly as the real relay does (same endpoint candidates, same `ROLE_BROWSER`
 //! hello), so wire-protocol changes -- routing, tabId encoding, focus, notifications -- can be
 //! exercised and watched WITHOUT Chrome, an extension reload, or a real browser process at all.
@@ -163,7 +163,7 @@ fn canned_tab_context(native_tab_id: i64) -> Value {
 }
 
 /// The canned auto-reply for one incoming frame, or `None` for a frame this mode does not
-/// answer (an id-less event like `group_request`/`notification`, which correctly gets no
+/// answer (an id-less event like `notification`, which correctly gets no
 /// reply). `next_native_tab` advances on every minted tab so repeated `tabs_create_mcp` calls
 /// return distinct ids, the same way a real browser's own counter would.
 fn canned_reply(frame: &Value, next_native_tab: &mut i64) -> Option<Value> {
@@ -254,7 +254,7 @@ mod tests {
         let reply = canned_reply(&tab_url, &mut next).expect("tab_url_request gets a reply");
         assert_eq!(reply["type"], "tab_url_response");
 
-        let event = json!({"type": "group_request", "guid": "x", "tabIds": []});
+        let event = json!({"type": "notification", "tabId": 5, "title": "status"});
         assert!(
             canned_reply(&event, &mut next).is_none(),
             "an id-less event gets no reply"

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-// Thin launcher: fetch the version-matched ghostlight role executables from the GitHub release on
+// Thin launcher: fetch the version-matched Ghostlight executables from the GitHub release on
 // first run, cache them under ~/.ghostlight/bin/<version>/, then exec the right one for the caller.
-// ADR-0046 + ADR-0051 Phase 3: a bare `npx ghostlight` (what an MCP client launches) execs
-// `ghostlight-relay --role agent` (the MCP pass-through); a CLI subcommand (install/doctor/...)
-// execs ghostlight. Zero dependencies.
+// ADR-0096: a bare `npx ghostlight` (what an MCP client launches) execs
+// `ghostlight-mcp-connector`; a CLI
+// subcommand (install/doctor/...) execs `ghostlight`. Zero dependencies.
 //
 // SUPPLY-CHAIN INTEGRITY: this is a download-and-execute-native-binary launcher, so it verifies
 // what it runs. Every downloaded binary is checked (sha256) against a checksums.json that travels
@@ -27,13 +27,16 @@ const { spawnSync } = require("child_process");
 const VERSION = require("../package.json").version;
 const REPO = "sylin-org/ghostlight";
 
-// The two executables (ADR-0046 + ADR-0051 Phase 3): ghostlight = CLI + service; ghostlight-relay =
-// the single thin pass-through carrying both roles. Both are cached in ONE dir, so `ghostlight
-// install` resolves the relay as a sibling.
-const BINS = ["ghostlight", "ghostlight-relay"];
+// The three executables (ADR-0096): persistent service, protocol-versioned MCP stdio edge, and
+// browser-only native relay. All are cached in one directory so installation resolves siblings.
+const BINS = Object.freeze([
+  "ghostlight",
+  "ghostlight-mcp-connector",
+  "ghostlight-browser-connector",
+]);
 
 // When the caller names one of these `ghostlight` CLI subcommands, exec `ghostlight`; otherwise
-// this is an MCP launch (bare, or with only flags like --instance), so exec the agent adapter.
+// this is an MCP launch (bare, or with only flags like --instance), so exec the MCP edge.
 const CLI_SUBCOMMANDS = new Set([
   "install",
   "uninstall",
@@ -51,6 +54,13 @@ function targetTriple() {
   if (platform === "darwin" && arch === "x64") return "x86_64-apple-darwin";
   if (platform === "linux" && arch === "x64") return "x86_64-unknown-linux-gnu";
   return null;
+}
+
+function launchSpec(args) {
+  const isCli = args.some((argument) => CLI_SUBCOMMANDS.has(argument));
+  return isCli
+    ? { binName: "ghostlight", spawnArgs: args }
+    : { binName: "ghostlight-mcp-connector", spawnArgs: args };
 }
 
 // Redirect/download allowlist: GitHub release downloads start at github.com and 302 to the
@@ -126,7 +136,7 @@ async function ensureBinaries() {
   if (!triple) {
     process.stderr.write(
       `ghostlight: no prebuilt binary for ${process.platform}/${process.arch}.\n` +
-        `Build from source (cargo install --git https://github.com/${REPO}) or see\n` +
+        `Clone https://github.com/${REPO} and run "cargo build --release" from its root, or see\n` +
         `https://sylin.org/ghostlight/ for options.\n`
     );
     process.exit(1);
@@ -186,13 +196,10 @@ function main() {
   ensureBinaries()
     .then(({ dir, exe }) => {
       const args = process.argv.slice(2);
-      // ADR-0046 + ADR-0051 Phase 3: a CLI subcommand runs the `ghostlight` binary; a bare/flags-only
-      // invocation is an MCP launch and runs `ghostlight-relay --role agent` (the pass-through your
-      // client relays through).
-      const isCli = args.some((a) => CLI_SUBCOMMANDS.has(a));
-      const binName = isCli ? "ghostlight" : "ghostlight-relay";
+      // A CLI subcommand runs the persistent service/CLI binary. A bare or flags-only invocation
+      // runs the protocol-versioned MCP edge with the caller's arguments unchanged.
+      const { binName, spawnArgs } = launchSpec(args);
       const bin = path.join(dir, `${binName}${exe}`);
-      const spawnArgs = isCli ? args : ["--role", "agent", ...args];
       const result = spawnSync(bin, spawnArgs, { stdio: "inherit" });
       if (result.error) {
         process.stderr.write(`ghostlight: failed to launch binary: ${result.error.message}\n`);
@@ -210,4 +217,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { targetTriple, isAllowedHost, sha256File, loadChecksums };
+module.exports = { BINS, isAllowedHost, launchSpec, loadChecksums, sha256File, targetTriple };

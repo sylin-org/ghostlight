@@ -1,7 +1,7 @@
 # Ghostlight Lightbox (ADR-0056): a DEV-ONLY integration harness -- a second composition root over
 # the ghostlight-core library that stands up the real governance/managed logic against temp dirs,
 # an injected clock, and a real localhost fake-org endpoint. Never shipped: publish = false, and
-# release.yml builds only `ghostlight` and `ghostlight-relay`, never this crate.
+# release.yml builds only the three shipped executables, never this crate.
 [package]
 name = "ghostlight-lightbox"
 version = "0.7.3"
@@ -18,8 +18,8 @@ path = "src/main.rs"
 # The whole point: reuse the REAL library (default features include managed-fetch, so the real
 # ureq/rustls network path executes in the network scenarios).
 ghostlight-core = { path = "../core" }
-# ADR-0059 `fake-browser`: dials a REAL running service's extension endpoint exactly as
-# ghostlight-relay's browser role does, without needing Chrome.
+# ADR-0059 `fake-browser`: dials a REAL running service's extension endpoint exactly as the
+# browser-only ghostlight-browser-connector does, without needing Chrome.
 ghostlight-transport = { path = "../transport" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

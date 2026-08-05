@@ -4,7 +4,7 @@ Personal checklist for actions only the founder can take. Agentic work is NOT tr
 here (it lives in docs/tasks/licensing-1/ and the frontier queue in
 docs/business/PLAN.md). Check items off in place; add dates.
 
-Last reconciled: 2026-08-01. This checklist is current through Ghostlight v0.7.3.
+Last reconciled: 2026-08-04. This checklist is current through Ghostlight v0.7.3.
 
 ## Now (owner-only foundations)
 
@@ -59,13 +59,23 @@ Last reconciled: 2026-08-01. This checklist is current through Ghostlight v0.7.3
       participation lanes.
 - [x] The official MCP Registry and Glama listings are live. Glama recognizes all 25 tools and
       scores Ghostlight A for license, A for quality, and B for maintenance.
+- [x] Ghostlight was submitted to mcpservers.org under Development on 2026-08-04. The free
+      submission is in review; the site quoted a review window of 12 hours.
+- [ ] Watch `hello@sylin.org` for the mcpservers.org decision and verify the public listing before
+      marking it live.
+- [ ] Review and send the Anthropic open-core MCPB eligibility inquiry in
+      `docs/business/DIRECTORY-SUBMISSIONS.md`. Do not submit the form as MIT-only; wait for a clear
+      answer and a released MCPB asset.
+- [ ] Ask OpenAI whether its public directory will accept local stdio MCP plugins. The current
+      portal requires a public production HTTPS MCP URL, which Ghostlight will not add merely for
+      listing eligibility.
 - [ ] Submit the remaining directory entries to mcp.so and PulseMCP.
 - [ ] Monitor the open external submissions: Winget
       [#411087](https://github.com/microsoft/winget-pkgs/pull/411087), Cline Marketplace
       [#1989](https://github.com/cline/mcp-marketplace/issues/1989), and
       `awesome-mcp-servers` [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306).
-- [ ] Follow up on the GitHub MCP Registry / VS Code discovery email on 2026-08-28 if there is no
-      reply and Ghostlight remains absent from the catalog.
+- [x] GitHub approved Ghostlight for inclusion in the GitHub MCP Registry on 2026-08-03. GitHub
+      will add the server to the catalog; no further founder action is required.
 - [ ] Configure Edge Add-ons publisher credentials and submit the current compatible adapter.
 - [ ] Optionally submit the already working v0.7.3 Scoop manifest to Scoop Extras.
 - [ ] Send client-specific founder outreach to Cursor, Zed, and Cline using a concrete proof, not
@@ -155,3 +165,14 @@ Last reconciled: 2026-08-01. This checklist is current through Ghostlight v0.7.3
   GitHub catalog request was submitted and is pending a response, with Ghostlight still absent.
   The founder checklist was reconciled to current composite signing, Polar.sh, public-channel
   recruitment, and the remaining owner-only gates.
+- 2026-08-03: **GITHUB MCP REGISTRY APPROVED.** GitHub completed its review of
+  `org.sylin/ghostlight` and approved it for inclusion. GitHub will add the server to its catalog;
+  no further founder action is required.
+- 2026-08-04: **MCPSERVERS.ORG SUBMITTED.** The free Development-category listing was submitted
+  with the canonical GitHub repository and `hello@sylin.org` contact. The site confirmed receipt
+  and quoted a 12-hour review window; publication remains pending.
+- 2026-08-04: **CLAUDE/CODEX DIRECTORY PATHS CHECKED.** Ghostlight now has a self-contained MCPB
+  design and implementation, but Anthropic's live form says extensions must be MIT licensed. The
+  open-core bundle was not misrepresented or submitted; an eligibility inquiry is ready. OpenAI's
+  public plugin submission requires a public HTTPS MCP server, so it remains incompatible with
+  Ghostlight's local-only ingress boundary. No remote proxy will be added for a listing.

@@ -97,9 +97,9 @@ jobs:
             BIN_SUFFIX=".exe"
           fi
 
-          # ADR-0046 + ADR-0051 Phase 3: two executables ship together -- the ghostlight brain and
-          # the single ghostlight-relay pass-through (it carries both former adapter roles).
-          BINS=(ghostlight ghostlight-relay)
+          # ADR-0096: three executables ship together, each with one lifecycle -- the persistent
+          # service, the protocol-versioned MCP edge, and the browser-only native relay.
+          BINS=(ghostlight ghostlight-mcp-connector ghostlight-browser-connector)
           for b in "${BINS[@]}"; do
             cp "target/${TARGET}/release/${b}${BIN_SUFFIX}" "$ARCHIVE_DIR/"
           done
@@ -133,7 +133,7 @@ jobs:
             BIN_SUFFIX=""
           fi
           $SHA "${{ env.ASSET }}" > "${{ env.ASSET }}.sha256"
-          for b in ghostlight ghostlight-relay; do
+          for b in ghostlight ghostlight-mcp-connector ghostlight-browser-connector; do
             RAW="${b}-${{ matrix.target }}${BIN_SUFFIX}"
             $SHA "$RAW" > "${RAW}.sha256"
           done
@@ -147,7 +147,8 @@ jobs:
             ${{ env.ASSET }}
             ${{ env.ASSET }}.sha256
             ghostlight-${{ matrix.target }}*
-            ghostlight-relay-${{ matrix.target }}*
+            ghostlight-mcp-connector-${{ matrix.target }}*
+            ghostlight-browser-connector-${{ matrix.target }}*
           if-no-files-found: error
 
   assemble:
@@ -157,6 +158,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8
@@ -190,6 +195,18 @@ jobs:
           EXTENSION="artifacts/${BIN_NAME}-extension-v${ADAPTER_VERSION}.zip"
           cp "dist/${BIN_NAME}-extension-v${ADAPTER_VERSION}.zip" "$EXTENSION"
           sha256sum "$EXTENSION" > "${EXTENSION}.sha256"
+
+      - name: Package Claude Desktop MCPB
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          npx --yes @anthropic-ai/mcpb@2.1.2 validate packaging/mcpb/manifest.json
+          pwsh -File scripts/package-mcpb.ps1 -Version "$VERSION" -ArtifactsDir artifacts
+          MCPB="artifacts/${BIN_NAME}-v${VERSION}.mcpb"
+          cp "dist/${BIN_NAME}-v${VERSION}.mcpb" "$MCPB"
+          sha256sum "$MCPB" > "${MCPB}.sha256"
 
       - name: Assemble immutable release bundle
         shell: bash

@@ -1,54 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! In-process test fixture (ADR-0051 Phase 4): drive the REAL MCP session chokepoint
-//! (`transport::mcp::server::serve_session`) over an in-memory `tokio::io::duplex` pipe, wired to a
-//! REAL `Browser` (optionally attached to a drivable fake extension over a second duplex) and a
-//! REAL `ServiceContext` built by the same `ServiceContext::from_startup` a spawned service uses --
-//! with NO spawned OS process, no stdio, no exe-lock contention.
+//! In-process test fixture for the ADR-0096 protocol-neutral service boundary.
 //!
-//! This is the seam the incidentally-end-to-end wiring tests (tool_enforcement, tool_advertisement,
-//! shadow_mode, most of mcp_protocol, ...) are migrated onto in P4.2: the SAME code path
-//! (`serve_session` -> governance `decide` -> dispatch), the SAME JSON-RPC-over-a-stream wire, none
-//! of the process/stdio/exe-lock flakiness that made the spawn tier fragile on a live dev machine.
+//! The fixture builds the same [`ServiceContext`] as the persistent service, projects its canonical
+//! catalog, and executes immutable [`ghostlight::work::WorkContext`] values through
+//! [`ghostlight::tool::pipeline::run_work`]. It optionally attaches a drivable fake extension over
+//! an in-memory duplex. There is no MCP lifecycle, JSON-RPC parser, stdio, or spawned process here;
+//! exact protocol behavior belongs to the date-named handlers in `crates/mcp-connector`.
 //!
-//! The two seams this generalizes previously lived inline: a `Browser` over `tokio::io::duplex`
-//! plus a fake extension (`tests/hub_multiplex.rs`), and an all-open `Governance` reached through
-//! the server loop (`tests/all_open_golden.rs`). Here they are one reusable [`Harness`].
+//! Existing integration tests still supply request-shaped JSON values to [`Harness::drive`] as a
+//! compact test instruction format. `drive` translates only `initialize`, `tools/list`, and
+//! `tools/call`; it is deliberately not a wire implementation.
 //!
 //! RUNTIME FLAVOR: a test that drives a tool which ORCHESTRATES internal sub-calls -- `script`, and
 //! a non-denied `form_fill` -- must use `#[tokio::test(flavor = "multi_thread", worker_threads =
 //! 2)]`. Those tools re-enter the runtime via `tokio::task::block_in_place` +
-//! `Handle::block_on` (`crates/core/src/mcp/script.rs`), which panics on the default current-thread
+//! `Handle::block_on` (`crates/core/src/tool/script.rs`), which panics on the default current-thread
 //! test runtime; the panic surfaces inside the spawned `tools/call` task, so the only visible
-//! symptom is that [`Harness::drive`] hangs waiting for a reply that never comes. Plain
+//! symptom is that [`Harness::drive`] hangs waiting for a result that never comes. Plain
 //! (non-orchestrating) tool calls and denied-before-dispatch cases run fine on the default runtime.
 
 #![allow(dead_code)]
 
+use ghostlight::browser::directory::WorkspaceUse;
 use ghostlight::browser::pattern::is_valid_pattern;
 use ghostlight::governance::manifest::document::{parse_manifest, Manifest};
 use ghostlight::governance::manifest::source::{LoadedPolicy, ManifestOrigin};
+use ghostlight::governance::ports::ClientInfo;
 use ghostlight::hub::outbound::browser::Browser;
-use ghostlight::hub::role::{set_role, Role};
-use ghostlight::hub::session::SessionGuid;
+use ghostlight::hub::peer::PeerUser;
 use ghostlight::hub::ServiceContext;
-use ghostlight::mcp::server::serve_session;
 use ghostlight::native::host;
 use ghostlight::observability::DebugSink;
+use ghostlight::tool::outcome::CallOutcome;
+use ghostlight::work::{CancellationToken, WorkContext};
 use serde_json::{json, Value};
-use std::sync::Once;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-
-/// The governance chokepoint asserts this process's role is `Service` (ADR-0030 Decision 1
-/// addendum; `ghostlight_transport::role`). A spawned service records its role during startup; an
-/// in-process harness must record it once per test binary, before the first `serve_session`.
-/// `set_role` panics if called twice, so a `Once` guards it. Only the fixture ever calls this, and
-/// nothing an in-process session reaches asserts the `Adapter` role, so recording `Service` here is
-/// inert for any binary that also spawns real subprocesses (those run in their own processes).
-static ROLE_ONCE: Once = Once::new();
-fn ensure_service_role() {
-    ROLE_ONCE.call_once(|| set_role(Role::Service));
-}
 
 /// Parse a JSON `Value` into a validated schema-3 [`Manifest`], the way a `--manifest file://`
 /// source would, so a governed [`Harness`] can be built from the exact manifest shape the
@@ -62,16 +48,15 @@ pub fn manifest_from_value(value: &Value) -> Manifest {
     .expect("the in-process test manifest parses and validates")
 }
 
-/// A real, in-process service session substrate: one [`ServiceContext`] (built once via
-/// `from_startup`, exactly as a spawned service builds it) that [`Harness::drive`] clones per
-/// session. Construct inside a `#[tokio::test]` -- `from_startup` spawns background tasks and so
-/// requires an active tokio runtime.
+/// A real in-process service substrate built once through [`ServiceContext::from_startup`].
+/// Construct inside a `#[tokio::test]`; startup spawns background tasks and requires an active
+/// tokio runtime.
 pub struct Harness {
     ctx: ServiceContext,
 }
 
 impl Harness {
-    /// All-open (no manifest): behavior is byte-identical to a spawned all-open service.
+    /// Build an all-open service with no manifest.
     pub fn all_open() -> Self {
         Self::build(LoadedPolicy {
             manifest: None,
@@ -93,7 +78,6 @@ impl Harness {
     }
 
     fn build(policy: LoadedPolicy) -> Self {
-        ensure_service_role();
         let browser = Browser::new();
         let ctx = ServiceContext::from_startup(
             browser,
@@ -169,88 +153,186 @@ impl Harness {
         panic!("the fake extension never reported connected");
     }
 
-    /// Drive `requests` (each serialized as one newline-delimited JSON-RPC line) through a FRESH
-    /// in-process session and return the responses to the `id`-bearing requests, in arrival order.
-    /// Look responses up by `id`: `tools/call` runs concurrently (each spawns its own task), so
-    /// arrival order does not track request order -- identical to the spawn-based `drive` helpers.
+    /// Translate request-shaped test instructions through one fresh service-owned workspace.
+    ///
+    /// This convenience surface preserves the result-shaped JSON consumed by older governance and
+    /// dispatch tests. It is not an MCP state machine: framing, lifecycle validation, request
+    /// correlation, and revision envelopes are tested by `crates/mcp-connector`.
     pub async fn drive(&self, requests: &[Value]) -> Vec<Value> {
-        let (client, server) = tokio::io::duplex(256 * 1024);
-        let ctx = self.ctx.clone();
-        let guid = SessionGuid::mint();
-        let session = tokio::spawn(async move {
-            let _ = serve_session(server, ctx, guid).await;
-        });
+        let owner = PeerUser("inproc-fixture".to_string());
+        let workspace = self
+            .ctx
+            .workspaces
+            .mint(&owner, true)
+            .expect("mint the fixture workspace");
+        let mut client = None;
+        let mut responses = Vec::new();
 
-        let (read_half, mut write_half) = tokio::io::split(client);
-        for req in requests {
-            let mut line = serde_json::to_vec(req).expect("serialize request");
-            line.push(b'\n');
-            write_half
-                .write_all(&line)
-                .await
-                .expect("write request line");
+        for request in requests {
+            let Some(id) = request.get("id").cloned() else {
+                continue;
+            };
+            let method = request
+                .get("method")
+                .and_then(Value::as_str)
+                .expect("fixture instruction has a method");
+            let result = match method {
+                "initialize" => {
+                    client = request_client(request);
+                    json!({})
+                }
+                "tools/list" => self.catalog_result(),
+                "tools/call" => {
+                    let params = request
+                        .get("params")
+                        .expect("tools/call fixture instruction has params");
+                    let operation = params
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .expect("tools/call fixture instruction has a string name");
+                    let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
+                    // This convenience fixture represents a trusted fake-browser inventory. Seed
+                    // caller-supplied tab handles explicitly so ordinary tool tests do not need a
+                    // synthetic tabs_context_mcp prelude. Workspace-authority tests bypass this
+                    // helper and exercise verification-only request admission directly.
+                    let mut fixture_tabs = Vec::new();
+                    collect_fixture_tab_ids(&arguments, &mut fixture_tabs);
+                    fixture_tabs.sort_unstable();
+                    fixture_tabs.dedup();
+                    if !fixture_tabs.is_empty() {
+                        let claim = self.ctx.workspaces.claim_tabs(&workspace, &fixture_tabs);
+                        assert_ne!(
+                            claim,
+                            ghostlight::hub::workspace::TabClaim::Refused,
+                            "fixture tab inventory crossed a workspace"
+                        );
+                    }
+                    self.execute(operation, &arguments, &workspace, &owner, client.clone())
+                        .await
+                }
+                other => panic!("unsupported neutral fixture instruction: {other}"),
+            };
+            responses.push(json!({"id": id, "result": result}));
         }
-        write_half.flush().await.ok();
 
-        // Read the id-bearing replies BEFORE closing the write half: closing it signals EOF, which
-        // ends the session -- so keep it open until every expected reply is in hand (the same order
-        // the spawn-based `drive` helpers use when they drop the adapter's stdin last).
-        let expected = requests.iter().filter(|r| r.get("id").is_some()).count();
-        let mut lines = BufReader::new(read_half).lines();
-        let mut responses = Vec::with_capacity(expected);
-        for _ in 0..expected {
-            let line = lines
-                .next_line()
-                .await
-                .expect("read a response line")
-                .expect("the session closed before every expected reply arrived");
-            responses.push(serde_json::from_str(&line).expect("each response line is JSON"));
-        }
-
-        drop(write_half);
-        drop(lines);
-        let _ = session.await;
+        self.ctx
+            .workspaces
+            .release(&workspace, &owner)
+            .expect("release the fixture workspace");
         responses
     }
 
-    /// Like [`Harness::drive`], but writes each `&str` line VERBATIM (so a malformed frame or a
-    /// JSON-RPC batch array can be exercised) and reads EXACTLY `expected` responses. The ADR-0049
-    /// parse-error / batch rejects reply with `id: null`, so they cannot be counted by id-presence
-    /// the way [`Harness::drive`] does; the caller states `expected` directly.
-    pub async fn drive_raw(&self, lines: &[&str], expected: usize) -> Vec<Value> {
-        let (client, server) = tokio::io::duplex(256 * 1024);
-        let ctx = self.ctx.clone();
-        let guid = SessionGuid::mint();
-        let session = tokio::spawn(async move {
-            let _ = serve_session(server, ctx, guid).await;
-        });
-
-        let (read_half, mut write_half) = tokio::io::split(client);
-        for line in lines {
-            write_half
-                .write_all(line.as_bytes())
-                .await
-                .expect("write raw line");
-            write_half.write_all(b"\n").await.expect("write newline");
-        }
-        write_half.flush().await.ok();
-
-        let mut reader = BufReader::new(read_half).lines();
-        let mut responses = Vec::with_capacity(expected);
-        for _ in 0..expected {
-            let line = reader
-                .next_line()
-                .await
-                .expect("read a response line")
-                .expect("the session closed before every expected reply arrived");
-            responses.push(serde_json::from_str(&line).expect("each response line is JSON"));
-        }
-
-        drop(write_half);
-        drop(reader);
-        let _ = session.await;
-        responses
+    fn catalog_result(&self) -> Value {
+        let authority = self.ctx.authority.current();
+        let generation = *self.ctx.catalog_generation.borrow();
+        let projection =
+            ghostlight::tool::catalog::project_catalog(&authority.governance, None, generation);
+        let tools: Vec<Value> = projection
+            .tools
+            .into_iter()
+            .map(|tool| tool.declaration)
+            .collect();
+        json!({"tools": tools})
     }
+
+    async fn execute(
+        &self,
+        operation: &str,
+        arguments: &Value,
+        workspace: &ghostlight_transport::workspace_id::WorkspaceId,
+        owner: &PeerUser,
+        client: Option<ClientInfo>,
+    ) -> Value {
+        let workspace = match ghostlight::browser::directory::descriptor(operation)
+            .map(|descriptor| descriptor.workspace_use)
+        {
+            Some(WorkspaceUse::Independent) => None,
+            _ => Some(workspace.clone()),
+        };
+        let lease = workspace.as_ref().map(|workspace| {
+            self.ctx
+                .workspaces
+                .lease(workspace, owner)
+                .expect("lease the fixture workspace")
+        });
+        let work = WorkContext::new(workspace, operation.to_string(), client, None);
+        let cancellation = CancellationToken::new();
+        let outcome = ghostlight::tool::pipeline::run_work(
+            &self.ctx.browser,
+            &self.ctx.store,
+            &self.ctx.authority,
+            &self.ctx.workspaces,
+            &work,
+            &cancellation,
+            arguments,
+        )
+        .await;
+        drop(lease);
+        render_outcome(outcome)
+    }
+}
+
+fn collect_fixture_tab_ids(value: &Value, tab_ids: &mut Vec<i64>) {
+    match value {
+        Value::Object(object) => {
+            if let Some(tab_id) = object.get("tabId").and_then(Value::as_i64) {
+                tab_ids.push(tab_id);
+            }
+            for child in object.values() {
+                collect_fixture_tab_ids(child, tab_ids);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_fixture_tab_ids(item, tab_ids);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn request_client(request: &Value) -> Option<ClientInfo> {
+    let client = request.pointer("/params/clientInfo")?;
+    Some(ClientInfo {
+        name: client.get("name")?.as_str()?.to_string(),
+        version: client.get("version")?.as_str()?.to_string(),
+    })
+}
+
+fn render_outcome(outcome: CallOutcome) -> Value {
+    match outcome {
+        CallOutcome::Success { result } => result,
+        CallOutcome::Failure { error } => error_result(error.to_string()),
+        CallOutcome::NotDispatched { message } => execution_result("not_dispatched", true, message),
+        CallOutcome::OutcomeUnknown { message } => {
+            execution_result("outcome_unknown", false, message)
+        }
+        CallOutcome::Denied { message, .. }
+        | CallOutcome::Held { message }
+        | CallOutcome::AttentionRequired { message } => text_result(message),
+        CallOutcome::Cancelled { message } => execution_result("cancelled", false, message),
+    }
+}
+
+fn text_result(message: String) -> Value {
+    json!({"content": [{"type": "text", "text": message}]})
+}
+
+fn error_result(message: String) -> Value {
+    json!({
+        "content": [{"type": "text", "text": message}],
+        "isError": true,
+    })
+}
+
+fn execution_result(status: &str, retry_safe: bool, message: String) -> Value {
+    json!({
+        "content": [{"type": "text", "text": message}],
+        "structuredContent": {
+            "execution": {"status": status, "retrySafe": retry_safe}
+        },
+        "isError": true,
+    })
 }
 
 /// The `[initialize, tools/call name(arguments)]` request pair every call-driving test opens with

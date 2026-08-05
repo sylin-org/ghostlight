@@ -192,7 +192,7 @@ wrong dimensions.
 
 ### Promotional video: the shortest honest story
 
-Use the built-in `ghostlight demo` tour. It drives the public demo stage through the same MCP relay
+Use the built-in `ghostlight demo` tour. It drives the public demo stage through the same MCP edge
 and tool surface an agent uses. It shows the dedicated Ghostlight tab, visible actions, form work,
 console and network observation, page reading, and a tighten-only session policy refusing an
 off-domain navigation. The default pacing is designed for a roughly 90-second recording.

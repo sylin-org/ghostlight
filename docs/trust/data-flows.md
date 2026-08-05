@@ -5,16 +5,17 @@ endpoint and to destinations you configure, and nowhere else.
 
 ## What runs where
 
-The Ghostlight service and thin relay run on the endpoint. The extension runs inside the user's own
-Chromium browser on the same endpoint. There is no vendor-hosted Ghostlight service or cloud backend
-anywhere in the path. Your MCP client and the model behind it are yours, running where you run them.
+The Ghostlight MCP edge, persistent service, and browser-only relay run on the endpoint. The
+extension runs inside the user's own Chromium browser on the same endpoint. There is no
+vendor-hosted Ghostlight service or cloud backend anywhere in the path. Your MCP client and the
+model behind it are yours, running where you run them.
 
 ## Flows that exist
 
 | Flow | Transport | Where it goes |
 | --- | --- | --- |
-| MCP client to agent relay | stdio | Local, same machine. |
-| Agent relay to service | Named pipe or Unix-domain socket | Local, owner-scoped IPC. |
+| MCP client to `ghostlight-mcp-connector` edge | stdio | Local, same machine. |
+| MCP edge to service | Named pipe or Unix-domain socket | Local, owner-scoped typed IPC. |
 | Service to browser relay | Named pipe or Unix-domain socket | Local, owner-scoped IPC. |
 | Browser relay to extension | Chromium native messaging | Local, same machine. |
 | Extension to pages | DevTools protocol | The user's own authenticated browser session. |
@@ -35,9 +36,9 @@ ADR-0028 Decision 9 (never phone home, normative and permanent):
   vendor.
 - Licensing callbacks: none. License state is evaluated locally and never validated against a
   vendor server.
-- Update phone-home: none. The binary does not call out to check for or pull updates. (The
-  extension, once installed from the Chrome Web Store, follows Chrome's own store update
-  mechanism; self-hosted and load-unpacked installs update only when you update them.)
+- Update phone-home: none. The Ghostlight executables do not call out to check for or pull
+  updates. (The extension, once installed from the Chrome Web Store, follows Chrome's own store
+  update mechanism; self-hosted and load-unpacked installs update only when you update them.)
 - Model-provider calls: none. Ghostlight calls no LLM; the model belongs to your MCP client.
 
 There is zero vendor-bound traffic. Ghostlight has no channel over which your data could reach
@@ -62,4 +63,4 @@ control.
 
 See [security-overview.md](security-overview.md) and [sub-processors.md](sub-processors.md).
 
-Last reviewed: 2026-07-10 against v0.7.3 | Contact: support@sylin.org
+Last reviewed: 2026-08-04 against the unreleased ADR-0096 working tree | Contact: support@sylin.org

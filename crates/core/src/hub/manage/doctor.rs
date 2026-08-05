@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! `ghostlight doctor` -- the one-shot, read-only diagnosis that fuses installer registration
-//! state, per-pid debug sessions, and a live probe of the IPC endpoint into a single report with
+//! state, per-process debug records, and a live probe of the IPC endpoint into a single report with
 //! a truthful exit code.
 //!
 //! Doctor never writes, deletes, or kills anything: every finding is a hint the user (or a
@@ -16,11 +16,11 @@ use std::path::{Path, PathBuf};
 
 /// Options for `ghostlight doctor`.
 pub struct DoctorOptions {
-    /// Show every debug session (not just the newest few) with its per-session counters.
+    /// Show every per-process debug record (not just the newest few) with its counters.
     pub verbose: bool,
-    /// Repair instead of only reporting (ADR-0029; re-scoped to the adapter by ADR-0030 Decision
-    /// 8, PINS.md SS5.5): reap orphaned adapter sessions (alive process, dead parent) and remove
-    /// state files whose process has exited. This is the one
+    /// Repair instead of only reporting: reap orphaned pre-ADR-0096 agent-relay processes recorded
+    /// in legacy debug state (alive process, dead parent) and remove state files whose process has
+    /// exited. Current `ghostlight-mcp-connector` has its own parent-death watchdog. This is the one
     /// place doctor's otherwise strict "never writes, deletes, or kills anything" contract is
     /// relaxed, and only behind this explicit flag.
     pub fix: bool,
@@ -105,11 +105,15 @@ pub fn run(opts: DoctorOptions) -> Result<bool> {
         None
     };
     let live_extension = live_status.as_ref().map(|s| s.extension_connected);
+    let live_mcp_edges = live_status.as_ref().map(|s| s.live_sessions);
     println!();
     println!("IPC endpoint:");
-    println!("  {:<9}{}", "path", endpoint_display);
-    println!("  {:<9}{}", "state", state_line(&probe));
-    println!("  {:<9}{}", "extension", extension_line(live_extension));
+    println!("  {:<9} {}", "path", endpoint_display);
+    println!("  {:<9} {}", "state", state_line(&probe));
+    println!("  {:<9} {}", "extension", extension_line(live_extension));
+    // Point-in-time context only: zero live edges is valid while the persistent service remains
+    // available to the browser and future MCP connections, so this count never affects findings.
+    println!("  {:<9} {}", "MCP", mcp_edges_line(live_mcp_edges));
     // ADR-0058: list every attached browser, not just a single yes/no -- the diagnostic gap
     // that made 2026-07-11's multi-browser connectivity debugging slow. Empty when the live
     // query could not be made (older service, or the endpoint did not accept) or genuinely
@@ -153,7 +157,7 @@ pub fn run(opts: DoctorOptions) -> Result<bool> {
     if problems.is_empty() {
         // Empty findings implies a healthy chain: the endpoint accepts, and either the live control
         // query confirmed the extension is attached or (older service / no --debug) the newest debug
-        // session did. The pid is shown when a debug session recorded one, omitted otherwise.
+        // process did. The pid is shown when a debug record captured one, omitted otherwise.
         let pid_note = obs
             .newest_server
             .map(|s| format!(" (pid {})", s.pid))
@@ -174,7 +178,7 @@ pub fn run(opts: DoctorOptions) -> Result<bool> {
     Ok(problems.is_empty())
 }
 
-/// The `--fix` repair pass: reap orphaned sessions and clear stale files, then report what changed
+/// The `--fix` repair pass: reap orphaned legacy edge processes and clear stale files, then report what changed
 /// and nudge the user to re-run the plain diagnosis. Returns `true` (the repair ran without error);
 /// the user re-runs `ghostlight doctor` to confirm the resulting health, keeping this path free of a
 /// second full diagnosis.
@@ -271,7 +275,7 @@ fn client_rows(ctx: &PlanCtx) -> Vec<(String, bool, bool)> {
 
 /// Body lines of the doctor "Governance:" section (g15, shared format doc section 9.2).
 ///
-/// Doctor is a standalone, one-shot CLI invocation with no live `Governance`/session state
+/// Doctor is a standalone, one-shot CLI invocation with no live authority or workspace state
 /// and no `--manifest` flag of its own (that flag is server-role only); it resolves its OWN
 /// view of the active manifest the same way a server launched in the same environment would,
 /// using the real, already-tested `governance::manifest::source::load_policy` (org policy file,
@@ -322,7 +326,7 @@ fn governance_section_lines() -> Vec<String> {
 
 /// The doctor "Governance:" section's audit-health line (SEC hardening pass, 2026-07): the
 /// flight recorder is on by default in every preset, so a disabled recorder is called out
-/// loudly -- an incident in a session that keeps no record cannot be reconstructed afterwards.
+/// loudly -- an incident in a process run that keeps no record cannot be reconstructed afterwards.
 /// Pure, so the exact wording is unit-testable.
 fn render_audit_status(enabled: bool, destination: &str) -> String {
     if enabled {
@@ -359,7 +363,7 @@ fn render_governance_status(
 }
 
 /// The managed:// section of `ghostlight doctor` (ADR-0055 Impl.8): answers the admin's "did my
-/// policy propagate?" from the T2 status sidecar, with no live service session required. Reads the
+/// policy propagate?" from the T2 status sidecar, with no running service required. Reads the
 /// fixed production paths; a missing bootstrap, data dir, or sidecar each degrades to one plain line.
 fn managed_section_lines() -> Vec<String> {
     let paths = crate::governance::paths::GovernancePaths::production();
@@ -427,6 +431,18 @@ fn extension_line(live_extension: Option<bool>) -> &'static str {
     }
 }
 
+/// The IPC-endpoint MCP-edge count. It is explicitly point-in-time and informational: zero does
+/// not make the service unhealthy, and an unavailable status reply is not guessed from processes.
+fn mcp_edges_line(live_edges: Option<u64>) -> String {
+    match live_edges {
+        Some(count) => {
+            let noun = if count == 1 { "edge" } else { "edges" };
+            format!("{count} live {noun} (aggregate; point-in-time; informational)")
+        }
+        None => "unknown (service did not report a count)".to_string(),
+    }
+}
+
 /// The doctor "Browsers:" sub-list (ADR-0058): one line per currently-attached browser, most
 /// recently focused first. Empty input renders nothing (the "extension" line above already
 /// covers "no browser attached"). Pure so the exact wording is unit-testable without a live
@@ -443,9 +459,10 @@ fn browser_lines(browsers: &[ghostlight_transport::ipc::BrowserInfo]) -> Vec<Str
     lines
 }
 
-// --- Debug sessions ---
+// --- Per-process debug records (compatibility heading: "Debug sessions") ---
 
-/// One `debug-state-<pid>.json` file, newest-first: either it parsed into a [`Session`], or it
+/// One `debug-state-<pid>.json` file, newest-first: either it parsed into the compatibility-named
+/// [`Session`] record, or it
 /// did not (unreadable, non-JSON, or missing the required `pid` field) and is named for the
 /// "skipping" row.
 enum SessionRow {
@@ -453,7 +470,7 @@ enum SessionRow {
     Unreadable(String),
 }
 
-/// One parsed `debug-state-<pid>.json` session, tolerant of both current- and old-format files
+/// One parsed per-process `debug-state-<pid>.json` record, tolerant of current and old formats
 /// (old files predate the `role`/`client` fields and every counter this crate has ever added).
 #[derive(Debug, Clone)]
 struct Session {
@@ -481,7 +498,7 @@ struct Session {
 
 /// Parse one `debug-state-<pid>.json` body, tolerantly (`serde_json::Value` lookups, every field
 /// but `pid` defaults when absent). Returns `None` when `raw` is not valid JSON or has no numeric
-/// `pid` -- a session with no pid cannot be named in a report row, so it is treated the same as
+/// `pid` -- a record with no pid cannot be named in a report row, so it is treated the same as
 /// an unreadable file (the "skipping unreadable state file" row).
 fn parse_session(raw: &str) -> Option<Session> {
     let v: serde_json::Value = serde_json::from_str(raw).ok()?;
@@ -525,7 +542,7 @@ fn parse_session(raw: &str) -> Option<Session> {
     })
 }
 
-/// Read the log dir's session state files (already newest-first) and parse each one. `None` for
+/// Read the log dir's per-process state files (already newest-first) and parse each one. `None` for
 /// the directory itself means "no log directory available on this platform" -- distinct from an
 /// empty (or absent) directory, which yields `Some(dir)` with an empty row list.
 fn gather_sessions() -> (Option<PathBuf>, Vec<SessionRow>) {
@@ -551,10 +568,11 @@ fn gather_sessions() -> (Option<PathBuf>, Vec<SessionRow>) {
     (Some(dir), rows)
 }
 
-/// Print the "Debug sessions" section. Without `--verbose`, shows at most 6 rows and, if more
-/// *sessions* (not unreadable-file rows) were parsed than shown, a trailing "N older" note; with
+/// Print the compatibility-named "Debug sessions" section. Without `--verbose`, shows at most 6
+/// rows and, if more process records (not unreadable-file rows) were parsed than shown, a trailing
+/// "N older" note; with
 /// `--verbose`, shows every row plus a `counters:` line under each parsed one. The final
-/// "extension last seen" line always considers every parsed native-host session, not just the
+/// "extension last seen" line always considers every parsed native-host process record, not just the
 /// shown ones -- it is a diagnostic signal, not a decorative row, and must not go stale under the
 /// row cap.
 fn print_sessions(log_dir: &Option<PathBuf>, rows: &[SessionRow], verbose: bool) {
@@ -588,7 +606,7 @@ fn print_sessions(log_dir: &Option<PathBuf>, rows: &[SessionRow], verbose: bool)
             SessionRow::Parsed(s) => {
                 shown_parsed += 1;
                 let tag = if s.role == "mcp-server" {
-                    liveness_tag(s)
+                    service_liveness_tag(s)
                 } else {
                     ""
                 };
@@ -624,8 +642,9 @@ fn print_sessions(log_dir: &Option<PathBuf>, rows: &[SessionRow], verbose: bool)
     }
 }
 
-/// One session row. mcp-server sessions additionally show the recorded client and extension link
-/// state; every other role (today only native-host) shows just pid + timing.
+/// One legacy debug-state row. The stable `mcp-server` role value names the persistent service and
+/// shows its extension link, but never a historical client value: MCP client identity belongs to
+/// edge records, not to the shared service. A legacy `adapter` row may still show its own client.
 fn session_row(s: &Session, now: u128) -> String {
     let started_ago =
         ghostlight_transport::observability::fmt_ms(now.saturating_sub(s.started_ms as u128));
@@ -633,17 +652,25 @@ fn session_row(s: &Session, now: u128) -> String {
         ghostlight_transport::observability::fmt_ms(now.saturating_sub(s.updated_ms as u128));
     if s.role == "mcp-server" {
         format!(
-            "  {:<12} pid {}  started {} ago  active {} ago  client {}  extension {}",
+            "  {:<12} pid {}  started {} ago  active {} ago  extension {}",
             s.role,
             s.pid,
             started_ago,
             active_ago,
-            s.client.as_deref().unwrap_or("(not recorded)"),
             if s.extension_connected {
                 "connected"
             } else {
                 "not connected"
             }
+        )
+    } else if s.role == "adapter" {
+        format!(
+            "  {:<12} pid {}  started {} ago  active {} ago  client {}",
+            s.role,
+            s.pid,
+            started_ago,
+            active_ago,
+            s.client.as_deref().unwrap_or("(not recorded)")
         )
     } else {
         format!(
@@ -655,7 +682,7 @@ fn session_row(s: &Session, now: u128) -> String {
 
 // --- Liveness and repair (ADR-0029) ---
 
-/// A recorded session's liveness against the live OS.
+/// A recorded process's liveness against the live OS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Liveness {
     /// The process is gone (exited cleanly or was killed): its state file is stale.
@@ -667,7 +694,7 @@ enum Liveness {
 }
 
 /// The pure classification decision, factored out so the ADR-0029 safety rule is unit-testable
-/// without touching the OS: a session with no recorded parent (`parent_recorded == false`, an
+/// without touching the OS: a process record with no recorded parent (`parent_recorded == false`, an
 /// old-format state file) is NEVER classified `Orphaned`, so the reaper cannot kill it. Only a
 /// live process whose recorded parent is provably dead is an orphan.
 fn liveness_from(process_alive: bool, parent_recorded: bool, parent_alive: bool) -> Liveness {
@@ -680,9 +707,9 @@ fn liveness_from(process_alive: bool, parent_recorded: bool, parent_alive: bool)
     }
 }
 
-/// Classify a session against the OS. Uses creation-time-matched liveness (ADR-0029): a pid that is
+/// Classify a process record against the OS. Uses creation-time-matched liveness (ADR-0029): a pid that is
 /// alive but carries a different creation time than recorded is a reused pid -- a different, dead
-/// process -- so this session reads as `Exited`, never mistaken for a live one to reap.
+/// process -- so this record reads as `Exited`, never mistaken for a live one to reap.
 fn classify(s: &Session) -> Liveness {
     let process_alive = ghostlight_transport::proc::is_alive(ghostlight_transport::proc::ProcId {
         pid: s.pid as u32,
@@ -697,18 +724,27 @@ fn classify(s: &Session) -> Liveness {
     liveness_from(process_alive, parent_recorded, parent_alive)
 }
 
-/// A short bracketed liveness tag for an mcp-server session row, or `""` for a plainly running one.
-fn liveness_tag(s: &Session) -> &'static str {
-    match classify(s) {
-        Liveness::Exited => "  [exited]",
-        Liveness::Orphaned => "  [ORPHANED: client exited]",
-        Liveness::Running => "",
+/// A short bracketed liveness tag for the persistent service. Its launcher is not an owner, so
+/// parent liveness is intentionally absent: the row says exited only when this process is gone.
+fn service_liveness_tag(s: &Session) -> &'static str {
+    let process_alive = ghostlight_transport::proc::is_alive(ghostlight_transport::proc::ProcId {
+        pid: s.pid as u32,
+        created: s.created,
+    });
+    service_liveness_tag_from(process_alive)
+}
+
+/// Pure rendering decision for [`service_liveness_tag`].
+fn service_liveness_tag_from(process_alive: bool) -> &'static str {
+    if process_alive {
+        ""
+    } else {
+        "  [exited]"
     }
 }
 
-/// The pids of orphaned adapter sessions among `rows` (alive process, dead parent; ADR-0030
-/// Decision 8, PINS.md SS5.5: reap targets the ADAPTER, never the standalone SERVICE, which has
-/// no client parent and idle-graces instead).
+/// Pids of orphaned legacy agent-relay rows (alive process, dead MCP-client parent). The stable
+/// serialized role is `"adapter"`; current `ghostlight-mcp-connector` does not write that legacy snapshot.
 fn orphan_pids(rows: &[SessionRow]) -> Vec<u64> {
     rows.iter()
         .filter_map(|r| match r {
@@ -724,13 +760,13 @@ fn orphan_pids(rows: &[SessionRow]) -> Vec<u64> {
 struct ReapReport {
     /// Orphan pids terminated.
     reaped: Vec<u64>,
-    /// Exited sessions whose stale state files were removed.
+    /// Exited process records whose stale state files were removed.
     cleared: Vec<u64>,
-    /// Live, still-served sessions left untouched.
+    /// Live, still-served processes left untouched.
     kept: usize,
 }
 
-/// Remove a session's `debug-state-<pid>.json` and `debug-events-<pid>.jsonl` under `dir`. Returns
+/// Remove a process's `debug-state-<pid>.json` and `debug-events-<pid>.jsonl` under `dir`. Returns
 /// true if at least one existed and was removed.
 fn remove_session_files(dir: &Path, pid: u64) -> bool {
     let mut removed = false;
@@ -745,11 +781,10 @@ fn remove_session_files(dir: &Path, pid: u64) -> bool {
     removed
 }
 
-/// Reap orphaned adapter sessions and clear stale (exited) session files under `dir` (ADR-0030
-/// Decision 8, PINS.md SS5.5: re-scoped from the pre-H6 "mcp-server" role -- the standalone
-/// SERVICE has no client parent and idle-graces instead, so it is never a reap target).
+/// Reap orphaned legacy agent-relay rows and clear their stale debug files under `dir`. The
+/// persistent service and browser-only relay are never reap targets here.
 ///
-/// SAFETY (ADR-0029): only parent-dead orphans are terminated. A session with a live parent, an
+/// SAFETY (ADR-0029): only parent-dead orphans are terminated. A process with a live parent, an
 /// unrecorded parent, or a mismatched creation time (a reused pid) is never killed; the current
 /// process is excluded; native-host rows are left alone (that relay exits promptly by design).
 fn reap(rows: &[SessionRow], dir: &Path) -> ReapReport {
@@ -782,10 +817,8 @@ fn reap(rows: &[SessionRow], dir: &Path) -> ReapReport {
     report
 }
 
-/// Startup self-heal (ADR-0029 part 4; ADR-0030 Decision 8 re-scope, PINS.md SS5.5): reap orphaned
-/// adapter sessions a predecessor left behind before this adapter begins relaying. Best-effort; a
-/// no-op in a release build (no session registry) and when nothing is orphaned. Returns the number
-/// of orphans terminated. Logs what it reaped.
+/// Compatibility cleanup for orphaned pre-ADR-0096 agent-relay debug rows. Best-effort and a no-op
+/// when no legacy state is present. Returns the number of processes terminated and logs them.
 pub fn sweep_orphans() -> usize {
     let (Some(dir), rows) = gather_sessions() else {
         return 0;
@@ -809,15 +842,14 @@ struct Observations {
     probe: EndpointProbe,
     /// True when at least one debug-state file parsed, of either role.
     sessions_present: bool,
-    /// The newest parsed mcp-server session, if any.
+    /// The newest parsed persistent-service row (`role == "mcp-server"`), if any.
     newest_server: Option<NewestServer>,
-    /// How many adapter sessions are orphaned (alive process, dead parent) -- reap targets
-    /// (ADR-0030 Decision 8, PINS.md SS5.5).
+    /// How many legacy agent-relay rows are orphaned (alive process, dead parent).
     orphans: usize,
     /// The live control-channel extension verdict (CAP-MED-01): `Some(true/false)` when the running
     /// service answered whether the extension is attached, `None` when it could not be asked (no
     /// server, an older service, or no reply). When present it is authoritative and does not need
-    /// `--debug`; when absent the verdict falls back to the debug-session inference.
+    /// `--debug`; when absent the verdict falls back to per-process debug-record inference.
     live_extension: Option<bool>,
 }
 
@@ -829,7 +861,7 @@ struct NewestServer {
 
 /// Evaluate the verdict rules, in order, against `obs`. Each rule appends at most one finding.
 /// An empty result means every signal was healthy: the browser/client registration exists, the
-/// endpoint accepted the probe, and the newest mcp-server session has the extension connected.
+/// endpoint accepted the probe, and the newest persistent-service row has the extension connected.
 fn findings(obs: &Observations) -> Vec<String> {
     let mut out = Vec::new();
 
@@ -872,7 +904,7 @@ fn findings(obs: &Observations) -> Vec<String> {
                     .to_string(),
             ),
             // The service could not be asked (older service, or no reply): fall back to the
-            // debug-session inference, which needs --debug to have written state.
+            // debug-record inference, which needs --debug to have written state.
             None => match &obs.newest_server {
                 None => out.push(
                     "an mcp-server is running but its extension status could not be confirmed and it wrote no debug state: restart the session with --debug (or GHOSTLIGHT_DEBUG=1) and re-run doctor for a full diagnosis"
@@ -896,10 +928,9 @@ fn findings(obs: &Observations) -> Vec<String> {
         },
     }
 
-    // Orphaned sessions: alive adapter processes whose MCP client has exited (ADR-0030 Decision 8
-    // re-scope, PINS.md SS5.5). These are the zombies ADR-0029 targets; the watchdog now prevents
-    // them, but a pre-watchdog process or one killed uncleanly can still be present. Point at the
-    // repair, not a manual process hunt.
+    // Compatibility cleanup: alive pre-ADR-0096 agent relays whose MCP client has exited. Current
+    // ghostlight-mcp-connector uses its parent-death watchdog; old debug rows can still describe a leftover
+    // process. Point at the guarded repair, not a manual process hunt.
     if obs.orphans > 0 {
         out.push(format!(
             "{} orphaned ghostlight session(s) are still running after their MCP client exited: run `ghostlight doctor --fix` to reap them",
@@ -909,7 +940,7 @@ fn findings(obs: &Observations) -> Vec<String> {
 
     // Fires in addition to rule 3 or 4 (an Absent/Rejects endpoint with no debug instrumentation
     // at all is two distinct, independently actionable problems); Accepts already implies rule 5
-    // covers the no-session case, so this never doubles up with it.
+    // covers the no-debug-record case, so this never doubles up with it.
     if !obs.sessions_present && !matches!(obs.probe, EndpointProbe::Accepts) {
         out.push(
             "no debug instrumentation found: run a session with --debug (or set GHOSTLIGHT_DEBUG=1) and re-run doctor"
@@ -1092,7 +1123,7 @@ mod tests {
 
     #[test]
     fn accepts_with_no_live_status_and_no_session_falls_back_to_debug_hint() {
-        // No live control answer (older service) AND no --debug session: doctor still points the
+        // No live control answer (older service) AND no --debug record: doctor still points the
         // user at --debug for a full diagnosis.
         let obs = Observations {
             any_browser_registered: true,
@@ -1111,7 +1142,7 @@ mod tests {
     #[test]
     fn accepts_with_live_extension_connected_is_healthy_without_debug() {
         // CAP-MED-01: the live control query confirms the extension is attached, so a normal
-        // (non-debug) install with no session file is HEALTHY -- no "wrote no debug state" nag.
+        // (non-debug) install with no state file is HEALTHY -- no "wrote no debug state" nag.
         let obs = Observations {
             any_browser_registered: true,
             any_client_registered: true,
@@ -1127,7 +1158,7 @@ mod tests {
     #[test]
     fn accepts_with_live_extension_disconnected_reports_it_without_debug() {
         // CAP-MED-01: the live query says the extension is NOT attached; doctor renders a real
-        // verdict even with no debug session.
+        // verdict even with no debug record.
         let obs = Observations {
             any_browser_registered: true,
             any_client_registered: true,
@@ -1145,7 +1176,7 @@ mod tests {
     #[test]
     fn accepts_with_a_disconnected_extension_distinguishes_never_connected_from_dropped() {
         // The debug-fallback path (no live answer): the never/dropped distinction still comes from
-        // the recorded session's connect count.
+        // the recorded process's connect count.
         let mut never = healthy_obs();
         never.live_extension = None;
         never.newest_server = Some(NewestServer {
@@ -1173,6 +1204,22 @@ mod tests {
         assert!(extension_line(Some(true)).contains("connected (live)"));
         assert!(extension_line(Some(false)).contains("NOT connected"));
         assert!(extension_line(None).contains("unknown"));
+    }
+
+    #[test]
+    fn mcp_edges_line_makes_zero_informational() {
+        assert_eq!(
+            mcp_edges_line(Some(0)),
+            "0 live edges (aggregate; point-in-time; informational)"
+        );
+        assert_eq!(
+            mcp_edges_line(Some(1)),
+            "1 live edge (aggregate; point-in-time; informational)"
+        );
+        assert_eq!(
+            mcp_edges_line(None),
+            "unknown (service did not report a count)"
+        );
     }
 
     #[test]
@@ -1234,6 +1281,24 @@ mod tests {
     }
 
     #[test]
+    fn persistent_service_row_does_not_claim_a_historical_client() {
+        let s = parse_session(
+            r#"{
+                "pid": 42, "role": "mcp-server", "client": "codex 1.2.3",
+                "started_ms": 1000, "updated_ms": 2000,
+                "extension_connected": true, "counters": {}
+            }"#,
+        )
+        .expect("service record");
+
+        let row = session_row(&s, 3000);
+        assert!(row.contains("mcp-server"), "{row}");
+        assert!(row.contains("extension connected"), "{row}");
+        assert!(!row.contains("client"), "{row}");
+        assert!(!row.contains("codex"), "{row}");
+    }
+
+    #[test]
     fn parse_session_defaults_role_and_client_for_old_format_files() {
         let raw = r#"{
             "pid": 7, "started_ms": 1, "updated_ms": 2, "extension_connected": false,
@@ -1267,7 +1332,7 @@ mod tests {
     #[test]
     fn parse_session_defaults_identity_fields_for_old_files() {
         // Files written before ADR-0029 have no created/ppid/parent_created; they must default to 0,
-        // and a 0 ppid is what makes `classify` treat the session as un-reapable.
+        // and a 0 ppid is what makes `classify` treat the process as un-reapable.
         let raw = r#"{ "pid": 7, "started_ms": 1, "updated_ms": 2,
                        "extension_connected": false, "counters": {} }"#;
         let s = parse_session(raw).unwrap();
@@ -1276,7 +1341,7 @@ mod tests {
         assert_eq!(s.parent_created, 0);
     }
 
-    /// The ADR-0029 safety rule, exhaustively: a session is `Orphaned` (and thus reapable) ONLY
+    /// The ADR-0029 safety rule, exhaustively: a process is `Orphaned` (and thus reapable) ONLY
     /// when it is alive AND its parent was recorded AND that parent is dead. Every other row --
     /// dead process, live parent, or no recorded parent -- must NOT be an orphan.
     #[test]
@@ -1290,6 +1355,17 @@ mod tests {
             "an unrecorded parent is never treated as orphaned -- the reaper must not kill it"
         );
         assert_eq!(liveness_from(true, true, false), Liveness::Orphaned);
+    }
+
+    #[test]
+    fn persistent_service_display_depends_only_on_its_own_process() {
+        assert_eq!(service_liveness_tag_from(false), "  [exited]");
+        assert_eq!(service_liveness_tag_from(true), "");
+        assert_eq!(
+            liveness_from(true, true, false),
+            Liveness::Orphaned,
+            "parent-death classification remains available for legacy adapter reaping"
+        );
     }
 
     #[test]

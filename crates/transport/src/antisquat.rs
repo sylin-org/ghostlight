@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Anti-squat: per-install secret + HMAC proof (ADR-0030 Decision 8; PINS.md SS5.3).
 //!
-//! Defeats a NAIVE or CROSS-USER process that squats the well-known adapter/control endpoint name
+//! Defeats a NAIVE or CROSS-USER process that squats the well-known typed edge/control endpoint
 //! without knowing the per-install secret: the genuine SERVICE proves possession of a 32-byte,
 //! per-user secret (`hub-key`, under `crate::observability::shared_data_dir`) to every connecting
-//! ADAPTER via an HMAC-SHA256 proof over the adapter's own hello bytes, before the adapter relays a
-//! single byte of its stdio. This is defense-in-depth, not a same-user sandbox: a determined
+//! `ghostlight-mcp-connector` edge via an HMAC-SHA256 proof over the edge's own hello bytes, before the typed
+//! bridge begins. This is defense-in-depth, not a same-user sandbox: a determined
 //! same-user process can read any same-user file (Decision 8).
 //!
-//! The key is PER-INSTANCE (ADR-0064): it lives under the instance's own `log_dir`, so an adapter
+//! The key is PER-INSTANCE (ADR-0064): it lives under the instance's own `log_dir`, so an MCP edge
 //! and the service it connects to -- both pinned to the same instance -- resolve the SAME secret,
 //! while two different instances (a `dev` alongside the default) each own an isolated key. This
 //! replaces the ADR-0048 instance-INDEPENDENT `shared_data_dir` key, which only existed so an
-//! unpinned (default-identity) adapter could verify a live `dev` service's proof -- a case that no
+//! unpinned (default-identity) edge could verify a live `dev` service's proof -- a case that no
 //! longer exists now that every client pins one instance. The threat model is unchanged (cross-user
 //! squatting; the key is per-USER via the user-owned data dir), so per-instance keys lose no defense.
 //! The DEFAULT instance's key location is byte-identical to before (`<data>/ghostlight/hub-key`).
@@ -29,17 +29,17 @@ type HmacSha256 = Hmac<Sha256>;
 /// corrected an earlier `%ProgramData%` draft). Created lazily on the first `run_service` start.
 const HUB_KEY_FILE: &str = "hub-key";
 
-/// The pinned refusal text (PINS.md SS5.3), logged and returned verbatim by the adapter on ANY
+/// The pinned refusal text (PINS.md SS5.3), logged and returned verbatim by the MCP edge on ANY
 /// anti-squat failure (missing/unreadable key, unreachable peer, malformed frame, wrong role, MAC
 /// mismatch) -- every failure mode collapses to this ONE message so a squatter cannot learn which
 /// check caught it.
 pub const REFUSAL_MESSAGE: &str = "refusing to connect: the Ghostlight service on this endpoint is not the one this user installed";
 
 fn hub_key_path() -> std::io::Result<PathBuf> {
-    // ADR-0064: the hub-key lives under the INSTANCE's own `log_dir`, so an adapter and the service
+    // ADR-0064: the hub-key lives under the INSTANCE's own `log_dir`, so an MCP edge and the service
     // it dials -- both pinned to the same instance -- resolve the same secret, and two instances own
     // isolated keys. (The ADR-0048 instance-independent key only existed for the retired unpinned
-    // adapter -> dev-service shadow.)
+    // edge -> dev-service shadow.)
     let dir = crate::observability::log_dir().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -72,7 +72,7 @@ fn read_key_file(path: &Path) -> std::io::Result<Option<[u8; 32]>> {
 }
 
 /// Load the per-install secret, creating it (32 CSPRNG bytes via `getrandom`) if absent. SERVICE
-/// only: called once at `run_service` startup, before any adapter can possibly connect, so no
+/// only: called once at `run_service` startup, before any MCP edge can possibly connect, so no
 /// connection ever races the file's first creation (PINS.md SS5.3). `0600` on Unix after write;
 /// the per-user `%LOCALAPPDATA%` ACL suffices on Windows (no DPAPI -- it adds no same-user defense
 /// and no dependency).
@@ -93,8 +93,8 @@ pub fn load_or_create_hub_key() -> std::io::Result<[u8; 32]> {
     Ok(key)
 }
 
-/// Read the per-install secret. ADAPTER only: a missing or wrong-length file is an error -- the
-/// adapter never creates this file itself; only the SERVICE owns the secret's lifecycle.
+/// Read the per-install secret. MCP edge only: a missing or wrong-length file is an error -- the
+/// edge never creates this file itself; only the SERVICE owns the secret's lifecycle.
 pub fn read_hub_key() -> std::io::Result<[u8; 32]> {
     let path = hub_key_path()?;
     read_key_file(&path)?

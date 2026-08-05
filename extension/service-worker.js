@@ -13,14 +13,7 @@
 // { id, type: "tab_url_response", result: { url } }, reporting chrome.tabs.get(tabId).url (or
 // null) with no matching or interpretation -- the binary's grant enforcement decides.
 //
-// Tab-group-per-session request (H7, ADR-0030 Decision 6/7): { type: "group_request", guid,
-// tabIds, title, workspace? } gets { type: "group_response", guid, ok } (both id-less;
-// fire-and-forget). The
-// grouping DECISION (which tabIds get grouped and how) lives in the pure lib/grouping.js module
-// this worker calls on receipt, ADDITIVE to (never replacing) the existing single-group
-// ensureGroup/groupTabs/inGroup access-control mechanism below, which this path never touches.
-
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/input-events.js", "lib/drag-session.js", "lib/workspace.js", "lib/grouping.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/find-visual.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/input-events.js", "lib/drag-session.js", "lib/workspace.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/find-visual.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
@@ -132,18 +125,21 @@ const {
   CAPTURE_SETTLE_MS, CLICK_GAP_MS, DRAG_INTERCEPT_GRACE_MS, DRAG_INTERCEPT_WAIT_MS,
   NAV_SETTLE_TIMEOUT_MS, MAX_SIDE,
 } = self.GhostlightConstants;
-// The H7 grouping DECISION (lib/grouping.js): pure, unit-tested in isolation
-// (tests/extension/grouping.test.js), given an injected chrome so it never touches policy.
-const { groupSessionTabs, managedGroupIds, isManagedGroupId, pruneDeadGroups, reclaimGroupsByTitle } =
-  self.GhostlightGrouping;
 const {
-  workspaceGroupKey,
-  resolveWorkspaceWindow,
-  resolveWorkspaceGroup,
   rememberFocusedWindow,
   forgetWorkspaceWindow,
-  reconcileWorkspaceGroups,
-  tabsInWindow,
+  replaceWorkspaceTabs,
+  addWorkspaceTab,
+  removeWorkspaceTab,
+  workspaceGroupIds,
+  isWorkspaceGroupId,
+  liveWorkspaceTabs,
+  liveWorkspaceGroup,
+  resolveWorkspacePlacement,
+  pruneWorkspaceGroups,
+  serializeWorkspaceTopology,
+  restoreWorkspaceTopology,
+  migrateLegacyWorkspaceTopology,
 } = self.GhostlightWorkspace;
 // ADR-0081: one policy-free broker owns current-document readiness, presentation replacement,
 // expiry, replay, acknowledgements, and bounded transient events. Chrome APIs remain adapter
@@ -165,6 +161,7 @@ const dialogStore = self.GhostlightDialog.createDialogStore();
 const NATIVE_HOST = "org.sylin.ghostlight";
 const BROWSER_GENERATION_KEY = "ghostlight_browser_generation";
 const PRESENTATION_STATE_KEY = "ghostlight_presentation_state";
+const WORKSPACE_TOPOLOGY_STATE_KEY = "workspaceTopologyState";
 const VISUAL_SCRIPT_FILES = ["lib/presentation-placement.js", "lib/action-signature.js", "lib/find-visual.js", "lib/keys.js", "agent-visual-indicator.js"];
 const PRESENTATION_EVENT_TTL_MS = 2500;
 const SIGNATURE_EVENT_TTL_MS = 1500;
@@ -186,20 +183,14 @@ let groupId = null;
 // session (and its composite tab ids) by, so identity survives relay reconnects and worker deaths
 // and never collides on a degraded pid=0.
 const browserIdentity = self.GhostlightIdentity.createBrowserIdentity(chrome.storage.local);
-// ADR-0085 (amending ADR-0066 D1): the presentation map is keyed on the user-placed workspace,
-// `browser window + clientKey -> Chrome tab-group id`. Sessions of the same client reuse one
-// group IN A GIVEN WINDOW, while deliberate placement in another window gets another group instead
-// of moving old tabs or spawning a new browser window. Legacy stored client-only keys are upgraded
-// from the live group's window during rehydrate. The single-group access-control gate
-// (groupTabs/inGroup/effectiveTabId) still CONSULTS this map through the managed-surface predicate
-// (lib/grouping.js managedGroupIds/isManagedGroupId): a tab is in-surface when it sits in the
-// global `groupId` group OR any group recorded here OR (ADR-0066 D5) in `managedTabs` below.
-const clientGroups = new Map();
+// ADR-0098: one browser-session record per WorkspaceId owns Chrome-native topology. Several
+// records may reference one visible group while their exact tab inventories remain separate.
+const workspaceTopology = new Map();
 // ADR-0066 D5: the set of tabIds this extension has placed in a managed group. A tab the user
 // drags OUT of the group (detached, or moved to another window -- both ungroup it in Chrome) stays
 // drivable because it is still one of OUR tabs, while a tab we never managed (the user's own,
-// named by a guessed id) is still refused -- the extension gate, not just the service, is what
-// keeps the agent out of the user's personal tabs (the service first-touch-adopts any unowned id).
+// named by a guessed id) is still refused. The service independently requires the current
+// workspace to own an addressed tab; this extension gate is the browser-shore defense-in-depth.
 // Session-scoped only (persisted in chrome.storage.session; Chrome renumbers tab ids across a
 // browser restart, so a stale id must never survive one), and re-seeded on rehydrate from the live
 // members of every managed group. Pruned on tabs.onRemoved.
@@ -224,10 +215,6 @@ function markTabManaged(tabId) {
   }
   return true;
 }
-// ADR-0066 D2/D4: the group title the service writes is the ghost glyph + a space + the clientKey
-// (session_title). This prefix is what rehydrate strips to reclaim a group by title after a
-// browser restart. Distinct from GROUP_TITLE (glyph + name, NO space) so the two never collide.
-const CLIENT_TITLE_PREFIX = "\u{1F47B} ";
 // Take-the-wheel hold (g10): pending id -> resolver, for get_hold/set_hold/toggle_hold replies.
 // A separate sequence and map from tool_request ids; hold ids never collide with tool ids
 // because tool ids are binary-chosen and hold ids are extension-chosen.
@@ -352,50 +339,8 @@ async function connect() {
         );
         return;
       }
-      // Tab-group-per-session request (H7, ADR-0030 Decision 6/7): mechanism only, out of band
-      // from tool dispatch. Groups exactly the named tabIds (the pure lib/grouping.js decision,
-      // given the injected `chrome`) and persists the updated per-session map; fire-and-forget --
-      // neither this request nor its reply carries an `id`, so nothing here awaits a correlated
-      // response.
-      // ADR-0085: a pinned request keys presentation on client + window. Tabs the user moved to a
-      // different window stay reachable through `managedTabs` but are not dragged back by this
-      // presentation request. A legacy caller without workspace metadata keeps client/guid keying.
-      const clientKey = (msg && (msg.clientKey || msg.guid)) || null;
-      const workspaceWindowId = msg && msg.workspace && msg.workspace.windowId;
-      const groupKey = Number.isSafeInteger(workspaceWindowId)
-        ? workspaceGroupKey(clientKey, workspaceWindowId)
-        : clientKey;
-      if (msg && msg.type === "group_request" && typeof groupKey === "string" && groupKey) {
-        const namedTabIds = Array.isArray(msg.tabIds) ? msg.tabIds : [];
-        for (const t of namedTabIds) markTabManaged(t);
-        Promise.resolve()
-          .then(async () => {
-            if (Number.isSafeInteger(workspaceWindowId)) {
-              // Re-key a group the user moved before attempting reuse. Otherwise Chrome could
-              // reject a cross-window group operation or undo the user's placement.
-              await workspaceGroupId(clientKey, workspaceWindowId);
-              return tabsInWindow(chrome, namedTabIds, workspaceWindowId);
-            }
-            return namedTabIds;
-          })
-          .then((tabIds) => groupSessionTabs(
-            chrome,
-            clientGroups,
-            groupKey,
-            tabIds,
-            msg.title || GROUP_TITLE
-          ))
-          .then(() => persistSessionState())
-          .then(() => {
-            connectedResponder.post({ type: "group_response", guid: msg.guid, ok: true });
-          })
-          .catch(() => {
-            connectedResponder.post({ type: "group_response", guid: msg.guid, ok: false });
-          });
-        return;
-      }
       // On-screen notification (SAPS PRES-HIGH-01): mechanism only, out of band from tool
-      // dispatch, the same fire-and-forget posture as group_request above. The binary has
+      // dispatch. The binary has
       // already decided everything (class/icon/title/description); this only relays it to the
       // named tab's content script for rendering -- no policy decision, no interpretation here.
       if (msg && msg.type === "notification" && typeof msg.tabId === "number") {
@@ -564,8 +509,7 @@ function reply(response, result) {
 // focus reporting below -- off by default (chrome.storage.local "ghostlight_debug"), and when
 // on, purely a breadcrumb for `ghostlight doctor` / a raw debug-state file, never anything the
 // dispatch path reads back. The decision logic (is debug on, buffer-while-no-port) lives in the
-// pure lib/debug.js module (the SAME injected-dependency shape lib/grouping.js already
-// established); this worker only supplies WHAT to post and WHERE.
+// pure lib/debug.js module; this worker only supplies WHAT to post and WHERE.
 const debugForwarder = self.GhostlightDebug.createDebugForwarder(chrome.storage.local);
 function postToNativePort(msg) {
   nativePort.postMessage(msg);
@@ -577,8 +521,8 @@ function flushPendingDebugEvents() {
   debugForwarder.flush(nativePort ? postToNativePort : null);
 }
 
-// --- Focus reporting (ADR-0058): mechanism only, fire-and-forget, the same posture as
-// group_request/notification. Chosen over OS-level window z-order specifically because Chrome's
+// --- Focus reporting (ADR-0058): mechanism only, fire-and-forget, like notification. Chosen over
+// OS-level window z-order specifically because Chrome's
 // own onFocusChanged/getLastFocused already answer "is THIS profile's window focused" from
 // inside the one process that already knows it -- portably, with no unsafe native window
 // enumeration. Only "gained focus" is ever reported: losing focus to another app (or to a
@@ -1122,6 +1066,7 @@ function clearTabState(tabId) {
   tabUrl.delete(tabId);
   dialogStore.remove(tabId);
   managedTabs.delete(tabId); // ADR-0066 D5: a closed tab is no longer ours to reach
+  removeWorkspaceTab(workspaceTopology, tabId);
   presentationBroker.destroyTab(tabId);
   persistSessionState();
 }
@@ -1276,10 +1221,7 @@ async function persistSessionState() {
   try {
     await chrome.storage.session.set({
       sessionState: { groupId, tabIds },
-      // ADR-0085: the workspace-key -> groupId map, persisted under its OWN key -- ADDITIVE
-      // alongside `sessionState`, whose own shape is unchanged -- so a service-worker restart
-      // recovers client groups too (a browser restart clears it, and rehydrate reclaims by title).
-      clientGroupsState: Array.from(clientGroups.entries()),
+      [WORKSPACE_TOPOLOGY_STATE_KEY]: serializeWorkspaceTopology(workspaceTopology),
       // ADR-0066 D5: the managed-tab set, so a detached-but-owned tab stays reachable across a
       // service-worker restart. Session-scoped only -- never storage.local -- because Chrome
       // renumbers tab ids across a browser restart and a stale id must not survive one.
@@ -1315,61 +1257,64 @@ async function ensureGroup(create) {
 
 class WorkspaceWindowGoneError extends Error {}
 
-function withWorkspaceResult(result, windowId) {
-  if (result && typeof result === "object") {
-    result._ghostlightWorkspace = { windowId };
-  }
-  return result;
+function requestedGroupTitle(workspaceRequest) {
+  const title = workspaceRequest && workspaceRequest.groupTitle;
+  return typeof title === "string" && title ? title : GROUP_TITLE;
 }
 
-async function workspaceGroupId(clientKey, windowId) {
-  const state = await resolveWorkspaceGroup(chrome, clientGroups, clientKey, windowId);
-  return { key: state.key, gid: state.groupId, changed: state.changed };
-}
-
-async function createTabInResolvedWorkspace(clientKey, resolved) {
-  const windowId = resolved.window.id;
-  const state = await workspaceGroupId(clientKey, windowId);
+async function createTabAtPlacement(workspaceId, placement, title) {
   let tab;
-  if (resolved.created && resolved.window.tabs && resolved.window.tabs[0] && state.gid === null) {
-    tab = resolved.window.tabs[0];
+  if (placement.createdWindow && placement.initialTab && !placement.group) {
+    tab = placement.initialTab;
   } else {
     try {
-      tab = await chrome.tabs.create({ active: true, windowId });
+      tab = await chrome.tabs.create({ active: true, windowId: placement.windowId });
     } catch (error) {
       throw new WorkspaceWindowGoneError((error && error.message) || String(error));
     }
   }
 
-  let gid = state.gid;
-  if (gid === null) {
+  let gid = placement.group && placement.group.id;
+  if (!Number.isSafeInteger(gid)) {
     gid = await chrome.tabs.group({ tabIds: [tab.id] });
-    await chrome.tabGroups.update(gid, { title: GROUP_TITLE, color: "blue" });
   } else {
-    await chrome.tabs.group({ tabIds: [tab.id], groupId: gid });
+    try {
+      await chrome.tabs.group({ tabIds: [tab.id], groupId: gid });
+    } catch {
+      // The user may move or close the destination group between placement resolution and this
+      // call. Keep the one tab already created and give it a local group instead of duplicating it.
+      gid = await chrome.tabs.group({ tabIds: [tab.id] });
+    }
   }
-  clientGroups.set(state.key, gid);
+  await chrome.tabGroups.update(gid, { title, color: "blue" });
+  addWorkspaceTab(workspaceTopology, workspaceId, tab.id, gid);
   markTabManaged(tab.id);
-  return { tab, gid, windowId };
+  return { tab, gid };
 }
 
-// Resolve the service-requested placement and create a tab without moving existing tabs. An
-// automatic target may disappear between getLastFocused and tabs.create; retry that pre-mutation
-// race once. A pinned target never silently fails over.
-async function createTabInSessionGroup(clientKey, workspaceRequest, initialTarget) {
-  const first = initialTarget || await resolveWorkspaceWindow(chrome, workspaceRequest);
+// Resolve live browser placement and create one tab without moving existing tabs. A destination
+// window may disappear before tabs.create; retry that pre-mutation race once against fresh state.
+async function createTabInSessionGroup(workspaceId, workspaceRequest) {
+  const title = requestedGroupTitle(workspaceRequest);
+  const first = await resolveWorkspacePlacement(chrome, workspaceTopology, workspaceId, title);
   try {
-    return await createTabInResolvedWorkspace(clientKey, first);
+    return await createTabAtPlacement(workspaceId, first, title);
   } catch (error) {
-    if (first.pinned || !(error instanceof WorkspaceWindowGoneError)) throw error;
-    const second = await resolveWorkspaceWindow(chrome, workspaceRequest);
-    return createTabInResolvedWorkspace(clientKey, second);
+    if (!(error instanceof WorkspaceWindowGoneError)) throw error;
+    const second = await resolveWorkspacePlacement(chrome, workspaceTopology, workspaceId, title);
+    return createTabAtPlacement(workspaceId, second, title);
   }
 }
+
+function managedPresentationGroupIds() {
+  const ids = workspaceGroupIds(workspaceTopology);
+  if (Number.isSafeInteger(groupId)) ids.add(groupId);
+  return ids;
+}
+
 async function groupTabs() {
-  const ids = managedGroupIds(groupId, clientGroups);
   const all = [];
-  for (const gid of ids) {
+  for (const gid of managedPresentationGroupIds()) {
     try {
       all.push(...(await chrome.tabs.query({ groupId: gid })));
     } catch { /* a vanished group contributes no tabs */ }
@@ -1380,7 +1325,7 @@ async function groupTabs() {
 // reachable if the user later drags it out. Called on rehydrate to rebuild the set from live state
 // after a browser restart (where the persisted set's tab ids are stale). Best-effort per group.
 async function seedManagedTabsFromGroups() {
-  for (const gid of managedGroupIds(groupId, clientGroups)) {
+  for (const gid of managedPresentationGroupIds()) {
     try {
       for (const t of await chrome.tabs.query({ groupId: gid })) markTabManaged(t.id);
     } catch { /* a vanished group contributes no tabs */ }
@@ -1400,11 +1345,13 @@ async function inGroup(tabId) {
     // ADR-0066 D5: in-surface if the tab sits in a managed group OR it is one we manage but the
     // user has dragged out of the group (ungrouped / moved to another window). `managedTabs` only
     // ever holds tabs we grouped, so a never-managed user tab is still refused.
-    return isManagedGroupId(tab.groupId, groupId, clientGroups) || managedTabs.has(tabId);
+    return tab.groupId === groupId || isWorkspaceGroupId(workspaceTopology, tab.groupId) ||
+      managedTabs.has(tabId);
   } catch {
     return false;
   }
 }
+
 // Restore durable session state (if any) on service-worker startup. Never rejects: any internal
 // failure degrades to the existing cold-start / title-based recovery path instead of wedging
 // dispatch, which awaits this promise before running any tool.
@@ -1413,40 +1360,32 @@ async function rehydrate() {
     const stored = await chrome.storage.session.get([
       "sessionState",
       "clientGroupsState",
+      "workspaceTabsState",
       "managedTabsState",
       PRESENTATION_STATE_KEY,
+      WORKSPACE_TOPOLOGY_STATE_KEY,
     ]);
     presentationBroker.restore(stored && stored[PRESENTATION_STATE_KEY]);
     const sessionState = stored && stored.sessionState;
-    // ADR-0085: restore the workspace-group map independently of the legacy single-group
-    // `sessionState` below -- a fresh install has neither, but either one being absent must not
-    // block recovering the other.
-    if (Array.isArray(stored && stored.clientGroupsState)) {
-      for (const [key, gid] of stored.clientGroupsState) clientGroups.set(key, gid);
-    }
+    const restored = restoreWorkspaceTopology(
+      workspaceTopology,
+      stored && stored[WORKSPACE_TOPOLOGY_STATE_KEY]
+    );
+    if (!restored) migrateLegacyWorkspaceTopology(workspaceTopology, stored);
     // ADR-0066 D5: restore the managed-tab set (a service-worker restart keeps tab ids stable).
     if (Array.isArray(stored && stored.managedTabsState)) {
       for (const id of stored.managedTabsState) markTabManaged(id);
     }
-    // ADR-0047 D5: drop any restored groups whose Chrome group died while the worker was asleep,
-    // so the managed surface never names a stale group id.
-    await pruneDeadGroups(chrome, clientGroups);
-    // ADR-0085: upgrade legacy client-only keys and repair a group's key after the user moved it.
-    // Then re-attach to groups Chrome restored after a browser restart by combining each title's
-    // client key with the group's CURRENT live window id.
-    await reconcileWorkspaceGroups(chrome, clientGroups);
-    await reclaimGroupsByTitle(
-      chrome,
-      clientGroups,
-      CLIENT_TITLE_PREFIX,
-      workspaceGroupKey
-    );
+    await pruneWorkspaceGroups(chrome, workspaceTopology);
     // ADR-0066 D5: re-seed managedTabs from the live members of every managed group (covers the
     // browser-restart case where Chrome renumbered tab ids), then drop any managed id that no
     // longer exists (tabs closed while the worker was asleep).
     await seedManagedTabsFromGroups();
     for (const id of Array.from(managedTabs)) {
       try { await chrome.tabs.get(id); } catch { managedTabs.delete(id); }
+    }
+    for (const key of Array.from(workspaceTopology.keys())) {
+      await liveWorkspaceTabs(chrome, workspaceTopology, key);
     }
     for (const state of presentationBroker.states()) {
       if (!managedTabs.has(state.tabId)) presentationBroker.destroyTab(state.tabId);
@@ -1507,36 +1446,34 @@ async function effectiveTabId(rawTabId) {
 // works, instead of failing cold and having to discover tabs_create_mcp first. Bootstrap only when
 // the managed surface is genuinely empty: if managed tabs DO exist and the named tabId is not one
 // of them, effectiveTabId's helpful "not a tab Ghostlight manages" error stands -- a wrong tabId is
-// a real mistake, not a bootstrap. Client-scoped when a `key` is present (ADR-0066: clientKey, or a
-// legacy guid), else the legacy global group for guid-less native callers.
+// a real mistake, not a bootstrap. Workspace-scoped when a `key` is present; otherwise it uses the
+// legacy global group for guid-less native callers.
 async function navigateTabId(rawTabId, key, workspaceRequest) {
   if (rawTabId !== undefined && rawTabId !== null) {
-    return { tabId: await effectiveTabId(rawTabId), windowId: null };
+    return await effectiveTabId(rawTabId);
   }
   if (typeof key === "string" && key) {
-    const resolved = await resolveWorkspaceWindow(chrome, workspaceRequest);
-    const state = await workspaceGroupId(key, resolved.window.id);
-    if (state.changed) await persistSessionState();
-    if (state.gid !== null) {
-      const tabs = await chrome.tabs.query({ groupId: state.gid });
-      if (tabs.length) {
-        const active = tabs.find((tab) => tab.active) || tabs[0];
-        return { tabId: active.id, windowId: resolved.window.id };
-      }
+    const tabs = await liveWorkspaceTabs(chrome, workspaceTopology, key);
+    if (tabs.length) {
+      const active = tabs.find((tab) => tab.active);
+      const selected = active || tabs.slice().sort((left, right) =>
+        (right.lastAccessed || 0) - (left.lastAccessed || 0) || left.id - right.id
+      )[0];
+      return selected.id;
     }
-    const { tab, windowId } = await createTabInSessionGroup(key, workspaceRequest, resolved);
+    const { tab } = await createTabInSessionGroup(key, workspaceRequest);
     await persistSessionState();
-    return { tabId: tab.id, windowId };
+    return tab.id;
   }
 
   await ensureGroup(false);
   const tabs = await groupTabs();
-  if (tabs.length) return { tabId: await effectiveTabId(rawTabId), windowId: null };
+  if (tabs.length) return effectiveTabId(rawTabId);
   await ensureGroup(true);
   const tab = await chrome.tabs.create({ active: true });
   await chrome.tabs.group({ tabIds: [tab.id], groupId });
   await persistSessionState();
-  return { tabId: tab.id, windowId: null };
+  return tab.id;
 }
 function tabContext(tabs, reportGroupId) {
   const gid = reportGroupId === undefined ? groupId : reportGroupId;
@@ -2414,45 +2351,34 @@ async function pageMeta(tabId) {
 }
 
 const handlers = {
-  // `key` is the client's stable clientKey, falling back to the guid. `workspaceRequest` is a
-  // private service instruction: either select the most recently focused normal window or use the
-  // session's already-pinned window.
+  // `key` is the opaque WorkspaceId. `workspaceRequest` carries only the presentation title;
+  // Chrome-native placement is derived here from the workspace's live tabs and groups.
   async tabs_context_mcp(a, key, workspaceRequest) {
     if (typeof key !== "string" || !key) return tabsContextLegacy(a);
-    const resolved = await resolveWorkspaceWindow(chrome, workspaceRequest);
-    let workspaceWindowId = resolved.window.id;
-    const group = await workspaceGroupId(key, resolved.window.id);
-    let { gid } = group;
-    if (group.changed) await persistSessionState();
-    if (gid === null) {
+    let tabs = await liveWorkspaceTabs(chrome, workspaceTopology, key);
+    let group = await liveWorkspaceGroup(chrome, workspaceTopology, key, tabs);
+    if (tabs.length === 0) {
       if (!a.createIfEmpty) {
-        return withWorkspaceResult(
-          text("No Ghostlight tab group in this session workspace. Call tabs_context_mcp with createIfEmpty: true, or create a tab with tabs_create_mcp."),
-          resolved.window.id
-        );
+        return text("No Ghostlight tabs in this workspace. Call tabs_context_mcp with createIfEmpty: true, or create a tab with tabs_create_mcp.");
       }
-      const created = await createTabInSessionGroup(key, workspaceRequest, resolved);
-      gid = created.gid;
-      workspaceWindowId = created.windowId;
+      const created = await createTabInSessionGroup(key, workspaceRequest);
+      group = { id: created.gid };
+      tabs = await liveWorkspaceTabs(chrome, workspaceTopology, key);
       await persistSessionState();
     }
-    return withWorkspaceResult(
-      tabContext(await chrome.tabs.query({ groupId: gid }), gid),
-      workspaceWindowId
-    );
+    return tabContext(tabs, group && group.id);
   },
   async tabs_create_mcp(_a, key, workspaceRequest) {
     if (typeof key !== "string" || !key) return tabsCreateLegacy();
-    const { tab, gid, windowId } = await createTabInSessionGroup(key, workspaceRequest);
+    const { tab, gid } = await createTabInSessionGroup(key, workspaceRequest);
     await persistSessionState();
-    const r = tabContext(await chrome.tabs.query({ groupId: gid }), gid);
+    const r = tabContext(await liveWorkspaceTabs(chrome, workspaceTopology, key), gid);
     r.content[0].text = `Created tab ${tab.id}.\n` + r.content[0].text;
     r.structuredContent = { tabId: tab.id, tabs: r.structuredContent.tabs };
-    return withWorkspaceResult(r, windowId);
+    return r;
   },
   async navigate(a, key, workspaceRequest) {
-    const navigation = await navigateTabId(a.tabId, key, workspaceRequest);
-    const { tabId } = navigation;
+    const tabId = await navigateTabId(a.tabId, key, workspaceRequest);
     if (a.url === "back") {
       await chrome.tabs.goBack(tabId);
     } else if (a.url === "forward") {
@@ -2470,7 +2396,7 @@ const handlers = {
     navigatePill(tabId, tab.url); // destination pill on the freshly loaded page
     const r = text(`Navigated to ${tab.url}${tab.status !== "complete" ? " (still loading)" : ""}.`);
     r.structuredContent = { tabId, url: tab.url, title: tab.title || "" };
-    return navigation.windowId === null ? r : withWorkspaceResult(r, navigation.windowId);
+    return r;
   },
   async dialog(a) {
     const tabId = await effectiveTabId(a.tabId);
@@ -2981,12 +2907,12 @@ async function dispatch(item) {
   const request = item.request;
   const tool = request.tool;
   const args = request.args || {};
-  const key = request.clientKey || request.guid;
+  const key = request.guid;
   const handler = handlers[tool];
   if (!handler) return fail(item.response, `Unknown tool: ${tool}`);
   try {
-    // ADR-0066: `key` is the client's clientKey (or a legacy guid); the grouping handlers use it
-    // to reuse the client's durable tab group. Every other handler ignores its second argument.
+    // `guid` carries the opaque WorkspaceId on current tool frames. A human client label is never
+    // accepted as topology authority. Guid-less legacy callers use the explicit global path.
     reply(item.response, await handler(args, key, request.workspace));
   } catch (e) {
     if (e instanceof TabAccessError) return reply(item.response, text(e.message));

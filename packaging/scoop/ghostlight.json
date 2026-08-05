@@ -10,7 +10,7 @@
       "extract_dir": "ghostlight-v0.7.3-x86_64-pc-windows-msvc"
     }
   },
-  "bin": ["ghostlight.exe", "ghostlight-relay.exe"],
+  "bin": ["ghostlight.exe", "ghostlight-mcp-connector.exe", "ghostlight-browser-connector.exe"],
   "post_install": [
     "Write-Host 'Connect the browser: run ghostlight install, then add the Ghostlight in Browser extension.'",
     "Write-Host 'Walkthrough: https://sylin.org/ghostlight/'"

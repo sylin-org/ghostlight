@@ -3,8 +3,8 @@
 //! extension connected (so the dispatched steps fail at execution) and asserts the compact result's
 //! honest per-step status plus the correlated audit records.
 //!
-//! ADR-0051 Phase 4 (P4.2): migrated from spawn-a-service-plus-adapter onto the in-process
-//! `support::inproc::Harness`. Both cases stay governed by a manifest carrying its own `audit.*`
+//! The test uses the ADR-0096 protocol-neutral `support::inproc::Harness`. Both cases stay
+//! governed by a manifest carrying its own `audit.*`
 //! config (a broad grant so the navigate step is allowed and reaches dispatch); the harness writes
 //! the correlated audit to that temp file exactly as a `--manifest file://` spawn would, so every
 //! assertion is verbatim, now with no OS process.

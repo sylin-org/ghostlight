@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Ghostlight one-line installer (macOS / Linux):
 #   curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | sh
-# Downloads the latest release binary, places it in ~/.ghostlight/bin, and runs
+# Downloads the latest release binaries, places them in ~/.ghostlight/bin, and runs
 # `ghostlight install` (idempotent: registers the native messaging host and any MCP clients
 # it finds). Safe to re-run. Set GHOSTLIGHT_NO_REGISTER=1 to download only.
 
@@ -78,9 +78,9 @@ download_and_verify() {
 
 mkdir -p "$BIN_DIR"
 echo "ghostlight: downloading latest release for ${TARGET}..."
-# ADR-0046 + ADR-0051 Phase 3: two executables ship together (the ghostlight brain + the single
-# ghostlight-relay pass-through). They sit in one dir, so `ghostlight install` finds the relay sibling.
-for b in ghostlight ghostlight-relay; do
+# ADR-0096: the persistent service, MCP stdio edge, and browser-only native relay ship together.
+# They sit in one directory so installation and MCP-client entries can resolve exact siblings.
+for b in ghostlight ghostlight-mcp-connector ghostlight-browser-connector; do
   download_and_verify "$b"
 done
 echo "ghostlight: installed to ${BIN_DIR} ($("$BIN" --version 2>/dev/null || echo version unknown))"

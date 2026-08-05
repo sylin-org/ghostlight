@@ -19,7 +19,7 @@ The release spans three first-party repositories plus external registries:
 | Channel | What ships | Automation | Driven by |
 | --- | --- | --- | --- |
 | GitHub Release | cross-platform binaries, raw per-target bins, SBOM, the store-ready adapter zip, checksums, Sigstore attestations | Automated | tag push -> `.github/workflows/release.yml`; `release.ps1` tags, watches, verifies |
-| npm (`ghostlight`) | the launcher that fetches the matching release binary, integrity-pinned | Automated | `release.ps1` (`sums` writes `checksums.json`, `npm` publishes) |
+| npm (`ghostlight`) | the launcher that fetches the three matching release executables, integrity-pinned | Automated | `release.ps1` (`sums` writes `checksums.json`, `npm` publishes) |
 | Homebrew tap (`sylin-org/homebrew-tap`) | the formula (version + macOS/Linux sums) | Automated | `release.ps1` (`tap`) |
 | Scoop | in-repo manifest `packaging/scoop/ghostlight.json` | Automated | `release.ps1` (`sums`) |
 | Winget | in-repo manifest `packaging/winget/Sylin.Ghostlight.yaml` | Semi: sums filled automatically; a PR to `microsoft/winget-pkgs` is manual, per version | `release.ps1` fills; you open the PR |
@@ -43,7 +43,7 @@ Every release needs these (the script checks them in `preflight`):
 - `git`, `gh` (authenticated: `gh auth status`), and `npm` (logged in: `npm whoami`) on PATH.
 - You are on `main`, the tree is clean, and `main == origin/main`.
 - All service version files agree on the release version (bump them on `dev` before the release PR;
-  the same list `release.ps1` checks: the four `Cargo.toml`s, `packaging/npm/package.json`,
+  the same list `release.ps1` checks: the root and runtime-crate `Cargo.toml` files, `packaging/npm/package.json`,
   `server.json`, the scoop/winget/homebrew manifests, and `docs/public-status.json`).
 - The source, public-store, and pending Chrome adapter versions each have a `compatibility.json`
   row that covers the service release.

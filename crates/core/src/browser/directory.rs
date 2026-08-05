@@ -40,7 +40,7 @@
 //! pointer signature (never constructed here).
 
 use crate::governance::ports::Capability;
-use crate::mcp::outcome::{LocalCtx, LocalFuture};
+use crate::tool::outcome::{LocalCtx, LocalFuture};
 use serde_json::{json, Value};
 
 /// The resource-shape classification driving GRANT-PATH resource resolution only (ADR-0024
@@ -74,7 +74,7 @@ pub enum Handler {
     /// Answered entirely inside the binary: `explain`, `update_plan`, and (additively)
     /// `script`/`form_fill`.
     /// An async, context-bearing handler (ADR-0035 Decision 6): receives a [`LocalCtx`] and
-    /// returns a [`crate::mcp::outcome::CallOutcome`] behind a boxed, pinned future,
+    /// returns a [`crate::tool::outcome::CallOutcome`] behind a boxed, pinned future,
     /// since Rust has no native `async fn` pointer type. Dispatch position depends on the
     /// tool's `action: None` variant requirement set (PINS.md SS2): empty answers in the
     /// free-action arm (where `explain`/`script` answer); non-empty falls through sacred +
@@ -112,7 +112,7 @@ pub enum SchedulingScope {
     /// Serialize on the resolved native tab surface.
     Surface,
     /// Serialize topology work for one client within a browser slot.
-    ClientTopology,
+    WorkspaceTopology,
     /// Exclude all child work within the resolved browser slot.
     Browser,
     /// Bypass browser resource queues as presentation-only traffic.
@@ -157,8 +157,8 @@ impl Scheduling {
     };
 
     /// A client-topology command.
-    pub const CLIENT_TOPOLOGY: Self = Self {
-        scope: SchedulingScope::ClientTopology,
+    pub const WORKSPACE_TOPOLOGY: Self = Self {
+        scope: SchedulingScope::WorkspaceTopology,
         lease: LeaseMode::Dispatch,
     };
 
@@ -269,6 +269,9 @@ impl ToolAnnotations {
 #[derive(Clone, Copy)]
 pub struct ToolDescriptor {
     pub tool: &'static str,
+    /// Whether the operation is independent, creates browser workspace continuity, or requires
+    /// an existing workspace. Protocol edges project this product fact into their own schemas.
+    pub workspace_use: WorkspaceUse,
     /// The model-facing description advertised in `tools/list`. Distinct from each variant's
     /// `directory_description` (which `explain` renders): the advertised description is rich,
     /// often multi-line, instructional prose; the directory description is a terse capability
@@ -300,6 +303,17 @@ pub struct ToolDescriptor {
     /// when this tool has a declared result vocabulary; `None` on every other row. Emitted in
     /// `tools/list` alongside `inputSchema` when present.
     pub output_schema: Option<fn() -> Value>,
+}
+
+/// How one canonical operation relates to service-owned browser workspace state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceUse {
+    /// The operation neither consumes nor creates browser workspace state.
+    Independent,
+    /// The operation may mint workspace state when no existing handle is supplied.
+    Creates,
+    /// The operation requires an existing workspace.
+    Uses,
 }
 
 /// The agent-facing example for a tool (ADR-0031 Decision 2): a sample `call` (as a JSON string
@@ -449,6 +463,7 @@ fn output_schema_with_provenance(descriptor: &ToolDescriptor) -> Value {
 pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "tabs_context_mcp",
+        workspace_use: WorkspaceUse::Creates,
         advertised_description: "List the tabs owned by this Ghostlight session and return their IDs, titles, and URLs. Use it before tab-scoped tools when you do not already have a valid tab ID. With createIfEmpty:true, it creates a blank tab when the selected workspace has no Ghostlight tab and may create a normal Chrome window if none is eligible. To recover an unavailable workspace, use tabs_create_mcp instead.",
         annotations: ToolAnnotations::open_change("List Ghostlight Tabs", false, true),
         input_schema: || json!({
@@ -474,7 +489,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                 "List the MCP tab group: the ids, URLs, and titles of the tabs this server controls.",
         }],
         resource: ResourceShape::DomainLess,
-        scheduling: Scheduling::CLIENT_TOPOLOGY,
+        scheduling: Scheduling::WORKSPACE_TOPOLOGY,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::Text,
@@ -503,6 +518,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "tabs_create_mcp",
+        workspace_use: WorkspaceUse::Creates,
         advertised_description: "Create and focus a fresh blank tab owned by this Ghostlight session. Returns its tab ID and the session's current tab list. Use it to start separate work or recover an unavailable workspace; call navigate afterward to load a URL.",
         annotations: ToolAnnotations::open_change("Create Ghostlight Tab", false, false),
         input_schema: || json!({
@@ -522,7 +538,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
             directory_description: "Open a new empty tab in the MCP tab group; touches no page and no server.",
         }],
         resource: ResourceShape::DomainLess,
-        scheduling: Scheduling::CLIENT_TOPOLOGY,
+        scheduling: Scheduling::WORKSPACE_TOPOLOGY,
         handler: Handler::ExtensionForward,
         postprocess: None,
         page_output: PageOutput::Text,
@@ -551,6 +567,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "navigate",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Load a URL in a Ghostlight-owned tab, or move forward or back through its history. Use it for top-level navigation, not same-page clicks. Get a tab ID from tabs_context_mcp when needed. Navigation can leave the current page; force:true also discards unsaved changes when Chrome asks for confirmation.",
         annotations: ToolAnnotations::open_action("Navigate"),
         input_schema: || json!({
@@ -602,6 +619,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "computer",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Take screenshots and perform low-level mouse, keyboard, scroll, hover, and zoom actions in one Ghostlight tab. Use it for coordinate-based interaction; prefer act_on for one semantic target and form_fill or form_input for forms. Get a tab ID from tabs_context_mcp when needed, and take a screenshot before coordinate actions. Input actions can change page state and should not be blindly retried.",
         annotations: ToolAnnotations::open_action("Browser Input and Screenshots"),
         input_schema: || json!({
@@ -759,6 +777,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "find",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Find elements on the page using natural language. Can search for elements by their purpose (e.g., \"search bar\", \"login button\") or by text content (e.g., \"organic mango product\"). Returns up to 20 matching elements with references that can be used with other tools. If more than 20 matches exist, you'll be notified to use a more specific query. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
         annotations: ToolAnnotations::open_read("Find Page Elements"),
         input_schema: || json!({
@@ -812,6 +831,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "form_input",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Set one form control using a fresh element ref from read_page or find. Use it when the exact element is already known; prefer form_fill for several fields matched by label. The tool dispatches the page's normal input and change events, so page handlers may react. Get a tab ID from tabs_context_mcp when needed.",
         annotations: ToolAnnotations::open_action("Set Form Value"),
         input_schema: || json!({
@@ -853,6 +873,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "get_page_text",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Extract raw text content from the page, prioritizing article content. Ideal for reading articles, blog posts, or other text-heavy pages. Returns plain text without HTML formatting. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. Output is limited to 50000 characters by default; if it exceeds the limit it is truncated with a note giving the full size.",
         annotations: ToolAnnotations::open_read("Read Page Text"),
         input_schema: || json!({
@@ -890,6 +911,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "javascript_tool",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Execute JavaScript code in the context of the current page. The code runs in the page's context and can interact with the DOM, window object, and page variables. Returns the result of the last expression or any thrown errors. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
         annotations: ToolAnnotations::open_action("Run Page JavaScript"),
         input_schema: || json!({
@@ -932,6 +954,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "read_console_messages",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Read browser console messages (console.log, console.error, console.warn, etc.) from a specific tab. Useful for debugging JavaScript errors, viewing application logs, or understanding what's happening in the browser console. Returns console messages from the current domain only. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. IMPORTANT: Always provide a pattern to filter messages - without a pattern, you may get too many irrelevant messages.",
         annotations: ToolAnnotations::open_read("Read Console Messages"),
         input_schema: || json!({
@@ -981,6 +1004,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "read_network_requests",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Read HTTP network requests (XHR, Fetch, documents, images, etc.) from a specific tab. Useful for debugging API calls, monitoring network activity, or understanding what requests a page is making. Returns all network requests made by the current page, including cross-origin requests. Requests are automatically cleared when the page navigates to a different domain. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
         annotations: ToolAnnotations::open_read("Read Network Requests"),
         input_schema: || json!({
@@ -1026,6 +1050,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "read_page",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Get an accessibility tree representation of elements on the page. By default returns all elements including non-visible ones. Can optionally filter for only interactive elements, limit tree depth, or focus on a specific element. Returns a structured tree that represents how screen readers see the page content. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. Output is limited to 50000 characters -- if exceeded, the tree is truncated at a line boundary with a note giving the full size; pass a larger max_chars, or use depth/ref_id to focus.",
         annotations: ToolAnnotations::open_read("Read Page Structure"),
         input_schema: || json!({
@@ -1087,6 +1112,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "resize_window",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Resize the current browser window to specified dimensions. Useful for testing responsive designs or setting up specific screen sizes. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
         annotations: ToolAnnotations::closed_change("Resize Browser Window", true),
         input_schema: || json!({
@@ -1128,6 +1154,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "update_plan",
+        workspace_use: WorkspaceUse::Independent,
         advertised_description: "Echo a concise plan of intended browser work. This compatibility tool is informational: it does not request approval, change permissions, or authorize domains. Use it only when the client or workflow expects an explicit plan.",
         annotations: ToolAnnotations::closed_read("Report Browser Plan"),
         input_schema: || json!({
@@ -1160,7 +1187,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         }],
         resource: ResourceShape::DomainLess,
         scheduling: Scheduling::LOCAL,
-        handler: Handler::Local(crate::mcp::update_plan::update_plan_handler),
+        handler: Handler::Local(crate::tool::update_plan::update_plan_handler),
         postprocess: None,
         page_output: PageOutput::None,
         post_dispatch: PostDispatch::None,
@@ -1168,6 +1195,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "narrate",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Show a short, temporary narration ribbon in the controlled browser tab so the person watching understands the current workflow phase. Use it for meaningful phase changes, not routine clicks or keystrokes. A new narration replaces the current one.",
         annotations: ToolAnnotations::closed_change("Narrate Browser Work", false),
         input_schema: || json!({
@@ -1232,6 +1260,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "wait_for",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Wait until the page is ready. By default waits for BOTH your condition and page settlement (DOM mutation rate decayed). Provide selector (CSS) or text (visible substring) with state visible|present|gone, or call with neither to wait for settlement alone. min_ms sets a minimum elapsed time; settle:false gates on the condition only. Returns elapsed_ms, settle diagnostics, and the matched element's ref for follow-up clicks. Times out with an error naming what WAS on the page.",
         annotations: ToolAnnotations::open_read("Wait for Page State"),
         input_schema: || json!({
@@ -1304,6 +1333,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "script",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Run dependent tool calls in one request when later steps need structured results from earlier ones. Use browser_batch when every step's input is known before the call. Steps execute in order; each step is validated, authorized, and audited exactly as if called individually. Step arguments may reference a prior step's structured result: $prev.field for the previous step, $N.field for step N (1-indexed), with .0-style numeric segments indexing arrays (example: $prev.results.0.ref after find). Write $$ for a literal leading $. Only a prior step that returned structuredContent can be referenced. Steps may not include script itself. Use wait_for between navigate and reads on dynamic pages.",
         annotations: ToolAnnotations::open_action("Run Dependent Browser Steps"),
         input_schema: || json!({
@@ -1358,7 +1388,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         }],
         resource: ResourceShape::DomainLess,
         scheduling: Scheduling::COMPOSITION,
-        handler: Handler::Local(crate::mcp::script::script_handler),
+        handler: Handler::Local(crate::tool::script::script_handler),
         postprocess: None,
         page_output: PageOutput::None,
         post_dispatch: PostDispatch::None,
@@ -1389,6 +1419,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "form_fill",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Fill a form by field labels in one call. Provide fields as a map from a label, placeholder, or name attribute to the value (string, number, or boolean for checkboxes). Matching is case-insensitive and specificity-ordered; ambiguous keys are returned unmatched with candidates instead of guessed. submit:true clicks the form's own submit control after filling. Passwords are masked in the result. Use this for several fields matched by meaning; use form_input when you already have one exact element ref. Unmatched fields include refs for that fallback.",
         annotations: ToolAnnotations::open_action("Fill Form"),
         input_schema: || json!({
@@ -1433,7 +1464,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         ],
         resource: ResourceShape::TabScoped,
         scheduling: Scheduling::RETAIN_SURFACE,
-        handler: Handler::Local(crate::mcp::form_fill::form_fill_handler),
+        handler: Handler::Local(crate::tool::form_fill::form_fill_handler),
         postprocess: None,
         page_output: PageOutput::Structured,
         post_dispatch: PostDispatch::None,
@@ -1488,6 +1519,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "act_on",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Resolve one visible element by ref or accessible meaning, perform one action, and return a bounded observation receipt. Use this when the target should be unique and you want to avoid a separate find, action, and wait loop. Use computer instead for screenshots or coordinate-level pointer and keyboard work. Ambiguous semantic matches are reported without acting.",
         annotations: ToolAnnotations::open_action("Act on Page Element"),
         input_schema: || json!({
@@ -1571,7 +1603,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         ],
         resource: ResourceShape::TabScoped,
         scheduling: Scheduling::RETAIN_SURFACE,
-        handler: Handler::Local(crate::mcp::act_on::act_on_handler),
+        handler: Handler::Local(crate::tool::act_on::act_on_handler),
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::Receipt,
         post_dispatch: PostDispatch::None,
@@ -1592,6 +1624,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "dialog",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Inspect or explicitly resolve the JavaScript dialog blocking one owned tab. Use status when the dialog state is unknown. Never accept, dismiss, or respond without intent from the current task.",
         annotations: ToolAnnotations::open_action("Handle Page Dialog"),
         input_schema: || json!({
@@ -1659,6 +1692,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "tab_control",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Focus, reload, or close one tab owned by this Ghostlight session. Close is always explicit and never affects a user-owned tab or automatically deletes the containing tab group.",
         annotations: ToolAnnotations::open_action("Control Ghostlight Tab"),
         input_schema: || json!({
@@ -1709,6 +1743,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "file_upload",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Upload one or multiple client-supplied files to a file input element on the page. Do not click file upload buttons or file inputs -- that opens a native file picker you cannot see or control. Use read_page or find to locate the file input, then pass its ref here. Use upload_image instead only for a screenshot already captured by Ghostlight.",
         annotations: ToolAnnotations::open_action("Upload Files"),
         input_schema: || json!({
@@ -1765,6 +1800,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "browser_batch",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Execute a sequence of browser tool calls in ONE round trip. Each item is {name, input} where input is exactly what you'd pass to that tool standalone. Actions execute SEQUENTIALLY (not in parallel) and stop on the first error. Use this tool extensively to quickly execute work whenever you can predict two or more steps ahead -- e.g. navigate, click a field, type, press Return, screenshot. Each tool's own permission check runs per item -- if an action navigates to a domain without permission, the next item's check fails and the batch stops. Screenshots and other images are returned interleaved with outputs; coordinates you write in THIS batch refer to the screenshot taken BEFORE this call. browser_batch cannot be nested. Use script instead when a later step needs structured output from an earlier one.",
         annotations: ToolAnnotations::open_action("Run Browser Batch"),
         input_schema: || json!({
@@ -1800,7 +1836,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         }],
         resource: ResourceShape::DomainLess,
         scheduling: Scheduling::COMPOSITION,
-        handler: Handler::Local(crate::mcp::browser_batch::browser_batch_handler),
+        handler: Handler::Local(crate::tool::browser_batch::browser_batch_handler),
         postprocess: None,
         page_output: PageOutput::None,
         post_dispatch: PostDispatch::None,
@@ -1808,6 +1844,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "upload_image",
+        workspace_use: WorkspaceUse::Uses,
         advertised_description: "Upload a screenshot already captured by Ghostlight to a file input or drag-and-drop target. Use file_upload for client-supplied files. Target a specific element, especially a hidden file input, with ref; target a visible drop location with coordinate. Provide either ref or coordinate, not both.",
         annotations: ToolAnnotations::open_action("Upload Captured Image"),
         input_schema: || json!({
@@ -1835,7 +1872,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         }],
         resource: ResourceShape::TabScoped,
         scheduling: Scheduling::RETAIN_SURFACE,
-        handler: Handler::Local(crate::mcp::upload_image::upload_image_handler),
+        handler: Handler::Local(crate::tool::upload_image::upload_image_handler),
         postprocess: Some(crate::browser::redact::apply_to_result),
         page_output: PageOutput::Receipt,
         post_dispatch: PostDispatch::None,
@@ -1843,6 +1880,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "gif_creator",
+        workspace_use: WorkspaceUse::Uses,
         // gif_creator is additive and not part of the 13 trained schemas. ADR-0073 simplifies the
         // happy path to start -> ordinary browser work -> export; stop remains an optional explicit
         // boundary, and status exposes the reliable lifecycle without touching the live page.
@@ -1905,7 +1943,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
         // ADR-0053 D6: the orchestrator lives in the binary (the form_fill precedent); the
         // extension keeps only the thin screencast capture relay. Wiring only -- the advertised
         // schema above is untouched.
-        handler: Handler::Local(crate::mcp::gif_creator::gif_creator_handler),
+        handler: Handler::Local(crate::tool::gif_creator::gif_creator_handler),
         postprocess: None,
         page_output: PageOutput::Structured,
         post_dispatch: PostDispatch::None,
@@ -1913,6 +1951,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         tool: "explain",
+        workspace_use: WorkspaceUse::Independent,
         advertised_description: "Returns this server's action directory: every available action, the capability it requires (read, action, write, or execute; some require none), and a short description of what it does, plus definitions of the capability vocabulary. Use it to learn what you are allowed to do in this session. It does not read, summarize, or explain web pages.",
         annotations: ToolAnnotations::closed_read("Explain Browser Permissions"),
         input_schema: || json!({
@@ -1949,7 +1988,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
                         }
                     }
                 }
-                crate::mcp::outcome::CallOutcome::Success {
+                crate::tool::outcome::CallOutcome::Success {
                     result: json!({ "content": [ { "type": "text", "text": text } ] }),
                 }
             })
@@ -2157,7 +2196,7 @@ fn gif_page_target(args: &Value) -> bool {
 /// (`computer`'s 13 actions in enum order), one line per variant -- `{tool}: requires
 /// {capability or nothing}. {description}` for a variant with no action, `{tool} ({action}):
 /// requires {capability or nothing}. {description}` for a variant with one. Pure formatting
-/// over static data: no I/O, and deterministic across calls and sessions.
+/// over static data: no I/O, and deterministic across calls and workspaces.
 pub fn explain_text() -> String {
     let total_variants: usize = REGISTRY.iter().map(|row| row.variants.len()).sum();
     let mut lines = Vec::with_capacity(total_variants + 2);
@@ -2321,8 +2360,8 @@ mod tests {
     #[test]
     fn every_tool_has_the_accepted_scheduling_shape() {
         const EXPECTED: &[(&str, Scheduling)] = &[
-            ("tabs_context_mcp", Scheduling::CLIENT_TOPOLOGY),
-            ("tabs_create_mcp", Scheduling::CLIENT_TOPOLOGY),
+            ("tabs_context_mcp", Scheduling::WORKSPACE_TOPOLOGY),
+            ("tabs_create_mcp", Scheduling::WORKSPACE_TOPOLOGY),
             ("navigate", Scheduling::SURFACE),
             ("computer", Scheduling::SURFACE),
             ("find", Scheduling::SURFACE),

@@ -2,10 +2,11 @@
 //! Resource-scoped command scheduling for browser-bound work (ADR-0080).
 //!
 //! This module owns dispatch admission, not browser transport. Page commands serialize on a
-//! browser surface, topology commands serialize per client, and browser-wide commands exclude all
+//! browser surface, topology commands serialize per workspace, and browser-wide commands exclude all
 //! child work in the same browser slot. Producers retain FIFO order while round-robin selection
-//! prevents one MCP session from monopolizing a shared resource.
+//! prevents one workspace producer from monopolizing a shared resource.
 
+use crate::work::CancellationToken;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -33,7 +34,7 @@ pub struct BrowserSurface {
     pub native_tab: i64,
 }
 
-/// A producer of scheduled browser work, normally one MCP session.
+/// A producer of scheduled browser work, normally one service-owned workspace.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ProducerId(String);
 
@@ -54,12 +55,12 @@ impl ProducerId {
 pub enum ScheduleKey {
     /// Page state belonging to one native tab.
     Surface(BrowserSurface),
-    /// Tab topology observed and mutated by one client within a browser slot.
-    ClientTopology {
+    /// Tab topology observed and mutated by one workspace within a browser slot.
+    WorkspaceTopology {
         /// Service-assigned browser connection slot.
         browser_slot: u32,
-        /// Stable client identity used to isolate topology ordering.
-        client_key: String,
+        /// Stable workspace identity used to isolate topology ordering.
+        workspace_key: String,
     },
     /// Browser-wide state. This excludes every child resource in the slot.
     Browser {
@@ -72,7 +73,7 @@ impl ScheduleKey {
     fn browser_slot(&self) -> u32 {
         match self {
             Self::Surface(surface) => surface.browser_slot,
-            Self::ClientTopology { browser_slot, .. } | Self::Browser { browser_slot } => {
+            Self::WorkspaceTopology { browser_slot, .. } | Self::Browser { browser_slot } => {
                 *browser_slot
             }
         }
@@ -114,12 +115,14 @@ pub enum RetirementReason {
     Panic,
     /// The browser requires interactive user attention.
     Attention,
-    /// The producing MCP session ended.
+    /// The producing workspace retired.
     SessionEnded,
     /// The browser or tab resource ceased to exist.
     ResourceDestroyed,
     /// The native connection disappeared without proof that the browser process ended.
     BrowserDisconnected,
+    /// The caller cancelled this queued work before browser dispatch.
+    Cancelled,
 }
 
 /// A command that never reached browser dispatch.
@@ -149,12 +152,15 @@ pub enum ScheduleFailure {
         /// The lifecycle event that retired the command.
         reason: RetirementReason,
     },
-    /// Prior work has an unknown outcome on this surface.
-    #[error("browser surface is quarantined after command {command_id} had an unknown outcome")]
-    SurfaceUncertain {
+    /// Prior work has an unknown outcome on this resource.
+    #[error("browser resource is quarantined after command {command_id} had an unknown outcome")]
+    ResourceUncertain {
         /// The exact command whose terminal state is unknown.
         command_id: u64,
     },
+    /// Cooperative cancellation won before browser dispatch.
+    #[error("browser command was cancelled before dispatch")]
+    Cancelled,
 }
 
 /// The dispatch path represented by an execution context.
@@ -343,6 +349,64 @@ impl CommandScheduler {
         }
     }
 
+    /// Wait for dispatch admission while permitting exact cancellation of this queued command.
+    ///
+    /// Cancellation removes only this command id. Other work from the same workspace producer is
+    /// unaffected. Once a context is returned, the caller owns an admitted atomic dispatch and
+    /// must use cooperative checks at its next safe boundary instead of aborting the browser send.
+    pub async fn acquire_cancellable(
+        &self,
+        key: ScheduleKey,
+        producer: ProducerId,
+        authority_epoch: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<ExecutionContext, ScheduleFailure> {
+        if cancellation.is_cancelled() {
+            return Err(ScheduleFailure::Cancelled);
+        }
+
+        let (sender, receiver) = oneshot::channel();
+        let command_id;
+        let deliveries;
+        {
+            let mut state = self.inner.lock_state();
+            if authority_epoch != state.authority_epoch {
+                return Err(ScheduleFailure::AuthorityChanged);
+            }
+            command_id = state.next_command_id;
+            state.next_command_id = state.next_command_id.wrapping_add(1).max(1);
+            let waiter = Waiter {
+                command_id,
+                producer,
+                authority_epoch,
+                sender,
+            };
+            state.enqueue(key, waiter, self.inner.limits)?;
+            deliveries = state.drive_all();
+        }
+        self.inner.deliver(deliveries);
+
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {
+                self.inner.cancel(command_id);
+                Err(ScheduleFailure::Cancelled)
+            }
+            result = tokio::time::timeout(self.inner.limits.queue_deadline, receiver) => {
+                match result {
+                    Ok(Ok(result)) => result,
+                    Ok(Err(_)) => Err(ScheduleFailure::Retired {
+                        reason: RetirementReason::ResourceDestroyed,
+                    }),
+                    Err(_) => {
+                        self.inner.cancel(command_id);
+                        Err(ScheduleFailure::QueueDeadline)
+                    }
+                }
+            }
+        }
+    }
+
     /// Publish a new authority epoch and retire every queued command from older authority.
     pub fn advance_authority_epoch(&self, authority_epoch: u64) {
         let failures;
@@ -392,21 +456,40 @@ impl CommandScheduler {
         self.inner.deliver(deliveries);
     }
 
-    /// Quarantine a surface after dispatch completed with an unknown outcome.
-    pub fn mark_surface_uncertain(&self, surface: BrowserSurface, command_id: u64) {
-        let deliveries;
+    /// Quarantine an exact resource delivery after dispatch completed with an unknown outcome.
+    ///
+    /// Marking succeeds only while `command_id` is still the resource's active lease. This makes a
+    /// delayed timeout harmless after tab or browser-generation destruction and avoids recreating
+    /// retired resource state. Negotiated executor generation is retained as part of the exact
+    /// terminal proof; legacy deliveries without it remain quarantined until resource destruction.
+    pub fn mark_uncertain(
+        &self,
+        key: &ScheduleKey,
+        command_id: u64,
+        request_id: &str,
+        executor_generation: Option<&str>,
+    ) -> bool {
+        let (marked, deliveries);
         {
             let mut state = self.inner.lock_state();
-            deliveries = state.mark_surface_uncertain(surface, command_id);
+            (marked, deliveries) =
+                state.mark_uncertain(key, command_id, request_id, executor_generation);
         }
         self.inner.deliver(deliveries);
+        marked
     }
 
-    /// Clear quarantine only for the exact command that later supplied a terminal acknowledgement.
-    pub fn reconcile_surface(&self, surface: BrowserSurface, command_id: u64) -> bool {
+    /// Clear quarantine only for the exact executor, command, request, and resource terminal proof.
+    pub fn reconcile(
+        &self,
+        key: &ScheduleKey,
+        command_id: u64,
+        request_id: &str,
+        executor_generation: &str,
+    ) -> bool {
         let (cleared, deliveries) = {
             let mut state = self.inner.lock_state();
-            state.reconcile_surface(surface, command_id)
+            state.reconcile(key, command_id, request_id, executor_generation)
         };
         self.inner.deliver(deliveries);
         cleared
@@ -514,10 +597,12 @@ impl State {
 
         let slot = key.browser_slot();
         let browser = self.browsers.entry(slot).or_default();
-        let queue = browser.queue_mut(&key);
-        if let Some(command_id) = queue.uncertain {
-            return Err(ScheduleFailure::SurfaceUncertain { command_id });
+        if let Some(uncertain) = browser.conflicting_uncertainty(&key) {
+            return Err(ScheduleFailure::ResourceUncertain {
+                command_id: uncertain.command_id,
+            });
         }
+        let queue = browser.queue_mut(&key);
         if queue.len() >= limits.per_resource {
             return Err(ScheduleFailure::Overloaded { scope: "resource" });
         }
@@ -538,7 +623,15 @@ impl State {
         for delivery in &grants {
             self.account_removed(&delivery.waiter.producer);
         }
+        self.prune_idle();
         grants
+    }
+
+    fn prune_idle(&mut self) {
+        for browser in self.browsers.values_mut() {
+            browser.prune_idle();
+        }
+        self.browsers.retain(|_, browser| !browser.is_idle());
     }
 
     fn account_removed(&mut self, producer: &ProducerId) {
@@ -578,6 +671,7 @@ impl State {
         for delivery in &deliveries {
             self.account_removed(&delivery.waiter.producer);
         }
+        self.prune_idle();
         deliveries
     }
 
@@ -589,6 +683,7 @@ impl State {
         for delivery in &deliveries {
             self.account_removed(&delivery.waiter.producer);
         }
+        self.prune_idle();
         deliveries
     }
 
@@ -600,51 +695,71 @@ impl State {
         for delivery in &deliveries {
             self.account_removed(&delivery.waiter.producer);
         }
+        self.prune_idle();
         deliveries
     }
 
-    fn mark_surface_uncertain(
+    fn mark_uncertain(
         &mut self,
-        surface: BrowserSurface,
+        key: &ScheduleKey,
         command_id: u64,
-    ) -> Vec<Delivery> {
-        let key = ChildKey::Surface(surface.native_tab);
-        let browser = self.browsers.entry(surface.browser_slot).or_default();
-        let queue = browser.children.entry(key).or_default();
-        queue.uncertain = Some(command_id);
+        request_id: &str,
+        executor_generation: Option<&str>,
+    ) -> (bool, Vec<Delivery>) {
+        let Some(browser) = self.browsers.get_mut(&key.browser_slot()) else {
+            return (false, Vec::new());
+        };
+        let Some(queue) = browser.queue_mut_existing(key) else {
+            return (false, Vec::new());
+        };
+        if queue.active != Some(command_id) {
+            return (false, Vec::new());
+        }
+        queue.uncertain = Some(UncertainDelivery {
+            command_id,
+            request_id: request_id.to_string(),
+            executor_generation: executor_generation.map(str::to_string),
+        });
         let waiters = queue.drain();
         let deliveries: Vec<_> = waiters
             .into_iter()
-            .map(|waiter| Delivery::fail(waiter, ScheduleFailure::SurfaceUncertain { command_id }))
+            .map(|waiter| Delivery::fail(waiter, ScheduleFailure::ResourceUncertain { command_id }))
             .collect();
         for delivery in &deliveries {
             self.account_removed(&delivery.waiter.producer);
         }
-        deliveries
+        self.prune_idle();
+        (true, deliveries)
     }
 
-    fn reconcile_surface(
+    fn reconcile(
         &mut self,
-        surface: BrowserSurface,
+        key: &ScheduleKey,
         command_id: u64,
+        request_id: &str,
+        executor_generation: &str,
     ) -> (bool, Vec<Delivery>) {
-        let Some(browser) = self.browsers.get_mut(&surface.browser_slot) else {
+        let Some(browser) = self.browsers.get_mut(&key.browser_slot()) else {
             return (false, Vec::new());
         };
-        let Some(queue) = browser
-            .children
-            .get_mut(&ChildKey::Surface(surface.native_tab))
-        else {
+        let Some(queue) = browser.queue_mut_existing(key) else {
             return (false, Vec::new());
         };
-        if queue.uncertain != Some(command_id) {
+        let Some(uncertain) = queue.uncertain.as_ref() else {
+            return (false, Vec::new());
+        };
+        if uncertain.command_id != command_id
+            || uncertain.request_id != request_id
+            || uncertain.executor_generation.as_deref() != Some(executor_generation)
+        {
             return (false, Vec::new());
         }
         queue.uncertain = None;
-        let deliveries = browser.drive();
+        let deliveries = BrowserQueues::with_slot(browser.drive(), key.browser_slot());
         for delivery in &deliveries {
             self.account_removed(&delivery.waiter.producer);
         }
+        self.prune_idle();
         (true, deliveries)
     }
 
@@ -676,6 +791,7 @@ impl State {
         for delivery in &deliveries {
             self.account_removed(&delivery.waiter.producer);
         }
+        self.prune_idle();
         deliveries
     }
 
@@ -689,6 +805,7 @@ impl State {
         for delivery in &deliveries {
             self.account_removed(&delivery.waiter.producer);
         }
+        self.prune_idle();
         deliveries
     }
 }
@@ -696,7 +813,7 @@ impl State {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum ChildKey {
     Surface(i64),
-    ClientTopology(String),
+    WorkspaceTopology(String),
 }
 
 #[derive(Default)]
@@ -714,20 +831,66 @@ impl BrowserQueues {
                 .children
                 .entry(ChildKey::Surface(surface.native_tab))
                 .or_default(),
-            ScheduleKey::ClientTopology { client_key, .. } => self
+            ScheduleKey::WorkspaceTopology { workspace_key, .. } => self
                 .children
-                .entry(ChildKey::ClientTopology(client_key.clone()))
+                .entry(ChildKey::WorkspaceTopology(workspace_key.clone()))
                 .or_default(),
             ScheduleKey::Browser { .. } => &mut self.browser,
         }
     }
 
+    fn prune_idle(&mut self) {
+        self.children.retain(|_, queue| !queue.is_idle());
+    }
+
+    fn is_idle(&self) -> bool {
+        self.browser.is_idle() && self.children.is_empty() && self.active_children == 0
+    }
+
+    fn queue_mut_existing(&mut self, key: &ScheduleKey) -> Option<&mut FairQueue> {
+        match key {
+            ScheduleKey::Surface(surface) => self
+                .children
+                .get_mut(&ChildKey::Surface(surface.native_tab)),
+            ScheduleKey::WorkspaceTopology { workspace_key, .. } => self
+                .children
+                .get_mut(&ChildKey::WorkspaceTopology(workspace_key.clone())),
+            ScheduleKey::Browser { .. } => Some(&mut self.browser),
+        }
+    }
+
+    fn conflicting_uncertainty(&self, key: &ScheduleKey) -> Option<&UncertainDelivery> {
+        match key {
+            ScheduleKey::Browser { .. } => self.browser.uncertain.as_ref().or_else(|| {
+                self.children
+                    .values()
+                    .find_map(|queue| queue.uncertain.as_ref())
+            }),
+            ScheduleKey::Surface(surface) => self.browser.uncertain.as_ref().or_else(|| {
+                self.children
+                    .get(&ChildKey::Surface(surface.native_tab))
+                    .and_then(|queue| queue.uncertain.as_ref())
+            }),
+            ScheduleKey::WorkspaceTopology { workspace_key, .. } => {
+                self.browser.uncertain.as_ref().or_else(|| {
+                    self.children
+                        .get(&ChildKey::WorkspaceTopology(workspace_key.clone()))
+                        .and_then(|queue| queue.uncertain.as_ref())
+                })
+            }
+        }
+    }
+
     fn drive(&mut self) -> Vec<Delivery> {
-        if self.browser.active.is_some() {
+        if self.browser.active.is_some() || self.browser.uncertain.is_some() {
             return Vec::new();
         }
         let browser_waiting = !self.browser.is_empty();
-        if self.active_children > 0 && browser_waiting {
+        let uncertain_child = self
+            .children
+            .values()
+            .any(|queue| queue.uncertain.is_some());
+        if (self.active_children > 0 || uncertain_child) && browser_waiting {
             return Vec::new();
         }
 
@@ -759,9 +922,9 @@ impl BrowserQueues {
                     browser_slot: 0,
                     native_tab: *native_tab,
                 }),
-                ChildKey::ClientTopology(client_key) => ScheduleKey::ClientTopology {
+                ChildKey::WorkspaceTopology(workspace_key) => ScheduleKey::WorkspaceTopology {
                     browser_slot: 0,
-                    client_key: client_key.clone(),
+                    workspace_key: workspace_key.clone(),
                 },
             };
             deliveries.push(Delivery::grant(waiter, key));
@@ -777,7 +940,7 @@ impl BrowserQueues {
             if let DeliveryResult::Grant(key) = &mut delivery.result {
                 match key {
                     ScheduleKey::Surface(surface) => surface.browser_slot = browser_slot,
-                    ScheduleKey::ClientTopology {
+                    ScheduleKey::WorkspaceTopology {
                         browser_slot: slot, ..
                     }
                     | ScheduleKey::Browser { browser_slot: slot } => *slot = browser_slot,
@@ -835,7 +998,14 @@ struct FairQueue {
     producer_order: VecDeque<ProducerId>,
     len: usize,
     active: Option<u64>,
-    uncertain: Option<u64>,
+    uncertain: Option<UncertainDelivery>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct UncertainDelivery {
+    command_id: u64,
+    request_id: String,
+    executor_generation: Option<String>,
 }
 
 impl FairQueue {
@@ -845,6 +1015,10 @@ impl FairQueue {
 
     fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    fn is_idle(&self) -> bool {
+        self.is_empty() && self.active.is_none() && self.uncertain.is_none()
     }
 
     fn push(&mut self, waiter: Waiter) {
@@ -972,6 +1146,13 @@ mod tests {
         })
     }
 
+    fn topology(workspace: &str) -> ScheduleKey {
+        ScheduleKey::WorkspaceTopology {
+            browser_slot: 7,
+            workspace_key: workspace.to_string(),
+        }
+    }
+
     #[tokio::test]
     async fn serializes_one_surface_in_fifo_order() {
         let scheduler = scheduler();
@@ -993,6 +1174,47 @@ mod tests {
         drop(first);
         let second = queued.await.unwrap();
         assert_eq!(second.key(), Some(&surface(10)));
+    }
+
+    #[tokio::test]
+    async fn cancellation_retires_only_the_exact_queued_command() {
+        let scheduler = scheduler();
+        let held = scheduler
+            .acquire(surface(10), ProducerId::new("held"), 0)
+            .await
+            .unwrap();
+        let cancelled = CancellationToken::new();
+        let queued_cancelled = tokio::spawn({
+            let scheduler = scheduler.clone();
+            let cancelled = cancelled.clone();
+            async move {
+                scheduler
+                    .acquire_cancellable(
+                        surface(10),
+                        ProducerId::new("same-workspace"),
+                        0,
+                        &cancelled,
+                    )
+                    .await
+            }
+        });
+        let queued_survivor = tokio::spawn({
+            let scheduler = scheduler.clone();
+            async move {
+                scheduler
+                    .acquire(surface(10), ProducerId::new("same-workspace"), 0)
+                    .await
+            }
+        });
+        tokio::task::yield_now().await;
+        cancelled.cancel();
+        assert_eq!(
+            queued_cancelled.await.unwrap().unwrap_err(),
+            ScheduleFailure::Cancelled
+        );
+        assert!(!queued_survivor.is_finished());
+        drop(held);
+        assert!(queued_survivor.await.unwrap().is_ok());
     }
 
     #[tokio::test]
@@ -1139,44 +1361,227 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn quarantine_clears_only_for_exact_terminal_command() {
+    async fn quarantine_clears_only_for_exact_terminal_delivery() {
         let scheduler = scheduler();
+        let key = surface(10);
         let active = scheduler
-            .acquire(surface(10), ProducerId::new("a"), 0)
+            .acquire(key.clone(), ProducerId::new("a"), 0)
             .await
             .unwrap();
         let command_id = active.command_id().unwrap();
-        scheduler.mark_surface_uncertain(
-            BrowserSurface {
-                browser_slot: 7,
-                native_tab: 10,
-            },
-            command_id,
-        );
+        assert!(scheduler.mark_uncertain(&key, command_id, "request-a", Some("executor-a")));
         drop(active);
         let error = scheduler
-            .acquire(surface(10), ProducerId::new("b"), 0)
+            .acquire(key.clone(), ProducerId::new("b"), 0)
             .await
             .unwrap_err();
-        assert_eq!(error, ScheduleFailure::SurfaceUncertain { command_id });
-        assert!(!scheduler.reconcile_surface(
-            BrowserSurface {
-                browser_slot: 7,
-                native_tab: 10,
-            },
-            command_id + 1,
-        ));
-        assert!(scheduler.reconcile_surface(
-            BrowserSurface {
-                browser_slot: 7,
-                native_tab: 10,
-            },
-            command_id,
-        ));
+        assert_eq!(error, ScheduleFailure::ResourceUncertain { command_id });
+        assert!(!scheduler.reconcile(&key, command_id + 1, "request-a", "executor-a"));
+        assert!(!scheduler.reconcile(&key, command_id, "request-b", "executor-a"));
+        assert!(!scheduler.reconcile(&surface(11), command_id, "request-a", "executor-a"));
+        assert!(!scheduler.reconcile(&key, command_id, "request-a", "executor-b"));
+        assert!(scheduler.reconcile(&key, command_id, "request-a", "executor-a"));
         scheduler
-            .acquire(surface(10), ProducerId::new("b"), 0)
+            .acquire(key, ProducerId::new("b"), 0)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_quarantine_without_executor_proof_never_terminal_reconciles() {
+        let scheduler = scheduler();
+        let key = surface(10);
+        let active = scheduler
+            .acquire(key.clone(), ProducerId::new("a"), 0)
+            .await
+            .unwrap();
+        let command_id = active.command_id().unwrap();
+        assert!(scheduler.mark_uncertain(&key, command_id, "legacy-request", None));
+        drop(active);
+
+        assert!(!scheduler.reconcile(&key, command_id, "legacy-request", "claimed-generation"));
+        assert_eq!(
+            scheduler
+                .acquire(key, ProducerId::new("b"), 0)
+                .await
+                .unwrap_err(),
+            ScheduleFailure::ResourceUncertain { command_id }
+        );
+    }
+
+    #[tokio::test]
+    async fn generic_quarantine_is_local_but_blocks_conflicting_browser_work() {
+        let scheduler = scheduler();
+        let key = topology("workspace-a");
+        let active = scheduler
+            .acquire(key.clone(), ProducerId::new("a"), 0)
+            .await
+            .unwrap();
+        let command_id = active.command_id().unwrap();
+        assert!(scheduler.mark_uncertain(&key, command_id, "topology-request", Some("executor-a")));
+        drop(active);
+
+        assert_eq!(
+            scheduler
+                .acquire(key.clone(), ProducerId::new("b"), 0)
+                .await
+                .unwrap_err(),
+            ScheduleFailure::ResourceUncertain { command_id }
+        );
+        let other = scheduler
+            .acquire(topology("workspace-b"), ProducerId::new("c"), 0)
+            .await
+            .unwrap();
+        assert_eq!(other.key(), Some(&topology("workspace-b")));
+        assert_eq!(
+            scheduler
+                .acquire(
+                    ScheduleKey::Browser { browser_slot: 7 },
+                    ProducerId::new("d"),
+                    0,
+                )
+                .await
+                .unwrap_err(),
+            ScheduleFailure::ResourceUncertain { command_id }
+        );
+    }
+
+    #[tokio::test]
+    async fn uncertain_browser_blocks_every_child_resource() {
+        let scheduler = scheduler();
+        let browser_key = ScheduleKey::Browser { browser_slot: 7 };
+        let active = scheduler
+            .acquire(browser_key.clone(), ProducerId::new("a"), 0)
+            .await
+            .unwrap();
+        let command_id = active.command_id().unwrap();
+        assert!(scheduler.mark_uncertain(
+            &browser_key,
+            command_id,
+            "browser-request",
+            Some("executor-a")
+        ));
+        drop(active);
+
+        for key in [surface(10), topology("workspace-a")] {
+            assert_eq!(
+                scheduler
+                    .acquire(key, ProducerId::new("b"), 0)
+                    .await
+                    .unwrap_err(),
+                ScheduleFailure::ResourceUncertain { command_id }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn uncertainty_blocks_already_queued_hierarchical_rivals_until_reconciled() {
+        let scheduler = scheduler();
+        let child_key = surface(10);
+        let child = scheduler
+            .acquire(child_key.clone(), ProducerId::new("child"), 0)
+            .await
+            .unwrap();
+        let child_command = child.command_id().unwrap();
+        let browser_waiter = tokio::spawn({
+            let scheduler = scheduler.clone();
+            async move {
+                scheduler
+                    .acquire(
+                        ScheduleKey::Browser { browser_slot: 7 },
+                        ProducerId::new("browser"),
+                        0,
+                    )
+                    .await
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(scheduler.mark_uncertain(
+            &child_key,
+            child_command,
+            "child-request",
+            Some("executor-a")
+        ));
+        drop(child);
+        tokio::task::yield_now().await;
+        assert!(!browser_waiter.is_finished());
+        assert!(scheduler.reconcile(&child_key, child_command, "child-request", "executor-a"));
+        let browser = browser_waiter.await.unwrap().unwrap();
+
+        let child_waiter = tokio::spawn({
+            let scheduler = scheduler.clone();
+            async move {
+                scheduler
+                    .acquire(surface(11), ProducerId::new("later-child"), 0)
+                    .await
+            }
+        });
+        tokio::task::yield_now().await;
+        let browser_key = ScheduleKey::Browser { browser_slot: 7 };
+        let browser_command = browser.command_id().unwrap();
+        assert!(scheduler.mark_uncertain(
+            &browser_key,
+            browser_command,
+            "browser-request",
+            Some("executor-a")
+        ));
+        drop(browser);
+        tokio::task::yield_now().await;
+        assert!(!child_waiter.is_finished());
+        assert!(scheduler.reconcile(
+            &browser_key,
+            browser_command,
+            "browser-request",
+            "executor-a"
+        ));
+        {
+            let state = scheduler.inner.lock_state();
+            let queues = state.browsers.get(&7).expect("browser queues remain");
+            let child = queues
+                .children
+                .get(&ChildKey::Surface(11))
+                .expect("queued child remains");
+            assert!(
+                child.active.is_some(),
+                "reconciliation must grant the already-queued child (browser_active={:?}, browser_uncertain={}, active_children={}, child_len={}, child_uncertain={})",
+                queues.browser.active,
+                queues.browser.uncertain.is_some(),
+                queues.active_children,
+                child.len,
+                child.uncertain.is_some()
+            );
+        }
+        child_waiter.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn stale_timeout_cannot_recreate_a_destroyed_resource() {
+        let scheduler = scheduler();
+        let key = surface(10);
+        let active = scheduler
+            .acquire(key.clone(), ProducerId::new("a"), 0)
+            .await
+            .unwrap();
+        let command_id = active.command_id().unwrap();
+        scheduler.destroy_browser(7);
+        assert!(!scheduler.mark_uncertain(&key, command_id, "old-request", Some("executor-a")));
+        drop(active);
+        scheduler
+            .acquire(key, ProducerId::new("b"), 0)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn idle_resource_queues_are_pruned_after_release() {
+        let scheduler = scheduler();
+        let active = scheduler
+            .acquire(topology("short-lived-workspace"), ProducerId::new("a"), 0)
+            .await
+            .unwrap();
+        assert_eq!(scheduler.inner.lock_state().browsers.len(), 1);
+        drop(active);
+        assert!(scheduler.inner.lock_state().browsers.is_empty());
     }
 
     #[tokio::test]
@@ -1225,20 +1630,19 @@ mod tests {
                 reason: RetirementReason::BrowserDisconnected
             }
         );
-        scheduler.mark_surface_uncertain(
-            BrowserSurface {
-                browser_slot: 7,
-                native_tab: 10,
-            },
+        assert!(scheduler.mark_uncertain(
+            &surface(10),
             command_id,
-        );
+            "disconnected-request",
+            Some("executor-a")
+        ));
         drop(active);
         assert_eq!(
             scheduler
                 .acquire(surface(10), ProducerId::new("c"), 0)
                 .await
                 .unwrap_err(),
-            ScheduleFailure::SurfaceUncertain { command_id }
+            ScheduleFailure::ResourceUncertain { command_id }
         );
 
         scheduler.destroy_browser(7);

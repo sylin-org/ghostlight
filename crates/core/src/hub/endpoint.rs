@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! The service-side endpoint owners (ADR-0030): serve, claim, serve_adapters; split from the old ipc module by ADR-0046.
+//! Service-side owners for the browser endpoint and the typed MCP-edge/control endpoint.
+//!
+//! The browser endpoint admits only `ghostlight-browser-connector` connections. The second
+//! endpoint authenticates `ghostlight-mcp-connector`, terminates the neutral typed bridge, and also answers
+//! stateless control requests. MCP JSON-RPC never enters this module.
 
 use crate::hub::outbound::browser::{AttachOutcome, Browser};
 use crate::{Error, Result};
@@ -10,8 +14,8 @@ use ghostlight_transport::ipc::*;
 
 /// Send the SERVICE's anti-squat proof (ADR-0030 Decision 8; PINS.md SS5.3): the lowercase-hex
 /// HMAC-SHA256 of the EXACT hello bytes just read, keyed by this install's `hub-key` (created
-/// lazily at `hub::run_service` startup). Sent AFTER admitting the hello, BEFORE `serve_session`,
-/// so a proof failure never reaches the governance chokepoint.
+/// lazily at `hub::run_service` startup). Sent after validating the MCP edge hello and before the
+/// typed bridge begins, so a proof failure never reaches service work admission.
 async fn send_service_proof<S>(stream: &mut S, hello_bytes: &[u8]) -> Result<()>
 where
     S: tokio::io::AsyncWrite + Unpin,
@@ -28,23 +32,20 @@ where
     host::write_message(stream, &proof_bytes).await
 }
 
-/// Demux one ADAPTER/CONTROL connection (ADR-0030 Decision 1; PINS.md SS1, SS9): read the
-/// session-hello FIRST (safe here -- unlike the extension endpoint, this peer always speaks
-/// first), parse and admit its presented GUID (H3, ADR-0030 Decision 4), and route `"adapter"`
-/// into the SAME governance chokepoint every transport calls
-/// (`transport::mcp::server::serve_session`), never a second dispatch path. `"control"` is a
-/// stateless read-only request/reply ([`answer_control_request`], CAP-MED-01) admitting no session;
-/// an unknown or absent role, a malformed/empty guid, or a guid refused by
-/// [`crate::hub::session::SessionRegistry::admit`] are all refused cleanly, never a panic, and
-/// never surface the presented GUID in a log. Runs entirely INSIDE the spawned per-connection
+/// Demux one typed MCP-edge/control connection. Read the opening hello first, validate the bridge
+/// major for `"mcp"`, prove service identity, and hand the stream to
+/// [`crate::hub::bridge::serve_bridge`]. The `"control"` role is a stateless read-only
+/// request/reply ([`answer_control_request`]) that admits no workspace or work. Unknown roles and
+/// malformed hellos are refused cleanly. Runs entirely inside the spawned per-connection
 /// task (never inline in the accept loop), so a silent peer cannot head-of-line-block admission
-/// of other adapters (ADR-0030 Decision 3). `peer_cred` is captured by the CONCRETE-platform
-/// caller in [`serve_adapters`] (before the stream is erased to generic `S`) and threaded in as a
-/// plain parameter -- this function itself never touches a raw OS handle.
+/// of other local peers. `peer_cred` is captured by the concrete-platform
+/// caller in the compatibility-named [`serve_adapters`] accept loop (before the stream is erased to
+/// generic `S`) and threaded in as a plain parameter; this function itself never touches a raw OS
+/// handle.
 async fn handle_adapter_connection<S>(
     ctx: crate::hub::ServiceContext,
     mut stream: S,
-    peer_cred: crate::hub::session::PeerCred,
+    peer_cred: crate::hub::peer::PeerCred,
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
 {
@@ -67,59 +68,27 @@ async fn handle_adapter_connection<S>(
         }
     };
     match hello.get("role").and_then(Value::as_str) {
-        Some(role) if role == ghostlight_transport::handshake::ROLE_ADAPTER => {
-            let presented_guid = hello.get("guid").and_then(Value::as_str).unwrap_or("");
-            let guid = match crate::hub::session::SessionGuid::parse(presented_guid) {
-                Some(guid) => guid,
-                None => {
-                    tracing::warn!(
-                        "adapter session-hello carried a malformed or empty guid; refusing"
-                    );
-                    return;
-                }
-            };
-            // H5 (ADR-0030 Decision 3 + Decision 4; PINS.md SS4): per-peer (never global) mint
-            // quota, checked BEFORE admission proceeds. Held for the connection's whole lifetime
-            // (including a Refused admission below) so the slot frees only once this connection
-            // genuinely ends -- the cap counts CONCURRENT sessions, not lifetime mints.
-            let _mint_guard = match crate::hub::try_mint(&ctx.mint_quota, &peer_cred.user) {
-                Ok(guard) => guard,
-                Err(message) => {
-                    tracing::warn!(
-                        message = %message,
-                        "adapter/control connection refused: per-peer mint quota exceeded"
-                    );
-                    return;
-                }
-            };
-            let admission = ctx
-                .session_registry
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .admit(&guid, &peer_cred);
-            match admission {
-                crate::hub::session::Admission::Admitted => {
-                    // Anti-squat (ADR-0030 Decision 8; PINS.md SS5.3): prove this service's
-                    // identity to the adapter AFTER admitting the hello, BEFORE serve_session --
-                    // a proof failure (e.g. the per-install hub-key could not be prepared) must
-                    // never reach the governance chokepoint.
-                    if let Err(e) = send_service_proof(&mut stream, &hello_bytes).await {
-                        tracing::warn!(
-                            error = %e,
-                            "could not prove this service's identity to the connecting adapter; refusing"
-                        );
-                        return;
-                    }
-                    if let Err(e) = crate::mcp::server::serve_session(stream, ctx, guid).await {
-                        tracing::warn!(error = %e, "adapter session ended with an error");
-                    }
-                }
-                crate::hub::session::Admission::Refused => {
-                    tracing::warn!(
-                        "adapter/control connection presented a guid already bound to a \
-                         different peer; refusing"
-                    );
-                }
+        Some(role) if role == ghostlight_transport::handshake::ROLE_MCP => {
+            if hello.get("hub").and_then(Value::as_u64)
+                != Some(ghostlight_transport::handshake::HUB_PROTO as u64)
+            {
+                tracing::warn!("MCP edge hello carried an unsupported Hub major; refusing");
+                return;
+            }
+            if let Err(error) = send_service_proof(&mut stream, &hello_bytes).await {
+                tracing::warn!(
+                    error = %error,
+                    "could not prove service identity to the MCP edge; refusing"
+                );
+                return;
+            }
+            ctx.live_sessions
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let result = crate::hub::bridge::serve_bridge(stream, ctx.clone(), peer_cred).await;
+            ctx.live_sessions
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            if let Err(error) = result {
+                tracing::warn!(error = %error, "MCP edge bridge ended with an error");
             }
         }
         Some(role) if role == ghostlight_transport::handshake::ROLE_CONTROL => {
@@ -142,10 +111,10 @@ async fn handle_adapter_connection<S>(
 }
 
 /// Answer a [`ghostlight_transport::handshake::ROLE_CONTROL`] request (CAP-MED-01): a stateless,
-/// read-only reply with NO session admission (no guid, no mint quota, no anti-squat proof, no
-/// `serve_session`). Today the only request is `status`, which returns a liveness
+/// read-only reply with no bridge or workspace admission, no mint quota, and no anti-squat proof.
+/// Today the only request is `status`, which returns a liveness
 /// [`ghostlight_transport::ipc::StatusReply`] -- whether the extension is attached and how many tool
-/// sessions are live -- so `ghostlight doctor` can render a real Extension verdict without
+/// MCP-edge bridge streams are live -- so `ghostlight doctor` can render a real Extension verdict without
 /// `--debug`. An unknown request is ignored (the connection just closes), keeping the control
 /// vocabulary forward-compatible. Access is already bounded to the same OS user by the endpoint's
 /// owner-only transport ACL, and the reply carries only non-sensitive liveness, so no per-request
@@ -190,7 +159,7 @@ async fn answer_control_request<S>(
 /// REFUSE to create the pipe rather than fall back to the broader default named-pipe DACL, which
 /// would silently weaken the cross-user guarantee. Constant-SDDL construction failure is
 /// essentially theoretical, so this never fires in practice -- but "silently less safe" is not an
-/// acceptable failure mode for the boundary that keeps other local users off this session's pipe.
+/// acceptable failure mode for the boundary that keeps other local users off this service pipe.
 #[cfg(windows)]
 fn require_owner_only(built: Option<win_security::OwnerOnly>) -> Result<win_security::OwnerOnly> {
     built.ok_or_else(|| {
@@ -203,8 +172,8 @@ fn require_owner_only(built: Option<win_security::OwnerOnly>) -> Result<win_secu
     })
 }
 
-/// mcp-server role (Windows): own the named pipe (single active session) and serve native-host
-/// connections. Each accepted connection is handed to [`Browser::attach`] until it closes.
+/// Persistent service browser shore (Windows): own the browser named pipe and accept
+/// browser-only relay connections. Each accepted connection is handed to [`Browser::attach`].
 #[cfg(windows)]
 pub async fn serve(browser: Browser, endpoint: &str) -> Result<()> {
     let path = pipe_path(endpoint);
@@ -212,12 +181,11 @@ pub async fn serve(browser: Browser, endpoint: &str) -> Result<()> {
     // broader default DACL.
     let security = require_owner_only(win_security::OwnerOnly::build())?;
 
-    // First instance: `first_pipe_instance(true)` both enforces the single active session (creation
-    // fails if a pipe of this name already exists) and prevents another local process from squatting
-    // the name.
+    // First instance: `first_pipe_instance(true)` both enforces one service owner for this browser
+    // endpoint and prevents another local process from squatting the name.
     let mut server = win_security::create_instance(&path, true, Some(&security)).map_err(|e| {
         match e.raw_os_error() {
-            // ACCESS_DENIED / PIPE_BUSY: a first instance already exists -> another session owns it.
+            // ACCESS_DENIED / PIPE_BUSY: a first instance already exists -> another process owns it.
             Some(5) | Some(231) => Error::SessionBusy,
             _ => Error::Ipc(format!("cannot create named pipe {path}: {e}")),
         }
@@ -236,12 +204,13 @@ pub async fn serve(browser: Browser, endpoint: &str) -> Result<()> {
         let connected = std::mem::replace(&mut server, next);
         tracing::info!("native-host connected");
         // Accept-ahead: hand this connection to a spawned task and loop back immediately, so a spare
-        // pipe instance is always waiting in ConnectNamedPipe. `Browser::attach` enforces the single
-        // active session -- the real native-host claims the slot; a stray connection (e.g. a `doctor`
+        // pipe instance is always waiting in ConnectNamedPipe. `Browser::attach` enforces one live
+        // connection per browser identity -- the real native-host claims the slot; a stray connection
+        // (e.g. a `doctor`
         // probe) is accepted here, rejected by attach as AlreadyAttached, and dropped without
-        // disturbing the live session. Awaiting attach inline (the old behavior) parked the loop for
-        // the whole session, leaving one consumable spare a probe could starve (ERROR_PIPE_BUSY 231
-        // on every later probe until the session ended).
+        // disturbing the live browser link. Awaiting attach inline (the old behavior) parked the loop
+        // for the whole connection, leaving one consumable spare a probe could starve
+        // (ERROR_PIPE_BUSY 231 on every later probe until the connection ended).
         let browser = browser.clone();
         tokio::spawn(async move {
             match browser.attach(connected).await {
@@ -254,13 +223,13 @@ pub async fn serve(browser: Browser, endpoint: &str) -> Result<()> {
     }
 }
 
-/// The ADAPTER/CONTROL endpoint's platform listener handle (ADR-0030 Decision 1; PINS.md SS1
-/// pin 1): cfg-split like the rest of this module -- there is no unified `Listener` type.
+/// Platform listener handle for the typed MCP-edge/control endpoint. The type name is retained for
+/// source compatibility; there is no agent-role adapter.
 #[cfg(windows)]
 pub type AdapterListener = tokio::net::windows::named_pipe::NamedPipeServer;
 
-/// Claim the ADAPTER/CONTROL endpoint (Windows): the single-instance ELECTION target (ADR-0030
-/// Decision 1, Decision 8; PINS.md SS1 pin 1). Performs the SAME bind-with-stale-heal [`serve`]
+/// Claim the typed MCP-edge/control endpoint (Windows), which is also the service singleton
+/// election target. Performs the same bind-with-stale-heal as [`serve`]
 /// does today (`first_pipe_instance(true)`; ACCESS_DENIED / PIPE_BUSY -> [`Error::SessionBusy`])
 /// and returns the claimed, not-yet-connected first pipe instance on a win. The caller must NOT
 /// re-claim the name (a second claim here self-deadlocks) -- pass the returned listener straight
@@ -268,7 +237,7 @@ pub type AdapterListener = tokio::net::windows::named_pipe::NamedPipeServer;
 #[cfg(windows)]
 pub async fn claim_adapter_endpoint(endpoint: &str) -> Result<AdapterListener> {
     let path = pipe_path(&adapter_endpoint_name(endpoint));
-    // Fail closed (SEC-LOW-09): the adapter/control pipe MUST carry the owner-only DACL.
+    // Fail closed (SEC-LOW-09): the typed edge/control pipe MUST carry the owner-only DACL.
     let security = require_owner_only(win_security::OwnerOnly::build())?;
 
     let server =
@@ -287,20 +256,21 @@ pub async fn claim_adapter_endpoint(endpoint: &str) -> Result<AdapterListener> {
     Ok(server)
 }
 
-/// Accept loop for the ADAPTER/CONTROL endpoint (Windows), over the ALREADY-claimed listener
+/// Accept loop for the typed MCP-edge/control endpoint (Windows), over the already-claimed listener
 /// (never re-claims the name). Accept-ahead + spawn-per-connection, exactly like [`serve`]; the
-/// session-hello is read and demuxed INSIDE the spawned task ([`handle_adapter_connection`]),
-/// never inline, so a silent peer cannot head-of-line-block admission of other adapters
+/// opening hello is read and demuxed inside the spawned task (the compatibility-named
+/// [`handle_adapter_connection`]),
+/// never inline, so a silent peer cannot head-of-line-block admission of other edge/control peers
 /// (ADR-0030 Decision 3). Re-derives the pipe path from [`default_endpoint`] (the same
 /// process-wide endpoint [`claim_adapter_endpoint`] was called with) rather than taking it as a
-/// parameter, matching the two-argument `serve_adapters(ctx, listener)` shape.
+/// parameter, matching the compatibility-named two-argument `serve_adapters(ctx, listener)` shape.
 #[cfg(windows)]
 pub async fn serve_adapters(
     ctx: crate::hub::ServiceContext,
     mut server: AdapterListener,
 ) -> Result<()> {
     let path = pipe_path(&adapter_endpoint_name(&default_endpoint()));
-    // Fail closed (SEC-LOW-09): the adapter/control pipe MUST carry the owner-only DACL.
+    // Fail closed (SEC-LOW-09): the typed edge/control pipe MUST carry the owner-only DACL.
     let security = require_owner_only(win_security::OwnerOnly::build())?;
 
     loop {
@@ -341,10 +311,10 @@ pub async fn serve_adapters(
 /// SS9): the pipe client's process id via `GetNamedPipeClientProcessId`, then that process's
 /// token SID (as a string, via `OpenProcessToken` + `GetTokenInformation(TokenUser)` +
 /// `ConvertSidToStringSidW`) as the OS-user principal admission compares. Called on the CONCRETE
-/// `NamedPipeServer` handle, before it is erased to generic `S` -- [`handle_adapter_connection`]
-/// itself never touches a raw OS handle.
+/// `NamedPipeServer` handle, before it is erased to generic `S` -- the compatibility-named
+/// [`handle_adapter_connection`] itself never touches a raw OS handle.
 #[cfg(windows)]
-fn capture_peer_cred(pipe: &AdapterListener) -> Result<crate::hub::session::PeerCred> {
+fn capture_peer_cred(pipe: &AdapterListener) -> Result<crate::hub::peer::PeerCred> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, HLOCAL};
     use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
@@ -436,8 +406,8 @@ fn capture_peer_cred(pipe: &AdapterListener) -> Result<crate::hub::session::Peer
         let sid_string = String::from_utf16_lossy(std::slice::from_raw_parts(sid_str_ptr, len));
         LocalFree(sid_str_ptr as HLOCAL);
 
-        Ok(crate::hub::session::PeerCred {
-            user: crate::hub::session::PeerUser(sid_string),
+        Ok(crate::hub::peer::PeerCred {
+            user: crate::hub::peer::PeerUser(sid_string),
             pid,
         })
     }
@@ -526,7 +496,8 @@ mod win_security {
     }
 }
 
-/// mcp-server role (Unix): bind the socket (single active session) and serve native-host connections.
+/// Persistent service browser shore (Unix): bind the browser socket and serve browser-only relay
+/// connections.
 #[cfg(unix)]
 pub async fn serve(browser: Browser, endpoint: &str) -> Result<()> {
     use tokio::net::{UnixListener, UnixStream};
@@ -537,8 +508,8 @@ pub async fn serve(browser: Browser, endpoint: &str) -> Result<()> {
         set_mode(parent, 0o700);
     }
 
-    // Single session: bind; if the path is in use, a successful probe-connect means a live owner
-    // (SessionBusy), otherwise the socket file is stale -- remove it and rebind.
+    // Single service owner: bind; if the path is in use, a successful probe-connect means a live
+    // owner (SessionBusy), otherwise the socket file is stale -- remove it and rebind.
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
@@ -564,8 +535,9 @@ pub async fn serve(browser: Browser, endpoint: &str) -> Result<()> {
             Ok((stream, _)) => {
                 tracing::info!("native-host connected");
                 // Accept-ahead (mirrors the Windows path): spawn the handler and keep accepting, so a
-                // queued stray connection (e.g. a `doctor` probe) is not promoted into a session when
-                // the loop resumes. `Browser::attach` enforces the single active session.
+                // queued stray connection (e.g. a `doctor` probe) is not promoted into a live browser
+                // link when the loop resumes. `Browser::attach` enforces one live connection per
+                // browser identity.
                 let browser = browser.clone();
                 tokio::spawn(async move {
                     match browser.attach(stream).await {
@@ -583,13 +555,13 @@ pub async fn serve(browser: Browser, endpoint: &str) -> Result<()> {
     }
 }
 
-/// The ADAPTER/CONTROL endpoint's platform listener handle (ADR-0030 Decision 1; PINS.md SS1
-/// pin 1): cfg-split like the rest of this module -- there is no unified `Listener` type.
+/// Platform listener handle for the typed MCP-edge/control endpoint. The type name is retained for
+/// source compatibility; there is no agent-role adapter.
 #[cfg(unix)]
 pub type AdapterListener = tokio::net::UnixListener;
 
-/// Claim the ADAPTER/CONTROL endpoint (Unix): the single-instance ELECTION target (ADR-0030
-/// Decision 1, Decision 8; PINS.md SS1 pin 1). Performs the SAME bind-with-stale-heal [`serve`]
+/// Claim the typed MCP-edge/control endpoint (Unix), which is also the service singleton election
+/// target. Performs the same bind-with-stale-heal as [`serve`]
 /// does today for the extension socket (on `AddrInUse`, probe-connect first: a live peer ->
 /// [`Error::SessionBusy`], a dead socket -> remove and rebind) and returns the bound listener on
 /// a win. The caller must NOT re-claim the name (a second bind here self-deadlocks: the process
@@ -634,9 +606,10 @@ pub async fn claim_adapter_endpoint(endpoint: &str) -> Result<AdapterListener> {
     Ok(listener)
 }
 
-/// Accept loop for the ADAPTER/CONTROL endpoint (Unix), over the ALREADY-claimed listener. The
-/// session-hello is read and demuxed INSIDE the spawned task ([`handle_adapter_connection`]),
-/// never inline, so a silent peer cannot head-of-line-block admission of other adapters
+/// Accept loop for the typed MCP-edge/control endpoint (Unix), over the already-claimed listener.
+/// The opening hello is read and demuxed inside the spawned task (the compatibility-named
+/// [`handle_adapter_connection`]), never inline, so a silent peer cannot head-of-line-block other
+/// edge/control peers
 /// (ADR-0030 Decision 3).
 #[cfg(unix)]
 pub async fn serve_adapters(
@@ -674,7 +647,7 @@ pub async fn serve_adapters(
 /// PINS.md SS9): `SO_PEERCRED` on the accepted socket, yielding the peer's uid (the OS-user
 /// principal admission compares) and pid (logging only).
 #[cfg(all(unix, not(target_os = "macos")))]
-fn capture_peer_cred(stream: &tokio::net::UnixStream) -> Result<crate::hub::session::PeerCred> {
+fn capture_peer_cred(stream: &tokio::net::UnixStream) -> Result<crate::hub::peer::PeerCred> {
     use std::os::unix::io::AsRawFd;
     let fd = stream.as_raw_fd();
     let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
@@ -696,8 +669,8 @@ fn capture_peer_cred(stream: &tokio::net::UnixStream) -> Result<crate::hub::sess
             std::io::Error::last_os_error()
         )));
     }
-    Ok(crate::hub::session::PeerCred {
-        user: crate::hub::session::PeerUser(cred.uid.to_string()),
+    Ok(crate::hub::peer::PeerCred {
+        user: crate::hub::peer::PeerUser(cred.uid.to_string()),
         pid: cred.pid as u32,
     })
 }
@@ -706,7 +679,7 @@ fn capture_peer_cred(stream: &tokio::net::UnixStream) -> Result<crate::hub::sess
 /// SS9): `getpeereid`, yielding the peer's uid (the OS-user principal admission compares).
 /// `getpeereid` reports no pid; `pid: 0` here is logging-only and never compared by `admit`.
 #[cfg(target_os = "macos")]
-fn capture_peer_cred(stream: &tokio::net::UnixStream) -> Result<crate::hub::session::PeerCred> {
+fn capture_peer_cred(stream: &tokio::net::UnixStream) -> Result<crate::hub::peer::PeerCred> {
     use std::os::unix::io::AsRawFd;
     let fd = stream.as_raw_fd();
     let mut uid: libc::uid_t = 0;
@@ -720,8 +693,8 @@ fn capture_peer_cred(stream: &tokio::net::UnixStream) -> Result<crate::hub::sess
             std::io::Error::last_os_error()
         )));
     }
-    Ok(crate::hub::session::PeerCred {
-        user: crate::hub::session::PeerUser(uid.to_string()),
+    Ok(crate::hub::peer::PeerCred {
+        user: crate::hub::peer::PeerUser(uid.to_string()),
         pid: 0,
     })
 }

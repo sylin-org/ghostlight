@@ -8,6 +8,21 @@ Amends: ADR-0066 Decision 1 (the presentation key gains a browser-window dimensi
 
 Builds on: ADR-0047, ADR-0058, ADR-0061, ADR-0080, and ADR-0084
 
+## Amendment by ADR-0096 (2026-08-04)
+
+Decision 2 now pins by product `WorkspaceId`, implicit at the `2025-11-25` shore and explicit at
+the `2026-07-28` shore, rather than by an MCP process session. Decision 3's current group key is
+browser instance plus native window ID plus `WorkspaceId`. A human client label remains useful for
+the visible title but is presentation-only and cannot merge same-named workspaces.
+
+## Superseded in part by ADR-0098 (2026-08-05)
+
+Decision 1 remains the browser shore's rule for selecting an initial eligible window. Decisions
+2 through 4 are superseded. The Rust service no longer stores or sends native Chrome window ids,
+and it does not recover a stale window pin. The extension owns live window, tab, and group
+placement and follows user-moved owned tabs or groups in their current windows. The service keeps
+only logical workspace authority, exact tab ownership, and browser-profile routing.
+
 ## Context
 
 Ghostlight used to create a new Chrome window whenever a client needed its first tab group. That

@@ -23,9 +23,8 @@ class Ghostlight < Formula
   end
 
   def install
-    # ADR-0046 as amended by ADR-0051: two executables ship in the archive
-    # (ghostlight + the single role-selected ghostlight-relay pass-through).
-    bin.install "ghostlight", "ghostlight-relay"
+    # ADR-0096: service, protocol-versioned MCP edge, and browser-only native relay.
+    bin.install "ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector"
   end
 
   def caveats

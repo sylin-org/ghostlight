@@ -7,6 +7,7 @@
 //! command) and inspects the printed plan. `--all-browsers`/`--all-clients` force a deterministic
 //! plan regardless of what is installed on the test machine.
 
+use std::path::Path;
 use std::process::Command;
 
 fn bin() -> &'static str {
@@ -50,6 +51,22 @@ fn install_help_names_every_registered_client() {
 }
 
 #[test]
+fn client_entry_uses_only_the_mcp_edge_and_optional_instance_argument() {
+    let instance = ghostlight::instance::Instance::resolve();
+    let entry = ghostlight::install::clients::server_entry(Path::new("/opt/gl/ghostlight"));
+    assert!(entry.command.ends_with(if cfg!(windows) {
+        "ghostlight-mcp-connector.exe"
+    } else {
+        "ghostlight-mcp-connector"
+    }));
+    let expected_args = instance
+        .name()
+        .map(|name| vec!["--instance".to_string(), name.to_string()])
+        .unwrap_or_default();
+    assert_eq!(entry.args, expected_args);
+}
+
+#[test]
 fn default_install_plan_is_byte_identical_and_places_no_copy() {
     let plan = install_plan(None);
     assert!(
@@ -69,11 +86,11 @@ fn default_install_plan_is_byte_identical_and_places_no_copy() {
 #[test]
 fn dev_install_plan_is_an_ordinary_named_instance_plan() {
     // ADR-0065: there is no dev-special install path. A `dev` install plans exactly what any
-    // named instance plans (ADR-0044): a `ghostlight-relay-dev` copy Chrome launches by name, a
+    // named instance plans (ADR-0044): a `ghostlight-browser-connector-dev` copy Chrome launches by name, a
     // suffixed native host, client entries, AND the suffixed supervisor -- no pinned skip line.
     let plan = install_plan(Some("dev"));
     assert!(
-        plan.contains("instance binary") && plan.contains("ghostlight-relay-dev"),
+        plan.contains("instance binary") && plan.contains("ghostlight-browser-connector-dev"),
         "the dev plan copies its own per-instance relay binary: {plan}"
     );
     assert!(
@@ -100,7 +117,7 @@ fn a_named_non_dev_instance_still_plans_the_full_stack() {
     // isolated host, suffixed supervisor).
     let plan = install_plan(Some("qa"));
     assert!(
-        plan.contains("instance binary") && plan.contains("ghostlight-relay-qa"),
+        plan.contains("instance binary") && plan.contains("ghostlight-browser-connector-qa"),
         "a qa plan copies a per-instance relay binary: {plan}"
     );
     assert!(
@@ -140,4 +157,37 @@ fn no_supervisor_flag_plans_no_supervisor_steps() {
             "no supervisor OS command is planned ({os_cmd}): {plan}"
         );
     }
+}
+
+#[test]
+fn no_clients_flag_keeps_the_browser_stack_and_skips_client_entries() {
+    let out = Command::new(bin())
+        .args([
+            "install",
+            "--dry-run",
+            "--all-browsers",
+            "--no-clients",
+            "--no-open",
+            "--extension-id",
+            &"a".repeat(32),
+        ])
+        .output()
+        .expect("run ghostlight install --dry-run --no-clients");
+    assert!(
+        out.status.success(),
+        "no-clients install exits successfully"
+    );
+    let plan = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        plan.contains("native host"),
+        "native-host registration remains in the plan: {plan}"
+    );
+    assert!(
+        plan.contains("Ghostlight Service"),
+        "supervisor registration remains in the plan: {plan}"
+    );
+    assert!(
+        !plan.contains("(client)"),
+        "no MCP-client entry is planned: {plan}"
+    );
 }

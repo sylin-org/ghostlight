@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Per-session tighten-only policy overlay (ADR-0060): the bottom tier of the policy
-//! composition model.
+//! Tighten-only request restriction (ADR-0060, amended by ADR-0096).
 //!
-//! A client may declare an overlay policy at session `initialize`. For that session's calls
-//! only, the service intersects the overlay's decision with the active service policy's
+//! An MCP edge may supply a serialized restriction with one call. The service validates it before
+//! building the immutable work context, then intersects its decision with the active service policy
 //! decision -- deny-overrides: a call is allowed only if BOTH allow. This mirrors AWS IAM
 //! session policies ("can only reduce permissions"): composition is pure intersection, so an
 //! overlay can never grant capability the service policy withholds. The service policy is always
@@ -27,8 +26,9 @@ use crate::governance::ports::{
     Capability, Decision, EffectiveMode, GoverningResource, HostRuleOutcome, NullSink,
 };
 
-/// A parsed, ready-to-evaluate session overlay: the tighten-only bottom policy tier for one
-/// session. Built once when the session declares it (at `initialize`), then consulted per call.
+/// A parsed, ready-to-evaluate tighten-only policy restriction for one work context.
+///
+/// The historical type name is retained, but no protocol session state enters the service core.
 pub struct SessionOverlay {
     /// A governed facade over the overlay's own grants. Only [`Governance::decide`] (audit-free)
     /// is called on it; its [`NullSink`] audit is never used.
@@ -40,9 +40,9 @@ pub struct SessionOverlay {
 
 impl SessionOverlay {
     /// Parse a client-supplied overlay -- a schema-3 manifest, validated exactly as a service
-    /// manifest is -- into a tighten-only session tier. `is_valid_pattern` (the host-syntax checker,
+    /// manifest is -- into a tighten-only restriction. `is_valid_pattern` (the host-syntax checker,
     /// `browser::pattern::is_valid_pattern`) and `evaluate_host` (the polarity evaluator,
-    /// `browser::polarity::evaluate_host`) are INJECTED by the caller (`mcp/`), exactly as the
+    /// `browser::polarity::evaluate_host`) are injected by the service bridge, exactly as the
     /// service policy path injects them: the relocatable governance core must not name `browser`
     /// (the A7 architecture guard). A parse or shape error is returned verbatim so the client learns
     /// precisely what was malformed; the caller declines the overlay rather than silently proceeding
@@ -87,6 +87,11 @@ impl SessionOverlay {
     /// sacred check. Empty when the overlay declares none.
     pub fn sacred_domains(&self) -> &[String] {
         &self.sacred_domains
+    }
+
+    /// Return the restriction grants for catalog intersection at the service boundary.
+    pub fn grants(&self) -> Option<&[crate::governance::manifest::document::Grant]> {
+        self.governance.grants()
     }
 }
 

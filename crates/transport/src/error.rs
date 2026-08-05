@@ -21,7 +21,7 @@ pub enum Error {
     #[error("ipc error: {0}")]
     Ipc(String),
 
-    /// Another Ghostlight session already owns the browser (single-session policy, v1.0).
+    /// Compatibility-named busy signal: another process already owns the requested service endpoint.
     #[error("another Ghostlight session already owns the browser")]
     SessionBusy,
 
@@ -67,13 +67,23 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// A tool-call failure attributed to the dispatch hop that broke. Rendered for the MCP client as:
 /// "[hop: <hop>] <message>. Next step: <next step>."
 ///
-/// The dispatch path is: MCP client -> binary (mcp-server role) -> IPC -> binary (native-host
-/// role) -> Chrome native messaging -> extension -> CDP or the page's content script. Each variant
+/// The dispatch path is: MCP client -> `ghostlight-mcp-connector` -> typed bridge -> `ghostlight`
+/// service -> browser IPC -> `ghostlight-browser-connector` -> Chrome native messaging ->
+/// extension -> CDP
+/// or the page's content script. Each variant
 /// names one hop in that chain so the client always knows which layer broke and what to try next,
 /// instead of an opaque "native messaging error: ...".
 #[derive(Debug, Clone, Error)]
 pub enum ToolError {
-    /// The local service paused this one MCP session after a denial burst. The MCP edge converts
+    /// The take-the-wheel hold won at the final dispatch boundary. The neutral pipeline converts
+    /// this signal into an ordinary held result; it is typed here so it cannot be flattened into
+    /// an extension failure during the last admission/enqueue race.
+    #[error("{message}")]
+    Held {
+        /// Complete user/model-facing explanation of the hold.
+        message: String,
+    },
+    /// The local service paused this one workspace after a denial burst. The MCP edge converts
     /// this final dispatch-boundary signal into an ordinary attention-required result.
     #[error("{message}")]
     AttentionRequired {
@@ -96,8 +106,7 @@ pub enum ToolError {
         /// One imperative clause describing what the caller should try next.
         next_step: String,
     },
-    /// The inter-instance transport (named pipe / Unix domain socket) between the mcp-server and
-    /// native-host processes failed.
+    /// A local process transport (the typed edge bridge or browser IPC) failed.
     #[error("[hop: ipc] {message}. Next step: {next_step}.")]
     Ipc {
         /// One-sentence, specific description of the IPC failure.
@@ -128,10 +137,10 @@ pub enum ToolError {
     /// content).
     #[error("[hop: page] {message}. Next step: {next_step}.")]
     Page { message: String, next_step: String },
-    /// A capability's backend is not connected (the browser extension hasn't attached, or lost
-    /// its connection mid-session). Not a failure of the call itself -- the capability is
-    /// temporarily unavailable. Covers both the initial-attach race and the
-    /// lost-connection-mid-session case with one consistent signal.
+    /// A capability's backend is not connected (the browser extension has not attached, or lost
+    /// its connection). Not a failure of the call itself -- the capability is temporarily
+    /// unavailable. Covers both the initial-attach race and a later lost connection with one
+    /// consistent signal.
     #[error("[hop: {capability}] {message}. Next step: {next_step}.")]
     CapabilityNotReady {
         capability: String,
@@ -141,6 +150,13 @@ pub enum ToolError {
 }
 
 impl ToolError {
+    /// Build a final dispatch-boundary take-the-wheel signal.
+    pub fn held(message: impl Into<String>) -> Self {
+        Self::Held {
+            message: message.into(),
+        }
+    }
+
     /// Build a final dispatch-boundary attention-required signal.
     pub fn attention_required(message: impl Into<String>) -> Self {
         Self::AttentionRequired {
@@ -219,6 +235,7 @@ impl ToolError {
     pub fn next_step(self, step: impl Into<String>) -> Self {
         let step = step.into();
         match self {
+            Self::Held { message } => Self::Held { message },
             Self::AttentionRequired { message } => Self::AttentionRequired { message },
             Self::InvalidRequest { message, .. } => Self::InvalidRequest {
                 message,
@@ -366,12 +383,9 @@ mod tool_error_tests {
 
     #[test]
     fn from_extension_wire_preserves_an_extension_state_code() {
-        let err = ToolError::from_extension_wire(
-            None,
-            Some("workspace_window_ineligible".into()),
-            "boom".into(),
-        );
-        assert_eq!(err.extension_code(), Some("workspace_window_ineligible"));
+        let err =
+            ToolError::from_extension_wire(None, Some("topology_failed".into()), "boom".into());
+        assert_eq!(err.extension_code(), Some("topology_failed"));
     }
 
     #[test]

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Cross-platform process-liveness primitives for lifecycle hygiene (ADR-0029).
 //!
-//! The adapter role (ADR-0030 Decision 8 re-scope, PINS.md SS5.5) must end when the MCP client
+//! The `ghostlight-mcp-connector` edge (ADR-0030 Decision 8, amended by ADR-0096; PINS.md SS5.5) must end when the MCP client
 //! that spawned it goes away, even when the platform does not deliver a stdin EOF (Windows leaves
 //! the child's ReadFile parked forever when the parent is killed rather than closed). The
 //! parent-death watchdog polls these primitives; the
 //! `doctor` diagnosis and its `--fix` reaper use them to tell an exited process from a hung one and
-//! to reap only genuinely orphaned sessions.
+//! to reap only genuinely orphaned legacy debug sessions.
 //!
 //! The public surface is intentionally tiny and platform-agnostic; the OS specifics live in the
 //! per-platform `imp` module. On Windows a process is identified by pid **plus creation time**, so a
@@ -187,7 +187,7 @@ mod imp {
             if handle.is_null() {
                 // Not openable: a genuinely gone process, or (rare, and never for our same-user
                 // targets) access denied, which we treat as still-present rather than risk a false
-                // "dead" that could strand a session.
+                // "dead" that could terminate a live process.
                 return GetLastError() == ERROR_ACCESS_DENIED;
             }
             let wait = WaitForSingleObject(handle, 0);

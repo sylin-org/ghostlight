@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! H2 multiplex tests (ADR-0030 Decision 1, Decision 2, Decision 3, Decision 7;
-//! `docs/tasks/hub/H2-service-adapter-multiplex.md`).
+//! Shared browser-shore correlation tests (ADR-0030, retained by ADR-0096).
 //!
-//! 1. `two_sessions_route_replies_independently` -- two sessions sharing ONE `Browser` never get
+//! `two_sessions_route_replies_independently` -- two workspace calls sharing ONE `Browser` never get
 //!    each other's reply (Decision 2: the shared `Arc<AtomicU64>`/`Arc<Mutex<HashMap>>`
 //!    correlation needs no new code for multiplex).
 //!
@@ -14,8 +13,8 @@ use ghostlight::native::host;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-/// ADR-0030 Decision 2: two sessions sharing ONE `Browser` (one `.clone()` each, standing in for
-/// two multiplexed `serve_session` callers) must never receive each other's reply. Both calls are
+/// Two workspace calls sharing ONE `Browser` (one `.clone()` each) must never receive each other's
+/// reply. Both calls are
 /// framed and routed through the SAME `next_id`/`pending` map the `Browser` already carries as
 /// `Arc` fields across clones -- multiplex needs no new correlation code.
 #[tokio::test]
@@ -30,7 +29,7 @@ async fn two_sessions_route_replies_independently() {
 
     // Fake extension: reads TWO framed requests (in whichever order they arrive on the one
     // shared physical link) and replies to each by id, echoing its own tool name back -- the
-    // exact pattern `browser.rs::call_round_trips_a_tool_response` uses for a single session.
+    // exact pattern `browser.rs::call_round_trips_a_tool_response` uses for a single call.
     let fake_ext = tokio::spawn(async move {
         // ADR-0058/0061: relay hello then the extension identity frame; plain un-encoded small
         // tabIds decode to slot 0, which resolve_target routes to this sole focus-front browser.
@@ -60,7 +59,7 @@ async fn two_sessions_route_replies_independently() {
     }
     assert!(browser.is_connected(), "browser never reported connected");
 
-    // Session A and session B: two independent clones of the ONE Browser.
+    // Workspace A and workspace B: two independent clones of the ONE Browser.
     let session_a = browser.clone();
     let session_b = browser.clone();
     let args_a = json!({});

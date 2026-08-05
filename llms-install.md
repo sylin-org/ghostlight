@@ -7,8 +7,9 @@ missing. Everything here is idempotent and safe to re-run.
 
 ## 1. Install and register Ghostlight
 
-Run the installer. The `npx` launcher fetches the native service and relay on first run, so there is
-nothing to compile. It registers every detected supported MCP client and the browser's native host:
+Run the installer. The `npx` launcher fetches the native MCP connector, persistent service, and
+browser connector on first run, so there is nothing to compile. It registers every detected
+supported MCP client and the browser's native host:
 
 ```sh
 npx -y ghostlight install

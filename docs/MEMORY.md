@@ -25,6 +25,11 @@ Collaboration and process -- this file is their canonical home:
   tags are the owner's call.
 - **Prefer the root fix over the spot fix.** If a spot fix is genuinely unavoidable, say so
   explicitly in the commit message so the debt stays visible.
+- **Use the fewest meaningful moving parts.** A logical boundary does not automatically earn a
+  process, service, crate, trait framework, or new identity. Add one only for a real lifecycle,
+  trust, version, or correctness need. Preserve product capability and safety, not incidental
+  compatibility. A break-and-rebuild is welcome when it produces a smaller, clearer, better
+  system (ADR-0096).
 - **Keep tool identity stable and guidance current.** Tool names, parameters, types, and enums are
   compatibility contracts. Descriptions and additive response guidance should improve when they
   can make purpose, side effects, recovery, or tool choice clearer (ADR-0094).
@@ -32,7 +37,7 @@ Collaboration and process -- this file is their canonical home:
   user's existing authenticated Chromium profile. Headless, isolated-profile, cloud, and remote
   browser execution are product exclusions, not missing parity work.
 - **Browser placement belongs to the user.** Reuse the last-focused eligible normal window for new
-  work and pin the MCP session there. Create a browser window only when none is eligible. A tab
+  work and pin the Ghostlight workspace there. Create a browser window only when none is eligible. A tab
   group is visible organization, not a user-facing security boundary; never move tabs or groups
   back after the user places them elsewhere (ADR-0085).
 - **A stale workspace recovers only through explicit tab creation.** Known Ghostlight tab ids stay
@@ -65,18 +70,40 @@ file does not restate them -- follow AGENTS.md.
 ## Durable learnings (cross-cutting facts, not decisions)
 
 - **Build/test in an isolated `CARGO_TARGET_DIR`**. Lightbox creates its own isolated process build
-  by default. Live MCP
-  clients continuously respawn `ghostlight-relay.exe` and a running service holds `target/*.exe`
-  against the linker, so a plain `cargo build`/`test` can relink-fail (Windows os error 5) and
-  silently leave a STALE binary.
+  by default. Live MCP clients continuously respawn `ghostlight-mcp-connector.exe`, Chromium keeps
+  `ghostlight-browser-connector.exe` alive, and the running service holds `ghostlight.exe` against
+  the linker.
+  A plain `cargo build`/`test` can relink-fail (Windows os error 5) and silently leave a STALE
+  binary.
+- **The two reconnect paths mean different things.** `ghostlight-mcp-connector` retains only the selected
+  revision and future-call continuity across a service restart; it fails pending calls truthfully
+  and never replays an effect. `ghostlight-browser-connector` separately replays the browser identity frame so
+  Chromium can keep its native port and browser slot (ADR-0062/0096).
+- **A listed MCP tool is not a transport-liveness signal.** The MCP client owns connector stdio
+  and may retain cached Ghostlight declarations after that connector exits. On `Transport closed`,
+  reopen Ghostlight through that client; a standalone connector cannot repair the closed stdio and
+  may create a different workspace. Inspect state before retrying an effectful call (ADR-0096).
+- **Runtime roles are structural, and workspace routing has one identity.** Separate executable
+  entry points plus crate dependency direction define the MCP edge, service, and browser relay;
+  there is no process-global role marker. Browser frames route only by `WorkspaceId` in the
+  compatibility `guid` field. Human client labels are presentation/audit data, never routing,
+  scheduling, ownership, or authority keys (ADR-0096).
+- **Chrome topology belongs at the browser shore.** The Rust service owns `WorkspaceId` authority,
+  exact tab ownership, governance, scheduling, and browser-profile routing, but never native
+  Chrome window or group ids. The extension owns live placement and one per-workspace tab/group
+  record. It follows user-moved owned tabs and groups in their current windows, never moves an
+  existing tab back, and may reuse an exact-title group for presentation without sharing authority
+  or tab inventory (ADR-0098).
 - **An upgrade is not active until the selected engine owns the endpoint.** Registering new paths
   and successfully spawning a singleton loser are not enough. Verify the endpoint owner, quiesce
   old self-heal paths, replace only a proven managed predecessor, and preserve an external/dev
   engine (ADR-0092).
-- **The extension's tab-group membership gate -- not only the service -- keeps the agent out of the
-  user's OWN tabs.** The service first-touch-adopts any unowned tabId (`claim_tab_live`), so the
-  extension's "is this tab one we manage?" check is load-bearing scoping, not just defense in
-  depth. Any change there must widen to "tabs we manage", never "any tab" (ADR-0066 context).
+- **Tab authority is established at the browser shore, never from an input handle.** An explicit
+  `tabId` is verification-only: the current live workspace must already own it, and unknown and
+  cross-workspace ids fail identically before any browser frame. Only successful, correlated
+  `tabs_context_mcp` and `tabs_create_mcp` results may atomically add exact declared tab ids to a
+  workspace. The extension's managed-tab gate remains defense-in-depth for those owned tabs and
+  still keeps guessed user tabs out (ADR-0066/0096).
 - **Distribution is automated and credential-gated** in `scripts/release.ps1`; the MCP registry
   publish is DNS-authed on the sylin.org apex; canonical URLs are `sylin.org` (the github.io site
   is retired, redirect-stubbed). Off-tree/secret change history is in `local/AUDIT-LOG.md`.
@@ -98,8 +125,8 @@ file does not restate them -- follow AGENTS.md.
   method/tool ids, states, counts, timings, and byte sizes only (ADR-0073).
 - **A native-port or extension-worker restart is not a browser restart.** Chrome storage.session
   provides the process-generation proof used by ADR-0080 recovery. Do not clear an uncertain tab
-  merely because the native host reconnected; require the exact terminal command, tab destruction,
-  or a changed browser-process generation.
+  merely because the native host reconnected; require the exact terminal executor generation,
+  command, request, and resource, tab destruction, or a changed browser-process generation.
 - **A completed tab load is not proof that the current document can render extension UI.** An
   extension reload can invalidate an unchanged page's content-script receiver without causing
   navigation. Presentation delivery uses ADR-0081's content-script ready handshake plus exact
@@ -119,6 +146,7 @@ file does not restate them -- follow AGENTS.md.
 | Decisions (one per file), authoritative and immutable | [docs/adr/](adr/README.md) |
 | Deep design rationale (superseded by ADRs where they differ) | [docs/SPEC.md](SPEC.md) |
 | Build / run / deploy on a dev machine | [docs/DEV-LOOP.md](DEV-LOOP.md) |
+| Directory submission facts, ready copy, and external gates | [docs/business/DIRECTORY-SUBMISSIONS.md](business/DIRECTORY-SUBMISSIONS.md) |
 | Larger work: task batches (BOOTSTRAP + LEDGER) | `docs/tasks/<batch>/` |
 | Machine-local state: which engine runs, install | `local/MACHINE-STATE.md` |
 | Sensitive/working notes, credential *locations*, handoffs | `local/NOTES.md` |

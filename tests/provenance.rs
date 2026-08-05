@@ -74,7 +74,7 @@ async fn nonce_is_stable_within_one_session_and_rotates_between_sessions() {
 fn non_page_result_is_byte_unchanged() {
     let mut result = json!({"content":[{"type":"text","text":"service confirmation"}]});
     let before = result.clone();
-    ghostlight::mcp::provenance::apply(
+    ghostlight::tool::provenance::apply(
         &mut result,
         ghostlight::browser::directory::PageOutput::None,
         "00112233-4455-4677-8899-aabbccddeeff",

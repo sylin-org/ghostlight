@@ -8,7 +8,31 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { isAllowedHost, sha256File, targetTriple } = require("../bin/ghostlight.js");
+const { BINS, isAllowedHost, launchSpec, sha256File, targetTriple } = require("../bin/ghostlight.js");
+
+test("ships the complete three-binary runtime", () => {
+  assert.deepEqual(BINS, [
+    "ghostlight",
+    "ghostlight-mcp-connector",
+    "ghostlight-browser-connector",
+  ]);
+});
+
+test("launches the MCP edge without the removed relay role", () => {
+  assert.deepEqual(launchSpec([]), { binName: "ghostlight-mcp-connector", spawnArgs: [] });
+  assert.deepEqual(launchSpec(["--instance", "test"]), {
+    binName: "ghostlight-mcp-connector",
+    spawnArgs: ["--instance", "test"],
+  });
+});
+
+test("keeps service CLI subcommands on the ghostlight binary", () => {
+  assert.deepEqual(launchSpec(["doctor"]), { binName: "ghostlight", spawnArgs: ["doctor"] });
+  assert.deepEqual(launchSpec(["install", "--no-open"]), {
+    binName: "ghostlight",
+    spawnArgs: ["install", "--no-open"],
+  });
+});
 
 test("isAllowedHost permits only GitHub hosts", () => {
   // The initial URL and the object-store redirect target.

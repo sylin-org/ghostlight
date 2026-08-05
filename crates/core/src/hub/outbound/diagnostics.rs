@@ -25,11 +25,13 @@ pub enum Diagnostic<'a> {
     /// A `ROLE_BROWSER` hello was admitted but no valid extension identity frame followed within
     /// the window (ADR-0061); the connection was rejected fail-closed (no slot assigned).
     MissingIdentity,
+    /// The extension claimed the resource-executor feature without its required generation.
+    InvalidExecutorIdentity,
     /// A well-formed handshake was admitted and assigned a `slot` (ADR-0061).
     Attached { slot: u32, replaced_existing: bool },
-    /// A session's stream closed and its own entry was removed.
+    /// A browser connection's stream closed and its own entry was removed.
     Detached { slot: u32 },
-    /// A session's stream closed, but a NEWER handshake for the same slot had already replaced it
+    /// A browser connection's stream closed, but a NEWER handshake for the same slot had already replaced it
     /// (a reconnect race); the newer entry was left untouched.
     DetachedStale { slot: u32 },
     /// The browser in `slot` reported (via `chrome.windows.onFocusChanged`) gaining window focus.
@@ -57,6 +59,9 @@ impl Diagnostic<'_> {
             Diagnostic::MissingIdentity => {
                 "native-host: no valid extension identity frame after the hello; rejected"
                     .to_string()
+            }
+            Diagnostic::InvalidExecutorIdentity => {
+                "native-host: surfaceExecutorV1 lacked executorGeneration; rejected".to_string()
             }
             Diagnostic::Attached {
                 slot,

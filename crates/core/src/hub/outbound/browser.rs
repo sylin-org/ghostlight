@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! The `Browser` handle -- the mcp-server's view of the connected browser extension.
+//! The `Browser` handle -- the persistent service's browser-shore view.
 //!
 //! A tool call becomes a framed request sent to the extension (through the native-host instance
 //! over the local IPC) and a correlated response, awaited by id. This module is transport-agnostic:
 //! [`Browser::attach`] takes any async duplex stream -- a real IPC connection in production, an
 //! in-memory pipe in tests -- so the correlation logic is verifiable without a browser.
 //!
-//! Wire protocol (see also `transport/native/messages.rs`): the mcp-server sends
+//! Wire protocol (see also [`crate::messages`]): the service sends
 //! `{ "id", "type": "tool_request", "tool", "args" }`; the extension replies with
 //! `{ "id", "type": "tool_response", "result" }` or
 //! `{ "id", "type": "tool_error", "error", "hop"?, "detail"?, "code"? }`. A `tool_error` is mapped to a
 //! hop-attributed [`ToolError`] (see [`ToolError::from_extension_wire`]); `detail`, if present, is
-//! logged with `tracing::debug!` and never reaches the tool result. Messages without an `id`
-//! (events, heartbeats) are ignored here (Phase 3 buffers events).
+//! logged with `tracing::debug!` and never reaches the tool result. Recognized id-less browser
+//! events are handled here without entering MCP lifecycle.
 //!
-//! Tab-URL query (g13, [`Browser::tab_url`]): the mcp-server sends
+//! Tab-URL query (g13, [`Browser::tab_url`]): the service sends
 //! `{ "id", "type": "tab_url_request", "tabId" }`; the extension replies with
 //! `{ "id", "type": "tab_url_response", "result": { "url" } }`. This routes through the same
 //! `pending` map and generic reply path as a tool call (any non-`tool_error` reply already
@@ -23,10 +23,10 @@
 //!
 //! Take-the-wheel hold (g10, ADR-0018 step 2): the extension's popup/shortcut sends
 //! `get_hold` / `set_hold` / `toggle_hold` requests over the same channel; [`Browser`] holds
-//! the flag (mcp-server process memory only -- no disk persistence, no survival across a
+//! the flag (service process memory only -- no disk persistence, no survival across a
 //! restart, and NOT cleared by an extension disconnect/reconnect) and answers with a
-//! `hold_state` (or `hold_error`) reply. The dispatch chokepoint (`transport::mcp::server`)
-//! checks [`Browser::held_for`] before any policy or extension traffic; the flag itself
+//! `hold_state` (or `hold_error`) reply. The neutral tool pipeline checks
+//! [`Browser::held_for`] before any policy or extension traffic; the flag itself
 //! carries no policy meaning here, only a user gesture the chokepoint acts on.
 //!
 //! Panic kill switch (g11, ADR-0018 step 2): the extension signals `{"type":"session_killed"}`
@@ -34,41 +34,35 @@
 //! native port. [`Browser`] latches a `killed` flag (idempotent: only the false-to-true
 //! transition acts), fails every pending and future call with the truthful
 //! `"The user ended the browser session (kill switch)"` [`ToolError`], and invokes every
-//! registered kill hook exactly once per transition (a fan-out registry, ADR-0030 Decision 7: one
-//! `session_killed` audit record per LIVE session's subject, since `held`/`killed`/`connected`
-//! stay global on this one shared handle while sessions multiplex over it). A fresh
+//! registered kill hook exactly once per transition. The browser state stays global on this one
+//! shared service handle while workspaces multiplex over it. A fresh
 //! [`Browser::attach`] (only reachable after the extension's own storage-marker gate lets it
-//! reconnect) clears the flag: a fresh session begins only on the user's explicit reconnect.
+//! reconnect) clears the flag: browser work resumes only on the user's explicit reconnect.
 //!
-//! Tab-group-per-session request ([`Browser::request_group`], H7, ADR-0030 Decision 6/7): the
-//! mcp-server sends `{ "type": "group_request", "guid", "tabIds", "title" }`; the extension
-//! groups exactly the named tabIds into that session's Chrome tab group and replies
-//! `{ "type": "group_response", "guid", "ok" }`. Fire-and-forget -- neither message carries an
-//! `id`, so no caller awaits a reply; [`Browser::route_reply`] drops an incoming `group_response`
-//! as an ordinary id-less event, same as any other frame nothing is waiting for.
-//!
-//! On-screen notification ([`Browser::notify`], SAPS PRES-HIGH-01): the mcp-server sends
+//! On-screen notification ([`Browser::notify`], SAPS PRES-HIGH-01): the service sends
 //! `{ "type": "notification", "tabId", "class", "icon"?, "title", "description"?, "ref"? }`.
-//! Same posture as `request_group` -- fire-and-forget, no `id`, no reply. `class` and `icon` are
-//! the standard severity taxonomy this codebase's own tracing already uses --
+//! Fire-and-forget, no `id`, no reply. `class` and `icon` are the standard severity taxonomy this
+//! codebase's own tracing already uses --
 //! `"info"`/`"debug"`/`"warn"`/`"error"` -- so the primitive stays general-purpose rather than
 //! denial-specific (today: `class: "error"` for a sacred-domain denial, `"warn"` for a policy
 //! denial) the extension renders without judging; `title` is the
 //! always-shown headline, `description` an optional supporting line; `ref` is an opaque
 //! cross-reference (today: the denial_id) a viewer can correlate back to the structured audit
-//! record. First caller is a denial, fired from [`crate::mcp::pipeline::run_tool_call`] at each of
+//! record. First caller is a denial, fired from [`crate::tool::pipeline::run_tool_call`] at each of
 //! the three points a call is denied -- the ONE place today where governance decides something and the
 //! extension is never otherwise contacted, so nothing on screen shows a block happened without
 //! this. Deliberately general so a future notification need (a policy hot-reload landing, for
 //! example) is a new `class`/`icon` value at an existing call site, not a new message type.
 
 use super::diagnostics::Diagnostic;
-use super::workspace::{WorkspaceRegistry, WorkspaceTarget};
+use super::workspace::WorkspaceBindings;
 use crate::browser::directory::{SchedulingScope, ToolDescriptor};
+use crate::governance::dispatch::hold_message;
 use crate::hub::scheduling::{
     BrowserSurface, CommandScheduler, ExecutionContext, ProducerId, RetirementReason,
     ScheduleFailure, ScheduleKey,
 };
+use crate::hub::workspace::WorkspaceRegistry;
 use crate::ToolError;
 use ghostlight_transport::host;
 use ghostlight_transport::observability::DebugSink;
@@ -76,7 +70,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -84,13 +78,12 @@ use zeroize::Zeroizing;
 
 /// A kill hook: `Fn`, not `FnOnce`, because it is stored and may (in principle) be invoked more
 /// than once across the `Browser`'s lifetime -- once per kill event, across however many kills
-/// a single mcp-server process observes (each preceded by a fresh reconnect that clears the
+/// a single service process observes (each preceded by a fresh browser reconnect that clears the
 /// flag). The false-to-true transition guard in [`Browser::route_reply`] is what makes each
 /// individual kill fire it exactly once.
 type KillHook = Box<dyn Fn() + Send + Sync>;
 
-/// The kill-hook fan-out registry (ADR-0030 Decision 7): every live session's subject gets
-/// exactly one `session_killed` audit record, keyed by an opaque monotonic id so a session-scoped
+/// The kill-hook fan-out registry. Registrations are keyed by an opaque monotonic id so a removable
 /// registration ([`Browser::register_session_kill_hook`]) can remove exactly its own entry when
 /// its [`KillHookHandle`] drops. A permanent hook registered via [`Browser::on_session_killed`]
 /// is never removed.
@@ -107,8 +100,20 @@ struct AttentionSession {
 
 type AttentionSessions = Arc<Mutex<HashMap<String, AttentionSession>>>;
 
+#[derive(Default)]
+struct SafetyState {
+    held_since: Option<Instant>,
+    killed: bool,
+}
+
 /// How long to wait for the extension to answer a single tool call before giving up.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
+/// Longer bound for an effectful delivery after the protocol shore has stopped waiting.
+///
+/// The extension's execution queue forgets terminal entries after 120 seconds. Keeping the exact
+/// service pipeline alive for 180 seconds covers that queue lifetime plus the original execution
+/// budget while still bounding pending memory, audit scopes, and workspace leases.
+const DELIVERY_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(180);
 /// Browser final-frame barriers are deliberately much shorter than an ordinary tool timeout.
 const RECORDING_BARRIER_TIMEOUT: Duration = Duration::from_secs(5);
 /// Conservative payload ceiling below Chrome's 1 MiB host-to-extension native-message limit.
@@ -117,11 +122,14 @@ const CHROME_OUTBOUND_PAYLOAD_LIMIT: usize = 900 * 1024;
 const WIRE_CHUNK_BYTES: usize = 512 * 1024;
 /// Extension reassembly bound for one ordinary serialized request.
 const MAX_CHUNKED_REQUEST_BYTES: usize = 32 * 1024 * 1024;
+/// One maximum-sized chunked request, with no unbounded backlog behind a stalled browser pipe.
+const BROWSER_WRITER_QUEUE_CAPACITY: usize = 64;
 const CHUNKED_HOST_MESSAGES_V1: &str = "chunkedHostMessagesV1";
+const SURFACE_EXECUTOR_V1: &str = "surfaceExecutorV1";
 
 /// Bounded reconnect grace window (ADR-0030 Decision 3, "D1 -- the honest singleton queue":
 /// "truthful failure on a real drop"; PINNED in PINS.md SS4). STRICTLY LESS THAN
-/// [`TOOL_TIMEOUT`]: a brief extension disconnect HOLDS the session's pending calls awaiting
+/// [`TOOL_TIMEOUT`]: a brief extension disconnect HOLDS the browser connection's pending calls awaiting
 /// reconnect instead of failing them the instant the stream closes; only a REAL drop (this
 /// window elapsing with no reconnect) fails them, with the unchanged disconnect error text.
 pub const GRACE_WINDOW: Duration = Duration::from_secs(10);
@@ -134,7 +142,7 @@ pub const GRACE_WINDOW: Duration = Duration::from_secs(10);
 const IDENTITY_WINDOW: Duration = Duration::from_secs(5);
 
 /// The truthful, hop-attributed error for every call while [`Browser::is_killed`] is true
-/// (g11): the user severed the session; never a generic connection failure.
+/// (g11): the user severed the browser interaction; never a generic connection failure.
 fn kill_error() -> ToolError {
     ToolError::extension("The user ended the browser session (kill switch)")
         .next_step("ask the user to reconnect from the Ghostlight extension popup, then retry")
@@ -148,19 +156,76 @@ fn attention_required_message() -> String {
         .to_string()
 }
 
-/// Delivered to a waiting caller: `Ok(result)` or `Err(hop-attributed tool error)`.
-type CallResult = std::result::Result<Value, ToolError>;
-type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<CallResult>>>>;
+fn hold_action<'a>(tool: &str, args: &'a Value) -> Option<&'a str> {
+    let key = crate::browser::directory::descriptor(tool)?.action_key?;
+    match args.get(key) {
+        Some(Value::String(action)) => Some(action.as_str()),
+        Some(Value::Bool(true)) => Some(key),
+        _ => None,
+    }
+}
 
-/// Failure from a side-effecting request, including whether bytes entered the browser session
+/// Failure from a side-effecting request, including whether bytes entered the browser connection
 /// without a conclusive reply. Callers use this bit to avoid retrying an operation that may have
 /// completed in the page.
+#[derive(Clone, Debug)]
 pub(crate) struct DeliveryFailure {
     pub(crate) error: ToolError,
     pub(crate) outcome_unknown: bool,
 }
 
-/// A screenshot cached per session for later `upload_image` reference (ADR-0050 Decision 4). Holds
+impl DeliveryFailure {
+    /// Whether a compound operation must stop instead of flattening this into one skipped step.
+    pub(crate) fn stops_composition(&self) -> bool {
+        self.outcome_unknown
+            || matches!(
+                self.error,
+                ToolError::Held { .. } | ToolError::AttentionRequired { .. }
+            )
+    }
+}
+
+#[derive(Clone, Copy)]
+enum BrowserRequestKind<'a> {
+    Tool {
+        enforce_safety: bool,
+        hold_action: Option<&'a str>,
+    },
+    Auxiliary,
+}
+
+#[derive(Clone, Copy)]
+struct AwaitRequest<'a> {
+    debug_label: &'a str,
+    timeout: Duration,
+    attention_guid: Option<&'a str>,
+    execution: &'a ExecutionContext,
+    kind: BrowserRequestKind<'a>,
+}
+
+/// Delivered to a waiting caller with the exact delivery disposition preserved.
+type CallResult = std::result::Result<Value, DeliveryFailure>;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingExecution {
+    key: ScheduleKey,
+    command_id: u64,
+}
+
+struct PendingEntry {
+    sender: oneshot::Sender<CallResult>,
+    target_slot: u32,
+    target_generation: u64,
+    workspace_adoption: Option<ghostlight_transport::workspace_id::WorkspaceId>,
+    executor_generation: Option<String>,
+    execution: Option<PendingExecution>,
+    terminal_seen: bool,
+    dispatched: bool,
+}
+
+type Pending = Arc<Mutex<HashMap<String, PendingEntry>>>;
+
+/// A screenshot cached per workspace for later `upload_image` reference (ADR-0050 Decision 4). Holds
 /// the base64 bytes and the media type exactly as the extension's `computer` screenshot result
 /// carried them, so `upload_image` can forward them to a file input or drag-drop target.
 #[derive(Clone)]
@@ -169,29 +234,28 @@ pub(crate) struct CachedImage {
     pub(crate) media_type: String,
 }
 
-/// Per-guid bounded screenshot cache (ADR-0050 D4): each session's last
+/// Per-workspace bounded screenshot cache (ADR-0050 D4): each workspace's last
 /// [`SCREENSHOT_CACHE_BOUND`] screenshots, newest last, keyed by minted `img_...` id.
 type ScreenshotCache = Arc<Mutex<HashMap<String, VecDeque<(String, CachedImage)>>>>;
 
 /// The per-guid screenshot-cache bound (ADR-0050 D4): pushing a 9th screenshot evicts the oldest.
 const SCREENSHOT_CACHE_BOUND: usize = 8;
 
-/// The outcome of [`Browser::attach`]: whether this connection became the active session or was
+/// The outcome of [`Browser::attach`]: whether this connection became the active browser link or was
 /// rejected because one is already attached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
 pub enum AttachOutcome {
-    /// This connection was the active session and has now detached (its stream closed).
+    /// This connection was the active browser link and has now detached (its stream closed).
     Detached,
-    /// A session was already attached; this stray/extra connection was dropped without touching any
+    /// A browser link was already attached; this stray connection was dropped without touching any
     /// `Browser` state.
     AlreadyAttached,
 }
 
-/// A session-scoped kill-hook registration (ADR-0030 Decision 7). Dropping the handle
-/// unregisters the session's hook, so a session that has already ended records nothing on a
-/// later kill. Returned by [`Browser::register_session_kill_hook`]; a live session holds it for
-/// its whole lifetime.
+/// A removable kill-hook registration. Dropping the handle unregisters this subscriber, so a
+/// retired subscriber records nothing on a later browser kill event. Returned by
+/// [`Browser::register_session_kill_hook`].
 #[must_use = "dropping the handle immediately unregisters the session kill hook"]
 pub struct KillHookHandle {
     kill_hooks: KillHooks,
@@ -219,7 +283,7 @@ fn merge_tab_id(args: &Value, native: i64) -> Value {
     owned
 }
 
-/// Whether this extension request may establish or reuse the calling session's browser-window
+/// Whether this extension request may establish or reuse the calling workspace's browser-window
 /// workspace. Ordinary addressed calls route only by tab id and carry no window metadata.
 fn uses_workspace(tool: &str, args: &Value) -> bool {
     matches!(tool, "tabs_context_mcp" | "tabs_create_mcp")
@@ -254,13 +318,16 @@ fn execution_wire(context: &ExecutionContext) -> Value {
                 "browserSlot": surface.browser_slot,
                 "nativeTab": surface.native_tab
             }),
-            ScheduleKey::ClientTopology {
+            ScheduleKey::WorkspaceTopology {
                 browser_slot,
-                client_key,
+                workspace_key,
             } => json!({
+                // ADR-0093 compatibility encoding: covered older adapters still spell this
+                // private execution resource `client_topology`/`clientKey`. The value is the
+                // service-minted WorkspaceId, never client presentation or authority.
                 "kind": "client_topology",
                 "browserSlot": browser_slot,
-                "clientKey": client_key
+                "clientKey": workspace_key
             }),
             ScheduleKey::Browser { browser_slot } => json!({
                 "kind": "browser",
@@ -269,6 +336,75 @@ fn execution_wire(context: &ExecutionContext) -> Value {
         };
     }
     value
+}
+
+fn pending_execution(context: &ExecutionContext) -> Option<PendingExecution> {
+    Some(PendingExecution {
+        key: context.key()?.clone(),
+        command_id: context.command_id()?,
+    })
+}
+
+fn creates_workspace_membership(tool: &str) -> bool {
+    matches!(tool, "tabs_context_mcp" | "tabs_create_mcp")
+}
+
+fn creator_result_tab_ids(result: &Value, browser_slot: u32) -> Vec<i64> {
+    let Some(structured) = result.get("structuredContent") else {
+        return Vec::new();
+    };
+    let mut native_ids = Vec::new();
+    if let Some(tab_id) = structured.get("tabId").and_then(Value::as_i64) {
+        native_ids.push(tab_id);
+    }
+    if let Some(tabs) = structured.get("tabs").and_then(Value::as_array) {
+        native_ids.extend(
+            tabs.iter()
+                .filter_map(|tab| tab.get("tabId").and_then(Value::as_i64)),
+        );
+    }
+    let mut tab_ids = native_ids
+        .into_iter()
+        .map(|native_id| crate::constants::tab_id::encode(browser_slot, native_id))
+        .collect::<Vec<_>>();
+    tab_ids.sort_unstable();
+    tab_ids.dedup();
+    tab_ids
+}
+
+fn chunk_transport_not_negotiated() -> ToolError {
+    ToolError::extension("This Ghostlight extension is too old for bounded large-value transport")
+        .next_step("update or reload the Ghostlight extension, then retry")
+}
+
+fn command_id_from_wire(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+}
+
+fn schedule_key_from_wire(slot: u32, resource: &Value) -> Option<ScheduleKey> {
+    let browser_slot = u32::try_from(resource.get("browserSlot")?.as_u64()?).ok()?;
+    // Slot zero is the service's pre-placement topology lane. Every concrete resource must be
+    // echoed by the browser connection that owns it; bootstrap topology keeps its slot-zero key
+    // even though the request necessarily travels over one selected live browser.
+    if browser_slot != 0 && browser_slot != slot {
+        return None;
+    }
+    match resource.get("kind").and_then(Value::as_str)? {
+        "surface" => Some(ScheduleKey::Surface(BrowserSurface {
+            browser_slot,
+            native_tab: resource.get("nativeTab")?.as_i64()?,
+        })),
+        // ADR-0093 compatibility encoding. Domain code calls this WorkspaceTopology, but covered
+        // adapters still echo the older private spelling and carry WorkspaceId as `clientKey`.
+        "client_topology" => Some(ScheduleKey::WorkspaceTopology {
+            browser_slot,
+            workspace_key: resource.get("clientKey")?.as_str()?.to_string(),
+        }),
+        "browser" => Some(ScheduleKey::Browser { browser_slot }),
+        _ => None,
+    }
 }
 
 /// Recursively rewrite every plain-number `"tabId"` key in `v` to its composite form (ADR-0058),
@@ -375,16 +511,17 @@ fn parse_rescaled_points(reply: &Value) -> Option<Vec<(f64, f64)>> {
 
 /// One attached browser's live send half plus enough identity to detect a stale self-removal
 /// race (ADR-0058): `generation` is this [`Browser::attach`] call's own monotonic id, so a
-/// reader loop that is about to remove its session on disconnect can tell whether a LATER
+/// reader loop that is about to remove its connection on disconnect can tell whether a LATER
 /// attach (a reconnect from the same browser) has already replaced it -- and if so, leave the
 /// newer entry alone.
 struct BrowserSession {
-    sender: mpsc::UnboundedSender<Zeroizing<Vec<u8>>>,
+    sender: mpsc::Sender<Zeroizing<Vec<u8>>>,
     generation: u64,
     chunked_host_messages_v1: bool,
+    executor_generation: Option<String>,
 }
 
-/// A cloneable handle the mcp-server uses to call tools on the extension.
+/// A cloneable handle the persistent service uses to call tools on the extension.
 #[derive(Clone)]
 pub struct Browser {
     next_id: Arc<AtomicU64>,
@@ -402,12 +539,15 @@ pub struct Browser {
     slots: Arc<Mutex<HashMap<String, u32>>>,
     /// Last browser-process generation announced for each stable browser slot. Unlike an
     /// extension worker or native port, this changes only after Chrome clears storage.session.
+    /// Its mutex is also the browser-shore lifecycle gate: attach, detach, and inbound routing
+    /// hold it so a replaced native connection cannot act after its replacement is published.
     browser_generations: Arc<Mutex<HashMap<u32, String>>>,
     /// Monotonic source for the next `slot` (ADR-0061): starts at 1 so a slot is never 0.
     next_slot: Arc<AtomicU64>,
     /// Focus recency (ADR-0058/0061): front = the browser whose slot most recently gained window
     /// focus (or, failing any focus report, most recently attached -- seeded on attach so the
-    /// chain always covers every live session). Only entries also present in `sessions` are ever
+    /// chain always covers every live browser connection). Only entries also present in `sessions`
+    /// are ever
     /// consulted; a disconnected browser's entry is pruned on detach. Used ONLY to pick a target
     /// when a call names no tab at all (tab-creation bootstrap); a call that names a tab is always
     /// routed by that tab's OWN encoded slot, never by focus.
@@ -419,12 +559,10 @@ pub struct Browser {
     connected: Arc<watch::Sender<bool>>,
     /// Observability sink (no-op unless debug mode is on).
     debug: DebugSink,
-    /// Take-the-wheel hold (g10): `None` while not held; `Some(t)` since the instant the user
-    /// engaged it. Process memory only -- never persisted, never cleared by a disconnect.
-    held: Arc<Mutex<Option<Instant>>>,
-    /// Panic kill switch (g11): `true` once the extension has reported the user ended the
-    /// session, until the next [`Browser::attach`] (a fresh, explicit reconnect) clears it.
-    killed: Arc<AtomicBool>,
+    /// Take-the-wheel and panic state under the same final-enqueue lock. A transition and a frame
+    /// enqueue therefore have one total order: work either entered the browser before the user's
+    /// safety action or is conclusively refused afterward.
+    safety: Arc<Mutex<SafetyState>>,
     /// The kill-hook fan-out registry (ADR-0030 Decision 7): every entry fires exactly once per
     /// false-to-true `killed` transition. Starts empty until [`Browser::on_session_killed`] or
     /// [`Browser::register_session_kill_hook`] appends one.
@@ -432,31 +570,29 @@ pub struct Browser {
     /// Monotonic id source for `kill_hooks` entries (ADR-0030 Decision 7), so a
     /// [`KillHookHandle`] can remove exactly its own registration.
     next_hook_id: Arc<AtomicU64>,
-    /// Per-session screenshot cache (ADR-0050 Decision 4): a `computer` screenshot result is cached
+    /// Per-workspace screenshot cache (ADR-0050 Decision 4): a `computer` screenshot result is cached
     /// here under a minted `img_...` id so `upload_image` can later place it into a file input or a
     /// drag-drop target. Bounded per guid ([`SCREENSHOT_CACHE_BOUND`]), evicting the oldest.
     screenshot_cache: ScreenshotCache,
-    /// The `guid -> clientKey` map (ADR-0066 D3): a session's stable per-CLIENT presentation key
-    /// ([`crate::hub::session::client_key`]), captured at `initialize` and stamped onto the
-    /// `tool_request`/`group_request` envelopes so the extension keys its Chrome tab group on the
-    /// client (reused across the client's sessions) rather than the per-process guid. A guid with no
-    /// entry (a legacy/hand-rolled caller that never sent `initialize`, or an in-proc test) simply
-    /// sends no `clientKey`, and the extension falls back to guid-keying. Bounded by the number of
-    /// distinct sessions this service lifetime; never evicted (tiny, like the slot map).
-    client_keys: Arc<Mutex<HashMap<String, String>>>,
-    /// Per-MCP-session browser-window placement. The first unaddressed topology call pins a
-    /// service-assigned browser slot plus an adapter-native window id. This is ergonomic routing
-    /// only; tab ownership and governance remain authoritative.
-    workspaces: WorkspaceRegistry,
-    /// Session/surface/generation-scoped, memory-only GIF recordings (ADR-0073).
+    /// Stable human-facing label for each live workspace. It is never an extension routing key:
+    /// browser state is keyed only by the workspace handle carried in the compatibility `guid`
+    /// field. Entries are removed when the workspace retires.
+    workspace_labels: Arc<Mutex<HashMap<String, String>>>,
+    /// Per-workspace browser-profile routing for unaddressed topology calls. Chrome-native
+    /// windows and groups remain entirely browser-shore state.
+    workspace_bindings: WorkspaceBindings,
+    /// Workspace/surface/generation-scoped, memory-only GIF recordings (ADR-0073/0096).
     recordings: Arc<crate::recording::RecordingCoordinator>,
     /// Starts the one process-local deadline and health-lease supervisor lazily.
     recording_supervisor_started: Arc<AtomicBool>,
-    /// Per-MCP-session denial attention circuits (ADR-0079). The same lock is held through the
+    /// Per-workspace denial attention circuits (ADR-0079/0096). The same lock is held through the
     /// final extension-frame enqueue, so an opening transition cannot race a stale admission.
     attention_sessions: AttentionSessions,
-    /// Service-owned resource scheduler shared by every MCP session (ADR-0080).
+    /// Service-owned resource scheduler shared by every workspace (ADR-0080/0096).
     scheduler: CommandScheduler,
+    /// The service workspace registry, bound once by the composition root. Browser-process
+    /// restart is the one browser-shore event that invalidates its composite tab membership.
+    workspace_registry: Arc<OnceLock<WorkspaceRegistry>>,
 }
 
 impl Browser {
@@ -480,17 +616,27 @@ impl Browser {
             // require a live receiver (unlike `send`, which would fail and skip the update).
             connected: Arc::new(watch::channel(false).0),
             debug,
-            held: Arc::new(Mutex::new(None)),
-            killed: Arc::new(AtomicBool::new(false)),
+            safety: Arc::new(Mutex::new(SafetyState::default())),
             kill_hooks: Arc::new(Mutex::new(Vec::new())),
             next_hook_id: Arc::new(AtomicU64::new(1)),
             screenshot_cache: Arc::new(Mutex::new(HashMap::new())),
-            client_keys: Arc::new(Mutex::new(HashMap::new())),
-            workspaces: WorkspaceRegistry::default(),
+            workspace_labels: Arc::new(Mutex::new(HashMap::new())),
+            workspace_bindings: WorkspaceBindings::default(),
             recordings: Arc::new(crate::recording::RecordingCoordinator::new()),
             recording_supervisor_started: Arc::new(AtomicBool::new(false)),
             attention_sessions: Arc::new(Mutex::new(HashMap::new())),
             scheduler: CommandScheduler::default(),
+            workspace_registry: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// Bind the service-owned workspace registry to browser-process lifecycle cleanup.
+    ///
+    /// This is a direct composition-root link, not a callback framework: a changed browser
+    /// process generation invalidates exactly the tabs whose native ids belonged to that slot.
+    pub(crate) fn bind_workspace_registry(&self, registry: WorkspaceRegistry) {
+        if self.workspace_registry.set(registry).is_err() {
+            tracing::warn!("browser workspace registry was already bound");
         }
     }
 
@@ -508,6 +654,40 @@ impl Browser {
         authority_epoch: u64,
         inherited: Option<&ExecutionContext>,
     ) -> Result<ExecutionContext, ScheduleFailure> {
+        self.acquire_execution_inner(descriptor, guid, args, authority_epoch, inherited, None)
+            .await
+    }
+
+    /// Resolve and acquire descriptor-declared execution with exact queued-work cancellation.
+    pub async fn acquire_execution_cancellable(
+        &self,
+        descriptor: &ToolDescriptor,
+        guid: &str,
+        args: &Value,
+        authority_epoch: u64,
+        inherited: Option<&ExecutionContext>,
+        cancellation: &crate::work::CancellationToken,
+    ) -> Result<ExecutionContext, ScheduleFailure> {
+        self.acquire_execution_inner(
+            descriptor,
+            guid,
+            args,
+            authority_epoch,
+            inherited,
+            Some(cancellation),
+        )
+        .await
+    }
+
+    async fn acquire_execution_inner(
+        &self,
+        descriptor: &ToolDescriptor,
+        guid: &str,
+        args: &Value,
+        authority_epoch: u64,
+        inherited: Option<&ExecutionContext>,
+        cancellation: Option<&crate::work::CancellationToken>,
+    ) -> Result<ExecutionContext, ScheduleFailure> {
         let producer = ProducerId::new(guid);
         let composite_tab = args.get("tabId").and_then(Value::as_i64);
         match descriptor.scheduling.scope {
@@ -517,19 +697,23 @@ impl Browser {
             // their inherited context through LocalCtx once preflight can prove the target.
             SchedulingScope::Composition => Ok(ExecutionContext::local()),
             SchedulingScope::Surface => {
-                self.acquire_surface_for(producer, composite_tab, authority_epoch, inherited)
-                    .await
+                self.acquire_surface_for(
+                    producer,
+                    composite_tab,
+                    authority_epoch,
+                    inherited,
+                    cancellation,
+                )
+                .await
             }
-            SchedulingScope::ClientTopology => {
+            SchedulingScope::WorkspaceTopology => {
                 let slot = if uses_workspace(descriptor.tool, args) && composite_tab.is_none() {
                     // Before first selection, all concurrent topology calls from this client use
                     // the slot-zero bootstrap queue. This prevents two browser profiles from
                     // racing to establish different first-workspace pins. Dispatch resolves the
                     // live profile only after this lease is held. Once pinned, ordinary
                     // browser-local topology scheduling resumes on the selected slot.
-                    self.workspaces
-                        .get(guid)
-                        .map(|workspace| workspace.browser_slot)
+                    self.workspace_bindings.get(guid)
                 } else {
                     self.resolve_target(composite_tab).0
                 };
@@ -537,30 +721,28 @@ impl Browser {
                 // existing transport layer returns its canonical not-connected error, while no
                 // real browser resource can collide with it (assigned slots start at one).
                 let slot = slot.unwrap_or(0);
-                let client_key = self
-                    .client_key_for(guid)
-                    .unwrap_or_else(|| guid.to_string());
-                self.scheduler
-                    .acquire(
-                        ScheduleKey::ClientTopology {
-                            browser_slot: slot,
-                            client_key,
-                        },
-                        producer,
-                        authority_epoch,
-                    )
-                    .await
+                let workspace_key = guid.to_string();
+                self.acquire_scheduled(
+                    ScheduleKey::WorkspaceTopology {
+                        browser_slot: slot,
+                        workspace_key,
+                    },
+                    producer,
+                    authority_epoch,
+                    cancellation,
+                )
+                .await
             }
             SchedulingScope::Browser => {
                 let (slot, _) = self.resolve_target(composite_tab);
                 let slot = slot.unwrap_or(0);
-                self.scheduler
-                    .acquire(
-                        ScheduleKey::Browser { browser_slot: slot },
-                        producer,
-                        authority_epoch,
-                    )
-                    .await
+                self.acquire_scheduled(
+                    ScheduleKey::Browser { browser_slot: slot },
+                    producer,
+                    authority_epoch,
+                    cancellation,
+                )
+                .await
             }
         }
     }
@@ -577,8 +759,44 @@ impl Browser {
             Some(composite_tab),
             authority_epoch,
             None,
+            None,
         )
         .await
+    }
+
+    /// Acquire a retained composition surface with exact queued-work cancellation.
+    pub(crate) async fn acquire_composition_surface_cancellable(
+        &self,
+        guid: &str,
+        composite_tab: i64,
+        authority_epoch: u64,
+        cancellation: &crate::work::CancellationToken,
+    ) -> Result<ExecutionContext, ScheduleFailure> {
+        self.acquire_surface_for(
+            ProducerId::new(guid),
+            Some(composite_tab),
+            authority_epoch,
+            None,
+            Some(cancellation),
+        )
+        .await
+    }
+
+    async fn acquire_scheduled(
+        &self,
+        key: ScheduleKey,
+        producer: ProducerId,
+        authority_epoch: u64,
+        cancellation: Option<&crate::work::CancellationToken>,
+    ) -> Result<ExecutionContext, ScheduleFailure> {
+        match cancellation {
+            Some(cancellation) => {
+                self.scheduler
+                    .acquire_cancellable(key, producer, authority_epoch, cancellation)
+                    .await
+            }
+            None => self.scheduler.acquire(key, producer, authority_epoch).await,
+        }
     }
 
     async fn acquire_surface_for(
@@ -587,6 +805,7 @@ impl Browser {
         composite_tab: Option<i64>,
         authority_epoch: u64,
         inherited: Option<&ExecutionContext>,
+        cancellation: Option<&crate::work::CancellationToken>,
     ) -> Result<ExecutionContext, ScheduleFailure> {
         let (slot, native_tab) = self.resolve_target(composite_tab);
         let slot = slot.unwrap_or(0);
@@ -600,10 +819,11 @@ impl Browser {
         if let Some(context) = inherited.filter(|context| context.authorizes(&key)) {
             return Ok(context.clone());
         }
-        self.scheduler.acquire(key, producer, authority_epoch).await
+        self.acquire_scheduled(key, producer, authority_epoch, cancellation)
+            .await
     }
 
-    /// Register one live MCP session's memory-only attention circuit and transition hook.
+    /// Register one live workspace's memory-only attention circuit and transition hook.
     pub fn register_attention_session(
         &self,
         guid: &str,
@@ -620,14 +840,14 @@ impl Browser {
         );
     }
 
-    /// Update the bounded human-facing label for a registered attention session.
+    /// Update the bounded human-facing label for a registered workspace attention circuit.
     pub fn set_attention_label(&self, guid: &str, label: &str) {
         if let Some(session) = self.attention_sessions.lock().unwrap().get_mut(guid) {
             session.label = label.chars().take(80).collect();
         }
     }
 
-    /// Remove all denial history, quieting, and presentation state for a finished MCP session.
+    /// Remove all denial history, quieting, and presentation state for a retired workspace.
     pub fn clear_attention_session(&self, guid: &str) {
         self.scheduler
             .retire_producer(&ProducerId::new(guid), RetirementReason::SessionEnded);
@@ -639,7 +859,17 @@ impl Browser {
         }
     }
 
-    /// Helpful model-facing text while this session's denial circuit is open.
+    /// Clear every browser-side cache and presentation object owned by a retired workspace.
+    pub fn cleanup_workspace(&self, workspace: &str, owned_tabs: &[i64]) {
+        self.erase_session_recordings(workspace);
+        self.clear_attention_session(workspace);
+        self.clear_narrations(owned_tabs);
+        self.screenshot_cache.lock().unwrap().remove(workspace);
+        self.workspace_labels.lock().unwrap().remove(workspace);
+        self.workspace_bindings.remove(workspace);
+    }
+
+    /// Helpful model-facing text while this workspace's denial circuit is open.
     pub fn attention_message(&self, guid: &str) -> Option<String> {
         self.attention_sessions
             .lock()
@@ -686,53 +916,39 @@ impl Browser {
         result.present_isolated
     }
 
-    /// Record a session's stable per-client presentation key (ADR-0066 D3), captured at
-    /// `initialize` from `clientInfo.name` (via [`crate::hub::session::client_key`]). Overwrites
-    /// any prior value for the same guid -- a re-`initialize` on a reconnected session keeps the
-    /// mapping current. Read by [`Browser::raw_call`] and [`Browser::request_group`] when stamping
-    /// the wire; the value is presentation only and, like the guid, is never logged from here.
-    pub fn set_client_key(&self, guid: &str, client_key: &str) {
-        self.client_keys
+    /// Record one workspace's stable human-facing label without changing browser routing.
+    pub fn set_workspace_label(&self, guid: &str, label: &str) {
+        self.workspace_labels
             .lock()
             .unwrap()
-            .insert(guid.to_string(), client_key.to_string());
+            .entry(guid.to_string())
+            .or_insert_with(|| label.to_string());
     }
 
-    /// This guid's stamped clientKey (ADR-0066 D3), or `None` if none was captured. `None` sends no
-    /// `clientKey` on the wire, and the extension falls back to guid-keying.
-    fn client_key_for(&self, guid: &str) -> Option<String> {
-        self.client_keys.lock().unwrap().get(guid).cloned()
+    /// Return the stable display label for a workspace, when one was captured at creation.
+    fn workspace_label_for(&self, guid: &str) -> Option<String> {
+        self.workspace_labels.lock().unwrap().get(guid).cloned()
     }
 
-    /// Add the private workspace instruction for an unaddressed topology request. A session with
-    /// no pin asks the adapter to pull Chrome's most recently focused eligible normal window; a
-    /// pinned session names its exact native window. Neither shape is model-facing.
-    fn stamp_workspace_request(
-        &self,
-        request: &mut Value,
-        guid: &str,
-        tool: &str,
-        args: &Value,
-        target: u32,
-    ) {
+    fn workspace_group_title(&self, guid: &str) -> String {
+        self.workspace_label_for(guid)
+            .map(|label| format!("Ghostlight - {label}"))
+            .unwrap_or_else(|| "Ghostlight".to_string())
+    }
+
+    /// Add the presentation-only workspace instruction for a topology request. The browser shore
+    /// chooses and follows Chrome-native windows and groups; the service supplies no placement.
+    fn stamp_workspace_request(&self, request: &mut Value, guid: &str, tool: &str, args: &Value) {
         if !uses_workspace(tool, args) {
             return;
         }
-        let workspace = match self.workspaces.get(guid) {
-            Some(workspace) if workspace.browser_slot == target => json!({
-                crate::constants::workspace::WINDOW_ID: workspace.native_window_id,
-            }),
-            _ => json!({
-                crate::constants::workspace::SELECT:
-                    crate::constants::workspace::LAST_FOCUSED_NORMAL,
-            }),
-        };
-        request[crate::constants::workspace::REQUEST] = workspace;
+        request[crate::constants::workspace::REQUEST] = json!({
+            crate::constants::workspace::GROUP_TITLE: self.workspace_group_title(guid),
+        });
     }
 
-    /// Consume the extension's private native-window metadata and pin the session. The metadata is
-    /// removed unconditionally before encoding or returning the tool result, preserving the public
-    /// structured-result surface and its token cost.
+    /// Bind a successful topology call to its browser profile and remove covered older adapters'
+    /// private native-window metadata before returning the public result.
     fn capture_workspace_result(
         &self,
         guid: &str,
@@ -740,40 +956,28 @@ impl Browser {
         args: &Value,
         target: u32,
         result: &mut Value,
-        replace: Option<WorkspaceTarget>,
     ) {
-        let metadata = result
-            .as_object_mut()
-            .and_then(|object| object.remove(crate::constants::workspace::RESULT_META));
+        if let Some(object) = result.as_object_mut() {
+            object.remove(crate::constants::workspace::RESULT_META);
+        }
         if !uses_workspace(tool, args) {
             return;
         }
-        let Some(native_window_id) = metadata
-            .as_ref()
-            .and_then(|value| value.get(crate::constants::workspace::WINDOW_ID))
-            .and_then(Value::as_i64)
-        else {
-            return;
-        };
-        let selected = WorkspaceTarget {
-            browser_slot: target,
-            native_window_id,
-        };
-        if let Some(expected) = replace {
-            self.workspaces.replace_if(guid, expected, selected);
-        } else {
-            self.workspaces.pin(guid, selected);
-        }
+        self.workspace_bindings.bind(guid, target);
     }
 
-    /// The observability sink (used by the mcp-server to record the MCP boundary).
+    /// The service observability sink. MCP request/response observability stays at the edge.
     pub fn debug(&self) -> &DebugSink {
         &self.debug
     }
 
     /// Time since the take-the-wheel hold was engaged, or `None` while not held (g10).
     pub fn held_for(&self) -> Option<Duration> {
-        self.held.lock().unwrap().map(|since| since.elapsed())
+        self.safety
+            .lock()
+            .unwrap()
+            .held_since
+            .map(|since| since.elapsed())
     }
 
     /// Set the hold flag and return the resulting state (g10). Setting `true` while already
@@ -781,16 +985,18 @@ impl Browser {
     /// pause gesture must not reset the hint countdown). Logs exactly once per real
     /// transition, never on a no-op repeat.
     pub fn set_held(&self, held: bool) -> bool {
-        let mut guard = self.held.lock().unwrap();
-        let was_held = guard.is_some();
+        let mut safety = self.safety.lock().unwrap();
+        let was_held = safety.held_since.is_some();
         if held && !was_held {
+            safety.held_since = Some(Instant::now());
+            drop(safety);
             self.scheduler.retire_all(RetirementReason::Hold);
-            *guard = Some(Instant::now());
             self.recordings
                 .interrupt_all(crate::recording::StopReason::UserHold);
             tracing::info!("user hold engaged");
         } else if !held && was_held {
-            *guard = None;
+            safety.held_since = None;
+            drop(safety);
             tracing::info!("user hold released");
         }
         held
@@ -798,44 +1004,44 @@ impl Browser {
 
     /// Flip the hold flag atomically and return the new state (g10).
     pub fn toggle_held(&self) -> bool {
-        let mut guard = self.held.lock().unwrap();
-        let now_held = guard.is_none();
+        let mut safety = self.safety.lock().unwrap();
+        let now_held = safety.held_since.is_none();
         if now_held {
+            safety.held_since = Some(Instant::now());
+            drop(safety);
             self.scheduler.retire_all(RetirementReason::Hold);
-            *guard = Some(Instant::now());
             self.recordings
                 .interrupt_all(crate::recording::StopReason::UserHold);
             tracing::info!("user hold engaged");
         } else {
-            *guard = None;
+            safety.held_since = None;
+            drop(safety);
             tracing::info!("user hold released");
         }
         now_held
     }
 
-    /// True once the extension has reported the user ended the session (g11), until the next
+    /// True once the extension has reported the user ended the browser interaction (g11), until the next
     /// [`Browser::attach`] (a fresh, explicit reconnect) clears it.
     pub fn is_killed(&self) -> bool {
-        self.killed.load(Ordering::SeqCst)
+        self.safety.lock().unwrap().killed
     }
 
     /// Register a PERMANENT hook invoked exactly once each time the extension reports the user
-    /// ended the session (the `session_killed` event, g11): appended to the fan-out registry and
+    /// ended the browser interaction (the `session_killed` event, g11): appended to the fan-out registry and
     /// never removed (ADR-0030 Decision 7, converting this from the pre-H2 single-consumer
     /// "registering a second hook replaces the first" behavior). Use
-    /// [`Browser::register_session_kill_hook`] for a session-scoped registration that
-    /// deregisters when the session ends.
+    /// [`Browser::register_session_kill_hook`] for a removable registration that deregisters when
+    /// its owner retires.
     pub fn on_session_killed(&self, hook: impl Fn() + Send + Sync + 'static) {
         let id = self.next_hook_id.fetch_add(1, Ordering::Relaxed);
         self.kill_hooks.lock().unwrap().push((id, Box::new(hook)));
     }
 
-    /// Register a REMOVABLE, session-scoped kill hook (ADR-0030 Decision 7): fires exactly once
+    /// Register a removable kill hook (ADR-0030 Decision 7): fires exactly once
     /// per false-to-true `killed` transition, same as [`Browser::on_session_killed`], but is
-    /// deregistered as soon as the returned [`KillHookHandle`] drops -- so a session that has
-    /// already ended records nothing on a later kill. `hold`/`killed`/`connected` stay GLOBAL
-    /// (latched on this one shared `Browser`, never per session); only the audit-writing hook
-    /// itself is session-scoped. A live session holds its handle for its whole lifetime.
+    /// deregistered as soon as the returned [`KillHookHandle`] drops. `hold`/`killed`/`connected`
+    /// stay global on this one shared `Browser`; only the subscriber lifetime is scoped.
     pub fn register_session_kill_hook(
         &self,
         hook: impl Fn() + Send + Sync + 'static,
@@ -912,7 +1118,8 @@ impl Browser {
     ///
     /// ADR-0061 retired the pre-0061 `sessions.keys().min()` fallback (which could hand a call to a
     /// lingering pid-0 corpse): the focus chain is seeded on attach (see [`Browser::touch_focus`]),
-    /// so it always covers every live session, and a live focus-ordered entry is always available
+    /// so it always covers every live browser connection, and a live focus-ordered entry is always
+    /// available
     /// when any browser is attached. The `.or_else` below is a defensive floor only -- it can no
     /// longer select a dead or zero slot, because a slot maps to a live UUID and is evicted from
     /// `sessions` on disconnect.
@@ -931,9 +1138,9 @@ impl Browser {
         (self.focus_front_live(), None)
     }
 
-    /// Resolve an unaddressed workspace operation to its session-pinned browser when one exists.
-    /// Addressed operations remain tab-authoritative. A missing pinned browser is returned as-is
-    /// so the transport reports the truthful disconnect instead of silently changing workspace.
+    /// Resolve an unaddressed workspace operation to its bound browser profile when one exists.
+    /// Addressed operations remain tab-authoritative. Chrome-native window placement is not
+    /// service state.
     fn resolve_workspace_target(
         &self,
         guid: &str,
@@ -942,9 +1149,9 @@ impl Browser {
         if composite_tab_id.is_some() {
             return self.resolve_target(composite_tab_id);
         }
-        self.workspaces
+        self.workspace_bindings
             .get(guid)
-            .map(|workspace| (Some(workspace.browser_slot), None))
+            .map(|browser_slot| (Some(browser_slot), None))
             .unwrap_or_else(|| self.resolve_target(None))
     }
 
@@ -968,8 +1175,8 @@ impl Browser {
     /// Move `slot` to the front of the focus chain (ADR-0061), no duplicate entries. The shared
     /// core of [`Browser::note_focus`] (a real focus report) and the attach-time seed (a freshly
     /// connected browser is the most-recently-active until another reports focus), so the chain
-    /// always covers every live session and [`Browser::resolve_target`] never needs a corpse-prone
-    /// fallback.
+    /// always covers every live browser connection and [`Browser::resolve_target`] never needs a
+    /// corpse-prone fallback.
     fn touch_focus(&self, slot: u32) {
         let mut chain = self.focus_chain.lock().unwrap();
         chain.retain(|s| *s != slot);
@@ -1009,10 +1216,10 @@ impl Browser {
 
     /// Invoke `tool` with `args` on the extension and await its result.
     ///
-    /// `guid` is the calling session's [`SessionGuid`] string (ADR-0047 D3), written verbatim into
-    /// the additive `tool_request` envelope field. Trained tool schemas are untouched; the extension
-    /// consumes `guid` only for session-scoped tab operations (`tabs_create_mcp`/`tabs_context_mcp`)
-    /// and ignores it for every other tool.
+    /// `guid` is the browser-wire spelling for the calling work's service-minted WorkspaceId. It is
+    /// written verbatim into the additive `tool_request` envelope field for browser-adapter version
+    /// compatibility. Trained tool schemas are untouched; the extension uses it for
+    /// workspace-scoped tab operations and ignores it where no workspace routing is needed.
     ///
     /// Every failure is a hop-attributed [`ToolError`]: no extension connected, an encoding
     /// failure before the request left the process, the extension reporting a tool error (tagged
@@ -1038,10 +1245,10 @@ impl Browser {
     ) -> std::result::Result<Value, ToolError> {
         // The killed check precedes everything else, including the pending-map insert and the
         // not-connected check (g11 constraint 12): after a kill the port drops and every
-        // session is gone, so the generic not-connected error would otherwise win by accident.
+        // browser link is gone, so the generic not-connected error would otherwise win by accident.
         // The binary knows the real cause; the engine is truthful. No debug tool_begin/tool_end
         // pairing here: the call never began in any trackable sense.
-        if self.killed.load(Ordering::SeqCst) {
+        if self.is_killed() {
             return Err(kill_error());
         }
 
@@ -1100,8 +1307,8 @@ impl Browser {
     /// Invoke a side-effecting extension operation while preserving outcome uncertainty.
     ///
     /// A timeout, disconnect, or partial enqueue after at least one frame entered the browser
-    /// session is reported with `outcome_unknown = true`. A local preparation failure, absent
-    /// session, or explicit extension error remains a conclusive failure. This is intentionally
+    /// connection is reported with `outcome_unknown = true`. A local preparation failure, absent
+    /// browser connection, or explicit extension error remains a conclusive failure. This is intentionally
     /// separate from [`Browser::call`], whose historical error surface cannot carry that bit.
     pub(crate) async fn call_with_delivery_outcome(
         &self,
@@ -1110,7 +1317,7 @@ impl Browser {
         args: &Value,
         execution: &ExecutionContext,
     ) -> std::result::Result<Value, DeliveryFailure> {
-        if self.killed.load(Ordering::SeqCst) {
+        if self.is_killed() {
             return Err(DeliveryFailure {
                 error: kill_error(),
                 outcome_unknown: false,
@@ -1148,56 +1355,39 @@ impl Browser {
         self.note_gif_action(guid, tool, call_args, target, execution)
             .await;
 
-        let pinned_workspace = self
-            .workspaces
-            .get(guid)
-            .filter(|workspace| workspace.browser_slot == target);
-        let mut recovery_from = None;
-        let result = loop {
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
-            let mut request = json!({ "id": id, "type": "tool_request", "tool": tool, "args": call_args, "guid": guid });
-            request["execution"] = execution_wire(execution);
-            if let Some(client_key) = self.client_key_for(guid) {
-                request["clientKey"] = json!(client_key);
-            }
-            self.stamp_workspace_request(&mut request, guid, tool, call_args, target);
-            if recovery_from.is_some() {
-                request[crate::constants::workspace::REQUEST] = json!({
-                    crate::constants::workspace::SELECT:
-                        crate::constants::workspace::LAST_FOCUSED_NORMAL,
-                });
-            }
-            let payload = serde_json::to_vec(&request)
-                .map(Zeroizing::new)
-                .map_err(|error| DeliveryFailure {
-                    error: ToolError::binary(format!("failed to encode the tool request: {error}")),
-                    outcome_unknown: false,
-                })?;
-            let frames = self
-                .outbound_frames(target, &id, &payload)
-                .map_err(|error| DeliveryFailure {
-                    error,
-                    outcome_unknown: false,
-                })?;
-            let attempt = self
-                .send_and_await_delivery(id, frames, tool, target, TOOL_TIMEOUT, Some(guid))
-                .await;
-            let should_recover = recovery_from.is_none()
-                && tool == "tabs_create_mcp"
-                && pinned_workspace.is_some()
-                && matches!(
-                    &attempt,
-                    Err(failure)
-                        if !failure.outcome_unknown
-                            && failure.error.extension_code()
-                                == Some(crate::constants::workspace::WINDOW_INELIGIBLE_ERROR)
-                );
-            if should_recover {
-                recovery_from = pinned_workspace;
-                continue;
-            }
-            break attempt;
-        };
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
+        let mut request = json!({ "id": id, "type": "tool_request", "tool": tool, "args": call_args, "guid": guid });
+        request["execution"] = execution_wire(execution);
+        self.stamp_workspace_request(&mut request, guid, tool, call_args);
+        let payload = serde_json::to_vec(&request)
+            .map(Zeroizing::new)
+            .map_err(|error| DeliveryFailure {
+                error: ToolError::binary(format!("failed to encode the tool request: {error}")),
+                outcome_unknown: false,
+            })?;
+        let frames = self
+            .outbound_frames(target, &id, &payload)
+            .map_err(|error| DeliveryFailure {
+                error,
+                outcome_unknown: false,
+            })?;
+        let result = self
+            .send_and_await_delivery(
+                id,
+                frames,
+                target,
+                AwaitRequest {
+                    debug_label: tool,
+                    timeout: DELIVERY_SETTLEMENT_TIMEOUT,
+                    attention_guid: Some(guid),
+                    execution,
+                    kind: BrowserRequestKind::Tool {
+                        enforce_safety: true,
+                        hold_action: hold_action(tool, call_args),
+                    },
+                },
+            )
+            .await;
         if activity_admitted {
             self.recordings.finish_activity(
                 guid,
@@ -1205,7 +1395,7 @@ impl Browser {
             );
         }
         let mut result = result?;
-        self.capture_workspace_result(guid, tool, call_args, target, &mut result, recovery_from);
+        self.capture_workspace_result(guid, tool, call_args, target, &mut result);
         let result = self.encode_tab_ids(result, target);
         Ok(self.cache_and_inject_screenshot(guid, tool, result))
     }
@@ -1238,13 +1428,7 @@ impl Browser {
         let mut request =
             json!({ "id": id, "type": "tool_request", "tool": tool, "args": args, "guid": guid });
         request["execution"] = execution_wire(execution);
-        // ADR-0066 D3: stamp the session's stable per-client key so the extension groups this
-        // call's tab under the client's durable group, not a fresh per-guid one. Additive and
-        // optional -- omitted when no clientInfo was captured, and the extension falls back to guid.
-        if let Some(client_key) = self.client_key_for(guid) {
-            request["clientKey"] = json!(client_key);
-        }
-        self.stamp_workspace_request(&mut request, guid, tool, args, target);
+        self.stamp_workspace_request(&mut request, guid, tool, args);
         let payload = match serde_json::to_vec(&request) {
             Ok(payload) => Zeroizing::new(payload),
             Err(e) => {
@@ -1256,9 +1440,23 @@ impl Browser {
         };
         let frames = self.outbound_frames(target, &id, &payload)?;
         let mut result = self
-            .send_and_await(id, frames, tool, target, timeout, Some(guid))
+            .send_and_await(
+                id,
+                frames,
+                target,
+                AwaitRequest {
+                    debug_label: tool,
+                    timeout,
+                    attention_guid: Some(guid),
+                    execution,
+                    kind: BrowserRequestKind::Tool {
+                        enforce_safety: false,
+                        hold_action: hold_action(tool, args),
+                    },
+                },
+            )
             .await?;
-        self.capture_workspace_result(guid, tool, args, target, &mut result, None);
+        self.capture_workspace_result(guid, tool, args, target, &mut result);
         Ok(result)
     }
 
@@ -1287,10 +1485,7 @@ impl Browser {
             .get(&target)
             .is_some_and(|session| session.chunked_host_messages_v1);
         if !supports_chunks {
-            return Err(ToolError::extension(
-                "This Ghostlight extension is too old for bounded large-value transport",
-            )
-            .next_step("update or reload the Ghostlight extension, then retry"));
+            return Err(chunk_transport_not_negotiated());
         }
 
         let transfer_id = format!("wire_{}", uuid::Uuid::new_v4().simple());
@@ -1388,7 +1583,7 @@ impl Browser {
             .finish_finalizing(&due.ticket, success, due.reason);
     }
 
-    /// Stop one exact capture generation through the bounded final-frame barrier.
+    /// Stop one exact capture generation within its workspace-routed browser state.
     pub(crate) async fn stop_recording_capture(
         &self,
         guid: &str,
@@ -1458,7 +1653,7 @@ impl Browser {
         self.send_fire_and_forget(surface.slot, framed);
     }
 
-    /// Erase all captured content owned by one MCP session and stop matching extension relays.
+    /// Erase all captured content owned by one workspace and stop matching extension relays.
     pub(crate) fn erase_session_recordings(&self, guid: &str) {
         for ticket in self
             .recordings
@@ -1686,7 +1881,7 @@ impl Browser {
         tab_id: i64,
         execution: &ExecutionContext,
     ) -> std::result::Result<Option<String>, ToolError> {
-        if self.killed.load(Ordering::SeqCst) {
+        if self.is_killed() {
             return Err(kill_error());
         }
         // ADR-0058: `tab_id` here is the composite MCP-facing id; decode to route to the owning
@@ -1728,10 +1923,14 @@ impl Browser {
             .send_and_await(
                 id,
                 vec![Zeroizing::new(framed)],
-                "tab_url_request",
                 target,
-                TOOL_TIMEOUT,
-                None,
+                AwaitRequest {
+                    debug_label: "tab_url_request",
+                    timeout: TOOL_TIMEOUT,
+                    attention_guid: None,
+                    execution,
+                    kind: BrowserRequestKind::Auxiliary,
+                },
             )
             .await?;
         Ok(result
@@ -1740,63 +1939,7 @@ impl Browser {
             .map(str::to_string))
     }
 
-    /// Ask the extension to place `tab_ids` into `guid`'s Chrome tab group (H7, ADR-0030 Decision
-    /// 6/7; PINS.md SS6). Fire-and-forget, the SAME posture `send_hold_reply` below uses: this
-    /// is out-of-band PRESENTATION, never a tool call, so a missing connection or an encoding
-    /// failure is a harmless no-op with nothing for a caller to await -- the pinned wire shape
-    /// carries no `id` to correlate a `group_response` by, and [`Browser::route_reply`] already
-    /// drops any id-less, non-`session_killed` frame as an ordinary event. `guid` is written
-    /// verbatim into the outbound wire message (the pinned wire behavior itself) but MUST NOT be
-    /// logged from this function or by any caller (ADR-0030 Decision 4: the GUID is secret
-    /// material in every log/audit sink) -- and it is not: this function contains no `tracing`
-    /// call naming any of its arguments.
-    pub fn request_group(&self, guid: &str, tab_ids: &[i64], title: &str) {
-        // ADR-0058: `tab_ids` are the composite, MCP-facing ids this session owns (mirrored
-        // from `args.tabId` at claim time -- `hub::session::claim_tab_live`). A session's tabs
-        // all belong to the SAME browser, so the first id's encoded slot picks the target; every
-        // id is decoded to its native form for the extension, which never learns the encoding.
-        let Some(&first) = tab_ids.first() else {
-            return; // nothing to group
-        };
-        let (target, _) = self.resolve_target(Some(first));
-        let Some(target) = target else {
-            return;
-        };
-        let native_ids: Vec<i64> = tab_ids
-            .iter()
-            .map(|&t| crate::constants::tab_id::decode(t).1)
-            .collect();
-        let mut request = json!({
-            "type": "group_request",
-            "guid": guid,
-            "tabIds": native_ids,
-            "title": title,
-        });
-        // ADR-0066 D3: the group request carries the same additive clientKey as tool_request, so
-        // the extension (re)groups the owned tabs under the client's durable group. Omitted when no
-        // clientInfo was captured; the extension then keys on guid, as before.
-        if let Some(client_key) = self.client_key_for(guid) {
-            request["clientKey"] = json!(client_key);
-        }
-        if let Some(workspace) = self
-            .workspaces
-            .get(guid)
-            .filter(|workspace| workspace.browser_slot == target)
-        {
-            request[crate::constants::workspace::REQUEST] = json!({
-                crate::constants::workspace::WINDOW_ID: workspace.native_window_id,
-            });
-        }
-        let Ok(bytes) = serde_json::to_vec(&request) else {
-            return;
-        };
-        let Ok(framed) = host::encode(&bytes) else {
-            return;
-        };
-        self.send_fire_and_forget(target, framed);
-    }
-
-    /// Clear the transient narration card on each named composite tab when its MCP session ends
+    /// Clear the transient narration card on each named composite tab when its workspace retires
     /// (ADR-0072). This is policy-free, fire-and-forget presentation cleanup: each tab id selects
     /// its owning browser, and the extension receives only the native tab id. A disconnected
     /// browser or encoding failure is a harmless no-op; every narration also has a hard 30-second
@@ -1820,13 +1963,13 @@ impl Browser {
         }
     }
 
-    /// Enqueue an already-framed, fire-and-forget message onto `target`'s session, dropping it
+    /// Enqueue an already-framed, fire-and-forget message onto `target`'s browser connection, dropping it
     /// silently if that browser is not (or no longer) attached -- the shared tail of
     /// [`Browser::request_group`], [`Browser::clear_narrations`], [`Browser::notify`], and
     /// [`Browser::send_hold_reply`].
     fn send_fire_and_forget(&self, target: u32, framed: Vec<u8>) {
         if let Some(session) = self.sessions.lock().unwrap().get(&target) {
-            let _ = session.sender.send(Zeroizing::new(framed));
+            let _ = session.sender.try_send(Zeroizing::new(framed));
         }
     }
 
@@ -1931,9 +2074,9 @@ impl Browser {
     }
 
     /// Shared send-and-await core behind [`Browser::call`] and [`Browser::tab_url`] (g13):
-    /// register the pending reply slot, enqueue the already-framed bytes on `target`'s session if
-    /// still attached (fail fast otherwise), and await the correlated reply up to
-    /// [`TOOL_TIMEOUT`]. Each caller frames its own request first, since their encode-failure
+    /// register the pending reply slot, enqueue the already-framed bytes on `target`'s browser connection if
+    /// still attached (fail fast otherwise), and await the correlated reply up to the supplied
+    /// request deadline. Each caller frames its own request first, since their encode-failure
     /// messages differ. `target` is resolved (ADR-0058) before this is called; a `target` that
     /// named a specific browser (via a decoded tabId) but is no longer attached gets a more
     /// specific message than the generic "not connected" the zero-browsers case gets.
@@ -1941,12 +2084,10 @@ impl Browser {
         &self,
         id: String,
         frames: Vec<Zeroizing<Vec<u8>>>,
-        debug_label: &str,
         target: u32,
-        timeout: Duration,
-        attention_guid: Option<&str>,
-    ) -> CallResult {
-        self.send_and_await_delivery(id, frames, debug_label, target, timeout, attention_guid)
+        request: AwaitRequest<'_>,
+    ) -> std::result::Result<Value, ToolError> {
+        self.send_and_await_delivery(id, frames, target, request)
             .await
             .map_err(|failure| failure.error)
     }
@@ -1955,17 +2096,45 @@ impl Browser {
         &self,
         id: String,
         frames: Vec<Zeroizing<Vec<u8>>>,
-        debug_label: &str,
         target: u32,
-        timeout: Duration,
-        attention_guid: Option<&str>,
+        request: AwaitRequest<'_>,
     ) -> std::result::Result<Value, DeliveryFailure> {
         // ADR-0079 D3: hold the same attention lock through the actual frame enqueue. An opening
         // transition must either happen before this check (and refuse the request) or after these
         // bytes entered the already-dispatched set. There is no stale-check gap.
-        let (rx, sent, sent_count) = {
+        let (rx, sent, sent_count, writer_saturated) = {
+            let safety_tool = match request.kind {
+                BrowserRequestKind::Tool {
+                    enforce_safety: true,
+                    hold_action,
+                } => Some(hold_action),
+                BrowserRequestKind::Tool {
+                    enforce_safety: false,
+                    ..
+                }
+                | BrowserRequestKind::Auxiliary => None,
+            };
+            let safety_guard = safety_tool.map(|_| self.safety.lock().unwrap());
+            if let Some(safety) = safety_guard.as_ref() {
+                if safety.killed {
+                    return Err(DeliveryFailure {
+                        error: kill_error(),
+                        outcome_unknown: false,
+                    });
+                }
+                if let Some(since) = safety.held_since {
+                    return Err(DeliveryFailure {
+                        error: ToolError::held(hold_message(
+                            request.debug_label,
+                            safety_tool.flatten(),
+                            since.elapsed(),
+                        )),
+                        outcome_unknown: false,
+                    });
+                }
+            }
             let attention_guard = self.attention_sessions.lock().unwrap();
-            if attention_guid.is_some_and(|guid| {
+            if request.attention_guid.is_some_and(|guid| {
                 attention_guard
                     .get(guid)
                     .is_some_and(|session| session.circuit.paused().is_some())
@@ -1975,32 +2144,88 @@ impl Browser {
                     outcome_unknown: false,
                 });
             }
-            let (tx, rx) = oneshot::channel();
-            self.pending.lock().unwrap().insert(id.clone(), tx);
-            self.debug.tool_begin(&id, debug_label);
-
-            // Enqueue only if `target`'s session is still attached; otherwise fail fast. Both
-            // state locks end with this block and are never held across the reply await.
             let sessions = self.sessions.lock().unwrap();
-            let (sent, sent_count) = match sessions.get(&target) {
-                Some(session) => {
-                    let mut sent_count = 0;
-                    let sent = frames.into_iter().all(|frame| {
-                        let sent = session.sender.send(frame).is_ok();
-                        if sent {
-                            sent_count += 1;
-                        }
-                        sent
-                    });
-                    (sent, sent_count)
-                }
-                None => (false, 0),
+            let any_connected = !sessions.is_empty();
+            let Some(session) = sessions.get(&target) else {
+                let err = if any_connected {
+                    ToolError::extension("The browser that owns this tab is no longer connected")
+                        .next_step("re-check tabs_context_mcp; this tab's browser may have closed")
+                } else {
+                    ToolError::extension("Browser extension not connected")
+                };
+                self.debug.tool_begin(&id, request.debug_label);
+                self.debug.tool_end(&id, false, &err.to_string());
+                return Err(DeliveryFailure {
+                    error: err,
+                    outcome_unknown: false,
+                });
             };
-            (rx, sent, sent_count)
+            if frames.len() > 1 && !session.chunked_host_messages_v1 {
+                let error = chunk_transport_not_negotiated();
+                self.debug.tool_begin(&id, request.debug_label);
+                self.debug.tool_end(&id, false, &error.to_string());
+                return Err(DeliveryFailure {
+                    error,
+                    outcome_unknown: false,
+                });
+            }
+            let (tx, rx) = oneshot::channel();
+            let mut pending = self.pending.lock().unwrap();
+            let execution = pending_execution(request.execution);
+            let executor_generation =
+                if execution.is_some() && matches!(request.kind, BrowserRequestKind::Tool { .. }) {
+                    session.executor_generation.clone()
+                } else {
+                    None
+                };
+            pending.insert(
+                id.clone(),
+                PendingEntry {
+                    sender: tx,
+                    target_slot: target,
+                    target_generation: session.generation,
+                    workspace_adoption: creates_workspace_membership(request.debug_label)
+                        .then(|| {
+                            request
+                                .attention_guid
+                                .and_then(ghostlight_transport::workspace_id::WorkspaceId::parse)
+                        })
+                        .flatten(),
+                    executor_generation,
+                    execution,
+                    terminal_seen: false,
+                    dispatched: false,
+                },
+            );
+            self.debug.tool_begin(&id, request.debug_label);
+
+            // Keep the exact pending entry locked through the bounded channel enqueue. A terminal,
+            // disconnect, or kill transition therefore observes either no dispatch or the final
+            // `dispatched` bit; it can never race a stale intermediate state.
+            let frame_count = frames.len();
+            let reservation = session.sender.try_reserve_many(frame_count);
+            let writer_saturated = reservation.is_err() && !session.sender.is_closed();
+            let sent = match reservation {
+                Ok(permits) => {
+                    for (permit, frame) in permits.zip(frames) {
+                        permit.send(frame);
+                    }
+                    true
+                }
+                Err(_) => false,
+            };
+            let sent_count = if sent { frame_count } else { 0 };
+            if let Some(entry) = pending.get_mut(&id) {
+                entry.dispatched = sent_count > 0;
+            }
+            (rx, sent, sent_count, writer_saturated)
         };
         if !sent {
-            self.pending.lock().unwrap().remove(&id);
-            let err = if self.is_connected() {
+            self.take_pending(&id, sent_count > 0);
+            let err = if writer_saturated {
+                ToolError::ipc("Browser writer queue is full")
+                    .next_step("wait for the current browser request to settle, then retry")
+            } else if self.is_connected() {
                 ToolError::extension("The browser that owns this tab is no longer connected")
                     .next_step("re-check tabs_context_mcp; this tab's browser may have closed")
             } else {
@@ -2016,23 +2241,19 @@ impl Browser {
             self.debug.frame_out();
         }
 
-        let outcome = match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(Ok(result))) => Ok(result),
-            Ok(Ok(Err(err))) => Err(DeliveryFailure {
-                error: err,
-                outcome_unknown: false,
-            }),
+        let outcome = match tokio::time::timeout(request.timeout, rx).await {
+            Ok(Ok(result)) => result,
             Ok(Err(_closed)) => Err(DeliveryFailure {
                 error: ToolError::extension("Browser extension disconnected before responding")
                     .next_step("do not retry automatically; inspect the page before deciding"),
                 outcome_unknown: true,
             }),
             Err(_elapsed) => {
-                self.pending.lock().unwrap().remove(&id);
+                self.take_pending(&id, true);
                 Err(DeliveryFailure {
                     error: ToolError::extension(format!(
                         "Tool request timed out after {}ms",
-                        timeout.as_millis()
+                        request.timeout.as_millis()
                     ))
                     .next_step("do not retry automatically; inspect the page before deciding"),
                     outcome_unknown: true,
@@ -2046,13 +2267,69 @@ impl Browser {
         outcome
     }
 
-    /// Attach a connected native-host stream: read its `ROLE_BROWSER` session-hello (ADR-0058) then
+    fn take_pending(&self, id: &str, quarantine: bool) -> Option<PendingEntry> {
+        let mut pending = self.pending.lock().unwrap();
+        if quarantine {
+            if let Some(entry) = pending.get(id) {
+                self.mark_pending_uncertain(id, entry);
+            }
+        }
+        pending.remove(id)
+    }
+
+    fn mark_pending_uncertain(&self, id: &str, entry: &PendingEntry) {
+        if !entry.dispatched || entry.terminal_seen {
+            return;
+        }
+        if let Some(execution) = &entry.execution {
+            self.scheduler.mark_uncertain(
+                &execution.key,
+                execution.command_id,
+                id,
+                entry.executor_generation.as_deref(),
+            );
+        }
+    }
+
+    fn fail_pending_where(
+        &self,
+        error: &ToolError,
+        mut matches: impl FnMut(&PendingEntry) -> bool,
+    ) {
+        let drained = {
+            let mut pending = self.pending.lock().unwrap();
+            let ids = pending
+                .iter()
+                .filter(|(_, entry)| matches(entry))
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>();
+            let mut drained = Vec::with_capacity(ids.len());
+            for id in ids {
+                if let Some(entry) = pending.get(&id) {
+                    self.mark_pending_uncertain(&id, entry);
+                }
+                if let Some(entry) = pending.remove(&id) {
+                    let outcome_unknown = entry.dispatched;
+                    drained.push((entry, outcome_unknown));
+                }
+            }
+            drained
+        };
+        for (entry, outcome_unknown) in drained {
+            let _ = entry.sender.send(Err(DeliveryFailure {
+                error: error.clone(),
+                outcome_unknown,
+            }));
+        }
+    }
+
+    /// Attach a connected native-host stream: read its `ROLE_BROWSER` opening hello (ADR-0058) then
     /// the extension's opening identity frame (ADR-0061), assign the browser's `slot` from its
-    /// persistent UUID, admit it as an independent session keyed by that slot, then spawn a writer
+    /// persistent UUID, admit it as an independent connection keyed by that slot, then spawn a writer
     /// draining outgoing frames to it and run a reader routing replies back to waiting callers.
     ///
     /// UNLIKE the pre-0058 single-slot design, a well-formed handshake is ALWAYS admitted: a UUID
-    /// already mapped to a slot REPLACES that slot's existing session (a service-worker relaunch or
+    /// already mapped to a slot REPLACES that slot's existing connection (a service-worker relaunch or
     /// reconnect from the SAME browser), and a NEW UUID gets a NEW slot ADDED alongside any others
     /// -- this is the actual multi-browser support. [`AttachOutcome::AlreadyAttached`] is returned
     /// for a connection that never presents a valid hello at all -- a bare probe (`doctor`'s
@@ -2064,9 +2341,9 @@ impl Browser {
     /// per connection) so the pipe always has a spare instance ready, instead of parking the accept
     /// loop for the whole service lifetime.
     ///
-    /// On [`AttachOutcome::Detached`] this ONE session's entry is removed (guarded against a
+    /// On [`AttachOutcome::Detached`] this ONE browser connection's entry is removed (guarded against a
     /// same-slot reconnect race by comparing [`BrowserSession::generation`], never blindly
-    /// cleared) and this session's own pending calls are failed via the grace-drain below;
+    /// cleared) and this browser connection's own pending calls are failed via the grace-drain below;
     /// `is_connected()`/`wait_connected` reflect "at least one browser remains," recomputed after
     /// the removal.
     pub async fn attach<S>(&self, stream: S) -> AttachOutcome
@@ -2124,37 +2401,80 @@ impl Browser {
             return AttachOutcome::AlreadyAttached;
         };
         let identity_value = serde_json::from_slice::<Value>(&identity_bytes).ok();
-        let chunked_host_messages_v1 = identity_value
+        let features = identity_value
             .as_ref()
             .and_then(|identity| identity.get("features").and_then(Value::as_array))
-            .is_some_and(|features| {
-                features
-                    .iter()
-                    .any(|feature| feature.as_str() == Some(CHUNKED_HOST_MESSAGES_V1))
-            });
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let has_feature = |expected: &str| {
+            features
+                .iter()
+                .any(|feature| feature.as_str() == Some(expected))
+        };
+        let chunked_host_messages_v1 = has_feature(CHUNKED_HOST_MESSAGES_V1);
+        let surface_executor_v1 = has_feature(SURFACE_EXECUTOR_V1);
+        let executor_generation = surface_executor_v1.then(|| {
+            identity_value
+                .as_ref()
+                .and_then(|identity| identity.get("executorGeneration"))
+                .and_then(Value::as_str)
+                .filter(|generation| !generation.is_empty())
+                .map(str::to_string)
+        });
+        let executor_generation = match executor_generation {
+            Some(Some(generation)) => Some(generation),
+            Some(None) => {
+                self.debug
+                    .ipc_note(&Diagnostic::InvalidExecutorIdentity.describe());
+                return AttachOutcome::AlreadyAttached;
+            }
+            None => None,
+        };
         let slot = self.slot_for(&browser_id);
         let browser_generation = identity_value
             .as_ref()
             .and_then(|identity| identity.get("browserGeneration"))
-            .and_then(Value::as_str);
-        let process_restarted = browser_generation.is_some_and(|current| {
-            self.browser_generations
-                .lock()
-                .unwrap()
-                .insert(slot, current.to_string())
-                .is_some_and(|previous| previous != current)
-        });
-        if process_restarted {
-            // ADR-0080 D6: a changed browser-process generation is proof that old tabs and the
-            // old executor can no longer act, so it is one of only three quarantine-clear paths.
-            self.scheduler.destroy_browser(slot);
-            self.workspaces.clear_browser(slot);
-        }
+            .and_then(Value::as_str)
+            .map(str::to_string);
 
-        let (tx, mut rx) = mpsc::unbounded_channel::<Zeroizing<Vec<u8>>>();
+        let (tx, mut rx) = mpsc::channel::<Zeroizing<Vec<u8>>>(BROWSER_WRITER_QUEUE_CAPACITY);
         let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
-        let replaced = {
+        {
+            // Attach admission is one shore transition. Keep the process-generation record and
+            // live session under the fixed browser_generations -> sessions lock order so two
+            // same-slot attaches cannot publish a session that disagrees with the recorded
+            // browser process. Holding sessions through restart cleanup also prevents the old
+            // reader generation from reintroducing stale events between purge and replacement.
+            let mut browser_generations = self.browser_generations.lock().unwrap();
+            let process_restarted = if let Some(current) = browser_generation.as_deref() {
+                browser_generations
+                    .insert(slot, current.to_string())
+                    .is_some_and(|previous| previous != current)
+            } else {
+                false
+            };
+            // Clear an earlier kill before the new session is visible. The lifecycle gate keeps
+            // the new reader from reporting a fresh kill until publication finishes, so a valid
+            // post-attach kill can never be erased by this reconnect reset.
+            self.safety.lock().unwrap().killed = false;
+
             let mut sessions = self.sessions.lock().unwrap();
+            if process_restarted {
+                // ADR-0080 D6: a changed browser-process generation proves that old tabs,
+                // recordings, and executor work can no longer act. Clear every slot-bound state
+                // before publishing the replacement session.
+                self.fail_pending_where(
+                    &ToolError::extension("Browser restarted before responding")
+                        .next_step("refresh browser context before deciding whether to retry"),
+                    |entry| entry.target_slot == slot,
+                );
+                self.scheduler.destroy_browser(slot);
+                self.recordings
+                    .interrupt_slot(slot, crate::recording::StopReason::BrowserDisconnected);
+                if let Some(registry) = self.workspace_registry.get() {
+                    registry.purge_browser_slot(slot);
+                }
+            }
             let replaced = sessions.contains_key(&slot);
             sessions.insert(
                 slot,
@@ -2162,27 +2482,22 @@ impl Browser {
                     sender: tx,
                     generation,
                     chunked_host_messages_v1,
+                    executor_generation,
                 },
             );
-            replaced
-        };
-        // Seed the focus chain (ADR-0061): a freshly connected browser is the most-recently-active
-        // until another reports focus, so `resolve_target(None)` always resolves to a live slot.
-        self.touch_focus(slot);
-        self.debug.ipc_note(
-            &Diagnostic::Attached {
-                slot,
-                replaced_existing: replaced,
-            }
-            .describe(),
-        );
-        // A native-host stream attaching means the extension (re)connected -- which, because of
-        // the extension's own storage-marker gate, only happens after the user's explicit
-        // reconnect or a full browser restart (g11). `killed` stays GLOBAL (ADR-0058 scope): any
-        // browser attaching clears it, matching the pre-0058 single-browser behavior.
-        self.killed.store(false, Ordering::SeqCst);
-        self.debug.set_connected(true);
-        self.connected.send_replace(true);
+            // Publish session membership and focus together under sessions -> focus. Readers use
+            // the same order, so no observer can see a replacement removed from the focus chain.
+            self.touch_focus(slot);
+            self.debug.ipc_note(
+                &Diagnostic::Attached {
+                    slot,
+                    replaced_existing: replaced,
+                }
+                .describe(),
+            );
+            self.debug.set_connected(true);
+            self.connected.send_replace(true);
+        }
 
         let writer = tokio::spawn(async move {
             while let Some(frame) = rx.recv().await {
@@ -2199,7 +2514,7 @@ impl Browser {
             match host::read_message(&mut read_half).await {
                 Ok(Some(payload)) => {
                     self.debug.frame_in();
-                    self.route_reply(slot, &payload);
+                    self.route_reply(slot, generation, &payload);
                 }
                 Ok(None) => {
                     break ToolError::extension("Browser extension disconnected before responding")
@@ -2217,28 +2532,39 @@ impl Browser {
         // loop noticing its own stream died). ADR-0061: only the live `sessions` entry is evicted;
         // the slot's UUID->slot mapping in `slots` persists, so a reconnect resolves the same slot.
         {
-            let mut sessions = self.sessions.lock().unwrap();
-            if matches!(sessions.get(&slot), Some(s) if s.generation == generation) {
-                sessions.remove(&slot);
-                self.debug
-                    .ipc_note(&Diagnostic::Detached { slot }.describe());
-            } else {
-                self.debug
-                    .ipc_note(&Diagnostic::DetachedStale { slot }.describe());
+            let _lifecycle = self.browser_generations.lock().unwrap();
+            let (removed_live, slot_still_connected, still_connected) = {
+                let mut sessions = self.sessions.lock().unwrap();
+                let removed_live = if matches!(sessions.get(&slot), Some(s) if s.generation == generation)
+                {
+                    sessions.remove(&slot);
+                    self.focus_chain.lock().unwrap().retain(|s| *s != slot);
+                    self.debug
+                        .ipc_note(&Diagnostic::Detached { slot }.describe());
+                    true
+                } else {
+                    self.debug
+                        .ipc_note(&Diagnostic::DetachedStale { slot }.describe());
+                    false
+                };
+                (
+                    removed_live,
+                    sessions.contains_key(&slot),
+                    !sessions.is_empty(),
+                )
+            };
+            if removed_live && !slot_still_connected {
+                self.recordings
+                    .interrupt_slot(slot, crate::recording::StopReason::BrowserDisconnected);
+                // A native-port loss or worker restart is not proof that the browser effect ended.
+                // Retire waiters, but retain active/quarantined surfaces until an exact terminal
+                // ack, a tab-destroy event, or a changed browser-process generation proves
+                // recovery.
+                self.scheduler.retire_browser(slot);
             }
-            self.focus_chain.lock().unwrap().retain(|s| *s != slot);
+            self.debug.set_connected(still_connected);
+            self.connected.send_replace(still_connected);
         }
-        if !self.sessions.lock().unwrap().contains_key(&slot) {
-            self.recordings
-                .interrupt_slot(slot, crate::recording::StopReason::BrowserDisconnected);
-            // A native-port loss or worker restart is not proof that the browser effect ended.
-            // Retire waiters, but retain active/quarantined surfaces until an exact terminal ack,
-            // a tab-destroy event, or a changed browser-process generation proves recovery.
-            self.scheduler.retire_browser(slot);
-        }
-        let still_connected = self.is_connected();
-        self.debug.set_connected(still_connected);
-        self.connected.send_replace(still_connected);
         writer.abort();
 
         // ADR-0030 Decision 3 (H5): hold pending calls for a bounded grace window awaiting
@@ -2250,7 +2576,7 @@ impl Browser {
         // pending call whose OWN browser stays gone can silently ride to its own `TOOL_TIMEOUT`
         // instead of the earlier, clearer grace-window message. Disclosed, accepted scope
         // boundary (see ADR-0058 "Explicitly out of scope"), not a silent gap.
-        self.spawn_grace_drain(GRACE_WINDOW, drain_err);
+        self.spawn_grace_drain(slot, generation, GRACE_WINDOW, drain_err);
 
         AttachOutcome::Detached
     }
@@ -2266,14 +2592,22 @@ impl Browser {
     /// drains pending with [`kill_error`] independently and immediately -- if that already ran,
     /// this later, empty drain is a harmless no-op, and [`Browser::is_killed`] still wins for any
     /// subsequent call regardless of what this function does.
-    fn spawn_grace_drain(&self, window: Duration, drain_err: ToolError) {
+    fn spawn_grace_drain(
+        &self,
+        slot: u32,
+        generation: u64,
+        window: Duration,
+        drain_err: ToolError,
+    ) {
         let browser = self.clone();
         tokio::spawn(async move {
-            if !browser.wait_connected(window).await {
-                for (_, tx) in browser.pending.lock().unwrap().drain() {
-                    let _ = tx.send(Err(drain_err.clone()));
-                }
+            tokio::time::sleep(window).await;
+            if browser.sessions.lock().unwrap().contains_key(&slot) {
+                return;
             }
+            browser.fail_pending_where(&drain_err, |entry| {
+                entry.target_slot == slot && entry.target_generation == generation
+            });
         });
     }
 
@@ -2281,13 +2615,24 @@ impl Browser {
     /// `session_killed`, no `id`), a focus event (ADR-0058: `{"type":"focus"}`, no `id`), a hold
     /// request (g10: `get_hold` / `set_hold` / `toggle_hold`, answered here and returned early),
     /// or a reply to a waiting tool caller (by id). Messages without an id are otherwise events.
-    /// `slot` is the SENDING session's assigned slot (ADR-0061), needed to move the focus chain and
+    /// `slot` is the SENDING browser connection's assigned slot (ADR-0061), needed to move the focus chain and
     /// to address a hold reply back to the right connection.
-    fn route_reply(&self, slot: u32, payload: &[u8]) {
+    fn route_reply(&self, slot: u32, generation: u64, payload: &[u8]) {
         let Ok(reply) = serde_json::from_slice::<Value>(payload) else {
             tracing::warn!("dropping unparseable extension reply");
             return;
         };
+        // Serialize reply settlement with attach/restart/detach. Stateful events require the
+        // currently published connection below. Correlated replies may still settle work that was
+        // accepted by their exact older connection, unless a proven browser-process restart has
+        // already failed that pending entry.
+        let _lifecycle = self.browser_generations.lock().unwrap();
+        let sender_is_live = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&slot)
+            .is_some_and(|session| session.generation == generation);
 
         let msg_type = reply.get("type").and_then(Value::as_str);
 
@@ -2298,25 +2643,58 @@ impl Browser {
             return;
         }
 
+        let stateful_or_uncorrelated = reply.get("id").is_none()
+            || matches!(
+                msg_type,
+                Some(
+                    "get_hold" | "set_hold" | "toggle_hold" | "get_attention" | "attention_action"
+                )
+            );
+        if stateful_or_uncorrelated && !sender_is_live {
+            return;
+        }
+
         if msg_type == Some("tool_terminal") {
-            let command_id = reply.get("commandId").and_then(|value| {
-                value
-                    .as_u64()
-                    .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
-            });
-            let native_tab = reply
+            let Some(id) = reply.get("id").and_then(Value::as_str) else {
+                return;
+            };
+            let Some(command_id) = reply.get("commandId").and_then(command_id_from_wire) else {
+                return;
+            };
+            let Some(executor_generation) = reply
+                .get("executorGeneration")
+                .and_then(Value::as_str)
+                .filter(|generation| !generation.is_empty())
+            else {
+                return;
+            };
+            let Some(key) = reply
                 .get("resource")
-                .and_then(|resource| resource.get("nativeTab"))
-                .and_then(Value::as_i64);
-            if let (Some(command_id), Some(native_tab)) = (command_id, native_tab) {
-                self.scheduler.reconcile_surface(
-                    BrowserSurface {
-                        browser_slot: slot,
-                        native_tab,
-                    },
-                    command_id,
-                );
+                .and_then(|resource| schedule_key_from_wire(slot, resource))
+            else {
+                return;
+            };
+            let expected = PendingExecution {
+                key: key.clone(),
+                command_id,
+            };
+            let mut pending = self.pending.lock().unwrap();
+            if let Some(entry) = pending.get_mut(id) {
+                if entry.target_slot != slot
+                    || entry.target_generation != generation
+                    || entry.execution.as_ref() != Some(&expected)
+                    || entry.executor_generation.as_deref() != Some(executor_generation)
+                {
+                    return;
+                }
+                // Serialize terminal observation with timeout marking. Whichever takes this lock
+                // first leaves an exact state the other can honor; terminal-before-timeout never
+                // creates a permanent quarantine.
+                entry.terminal_seen = true;
             }
+            drop(pending);
+            self.scheduler
+                .reconcile(&key, command_id, id, executor_generation);
             return;
         }
 
@@ -2407,10 +2785,33 @@ impl Browser {
         let Some(id) = reply.get("id").and_then(Value::as_str) else {
             return; // an event/heartbeat, not a tool reply
         };
-        let Some(tx) = self.pending.lock().unwrap().remove(id) else {
-            return; // late or duplicate reply
+        let entry = {
+            let mut pending = self.pending.lock().unwrap();
+            let Some(entry) = pending.get(id) else {
+                return; // late or duplicate reply
+            };
+            if entry.target_slot != slot || entry.target_generation != generation {
+                return; // a different browser connection cannot settle this request id
+            }
+            if let Some(expected_generation) = entry.executor_generation.as_deref() {
+                if reply.get("executorGeneration").and_then(Value::as_str)
+                    != Some(expected_generation)
+                {
+                    return;
+                }
+                if let Some(expected) = entry.execution.as_ref() {
+                    if reply.get("commandId").and_then(command_id_from_wire)
+                        != Some(expected.command_id)
+                    {
+                        return;
+                    }
+                }
+            }
+            pending
+                .remove(id)
+                .expect("validated pending entry remains under the same lock")
         };
-        let result = match reply.get("type").and_then(Value::as_str) {
+        let mut result = match reply.get("type").and_then(Value::as_str) {
             Some("tool_error") => {
                 let message = reply
                     .get("error")
@@ -2426,20 +2827,42 @@ impl Browser {
                     tracing::debug!("extension supplied redacted error detail");
                 }
                 let error = ToolError::from_extension_wire(hop, code, message);
-                let error = if error.extension_code()
-                    == Some(crate::constants::workspace::WINDOW_INELIGIBLE_ERROR)
-                {
-                    error.next_step(
-                        "call tabs_create_mcp to open a fresh tab, or keep using a known Ghostlight tabId",
-                    )
-                } else {
-                    error
-                };
-                Err(error)
+                Err(DeliveryFailure {
+                    error,
+                    outcome_unknown: false,
+                })
             }
             _ => Ok(reply.get("result").cloned().unwrap_or(Value::Null)),
         };
-        let _ = tx.send(result);
+        if let (Ok(value), Some(workspace)) = (&result, entry.workspace_adoption.as_ref()) {
+            result = self
+                .adopt_creator_result(workspace, slot, value)
+                .map(|()| value.clone())
+                .map_err(|error| DeliveryFailure {
+                    error,
+                    outcome_unknown: false,
+                });
+        }
+        let _ = entry.sender.send(result);
+    }
+
+    fn adopt_creator_result(
+        &self,
+        workspace: &ghostlight_transport::workspace_id::WorkspaceId,
+        browser_slot: u32,
+        result: &Value,
+    ) -> std::result::Result<(), ToolError> {
+        let registry = self.workspace_registry.get().ok_or_else(|| {
+            ToolError::binary("workspace registry is unavailable at browser result settlement")
+        })?;
+        let tab_ids = creator_result_tab_ids(result, browser_slot);
+        match registry.claim_tabs(workspace, &tab_ids) {
+            crate::hub::workspace::TabClaim::Adopted => Ok(()),
+            crate::hub::workspace::TabClaim::Owned => Ok(()),
+            crate::hub::workspace::TabClaim::Refused => Err(ToolError::binary(
+                "browser returned state outside the requested workspace",
+            )),
+        }
     }
 
     /// Apply one hold request (g10) and send the `hold_state` (or `hold_error`) reply back
@@ -2466,7 +2889,7 @@ impl Browser {
     }
 
     /// Frame and enqueue a hold reply on `slot`'s connection (the one it arrived on), dropping it
-    /// silently if that session is already gone (the same fire-and-forget posture as every other
+    /// silently if that browser connection is already gone (the same fire-and-forget posture as every other
     /// best-effort send in this module).
     fn send_hold_reply(&self, slot: u32, reply: &Value) {
         let Ok(bytes) = serde_json::to_vec(reply) else {
@@ -2582,19 +3005,20 @@ impl Browser {
     /// Handle the `session_killed` event (g11): exactly once per false-to-true transition
     /// (`swap` makes duplicate frames on the same connection harmless), fail every pending
     /// call with the kill error, then invoke EVERY registered hook -- permanent and
-    /// session-scoped alike -- exactly once (ADR-0030 Decision 7: "every live session's subject
-    /// gets exactly one `session_killed` audit record"). The per-transition `swap` guard above is
+    /// removable and permanent alike -- exactly once. The per-transition `swap` guard above is
     /// what makes each individual kill fan out once per hook, never twice. Handling still sets
     /// the flag and drains pending calls even if no hook is registered.
     fn handle_session_killed(&self) {
-        if self.killed.swap(true, Ordering::SeqCst) {
-            return; // already handled; a duplicate frame is a no-op
+        {
+            let mut safety = self.safety.lock().unwrap();
+            if safety.killed {
+                return; // already handled; a duplicate frame is a no-op
+            }
+            safety.killed = true;
         }
         self.scheduler.retire_all(RetirementReason::Panic);
         self.erase_all_recordings(crate::recording::StopReason::Panic);
-        for (_, tx) in self.pending.lock().unwrap().drain() {
-            let _ = tx.send(Err(kill_error()));
-        }
+        self.fail_pending_where(&kill_error(), |_| true);
         for (_, hook) in self.kill_hooks.lock().unwrap().iter() {
             hook();
         }
@@ -2654,6 +3078,8 @@ mod tests {
     /// The default fake browser identity most tests attach as (ADR-0061): the persistent UUID the
     /// extension would mint. Arbitrary; tests that need two distinct browsers pass distinct ids.
     const TEST_BROWSER_ID: &str = "test-browser-0001";
+    const EXTENSION_TOPOLOGY_FAILURE: &str =
+        "[hop: extension] topology failed. Next step: check chrome://extensions and that Chrome is running.";
 
     /// A valid `ROLE_BROWSER` relay hello, framed. The relay's own pid identity is diagnostic-only
     /// since ADR-0061 (the extension owns identity), so the value here is arbitrary.
@@ -2672,32 +3098,101 @@ mod tests {
         serde_json::to_vec(&json!({ "type": "browser_hello", "browserId": browser_id })).unwrap()
     }
 
+    fn identity_frame_with_generation(browser_id: &str, generation: &str) -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "type": "browser_hello",
+            "browserId": browser_id,
+            "browserGeneration": generation,
+        }))
+        .unwrap()
+    }
+
+    fn executor_identity_frame(browser_id: &str, executor_generation: Option<&str>) -> Vec<u8> {
+        let mut identity = json!({
+            "type": "browser_hello",
+            "browserId": browser_id,
+            "features": [SURFACE_EXECUTOR_V1],
+        });
+        if let Some(generation) = executor_generation {
+            identity["executorGeneration"] = json!(generation);
+        }
+        serde_json::to_vec(&identity).unwrap()
+    }
+
+    fn process_executor_identity_frame(
+        browser_id: &str,
+        browser_generation: &str,
+        executor_generation: &str,
+    ) -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "type": "browser_hello",
+            "browserId": browser_id,
+            "browserGeneration": browser_generation,
+            "features": [SURFACE_EXECUTOR_V1],
+            "executorGeneration": executor_generation,
+        }))
+        .unwrap()
+    }
+
     /// Attach a fake extension for `browser_id` (ADR-0061): create the duplex, write the relay hello
     /// THEN the extension identity frame, spawn `attach()`, and wait until the service assigns a
-    /// slot for this id and admits its session. Returns the extension-side half plus the assigned
+    /// slot for this id and admits its connection. Returns the extension-side half plus the assigned
     /// slot, so the test can drive the connection and encode composite tab ids by slot.
     async fn attach_fake_extension_as(
         browser: &Browser,
         browser_id: &str,
     ) -> (tokio::io::DuplexStream, u32) {
+        attach_fake_extension_with_identity(browser, browser_id, identity_frame(browser_id)).await
+    }
+
+    async fn attach_fake_extension_with_generation(
+        browser: &Browser,
+        browser_id: &str,
+        generation: &str,
+    ) -> (tokio::io::DuplexStream, u32) {
+        attach_fake_extension_with_identity(
+            browser,
+            browser_id,
+            identity_frame_with_generation(browser_id, generation),
+        )
+        .await
+    }
+
+    async fn attach_fake_extension_with_identity(
+        browser: &Browser,
+        browser_id: &str,
+        identity: Vec<u8>,
+    ) -> (tokio::io::DuplexStream, u32) {
+        let prior_generation = browser.slot_of(browser_id).and_then(|slot| {
+            browser
+                .sessions
+                .lock()
+                .unwrap()
+                .get(&slot)
+                .map(|session| session.generation)
+        });
         let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         host::write_message(&mut ext_side, &test_hello())
             .await
             .unwrap();
-        host::write_message(&mut ext_side, &identity_frame(browser_id))
-            .await
-            .unwrap();
+        host::write_message(&mut ext_side, &identity).await.unwrap();
         let attached = browser.clone();
         tokio::spawn(async move { attached.attach(browser_side).await });
         // Poll for THIS browser's slot specifically (not `wait_connected`'s global is_connected(),
         // which a SECOND attach -- a different id, or the same one reconnecting -- would see as
-        // already true from an EARLIER session and return without ever giving the just-spawned task
+        // already true from an EARLIER connection and return without ever giving the just-spawned task
         // a chance to run). Sleep-then-check (not check-then-sleep) so at least one scheduling tick
         // always happens before the first check, even on a single-threaded test runtime.
         for _ in 0..200 {
             sleep(Duration::from_millis(5)).await;
             if let Some(slot) = browser.slot_of(browser_id) {
-                if browser.browser_snapshot().iter().any(|b| b.slot == slot) {
+                let current_generation = browser
+                    .sessions
+                    .lock()
+                    .unwrap()
+                    .get(&slot)
+                    .map(|session| session.generation);
+                if current_generation.is_some() && current_generation != prior_generation {
                     return (ext_side, slot);
                 }
             }
@@ -2707,6 +3202,49 @@ mod tests {
 
     async fn attach_fake_extension(browser: &Browser) -> tokio::io::DuplexStream {
         attach_fake_extension_as(browser, TEST_BROWSER_ID).await.0
+    }
+
+    fn install_route_session(
+        browser: &Browser,
+        target_slot: u32,
+        target_generation: u64,
+        executor_generation: Option<&str>,
+    ) {
+        let (sender, _receiver) = mpsc::channel(BROWSER_WRITER_QUEUE_CAPACITY);
+        browser.sessions.lock().unwrap().insert(
+            target_slot,
+            BrowserSession {
+                sender,
+                generation: target_generation,
+                chunked_host_messages_v1: false,
+                executor_generation: executor_generation.map(str::to_string),
+            },
+        );
+    }
+
+    fn insert_test_pending(
+        browser: &Browser,
+        id: &str,
+        target_slot: u32,
+        target_generation: u64,
+        execution: Option<PendingExecution>,
+        dispatched: bool,
+    ) -> oneshot::Receiver<CallResult> {
+        let (sender, receiver) = oneshot::channel();
+        browser.pending.lock().unwrap().insert(
+            id.to_string(),
+            PendingEntry {
+                sender,
+                target_slot,
+                target_generation,
+                workspace_adoption: None,
+                executor_generation: None,
+                execution,
+                terminal_seen: false,
+                dispatched,
+            },
+        );
+        receiver
     }
 
     #[tokio::test]
@@ -2743,10 +3281,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn workspace_selection_pins_privately_and_is_reused_by_grouping() {
+    async fn workspace_requests_route_only_by_guid() {
+        let browser = Browser::new();
+        let guid = "shared-guid";
+        browser.set_workspace_label(guid, "Visible label");
+        let mut ext_side = attach_fake_extension(&browser).await;
+
+        let fake_ext = tokio::spawn(async move {
+            for _ in 0..3 {
+                let request = host::read_message(&mut ext_side).await.unwrap().unwrap();
+                let request: Value = serde_json::from_slice(&request).unwrap();
+                assert_eq!(request["guid"], guid);
+                assert!(
+                    request.get("clientKey").is_none(),
+                    "human presentation labels must never become routing keys"
+                );
+                let reply = json!({
+                    "id": request["id"],
+                    "type": "tool_response",
+                    "result": { "ok": true },
+                });
+                host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let execution = ExecutionContext::safety_protocol();
+        let args = json!({});
+        let first = browser.call_with_context(guid, "read_page", &args, &execution);
+        let second = browser.call_with_delivery_outcome(guid, "navigate", &args, &execution);
+        let third = browser.call_with_context(guid, "find", &args, &execution);
+        let (first, second, third) = tokio::join!(first, second, third);
+        assert_eq!(first.unwrap(), json!({ "ok": true }));
+        let second = match second {
+            Ok(result) => result,
+            Err(failure) => panic!("delivery-outcome call failed: {}", failure.error),
+        };
+        assert_eq!(second, json!({ "ok": true }));
+        assert_eq!(third.unwrap(), json!({ "ok": true }));
+        fake_ext.await.unwrap();
+    }
+
+    #[test]
+    fn workspace_presentation_label_is_first_capture_wins() {
+        let browser = Browser::new();
+        browser.set_workspace_label("workspace", "first-client");
+        browser.set_workspace_label("workspace", "later-client");
+        assert_eq!(
+            browser.workspace_group_title("workspace"),
+            "Ghostlight - first-client"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_presentation_carries_only_title_and_binds_the_browser_profile() {
         let browser = Browser::new();
         let guid = "workspace-guid";
-        browser.set_client_key(guid, "test-client");
+        browser.set_workspace_label(guid, "test-client");
         let (mut ext_side, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
 
         let fake_ext = tokio::spawn(async move {
@@ -2755,8 +3347,7 @@ mod tests {
             assert_eq!(
                 first[crate::constants::workspace::REQUEST],
                 json!({
-                    crate::constants::workspace::SELECT:
-                        crate::constants::workspace::LAST_FOCUSED_NORMAL,
+                    crate::constants::workspace::GROUP_TITLE: "Ghostlight - test-client",
                 })
             );
             let first_reply = json!({
@@ -2765,7 +3356,7 @@ mod tests {
                 "result": {
                     "ok": true,
                     crate::constants::workspace::RESULT_META: {
-                        crate::constants::workspace::WINDOW_ID: 17,
+                        "windowId": 17,
                     },
                 },
             });
@@ -2777,7 +3368,9 @@ mod tests {
             let second: Value = serde_json::from_slice(&second).unwrap();
             assert_eq!(
                 second[crate::constants::workspace::REQUEST],
-                json!({ crate::constants::workspace::WINDOW_ID: 17 })
+                json!({
+                    crate::constants::workspace::GROUP_TITLE: "Ghostlight - test-client",
+                })
             );
             let second_reply = json!({
                 "id": second["id"],
@@ -2787,13 +3380,6 @@ mod tests {
             host::write_message(&mut ext_side, &serde_json::to_vec(&second_reply).unwrap())
                 .await
                 .unwrap();
-
-            let group = host::read_message(&mut ext_side).await.unwrap().unwrap();
-            let group: Value = serde_json::from_slice(&group).unwrap();
-            assert_eq!(
-                group[crate::constants::workspace::REQUEST],
-                json!({ crate::constants::workspace::WINDOW_ID: 17 })
-            );
         });
 
         let first = browser
@@ -2801,151 +3387,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first, json!({ "ok": true }));
+        assert_eq!(browser.workspace_bindings.get(guid), Some(slot));
         let second = browser
             .call(guid, "tabs_create_mcp", &json!({}))
             .await
             .unwrap();
         assert_eq!(second, json!({ "ok": true }));
-        browser.request_group(
-            guid,
-            &[crate::constants::tab_id::encode(slot, 101)],
-            "title",
-        );
         fake_ext.await.unwrap();
     }
 
     #[tokio::test]
-    async fn explicit_tab_creation_recovers_a_stale_workspace() {
+    async fn topology_errors_are_conclusive_and_never_trigger_window_recovery() {
         let browser = Browser::new();
-        let guid = "workspace-recovery-guid";
-        browser.set_client_key(guid, "test-client");
-        let (mut ext_side, _) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
-
-        let fake_ext = tokio::spawn(async move {
-            let first = host::read_message(&mut ext_side).await.unwrap().unwrap();
-            let first: Value = serde_json::from_slice(&first).unwrap();
-            assert_eq!(
-                first[crate::constants::workspace::REQUEST],
-                json!({
-                    crate::constants::workspace::SELECT:
-                        crate::constants::workspace::LAST_FOCUSED_NORMAL,
-                })
-            );
-            let reply = json!({
-                "id": first["id"],
-                "type": "tool_response",
-                "result": {
-                    "ok": "initial",
-                    crate::constants::workspace::RESULT_META: {
-                        crate::constants::workspace::WINDOW_ID: 17,
-                    },
-                },
-            });
-            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
-                .await
-                .unwrap();
-
-            let stale = host::read_message(&mut ext_side).await.unwrap().unwrap();
-            let stale: Value = serde_json::from_slice(&stale).unwrap();
-            assert_eq!(
-                stale[crate::constants::workspace::REQUEST],
-                json!({ crate::constants::workspace::WINDOW_ID: 17 })
-            );
-            let reply = json!({
-                "id": stale["id"],
-                "type": "tool_error",
-                "error": "That Ghostlight workspace is no longer available",
-                "code": crate::constants::workspace::WINDOW_INELIGIBLE_ERROR,
-            });
-            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
-                .await
-                .unwrap();
-
-            let recovery = host::read_message(&mut ext_side).await.unwrap().unwrap();
-            let recovery: Value = serde_json::from_slice(&recovery).unwrap();
-            assert_eq!(
-                recovery[crate::constants::workspace::REQUEST],
-                json!({
-                    crate::constants::workspace::SELECT:
-                        crate::constants::workspace::LAST_FOCUSED_NORMAL,
-                })
-            );
-            let reply = json!({
-                "id": recovery["id"],
-                "type": "tool_response",
-                "result": {
-                    "ok": "recovered",
-                    crate::constants::workspace::RESULT_META: {
-                        crate::constants::workspace::WINDOW_ID: 23,
-                    },
-                },
-            });
-            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
-                .await
-                .unwrap();
-
-            let context = host::read_message(&mut ext_side).await.unwrap().unwrap();
-            let context: Value = serde_json::from_slice(&context).unwrap();
-            assert_eq!(
-                context[crate::constants::workspace::REQUEST],
-                json!({ crate::constants::workspace::WINDOW_ID: 23 })
-            );
-            let reply = json!({
-                "id": context["id"],
-                "type": "tool_response",
-                "result": { "ok": "context" },
-            });
-            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
-                .await
-                .unwrap();
-        });
-
-        let execution = ExecutionContext::safety_protocol();
-        let initial = browser
-            .call_with_delivery_outcome(guid, "tabs_create_mcp", &json!({}), &execution)
-            .await
-            .unwrap_or_else(|failure| panic!("{}", failure.error));
-        assert_eq!(initial, json!({ "ok": "initial" }));
-
-        let recovered = browser
-            .call_with_delivery_outcome(guid, "tabs_create_mcp", &json!({}), &execution)
-            .await
-            .unwrap_or_else(|failure| panic!("{}", failure.error));
-        assert_eq!(recovered, json!({ "ok": "recovered" }));
-
-        let context = browser
-            .call_with_delivery_outcome(guid, "tabs_context_mcp", &json!({}), &execution)
-            .await
-            .unwrap_or_else(|failure| panic!("{}", failure.error));
-        assert_eq!(context, json!({ "ok": "context" }));
-        fake_ext.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn context_read_does_not_recover_a_stale_workspace() {
-        let browser = Browser::new();
-        let guid = "workspace-no-recovery-guid";
+        let guid = "workspace-error-guid";
         let (mut ext_side, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
-        browser.workspaces.pin(
-            guid,
-            WorkspaceTarget {
-                browser_slot: slot,
-                native_window_id: 17,
-            },
-        );
+        browser.workspace_bindings.bind(guid, slot);
 
         let fake_ext = tokio::spawn(async move {
             let request = host::read_message(&mut ext_side).await.unwrap().unwrap();
             let request: Value = serde_json::from_slice(&request).unwrap();
             assert_eq!(
                 request[crate::constants::workspace::REQUEST],
-                json!({ crate::constants::workspace::WINDOW_ID: 17 })
+                json!({
+                    crate::constants::workspace::GROUP_TITLE: "Ghostlight",
+                })
             );
             let reply = json!({
                 "id": request["id"],
                 "type": "tool_error",
-                "error": "That Ghostlight workspace is no longer available",
-                "code": crate::constants::workspace::WINDOW_INELIGIBLE_ERROR,
+                "error": "topology failed",
             });
             host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
                 .await
@@ -2954,7 +3424,7 @@ mod tests {
                 tokio::time::timeout(Duration::from_millis(50), host::read_message(&mut ext_side),)
                     .await
                     .is_err(),
-                "context reads must not retry in another workspace"
+                "topology errors must not produce a service-side retry"
             );
         });
 
@@ -2966,18 +3436,15 @@ mod tests {
                 &ExecutionContext::safety_protocol(),
             )
             .await
-            .expect_err("the stale context read must fail");
+            .expect_err("the topology call must fail");
         assert!(!failure.outcome_unknown);
-        assert_eq!(
-            failure.error.extension_code(),
-            Some(crate::constants::workspace::WINDOW_INELIGIBLE_ERROR)
-        );
-        assert_eq!(browser.workspaces.get(guid).unwrap().native_window_id, 17);
+        assert_eq!(failure.error.to_string(), EXTENSION_TOPOLOGY_FAILURE);
+        assert_eq!(browser.workspace_bindings.get(guid), Some(slot));
         fake_ext.await.unwrap();
     }
 
     #[tokio::test]
-    async fn workspace_bootstrap_schedules_globally_then_on_the_pinned_browser() {
+    async fn workspace_bootstrap_schedules_globally_then_on_the_bound_browser_profile() {
         let browser = Browser::new();
         let descriptor = crate::browser::directory::descriptor("tabs_create_mcp").unwrap();
         let bootstrap = browser
@@ -2986,27 +3453,21 @@ mod tests {
             .unwrap();
         assert!(matches!(
             bootstrap.key(),
-            Some(ScheduleKey::ClientTopology {
+            Some(ScheduleKey::WorkspaceTopology {
                 browser_slot: 0,
                 ..
             })
         ));
         drop(bootstrap);
 
-        browser.workspaces.pin(
-            "guid",
-            WorkspaceTarget {
-                browser_slot: 7,
-                native_window_id: 17,
-            },
-        );
+        browser.workspace_bindings.bind("guid", 7);
         let pinned = browser
             .acquire_execution(descriptor, "guid", &json!({}), 0, None)
             .await
             .unwrap();
         assert!(matches!(
             pinned.key(),
-            Some(ScheduleKey::ClientTopology {
+            Some(ScheduleKey::WorkspaceTopology {
                 browser_slot: 7,
                 ..
             })
@@ -3014,26 +3475,438 @@ mod tests {
     }
 
     #[test]
-    fn terminal_acknowledgement_reconciles_only_its_exact_surface_command() {
+    fn creator_result_membership_reads_only_root_and_declared_tab_rows() {
+        let slot = 3;
+        assert_eq!(
+            creator_result_tab_ids(
+                &json!({
+                    "structuredContent": {
+                        "tabId": 7,
+                        "tabs": [{"tabId": 8}, {"tabId": 7}],
+                        "unrelated": {"tabId": 999}
+                    }
+                }),
+                slot,
+            ),
+            vec![
+                crate::constants::tab_id::encode(slot, 7),
+                crate::constants::tab_id::encode(slot, 8),
+            ]
+        );
+    }
+
+    #[test]
+    fn creator_result_adoption_is_atomic_across_workspaces() {
         let browser = Browser::new();
-        let surface = BrowserSurface {
+        let registry = WorkspaceRegistry::new(Arc::new(Mutex::new(HashMap::new())));
+        browser.bind_workspace_registry(registry.clone());
+        let owner = crate::hub::peer::PeerUser("owner".to_string());
+        let first = registry.mint(&owner, false).unwrap();
+        let second = registry.mint(&owner, false).unwrap();
+        let foreign = crate::constants::tab_id::encode(1, 7);
+        assert_eq!(
+            registry.claim_tab(&first, foreign),
+            crate::hub::workspace::TabClaim::Adopted
+        );
+
+        let error = browser
+            .adopt_creator_result(
+                &second,
+                1,
+                &json!({"structuredContent": {"tabs": [{"tabId": 8}, {"tabId": 7}]}}),
+            )
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("outside the requested workspace"));
+        assert!(registry.owned_tabs(&second).is_empty());
+        assert!(!registry.owns_tab(&first, crate::constants::tab_id::encode(1, 8)));
+    }
+
+    #[tokio::test]
+    async fn creator_reply_adopts_membership_at_the_browser_shore() {
+        let browser = Browser::new();
+        let registry = WorkspaceRegistry::new(Arc::new(Mutex::new(HashMap::new())));
+        browser.bind_workspace_registry(registry.clone());
+        let owner = crate::hub::peer::PeerUser("owner".to_string());
+        let workspace = registry.mint(&owner, false).unwrap();
+        let (mut extension, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        let caller = browser.clone();
+        let workspace_for_call = workspace.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .call_with_delivery_outcome(
+                    workspace_for_call.as_str(),
+                    "tabs_context_mcp",
+                    &json!({}),
+                    &ExecutionContext::safety_protocol(),
+                )
+                .await
+        });
+        let request = host::read_message(&mut extension).await.unwrap().unwrap();
+        let request: Value = serde_json::from_slice(&request).unwrap();
+        host::write_message(
+            &mut extension,
+            &serde_json::to_vec(&json!({
+                "id": request["id"],
+                "type": "tool_response",
+                "result": {
+                    "content": [{"type": "text", "text": "context"}],
+                    "structuredContent": {
+                        "tabs": [{"tabId": 7}],
+                        "unrelated": {"tabId": 999}
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        call.await.unwrap().unwrap();
+        assert_eq!(
+            registry.owned_tabs(&workspace),
+            vec![crate::constants::tab_id::encode(slot, 7)]
+        );
+    }
+
+    #[tokio::test]
+    async fn creator_reply_racing_process_restart_leaves_no_stale_membership() {
+        let browser = Browser::new();
+        let registry = WorkspaceRegistry::new(Arc::new(Mutex::new(HashMap::new())));
+        browser.bind_workspace_registry(registry.clone());
+        let owner = crate::hub::peer::PeerUser("owner".to_string());
+        let workspace = registry.mint(&owner, false).unwrap();
+        let (mut old_extension, slot) =
+            attach_fake_extension_with_generation(&browser, TEST_BROWSER_ID, "process-a").await;
+        let caller = browser.clone();
+        let workspace_for_call = workspace.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .call_with_delivery_outcome(
+                    workspace_for_call.as_str(),
+                    "tabs_context_mcp",
+                    &json!({}),
+                    &ExecutionContext::safety_protocol(),
+                )
+                .await
+        });
+        let request = host::read_message(&mut old_extension)
+            .await
+            .unwrap()
+            .unwrap();
+        let request: Value = serde_json::from_slice(&request).unwrap();
+        host::write_message(
+            &mut old_extension,
+            &serde_json::to_vec(&json!({
+                "id": request["id"],
+                "type": "tool_response",
+                "result": {"structuredContent": {"tabs": [{"tabId": 17}]}}
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        let (_replacement, replacement_slot) =
+            attach_fake_extension_with_generation(&browser, TEST_BROWSER_ID, "process-b").await;
+        assert_eq!(replacement_slot, slot);
+        let _ = call.await.unwrap();
+        assert!(registry.owned_tabs(&workspace).is_empty());
+    }
+
+    #[tokio::test]
+    async fn terminal_acknowledgement_reconciles_only_its_exact_surface_delivery() {
+        let browser = Browser::new();
+        install_route_session(&browser, 1, 9, Some("executor-a"));
+        let key = ScheduleKey::Surface(BrowserSurface {
             browser_slot: 1,
             native_tab: 42,
-        };
-        browser.scheduler.mark_surface_uncertain(surface, 7);
+        });
+        let active = browser
+            .scheduler
+            .acquire(key.clone(), ProducerId::new("a"), 0)
+            .await
+            .unwrap();
+        let command_id = active.command_id().unwrap();
+        assert!(browser.scheduler.mark_uncertain(
+            &key,
+            command_id,
+            "request-7",
+            Some("executor-a")
+        ));
+        drop(active);
+
+        assert!(!browser
+            .scheduler
+            .reconcile(&key, command_id, "request-7", "executor-b"));
 
         browser.route_reply(
             1,
+            9,
             &serde_json::to_vec(&json!({
                 "id": "request-7",
                 "type": "tool_terminal",
-                "commandId": "7",
-                "resource": { "kind": "surface", "nativeTab": 42 }
+                "commandId": command_id.to_string(),
+                "executorGeneration": "executor-b",
+                "resource": { "kind": "surface", "browserSlot": 1, "nativeTab": 42 }
+            }))
+            .unwrap(),
+        );
+        assert_eq!(
+            browser
+                .scheduler
+                .acquire(key.clone(), ProducerId::new("still-blocked"), 0)
+                .await
+                .unwrap_err(),
+            ScheduleFailure::ResourceUncertain { command_id }
+        );
+
+        browser.route_reply(
+            1,
+            9,
+            &serde_json::to_vec(&json!({
+                "id": "request-7",
+                "type": "tool_terminal",
+                "commandId": command_id.to_string(),
+                "executorGeneration": "executor-a",
+                "resource": { "kind": "surface", "browserSlot": 1, "nativeTab": 42 }
             }))
             .unwrap(),
         );
 
-        assert!(!browser.scheduler.reconcile_surface(surface, 7));
+        assert!(!browser
+            .scheduler
+            .reconcile(&key, command_id, "request-7", "executor-a"));
+    }
+
+    #[tokio::test]
+    async fn terminal_before_timeout_prevents_stale_quarantine() {
+        let browser = Browser::new();
+        install_route_session(&browser, 1, 9, Some("executor-a"));
+        let key = ScheduleKey::Surface(BrowserSurface {
+            browser_slot: 1,
+            native_tab: 42,
+        });
+        let active = browser
+            .scheduler
+            .acquire(key.clone(), ProducerId::new("a"), 0)
+            .await
+            .unwrap();
+        let execution = PendingExecution {
+            key: key.clone(),
+            command_id: active.command_id().unwrap(),
+        };
+        let receiver = insert_test_pending(
+            &browser,
+            "terminal-first",
+            1,
+            9,
+            Some(execution.clone()),
+            true,
+        );
+        browser
+            .pending
+            .lock()
+            .unwrap()
+            .get_mut("terminal-first")
+            .unwrap()
+            .executor_generation = Some("executor-a".to_string());
+
+        for executor_generation in [None, Some("executor-b")] {
+            let mut terminal = json!({
+                "id": "terminal-first",
+                "type": "tool_terminal",
+                "commandId": execution.command_id.to_string(),
+                "resource": { "kind": "surface", "browserSlot": 1, "nativeTab": 42 }
+            });
+            if let Some(executor_generation) = executor_generation {
+                terminal["executorGeneration"] = json!(executor_generation);
+            }
+            browser.route_reply(1, 9, &serde_json::to_vec(&terminal).unwrap());
+            assert!(
+                !browser
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .get("terminal-first")
+                    .unwrap()
+                    .terminal_seen
+            );
+        }
+
+        browser.route_reply(
+            1,
+            9,
+            &serde_json::to_vec(&json!({
+                "id": "terminal-first",
+                "type": "tool_terminal",
+                "commandId": execution.command_id.to_string(),
+                "executorGeneration": "executor-a",
+                "resource": { "kind": "surface", "browserSlot": 1, "nativeTab": 42 }
+            }))
+            .unwrap(),
+        );
+        assert!(browser
+            .pending
+            .lock()
+            .unwrap()
+            .get("terminal-first")
+            .is_some_and(|entry| entry.terminal_seen));
+
+        drop(browser.take_pending("terminal-first", true));
+        drop(receiver);
+        drop(active);
+        browser
+            .scheduler
+            .acquire(key, ProducerId::new("b"), 0)
+            .await
+            .expect("a terminal observed before timeout must not quarantine the resource");
+    }
+
+    #[tokio::test]
+    async fn legacy_terminal_cannot_suppress_unknown_delivery_quarantine() {
+        let browser = Browser::new();
+        install_route_session(&browser, 1, 9, None);
+        let key = ScheduleKey::Surface(BrowserSurface {
+            browser_slot: 1,
+            native_tab: 42,
+        });
+        let active = browser
+            .scheduler
+            .acquire(key.clone(), ProducerId::new("legacy"), 0)
+            .await
+            .unwrap();
+        let command_id = active.command_id().unwrap();
+        let receiver = insert_test_pending(
+            &browser,
+            "legacy-terminal",
+            1,
+            9,
+            Some(PendingExecution {
+                key: key.clone(),
+                command_id,
+            }),
+            true,
+        );
+
+        browser.route_reply(
+            1,
+            9,
+            &serde_json::to_vec(&json!({
+                "id": "legacy-terminal",
+                "type": "tool_terminal",
+                "commandId": command_id,
+                "executorGeneration": "unproved-executor",
+                "resource": {"kind": "surface", "browserSlot": 1, "nativeTab": 42}
+            }))
+            .unwrap(),
+        );
+        assert!(
+            !browser
+                .pending
+                .lock()
+                .unwrap()
+                .get("legacy-terminal")
+                .unwrap()
+                .terminal_seen
+        );
+
+        drop(browser.take_pending("legacy-terminal", true));
+        drop(receiver);
+        drop(active);
+        assert_eq!(
+            browser
+                .scheduler
+                .acquire(key, ProducerId::new("blocked"), 0)
+                .await
+                .unwrap_err(),
+            ScheduleFailure::ResourceUncertain { command_id }
+        );
+    }
+
+    #[tokio::test]
+    async fn replies_are_bound_to_the_accepting_browser_connection() {
+        let browser = Browser::new();
+        install_route_session(&browser, 1, 9, None);
+        let receiver = insert_test_pending(&browser, "bound", 1, 9, None, true);
+        let response = serde_json::to_vec(&json!({
+            "id": "bound",
+            "type": "tool_response",
+            "result": { "ok": true }
+        }))
+        .unwrap();
+
+        browser.route_reply(2, 9, &response);
+        browser.route_reply(1, 8, &response);
+        assert!(browser.pending.lock().unwrap().contains_key("bound"));
+        browser.route_reply(1, 9, &response);
+        assert_eq!(receiver.await.unwrap().unwrap(), json!({ "ok": true }));
+    }
+
+    #[tokio::test]
+    async fn scheduled_tool_replies_require_the_exact_executor_generation_and_command() {
+        let browser = Browser::new();
+        install_route_session(&browser, 1, 9, Some("executor-a"));
+        let execution = PendingExecution {
+            key: ScheduleKey::Surface(BrowserSurface {
+                browser_slot: 1,
+                native_tab: 42,
+            }),
+            command_id: 17,
+        };
+        let receiver = insert_test_pending(
+            &browser,
+            "executor-bound",
+            1,
+            9,
+            Some(execution.clone()),
+            true,
+        );
+        browser
+            .pending
+            .lock()
+            .unwrap()
+            .get_mut("executor-bound")
+            .unwrap()
+            .executor_generation = Some("executor-a".to_string());
+
+        for (generation, command_id) in [
+            (None, Some(execution.command_id)),
+            (Some("executor-b"), Some(execution.command_id)),
+            (Some("executor-a"), Some(execution.command_id + 1)),
+        ] {
+            let mut response = json!({
+                "id": "executor-bound",
+                "type": "tool_response",
+                "result": { "ok": true }
+            });
+            if let Some(generation) = generation {
+                response["executorGeneration"] = json!(generation);
+            }
+            if let Some(command_id) = command_id {
+                response["commandId"] = json!(command_id);
+            }
+            browser.route_reply(1, 9, &serde_json::to_vec(&response).unwrap());
+            assert!(browser
+                .pending
+                .lock()
+                .unwrap()
+                .contains_key("executor-bound"));
+        }
+
+        browser.route_reply(
+            1,
+            9,
+            &serde_json::to_vec(&json!({
+                "id": "executor-bound",
+                "type": "tool_response",
+                "commandId": execution.command_id,
+                "executorGeneration": "executor-a",
+                "result": { "ok": true }
+            }))
+            .unwrap(),
+        );
+        assert_eq!(receiver.await.unwrap().unwrap(), json!({ "ok": true }));
     }
 
     #[tokio::test]
@@ -3060,7 +3933,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_workspace_error_points_to_a_fresh_tab() {
+    async fn extension_error_codes_are_preserved_without_service_topology_advice() {
         let browser = Browser::new();
         let mut ext_side = attach_fake_extension(&browser).await;
 
@@ -3070,8 +3943,8 @@ mod tests {
             let reply = json!({
                 "id": request["id"],
                 "type": "tool_error",
-                "error": "That Ghostlight workspace is no longer available",
-                "code": crate::constants::workspace::WINDOW_INELIGIBLE_ERROR,
+                "error": "topology failed",
+                "code": "topology_failed",
             });
             host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
                 .await
@@ -3082,10 +3955,8 @@ mod tests {
             .call("test-guid", "tabs_context_mcp", &json!({}))
             .await
             .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "[hop: extension] That Ghostlight workspace is no longer available. Next step: call tabs_create_mcp to open a fresh tab, or keep using a known Ghostlight tabId."
-        );
+        assert_eq!(error.to_string(), EXTENSION_TOPOLOGY_FAILURE);
+        assert_eq!(error.extension_code(), Some("topology_failed"));
     }
 
     #[tokio::test]
@@ -3120,20 +3991,143 @@ mod tests {
         let browser = Browser::new();
         let (_ext_side, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
         let frame = Zeroizing::new(host::encode(b"{}").unwrap());
+        let execution = ExecutionContext::safety_protocol();
 
         let failure = browser
             .send_and_await_delivery(
                 "uncertain-id".into(),
                 vec![frame],
-                "upload_image_exec",
                 slot,
-                Duration::from_millis(10),
-                None,
+                AwaitRequest {
+                    debug_label: "upload_image_exec",
+                    timeout: Duration::from_millis(10),
+                    attention_guid: None,
+                    execution: &execution,
+                    kind: BrowserRequestKind::Tool {
+                        enforce_safety: true,
+                        hold_action: None,
+                    },
+                },
             )
             .await
             .unwrap_err();
         assert!(failure.outcome_unknown);
         assert!(failure.error.to_string().contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn saturated_browser_writer_refuses_atomically_before_dispatch() {
+        let browser = Browser::new();
+        let (sender, mut receiver) = mpsc::channel(1);
+        sender
+            .try_send(Zeroizing::new(vec![1]))
+            .expect("test queue has one slot");
+        browser.sessions.lock().unwrap().insert(
+            1,
+            BrowserSession {
+                sender,
+                generation: 1,
+                chunked_host_messages_v1: false,
+                executor_generation: None,
+            },
+        );
+        let failure = browser
+            .send_and_await_delivery(
+                "queue-full".to_string(),
+                vec![Zeroizing::new(host::encode(b"{}").unwrap())],
+                1,
+                AwaitRequest {
+                    debug_label: "navigate",
+                    timeout: Duration::from_millis(10),
+                    attention_guid: None,
+                    execution: &ExecutionContext::safety_protocol(),
+                    kind: BrowserRequestKind::Tool {
+                        enforce_safety: true,
+                        hold_action: None,
+                    },
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(!failure.outcome_unknown);
+        assert!(failure.error.to_string().contains("writer queue is full"));
+        assert!(!browser.pending.lock().unwrap().contains_key("queue-full"));
+        assert_eq!(receiver.try_recv().unwrap().as_slice(), &[1]);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn final_session_check_rejects_chunks_after_capability_replacement() {
+        let browser = Browser::new();
+        let (sender, mut receiver) = mpsc::channel(BROWSER_WRITER_QUEUE_CAPACITY);
+        browser.sessions.lock().unwrap().insert(
+            1,
+            BrowserSession {
+                sender,
+                generation: 2,
+                chunked_host_messages_v1: false,
+                executor_generation: None,
+            },
+        );
+        let failure = browser
+            .send_and_await_delivery(
+                "replaced-chunks".to_string(),
+                vec![Zeroizing::new(vec![1]), Zeroizing::new(vec![2])],
+                1,
+                AwaitRequest {
+                    debug_label: "upload_image_exec",
+                    timeout: Duration::from_millis(10),
+                    attention_guid: None,
+                    execution: &ExecutionContext::safety_protocol(),
+                    kind: BrowserRequestKind::Tool {
+                        enforce_safety: true,
+                        hold_action: None,
+                    },
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(!failure.outcome_unknown);
+        assert!(failure.error.to_string().contains("too old"));
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn hold_wins_at_the_final_tool_enqueue_boundary() {
+        let browser = Browser::new();
+        let (mut extension, _slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        browser.set_held(true);
+
+        let failure = browser
+            .call_with_delivery_outcome(
+                "held-workspace",
+                "computer",
+                &json!({ "action": "left_click" }),
+                &ExecutionContext::safety_protocol(),
+            )
+            .await
+            .unwrap_err();
+        let ToolError::Held { message } = failure.error else {
+            panic!("final boundary must preserve the held disposition");
+        };
+        assert!(
+            message.contains("'computer (left_click)' call"),
+            "{message}"
+        );
+        assert!(tokio::time::timeout(
+            Duration::from_millis(30),
+            host::read_message(&mut extension)
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]
@@ -3151,13 +4145,14 @@ mod tests {
     #[test]
     fn oversized_requests_require_negotiated_chunk_transport() {
         let browser = Browser::new();
-        let (sender, _receiver) = mpsc::unbounded_channel();
+        let (sender, _receiver) = mpsc::channel(BROWSER_WRITER_QUEUE_CAPACITY);
         browser.sessions.lock().unwrap().insert(
             1,
             BrowserSession {
                 sender,
                 generation: 1,
                 chunked_host_messages_v1: false,
+                executor_generation: None,
             },
         );
         let payload = vec![b'x'; CHROME_OUTBOUND_PAYLOAD_LIMIT + 1];
@@ -3168,13 +4163,14 @@ mod tests {
     #[test]
     fn negotiated_chunks_stay_bounded_and_reassemble_exactly() {
         let browser = Browser::new();
-        let (sender, _receiver) = mpsc::unbounded_channel();
+        let (sender, _receiver) = mpsc::channel(BROWSER_WRITER_QUEUE_CAPACITY);
         browser.sessions.lock().unwrap().insert(
             1,
             BrowserSession {
                 sender,
                 generation: 1,
                 chunked_host_messages_v1: true,
+                executor_generation: None,
             },
         );
         let payload: Vec<u8> = (0..CHROME_OUTBOUND_PAYLOAD_LIMIT + 12345)
@@ -3193,72 +4189,6 @@ mod tests {
             rebuilt.extend(crate::b64::decode(chunk["data"].as_str().unwrap()).unwrap());
         }
         assert_eq!(rebuilt, payload);
-    }
-
-    /// H7 supplementary (not task-named; the pinned H7 assertions live in
-    /// `tests/extension/grouping.test.js`): `request_group` is a harmless no-op with no connected
-    /// extension -- it must never panic or block a caller that has nothing to await.
-    #[test]
-    fn request_group_without_a_connection_is_a_harmless_no_op() {
-        let browser = Browser::new();
-        browser.request_group("11111111-1111-4111-8111-111111111111", &[101, 202], "title");
-    }
-
-    /// H7 supplementary: a connected fake extension receives EXACTLY the pinned wire shape --
-    /// `type`/`guid`/`tabIds`/`title`, no `id` member (fire-and-forget; nothing correlates a
-    /// reply) -- and sending a `group_response` back (also id-less) never wedges `route_reply`,
-    /// which drops it as an ordinary event.
-    #[tokio::test]
-    async fn request_group_sends_the_pinned_shape_and_a_reply_is_a_harmless_event() {
-        let browser = Browser::new();
-        let (mut ext_side, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
-
-        // ADR-0058/0061: tab_ids are composite (encoding this browser's slot); the wire shows the
-        // DECODED native ids the extension actually understands.
-        let composite_ids = [
-            crate::constants::tab_id::encode(slot, 101),
-            crate::constants::tab_id::encode(slot, 202),
-        ];
-        browser.request_group(
-            "11111111-1111-4111-8111-111111111111",
-            &composite_ids,
-            "title",
-        );
-
-        let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
-        let v: Value = serde_json::from_slice(&req).unwrap();
-        assert_eq!(v["type"], "group_request");
-        assert_eq!(v["guid"], "11111111-1111-4111-8111-111111111111");
-        assert_eq!(v["tabIds"], json!([101, 202]));
-        assert_eq!(v["title"], "title");
-        assert!(v.get("id").is_none(), "the pinned shape carries no id");
-
-        let reply = json!({
-            "type": "group_response",
-            "guid": "11111111-1111-4111-8111-111111111111",
-            "ok": true,
-        });
-        host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
-            .await
-            .unwrap();
-
-        // Proof the id-less reply did not wedge anything: an ordinary tool call still round-trips
-        // afterward.
-        let fake_ext = tokio::spawn(async move {
-            let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
-            let v: Value = serde_json::from_slice(&req).unwrap();
-            let id = v["id"].as_str().unwrap();
-            let reply = json!({ "id": id, "type": "tool_response", "result": { "ok": true } });
-            host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
-                .await
-                .unwrap();
-        });
-        let result = browser
-            .call("test-guid", "navigate", &json!({}))
-            .await
-            .unwrap();
-        assert_eq!(result, json!({ "ok": true }));
-        fake_ext.await.unwrap();
     }
 
     #[tokio::test]
@@ -3369,7 +4299,7 @@ mod tests {
     }
 
     /// A bare probe connection (no hello at all -- `doctor`'s harmless connect-and-close) is
-    /// rejected without touching any live session's state, exactly as a stray was pre-ADR-0058.
+    /// rejected without touching any live browser connection's state, exactly as a stray was pre-ADR-0058.
     #[tokio::test]
     async fn a_hello_less_probe_is_rejected_without_disturbing_the_live_session() {
         let browser = Browser::new();
@@ -3384,7 +4314,7 @@ mod tests {
             "the live session must stay connected after a hello-less probe"
         );
 
-        // ...and the live session still round-trips a call.
+        // ...and the live browser connection still round-trips a call.
         let ext = tokio::spawn(async move {
             let req = host::read_message(&mut ext_side).await.unwrap().unwrap();
             let v: Value = serde_json::from_slice(&req).unwrap();
@@ -3402,9 +4332,9 @@ mod tests {
     }
 
     /// ADR-0058/0061: two DIFFERENT browsers (distinct UUIDs) are BOTH admitted as independent,
-    /// live sessions with distinct non-zero slots -- the actual multi-browser support this whole
+    /// live browser connections with distinct non-zero slots -- the actual multi-browser support this whole
     /// change exists for. Each one's own tab (encoded with its own slot) routes a call to that
-    /// SPECIFIC session, never the other.
+    /// SPECIFIC browser connection, never the other.
     #[tokio::test]
     async fn two_different_browsers_are_both_admitted_and_route_independently() {
         let browser = Browser::new();
@@ -3464,13 +4394,13 @@ mod tests {
         second_task.await.unwrap();
     }
 
-    /// ADR-0058/0061: a fresh handshake for a UUID ALREADY attached REPLACES the old session (a
+    /// ADR-0058/0061: a fresh handshake for a UUID ALREADY attached REPLACES the old connection (a
     /// service-worker relaunch or reconnect from the SAME browser), rather than being rejected, and
     /// resolves to the SAME slot (the mapping is never evicted).
     #[tokio::test]
     async fn a_reconnect_from_the_same_id_replaces_the_old_session() {
         let browser = Browser::new();
-        let (_first_ext, slot_first) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        let (first_ext, slot_first) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
         assert_eq!(browser.browser_snapshot().len(), 1);
 
         let (mut second_ext, slot_second) =
@@ -3483,6 +4413,16 @@ mod tests {
         assert_eq!(
             slot_first, slot_second,
             "the same browser id keeps its slot across a reconnect"
+        );
+        drop(first_ext);
+        sleep(Duration::from_millis(20)).await;
+        assert!(
+            browser.focus_chain.lock().unwrap().contains(&slot_second),
+            "a stale detach must not remove the replacement session from focus routing"
+        );
+        assert!(
+            *browser.connected.borrow(),
+            "a stale detach must not publish the replacement as disconnected"
         );
 
         // The NEW connection serves calls; the old one is simply not read from again.
@@ -3502,8 +4442,168 @@ mod tests {
         ext.await.unwrap();
     }
 
+    #[tokio::test]
+    async fn browser_process_restart_purges_service_workspace_tab_ownership() {
+        let browser = Browser::new();
+        let registry = WorkspaceRegistry::new(Arc::new(Mutex::new(HashMap::new())));
+        browser.bind_workspace_registry(registry.clone());
+        let owner = crate::hub::peer::PeerUser("owner".to_string());
+        let workspace = registry.mint(&owner, false).unwrap();
+
+        let (_first, slot) =
+            attach_fake_extension_with_generation(&browser, TEST_BROWSER_ID, "process-a").await;
+        let old_connection_generation = browser.sessions.lock().unwrap()[&slot].generation;
+        let pending = insert_test_pending(
+            &browser,
+            "restart-pending",
+            slot,
+            old_connection_generation,
+            None,
+            true,
+        );
+        let tab_id = crate::constants::tab_id::encode(slot, 17);
+        assert_eq!(
+            registry.claim_tab(&workspace, tab_id),
+            crate::hub::workspace::TabClaim::Adopted
+        );
+        let surface = crate::recording::SurfaceId {
+            slot,
+            native_tab: 17,
+        };
+        let ticket = browser
+            .recordings
+            .begin_start(workspace.as_str(), surface)
+            .unwrap();
+        browser.recordings.commit_start(&ticket, Some(1280.0));
+        assert!(browser.recordings.is_active(workspace.as_str(), surface));
+
+        let (_second, same_slot) =
+            attach_fake_extension_with_generation(&browser, TEST_BROWSER_ID, "process-b").await;
+        assert_eq!(same_slot, slot);
+        let failure = pending.await.unwrap().unwrap_err();
+        assert!(failure.outcome_unknown);
+        assert!(failure.error.to_string().contains("restarted"));
+        assert!(registry.owned_tabs(&workspace).is_empty());
+        assert!(!browser.recordings.is_active(workspace.as_str(), surface));
+    }
+
+    #[tokio::test]
+    async fn replaced_connection_cannot_route_safety_events_or_replies() {
+        let browser = Browser::new();
+        let (mut old_extension, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        let old_generation = browser.sessions.lock().unwrap()[&slot].generation;
+        let old_receiver =
+            insert_test_pending(&browser, "old-bound", slot, old_generation, None, true);
+        let (mut new_extension, same_slot) =
+            attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        assert_eq!(same_slot, slot);
+        let new_generation = browser.sessions.lock().unwrap()[&slot].generation;
+        assert_ne!(old_generation, new_generation);
+
+        let receiver = insert_test_pending(
+            &browser,
+            "replacement-bound",
+            slot,
+            new_generation,
+            None,
+            true,
+        );
+        host::write_message(
+            &mut old_extension,
+            &serde_json::to_vec(&json!({"type": "session_killed"})).unwrap(),
+        )
+        .await
+        .unwrap();
+        host::write_message(
+            &mut old_extension,
+            &serde_json::to_vec(&json!({
+                "id": "old-bound",
+                "type": "tool_response",
+                "result": {"from": "old-for-old"}
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        host::write_message(
+            &mut old_extension,
+            &serde_json::to_vec(&json!({
+                "id": "replacement-bound",
+                "type": "tool_response",
+                "result": {"from": "old"}
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        sleep(Duration::from_millis(20)).await;
+        assert!(!browser.is_killed());
+        assert_eq!(
+            old_receiver.await.unwrap().unwrap(),
+            json!({"from": "old-for-old"})
+        );
+        assert!(browser
+            .pending
+            .lock()
+            .unwrap()
+            .contains_key("replacement-bound"));
+
+        host::write_message(
+            &mut new_extension,
+            &serde_json::to_vec(&json!({
+                "id": "replacement-bound",
+                "type": "tool_response",
+                "result": {"from": "new"}
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(receiver.await.unwrap().unwrap(), json!({"from": "new"}));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_same_slot_attach_keeps_process_and_executor_identity_together() {
+        let browser = Browser::new();
+        let first = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            process_executor_identity_frame(TEST_BROWSER_ID, "process-a", "executor-a"),
+        );
+        let second = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            process_executor_identity_frame(TEST_BROWSER_ID, "process-b", "executor-b"),
+        );
+        let ((_first_extension, first_slot), (_second_extension, second_slot)) =
+            tokio::join!(first, second);
+        assert_eq!(first_slot, second_slot);
+        sleep(Duration::from_millis(20)).await;
+        for _ in 0..200 {
+            if browser
+                .next_session_generation
+                .load(std::sync::atomic::Ordering::Relaxed)
+                >= 3
+            {
+                break;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
+
+        let process = browser.browser_generations.lock().unwrap()[&first_slot].clone();
+        let executor = browser.sessions.lock().unwrap()[&first_slot]
+            .executor_generation
+            .clone()
+            .unwrap();
+        assert!(
+            (process == "process-a" && executor == "executor-a")
+                || (process == "process-b" && executor == "executor-b"),
+            "the live session must match the atomically recorded browser process"
+        );
+    }
+
     /// ADR-0061 (fail closed): a valid `ROLE_BROWSER` hello whose follow-up frame is NOT a valid
-    /// extension identity frame admits no session -- there is no `browserPid` fallback anymore. A
+    /// extension identity frame admits no browser connection -- there is no `browserPid` fallback anymore. A
     /// wrong-TYPE second frame (a focus event) is used so the rejection is immediate, exercising the
     /// parse-reject path rather than the `IDENTITY_WINDOW` timeout.
     #[tokio::test]
@@ -3530,6 +4630,168 @@ mod tests {
             browser.slot_of("test-browser-0001").is_none(),
             "no slot is minted for a rejected handshake"
         );
+    }
+
+    #[tokio::test]
+    async fn surface_executor_feature_requires_a_nonempty_generation() {
+        let browser = Browser::new();
+        let (browser_side, mut extension) = tokio::io::duplex(64 * 1024);
+        host::write_message(&mut extension, &test_hello())
+            .await
+            .unwrap();
+        host::write_message(
+            &mut extension,
+            &executor_identity_frame(TEST_BROWSER_ID, None),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            browser.attach(browser_side).await,
+            AttachOutcome::AlreadyAttached
+        );
+        assert!(!browser.is_connected());
+        assert!(browser.slot_of(TEST_BROWSER_ID).is_none());
+    }
+
+    #[tokio::test]
+    async fn negotiated_executor_generation_is_bound_to_the_browser_session() {
+        let browser = Browser::new();
+        let (_extension, slot) = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            executor_identity_frame(TEST_BROWSER_ID, Some("executor-a")),
+        )
+        .await;
+
+        assert_eq!(
+            browser
+                .sessions
+                .lock()
+                .unwrap()
+                .get(&slot)
+                .and_then(|session| session.executor_generation.as_deref())
+                .map(str::to_string),
+            Some("executor-a".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn negotiated_unscheduled_reply_does_not_require_executor_generation() {
+        let browser = Browser::new();
+        let (mut extension, _slot) = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            executor_identity_frame(TEST_BROWSER_ID, Some("executor-a")),
+        )
+        .await;
+        let caller = browser.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .call_with_delivery_outcome(
+                    "executor-workspace",
+                    "navigate",
+                    &json!({ "url": "https://example.com" }),
+                    &ExecutionContext::safety_protocol(),
+                )
+                .await
+        });
+        let request = host::read_message(&mut extension).await.unwrap().unwrap();
+        let request: Value = serde_json::from_slice(&request).unwrap();
+        let id = request["id"].as_str().unwrap();
+        assert_eq!(
+            browser
+                .pending
+                .lock()
+                .unwrap()
+                .get(id)
+                .and_then(|entry| entry.executor_generation.as_deref())
+                .map(str::to_string),
+            None
+        );
+        assert!(browser
+            .pending
+            .lock()
+            .unwrap()
+            .get(id)
+            .is_some_and(|entry| entry.execution.is_none()));
+        host::write_message(
+            &mut extension,
+            &serde_json::to_vec(&json!({
+                "id": id,
+                "type": "tool_response",
+                "result": { "ok": true }
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(call.await.unwrap().unwrap(), json!({ "ok": true }));
+    }
+
+    #[tokio::test]
+    async fn negotiated_scheduled_request_binds_executor_generation() {
+        let browser = Browser::new();
+        let (mut extension, slot) = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            executor_identity_frame(TEST_BROWSER_ID, Some("executor-a")),
+        )
+        .await;
+        let execution = browser
+            .scheduler
+            .acquire(
+                ScheduleKey::Surface(BrowserSurface {
+                    browser_slot: slot,
+                    native_tab: 42,
+                }),
+                ProducerId::new("executor-workspace"),
+                0,
+            )
+            .await
+            .unwrap();
+        let command_id = execution.command_id().unwrap();
+        let caller = browser.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .call_with_delivery_outcome(
+                    "executor-workspace",
+                    "navigate",
+                    &json!({
+                        "tabId": crate::constants::tab_id::encode(slot, 42),
+                        "url": "https://example.com"
+                    }),
+                    &execution,
+                )
+                .await
+        });
+        let request = host::read_message(&mut extension).await.unwrap().unwrap();
+        let request: Value = serde_json::from_slice(&request).unwrap();
+        let id = request["id"].as_str().unwrap();
+        assert_eq!(request["execution"]["commandId"], command_id);
+        assert_eq!(
+            browser
+                .pending
+                .lock()
+                .unwrap()
+                .get(id)
+                .and_then(|entry| entry.executor_generation.as_deref()),
+            Some("executor-a")
+        );
+        host::write_message(
+            &mut extension,
+            &serde_json::to_vec(&json!({
+                "id": id,
+                "type": "tool_response",
+                "commandId": command_id,
+                "executorGeneration": "executor-a",
+                "result": { "ok": true }
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(call.await.unwrap().unwrap(), json!({ "ok": true }));
     }
 
     #[test]
@@ -3617,7 +4879,7 @@ mod tests {
         let ext_side = attach_fake_extension(&browser).await;
 
         drop(ext_side);
-        // Let the reader loop observe the close and remove its session before asserting.
+        // Let the reader loop observe the close and remove its connection before asserting.
         for _ in 0..200 {
             if !browser.is_connected() {
                 break;
@@ -3748,7 +5010,7 @@ mod tests {
         }
         assert!(browser.is_killed());
 
-        // Tear down the first connection (a real "session ended") and wait for it to be
+        // Tear down the first connection and wait for it to be
         // removed before attaching a fresh one -- reconnecting from the SAME id replaces the
         // entry outright (ADR-0058/0061), but this exercises the ordinary disconnect-then-reconnect
         // path too.
@@ -3830,19 +5092,23 @@ mod tests {
     #[tokio::test]
     async fn a_reconnect_within_the_grace_window_does_not_fail_a_pending_call() {
         let browser = Browser::new();
-        let (tx, rx) = oneshot::channel();
-        browser
-            .pending
-            .lock()
-            .unwrap()
-            .insert("held".to_string(), tx);
+        let rx = insert_test_pending(&browser, "held", 1, 7, None, true);
 
         let drain_err = ToolError::extension("Browser extension disconnected before responding");
-        browser.spawn_grace_drain(Duration::from_millis(200), drain_err);
+        browser.spawn_grace_drain(1, 7, Duration::from_millis(200), drain_err);
 
         // Reconnect well within the window.
         sleep(Duration::from_millis(20)).await;
-        browser.connected.send_replace(true);
+        let (sender, _receiver) = mpsc::channel(BROWSER_WRITER_QUEUE_CAPACITY);
+        browser.sessions.lock().unwrap().insert(
+            1,
+            BrowserSession {
+                sender,
+                generation: 8,
+                chunked_host_messages_v1: false,
+                executor_generation: None,
+            },
+        );
 
         // Give the grace task time to observe the reconnect and skip draining.
         sleep(Duration::from_millis(300)).await;
@@ -3850,6 +5116,7 @@ mod tests {
             browser.pending.lock().unwrap().contains_key("held"),
             "a reconnect within the grace window must not fail the pending call"
         );
+        drop(browser.take_pending("held", false));
         drop(rx);
     }
 
@@ -3860,14 +5127,12 @@ mod tests {
     async fn grace_window_elapsing_with_no_reconnect_drains_pending_with_the_pinned_disconnect_text(
     ) {
         let browser = Browser::new();
-        let (tx, rx) = oneshot::channel();
-        browser
-            .pending
-            .lock()
-            .unwrap()
-            .insert("held".to_string(), tx);
+        let rx = insert_test_pending(&browser, "held", 1, 7, None, true);
+        let other = insert_test_pending(&browser, "other-browser", 2, 9, None, true);
 
         browser.spawn_grace_drain(
+            1,
+            7,
             Duration::from_millis(50),
             ToolError::extension("Browser extension disconnected before responding"),
         );
@@ -3878,13 +5143,25 @@ mod tests {
             .expect("the sender must have sent a result, not been dropped silently");
         let err = result.unwrap_err();
         assert!(
-            err.to_string()
+            err.error
+                .to_string()
                 .contains("Browser extension disconnected before responding"),
-            "{err}"
+            "{}",
+            err.error
         );
+        assert!(
+            browser
+                .pending
+                .lock()
+                .unwrap()
+                .contains_key("other-browser"),
+            "one disconnected browser must not drain another browser's pending call"
+        );
+        drop(browser.take_pending("other-browser", false));
+        drop(other);
     }
 
-    /// ADR-0050 D4: the per-session screenshot cache mints an `img_`-prefixed id, round-trips the
+    /// ADR-0050 D4: the per-workspace screenshot cache mints an `img_`-prefixed id, round-trips the
     /// bytes/media-type, misses on an unknown id/guid, is bounded to 8 (a 9th insert evicts the
     /// 1st), and `cache_and_inject_screenshot` appends exactly one imageId text block to a
     /// `computer` screenshot result while passing every other result through unchanged. (Named with

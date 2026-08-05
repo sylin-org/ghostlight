@@ -138,6 +138,29 @@ pub fn server_matches(
     })
 }
 
+/// True when the configured command and arguments exactly match the expected MCP launch.
+/// Environment keys remain outside this check because debug installation may add them without
+/// changing which executable or instance a client reaches.
+pub(crate) fn server_launch_matches(
+    existing: &str,
+    dialect: Dialect,
+    entry: &ServerEntry,
+) -> Result<bool, MergeError> {
+    let root = root_object(existing)?;
+    let Some(Value::Object(servers)) = root.get(dialect.top_key()) else {
+        return Ok(false);
+    };
+    let Some(actual) = servers.get(&entry.name) else {
+        return Ok(false);
+    };
+    let expected = entry.to_value(dialect);
+    if dialect == Dialect::OpenCodeMcp {
+        return Ok(actual.get("command") == expected.get("command"));
+    }
+    Ok(actual.get("command") == expected.get("command")
+        && actual.get("args") == expected.get("args"))
+}
+
 /// Remove only our server entry (by `name`) under the dialect's key. No-op if absent. Preserves the
 /// key and all siblings.
 pub fn remove_server(existing: &str, dialect: Dialect, name: &str) -> Result<String, MergeError> {
@@ -225,8 +248,8 @@ mod tests {
     fn opencode_mcp_dialect_uses_command_array_type_local_and_omits_empty_env() {
         let e = ServerEntry {
             name: "ghostlight".into(),
-            command: "/abs/ghostlight".into(),
-            args: vec!["--role".into(), "agent".into()],
+            command: "/abs/ghostlight-mcp-connector".into(),
+            args: vec!["--instance".into(), "qa".into()],
             env: BTreeMap::new(),
         };
         let out = parse(&merge_server("", Dialect::OpenCodeMcp, &e).unwrap());
@@ -234,7 +257,7 @@ mod tests {
         assert_eq!(out["mcp"]["ghostlight"]["enabled"], true);
         assert_eq!(
             out["mcp"]["ghostlight"]["command"],
-            json!(["/abs/ghostlight", "--role", "agent"])
+            json!(["/abs/ghostlight-mcp-connector", "--instance", "qa"])
         );
         assert!(out["mcp"]["ghostlight"].get("environment").is_none());
     }
@@ -293,6 +316,16 @@ mod tests {
         assert!(!server_matches(stale, Dialect::McpServers, &entry()).unwrap());
         // Absent -> not a match.
         assert!(!server_matches("", Dialect::McpServers, &entry()).unwrap());
+    }
+
+    #[test]
+    fn launch_match_checks_command_and_arguments_but_not_environment() {
+        let configured = r#"{"mcpServers":{"ghostlight":{"command":"/abs/ghostlight","args":[],"env":{"GHOSTLIGHT_DEBUG":"1"}}}}"#;
+        assert!(server_launch_matches(configured, Dialect::McpServers, &entry()).unwrap());
+        let wrong_args = r#"{"mcpServers":{"ghostlight":{"command":"/abs/ghostlight","args":["--instance","qa"],"env":{}}}}"#;
+        assert!(!server_launch_matches(wrong_args, Dialect::McpServers, &entry()).unwrap());
+        let stale = r#"{"mcpServers":{"ghostlight":{"command":"/abs/ghostlight-relay","args":["--role","agent"],"env":{}}}}"#;
+        assert!(!server_launch_matches(stale, Dialect::McpServers, &entry()).unwrap());
     }
 
     #[test]

@@ -67,9 +67,10 @@ capability evidence behind those choices.
 - **Responsibility scales with the job.** Personal use needs no policy. When boundaries matter,
   Ghostlight adds capability grants, sacred never-touch domains, dry-run preflight, and one
   structured record per call. The unrestricted engine remains a first-class product.
-- **The software stays yours.** The Rust service and its thin relay have no runtime framework to
-  maintain. The engine is open source, the governance code is readable, license state never changes
-  behavior, and an installed copy keeps working offline.
+- **The software stays yours.** Three focused Rust executables have no runtime framework to
+  maintain: an MCP stdio edge, the persistent service, and a browser-only relay. The engine is open
+  source, the governance code is readable, license state never changes behavior, and an installed
+  copy keeps working offline.
 
 ## Try it
 
@@ -124,10 +125,10 @@ also ships prebuilt binaries and checksums on the
 <details>
 <summary><strong>Build from source and test locally</strong></summary>
 
-1. **Build the binary.** Clone this repository and run `cargo build --release` with a stable Rust
-   toolchain. The build produces two executables:
-   `ghostlight` (the CLI) and `ghostlight-relay`, the thin pass-through that your MCP client
-   and Chrome launch.
+1. **Build the binaries.** Clone this repository and run `cargo build --release` with a stable Rust
+   toolchain. The build produces three product executables: `ghostlight-mcp-connector` (the MCP stdio edge),
+   `ghostlight` (the CLI and persistent service), and `ghostlight-browser-connector` (the browser-only native
+   host).
 2. **Load the development extension for immediate testing.** Open `chrome://extensions`, enable
    Developer mode, choose `Load unpacked`, and select this repository's `extension/` directory.
    The committed manifest key pins the development extension ID, and the installer already allows
@@ -263,22 +264,26 @@ templates you can read and file before you ever reach out.
 ## How it works
 
 ```
-MCP Client <--stdio--> Relay <--local IPC--> Service <--native messaging--> Relay
-                                                                        |
-                                                                     Extension <--CDP--> Browser
+MCP Client <--stdio--> ghostlight-mcp-connector <--typed local IPC--> ghostlight service
+    <--browser IPC--> ghostlight-browser-connector <--native messaging--> Extension <--CDP--> Browser
 ```
 
-The persistent Rust service owns browser sessions, governance, and audit. The two roles that MCP
-clients and Chromium spawn are handled by one small `ghostlight-relay` executable. The extension is
-deliberately thin: it contains Chrome-API mechanism, not policy. All decisions and records stay in
-the local service. The separation lets clients, the extension worker, and the service restart
-without making the user rebuild their browser session.
+`ghostlight-mcp-connector` owns JSON-RPC and the exact `2025-11-25` and `2026-07-28` MCP state machines.
+The persistent service receives typed product work, not protocol messages; it owns the canonical
+tool catalog, workspaces, governance, scheduling, browser coordination, and audit.
+`ghostlight-browser-connector` is only the Chromium native host, and the extension stays deliberately thin:
+Chrome-API mechanism, never policy. This keeps protocol state and browser mechanics at their
+shores while the main work pipeline stays protocol-neutral.
+
+The `2025-11-25` shore presents one implicit workspace after initialization. The `2026-07-28`
+shore is request-stateless: context-creating tools return `workspaceId`, and later stateful calls
+pass it explicitly. Both paths reach the same service-owned catalog and safety pipeline.
 
 <details>
 <summary><strong>CLI and troubleshooting</strong></summary>
 
-- No subcommand: prints a short hint and exits. The MCP server role now lives in `ghostlight-relay`
-  (your client launches `ghostlight-relay --role agent`; you never launch it directly).
+- No subcommand: prints a short hint and exits. Your MCP client launches the sibling
+  `ghostlight-mcp-connector` executable; `ghostlight` itself remains the CLI and service.
 - `install` / `uninstall`: register or remove everything (both support `--dry-run`).
 - `doctor [--verbose]`: read-only diagnosis of the whole chain with a truthful exit code.
 - `status [--json]`: a running server's live inner state (requires `--debug` /

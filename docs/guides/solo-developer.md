@@ -6,7 +6,7 @@ rails. Everything on this page is free, forever, with no key and no account.
 ## What you get
 
 Your AI agent (Claude Code, Claude Desktop, Cursor, VS Code, or any MCP client) gets your signed-in
-Chromium profile inside Ghostlight-managed tabs, separate from your ordinary tabs. Twenty-two tools
+Chromium profile inside Ghostlight-managed tabs, separate from your ordinary tabs. Twenty-five tools
 -- navigate, click,
 type, screenshot, read the page, find elements, fill forms (by ref or by label), run
 JavaScript, inspect console and network traffic, wait for dynamic pages to settle,

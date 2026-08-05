@@ -5,7 +5,7 @@
 //! a non-empty description and an object inputSchema. The computer tool carries all 13 actions.
 //! This is a regression snapshot (visibility), not a drift-prevention contract between two files.
 
-use ghostlight::mcp::tools::advertised_tools_json;
+use ghostlight::tool::tools::advertised_tools_json;
 use serde_json::{json, Value};
 
 /// The 13 trained tools, in order. Changing this array is changing the sacred contract.
@@ -475,7 +475,7 @@ fn agent_guide_is_present_with_all_four_non_empty_fields() {
 /// missing a required field, carrying an unknown property, or a wrong-typed value fails CI.
 #[test]
 fn every_trained_tools_example_call_validates_against_its_own_input_schema() {
-    use ghostlight::transport::mcp::validation::{validate_arguments, ToolSchema};
+    use ghostlight::tool::validation::{validate_arguments, ToolSchema};
 
     for t in tools() {
         let name = t["name"].as_str().expect("name");

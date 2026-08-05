@@ -11,7 +11,7 @@
 //! the one place the stage-2 overlay attaches.
 //!
 //! [`Governance::all_open`] is the ungoverned engine: [`Governance::authorize`] short-circuits to
-//! `Gate::Proceed` for it, querying no port and resolving no resource, so a session with no
+//! `Gate::Proceed` for it, querying no port and resolving no resource, so a service with no
 //! manifest and default config is byte-identical to stage 1 (ADR-0013). Audit is orthogonal to
 //! that short-circuit (shared format doc section 4.5: the flight recorder still records under
 //! all-open when `audit.enabled` is true), so the audit sink is a field of `Governance` itself,
@@ -87,7 +87,7 @@ pub struct GovernanceStatus {
 /// though an individual would-deny call under it would still be classified `shadow_deny` by
 /// [`crate::governance::enforcement::apply_mode`] (the badge describes whether a MEANINGFUL
 /// policy is being observed, not the literal per-call decision vocabulary). A free function
-/// (not a `Governance` method) so a standalone caller with no live session -- `ghostlight
+/// (not a `Governance` method) so a standalone caller with no live bridge -- `ghostlight
 /// doctor`, which resolves its own manifest independently -- computes the identical summary
 /// [`Governance::governance_status`] does, from the same three inputs.
 pub fn governance_status(
@@ -102,7 +102,7 @@ pub fn governance_status(
 
 /// The governance facade held at the dispatch chokepoint: the Policy Enforcement Point.
 ///
-/// One instance lives for the whole MCP session. The decision path is either the ungoverned
+/// One instance lives for one immutable service authority snapshot. The decision path is either the ungoverned
 /// engine ([`Governance::all_open`], holding no decision port) or a governed overlay holding the
 /// ports; the audit sink and client identity are held regardless, since recording is orthogonal
 /// to whether a manifest is active.
@@ -111,8 +111,8 @@ pub struct Governance {
     /// Always present; `NullSink` when audit is disabled. Recording is orthogonal to
     /// [`Mode`] (shared format doc section 4.5).
     audit: Arc<dyn AuditSink>,
-    /// The MCP client identity captured from the `initialize` request, first-wins for the
-    /// whole session (shared format doc section 6.1 `client` field).
+    /// Compatibility fallback client presentation for service-authored events and direct callers.
+    /// Protocol-edge work supplies immutable per-call presentation instead.
     client: Mutex<Option<ClientInfo>>,
 }
 
@@ -144,8 +144,7 @@ struct GovernedState {
 impl Governance {
     /// The ungoverned engine: a zero-port decision path whose `authorize` short-circuits to
     /// `Gate::Proceed`, paired with an audit sink built independently from config (audit is
-    /// orthogonal to all-open). This is the facade used in production until the manifest task
-    /// lands.
+    /// orthogonal to all-open). This is the production facade when no manifest is active.
     pub fn all_open(audit: Arc<dyn AuditSink>) -> Self {
         Self {
             mode: Mode::AllOpen,
@@ -156,8 +155,8 @@ impl Governance {
 
     /// A governed facade over the given decision point, audit sink, the active manifest's
     /// resolved grants, its content hash (g13), and its own `mode` field, if any (g15).
-    /// `transport::mcp::server::run` constructs this with a `LocalPdp` once a manifest is
-    /// active; `all_open` stays the facade for a session with no manifest.
+    /// [`crate::hub::authority`] constructs this with a `LocalPdp` once a manifest is active;
+    /// `all_open` remains the facade for a service authority snapshot with no manifest.
     pub fn governed(
         pdp: Box<dyn PolicyDecisionPoint>,
         audit: Arc<dyn AuditSink>,
@@ -183,8 +182,8 @@ impl Governance {
         self.audit.as_ref()
     }
 
-    /// True when a manifest is active ([`Mode::Governed`]); false under all-open. The dispatch
-    /// chokepoint (`transport::mcp::server`) uses this to skip grant-resource resolution --
+    /// True when a manifest is active ([`Mode::Governed`]); false under all-open. The neutral tool
+    /// pipeline uses this to skip grant-resource resolution --
     /// including every extension tab-URL round trip it would otherwise make -- entirely under
     /// all-open (g13 constraint 3: STEP 0 must add zero new frames and zero new latency).
     pub fn is_governed(&self) -> bool {
@@ -227,8 +226,8 @@ impl Governance {
     /// shape, this performs no directory lookup and no miss handling of its own -- `requires` is
     /// the caller's own bound capability requirement set (ADR-0022 Decision 2), supplied
     /// directly. [`Self::authorize`] is the only in-crate caller for a governed, resource-bearing
-    /// call (its precedence table's arm 5); it is also called directly for the navigate landing
-    /// re-check (`transport::mcp::server::post_navigate_landing_check`) and by tests. Under
+    /// call (its precedence table's arm 5); it is also called directly by the tool pipeline's
+    /// navigate landing re-check and by tests. Under
     /// [`Mode::AllOpen`] this returns [`Decision::Allow`] without touching any port or resolving
     /// any resource, so all-open output is byte-identical to stage 1. Under [`Mode::Governed`] it
     /// builds the full [`DecisionRequest`] from the held grants, manifest hash, and
@@ -264,7 +263,7 @@ impl Governance {
     }
 
     /// Phase 0 (ADR-0024 Decision 3): open the per-call audit scope. `requires` is THE one
-    /// directory lookup's result the transport layer performed (`None` is a registry/variant
+    /// directory lookup's result the neutral tool pipeline performed (`None` is a registry/variant
     /// miss; [`Self::authorize`] turns it into the `unknown_action` denial). For the eventual
     /// record's `capability` field a miss renders `"none"`, exactly as the pre-ADR-0024
     /// `unwrap_or(&[])` convention did. Captures the sink handle, the tool/action strings, the
@@ -276,9 +275,24 @@ impl Governance {
         action: Option<&str>,
         requires: Option<&'static [Capability]>,
     ) -> CallAudit {
+        self.begin_with_client(tool, action, requires, self.current_client())
+    }
+
+    /// Open a per-call audit scope with an explicit immutable client presentation.
+    ///
+    /// Unlike [`Self::begin`], this does not read or mutate the facade's compatibility fallback
+    /// client slot. Protocol edges use this entry point when client presentation
+    /// belongs to one request rather than to the service-global authority snapshot.
+    pub fn begin_with_client(
+        &self,
+        tool: &str,
+        action: Option<&str>,
+        requires: Option<&'static [Capability]>,
+        client: Option<ClientInfo>,
+    ) -> CallAudit {
         CallAudit {
             audit: Arc::clone(&self.audit),
-            client: self.current_client(),
+            client,
             tool: tool.to_string(),
             action: action.map(str::to_string),
             requires,
@@ -389,9 +403,10 @@ impl Governance {
         }
     }
 
-    /// Capture the MCP client identity from the `initialize` request's `clientInfo`
-    /// (shared format doc section 6.1 `client` field). First capture wins for the whole
-    /// session; a no-op if a client identity is already stored.
+    /// Set the compatibility fallback client presentation. First capture wins.
+    ///
+    /// Production protocol-edge calls use [`Self::begin_with_client`] with immutable per-call
+    /// presentation. This slot remains for service-authored events and direct in-process callers.
     pub fn set_client(&self, name: &str, version: &str) {
         let mut guard = self.client.lock().unwrap_or_else(PoisonError::into_inner);
         if guard.is_none() {
@@ -402,12 +417,10 @@ impl Governance {
         }
     }
 
-    /// The MCP client identity captured from `initialize`, if any. `pub(crate)` (ADR-0025
-    /// Decision 2/6): the manifest hot-reload policy-subscription task
-    /// (`transport::mcp::server`) reads this off the OUTGOING `Governance` snapshot before a
-    /// swap and re-applies it to the rebuilt instance via [`Self::set_client`], so client
-    /// identity survives every swap even though a rebuilt `Governance` otherwise starts with
-    /// none.
+    /// The compatibility fallback client presentation, if any.
+    ///
+    /// ADR-0096 authority swaps deliberately do not carry this slot into a new snapshot. Current
+    /// edge calls supply client presentation through immutable [`crate::work::WorkContext`].
     pub(crate) fn current_client(&self) -> Option<ClientInfo> {
         self.client
             .lock()
@@ -420,15 +433,21 @@ impl Governance {
     /// `tool`/`action`/`capability`/`domain`/`decision`/`grant_id`/`denial_id`/`duration_ms`,
     /// only the shared `event_id`/`ts`/`identity`/`client`/`manifest` fields plus
     /// `event: "session_killed"`. Called from the
-    /// `Browser::on_session_killed` hook, registered once at session startup; the extension
-    /// signals the event at most once per kill (the flag transition is idempotent), so this
-    /// fires at most once per kill too.
+    /// a `Browser` kill-hook subscriber. The browser flag transition is idempotent, so a registered
+    /// subscriber fires at most once per kill transition.
     pub fn record_session_killed(&self) {
+        self.record_session_killed_with_client(self.current_client());
+    }
+
+    /// Record the panic kill switch's session event with an explicit client presentation.
+    ///
+    /// This does not consult or mutate the compatibility fallback client slot.
+    pub fn record_session_killed_with_client(&self, client: Option<ClientInfo>) {
         let record = SessionEventRecord {
             event_id: uuid::Uuid::new_v4().to_string(),
             ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             identity: None,
-            client: self.current_client(),
+            client,
             event: "session_killed",
             manifest: None,
         };
@@ -440,11 +459,22 @@ impl Governance {
     /// failed reload records nothing (the ERROR log carries it; the audit stream records what IS
     /// in force, not what failed to be) -- callers only invoke this on a successful swap.
     pub fn record_manifest_reload(&self, manifest: Option<ManifestIdentity>) {
+        self.record_manifest_reload_with_client(manifest, self.current_client());
+    }
+
+    /// Record a manifest hot-reload event with an explicit client presentation.
+    ///
+    /// This does not consult or mutate the compatibility fallback client slot.
+    pub fn record_manifest_reload_with_client(
+        &self,
+        manifest: Option<ManifestIdentity>,
+        client: Option<ClientInfo>,
+    ) {
         let record = SessionEventRecord {
             event_id: uuid::Uuid::new_v4().to_string(),
             ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             identity: None,
-            client: self.current_client(),
+            client,
             event: "manifest_reload",
             manifest,
         };
@@ -458,11 +488,18 @@ impl Governance {
     /// across consecutive reloads (see [`crate::governance::ports::
     /// user_manifest_ignored_transitioned`], the pure gate callers apply before calling this).
     pub fn record_user_manifest_ignored(&self) {
+        self.record_user_manifest_ignored_with_client(self.current_client());
+    }
+
+    /// Record `user_manifest_ignored` with an explicit client presentation.
+    ///
+    /// This does not consult or mutate the compatibility fallback client slot.
+    pub fn record_user_manifest_ignored_with_client(&self, client: Option<ClientInfo>) {
         let record = SessionEventRecord {
             event_id: uuid::Uuid::new_v4().to_string(),
             ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             identity: None,
-            client: self.current_client(),
+            client,
             event: "user_manifest_ignored",
             manifest: None,
         };
@@ -471,11 +508,23 @@ impl Governance {
 
     /// Record one content-free attention-circuit transition (ADR-0079).
     pub fn record_attention_event(&self, event: crate::governance::attention::AttentionEvent) {
+        self.record_attention_event_with_client(event, self.current_client());
+    }
+
+    /// Record one content-free attention-circuit transition with an explicit client
+    /// presentation.
+    ///
+    /// This does not consult or mutate the compatibility fallback client slot.
+    pub fn record_attention_event_with_client(
+        &self,
+        event: crate::governance::attention::AttentionEvent,
+        client: Option<ClientInfo>,
+    ) {
         let signal = event.state.signal;
         let record = AttentionEventRecord {
             event_id: uuid::Uuid::new_v4().to_string(),
             ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            client: self.current_client(),
+            client,
             event: event.event,
             category: signal.category.as_str(),
             capability: capability_names(&signal.capabilities),
@@ -550,7 +599,7 @@ impl CallAudit {
         self.audit.record(&record);
     }
 
-    /// Record a call refused by this MCP session's denial-attention circuit (ADR-0079).
+    /// Record a call refused by this workspace's denial-attention circuit (ADR-0079/0096).
     pub fn attention_required(self) {
         let record = self.build_record(None, "allow", None, None, 0, false, true);
         self.audit.record(&record);
@@ -1195,6 +1244,70 @@ mod tests {
         let client = sink.last().client.expect("client info recorded");
         assert_eq!(client.name, "a");
         assert_eq!(client.version, "1");
+    }
+
+    #[test]
+    fn explicit_clients_remain_isolated_across_concurrent_calls() {
+        let sink = Arc::new(CapturingAuditSink::default());
+        let governance = Arc::new(Governance::all_open(sink.clone()));
+        governance.set_client("legacy-client", "0");
+
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let handles: Vec<_> = [
+            ("client-a", "1", "read_page"),
+            ("client-b", "2", "navigate"),
+        ]
+        .into_iter()
+        .map(|(client_name, client_version, tool)| {
+            let governance = Arc::clone(&governance);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..64 {
+                    governance
+                        .begin_with_client(
+                            tool,
+                            None,
+                            None,
+                            Some(ClientInfo {
+                                name: client_name.to_string(),
+                                version: client_version.to_string(),
+                            }),
+                        )
+                        .complete();
+                }
+            })
+        })
+        .collect();
+
+        barrier.wait();
+        for handle in handles {
+            handle.join().expect("audit producer completes");
+        }
+
+        let records = sink.records.lock().unwrap_or_else(PoisonError::into_inner);
+        assert_eq!(records.len(), 128);
+        for record in records.iter() {
+            let client = record.client.as_ref().expect("explicit client is recorded");
+            match record.tool.as_str() {
+                "read_page" => {
+                    assert_eq!(client.name, "client-a");
+                    assert_eq!(client.version, "1");
+                }
+                "navigate" => {
+                    assert_eq!(client.name, "client-b");
+                    assert_eq!(client.version, "2");
+                }
+                other => panic!("unexpected tool {other}"),
+            }
+        }
+        drop(records);
+
+        let legacy = governance
+            .current_client()
+            .expect("explicit calls do not alter the legacy slot");
+        assert_eq!(legacy.name, "legacy-client");
+        assert_eq!(legacy.version, "0");
     }
 
     #[test]

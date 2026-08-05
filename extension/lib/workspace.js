@@ -1,54 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-// Ghostlight -- browser-window placement mechanism for managed tab workspaces.
+// Ghostlight -- browser-shore workspace topology.
 //
-// This adapter helper knows Chrome window ids and API calls. It does not know policy, grants, page
-// content, or model-facing browser identity. The service chooses the selection mode and pins the
-// returned mechanism fact for the MCP session.
+// The service supplies an opaque WorkspaceId and a presentation title. This helper owns only
+// Chrome mechanism: live tabs, groups, windows, and initial placement. It never knows policy,
+// grants, page content, composite tab ids, or model-facing browser identity.
 (function () {
 "use strict";
 
-const KEY_VERSION = "v1";
-const LAST_FOCUSED_NORMAL = "last_focused_normal";
 const FOCUS_MRU_KEY = "ghostlight_workspace_focus_mru_v1";
-const WINDOW_INELIGIBLE_CODE = "workspace_window_ineligible";
 const MAX_FOCUS_MRU = 32;
 let focusMutationTail = Promise.resolve();
 
-class WorkspaceWindowIneligibleError extends Error {
-  constructor() {
-    super("That Ghostlight workspace is no longer available");
-    this.code = WINDOW_INELIGIBLE_CODE;
-  }
-}
-
 function eligibleNormalWindow(win) {
   return !!win && Number.isSafeInteger(win.id) && win.type === "normal" && win.incognito !== true;
-}
-
-function workspaceGroupKey(clientKey, windowId) {
-  if (typeof clientKey !== "string" || !clientKey || !Number.isSafeInteger(windowId)) return null;
-  return JSON.stringify([KEY_VERSION, windowId, clientKey]);
-}
-
-function parseWorkspaceGroupKey(key) {
-  if (typeof key !== "string") return null;
-  try {
-    const parsed = JSON.parse(key);
-    if (!Array.isArray(parsed) || parsed.length !== 3 || parsed[0] !== KEY_VERSION) return null;
-    if (!Number.isSafeInteger(parsed[1]) || typeof parsed[2] !== "string" || !parsed[2]) return null;
-    return { windowId: parsed[1], clientKey: parsed[2] };
-  } catch {
-    return null;
-  }
-}
-
-async function getEligibleWindow(chrome, windowId) {
-  let win;
-  try { win = await chrome.windows.get(windowId); } catch { win = null; }
-  if (!eligibleNormalWindow(win)) {
-    throw new WorkspaceWindowIneligibleError();
-  }
-  return win;
 }
 
 function normalizedFocusMru(value) {
@@ -107,7 +71,9 @@ async function forgetWorkspaceWindow(chrome, windowId) {
   return mutation;
 }
 
-async function resolveAutomaticWindow(chrome) {
+// Select an initial Chrome window. Once a workspace has live tabs, their live placement supersedes
+// this bootstrap choice.
+async function resolveWorkspaceWindow(chrome) {
   try {
     const last = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
     if (eligibleNormalWindow(last)) return { window: last, created: false };
@@ -141,83 +107,224 @@ async function resolveAutomaticWindow(chrome) {
   return { window: created, created: true };
 }
 
-async function resolveWorkspaceWindow(chrome, request) {
-  if (request && Number.isSafeInteger(request.windowId)) {
-    return { window: await getEligibleWindow(chrome, request.windowId), created: false, pinned: true };
+function workspaceRecord(index, key) {
+  if (typeof key !== "string" || !key) return null;
+  let record = index.get(key);
+  if (!record) {
+    record = { tabIds: new Set(), groupId: null };
+    index.set(key, record);
   }
-  const selector = request && request.select;
-  if (selector !== undefined && selector !== LAST_FOCUSED_NORMAL) {
-    throw new Error(`Unknown Ghostlight workspace selector: ${selector}`);
-  }
-  const resolved = await resolveAutomaticWindow(chrome);
-  return { ...resolved, pinned: false };
+  return record;
 }
 
-// Resolve a client's group in one window without moving it. If the user moved the group, re-key
-// that live group to its actual window and leave the requested workspace empty.
-async function resolveWorkspaceGroup(chrome, groups, clientKey, windowId) {
-  const key = workspaceGroupKey(clientKey, windowId);
-  if (!key || !groups.has(key)) return { key, groupId: null, changed: false };
-  const groupId = groups.get(key);
+function replaceWorkspaceTabs(index, key, tabIds, groupId) {
+  const record = workspaceRecord(index, key);
+  if (!record) return false;
+  record.tabIds = new Set((Array.isArray(tabIds) ? tabIds : []).filter(Number.isSafeInteger));
+  if (Number.isSafeInteger(groupId)) record.groupId = groupId;
+  return true;
+}
+
+function addWorkspaceTab(index, key, tabId, groupId) {
+  const record = workspaceRecord(index, key);
+  if (!record || !Number.isSafeInteger(tabId)) return false;
+  record.tabIds.add(tabId);
+  if (Number.isSafeInteger(groupId)) record.groupId = groupId;
+  return true;
+}
+
+function removeWorkspaceTab(index, tabId) {
+  for (const record of index.values()) {
+    if (record.tabIds.delete(tabId) && record.tabIds.size === 0) record.groupId = null;
+  }
+}
+
+function workspaceGroupIds(index) {
+  return new Set(Array.from(index.values())
+    .map((record) => record.groupId)
+    .filter(Number.isSafeInteger));
+}
+
+function isWorkspaceGroupId(index, groupId) {
+  return Number.isSafeInteger(groupId) && workspaceGroupIds(index).has(groupId);
+}
+
+async function liveWorkspaceTabs(chrome, index, key) {
+  const record = index.get(key);
+  if (!record) return [];
+  const tabs = [];
+  for (const tabId of Array.from(record.tabIds)) {
+    try {
+      tabs.push(await chrome.tabs.get(tabId));
+    } catch {
+      record.tabIds.delete(tabId);
+    }
+  }
+  return tabs;
+}
+
+function byMostRecent(left, right) {
+  const recency = (right.lastAccessed || 0) - (left.lastAccessed || 0);
+  return recency || left.id - right.id;
+}
+
+// Derive the workspace's presentation group from its own live tabs. A stored group id alone is
+// never enough: the user may have detached every workspace tab while that shared group stayed live.
+async function liveWorkspaceGroup(chrome, index, key, liveTabs) {
+  const record = workspaceRecord(index, key);
+  if (!record) return null;
+  const tabs = Array.isArray(liveTabs) ? liveTabs : await liveWorkspaceTabs(chrome, index, key);
+  for (const tab of tabs.slice().sort(byMostRecent)) {
+    if (!Number.isSafeInteger(tab.groupId) || tab.groupId < 0) continue;
+    try {
+      const group = await chrome.tabGroups.get(tab.groupId);
+      record.groupId = group.id;
+      return group;
+    } catch { /* inspect the next owned tab */ }
+  }
+  record.groupId = null;
+  return null;
+}
+
+async function preferredNamedGroup(chrome, index, windowId, title) {
+  if (!Number.isSafeInteger(windowId) || typeof title !== "string" || !title) return null;
+  let candidates;
   try {
-    const group = await chrome.tabGroups.get(groupId);
-    if (group.windowId === windowId) return { key, groupId, changed: false };
-    groups.delete(key);
-    const movedKey = workspaceGroupKey(clientKey, group.windowId);
-    if (movedKey && !groups.has(movedKey)) groups.set(movedKey, groupId);
+    candidates = await chrome.tabGroups.query({ title, windowId });
   } catch {
-    groups.delete(key);
+    return null;
   }
-  return { key, groupId: null, changed: true };
+  candidates = (Array.isArray(candidates) ? candidates : [])
+    .filter((group) => group && Number.isSafeInteger(group.id) && group.windowId === windowId);
+  const managed = workspaceGroupIds(index);
+  const managedCandidates = candidates.filter((group) => managed.has(group.id));
+  const pool = managedCandidates.length > 0 ? managedCandidates : candidates;
+  pool.sort((left, right) => left.id - right.id);
+  return pool.length > 0 ? pool[0] : null;
 }
 
-// Upgrade old `clientKey -> groupId` entries and repair window keys after a group was moved. The
-// group itself is authoritative for its current Chrome window. A collision is left first-wins;
-// both group ids remain managed through `managedTabs`, while the canonical workspace mapping stays
-// deterministic.
-async function reconcileWorkspaceGroups(chrome, groups) {
+// Find where a new workspace tab belongs without moving any existing tab. Live workspace tabs win
+// over focus; focus is only the bootstrap when the workspace has no live browser artifacts.
+async function resolveWorkspacePlacement(chrome, index, key, title) {
+  const tabs = await liveWorkspaceTabs(chrome, index, key);
+  const group = await liveWorkspaceGroup(chrome, index, key, tabs);
+  if (group) {
+    return { tabs, group, windowId: group.windowId, createdWindow: false, initialTab: null };
+  }
+
+  const ordered = tabs.slice().sort(byMostRecent);
+  if (ordered.length > 0) {
+    const windowId = ordered[0].windowId;
+    const named = await preferredNamedGroup(chrome, index, windowId, title);
+    return { tabs, group: named, windowId, createdWindow: false, initialTab: null };
+  }
+
+  const resolved = await resolveWorkspaceWindow(chrome);
+  const windowId = resolved.window.id;
+  const named = await preferredNamedGroup(chrome, index, windowId, title);
+  const initialTab = resolved.created && resolved.window.tabs && resolved.window.tabs[0]
+    ? resolved.window.tabs[0]
+    : null;
+  return {
+    tabs,
+    group: named,
+    windowId,
+    createdWindow: resolved.created,
+    initialTab,
+  };
+}
+
+async function pruneWorkspaceGroups(chrome, index) {
   let changed = false;
-  for (const [storedKey, groupId] of Array.from(groups.entries())) {
-    let group;
-    try { group = await chrome.tabGroups.get(groupId); } catch { continue; }
-    if (!Number.isSafeInteger(group.windowId)) continue;
-    const parsed = parseWorkspaceGroupKey(storedKey);
-    const clientKey = parsed ? parsed.clientKey : storedKey;
-    if (typeof clientKey !== "string" || !clientKey) continue;
-    const currentKey = workspaceGroupKey(clientKey, group.windowId);
-    if (!currentKey || currentKey === storedKey) continue;
-    if (!groups.has(currentKey)) groups.set(currentKey, groupId);
-    groups.delete(storedKey);
-    changed = true;
+  for (const record of index.values()) {
+    if (!Number.isSafeInteger(record.groupId)) continue;
+    try {
+      await chrome.tabGroups.get(record.groupId);
+    } catch {
+      record.groupId = null;
+      changed = true;
+    }
   }
   return changed;
 }
 
-async function tabsInWindow(chrome, tabIds, windowId) {
-  const live = [];
-  for (const tabId of tabIds) {
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      if (tab.windowId === windowId) live.push(tabId);
-    } catch { /* a vanished tab contributes nothing */ }
+function serializeWorkspaceTopology(index) {
+  return Array.from(index.entries(), ([key, record]) => [key, {
+    tabIds: Array.from(record.tabIds),
+    groupId: Number.isSafeInteger(record.groupId) ? record.groupId : null,
+  }]);
+}
+
+function restoreWorkspaceTopology(index, serialized) {
+  if (!Array.isArray(serialized)) return false;
+  let restored = false;
+  for (const entry of serialized) {
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") continue;
+    const value = entry[1];
+    if (!value || typeof value !== "object") continue;
+    replaceWorkspaceTabs(index, entry[0], value.tabIds, value.groupId);
+    restored = true;
   }
-  return live;
+  return restored;
+}
+
+function legacyWorkspaceId(key) {
+  if (typeof key !== "string" || !key) return null;
+  try {
+    const parsed = JSON.parse(key);
+    if (Array.isArray(parsed) && parsed.length === 3 && parsed[0] === "v1" &&
+        typeof parsed[2] === "string" && parsed[2]) {
+      return parsed[2];
+    }
+  } catch { /* a direct legacy key is already usable */ }
+  return key;
+}
+
+function migrateLegacyWorkspaceTopology(index, stored) {
+  let migrated = false;
+  if (Array.isArray(stored && stored.clientGroupsState)) {
+    for (const entry of stored.clientGroupsState) {
+      if (!Array.isArray(entry) || entry.length !== 2 || !Number.isSafeInteger(entry[1])) continue;
+      const key = legacyWorkspaceId(entry[0]);
+      if (!key) continue;
+      replaceWorkspaceTabs(index, key, [], entry[1]);
+      migrated = true;
+    }
+  }
+  if (Array.isArray(stored && stored.workspaceTabsState)) {
+    for (const entry of stored.workspaceTabsState) {
+      if (!Array.isArray(entry) || entry.length !== 2) continue;
+      const key = legacyWorkspaceId(entry[0]);
+      if (!key || !Array.isArray(entry[1])) continue;
+      for (const tabId of entry[1]) {
+        if (Number.isSafeInteger(tabId)) addWorkspaceTab(index, key, tabId);
+      }
+      migrated = true;
+    }
+  }
+  return migrated;
 }
 
 const GhostlightWorkspace = {
-  LAST_FOCUSED_NORMAL,
   FOCUS_MRU_KEY,
-  WINDOW_INELIGIBLE_CODE,
-  WorkspaceWindowIneligibleError,
   eligibleNormalWindow,
-  workspaceGroupKey,
-  parseWorkspaceGroupKey,
   resolveWorkspaceWindow,
   rememberFocusedWindow,
   forgetWorkspaceWindow,
-  resolveWorkspaceGroup,
-  reconcileWorkspaceGroups,
-  tabsInWindow,
+  workspaceRecord,
+  replaceWorkspaceTabs,
+  addWorkspaceTab,
+  removeWorkspaceTab,
+  workspaceGroupIds,
+  isWorkspaceGroupId,
+  liveWorkspaceTabs,
+  liveWorkspaceGroup,
+  preferredNamedGroup,
+  resolveWorkspacePlacement,
+  pruneWorkspaceGroups,
+  serializeWorkspaceTopology,
+  restoreWorkspaceTopology,
+  migrateLegacyWorkspaceTopology,
 };
 if (typeof module !== "undefined" && module.exports) {
   module.exports = GhostlightWorkspace;

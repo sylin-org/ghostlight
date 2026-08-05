@@ -1,42 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! The inbound.pipe transport: the named-pipe (Windows) / Unix-domain-socket (Unix) listener
-//! that thin MCP adapters dial into. Accepts connections, captures the peer's OS credential,
-//! validates the session-hello (GUID + anti-squat proof), and hands the accepted stream to
-//! `serve_session` -- the SAME governance chokepoint every transport enters.
+//! The `inbound.pipe` owner-only local listener lifecycle and policy gate.
 //!
-//! This module owns the TRANSPORT (the listener lifecycle, the policy gate); the platform-
-//! specific wire primitives (bind, accept, peer-cred capture, the anti-squat proof exchange)
-//! live in [`crate::transport::native::ipc`] -- the platform-abstraction layer, exactly as
-//! [`super::web`] delegates TCP/WS primitives to `tokio::net`.
-//!
-//! The pipe transport carries a richer handshake than the web transport: a session-hello with
-//! the adapter's GUID, a per-peer mint-quota check, a session-registry admission, and an
-//! anti-squat proof. All of that lives in `ipc::handle_adapter_connection` (called by
-//! `ipc::serve_adapters`); this module's job is to run the accept loop over a claimed listener.
+//! Platform-specific binding, same-user peer credentials, role admission, and anti-squat proof
+//! live in [`crate::hub::endpoint`]. This module keeps one concrete job: take the listener already
+//! claimed by the composition root, honor `inbound.pipe.enabled`, and run the bridge/control
+//! accept loop for the service lifetime.
 
 use crate::hub::endpoint as ipc;
-use crate::hub::inbound::ITransport;
 use crate::hub::ServiceContext;
 
-/// The inbound.pipe transport instance. Constructed at the composition root with the
-/// ALREADY-CLAIMED adapter listener (the composition root claims it as a process-level
-/// single-instance guard before any transport runs). The transport owns the accept loop.
+/// The live `inbound.pipe` listener. The composition root claims it as the process-level
+/// single-instance guard before constructing this value.
 pub struct PipeTransport {
     /// `Some` until `run` is called (which moves the listener into the spawned task).
     listener: Option<ipc::AdapterListener>,
 }
 
 impl PipeTransport {
+    /// Take ownership of the already-claimed local bridge/control listener.
     pub fn new(listener: ipc::AdapterListener) -> Self {
         Self {
             listener: Some(listener),
         }
     }
 
-    /// Run the accept loop for the life of the service. Takes the claimed listener and the
-    /// shared context; per connection it clones the context and hands it to
-    /// `ipc::serve_adapters`, which demuxes the session-hello and enters `serve_session`.
-    /// A policy-disabled transport logs and returns without serving.
+    /// Run the bridge/control accept loop for the service lifetime.
+    ///
+    /// A policy-disabled listener logs and returns without serving. Each admitted peer otherwise
+    /// receives a clone of the shared service context inside [`ipc::serve_adapters`].
     pub async fn run(self, ctx: ServiceContext) {
         let enabled = {
             let resolution = ctx.store.current_resolution();
@@ -47,7 +38,7 @@ impl PipeTransport {
         };
         if !enabled {
             tracing::info!(
-                "inbound.pipe transport disabled by policy (inbound.pipe.enabled = false); \
+                "local bridge/control listener disabled by policy (inbound.pipe.enabled = false); \
                  not serving"
             );
             return;
@@ -57,15 +48,9 @@ impl PipeTransport {
             tracing::error!("inbound.pipe transport has no listener");
             return;
         };
-        tracing::info!("inbound.pipe listening");
+        tracing::info!("inbound.pipe bridge/control listener active");
         if let Err(e) = ipc::serve_adapters(ctx, listener).await {
             tracing::error!(error = %e, "inbound.pipe endpoint failed");
         }
-    }
-}
-
-impl ITransport for PipeTransport {
-    fn code(&self) -> &'static str {
-        "pipe"
     }
 }

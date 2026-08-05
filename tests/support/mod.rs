@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Shared spawn helpers for the standalone-SERVICE + thin-ADAPTER topology (ADR-0030 Decision 8
-//! amendment, "the always-ready-service amendment"; H6 task file's "Tests" section). Every
-//! integration test that used to spawn ONE bare `ghostlight` invocation now needs TWO cooperating
-//! processes: the standalone SERVICE (`ghostlight service`, which owns the browser link and the
-//! adapter/control endpoint) and a thin ADAPTER (a bare `ghostlight` invocation) that connects to
-//! it and relays stdio. `#![allow(dead_code)]`: not every test binary that includes this module
-//! (via `mod support;`) uses every helper.
+//! Shared spawn helpers for ADR-0096's three-process topology: the persistent `ghostlight`
+//! service, the protocol-versioned `ghostlight-mcp-connector` stdio edge, and the browser-side
+//! `ghostlight-browser-connector`. Most process integration tests need only the service plus MCP edge; fake
+//! browser helpers exercise the third shore when browser routing is the subject.
+//!
+//! `#![allow(dead_code)]`: not every test binary that includes this module via `mod support;` uses
+//! every helper.
 
 #![allow(dead_code)]
 
-/// The in-process session fixture (ADR-0051 Phase 4): drives the real `serve_session` chokepoint
-/// over an in-memory duplex, no spawned process. The migration target for the incidentally-E2E
-/// wiring tests.
+/// The protocol-neutral in-process service fixture used by governance and dispatch tests.
 pub mod inproc;
 
 use std::io::Read;
@@ -19,24 +17,23 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-fn bin() -> &'static str {
+fn ghostlight_service_bin() -> &'static str {
     env!("CARGO_BIN_EXE_ghostlight")
 }
 
-/// The single `ghostlight-relay` executable beside the `ghostlight` test binary (ADR-0046 +
-/// ADR-0051 Phase 3: it carries both former adapter roles). Cargo does not expose a
-/// `CARGO_BIN_EXE_*` for another workspace member's bin, so derive the sibling path in the same
-/// `target/<profile>/` directory; `cargo test --workspace` builds it before tests. The AGENT role is
-/// selected with `--role agent` (see [`spawn_adapter`]); the BROWSER role is auto-detected from the
-/// `chrome-extension://` origin, exactly as Chrome launches it.
-pub fn relay_bin() -> PathBuf {
-    let dir = Path::new(bin())
+/// Locate the sibling `ghostlight-mcp-connector` executable built for the same target profile.
+///
+/// Cargo does not expose another workspace member's `CARGO_BIN_EXE_*` value to this package's
+/// integration tests, so derive the path beside the known service executable. Workspace tests
+/// build all three binaries before exercising process scenarios.
+pub fn ghostlight_mcp_bin() -> PathBuf {
+    let dir = Path::new(ghostlight_service_bin())
         .parent()
         .expect("the test binary has a parent directory");
     let name = if cfg!(windows) {
-        "ghostlight-relay.exe"
+        "ghostlight-mcp-connector.exe"
     } else {
-        "ghostlight-relay"
+        "ghostlight-mcp-connector"
     };
     dir.join(name)
 }
@@ -65,12 +62,12 @@ pub fn spawn_service(endpoint: &str) -> Child {
     spawn_service_with_manifest(endpoint, None)
 }
 
-/// Like [`spawn_service`], but with `--manifest <src>` forwarded to the SERVICE (PINS.md SS5.1: a
-/// `--manifest` on the ADAPTER is a no-op with a warning -- only the SERVICE ever loads policy).
+/// Like [`spawn_service`], but with `--manifest <src>` forwarded to the service. The MCP edge never
+/// loads policy.
 pub fn spawn_service_with_manifest(endpoint: &str, manifest: Option<&str>) -> Child {
     let log_dir = log_dir_for(endpoint);
     let _ = std::fs::remove_dir_all(&log_dir);
-    let mut cmd = Command::new(bin());
+    let mut cmd = Command::new(ghostlight_service_bin());
     // PINS.md SS5.1: `--manifest` is a TOP-LEVEL `Cli` field, not scoped to the `service`
     // subcommand -- it MUST precede the subcommand token on the command line (usage:
     // `ghostlight --manifest <src> service`), or clap rejects it as an unexpected argument.
@@ -99,7 +96,7 @@ pub fn spawn_service_with_manifest(endpoint: &str, manifest: Option<&str>) -> Ch
 pub fn spawn_service_with_program_data(endpoint: &str, program_data_dir: &Path) -> Child {
     let log_dir = log_dir_for(endpoint);
     let _ = std::fs::remove_dir_all(&log_dir);
-    let child = Command::new(bin())
+    let child = Command::new(ghostlight_service_bin())
         .arg("service")
         .env("GHOSTLIGHT_ENDPOINT", endpoint)
         .env("ProgramData", program_data_dir)
@@ -115,24 +112,20 @@ pub fn spawn_service_with_program_data(endpoint: &str, program_data_dir: &Path) 
     child
 }
 
-/// Spawn a bare `ghostlight` invocation (the thin ADAPTER) with piped stdin/stdout, relaying to the
-/// SERVICE already running on `endpoint`. Because the service is spawned FIRST and awaited-ready
-/// ([`spawn_service`]), the adapter's first dial succeeds and the self-heal path is never taken --
-/// correct, since tests must never touch a real OS supervisor. Shares the SAME `GHOSTLIGHT_LOG_DIR`
-/// ([`log_dir_for`]) the matching [`spawn_service`] call used: anti-squat (PINS.md SS5.3) requires
-/// both sides to read the SAME per-install `hub-key`, so a mismatched log dir here would make
-/// every real adapter/service pair fail the proof, not just an intentional impostor scenario.
-pub fn spawn_adapter(endpoint: &str) -> Child {
-    Command::new(relay_bin())
-        .arg("--role")
-        .arg("agent")
+/// Spawn `ghostlight-mcp-connector` with piped stdio and connect it to the ready service at `endpoint`.
+///
+/// The matching [`spawn_service`] must run first so tests do not invoke supervisor self-heal. Both
+/// processes share [`log_dir_for`] because the owner-only bridge anti-squat proof reads the same
+/// per-install key from that directory.
+pub fn spawn_mcp_edge(endpoint: &str) -> Child {
+    Command::new(ghostlight_mcp_bin())
         .env("GHOSTLIGHT_ENDPOINT", endpoint)
         .env("GHOSTLIGHT_LOG_DIR", log_dir_for(endpoint))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn ghostlight adapter")
+        .expect("spawn ghostlight MCP edge")
 }
 
 /// BLOCK until `log_dir` holds at least one `debug-state-*.json` file (the service has written its
@@ -170,63 +163,6 @@ pub fn newest_state(dir: &Path) -> Option<String> {
         .read_to_string(&mut contents)
         .ok()?;
     Some(contents)
-}
-
-/// The newest `debug-state-*.json` under `dir` written by a process whose `role` matches
-/// ("adapter", "mcp-server", "native-host"), parsed as JSON. The adapter and the service both write
-/// state files into a shared test log dir, so a test that wants the ADAPTER's structured counters
-/// (ADR-0051 P4.3b) must filter on role rather than take [`newest_state`] (which may return the
-/// service's file). `None` if none match yet.
-pub fn newest_state_for_role(dir: &Path, role: &str) -> Option<serde_json::Value> {
-    let mut newest: Option<(std::time::SystemTime, serde_json::Value)> = None;
-    for entry in std::fs::read_dir(dir).ok()?.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !(name.starts_with("debug-state-") && name.ends_with(".json")) {
-            continue;
-        }
-        let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else {
-            continue;
-        };
-        let Ok(raw) = std::fs::read_to_string(entry.path()) else {
-            continue;
-        };
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
-            continue;
-        };
-        if v.get("role").and_then(|r| r.as_str()) != Some(role) {
-            continue;
-        }
-        if newest.as_ref().map(|(t, _)| mtime > *t).unwrap_or(true) {
-            newest = Some((mtime, v));
-        }
-    }
-    newest.map(|(_, v)| v)
-}
-
-/// Poll [`newest_state_for_role`] until `pred` holds on the parsed state (returning it), or panic
-/// after `within`. Bridges the brief window between the adapter forcing a snapshot on a lifecycle
-/// note and the test reading it back (ADR-0051 P4.3b).
-pub fn wait_state_for_role_until(
-    dir: &Path,
-    role: &str,
-    within: Duration,
-    pred: impl Fn(&serde_json::Value) -> bool,
-) -> serde_json::Value {
-    let deadline = Instant::now() + within;
-    loop {
-        if let Some(v) = newest_state_for_role(dir, role) {
-            if pred(&v) {
-                return v;
-            }
-        }
-        if Instant::now() >= deadline {
-            panic!(
-                "no '{role}' debug-state satisfying the predicate under {} within {within:?}",
-                dir.display()
-            );
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
 }
 
 /// The fake-extension attach preamble (ADR-0058/0061): the browser-role hello the relay would

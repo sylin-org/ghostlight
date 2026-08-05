@@ -6,8 +6,9 @@ boundaries when you want them. All-open is a first-class default.
 
 This npm package is a thin launcher. On first run it downloads the version-matched Ghostlight
 binaries from the GitHub release and caches them under `~/.ghostlight/bin/`, so there are no
-runtime dependencies. A bare `npx ghostlight` starts the MCP server your client talks to;
-`npx ghostlight install` connects the browser side.
+runtime dependencies. The package keeps the persistent service, the protocol-versioned MCP edge,
+and the browser-only native connector together. A bare `npx ghostlight` starts `ghostlight-mcp-connector`, the
+stdio server your client talks to; `npx ghostlight install` connects the browser side.
 
 ## Quick start
 

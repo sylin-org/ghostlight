@@ -21,7 +21,7 @@ pub fn host_name() -> String {
 pub const HOST_DESCRIPTION: &str = "Ghostlight native messaging host";
 
 /// Upper bound on generic framed IPC input. This is a corruption guard, not Chrome's directional
-/// contract: the core browser adapter separately keeps host-to-extension messages below Chrome's
+/// contract: the service's browser shore separately keeps host-to-extension messages below Chrome's
 /// 1 MiB limit and uses bounded negotiated chunks for larger ordinary requests (ADR-0074).
 pub const MAX_MESSAGE_LEN: u32 = 128 * 1024 * 1024;
 

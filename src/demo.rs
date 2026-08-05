@@ -4,8 +4,8 @@
 //! tool surface -- the same path Claude takes. Cross-platform, superseding the pre-ADR-0046/0051
 //! PowerShell harnesses that directly spawned the old single-process server.
 //!
-//! It connects by spawning `ghostlight-relay --role agent` and speaking newline-delimited
-//! JSON-RPC over its stdio -- the relay handles all the connect/handshake/reconnect resilience, so
+//! It connects by spawning `ghostlight-mcp-connector` and speaking newline-delimited JSON-RPC over its
+//! stdio -- the protocol edge handles connect/handshake/reconnect resilience, so
 //! this stays a thin scripted client. At `initialize` it declares a tighten-only session policy
 //! overlay (ADR-0060, `examples/demo-policy.json`): grants the public stage plus explicit loopback
 //! hosts for local preview. Every Foundry step then works, and the finale -- a navigation to
@@ -598,7 +598,7 @@ mod tests {
             "content": [{ "type": "text", "text": "[10,20.5,30,40]" }],
             "structuredContent": { "page": { "origin": "https://example.com" } }
         });
-        ghostlight::mcp::provenance::apply(
+        ghostlight::tool::provenance::apply(
             &mut result,
             ghostlight::browser::directory::PageOutput::Text,
             "00112233-4455-4677-8899-aabbccddeeff",

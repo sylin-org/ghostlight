@@ -4,8 +4,8 @@
 //! reaches dispatch and returns a `Denied (D-...)` text result instead -- that contrast is the test
 //! signal.
 //!
-//! ADR-0051 Phase 4 moved these cases onto the in-process `support::inproc::Harness`, which drives
-//! the same serve_session -> governance decide -> dispatch path with no OS process. Governed cases
+//! The ADR-0096 protocol-neutral `support::inproc::Harness` drives the same governance decision and
+//! service dispatch path with no OS process. Governed cases
 //! carry their `audit.*` config in the manifest. The all-open parent-audit process case lives in
 //! the ADR-0056 Lightbox scenario library.
 //!
@@ -61,10 +61,10 @@ fn read_audit_lines(path: &Path) -> Vec<Value> {
         .collect()
 }
 
-/// Drive `requests` through an in-process session: governed by `manifest` (a manifest JSON `Value`
+/// Drive `requests` through an in-process harness: governed by `manifest` (a manifest JSON `Value`
 /// carrying its own audit config) when `Some`, all-open when `None`. Builds a FRESH
 /// `support::inproc::Harness` per call, so two calls with the same manifest model two independent
-/// sessions of the same policy version (the denial-id determinism test relies on this).
+/// runs of the same policy version (the denial-id determinism test relies on this).
 async fn drive(manifest: Option<&Value>, requests: &[Value]) -> Vec<Value> {
     let harness = match manifest {
         Some(value) => Harness::governed(manifest_from_value(value)),
@@ -333,7 +333,7 @@ async fn all_open_invariant_no_manifest_means_no_denials() {
         ghostlight::browser::directory::advertised_tool_count(),
         "the wire advertises the full REGISTRY surface (see directory::advertised_tool_names)"
     );
-    let fixture = ghostlight::mcp::tools::advertised_tools_json();
+    let fixture = ghostlight::tool::tools::advertised_tools_json();
     assert_eq!(list["result"], fixture, "byte-identical tools/list");
 
     let call = by_id(&responses, 3);
@@ -354,9 +354,9 @@ async fn all_open_invariant_no_manifest_means_no_denials() {
     }
 }
 
-/// Denial-id determinism (ADR-0020): the same denied call, driven twice within one session and
-/// again in a second independent session against the SAME manifest, gets the identical `D-...` id
-/// every time (the id derives from the manifest's content hash, not from any per-session state).
+/// Denial-id determinism (ADR-0020): the same denied call, driven twice within one harness and
+/// again in a second independent harness against the SAME manifest, gets the identical `D-...` id
+/// every time (the id derives from the manifest's content hash, not from bridge-local state).
 #[tokio::test]
 async fn denial_id_is_deterministic_within_and_across_sessions() {
     let audit_path = temp_path("case-determinism-audit");

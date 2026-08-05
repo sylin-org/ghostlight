@@ -533,6 +533,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostlight-browser-connector"
+version = "0.7.3"
+dependencies = [
+ "ghostlight-transport",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ghostlight-core"
 version = "0.7.3"
 dependencies = [
@@ -577,10 +586,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "ghostlight-relay"
+name = "ghostlight-mcp-connector"
 version = "0.7.3"
 dependencies = [
  "ghostlight-transport",
+ "serde_json",
  "tokio",
  "tracing",
 ]

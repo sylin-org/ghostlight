@@ -4,6 +4,8 @@
 
 # Rust build output
 /target/
+/.target-*/
+/target-*/
 
 # Packaged extension zip (scripts/package-extension.ps1 output)
 /dist/

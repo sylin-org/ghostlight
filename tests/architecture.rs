@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Fail-closed guard on the `governance/` core boundary (ADR-0021, PLAN A7).
+//! Fail-closed guards on the governance and protocol-shore boundaries.
 //!
 //! `governance/` is the domain-agnostic core: it is written so it can later be lifted into its
 //! own crate with no code change. This test walks every `.rs` file under `src/governance/`
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 const FORBIDDEN_CRATE_EDGES: &[&str] = &[
     "crate::browser",
     "crate::transport",
-    "crate::mcp",
+    "crate::tool",
     "crate::native",
 ];
 
@@ -122,12 +122,12 @@ fn governance_dir() -> PathBuf {
         .join("governance")
 }
 
-fn mcp_dir() -> PathBuf {
+fn tool_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("crates")
         .join("core")
         .join("src")
-        .join("mcp")
+        .join("tool")
 }
 
 /// Recursively collect every `.rs` file under `dir` into `out`. Hand-rolled, no `walkdir`.
@@ -187,15 +187,15 @@ fn governance_core_has_no_forbidden_back_edges() {
     );
 }
 
-/// ADR-0080: production MCP code may not use the legacy safety-protocol Browser::call wrapper.
+/// ADR-0080: production tool code may not use the legacy safety-protocol Browser::call wrapper.
 /// Every ordinary browser dispatch must name call_with_context and carry an ExecutionContext.
 #[test]
-fn mcp_browser_dispatches_require_an_execution_context() {
+fn tool_browser_dispatches_require_an_execution_context() {
     let mut files = Vec::new();
-    collect_rust_files(&mcp_dir(), &mut files);
+    collect_rust_files(&tool_dir(), &mut files);
     let mut violations = Vec::new();
     for file in files {
-        let contents = fs::read_to_string(&file).expect("read MCP source");
+        let contents = fs::read_to_string(&file).expect("read tool source");
         let production = contents.split("#[cfg(test)]").next().unwrap_or(&contents);
         let compact: String = production
             .chars()
@@ -207,9 +207,121 @@ fn mcp_browser_dispatches_require_an_execution_context() {
     }
     assert!(
         violations.is_empty(),
-        "ordinary MCP browser sends must use call_with_context; legacy call found in: {}",
+        "ordinary tool browser sends must use call_with_context; legacy call found in: {}",
         violations.join(", ")
     );
+}
+
+fn repo_path(relative: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
+}
+
+fn read_repo_file(relative: &str) -> String {
+    let path = repo_path(relative);
+    fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+}
+
+/// ADR-0096: the protocol edge may depend on transport mechanics, never the service engine.
+#[test]
+fn protocol_edge_has_no_service_engine_dependency() {
+    let manifest = read_repo_file("crates/mcp-connector/Cargo.toml");
+    for forbidden in ["ghostlight-core", "path = \"../core\""] {
+        assert!(
+            !manifest.contains(forbidden),
+            "crates/mcp-connector must not depend on the service engine: found {forbidden}"
+        );
+    }
+    assert!(manifest.contains("ghostlight-transport"));
+
+    let mut files = Vec::new();
+    collect_rust_files(&repo_path("crates/mcp-connector/src"), &mut files);
+    for file in files {
+        let source = fs::read_to_string(&file).expect("read protocol-edge source");
+        assert!(
+            !source.contains("ghostlight_core") && !source.contains("ghostlight::browser"),
+            "protocol edge imports service code: {}",
+            file.display()
+        );
+    }
+}
+
+/// ADR-0096: exact revision and client-wire vocabulary stops at the service shore.
+#[test]
+fn service_execution_is_protocol_revision_agnostic() {
+    let mut files = Vec::new();
+    collect_rust_files(&tool_dir(), &mut files);
+    files.push(repo_path("crates/core/src/hub/bridge.rs"));
+    files.push(repo_path("crates/core/src/work.rs"));
+    let forbidden = [
+        "2025-11-25",
+        "2026-07-28",
+        "json-rpc",
+        "json_rpc",
+        "stdio",
+        "mcp tasks",
+    ];
+    let mut violations = Vec::new();
+    for file in files {
+        let source = fs::read_to_string(&file).expect("read neutral service source");
+        let lower = source.to_ascii_lowercase();
+        for term in forbidden {
+            if lower.contains(term) {
+                violations.push(format!("{}: {term}", file.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "protocol-specific vocabulary crossed into service execution:\n{}",
+        violations.join("\n")
+    );
+}
+
+/// ADR-0096: process identity is diagnostic only, never application authority or routing state.
+#[test]
+fn work_and_workspace_routing_do_not_name_pid() {
+    for relative in [
+        "crates/core/src/work.rs",
+        "crates/core/src/hub/workspace.rs",
+        "crates/core/src/hub/scheduling.rs",
+    ] {
+        let lower = read_repo_file(relative).to_ascii_lowercase();
+        assert!(
+            !contains_path_token(&lower, "pid", true)
+                && !lower.contains("process_id")
+                && !lower.contains("processid"),
+            "process identity entered authority or routing state: {relative}"
+        );
+    }
+}
+
+/// ADR-0096: the relay is browser-only; the MCP role cannot grow back as a flag.
+#[test]
+fn browser_connector_has_no_agent_or_mcp_role() {
+    let source = read_repo_file("crates/browser-connector/src/main.rs");
+    for forbidden in ["--role", "Role::McpEdge", "relay_adapter", "ROLE_MCP"] {
+        assert!(
+            !source.contains(forbidden),
+            "browser connector regained an MCP role: {forbidden}"
+        );
+    }
+}
+
+/// ADR-0096: releases have exactly three product executables; Lightbox remains dev-only.
+#[test]
+fn shipped_executable_topology_is_exact() {
+    let root = read_repo_file("Cargo.toml");
+    let mcp = read_repo_file("crates/mcp-connector/Cargo.toml");
+    let browser = read_repo_file("crates/browser-connector/Cargo.toml");
+    let lightbox = read_repo_file("crates/lightbox/Cargo.toml");
+    assert!(root.contains("name = \"ghostlight\""));
+    assert!(mcp.contains("name = \"ghostlight-mcp-connector\""));
+    assert!(browser.contains("name = \"ghostlight-browser-connector\""));
+    assert!(lightbox.contains("publish = false"));
+    assert!(repo_path("src/main.rs").is_file());
+    assert!(repo_path("crates/mcp-connector/src/main.rs").is_file());
+    assert!(repo_path("crates/browser-connector/src/main.rs").is_file());
+    assert!(!repo_path("crates/core/src/mcp").exists());
 }
 
 #[test]
@@ -223,8 +335,8 @@ fn scanner_detects_forbidden_crate_edges() {
         vec!["crate::transport".to_string()]
     );
     assert_eq!(
-        scan_line("use crate::mcp::types::Foo;"),
-        vec!["crate::mcp".to_string()]
+        scan_line("use crate::tool::result::Foo;"),
+        vec!["crate::tool".to_string()]
     );
     assert_eq!(
         scan_line("crate::native::host::send();"),
@@ -270,7 +382,7 @@ fn scanner_ignores_clean_lines() {
     // Trailing boundary: a different module whose name merely starts with a forbidden one.
     assert!(scan_line("use crate::browser_stats::X;").is_empty());
     // Leading boundary: a longer crate name.
-    assert!(scan_line("use mycrate::mcp_helpers::Y;").is_empty());
+    assert!(scan_line("use mycrate::tool_helpers::Y;").is_empty());
     // `url` letters inside identifiers are not the crate.
     assert!(scan_line("let full_url = build_url();").is_empty());
     assert!(scan_line("struct R { url: String }").is_empty());

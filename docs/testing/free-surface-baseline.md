@@ -18,8 +18,8 @@ To inspect the resolved paths without launching Chromium:
 node tests/e2e/run-smoke.mjs --dry-run --free-surface-baseline
 ```
 
-The runner starts the real Ghostlight service, relay, unpacked extension, Chromium, and a local
-fixture server. Its JSON report contains:
+The runner starts the real Ghostlight MCP edge, persistent service, browser relay, unpacked
+extension, Chromium, and a local fixture server. Its JSON report contains:
 
 - Ghostlight version, platform, and measurement time;
 - three visual-semantic journeys;

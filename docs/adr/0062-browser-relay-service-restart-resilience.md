@@ -4,6 +4,23 @@
 - Date: 2026-07-12
 - Amends: ADR-0045 (adapter reconnect + handshake replay), ADR-0058/0061 (browser identity)
 
+## Amendment by ADR-0096 (2026-08-04)
+
+Identity replay preserves only the browser shore's native port, persistent `browserId`, and
+service-assigned browser slot. It does not preserve the restarted service's in-memory workspace
+registry, tab authority, pending calls, or effect disposition. A pre-restart composite number may
+still decode to the same browser slot, but it cannot route a new call until a successful
+`tabs_context_mcp` or `tabs_create_mcp` result establishes that tab in the current live
+`WorkspaceId`. Input ids never recreate ownership.
+
+Likewise, a call lost at service failure is reported as `outcome_unknown` when execution may have
+started. Ghostlight never replays it, and there is no general "the model retries" rule for an
+unknown effect. The caller must re-establish context and choose a recovery based on the operation
+and available evidence. Dial, relay hello, and cached identity replay now form one bounded opening
+attempt, so a stale pipe that closes during either opening write remains inside this reconnect
+contract. The historical text below records the earlier rationale but is superseded where it
+claims broader continuity.
+
 ## Context
 
 The MCP-side ADAPTER relay is resilient to a service restart (ADR-0045): when the service drops, the

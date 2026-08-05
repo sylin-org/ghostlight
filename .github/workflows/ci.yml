@@ -56,10 +56,10 @@ jobs:
           key: ${{ matrix.os }}
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Build the deliverable binaries FIRST. Some CLI-command tests still spawn the sibling
-      # `ghostlight` / `ghostlight-relay` by path;
-      # `cargo test` alone builds test harnesses + CARGO_BIN_EXE_ghostlight but NOT the sibling
-      # relay deliverable, so those would panic at spawn (ENOENT). rust-cache had masked this until
-      # a Cargo.lock change rotated the cache.
+      # `ghostlight` / `ghostlight-mcp-connector` / `ghostlight-browser-connector` by path;
+      # `cargo test` alone builds test harnesses + CARGO_BIN_EXE_ghostlight but NOT every sibling
+      # deliverable, so those would panic at spawn (ENOENT). rust-cache had masked this until a
+      # Cargo.lock change rotated the cache.
       - run: cargo build --locked --workspace
       # --no-fail-fast: report EVERY failing test binary, not just the first (ADR-0032).
       - run: cargo test --locked --no-fail-fast --workspace
@@ -94,6 +94,8 @@ jobs:
       # Let Node expand the quoted glob so Bash and PowerShell discover the same complete suite.
       - run: node --test "tests/extension/*.test.js"
       - run: npm test --prefix packaging/npm
+      - run: node --test "packaging/mcpb/test/*.test.js"
+      - run: npx --yes @anthropic-ai/mcpb@2.1.2 validate packaging/mcpb/manifest.json
 
   # Real extension + real binary over native messaging, driven as an MCP server over stdio.
   # Retained under ADR-0056 Decision 4: Lightbox replaces service-side process coverage, while

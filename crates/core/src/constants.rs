@@ -26,22 +26,15 @@ pub mod notification {
     }
 }
 
-/// Private native-envelope vocabulary for session-pinned browser placement. These fields never
-/// enter the trained MCP schemas or model-facing results; the browser boundary strips the result
-/// metadata after recording the native window target.
+/// Private native-envelope vocabulary for browser-shore workspace presentation. These fields
+/// never enter the trained MCP schemas or model-facing results.
 pub mod workspace {
-    /// Top-level `tool_request` member carrying the placement instruction.
+    /// Top-level `tool_request` member carrying presentation metadata.
     pub const REQUEST: &str = "workspace";
-    /// A pinned adapter-native window id inside a workspace request or private result metadata.
-    pub const WINDOW_ID: &str = "windowId";
-    /// Selector member used before a session has a pinned native window.
-    pub const SELECT: &str = "select";
-    /// Pull-based Chromium selector: query the most recently focused eligible normal window.
-    pub const LAST_FOCUSED_NORMAL: &str = "last_focused_normal";
-    /// Private extension-result member consumed and removed by the browser boundary.
+    /// Presentation-only Chrome tab-group title for this workspace.
+    pub const GROUP_TITLE: &str = "groupTitle";
+    /// Covered older extension-result member stripped during a live shore upgrade.
     pub const RESULT_META: &str = "_ghostlightWorkspace";
-    /// Conclusive extension error: the pinned normal window disappeared or became ineligible.
-    pub const WINDOW_INELIGIBLE_ERROR: &str = "workspace_window_ineligible";
 }
 
 /// Composite tab identifiers (ADR-0058, amended by ADR-0061): a `tabId` that crosses the wire to
@@ -51,7 +44,7 @@ pub mod workspace {
 /// (`crate::browser::directory`) never changes shape. ADR-0061 replaced the high-bits `browser_pid`
 /// (which degraded to a colliding 0) with a `slot` derived from the extension's persistent UUID; the
 /// arithmetic is unchanged. The extension itself never learns this encoding exists: only
-/// `crate::mcp::pipeline` (decoding an inbound composite id to route the call, and encoding an
+/// `crate::tool::pipeline` (decoding an inbound composite id to route the call, and encoding an
 /// outbound native id in a tool result) touches these.
 pub mod tab_id {
     /// Bounds the native (extension-side) tab id to `2^32` (matching Chrome's internal tab id,
@@ -70,7 +63,8 @@ pub mod tab_id {
     /// Split a composite tab id back into `(slot, native_tab_id)`. Not meaningfully fallible: any
     /// `i64` decodes to SOME pair, even if the value never came from [`encode`] (a caller that used
     /// a plain small native id un-encoded just decodes to `slot: 0`, which will simply fail to match
-    /// any live session -- a clear "browser not connected" error, not a panic or a silent misroute).
+    /// any live browser connection -- a clear "browser not connected" error, not a panic or a
+    /// silent misroute).
     pub fn decode(composite: i64) -> (u32, i64) {
         let slot = (composite / MULTIPLIER).max(0) as u32;
         let native_tab_id = composite.rem_euclid(MULTIPLIER);
@@ -116,8 +110,8 @@ pub mod tab_id {
         #[test]
         fn decode_of_a_plain_small_native_id_never_panics() {
             // A caller that forgot to encode (or an old client echoing a pre-ADR-0058 value)
-            // decodes to a pid that will not match any live session -- handled as an ordinary
-            // routing miss downstream, not a special case here.
+            // decodes to a pid that will not match any live browser connection -- handled as an
+            // ordinary routing miss downstream, not a special case here.
             let (pid, tab) = decode(5);
             assert_eq!(pid, 0);
             assert_eq!(tab, 5);

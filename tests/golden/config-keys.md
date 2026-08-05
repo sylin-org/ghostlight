@@ -98,7 +98,7 @@ Default enforcement mode when the active manifest does not set one: observe reco
 
 ## `inbound.pipe.enabled`
 
-Whether the inbound.pipe adapter (the named-pipe/UDS listener thin MCP adapters dial into) binds.
+Whether the owner-only local bridge/control listener binds.
 
 - Type: bool
 - Constraints: none

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Per-user OS autostart registration for the always-ready Ghostlight service (ADR-0030 Decision 8
 //! amendment, H9; Windows mechanism replaced by ADR-0054). Registers `ghostlight service` to start
-//! at login, then starts it once so the first session is already up; unregisters + stops it on
-//! uninstall. Uses the SAME per-platform identifiers the adapter self-heal targets
+//! at login, then starts it once so the service is already warm; unregisters + stops it on
+//! uninstall. Uses the SAME per-platform identifiers the MCP edge self-heal targets
 //! (`ghostlight_transport::supervisor`), so there is one source of truth for the names both sides
 //! address. Every mechanism is per-user and genuinely zero-admin -- NEVER elevated (Decision 8):
 //! an HKCU Run key + detached start on Windows (a schtasks logon task needs elevation, issue #17),
 //! a user launchd LaunchAgent on macOS, a systemd --user unit on Linux. Registration also activates
 //! the selected installed engine immediately (ADR-0092). Applying these steps is best-effort: a
-//! failure here is logged and never aborts the surrounding install/uninstall (the adapter self-heal
+//! failure here is logged and never aborts the surrounding install/uninstall (the MCP edge self-heal
 //! and manual `ghostlight service` remain fallbacks).
 
 use super::{native_host, PlanCtx};
@@ -317,7 +317,7 @@ mod activation {
     use std::time::{Duration, Instant};
 
     const SERVICE_EXE_NAME: &str = "ghostlight.exe";
-    const RELAY_EXE_NAME: &str = "ghostlight-relay.exe";
+    const RELAY_EXE_NAME: &str = "ghostlight-browser-connector.exe";
     const OWNER_RETRIES: usize = 10;
     const OWNER_RETRY_INTERVAL: Duration = Duration::from_millis(50);
     const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(3);
@@ -379,7 +379,7 @@ mod activation {
     }
 
     /// Activate `exe` without displacing an explicitly running repository/dev engine. Only the
-    /// exact owner of the resolved adapter endpoint may be replaced, and only after its executable
+    /// exact owner of the resolved typed edge/control endpoint may be replaced, and only after its executable
     /// path proves that it belongs to `install_root`.
     pub(super) fn activate(
         exe: &Path,
@@ -634,7 +634,7 @@ mod activation {
 
 /// Apply supervisor steps best-effort, printing progress in the same `[ok]`/`[warn]`/`[plan]`/
 /// `[noop]` style the rest of the installer uses. Never aborts and never returns an error: a failed
-/// step here is a WARNING (Required behavior item 4) -- the adapter self-heal
+/// step here is a WARNING (Required behavior item 4) -- the MCP edge self-heal
 /// (`ghostlight_transport::supervisor::start_service`) and manual `ghostlight service` remain fallbacks.
 pub fn apply_steps(label: &str, steps: &[SupervisorStep], dry_run: bool) {
     for step in steps {

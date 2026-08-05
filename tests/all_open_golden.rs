@@ -17,7 +17,7 @@ use ghostlight::governance::dispatch::Governance;
 use ghostlight::governance::ports::{
     AuditRecord, AuditSink, Capability, Decision, EffectiveMode, GoverningResource,
 };
-use ghostlight::transport::mcp::tools::advertised_tools_json;
+use ghostlight::tool::tools::advertised_tools_json;
 
 /// The 25 tool names in advertised order (the 13 trained tools plus `narrate`, `wait_for`, `script`,
 /// `form_fill`, `act_on`, `dialog`, `tab_control`, `file_upload` (ADR-0050 Decision 2), `browser_batch` (ADR-0050 Decision 3),

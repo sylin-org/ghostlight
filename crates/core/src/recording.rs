@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Session-owned, memory-only GIF recording state (ADR-0073).
+//! Workspace-owned, memory-only GIF recording state (ADR-0073, amended by ADR-0096).
 //!
 //! The extension supplies Chrome mechanics and compressed frames. This module owns recording
 //! identity, state transitions, bounds, action tagging, deadlines, and erasure. Captured bytes
@@ -237,7 +237,7 @@ struct Inner {
     tombstones: HashMap<(String, SurfaceId), RecordingSummary>,
 }
 
-/// All recording sessions in this service process.
+/// All workspace-owned recordings in this service process.
 pub(crate) struct RecordingCoordinator {
     inner: Mutex<Inner>,
 }
@@ -702,7 +702,7 @@ impl RecordingCoordinator {
     }
 
     /// Whether an already encoded snapshot may still cross its explicit export boundary. Clear,
-    /// expiry, session teardown, panic, and policy changes all revoke delivery.
+    /// expiry, workspace retirement, panic, and policy changes all revoke delivery.
     pub(crate) fn delivery_allowed(
         &self,
         owner: &str,
@@ -789,7 +789,7 @@ impl RecordingCoordinator {
         }
     }
 
-    /// Erase all content owned by an ending session and return generations whose relays should
+    /// Erase all content owned by a retiring workspace and return generations whose relays should
     /// stop immediately.
     pub(crate) fn end_session(&self, owner: &str, reason: StopReason) -> Vec<RecordingTicket> {
         let tickets: Vec<RecordingTicket> = {

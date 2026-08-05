@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! ADR-0046: the bare `ghostlight` (no subcommand) no longer serves MCP. It prints guidance
-//! pointing the user at `ghostlight-relay` (ADR-0051 Phase 3) and exits 2.
+//! ADR-0096: the bare `ghostlight` (no subcommand) does not serve MCP. It points the user at the
+//! dedicated `ghostlight-mcp-connector` protocol edge and exits 2.
 
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -27,7 +27,7 @@ fn bare_invocation_prints_guidance_and_exits_2() {
         "bare invocation exits 2; stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("ghostlight no longer serves MCP directly"),
-        "stderr carries the ADR-0046 guidance:\n{stderr}"
+        stderr.contains("your MCP client launches ghostlight-mcp-connector"),
+        "stderr carries the ADR-0096 guidance:\n{stderr}"
     );
 }

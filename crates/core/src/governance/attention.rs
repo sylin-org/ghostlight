@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-Ghostlight-Commercial
-//! Per-session denial-burst attention state (ADR-0079).
+//! Per-workspace denial-burst attention state (ADR-0079, amended by ADR-0096).
 //!
 //! This module is pure over caller-supplied instants and normalized decision facts. It owns no
-//! transport, presentation, or live-resource mechanism. Infrastructure supplies a session-local
+//! transport, presentation, or live-resource mechanism. Infrastructure supplies a workspace-local
 //! instance, presents returned transitions, and applies explicit human dispositions.
 
 use std::collections::{HashSet, VecDeque};
@@ -16,7 +16,7 @@ pub const MATCHING_DENIAL_THRESHOLD: u32 = 3;
 pub const MATCHING_DENIAL_WINDOW: Duration = Duration::from_secs(60);
 /// All enforced denials required to open the circuit.
 pub const SESSION_DENIAL_THRESHOLD: u32 = 5;
-/// Rolling window for all enforced denials in one session.
+/// Rolling window for all enforced denials in one workspace.
 pub const SESSION_DENIAL_WINDOW: Duration = Duration::from_secs(120);
 
 /// The service-authored class of an enforced denial.
@@ -24,7 +24,7 @@ pub const SESSION_DENIAL_WINDOW: Duration = Duration::from_secs(120);
 pub enum DenialCategory {
     /// The always-on never-touch boundary denied the request.
     Sacred,
-    /// An active grant or session overlay denied the request.
+    /// An active grant or tighten-only request restriction denied the request.
     Policy,
 }
 
@@ -43,7 +43,7 @@ impl DenialCategory {
 pub enum ThresholdKind {
     /// The same decision signature repeated in the short window.
     Matching,
-    /// The session produced enough enforced denials of any signature.
+    /// The workspace produced enough enforced denials of any signature.
     Session,
 }
 
@@ -103,9 +103,9 @@ pub enum AttentionDisposition {
     KeepPaused,
     /// Close the circuit and clear rolling history.
     Resume,
-    /// Close and quiet identical isolated-denial presentation for this session.
+    /// Close and quiet identical isolated-denial presentation for this workspace.
     ResumeQuiet,
-    /// End the enclosing session through its existing panic path.
+    /// End the enclosing browser interaction through its existing panic path.
     EndSession,
 }
 
@@ -200,7 +200,7 @@ struct Observation {
     signature: Signature,
 }
 
-/// One session's memory-only denial attention circuit.
+/// One workspace's memory-only denial attention circuit.
 #[derive(Debug, Default)]
 pub struct AttentionCircuit {
     observations: VecDeque<Observation>,

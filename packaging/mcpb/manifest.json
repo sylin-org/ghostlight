@@ -1,0 +1,52 @@
+{
+  "manifest_version": "0.3",
+  "name": "ghostlight",
+  "display_name": "Ghostlight",
+  "version": "0.7.3",
+  "description": "Use your signed-in Chromium browser from Claude with local execution and optional governance.",
+  "long_description": "Ghostlight connects Claude to the Chromium browser you already use. It can navigate, read pages, fill forms, upload files, inspect console and network activity, and run multi-step browser workflows. The service, MCP connector, and browser connector run on your machine. Optional governance adds capability grants, protected domains, and structured local audit logs. The Ghostlight in Browser extension from the Chrome Web Store is required.",
+  "author": {
+    "name": "Sylin",
+    "email": "hello@sylin.org",
+    "url": "https://github.com/sylin-org"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sylin-org/ghostlight.git"
+  },
+  "homepage": "https://sylin.org/ghostlight/",
+  "documentation": "https://github.com/sylin-org/ghostlight/blob/main/docs/guides/installation.md",
+  "support": "https://github.com/sylin-org/ghostlight/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/launch.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/launch.js"
+      ],
+      "env": {}
+    }
+  },
+  "tools_generated": true,
+  "keywords": [
+    "browser",
+    "automation",
+    "chromium",
+    "governance",
+    "audit"
+  ],
+  "privacy_policies": [
+    "https://sylin.org/ghostlight/privacy/"
+  ],
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}

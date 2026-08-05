@@ -2,7 +2,7 @@
 //! The manage.web adapter -- a standalone loopback HTTP UI for observing runtime state.
 //!
 //! This listener is not an MCP transport. It never upgrades to WebSocket and never admits tool
-//! sessions. It exposes only read-only management routes:
+//! work. It exposes only read-only management routes:
 //! - `GET /` -- the embedded HTML shell.
 //! - `GET /manage.css`, `GET /manage.js` -- the shell's static assets.
 //! - `GET /api/v1/config` -- the provenance-aware config view.
@@ -41,7 +41,7 @@ pub fn enabled(store: &crate::governance::config::reload::ConfigStore) -> bool {
 }
 
 /// Run the standalone loopback management listener. Bind failures are logged and do not affect
-/// local MCP sessions.
+/// local MCP-edge bridge streams.
 pub async fn run(ctx: ServiceContext) {
     let port = resolve_port();
     let addr = format!("{DEFAULT_BIND}:{port}");
@@ -279,32 +279,30 @@ async fn write_sessions_response(
     ctx: &ServiceContext,
 ) -> crate::Result<()> {
     let live_session_count = ctx.live_sessions.load(std::sync::atomic::Ordering::Relaxed);
-    let summaries =
-        crate::hub::session::live_session_summaries(&ctx.session_registry, &ctx.owned_tabs);
+    let summaries = ctx.workspaces.summaries();
     let payload = sessions_payload(&summaries, live_session_count).to_string();
     write_json(stream, 200, "OK", &payload).await
 }
 
 fn sessions_payload(
-    summaries: &[crate::hub::session::SessionSummary],
+    summaries: &[crate::hub::workspace::WorkspaceSummary],
     live_session_count: usize,
 ) -> serde_json::Value {
-    let adapter_bindings: Vec<serde_json::Value> = summaries
+    let workspaces: Vec<serde_json::Value> = summaries
         .iter()
         .map(|summary| {
             serde_json::json!({
-                "guid": summary.guid,
-                "pid": summary.pid,
+                "attached": summary.attached,
+                "active": summary.active,
                 "owned_tab_ids": summary.owned_tab_ids,
             })
         })
         .collect();
     serde_json::json!({
         "live_session_count": live_session_count,
-        "adapter_bindings": adapter_bindings,
-        "note": "adapter_bindings lists sessions admitted since the service started; a listed \
-                 binding may no longer be currently connected. Management HTTP requests are not \
-                 sessions.",
+        "workspaces": workspaces,
+        "note": "Workspace bearer handles and OS-user principals are intentionally omitted. \
+                 Management HTTP requests are not client sessions.",
     })
 }
 
@@ -421,21 +419,18 @@ mod tests {
 
     #[test]
     fn sessions_payload_serialises_count_bindings_and_note() {
-        let summaries = vec![crate::hub::session::SessionSummary {
-            guid: "abcd1234".to_string(),
-            pid: 4242,
+        let summaries = vec![crate::hub::workspace::WorkspaceSummary {
+            attached: 1,
+            active: 2,
             owned_tab_ids: vec![7, 9],
         }];
         let payload = sessions_payload(&summaries, 3);
         assert_eq!(payload["live_session_count"], 3);
-        let bindings = payload["adapter_bindings"].as_array().unwrap();
-        assert_eq!(bindings.len(), 1);
-        assert_eq!(bindings[0]["guid"], "abcd1234");
-        assert_eq!(bindings[0]["pid"], 4242);
-        assert_eq!(bindings[0]["owned_tab_ids"], serde_json::json!([7, 9]));
-        assert!(payload["note"]
-            .as_str()
-            .unwrap()
-            .contains("admitted since the service started"));
+        let workspaces = payload["workspaces"].as_array().unwrap();
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(workspaces[0]["attached"], 1);
+        assert_eq!(workspaces[0]["active"], 2);
+        assert_eq!(workspaces[0]["owned_tab_ids"], serde_json::json!([7, 9]));
+        assert!(payload["note"].as_str().unwrap().contains("bearer handles"));
     }
 }

@@ -1,60 +1,61 @@
-# MCP spec currency: the 2026-07-28 revision vs the Ghostlight tree
+# MCP spec currency: MCP 2026-07-28 and the Ghostlight tree
 
-Date: 2026-07-07 (final revision publishes 2026-07-28; release candidate locked 2026-05-21).
-Standing rule per ADR-0041 Decision 5: refresh this note when a new MCP revision publishes, and
-check it before any new transport or adapter work. Tree facts below are as of dev @ 656259c.
+Last reviewed: 2026-08-04 against the published `2026-07-28` revision and the unreleased
+ADR-0096 working tree.
 
-## What the 2026-07-28 revision changes (from the RC)
+This note originally concluded that version negotiation was the only required change. The final
+revision invalidated that conclusion. [ADR-0096](../adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md)
+is authoritative and records the resulting architecture replacement. Final implementation gates
+remain in progress; this note does not claim a published release or a conformance-runner result.
 
-1. **Stateless protocol core.** Protocol-level sessions are removed; the `Mcp-Session-Id`
-   header is gone from the Streamable HTTP transport.
-2. **Multi Round-Trip Requests (MRTR)** replace server-initiated sampling and elicitation: a
-   server returns an input-required result carrying `inputRequests` plus opaque `requestState`;
-   the client re-issues the call with answers. All state rides the payload.
-3. **Tasks**: a first-class primitive for long-running work.
-4. **Extensions framework**: namespaced optional protocol extensions.
-5. **Authorization hardening**: six SEPs aligning the auth spec with deployed OAuth 2.0/OIDC
-   practice (HTTP transports).
-6. **Deprecation policy**: deprecated features live at least 12 months before removal.
+## Useful protocol delta
 
-Sources: blog.modelcontextprotocol.io (2026-07-28 release candidate post); see
-docs/research/14 for the discovery context.
+The published revision differs materially from `2025-11-25`:
 
-## Audit of the tree against it
+1. The base protocol is request-stateless. It removes initialize and protocol sessions, and each
+   request carries its protocol version, client capabilities, and client information.
+2. `server/discover` exposes server identity and capabilities before ordinary requests.
+3. Results carry explicit result types, while list caching and change delivery use the revision's
+   cache fields and `subscriptions/listen` model.
+4. Cross-call application state requires explicit handles. A stdio connection or process is not
+   an application-state identity.
+5. Multi Round-Trip Requests replace the older sampling/elicitation shape. Tasks are a separate
+   optional extension rather than an implication of long-running internal work.
+6. The authorization changes target HTTP transports. They do not create a reason to add remote
+   browser-control ingress to Ghostlight's local stdio product.
 
-- **Transport exposure.** Ghostlight's MCP is hand-rolled JSON-RPC 2.0 over stdio through the
-  relay and the owner-only local OS pipe into the same `serve_session` chokepoint. It has no HTTP
-  or WebSocket browser-control transport and does not use Streamable HTTP, protocol-level
-  sessions, or `Mcp-Session-Id` (verified: no occurrence in production source). The
-  stateless-core change therefore costs nothing today, and the local adapter's session
-  model (per-connection `SessionGuid`, an internal concept) is unaffected because it was never
-  a protocol session.
-- **Server-initiated calls.** Ghostlight issues none (no sampling, no elicitation), so the
-  MRTR replacement is a no-op. If a future hold/approval flow ever wants client interaction,
-  MRTR is the shape to use; do not build on elicitation, which is now legacy.
-- **Structured results.** `structuredContent` + `outputSchema` (ADR-0038) match the current
-  published shape and are untouched by the RC.
-- **Authorization.** stdio + a loopback-default local web API; the OAuth SEPs target remote
-  HTTP deployments and do not apply. If the web adapter ever accepts non-loopback peers as an
-  MCP endpoint, the then-current auth spec becomes mandatory reading (the channels allowlist
-  is a Ghostlight policy, not a substitute for protocol auth).
-- **THE finding -- protocol version pinning.** `src/transport/mcp/server.rs:160` pins
-  `pub const PROTOCOL_VERSION: &str = "2024-11-05"` and `initialize_result` echoes it
-  unconditionally, ignoring the client's requested version. Meanwhile the server emits
-  `structuredContent`/`outputSchema`, which entered the spec in the 2025-06-18 revision. The
-  declared version and the emitted surface disagree, and there is no version negotiation.
-  Clients tolerate it today (unknown fields are ignored per spec), but it is the one place the
-  tree is not spec-truthful. **Disposition: landscape-1 task L2** adds version negotiation
-  over a supported set (`2024-11-05`, `2025-03-26`, `2025-06-18`): echo the requested version
-  when supported, else answer the latest supported. Declaring `2025-06-18` is honest because
-  every optional feature is capability-gated and Ghostlight declares only `tools`.
-- **Tasks (direction, not action).** `script` executions and future saved-script runs
-  (ADR-0039) map naturally onto the Tasks primitive if long-running browser workflows ever
-  outgrow a single request/response. Evaluate ONLY against the final published revision, after
-  2026-07-28; recorded as direction in ADR-0041 Decision 5.
+## Current Ghostlight disposition
 
-## Bottom line
+- `crates/mcp-connector/` owns hand-rolled JSON-RPC over stdio. Its exact handlers are named
+  `mcp_2025_11_25` and `mcp_2026_07_28`; older compatibility revisions are intentionally removed.
+- `mcp_2025_11_25` owns initialize/initialized lifecycle state and an implicit service-minted
+  `WorkspaceId`. `mcp_2026_07_28` validates metadata on every request and requires explicit
+  workspace continuity for stateful work.
+- The persistent `ghostlight` service receives typed product work, not raw MCP. Protocol dates,
+  JSON-RPC ids, lifecycle, envelopes, and connection metadata stay at the MCP shore.
+- Browser routing uses only `WorkspaceId` in the compatibility browser-wire field `guid`. Human
+  client labels are presentation/audit context and never routing or authority.
+- Multi Round-Trip `input_required` flows and MCP Tasks remain unadvertised. Either needs a
+  concrete product flow and its own accepted decision before implementation.
+- Structured content and output schemas remain part of the canonical tool projection, rendered
+  into the exact response shape by each dated handler.
+- Ghostlight still has no HTTP or WebSocket browser-control transport. The local management HTTP
+  surface is separate, loopback-only, read-only, and not an MCP endpoint under ADR-0077.
 
-The tree is effectively insulated by its stdio-first design. One real fix (version
-negotiation, landscape-1 L2), one legacy trap to avoid (elicitation), one future mapping to
-revisit after publication (Tasks). No architectural change required.
+## Evidence posture
+
+Current protocol evidence is an immutable dated-schema/spec-driven review plus exact stdio
+transcript tests, neutral-service tests, and real-process tests. The official conformance server
+runner currently accepts an HTTP URL, not a stdio command, so it was not run against Ghostlight's
+shipping transport. Use it as an additional gate if compatible transport support is added; do not
+describe the present evidence as a conformance-runner pass.
+
+## Sources
+
+- [MCP 2026-07-28 changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+- [MCP 2026-07-28 base protocol](https://modelcontextprotocol.io/specification/2026-07-28/basic)
+- [MCP 2026-07-28 server discovery](https://modelcontextprotocol.io/specification/2026-07-28/server/discover)
+- [Immutable MCP 2025-11-25 schema](https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/2025-11-25/schema/2025-11-25/schema.json)
+- [Immutable MCP 2026-07-28 schema](https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/2026-07-28/schema/2026-07-28/schema.json)
+- [Official TypeScript SDK migration notes](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration/support-2026-07-28.md)
+- [Official MCP conformance suite](https://github.com/modelcontextprotocol/conformance)

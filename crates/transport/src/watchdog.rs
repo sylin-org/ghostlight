@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Parent-death watchdog for the adapter role (ADR-0029; re-scoped from the pre-H6 "mcp-server"
-//! role by ADR-0030 Decision 8, PINS.md SS5.5 -- the standalone SERVICE has no client parent and
-//! idle-graces instead).
+//! Parent-death watchdog for the `ghostlight-mcp-connector` edge (ADR-0029, amended by ADR-0096). The
+//! persistent service has no MCP-client parent and manages its own idle lifetime.
 //!
-//! The server's intended exit signal is stdin EOF, delivered when the MCP client closes the pipe.
+//! The edge's intended exit signal is stdin EOF, delivered when the MCP client closes the pipe.
 //! On Windows that signal is unreliable: when the client is killed rather than closed cleanly (a
 //! window reload, an auto-update that swaps the extension host, a crash), the child's stdin handle
 //! is not always closed, so the blocking read behind `tokio::io::stdin()` never returns EOF and the
-//! read loop blocks forever -- the process becomes an orphan that serves no one and never releases
-//! the IPC endpoint. This module adds a second, reliable exit trigger: poll the parent's liveness
+//! read loop blocks forever -- the process becomes an orphan that serves no one. This module adds
+//! a second, reliable exit trigger: poll the parent's liveness
 //! and end the process once the parent is gone.
 //!
 //! The polling loop is generic over the liveness predicate ([`wait_until`]) so it is unit-testable

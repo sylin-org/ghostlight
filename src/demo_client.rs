@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Shared MCP-client support for Ghostlight's visible browser demos.
 //!
-//! Demo stories are ordinary MCP clients. They spawn the installed relay, speak newline-delimited
+//! Demo stories are ordinary MCP clients. They spawn the installed MCP edge, speak newline-delimited
 //! JSON-RPC over stdio, and use only the public tool surface. This module owns that transport seam,
 //! common result parsing, and the service-authored page-provenance contract so individual stories
 //! stay focused on their own sequence and copy.
@@ -52,7 +52,7 @@ impl PageProvenanceContract {
     }
 }
 
-/// A minimal MCP client speaking JSON-RPC over a spawned `ghostlight-relay --role agent`.
+/// A minimal MCP client speaking JSON-RPC over a spawned `ghostlight-mcp-connector` edge.
 pub(crate) struct Client {
     child: Child,
     stdin: ChildStdin,
@@ -63,25 +63,23 @@ pub(crate) struct Client {
 }
 
 impl Client {
-    /// Spawn the sibling relay in its agent role and take ownership of its stdio.
+    /// Spawn the sibling MCP edge and take ownership of its stdio.
     pub(crate) async fn spawn(pause: Duration) -> Result<Self> {
-        let relay = relay_path().context("locate the ghostlight-relay binary")?;
-        let mut child = tokio::process::Command::new(&relay)
-            .arg("--role")
-            .arg("agent")
+        let edge = mcp_path().context("locate the ghostlight-mcp-connector binary")?;
+        let mut child = tokio::process::Command::new(&edge)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .with_context(|| format!("spawn {}", relay.display()))?;
+            .with_context(|| format!("spawn {}", edge.display()))?;
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| anyhow!("relay stdin unavailable"))?;
+            .ok_or_else(|| anyhow!("MCP edge stdin unavailable"))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| anyhow!("relay stdout unavailable"))?;
+            .ok_or_else(|| anyhow!("MCP edge stdout unavailable"))?;
         Ok(Self {
             child,
             stdin,
@@ -103,8 +101,8 @@ impl Client {
                 .stdout
                 .next_line()
                 .await
-                .context("read from relay")?
-                .ok_or_else(|| anyhow!("relay closed its output while awaiting '{method}'"))?;
+                .context("read from MCP edge")?
+                .ok_or_else(|| anyhow!("MCP edge closed its output while awaiting '{method}'"))?;
             if line.trim().is_empty() {
                 continue;
             }
@@ -133,8 +131,8 @@ impl Client {
         self.stdin
             .write_all(line.as_bytes())
             .await
-            .context("write to relay")?;
-        self.stdin.flush().await.context("flush relay stdin")
+            .context("write to MCP edge")?;
+        self.stdin.flush().await.context("flush MCP edge stdin")
     }
 
     /// Call one MCP tool and retain the complete result envelope.
@@ -288,20 +286,20 @@ pub(crate) fn parse_first_ref(text: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-fn relay_path() -> Result<std::path::PathBuf> {
+fn mcp_path() -> Result<std::path::PathBuf> {
     let executable = std::env::current_exe().context("resolve the current executable")?;
     let directory = executable
         .parent()
         .ok_or_else(|| anyhow!("executable has no parent directory"))?;
     let name = if cfg!(windows) {
-        "ghostlight-relay.exe"
+        "ghostlight-mcp-connector.exe"
     } else {
-        "ghostlight-relay"
+        "ghostlight-mcp-connector"
     };
     let path = directory.join(name);
     if !path.exists() {
         bail!(
-            "ghostlight-relay not found next to {} (expected {})",
+            "ghostlight-mcp-connector not found next to {} (expected {})",
             executable.display(),
             path.display()
         );

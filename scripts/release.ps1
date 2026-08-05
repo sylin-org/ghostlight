@@ -100,13 +100,17 @@ $McpPublisherVersion = 'v1.7.9'
 $RegistryUrl = 'https://registry.modelcontextprotocol.io'
 
 # The cross-build matrix (release.yml build job). Each archive is
-# ghostlight-<Tag>-<target>.<ext>; each ships two raw versionless bins too.
+# ghostlight-<Tag>-<target>.<ext>; each ships three raw versionless bins too.
 $Targets = @(
     @{ Target = 'x86_64-pc-windows-msvc'; Ext = 'zip'; Windows = $true }
     @{ Target = 'aarch64-apple-darwin'; Ext = 'tar.gz'; Windows = $false }
     @{ Target = 'x86_64-apple-darwin'; Ext = 'tar.gz'; Windows = $false }
     @{ Target = 'x86_64-unknown-linux-gnu'; Ext = 'tar.gz'; Windows = $false }
 )
+
+# ADR-0096: one persistent service, one protocol-versioned MCP stdio edge, and one
+# browser-only native relay. Every release and launcher channel ships this exact set.
+$ReleaseBinaries = @('ghostlight', 'ghostlight-mcp-connector', 'ghostlight-browser-connector')
 
 $StepOrder = @('preflight', 'tag', 'watch', 'verify', 'sums', 'tap', 'npm', 'registry', 'trust', 'extension', 'website', 'report')
 
@@ -149,7 +153,7 @@ function Get-ExpectedAssets {
         $names.Add($arc)
         $names.Add("$arc.sha256")
         $suffix = if ($t.Windows) { '.exe' } else { '' }
-        foreach ($b in @('ghostlight', 'ghostlight-relay')) {
+        foreach ($b in $ReleaseBinaries) {
             $raw = "$b-$($t.Target)$suffix"
             $names.Add($raw)
             $names.Add("$raw.sha256")
@@ -158,6 +162,9 @@ function Get-ExpectedAssets {
     $ext = "ghostlight-extension-v$ChromeAdapterVersion.zip"
     $names.Add($ext)
     $names.Add("$ext.sha256")
+    $mcpb = "ghostlight-v$Version.mcpb"
+    $names.Add($mcpb)
+    $names.Add("$mcpb.sha256")
     $names.Add("ghostlight-$Tag-sbom.cyclonedx.json")
     $names.Add('SHA256SUMS')
     return $names
@@ -196,9 +203,11 @@ function Test-VersionConsistency {
 
     Check 'Cargo.toml' 'workspace crate' '(?m)^version = "(?<v>[^"]+)"'
     Check 'crates/core/Cargo.toml' 'core crate' '(?m)^version = "(?<v>[^"]+)"'
-    Check 'crates/relay/Cargo.toml' 'relay crate' '(?m)^version = "(?<v>[^"]+)"'
+    Check 'crates/mcp-connector/Cargo.toml' 'MCP connector crate' '(?m)^version = "(?<v>[^"]+)"'
+    Check 'crates/browser-connector/Cargo.toml' 'browser connector crate' '(?m)^version = "(?<v>[^"]+)"'
     Check 'crates/transport/Cargo.toml' 'transport crate' '(?m)^version = "(?<v>[^"]+)"'
     Check 'packaging/npm/package.json' 'npm package' '"version":\s*"(?<v>[^"]+)"'
+    Check 'packaging/mcpb/manifest.json' 'MCPB package' '"version":\s*"(?<v>[^"]+)"'
     Check 'server.json' 'server.json (2 fields)' '"version":\s*"(?<v>[^"]+)"' 2
     Check 'packaging/scoop/ghostlight.json' 'scoop version' '"version":\s*"(?<v>[^"]+)"'
     Check 'packaging/winget/Sylin.Ghostlight.yaml' 'winget PackageVersion' '(?m)^PackageVersion:\s*(?<v>\S+)' 3
@@ -431,7 +440,7 @@ function Step-Sums {
         Write-Would "download the 4 archive .sha256 assets from $Tag"
         Write-Would "set scoop hash + winget InstallerSha256 = sha256($winTarget zip)"
         Write-Would "set homebrew sha256 for aarch64-apple-darwin, x86_64-apple-darwin, x86_64-unknown-linux-gnu"
-        Write-Would "download the 8 raw-binary .sha256 and write packaging/npm/checksums.json (launcher integrity pins)"
+        Write-Would "download the 12 raw-binary .sha256 and write packaging/npm/checksums.json (launcher integrity pins)"
         Write-Would "commit packaging/{scoop,winget,homebrew,npm/checksums.json} and push origin main"
         return
     }
@@ -465,7 +474,7 @@ function Step-Sums {
     $binaries = [ordered]@{}
     foreach ($t in $Targets) {
         $suffix = if ($t.Windows) { '.exe' } else { '' }
-        foreach ($b in @('ghostlight', 'ghostlight-relay')) {
+        foreach ($b in $ReleaseBinaries) {
             $asset = "$b-$($t.Target)$suffix"
             $binaries[$asset] = Get-AssetSha256 $asset $tmp
         }
@@ -501,7 +510,7 @@ function Step-Tap {
     if ($SkipTap) { Write-Skip '-SkipTap set'; return }
 
     if ($DryRun) {
-        Write-Would "clone $TapSlug, set version+3 sums in Formula/ghostlight.rb, commit and push"
+        Write-Would "clone $TapSlug, sync the canonical formula, set version+3 sums, commit and push"
         return
     }
 
@@ -511,6 +520,10 @@ function Step-Tap {
 
     $formula = Join-Path $tmp 'Formula/ghostlight.rb'
     if (-not (Test-Path $formula)) { throw "tap formula not found at $formula" }
+    $formulaTemplate = Join-Path $RepoRoot 'packaging/homebrew/ghostlight.rb'
+    if (-not (Test-Path $formulaTemplate)) {
+        throw "canonical homebrew formula not found at $formulaTemplate"
+    }
 
     # Recompute the same 3 sums (cheap; keeps this step independently runnable).
     $sumTmp = Join-Path $tmp '.sums'
@@ -519,7 +532,10 @@ function Step-Tap {
     $intelHash = Get-AssetSha256 "ghostlight-$Tag-x86_64-apple-darwin.tar.gz" $sumTmp
     $linuxHash = Get-AssetSha256 "ghostlight-$Tag-x86_64-unknown-linux-gnu.tar.gz" $sumTmp
 
-    $text = Get-Content -Raw $formula
+    # The in-repo formula is canonical. Starting from the prior tap formula would preserve stale
+    # install behavior (for example, the pre-ADR-0096 two-executable `bin.install` line) while only
+    # changing its version and checksums.
+    $text = Get-Content -Raw $formulaTemplate
     # Bump version and normalize any hardcoded /vX/ url segment to this version.
     $text = [regex]::Replace($text, 'version "(?:[^"]*)"', "version `"$Version`"", 1)
     $text = [regex]::Replace($text, 'releases/download/v[^/]+/', "releases/download/$Tag/")
@@ -547,7 +563,8 @@ function Step-Npm {
 
     # Integrity-manifest guard: the launcher verifies every binary against the bundled
     # checksums.json and fails closed without it, so refuse to publish a launcher whose manifest
-    # is missing, stale, or short of the 8 pins (that would break every user's first run). The
+    # is missing, stale, or short of the full target-by-binary pin set (that would break every
+    # user's first run). The
     # sums step writes it; -From npm without a fresh sums run is the case this catches.
     $checksumsPath = Join-Path $RepoRoot 'packaging/npm/checksums.json'
     if (-not $DryRun) {
@@ -555,7 +572,10 @@ function Step-Npm {
         $cs = Get-Content -Raw $checksumsPath | ConvertFrom-Json
         if ($cs.version -ne $Version) { throw "checksums.json version '$($cs.version)' != $Version; re-run the 'sums' step" }
         $pinCount = @($cs.binaries.PSObject.Properties).Count
-        if ($pinCount -ne 8) { throw "checksums.json has $pinCount pins, expected 8; re-run the 'sums' step" }
+        $expectedPinCount = $Targets.Count * $ReleaseBinaries.Count
+        if ($pinCount -ne $expectedPinCount) {
+            throw "checksums.json has $pinCount pins, expected $expectedPinCount; re-run the 'sums' step"
+        }
         Write-Ok "integrity manifest present ($pinCount pins for $Version)"
     }
 

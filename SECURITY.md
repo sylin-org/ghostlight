@@ -16,9 +16,9 @@ is an honest description rather than a hidden asterisk:
 
 ## Scope
 
-The `ghostlight` service and CLI, `ghostlight-relay`, the bundled Chromium extension, and the
-install scripts in this repository. The `reference/` directory is third-party study material and
-out of scope.
+The `ghostlight-mcp-connector` protocol edge, the `ghostlight` service and CLI, the browser-only
+`ghostlight-browser-connector`, the bundled Chromium extension, and the install scripts in this repository.
+The `reference/` directory is third-party study material and out of scope.
 
 ## What to expect from the product
 

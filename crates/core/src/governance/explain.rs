@@ -467,7 +467,7 @@ fn parse_user_config_file(
 
 /// Render the managed:// Policy Passport (ADR-0055 D9): the additive section the `explain` tool
 /// appends to its output when managed governance is active. Reads only the T2 status sidecar
-/// (`ManagedStatus`) -- who governs the session, the policy sequence + freshness (including the
+/// (`ManagedStatus`) -- who governs this service, the policy sequence + freshness (including the
 /// guardian doors), the org rationale, sacred-domain reassurance, and how to reach a human. Pure:
 /// the block ends with a single trailing newline. Absent presentation fields are simply omitted.
 pub fn managed_passport(status: &ManagedStatus) -> String {

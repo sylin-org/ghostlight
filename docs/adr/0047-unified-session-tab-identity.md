@@ -7,6 +7,17 @@ Supersedes: the per-(re)connect guid-minting posture inside ADR-0045's relay (it
 hub batch (`docs/tasks/hub/PINS.md`). Amends: ADR-0030 (Decisions 6/7 presentation mechanics),
 ADR-0045 (relay classification + session identity across reconnects).
 
+## Amendment by ADR-0096 (2026-08-04)
+
+ADR-0096 replaces session identity with `WorkspaceId` and supersedes every first-touch ownership
+rule in D3, D5, and D7. An explicit input `tabId` is verification-only: the current live
+workspace must already own it. Unknown and cross-workspace ids fail identically before any
+browser frame. Only a successful, correlated `tabs_context_mcp` or `tabs_create_mcp` result may
+atomically adopt the exact root `structuredContent.tabId` and
+`structuredContent.tabs[].tabId` values it declares. A browser-process or service restart purges
+the corresponding in-memory ownership; recovery then goes through a creator tool, never through
+presenting an old id. D1's managed-surface defense and the no-auto-close user-artifact rule remain.
+
 ## Context
 
 The first complete end-to-end test of the three-executable chain (ADR-0046, 2026-07-08) drove a

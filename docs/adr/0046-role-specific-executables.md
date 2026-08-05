@@ -2,6 +2,14 @@
 
 - Status: Accepted (2026-07-08)
 
+## Amendment by ADR-0096 (2026-08-04)
+
+The three-lifetime rationale remains. The current executables are `ghostlight-mcp-connector` for
+exact MCP stdio behavior, `ghostlight` for the persistent protocol-neutral service and CLI, and
+`ghostlight-browser-connector` for Chromium native messaging. Their entry points and crate
+dependencies carry the separation. The former adapter and relay names, byte-relay MCP path, and
+process-global role marker are retired; see ADR-0096 and its naming amendment for the replacement.
+
 ## Relationship to other decisions
 
 - SUPERSEDES the "single portable executable" aspect of ADR-0001 and the "dual-role binary" aspect

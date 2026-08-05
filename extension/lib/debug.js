@@ -5,7 +5,7 @@
 // own structured per-pid debug log (`ghostlight_core::hub::outbound::diagnostics`), so one file
 // shows the extension's view of a connection interleaved with the service's, by arrival order.
 //
-// Pure and storage/port agnostic (matches lib/grouping.js's injected-chrome precedent): takes
+// Pure and storage/port agnostic: takes
 // the storage area and a `post` callback as parameters rather than reaching for `chrome.runtime`
 // or a module-level `nativePort` itself, so it is unit-testable with a fake storage and no
 // mocked extension globals.
