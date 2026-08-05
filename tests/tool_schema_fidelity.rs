@@ -3,7 +3,9 @@
 //!
 //! Pins the structural invariants: the 13 trained tools plus sanctioned additive tools, in order, each with
 //! a non-empty description and an object inputSchema. The computer tool carries all 13 actions.
-//! This is a regression snapshot (visibility), not a drift-prevention contract between two files.
+//! The trained identity fixture fingerprints every non-prose input-schema field independently
+//! from the description snapshot. This is a regression snapshot (visibility), not a second
+//! declaration source.
 
 use ghostlight::tool::tools::advertised_tools_json;
 use serde_json::{json, Value};
@@ -23,6 +25,36 @@ const EXPECTED_TRAINED: [&str; 13] = [
     "read_page",
     "resize_window",
     "update_plan",
+];
+
+/// Exact fingerprints for all advertised tool descriptions, in registry order. Changing guidance
+/// is allowed by ADR-0094, but every change must be reviewed and refreshed intentionally here.
+const EXPECTED_DESCRIPTION_FINGERPRINTS: [(&str, &str); 25] = [
+    ("tabs_context_mcp", "5788cfee6bb5a7d8"),
+    ("tabs_create_mcp", "0819c83138bbff63"),
+    ("navigate", "c440f2ef721643be"),
+    ("computer", "af015688252f6988"),
+    ("find", "6e1a7e180546bfec"),
+    ("form_input", "b44ecba9034e2848"),
+    ("get_page_text", "ca7eb8573f8d277f"),
+    ("javascript_tool", "20eabb23c0d8118c"),
+    ("read_console_messages", "d35cd9df92eced2a"),
+    ("read_network_requests", "ebc3adc31777ce14"),
+    ("read_page", "0ccc0cb6bd5c8f08"),
+    ("resize_window", "ccf647ebb3e33328"),
+    ("update_plan", "7b1fc261c92d4240"),
+    ("narrate", "7e9148b5d8ced883"),
+    ("wait_for", "e0550b847a08186d"),
+    ("script", "43a5ea7366d1b180"),
+    ("form_fill", "02e38b255e95f107"),
+    ("act_on", "433b595b1054c0a4"),
+    ("dialog", "a2256caa419fe39c"),
+    ("tab_control", "6e3a4fb07f7faf55"),
+    ("file_upload", "897bfaebc8742424"),
+    ("browser_batch", "4a8ccfc823e6c842"),
+    ("upload_image", "f603829e53aef526"),
+    ("gif_creator", "9654257dc99d8585"),
+    ("explain", "2d33ce948898a528"),
 ];
 
 /// The `explain` tool's exact, pinned description string (ADR-0022 Decision 7).
@@ -46,6 +78,74 @@ fn tools() -> Vec<Value> {
         .as_array()
         .expect("`tools` must be an array")
         .clone()
+}
+
+fn fnv1a64(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn remove_descriptions(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("description");
+            for child in object.values_mut() {
+                remove_descriptions(child);
+            }
+        }
+        Value::Array(array) => {
+            for child in array {
+                remove_descriptions(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn every_advertised_description_matches_the_reviewed_snapshot() {
+    let actual = tools()
+        .iter()
+        .map(|tool| {
+            let name = tool["name"].as_str().expect("name").to_owned();
+            let description = tool["description"].as_str().expect("description");
+            (name, fnv1a64(description.as_bytes()))
+        })
+        .collect::<Vec<_>>();
+    let expected = EXPECTED_DESCRIPTION_FINGERPRINTS
+        .iter()
+        .map(|(name, fingerprint)| ((*name).to_owned(), (*fingerprint).to_owned()))
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn trained_tool_identity_matches_the_structural_golden() {
+    let golden: Value = serde_json::from_str(include_str!("golden/trained-tool-identity.json"))
+        .expect("trained identity golden must be valid JSON");
+    assert_eq!(golden["algorithm"], "fnv1a64");
+
+    let actual = tools()[..EXPECTED_TRAINED.len()]
+        .iter()
+        .map(|tool| {
+            let mut projection = json!({
+                "name": tool["name"],
+                "inputSchema": tool["inputSchema"],
+            });
+            remove_descriptions(&mut projection);
+            json!({
+                "name": tool["name"],
+                "fingerprint": fnv1a64(
+                    &serde_json::to_vec(&projection).expect("identity projection must serialize")
+                ),
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(Value::Array(actual), golden["tools"]);
 }
 
 #[test]
@@ -448,16 +548,17 @@ fn descriptions_reference_callable_tab_tool_names() {
     );
 }
 
-/// ADR-0031 Decision 5: the agentGuide section is present and well-formed. The four fields are
+/// ADR-0031 Decision 5: the agentGuide section is present and well-formed. The five fields are
 /// the agent's workflow contract at handshake; a missing/empty one breaks the onboarding payload.
 #[test]
-fn agent_guide_is_present_with_all_four_non_empty_fields() {
+fn agent_guide_is_present_with_all_five_non_empty_fields() {
     let guide = ghostlight::browser::directory::AGENT_GUIDE;
     for (key, val) in [
         ("summary", guide.summary),
         ("workflow", guide.workflow),
         ("flow", guide.flow),
         ("denials", guide.denials),
+        ("cost_notes", guide.cost_notes),
     ] {
         assert!(!val.is_empty(), "agentGuide.{key} must be non-empty");
     }

@@ -809,7 +809,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "find",
         workspace_use: WorkspaceUse::Uses,
-        advertised_description: "Find elements on the page using natural language. Can search for elements by their purpose (e.g., \"search bar\", \"login button\") or by text content (e.g., \"organic mango product\"). Returns up to 20 matching elements with references that can be used with other tools. If more than 20 matches exist, you'll be notified to use a more specific query. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+        advertised_description: "Find up to 20 page elements by accessible purpose or text and return fresh refs for follow-up tools. Use it for one targeted lookup; use read_page when you need surrounding structure or get_page_text for prose. Narrow the query when more matches exist. If a ref becomes stale after the page changes, call find or read_page again. Get a tab ID from tabs_context_mcp when needed.",
         annotations: ToolAnnotations::open_read("Find Page Elements"),
         input_schema: || json!({
             "type": "object",
@@ -905,7 +905,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "get_page_text",
         workspace_use: WorkspaceUse::Uses,
-        advertised_description: "Extract raw text content from the page, prioritizing article content. Ideal for reading articles, blog posts, or other text-heavy pages. Returns plain text without HTML formatting. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. Output is limited to 50000 characters by default; if it exceeds the limit it is truncated with a note giving the full size.",
+        advertised_description: "Extract readable plain text from a page, prioritizing article content and omitting HTML markup. Use it for prose or documents; use read_page for structure and element refs, or find for one targeted lookup. Output defaults to 50000 characters and reports when truncated so you can raise max_chars. Get a tab ID from tabs_context_mcp when needed.",
         annotations: ToolAnnotations::open_read("Read Page Text"),
         input_schema: || json!({
             "type": "object",
@@ -943,7 +943,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "javascript_tool",
         workspace_use: WorkspaceUse::Uses,
-        advertised_description: "Execute JavaScript code in the context of the current page. The code runs in the page's context and can interact with the DOM, window object, and page variables. Returns the result of the last expression or any thrown errors. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+        advertised_description: "Execute arbitrary JavaScript in the page and return the last expression or thrown error. Use it only when purpose-built browser tools cannot do the job. Code can read or change the DOM, call page functions, issue network requests, and trigger other page side effects, so do not blindly retry it. Get a tab ID from tabs_context_mcp when needed.",
         annotations: ToolAnnotations::open_action("Run Page JavaScript"),
         input_schema: || json!({
             "type": "object",
@@ -986,7 +986,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "read_console_messages",
         workspace_use: WorkspaceUse::Uses,
-        advertised_description: "Read browser console messages (console.log, console.error, console.warn, etc.) from a specific tab. Useful for debugging JavaScript errors, viewing application logs, or understanding what's happening in the browser console. Returns console messages from the current domain only. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. IMPORTANT: Always provide a pattern to filter messages - without a pattern, you may get too many irrelevant messages.",
+        advertised_description: "Read buffered console messages from the tab's current hostname. Tracking begins when this tool is first used on a tab; reload to capture messages emitted during page load. Use pattern, onlyErrors, or limit to bound noisy output. clear:true clears the entire buffer after reading, so use it only when you intend to consume that history. Get a tab ID from tabs_context_mcp when needed.",
         annotations: ToolAnnotations::open_read("Read Console Messages"),
         input_schema: || json!({
             "type": "object",
@@ -1036,7 +1036,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "read_network_requests",
         workspace_use: WorkspaceUse::Uses,
-        advertised_description: "Read HTTP network requests (XHR, Fetch, documents, images, etc.) from a specific tab. Useful for debugging API calls, monitoring network activity, or understanding what requests a page is making. Returns all network requests made by the current page, including cross-origin requests. Requests are automatically cleared when the page navigates to a different domain. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+        advertised_description: "Read buffered HTTP requests observed in one tab, including cross-origin traffic. Tracking begins when this tool is first used on a tab; reload to capture page-load requests or interact to trigger new ones. Use urlPattern or limit to bound output. clear:true consumes the buffer, and a hostname change resets it. Get a tab ID from tabs_context_mcp when needed.",
         annotations: ToolAnnotations::open_read("Read Network Requests"),
         input_schema: || json!({
             "type": "object",
@@ -1082,7 +1082,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "read_page",
         workspace_use: WorkspaceUse::Uses,
-        advertised_description: "Get an accessibility tree representation of elements on the page. By default returns all elements including non-visible ones. Can optionally filter for only interactive elements, limit tree depth, or focus on a specific element. Returns a structured tree that represents how screen readers see the page content. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. Output is limited to 50000 characters -- if exceeded, the tree is truncated at a line boundary with a note giving the full size; pass a larger max_chars, or use depth/ref_id to focus.",
+        advertised_description: "Read the page as an accessibility tree with element refs for follow-up actions. Use it when you need structure or interactive controls; use get_page_text for prose or find for one targeted element. Filter to interactive, reduce depth, or focus with ref_id when output is large. diff:true returns changes since the previous read_page on that tab. Re-read after page changes when refs become stale. Get a tab ID from tabs_context_mcp when needed.",
         annotations: ToolAnnotations::open_read("Read Page Structure"),
         input_schema: || json!({
             "type": "object",
@@ -1144,7 +1144,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "resize_window",
         workspace_use: WorkspaceUse::Uses,
-        advertised_description: "Resize the current browser window to specified dimensions. Useful for testing responsive designs or setting up specific screen sizes. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+        advertised_description: "Resize the Chrome window containing one Ghostlight-owned tab. Use it to set a viewport for responsive work; it affects every tab in that window and may make the page rerender, so refresh element refs afterward when needed. Get a tab ID from tabs_context_mcp when needed.",
         annotations: ToolAnnotations::closed_change("Resize Browser Window", true),
         input_schema: || json!({
             "type": "object",
@@ -1832,7 +1832,7 @@ pub const REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         tool: "browser_batch",
         workspace_use: WorkspaceUse::Uses,
-        advertised_description: "Execute a sequence of browser tool calls in ONE round trip. Each item is {name, input} where input is exactly what you'd pass to that tool standalone. Actions execute SEQUENTIALLY (not in parallel) and stop on the first error. Use this tool extensively to quickly execute work whenever you can predict two or more steps ahead -- e.g. navigate, click a field, type, press Return, screenshot. Each tool's own permission check runs per item -- if an action navigates to a domain without permission, the next item's check fails and the batch stops. Screenshots and other images are returned interleaved with outputs; coordinates you write in THIS batch refer to the screenshot taken BEFORE this call. browser_batch cannot be nested. Use script instead when a later step needs structured output from an earlier one.",
+        advertised_description: "Run a fixed sequence of browser tool calls in one request when every input is known in advance. Use script when a later step needs an earlier structured result. Steps run sequentially, are authorized and audited individually, and stop on the first error; inspect ordered results before retrying because earlier effects may have completed. Coordinates in the batch must come from a screenshot taken before the call. Images are returned in order. browser_batch cannot be nested.",
         annotations: ToolAnnotations::open_action("Run Browser Batch"),
         input_schema: || json!({
             "type": "object",
@@ -2039,14 +2039,14 @@ pub const REGISTRY: &[ToolDescriptor] = &[
 /// cost discipline across several tools at once rather than the workflow contract, but composes
 /// into the exact same `initialize.instructions` string.
 ///
-/// Prose revised 2026-07-10 (ergonomics pass; ADR-0031 Decision 1 field contract unchanged): the
+/// Prose revised 2026-08-05 (E4 guidance pass; ADR-0031 Decision 1 field contract unchanged): the
 /// `flow` field now reveals the higher-level tools (`narrate`, `wait_for`, `script`,
 /// `browser_batch`, `form_fill`) and steers tool choice, and all cost guidance is consolidated
 /// into `cost_notes` (the duplicated COST DISCIPLINE clause left `workflow`). The five-field set
 /// and the non-empty, `tabId`, and `Cost notes:` guarantees the tests pin are all preserved.
 pub const AGENT_GUIDE: AgentGuide = AgentGuide {
     summary: "Ghostlight drives the user's own authenticated browser. You observe and act on the web pages they're already logged into, in an isolated Ghostlight tab group separate from their own tabs. Default (no policy) is unrestricted; a policy can scope what's allowed.",
-    workflow: "BEFORE ANYTHING ELSE: GET A tabId. Every tool that touches a page requires a `tabId` (a number) -- it is required, not optional. Get one with tabs_context_mcp (pass `createIfEmpty: true` to create the group if none exists; usually your first call) or tabs_create_mcp (open a new tab). Then navigate (tabId + url) to go somewhere.",
+    workflow: "BEFORE ANYTHING ELSE: GET A tabId. Every tool that touches a page requires a `tabId` (a number) -- it is required, not optional. Get one with tabs_context_mcp (pass `createIfEmpty: true` to create the group if none exists; usually your first call) or tabs_create_mcp (open a new tab). Then navigate (tabId + url) to go somewhere. If a workspace or tab is unavailable, use tabs_create_mcp to establish fresh context instead of guessing an id.",
     flow: "tabs_context_mcp -> navigate -> read (read_page for structure, get_page_text for prose, find for one element; screenshot only to see layout) -> act (act_on for one unique semantic target plus receipt, form_fill for forms, computer and form_input as exact low-level escapes). Use act_on with expect when it can replace a separate find, action, and wait/read loop. If a receipt reports dialog_open, inspect and explicitly resolve it with dialog before continuing. Use tab_control only for an explicit focus, reload, or one-tab close; it never cleans up a group automatically. On dynamic pages, use wait_for between navigating and reading so you see the settled page, not a spinner. When a person is watching a longer workflow, use narrate at meaningful phase changes, not for routine clicks or keystrokes. When you can predict two or more steps ahead, run them in one call: script chains steps and passes results forward (e.g. `$prev.results.0.ref` after a find), and browser_batch runs a fixed sequence in one round-trip.",
     denials: "If a call is denied you'll see `Denied (D-xxxxxxxx): ...`. Call explain (no arguments) to see what's permitted -- you can do this any time to plan, not just after a denial -- and hand the denial id to the policy administrator.",
     cost_notes: "Cost notes: prefer read_page (structured tree) or get_page_text (plain text) over screenshots when you only need structure or text; a screenshot or zoom costs roughly 1,600 tokens, so capture one only when you need to see layout. read_page full is large on complex pages -- filter interactive is dramatically smaller, and diff true returns only what changed since your last read. get_page_text can return tens of thousands of tokens on document-heavy pages; prefer find for targeted lookups. Each script or browser_batch step is still one browser round-trip -- they save your tokens and turns, not the browser's work.",

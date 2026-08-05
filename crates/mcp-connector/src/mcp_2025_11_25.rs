@@ -845,7 +845,11 @@ mod tests {
             },
             &mut correlation,
         );
-        assert_eq!(listed.output[0]["result"]["tools"][0]["name"], "click");
+        assert_eq!(
+            listed.output[0]["result"]["tools"][0],
+            projection().tools[0].declaration,
+            "the 2025 tools/list shore must preserve the canonical declaration exactly"
+        );
         assert!(listed.output[0]["result"].get("resultType").is_none());
     }
 

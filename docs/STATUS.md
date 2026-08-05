@@ -7,19 +7,19 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
-- **The public-documentation delight batch completed E3 with a concise product-repository path to
-  first success.** README recognition, fit, store-only install, one copyable example.com proof,
-  visible/local experience, and recovery now precede compatibility and architecture; the page fell
-  from 354 to 184 lines by routing tool, policy, CLI, trust, and procurement depth to their owners.
-  The human install guide and agent guide share that bounded proof and symptom-led recovery for
-  missing tools, browser disconnect, stale workspace, closed transport, denial, and uncertain side
-  effects. The agent guide adds a compact tool-choice ladder without creating a second registry.
-  The comparison drops mutable star counts and a feature-scorecard grid, names better-fit uses for
-  current alternatives, and treats signed-in access as shared. Contributor and practitioner guides
-  now preserve trained structure while allowing deliberate guidance improvements and say
-  compatible local stdio clients instead of every client. Public-state checks, repository gates,
-  and link checks pass. E4 is next in `docs/tasks/public-delight-0.8/LEDGER.md`; no runtime, tool
-  declaration, package metadata, website, or external surface changed.
+- **The public-documentation delight batch completed E4 with reviewed agent guidance for all 25
+  tools.** Eight legacy descriptions now distinguish nearby tools, name material side effects, and
+  give useful recovery for stale refs, first-use debug buffers, responsive rerenders, or partially
+  completed batches. The other 17 descriptions and all parameter guidance, titles, annotations,
+  examples, and result metadata were explicitly kept. An unavailable workspace now points to
+  `tabs_create_mcp`; both protocol shores retain their exact transport-closed recovery contract.
+  Every description has an intentional fingerprint, and a new structural golden covers every
+  non-prose input-schema field of the trained 13 tools. The 2025 shore proves exact declaration
+  preservation; the 2026 shore proves guidance survives its sanctioned `workspaceId` augmentation.
+  Formatting, strict Clippy, full workspace tests, both revision suites, fidelity tests, ASCII, and
+  diff checks pass in an isolated target. E5 is next in
+  `docs/tasks/public-delight-0.8/LEDGER.md`. No trained identity, runtime result, browser behavior,
+  package metadata, website, or external surface changed.
 
 - **The v0.8.0 service candidate is locally release-ready without weakening the adapter gate.** The live
   Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter

@@ -5,10 +5,10 @@ conversation history.
 
 ## RESUME HERE
 
-- State: E3 is complete; E4 has not started
-- Current pass: E4
-- Next action: read `E4-agent-guidance-and-metadata.md`, inventory all 25 tool descriptors, and
-  preserve the trained identity projection while improving only useful guidance
+- State: E4 is complete; E5 has not started
+- Current pass: E5
+- Next action: read `E5-website-and-directory-surfaces.md`, adapt the approved message architecture
+  to the website and directory drafts, and keep every publishing action owner-gated
 - External actions: none authorized beyond preparing website work on a non-publishing branch
 
 ## Status
@@ -18,7 +18,7 @@ conversation history.
 | E1 | Truth and reception baseline | DONE | this pass's `docs(public): establish E1 public truth baseline` commit | - | none |
 | E2 | Message and content architecture | DONE | this pass's `docs(public): define 0.8 message architecture` commit | - | none |
 | E3 | Core public surfaces | DONE | this pass's `docs(public): reshape core first-success surfaces` commit | - | none |
-| E4 | Agent guidance and metadata | pending | - | - | - |
+| E4 | Agent guidance and metadata | DONE | this pass's `docs(tools): sharpen agent guidance` commit | - | none |
 | E5 | Website and directory surfaces | pending | - | - | - |
 | E6 | Release reconciliation and reception loop | pending | - | - | - |
 
@@ -172,3 +172,61 @@ commit hashes, external drafts, and numbered deviations.
   fetched public links returned HTTP 200 except npm's human web page, which returned its automated
   access 403; the official npm registry API remains the package/version evidence.
 - Deviations: none.
+
+### E4 -- agent guidance and metadata -- 2026-08-05
+
+- Commit: see this pass's `docs(tools): sharpen agent guidance` commit.
+- Scope: all 25 canonical descriptors were reviewed. Eight legacy advertised descriptions changed;
+  the other 17 were kept because they already state the job, nearest useful alternative, material
+  side effects, and recovery where one is common.
+- Shared guidance: an unavailable tab or workspace now directs the agent to `tabs_create_mcp`
+  instead of guessing an id. Both protocol revisions already append the exact transport-closed
+  recovery contract at initialization, so that guidance was not duplicated in the registry.
+- Metadata review: parameter descriptions, display titles, standard annotations, examples,
+  expected results, and output-field descriptions were kept for all 25 tools. They are accurate,
+  callable-name checks remain green, mixed-tool annotations remain conservative, and changing
+  them would have added words without improving tool choice.
+- Fidelity: every advertised description now has an intentional fingerprint. A new structural
+  golden fingerprints each trained tool's name and complete input schema after removing editable
+  description members. The existing exact computer action-order and annotation tests remain.
+- Revision projections: the 2025 test now proves `tools/list` preserves a canonical declaration
+  exactly. The 2026 test proves descriptions, titles, and examples survive its sanctioned
+  `workspaceId` projection. No runtime projection code changed.
+- Files changed: the canonical directory guidance, both revision-specific test modules, tool
+  schema fidelity tests, the trained identity golden, this ledger, and `docs/STATUS.md`. No tool
+  name, parameter, type, enum, order, requiredness, structural schema, runtime result, browser
+  behavior, extension code, package metadata, or external surface changed.
+- Gates: `cargo fmt --all -- --check`; strict workspace Clippy; full fast-tier workspace tests;
+  both revision-specific connector test suites; all tool-schema fidelity tests; ASCII scan; and
+  `git diff --check` passed in isolated target `.target-e1`.
+- Deviations: none.
+
+#### Descriptor dispositions
+
+| Tool | Disposition | Reason |
+| --- | --- | --- |
+| `tabs_context_mcp` | keep | Already distinguishes inventory from creation and names unavailable-workspace recovery. |
+| `tabs_create_mcp` | keep | Already states creation, focus, recovery, and the `navigate` follow-up. |
+| `navigate` | keep | Already separates top-level navigation from clicks and names unsaved-change risk. |
+| `computer` | keep | The external B grade prompted review only; current guidance names exact alternatives and retry risk while preserving the official mixed-tool signature. |
+| `find` | change | Added structure and prose alternatives plus stale-ref recovery. |
+| `form_input` | keep | Already distinguishes one exact ref from `form_fill` and states page-event side effects. |
+| `get_page_text` | change | Added `read_page` and `find` selection guidance plus bounded-output recovery. |
+| `javascript_tool` | change | Added purpose-built-tool preference, unbounded side effects, and no-blind-retry guidance. |
+| `read_console_messages` | change | Added first-use tracking, reload recovery, output bounds, hostname scope, and `clear` consumption. |
+| `read_network_requests` | change | Added first-use tracking, reload/interaction recovery, output bounds, reset scope, and `clear` consumption. |
+| `read_page` | change | Added prose and targeted-read alternatives, diff semantics, output focusing, and stale-ref recovery. |
+| `resize_window` | change | Clarified window-wide scope, responsive rerender effects, and ref refresh. |
+| `update_plan` | keep | Already prevents agents from treating informational planning as approval or authority. |
+| `narrate` | keep | Already distinguishes meaningful phase changes from routine interaction. |
+| `wait_for` | keep | Already explains settlement, conditions, matched refs, timeout evidence, and the dynamic-page job. |
+| `script` | keep | Already distinguishes dependent steps from `browser_batch` and explains validation, authorization, references, and waits. |
+| `form_fill` | keep | Already distinguishes semantic multi-field filling from exact-ref input and handles ambiguity safely. |
+| `act_on` | keep | Already distinguishes semantic receipt-based action from coordinate work and refuses ambiguity. |
+| `dialog` | keep | Already makes status and explicit user intent the safe recovery path. |
+| `tab_control` | keep | Already limits scope to one owned tab and makes close explicit. |
+| `file_upload` | keep | Already avoids the native picker and distinguishes client files from captured images. |
+| `browser_batch` | change | Condensed fixed-step selection while adding partial-completion recovery and preserving coordinate limits. |
+| `upload_image` | keep | Already distinguishes captured images from client files and makes target choice exclusive. |
+| `gif_creator` | keep | Already explains the bounded lifecycle, automatic stops, memory ownership, and export choices. |
+| `explain` | keep | Its ADR-pinned description already distinguishes permission explanation from page explanation. |

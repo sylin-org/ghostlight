@@ -916,15 +916,33 @@ mod tests {
             instructions: String::new(),
             tools: vec![
                 CatalogTool {
-                    declaration: json!({"name": "status", "inputSchema": {"type": "object"}}),
+                    declaration: json!({
+                        "name": "status",
+                        "description": "Inspect status.",
+                        "inputSchema": {"type": "object"},
+                        "annotations": {"title": "Status"},
+                        "example": {"call": {}}
+                    }),
                     workspace_use: WorkspaceUse::Independent,
                 },
                 CatalogTool {
-                    declaration: json!({"name": "tabs_create_mcp", "inputSchema": {"type": "object"}}),
+                    declaration: json!({
+                        "name": "tabs_create_mcp",
+                        "description": "Create context.",
+                        "inputSchema": {"type": "object"},
+                        "annotations": {"title": "Create Context"},
+                        "example": {"call": {}}
+                    }),
                     workspace_use: WorkspaceUse::Creates,
                 },
                 CatalogTool {
-                    declaration: json!({"name": "click", "inputSchema": {"type": "object", "properties": {"x": {"type": "number"}}}}),
+                    declaration: json!({
+                        "name": "click",
+                        "description": "Click a coordinate.",
+                        "inputSchema": {"type": "object", "properties": {"x": {"type": "number"}}},
+                        "annotations": {"title": "Click"},
+                        "example": {"call": {"x": 4}}
+                    }),
                     workspace_use: WorkspaceUse::Uses,
                 },
             ],
@@ -946,6 +964,15 @@ mod tests {
             result["tools"][2]["inputSchema"]["properties"]["workspaceId"]["type"],
             "string"
         );
+        for (index, description, title, example) in [
+            (0, "Inspect status.", "Status", json!({"call": {}})),
+            (1, "Create context.", "Create Context", json!({"call": {}})),
+            (2, "Click a coordinate.", "Click", json!({"call": {"x": 4}})),
+        ] {
+            assert_eq!(result["tools"][index]["description"], description);
+            assert_eq!(result["tools"][index]["annotations"]["title"], title);
+            assert_eq!(result["tools"][index]["example"], example);
+        }
         assert_eq!(result["ttlMs"], 0);
         assert_eq!(result["cacheScope"], "private");
         assert_eq!(result["resultType"], "complete");
