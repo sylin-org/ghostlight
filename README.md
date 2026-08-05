@@ -118,8 +118,9 @@ MCP server, then run the installer for the browser side. For VS Code, use its na
 builds and passes the full test suite in CI; its live-browser verification is still owed.
 
 **Extension state.** The Chrome Web Store serves Chrome adapter v0.7.1. Chrome adapter v0.7.1 covers
-Ghostlight service versions v0.7.1-v0.7.3. Install the extension from the public listing. See the
-full [adapter compatibility map](compatibility.json).
+Ghostlight service versions v0.7.1-v0.7.3. Chrome adapter v0.8.0 is pending review. Chrome adapter
+v0.8.0 covers Ghostlight service versions v0.8.x. Install the extension from the public listing. See
+the full [adapter compatibility map](compatibility.json).
 
 **Other ways to get it.** Homebrew: `brew install sylin-org/tap/ghostlight`. On the
 [MCP registry](https://registry.modelcontextprotocol.io) as `org.sylin/ghostlight`. Every release

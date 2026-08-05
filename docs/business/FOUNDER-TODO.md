@@ -42,9 +42,11 @@ Last reconciled: 2026-08-04. This checklist is current through Ghostlight v0.7.3
 - [x] Ghostlight v0.7.3 is published on GitHub, npm, Homebrew, the official MCP Registry, and the
       website. The release and live-install checks passed on 2026-08-01.
 - [x] **Chrome Web Store is public.** Adapter v0.7.1 is live under store id
-      `lejccfmoeogmhemakeknjjdhkfkgncdl`; there is no pending submission.
-- [ ] Submit source adapter v0.8.0 for review before publishing service v0.8.0. The 0.8 contract
-      block permits independent adapter and service patches after that. Keep Verified CRX uploads
+      `lejccfmoeogmhemakeknjjdhkfkgncdl`; adapter v0.8.0 is pending review with deferred publishing.
+- [x] Submit source adapter v0.8.0 for review before publishing service v0.8.0. The 0.8 contract
+      block permits independent adapter and service patches after that.
+- [ ] After approval, publish the staged v0.8.0 adapter before its 30-day expiry and before the
+      service release. Keep Verified CRX uploads
       deferred until release cadence and offline key recovery are stable; losing that key would
       prevent future updates.
 - [x] The CWS video evidence is present in the listing and the README hero GIF is published.
@@ -180,3 +182,6 @@ Last reconciled: 2026-08-04. This checklist is current through Ghostlight v0.7.3
 - 2026-08-05: **CHROME ADAPTER v0.7.1 PUBLISHED.** The public listing reports v0.7.1, updated
   2026-08-02. The repository's stale pending-review state was reconciled. Source adapter v0.8.0
   is the next submission and covers every v0.8.x service patch under the 0.8 contract block.
+- 2026-08-05: **CHROME ADAPTER v0.8.0 SUBMITTED.** Google accepted the package for review with
+  deferred publishing. The staged package will expire 30 days after approval if it is not
+  published. Public adapter v0.7.1 remains unchanged during review.

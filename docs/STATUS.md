@@ -8,8 +8,9 @@ when they disagree**, and update it when you land something that changes the pic
 ## Now
 
 - **The v0.8.0 release candidate is being prepared without weakening the adapter gate.** The live
-  Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02, with no
-  pending submission. The stale v0.6.0/pending-v0.7.1 canonical state and current runbooks are
+  Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter
+  v0.8.0 was submitted for review on 2026-08-05 with deferred publishing. The stale
+  v0.6.0/pending-v0.7.1 canonical state and current runbooks are
   corrected. Online public-surface checks now compare the tracked adapter with Chrome's public
   update feed, and `reconcile-chrome-store.ps1` handles both accepted-review and became-public
   transitions without publishing anything. GitHub release assembly now takes `What's changed`
@@ -19,7 +20,8 @@ when they disagree**, and update it when you land something that changes the pic
   every 0.8 service patch. Public adapter v0.7.1 remains capped at service v0.7.3, so preflight
   blocks the service release until adapter v0.8.0 is public. The store-ready v0.8.0 zip is 137,689
   bytes with SHA-256 `54119b6820f942071053927e0a309e7745629f1d7b992530d3386113d1f46535`.
-  No store submission, website publication, release tag, or registry publication has occurred.
+  Google accepted the store submission. No website publication, release tag, or registry
+  publication has occurred.
   The online audit now passes the live Chrome comparison and fails only because the public website
   still carries the old extension summary pending an explicitly confirmed refresh.
 
@@ -178,13 +180,13 @@ when they disagree**, and update it when you land something that changes the pic
   marked layout amendment. The layout shipped in v0.7.3, and Glama now scores its license metadata
   A. Other downstream services still depend on their next crawl.
 
-- **Chrome adapters now version independently from the service (ADR-0093).**
-  `compatibility.json` maps each adapter to an inclusive service range. Release packaging names the
-  extension artifact from `extension/manifest.json`; preflight and public-surface checks require
-  the source, public-store, and pending adapters to cover the service release. Service-only
-  releases extend the map without changing the adapter manifest or restarting store review. The
-  current source adapter is v0.7.3 and the public store serves v0.7.1 with no pending submission;
-  both cover the published v0.7.3 service.
+- **Chrome adapters now version independently from the service (ADR-0093).** Historical adapter
+  rows retain inclusive service ranges. From 0.8 onward, `compatibility.json` declares a
+  major/minor contract block: any 0.8 adapter patch covers any 0.8 service patch. Release packaging
+  names the extension artifact from `extension/manifest.json`; checks require the source adapter
+  to cover the source service and the public adapter to cover the public service. Source and
+  pending adapter v0.8.0 cover source service v0.8.0. Public adapter v0.7.1 covers published
+  service v0.7.3.
 
 - **v0.7.2 ships safe installed-engine activation (ADR-0092).** Windows identifies the
   exact adapter-pipe owner, verifies that its executable belongs to the managed Ghostlight install
@@ -369,7 +371,8 @@ when they disagree**, and update it when you land something that changes the pic
   handoff (ADR-0070), agent narration (ADR-0072), reliable memory-only GIF recording and bounded
   browser transport (ADRs 0073/0074), the cohesive Card Foundry demo story, and the live Foundry
   companion route at `https://sylin.org/ghostlight/demo/foundry/`.
-- **The Chrome Web Store listing is public at v0.7.1 with no pending submission.** The owner
+- **The Chrome Web Store listing is public at v0.7.1; v0.8.0 is pending review with deferred
+  publishing.** The owner
   completed the listing, Privacy practices, permission and remote-code justifications, data-use
   certifications, screenshots, video, and promotional tiles for the original v0.5.7 submission.
   After Google reinstated the `ghostlight-release` API project on 2026-07-15, the owner approved
@@ -377,7 +380,8 @@ when they disagree**, and update it when you land something that changes the pic
   The v0.6.0 package uploaded successfully and Chrome accepted the new submission as
   `ITEM_PENDING_REVIEW`. Chrome approved and published v0.6.0 by 2026-07-31. The v0.7.1 release
   then uploaded successfully and the publish API accepted it with `[OK] OK.`. The public listing
-  reports v0.7.1 updated on 2026-08-02. Broad host permissions can trigger an in-depth review;
+  reports v0.7.1 updated on 2026-08-02. Adapter v0.8.0 was submitted on 2026-08-05; once approved,
+  its staged publication expires after 30 days. Broad host permissions can trigger an in-depth review;
   that remains the intentional tradeoff for general-purpose automation across user-selected
   sites. Edge remains unsubmitted because no `EDGE_*` credentials are configured.
 - **The ADR-0056 Lightbox consolidation is complete.** All 27 legacy ignored spawn tests have named
@@ -661,8 +665,8 @@ its API credentials or dashboard metadata are absent.
 
 ## Owner-side gates (agents cannot do these)
 
-- Chrome Web Store: submit source adapter v0.8.0 and wait for it to become public before service
-  v0.8.0. Edge Add-ons remains unsubmitted.
+- Chrome Web Store: wait for adapter v0.8.0 review, then publish the staged package before its
+  30-day post-approval expiry and before service v0.8.0. Edge Add-ons remains unsubmitted.
 - Trust center legal: vendor entity name in the MSA (blocked on forming the LLC), the
   cyber-insurance yes/no line, counsel skim of MSA/DPA and the commercial license before first
   EXECUTION (publication already happened by design; drafts are marked as drafts).

@@ -42,52 +42,28 @@ English (United States)
 **Detailed description** (plain text; the store does not render Markdown)
 
 ```
-Ghostlight in Browser gives an AI agent controlled access to your real, authenticated browser
-session. It drives the browser you are already logged in to, so the agent can observe and act on
-the web apps you already use, through any Model Context Protocol (MCP) client such as Claude Code,
-Cursor, or VS Code.
+Ghostlight lets AI agents work in the Chromium browser you already use -- with your signed-in
+sessions, visible actions, local control, and optional policy guardrails.
 
-IMPORTANT: This extension does nothing on its own. It is the browser-side half of a two-part
-system. The other half is a local native application that you install and run separately -- it is
-not distributed through the Chrome Web Store. Without that native
-application installed and registered, the extension is inert: it cannot connect to anything,
-receive instructions, or take any action. Install instructions are in the project repository.
+Connect Claude Code, Cursor, VS Code, Codex, and other compatible MCP clients to a clearly labeled
+automation tab group in your real browser. Agents can navigate pages, read content, click, type,
+fill forms, manage tabs, inspect developer information, and complete multi-step browser tasks
+while you watch.
 
-What it can do, on instruction from that local application:
-- Read page content and structure (text, accessibility tree, shadow DOM).
-- Take screenshots of the automated tab, with an on-page cursor showing where input lands, and,
-  when you ask for a session recording, relay screen-capture frames of that tab so the local
-  application can assemble an annotated animated GIF of what the agent did.
-- Dispatch clicks, keystrokes, scrolling, and drags with real-input fidelity.
-- Fill in forms, find elements, and run in-page JavaScript.
-- Place files and captured screenshots into a page's file inputs and drop targets, using data the
-  local application supplies (the extension never reads your disk).
-- Inspect console messages and network request metadata.
-- Open, navigate, group, and manage tabs in a clearly labeled automation group inside the browser
-  window the user most recently attended.
+Ghostlight is local-first. The extension communicates directly with the Ghostlight application
+installed on your computer. There is no developer-operated service, telemetry, advertising,
+tracking, or data sale.
 
-Governed by design:
-- The native application is the policy and audit layer. It classifies every action (read, act,
-  write, execute), can restrict which domains the agent may touch, honors a "take the wheel" pause
-  and a panic kill switch, and writes a structured audit record of what ran.
-- All of that governance runs on your own machine, inside the native application, never inside this
-  extension and never on any remote server.
+You remain in control. Run Ghostlight unrestricted or apply local domain and capability policies.
+Pause automation, take the wheel, or stop it at any time.
 
-Local-first and private:
-- No developer-operated server. No analytics or telemetry. No ad tracking. No data sale.
-- Data the extension reads is sent only to the local native application on your own machine, over
-  Chrome native messaging (a direct, on-device, process-to-process channel). Nothing is transmitted
-  over the network to reach it.
-- All extension logic ships inside the reviewed extension package. The extension does not fetch or
-  dynamically import code that changes its own behavior. JavaScript supplied for an explicitly
-  requested javascript_tool call runs only in the attached page, not in the extension origin.
+Requires the local Ghostlight application:
 
-Open and inspectable:
-- Source, install scripts, the governance policy engine, and full documentation are at
-  https://github.com/sylin-org/ghostlight.
+https://sylin.org/ghostlight/
 
-You stay in control: you choose whether the native application runs at all, which policy (if any)
-it enforces, and you can pause or kill automation, or remove the extension, at any time.
+Source and documentation:
+
+https://github.com/sylin-org/ghostlight
 ```
 
 **Homepage / support URL**
@@ -303,10 +279,10 @@ The item was submitted for review on 2026-07-13. The store assigned the id
 stripped from the store package).
 
 Current release state (2026-08-05): Google approved and published v0.7.1. The public listing serves
-that version, reports an update date of 2026-08-02, and offers `Add to Chrome`. There is no pending
-submission. Source adapter v0.8.0 is the next review candidate. It covers every service v0.8.x
-patch under the 0.8 contract block. Broad host permissions may trigger
-the expected in-depth review.
+that version, reports an update date of 2026-08-02, and offers `Add to Chrome`. Adapter v0.8.0 was
+submitted for review on 2026-08-05 with deferred publishing. It covers every service v0.8.x patch
+under the 0.8 contract block. Once approved, the staged package expires after 30 days if it is not
+published. Broad host permissions may trigger the expected in-depth review.
 
 Ordinary `ghostlight install` already registers both the Web Store id and the pinned unpacked-dev
 id in the native host's `allowed_origins`. A store user therefore runs the normal command:
