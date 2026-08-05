@@ -27,7 +27,7 @@ Observed again on 2026-08-05 immediately before this packet:
 | Public service | 0.7.3 on npm, GitHub, and the official MCP Registry |
 | Source service | 0.8.0, unreleased |
 | Public Chrome adapter | 0.7.1 from the public Chrome update feed |
-| Pending Chrome adapter | 0.8.0 in tracked deferred-review state; owner dashboard recheck still required |
+| Pending Chrome adapter | 0.8.0; an owner-provided dashboard screenshot on 2026-08-05 showed `Pending review` |
 | Compatibility | Adapter 0.7.1 covers services 0.7.1 through 0.7.3; adapter 0.8.x covers services 0.8.x |
 | Platforms | Windows and Linux live-browser verified; macOS build and full-suite CI verified, live-browser proof owed |
 | MCP revisions | Source candidate has exact local stdio shores for `2025-11-25` and `2026-07-28` |
@@ -61,7 +61,7 @@ owner-approved adapter and status reconciliation lands on `main`, rerun the dry 
 | Recipe | Result | Evidence boundary |
 | --- | --- | --- |
 | Safe launch brief | PASS in this Codex client and visible Chromium. Filled the five authorized fields and submitted only the public synthetic form. The page reported `Moonlight Notes is ready for review.` | Tab `5541182605`; `https://sylin.org/ghostlight/demo/brief/` |
-| Authenticated read | WAITING FOR OWNER CHOICE. The signed-in GitHub page opened, but Ghostlight rejected reading private account metadata because the owner had not selected that source for this proof. No metadata was read and no action occurred. | Owner must name one signed-in page and permit reading its visible account or workspace label, page summary, and available actions. No clicks, typing, submission, recording, or credential copy. |
+| Authenticated read | QUALIFIED, NOT COMPLETE. The owner selected the Chrome Web Store Developer Dashboard. Ghostlight opened the default-account agreement page, the owner manually selected `sylin`, and Ghostlight immediately inventoried the exact browser-created dashboard child. Chrome blocks extension inspection and debugger attachment on Web Store pages, so the agent could not read its contents. The owner's screenshot showed publisher `sylin.org`, `Ghostlight in Browser` 0.8.0, two users, no rating, and `Pending review`. | Signed-in session continuity and exact child adoption passed. A full agent-read proof still needs an owner-selected signed-in page that allows extension inspection. No dashboard control was activated. |
 | Browser-created child | PASS in this Codex client and visible Chromium. A measured click on the temporary `Open child proof` link returned exactly one child in `tabDelta`; the next direct call read child tab `5541182622` at `https://example.org/` without a context refresh. The source tab remained at `https://example.com/`. | Temporary DOM change on the disposable source tab only; both public example tabs remain open. |
 | Foundry diagnosis | PASS. Tracking began before one explicit reload. The page read showed the synthetic QA blocker, no console message matched `error|warning|foundry`, and all 11 captured `sylin.org` requests returned 200. | Read-only public synthetic page; no page mutation. |
 
@@ -75,9 +75,9 @@ identified the link and exact child. Neither failure repeated three times.
 
 Approval must name each allowed item. One approval does not cover the others.
 
-- [ ] Select and authorize one signed-in page for the read-only recipe above.
-- [ ] Recheck the Chrome owner dashboard and record whether adapter 0.8.0 is approved, still in
-  review, or rejected.
+- [ ] Select and authorize one scriptable signed-in page for the full read-only recipe above.
+- [x] Recheck the Chrome owner dashboard. The 2026-08-05 owner screenshot records adapter 0.8.0 as
+  `Pending review`.
 - [ ] If approved, publish the already-submitted adapter 0.8.0 with deferred publication. Do not
   edit its listing copy in the same action.
 - [ ] Authorize the Ghostlight `dev` push, review path, and `dev -> main` merge.
@@ -104,8 +104,9 @@ Approval must name each allowed item. One approval does not cover the others.
 
 Each numbered mutation needs explicit owner confirmation.
 
-1. Finish the owner-selected authenticated read. Recheck the Chrome dashboard. If 0.8.0 is not
-   approved, stop. Keep service 0.8.0 unreleased.
+1. Finish the owner-selected authenticated read on a page that permits extension inspection.
+   Recheck the Chrome dashboard after its state changes. It currently says `Pending review`, so
+   stop here and keep service 0.8.0 unreleased.
 2. Publish the already-approved Chrome adapter 0.8.0 through deferred publishing. Make no listing
    copy change.
 3. Wait for the public update feed to report 0.8.0. Run:
@@ -169,8 +170,9 @@ clear current-status note over attempting to hide a broken immutable version.
 ## Remaining caveats
 
 - macOS still lacks live-browser verification.
-- The authenticated proof needs an owner-selected page.
-- Chrome's owner dashboard state still needs a final check.
+- The authenticated proof needs an owner-selected signed-in page that permits extension
+  inspection. Chrome Web Store pages do not.
+- The owner dashboard was rechecked by screenshot on 2026-08-05 and still says `Pending review`.
 - Glama and mcpservers.org are stale; search caches still show older Sylin content.
 - GitHub catalog approval is owner-recorded, but a public catalog entry was not located.
 - No independent review, user-authored public workflow, or permitted user quote was located in the

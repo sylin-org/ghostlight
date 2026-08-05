@@ -15,15 +15,19 @@ when they disagree**, and update it when you land something that changes the pic
   reconciliation passes. npm, GitHub, Chrome, registry, directory, search, traffic, and primary
   comparison evidence was refreshed on 2026-08-05. Public counters did not move; search, Glama,
   and mcpservers.org caches still show older source text. The safe brief, browser-created child,
-  and Foundry diagnosis recipes passed through this Codex client and visible Chromium. The
-  authenticated read correctly stopped because the owner had not selected a private signed-in
-  source. Exact commits, store implications, each proposed destination, release order, and recovery
+  and Foundry diagnosis recipes passed through this Codex client and visible Chromium. For the
+  authenticated recipe, the owner selected the Chrome Developer Dashboard and switched to the
+  `sylin` account. Ghostlight inventoried the exact browser-created dashboard child, but Chrome
+  blocks extension inspection on Web Store pages. The owner screenshot showed `Ghostlight in
+  Browser` 0.8.0 with two users, no rating, and `Pending review`. A full agent read still needs a
+  selected signed-in page that permits inspection. Exact commits, store implications, each
+  proposed destination, release order, and recovery
   live in `docs/business/PUBLICATION-PACKET-0.8.md`; the manual release/7-day/30-day reception
   record and owner-gated Discussion draft live in
   `docs/research/public-reception-loop-0.8.md`. No product push, merge, release, store action,
   registry publication, directory edit, Discussion, showcase edit, or social post occurred in E6.
-  The next action is an explicit owner choice for the signed-in proof and any individually named
-  publication action.
+  The release now waits on Chrome review. A scriptable signed-in source can finish the read proof;
+  every publication action still needs separate owner approval.
 
 - **The v0.8.0 service candidate is locally release-ready without weakening the adapter gate.** The live
   Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter

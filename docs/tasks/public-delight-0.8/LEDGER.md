@@ -7,9 +7,10 @@ conversation history.
 
 - State: E6 is in progress at the owner-review gate
 - Current pass: E6
-- Next action: the owner selects one signed-in page for the read-only proof, rechecks the Chrome
-  dashboard, and explicitly names any publication action to authorize from
-  `docs/business/PUBLICATION-PACKET-0.8.md`
+- Next action: adapter 0.8.0 remains in Chrome `Pending review`. Wait for that external state to
+  change. The owner may also select one signed-in page that permits extension inspection to finish
+  the full read-only proof. Any publication action still requires exact approval from
+  `docs/business/PUBLICATION-PACKET-0.8.md`.
 - External actions: website commit `1568538ba5ca217e46b917688b41d17b7e672488` was pushed to
   `main` and deployed under the owner's explicit website-push instruction. No product push, merge,
   release, store publication, registry publication, directory edit, Discussion, showcase update,
@@ -24,7 +25,7 @@ conversation history.
 | E3 | Core public surfaces | DONE | this pass's `docs(public): reshape core first-success surfaces` commit | - | none |
 | E4 | Agent guidance and metadata | DONE | this pass's `docs(tools): sharpen agent guidance` commit | - | none |
 | E5 | Website and directory surfaces | DONE | this pass's `docs(public): prepare E5 discovery surfaces` commit | `1568538ba5ca` | none |
-| E6 | Release reconciliation and reception loop | in-progress | this pass's packet commit | `1568538ba5ca` | authenticated proof awaits owner-selected source |
+| E6 | Release reconciliation and reception loop | in-progress | this pass's packet commits | `1568538ba5ca` | Chrome review pending; authenticated agent read needs a scriptable source |
 
 Status values: `pending`, `in-progress`, `DONE`, or `BLOCKED`.
 
@@ -312,8 +313,11 @@ commit hashes, external drafts, and numbered deviations.
   exact commit marker `1568538ba5ca`.
 - Live proof: the safe brief, exact browser-created child, and Foundry diagnosis recipes passed
   through this Codex client and the visible browser. The child was usable by its returned id on the
-  immediate next call without a context refresh. The authenticated recipe stopped safely because
-  the owner had not selected a private signed-in source; it remains the only proof item owed.
+  immediate next call without a context refresh. For the authenticated recipe, the owner selected
+  the Chrome Developer Dashboard and manually switched to `sylin`. Ghostlight immediately
+  inventoried the exact browser-created dashboard child, but Chrome blocks extension inspection
+  and debugger attachment on Web Store pages. The owner screenshot supplied the visible item and
+  status evidence. A full agent read still needs a selected signed-in page that permits inspection.
 - Packet: `docs/business/PUBLICATION-PACKET-0.8.md` records exact commits, evidence, every proposed
   destination, store implications, caveats, ordered release steps, and channel recovery.
   `docs/research/public-reception-loop-0.8.md` holds the release/7-day/30-day manual template and
@@ -333,4 +337,5 @@ commit hashes, external drafts, and numbered deviations.
 - Deviations: one transient fresh-tab request changed nothing; the existing owned blank tab
   completed the safe proof. The child recipe's first semantic lookup omitted the newly injected
   link; an exact measured coordinate action completed the proof and returned the unambiguous child.
-  The authenticated proof is waiting for the source selection required by its own boundary.
+  The authenticated Chrome dashboard proof reached a browser-protected surface: topology and
+  signed-in continuity were visible, while page reading was not available to extensions.

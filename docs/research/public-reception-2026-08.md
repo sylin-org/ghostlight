@@ -191,9 +191,12 @@ changed after the E1 snapshot without rewriting that earlier observation.
   owner-only traffic window stayed at 13 views/10 unique and 848 clones/157 unique, with Google
   and github.com at one view/one unique each.
 - The public Chrome update feed stayed at adapter 0.7.1. The public reviews HTML still showed two
-  users and `No ratings`. The tracked 0.8.0 deferred-review state was not re-read from the owner
-  dashboard because the live client correctly required specific authorization before reading a
-  private signed-in source. Recheck that dashboard before any store or service publication.
+  users and `No ratings`. After the owner selected the private source, Ghostlight opened the Chrome
+  Developer Dashboard through the signed-in browser and adopted its exact browser-created child.
+  Chrome blocks extension inspection and debugger attachment on Web Store pages, so the owner
+  supplied a screenshot instead. It showed publisher `sylin.org`, `Ghostlight in Browser` 0.8.0,
+  two users, no rating, and `Pending review`. Recheck after that status changes and before any
+  store or service publication.
 - The official MCP Registry stayed at seven active version records with 0.7.3 latest and the old
   `one portable binary` description. Cline issue 1989 and awesome-mcp-servers PR 11306 stayed open;
   PR 11306 remained non-draft, mergeable, and clean. Winget 0.7.3 remained merged.
