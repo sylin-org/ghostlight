@@ -5,10 +5,10 @@ conversation history.
 
 ## RESUME HERE
 
-- State: E1 is complete; E2 has not started
-- Current pass: E2
-- Next action: read `E2-message-and-content-architecture.md` and turn the E1 evidence into the
-  shared message and content architecture
+- State: E2 is complete; E3 has not started
+- Current pass: E3
+- Next action: read `E3-core-public-surfaces.md` and adapt the approved message architecture to the
+  product repository front doors and first-success path
 - External actions: none authorized beyond preparing website work on a non-publishing branch
 
 ## Status
@@ -16,7 +16,7 @@ conversation history.
 | Pass | Title | Status | Product commit | Website commit | Deviations |
 | --- | --- | --- | --- | --- | --- |
 | E1 | Truth and reception baseline | DONE | this pass's `docs(public): establish E1 public truth baseline` commit | - | none |
-| E2 | Message and content architecture | pending | - | - | - |
+| E2 | Message and content architecture | DONE | this pass's `docs(public): define 0.8 message architecture` commit | - | none |
 | E3 | Core public surfaces | pending | - | - | - |
 | E4 | Agent guidance and metadata | pending | - | - | - |
 | E5 | Website and directory surfaces | pending | - | - | - |
@@ -109,3 +109,32 @@ commit hashes, external drafts, and numbered deviations.
 - Deviation 1: the first Clippy attempt could not create Cargo's temporary sibling beside
   `F:\tmp\ghostlight-e1-target`. It was rerun successfully in the isolated workspace target
   `.target-e1`; this was an environment-path failure, not a code finding.
+
+### E2 -- message and content architecture -- 2026-08-05
+
+- Commit: see this pass's `docs(public): define 0.8 message architecture` commit.
+- Copy kit: `docs/design/public-message-0.8.md`.
+- Canonical story: one-sentence, short, medium, and long descriptions follow the ADR-0100 order of
+  useful work, visibility, continuity, local ownership, optional governance, then technical depth.
+- Architecture: six outcome pillars, four audience routes, fit and anti-fit language, a 13-claim
+  evidence matrix, and one primary job for each public surface keep later adaptations coherent
+  without making every page comprehensive.
+- First-success contract: reusable blocks cover roughly 15-second recognition, 2-minute fit,
+  5-minute first success, and symptom-led recovery. Exact 0.8 local stdio wording names protocol
+  revisions `2025-11-25` and `2026-07-28` below the product story.
+- Proof recipes: safe synthetic form, user-chosen authenticated read, exact browser-created child
+  continuity, and page/console/network diagnosis each include a copyable prompt, visible result,
+  success boundary, and evidence owner. The two Sylin demo routes and both example domains returned
+  HTTP 200; the live brief labels and success text matched the recipe.
+- Discovery copy: page title is 59 characters, search description is 147 characters, and the
+  compact directory draft is 230 characters. The fuller directory draft and banned-claim list are
+  internal drafts only; no external edit or submission occurred.
+- Better-fit guidance: Playwright MCP, Chrome DevTools MCP, first-party browser integration, and
+  hosted/headless browser use cases are stated directly. Signed-in access is not treated as a
+  unique primitive.
+- Files changed: the new copy kit, this ledger, and `docs/STATUS.md`. No public front door, package
+  metadata, tool definition, website, store, directory, or other external surface changed.
+- Gates: `cargo fmt --all -- --check`; strict workspace Clippy; full fast-tier workspace tests;
+  ASCII scan; relative-link validation; external proof-page and exact-marker checks; and
+  `git diff --check` all passed.
+- Deviations: none.

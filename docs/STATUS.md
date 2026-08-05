@@ -7,18 +7,18 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
-- **The public-documentation delight batch completed E1 with a dated truth and reception
-  baseline.** The baseline separates product proof, distribution, and reception; maps capabilities
-  by user outcome; records current package, store, GitHub, registry, directory, search, and
-  alternative evidence; and names uncertainty instead of turning unavailable evidence into zero.
-  It corrects the runbooks for the live but stale mcpservers.org listing, Glama's A/A/A grades and
-  one favorite, the merged Winget 0.7.3 submission, and the pending Chrome adapter 0.8.0 owner
-  state. The live Sylin page and two unrelated Sylin routes still repeat obsolete adapter and
-  topology text; Glama, mcpservers.org, and the official registry also carry stale copy. No
-  independent written review or user-authored workflow was located in the bounded searches, so no
-  adoption claim was invented. E2 is next in `docs/tasks/public-delight-0.8/LEDGER.md`. Website
-  deployment, store resubmission, directory posts, release publication, and other outward actions
-  still require explicit owner confirmation.
+- **The public-documentation delight batch completed E2 with one evidence-linked 0.8 message
+  architecture.** `docs/design/public-message-0.8.md` now carries the canonical story, short and
+  long adaptations, six outcome pillars, four audience routes, fit and anti-fit language, a
+  13-claim evidence matrix, and one primary job per public surface. Reusable copy covers
+  recognition, fit, first success, and recovery without leading on topology, licensing, governance,
+  or tool count. Four bounded proof recipes cover a synthetic form, user-chosen authenticated
+  reading, exact browser-created child continuity, and page/console/network diagnosis. Qualified
+  page, search, social-card, and directory drafts are ready but remain internal. The copy states
+  when Playwright MCP, Chrome DevTools MCP, a first-party integration, or a hosted/headless browser
+  is a better fit; it does not claim signed-in access is unique. E1 remains the dated public truth
+  and reception baseline. E3 is next in `docs/tasks/public-delight-0.8/LEDGER.md`. No public front
+  door or external surface changed, and publication gates remain in force.
 
 - **The v0.8.0 service candidate is locally release-ready without weakening the adapter gate.** The live
   Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter
