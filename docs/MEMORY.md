@@ -120,6 +120,12 @@ file does not restate them -- follow AGENTS.md.
   and with `-Online` after deployment instead of repairing either surface independently. Chrome
   review completes asynchronously: use `scripts/reconcile-chrome-store.ps1` after submission and
   approval so the public version, pending version, README, and compatibility claim move together.
+- **Release reception stays manual and evidence-labeled.** For 0.8, use
+  `docs/research/public-reception-loop-0.8.md` at release, 7 days, and 30 days. Keep voluntary human
+  reports separate from project-authored distribution and automation-prone counters. Three
+  independent reports of one normalized first-use failure stop broader outreach until its owning
+  documentation, doctor, or product path is fixed and verified. Do not add telemetry, tracking
+  parameters, automatic review prompts, or a vendor reporting path to fill evidence gaps.
 - **The changelog owns release changes.** Keep `CHANGELOG.md` current as work lands. Release
   preflight requires a non-empty version section, and GitHub release assembly inserts that exact
   section under `What's changed`; do not maintain a second hand-written release summary.

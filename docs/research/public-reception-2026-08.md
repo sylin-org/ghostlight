@@ -169,3 +169,45 @@ local audit, without a Ghostlight-hosted service or telemetry.
    labels and caveats.
 5. Ask for explicit owner confirmation before any external submission, directory edit, store
    publication, review request, or named participant story.
+
+## E6 pre-publication recheck -- 2026-08-05 15:14 -04:00
+
+E6 repeated the version, store, release, traffic, directory, discovery, and comparison checks. The
+full owner-gated action order is in
+[`PUBLICATION-PACKET-0.8.md`](../business/PUBLICATION-PACKET-0.8.md). This section records what
+changed after the E1 snapshot without rewriting that earlier observation.
+
+- The live canonical website changed. Website `main` and the E5 work branch both resolve to
+  `1568538ba5ca217e46b917688b41d17b7e672488`. The Ghostlight, install, privacy, brief, foundry,
+  Agyo, and Zen Garden routes return HTTP 200. The Ghostlight page now shows public service 0.7.3,
+  public adapter 0.7.1, pending adapter 0.8.0, current platform proof, the three executable roles,
+  the read-only first task, and the four bounded recipes. It no longer exposes the old relay copy.
+- Search caches have not caught up. Bounded searches still returned old Sylin snippets and did not
+  locate an independent review, user-authored workflow, useful extension-id result, or GitHub MCP
+  catalog entry. This remains unavailable evidence, not a zero metric.
+- npm stayed at 0.7.3 with 538 downloads for 2026-07-29 through 2026-08-04 and 2,009 for
+  2026-07-06 through 2026-08-04. GitHub stayed at 0 stars, 0 forks, 0 open issues excluding pull
+  requests, one project-authored Discussion, and 62 downloads across 28 v0.7.3 assets. The
+  owner-only traffic window stayed at 13 views/10 unique and 848 clones/157 unique, with Google
+  and github.com at one view/one unique each.
+- The public Chrome update feed stayed at adapter 0.7.1. The public reviews HTML still showed two
+  users and `No ratings`. The tracked 0.8.0 deferred-review state was not re-read from the owner
+  dashboard because the live client correctly required specific authorization before reading a
+  private signed-in source. Recheck that dashboard before any store or service publication.
+- The official MCP Registry stayed at seven active version records with 0.7.3 latest and the old
+  `one portable binary` description. Cline issue 1989 and awesome-mcp-servers PR 11306 stayed open;
+  PR 11306 remained non-draft, mergeable, and clean. Winget 0.7.3 remained merged.
+- Glama stayed A/A/A with one favorite and `computer` B. Glama and mcpservers.org still ingest the
+  former relay copy. Their lag is downstream of the now-current canonical website and local 0.8
+  source.
+- The primary comparison sources still support E1's distinctions: Playwright MCP documents its
+  existing-browser extension and signed-in state; Chrome DevTools MCP documents performance work
+  and usage-statistics controls; Claude in Chrome remains first-party and signed-in; Browser
+  Bridge remains a local real-Chrome alternative. No uniqueness claim changed.
+- `scripts/check-public-surfaces.ps1 -Online` passed the current public 0.7.3 service, 0.7.1
+  adapter, source 0.8.0 service and adapter, platform, and entry-path claims.
+
+The release, 7-day, and 30-day manual record is
+[`public-reception-loop-0.8.md`](public-reception-loop-0.8.md). It keeps public counters,
+owner-visible aggregates, voluntary human reports, and project-authored distribution in separate
+evidence categories.

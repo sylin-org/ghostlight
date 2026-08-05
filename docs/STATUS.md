@@ -7,21 +7,23 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
-- **The public-documentation delight batch completed E5 across product and website source.** The
-  Ghostlight page now leads with signed-in browser work, visible control, local ownership, fit and
-  anti-fit guidance, a read-only first task, and four bounded proof recipes. Direct routes carry
-  qualified search, social, canonical, and SoftwareApplication metadata; the in-page carousel
-  updates or removes that metadata with the selected project. Current public-status and install
-  fallbacks remain byte-aligned with their product owners. Website commit `bda3791` lives on the
-  non-publishing branch `work/ghostlight-public-delight-e5`; the user-authorized final E5 action is
-  a push of that exact branch, not a merge or deployment. npm, MCP Registry, and MCPB candidate
-  descriptions now share the same factual core. Owner-gated store, directory, Cline, awesome list,
-  Codex, and Zed drafts live in `docs/business/PUBLIC-COPY-DRAFTS-0.8.md`. Website production tests,
-  exact 390px and desktop checks, navigation and metadata checks, package tests, the MCPB validator,
-  public-surface reconciliation, formatting, strict Clippy, workspace tests, ASCII, links, and diff
-  hygiene pass. No store resubmission, registry publication, directory edit, showcase post, website
-  merge, or live deployment occurred. E6 is next in
-  `docs/tasks/public-delight-0.8/LEDGER.md`.
+- **The public-documentation delight batch is at E6's owner-review gate.** The live website is
+  deployed from exact commit `1568538ba5ca217e46b917688b41d17b7e672488`; its `main` and E5 work
+  branch match. The Ghostlight page and repeated project-route fallbacks now carry the current
+  public 0.7.3 service, public 0.7.1 adapter, pending 0.8.0 adapter, platform proof, three-role
+  topology, fit guidance, read-only first task, and four bounded recipes. The online public-surface
+  reconciliation passes. npm, GitHub, Chrome, registry, directory, search, traffic, and primary
+  comparison evidence was refreshed on 2026-08-05. Public counters did not move; search, Glama,
+  and mcpservers.org caches still show older source text. The safe brief, browser-created child,
+  and Foundry diagnosis recipes passed through this Codex client and visible Chromium. The
+  authenticated read correctly stopped because the owner had not selected a private signed-in
+  source. Exact commits, store implications, each proposed destination, release order, and recovery
+  live in `docs/business/PUBLICATION-PACKET-0.8.md`; the manual release/7-day/30-day reception
+  record and owner-gated Discussion draft live in
+  `docs/research/public-reception-loop-0.8.md`. No product push, merge, release, store action,
+  registry publication, directory edit, Discussion, showcase edit, or social post occurred in E6.
+  The next action is an explicit owner choice for the signed-in proof and any individually named
+  publication action.
 
 - **The v0.8.0 service candidate is locally release-ready without weakening the adapter gate.** The live
   Chrome Web Store listing was verified directly at adapter v0.7.1, updated 2026-08-02. Adapter
@@ -44,10 +46,9 @@ when they disagree**, and update it when you land something that changes the pic
   RustSec audit, cargo-deny policy, and an optimized Windows three-binary build all pass. The pure
   release preflight reports exactly two intentional blockers: public service status is still
   v0.7.3 and public adapter v0.7.1 does not cover service v0.8.0. Package-manager hashes remain
-  placeholders until GitHub produces the immutable release assets. No website publication,
-  release tag, or registry publication has occurred.
-  The online audit now passes the live Chrome comparison and fails only because the public website
-  still carries the old extension summary pending an explicitly confirmed refresh.
+  placeholders until GitHub produces the immutable release assets. The website has since been
+  published at commit `1568538ba5ca217e46b917688b41d17b7e672488`, but no release tag, store
+  publication, or registry publication has occurred. The online public-surface audit now passes.
 
 - **Browser-created tab continuity is implemented and live-verified in the working tree
   (ADR-0099).** Browser requests explicitly opt into bounded `tabDeltaV1` results. The extension

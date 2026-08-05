@@ -5,13 +5,15 @@ conversation history.
 
 ## RESUME HERE
 
-- State: E5 is complete when the remote non-publishing website branch matches commit `bda3791`
+- State: E6 is in progress at the owner-review gate
 - Current pass: E6
-- Next action: verify the E5 website branch ref, then read
-  `E6-release-reconciliation-and-reception-loop.md` before any further public-surface work
-- External actions: the owner authorized pushing website branch
-  `work/ghostlight-public-delight-e5`; no merge, deployment, store edit, registry publication,
-  directory edit, showcase update, or other external post is authorized
+- Next action: the owner selects one signed-in page for the read-only proof, rechecks the Chrome
+  dashboard, and explicitly names any publication action to authorize from
+  `docs/business/PUBLICATION-PACKET-0.8.md`
+- External actions: website commit `1568538ba5ca217e46b917688b41d17b7e672488` was pushed to
+  `main` and deployed under the owner's explicit website-push instruction. No product push, merge,
+  release, store publication, registry publication, directory edit, Discussion, showcase update,
+  or social post is authorized.
 
 ## Status
 
@@ -21,8 +23,8 @@ conversation history.
 | E2 | Message and content architecture | DONE | this pass's `docs(public): define 0.8 message architecture` commit | - | none |
 | E3 | Core public surfaces | DONE | this pass's `docs(public): reshape core first-success surfaces` commit | - | none |
 | E4 | Agent guidance and metadata | DONE | this pass's `docs(tools): sharpen agent guidance` commit | - | none |
-| E5 | Website and directory surfaces | DONE | this pass's `docs(public): prepare E5 discovery surfaces` commit | `bda3791` | none |
-| E6 | Release reconciliation and reception loop | pending | - | - | - |
+| E5 | Website and directory surfaces | DONE | this pass's `docs(public): prepare E5 discovery surfaces` commit | `1568538ba5ca` | none |
+| E6 | Release reconciliation and reception loop | in-progress | this pass's packet commit | `1568538ba5ca` | authenticated proof awaits owner-selected source |
 
 Status values: `pending`, `in-progress`, `DONE`, or `BLOCKED`.
 
@@ -283,3 +285,52 @@ commit hashes, external drafts, and numbered deviations.
   output, headless visual verification, Git metadata, and the pinned npm-fetched MCPB validator;
   these were environment constraints, not product findings. `npm ci` reported one high-severity
   dependency advisory in the website tree; no dependency or lockfile change was authorized in E5.
+
+#### E5 publication amendment -- 2026-08-05
+
+- The owner subsequently instructed that the website be pushed. The E5 branch first reached
+  `bda3791`, then the public copy was simplified in `1568538` to remove repeated guilt-framed
+  wording. The owner approved that follow-up and instructed another push.
+- Website `main` and `work/ghostlight-public-delight-e5` now both resolve to full commit
+  `1568538ba5ca217e46b917688b41d17b7e672488`. The external host deployed it. Live assets expose
+  marker `1568538ba5ca`, and the Ghostlight page and repeated carousel fallbacks carry the current
+  public 0.7.3/adapter 0.7.1 story.
+- This amendment supersedes E5's earlier no-deployment statement. It does not authorize any other
+  external action.
+
+### E6 -- release reconciliation and reception loop -- 2026-08-05 (in progress)
+
+- Exact baselines: product `57b4d24274942c03c4c6f8d7465ae7d2b31a7dd1`; product public
+  `main` `6de59b9920320a2e4b7f52e049c14c448cdaca56`; live website
+  `1568538ba5ca217e46b917688b41d17b7e672488`.
+- Evidence refresh: npm, GitHub, Chrome public listing, official MCP Registry, Glama,
+  mcpservers.org, Cline, awesome-mcp-servers, Winget, bounded search, and primary comparison facts
+  were rechecked. The counters and directory states did not change. The canonical website is now
+  current; search and directory caches are not.
+- Reconciliation: `scripts/check-public-surfaces.ps1 -Online` passes. All checked live website
+  routes return 200, the Chrome update feed reports public adapter 0.7.1, and website assets expose
+  exact commit marker `1568538ba5ca`.
+- Live proof: the safe brief, exact browser-created child, and Foundry diagnosis recipes passed
+  through this Codex client and the visible browser. The child was usable by its returned id on the
+  immediate next call without a context refresh. The authenticated recipe stopped safely because
+  the owner had not selected a private signed-in source; it remains the only proof item owed.
+- Packet: `docs/business/PUBLICATION-PACKET-0.8.md` records exact commits, evidence, every proposed
+  destination, store implications, caveats, ordered release steps, and channel recovery.
+  `docs/research/public-reception-loop-0.8.md` holds the release/7-day/30-day manual template and
+  owner-gated Discussion draft.
+- Release preview: the authenticated dry run passed tool/authentication setup and stopped at the
+  intended `main`-only guard because the candidate remains on `dev`. The packet requires a clean,
+  reviewed `main == origin/main` candidate and `-SkipExtension` after Chrome adapter 0.8.0 becomes
+  public.
+- Gates: local and online public-surface reconciliation; `cargo fmt --all -- --check`; strict
+  locked workspace Clippy; the complete locked workspace suite in isolated target `.target-e1`;
+  164 extension tests; seven npm launcher tests; five MCPB launcher tests; ASCII; relative links;
+  and `git diff --check` passed. Current public and owner-only evidence endpoints, website routes,
+  directory pages, Chrome update/listing pages, and primary comparison sources were fetched during
+  the dated recheck.
+- External state: no product push, merge, release tag, store action, registry publication,
+  directory edit, issue/PR comment, Discussion, showcase update, or social post occurred in E6.
+- Deviations: one transient fresh-tab request changed nothing; the existing owned blank tab
+  completed the safe proof. The child recipe's first semantic lookup omitted the newly injected
+  link; an exact measured coordinate action completed the proof and returned the unambiguous child.
+  The authenticated proof is waiting for the source selection required by its own boundary.
