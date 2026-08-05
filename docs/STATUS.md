@@ -7,6 +7,29 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
+- **The official conformance runner stdio side quest is implemented and dogfooded locally.** The
+  `sylin-org/conformance` fork now has branch `feat/stdio-server-runner` in the sibling local
+  checkout. One target abstraction selects an existing HTTP endpoint or a runner-owned stdio
+  command; the existing lifecycle selector, scenario registry, reporting, baselines, SDK runner,
+  and composite action remain the control plane. Stdio uses newline-delimited JSON-RPC, captures
+  `stderr` without treating it as failure, closes stdin before bounded process termination, probes
+  `server/discover` before 2026 functional traffic, rejects HTTP-only scenarios explicitly, and
+  runs transport-neutral initialization, tools, ping, sampling, elicitation, and MRTR paths. A
+  real-process fixture proves that multi-round requestState traffic stays on one child process.
+  Every observed request and response is validated against the runner's vendored 2025-11-25 or
+  2026-07-28 schema from specification commit `71e306956a4959c9655e5036be215d41986596e6`.
+  Live Ghostlight passes 2025 initialize, ping, tools/list, and a safe `explain` tool call. It also
+  passes the expanded 2026 stateless checks: discovery, required per-request metadata rejection,
+  optional clientInfo, response serverInfo, advertised capability/handler agreement, unsupported
+  version errors, tools/list, and a safe `explain` tool call. All live wire-schema checks pass.
+  The focused Ghostlight connector suite passes 48/48. Final full-workspace formatting, strict
+  Clippy, and tests also pass. The runner's final `npm run check`, 46-file/518-test suite, and
+  production build pass at local commit `f0273cf`.
+  Post-gate live artifacts are under `F:\tmp\conformance-ghostlight-2025-*-post-gate` and
+  `F:\tmp\conformance-ghostlight-2026-post-gate`. No Ghostlight defect was found and no
+  Ghostlight runtime code changed during the side quest. The conformance fork remains local and
+  unpublished pending owner review; no upstream PR or issue comment has been created.
+
 - **Browser topology now belongs entirely to the extension in the working tree (ADR-0098).** The
   service owns logical `WorkspaceId` authority, exact tab ownership, governance, scheduling, and
   browser-profile routing. Its private tool instruction carries only the desired `groupTitle`; it
@@ -37,8 +60,8 @@ when they disagree**, and update it when you land something that changes the pic
   focused results include 48 MCP-edge tests, 28 doctor tests, and 13 installer tests. A read-only
   live doctor probe confirmed one connected browser, two aggregate live MCP edges, and a truthful
   persistent-service row. The affected Codex connection still requires its client-owned MCP
-  reconnect before live tool verification. The upstream conformance-runner side quest remains
-  paused; no fork or external post was created.
+  reconnect before live tool verification. The conformance-runner side quest has since resumed in
+  the local `sylin-org/conformance` fork; no external PR or issue comment has been created.
 
 - **The ADR-0096 three-executable cutover is implemented and fully verified in the working tree.**
   Its naming amendment uses `ghostlight-mcp-connector`, `ghostlight`, and
@@ -75,9 +98,10 @@ when they disagree**, and update it when you land something that changes the pic
   Anthropic's pinned MCPB validator, public-surface checks, syntax checks, diff hygiene, and ASCII
   checks pass. The connector-name follow-up reran strict workspace Clippy, the full workspace
   suite, all 31 Lightbox process scenarios, 164 extension tests, npm/MCPB launcher tests, and
-  Anthropic's pinned MCPB validator. The official conformance server runner was not run because it currently
-  accepts an HTTP URL rather than a stdio command. The batch ledger records exact gate evidence;
-  do not treat this working-tree cutover as a published release.
+  Anthropic's pinned MCPB validator. The official conformance server runner now has a local stdio
+  implementation in the `sylin-org/conformance` fork and passes the live checks summarized above.
+  The batch ledger records the original gate evidence; do not treat this cutover as a published
+  release.
 
 - **The local directory packaging path is implemented but not externally submitted.** ADR-0095
   adds a self-contained Windows/macOS MCPB with a protocol-clean Node launcher, an installer mode
