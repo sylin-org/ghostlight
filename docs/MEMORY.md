@@ -57,6 +57,10 @@ Collaboration and process -- this file is their canonical home:
   become a qualification checklist, apology, excuse catalog, or directory of competing products.
   Product pages, decision aids, comparison guides, and the Trust Center carry deeper material at
   the point where a reader asks for it (ADR-0100).
+- **Treat public copy as a coordinated release surface.** Bring every mutable listing up to the
+  current public release instead of leaving stale copy in place for the next launch, then repeat
+  the sweep when the next release ships. Immutable package, registry, and catalog records change
+  only with their owning release; do not churn historical versions.
 - **End-user extension installation is store-only.** Packaged and public paths point to the Chrome
   Web Store. Only source-development docs may explain loading the repository extension directly for
   immediate local testing (ADR-0091).

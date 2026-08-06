@@ -17,9 +17,9 @@ These are distribution observations, not user reception. The dated evidence and 
 | Surface | State observed 2026-08-05 |
 | --- | --- |
 | Official MCP Registry | `org.sylin/ghostlight` 0.7.3 is active and latest. Its description still says `one portable binary`. |
-| Glama | Listed with A license, A quality, A maintenance, one favorite, and B for `computer`; its copied project text is stale. |
-| mcpservers.org | Development listing is live at `https://mcpservers.org/servers/sylin-org/ghostlight`; its copied project text is stale. |
-| Cline marketplace | Submission issue [#1989](https://github.com/cline/mcp-marketplace/issues/1989) remains open. |
+| Glama | Listed with A license, A quality, A maintenance, one favorite, and B for `computer`; its repository copy is synchronized to public README commit `f1423bae`, and its editable profile description is current. |
+| mcpservers.org | Development listing is live at `https://mcpservers.org/servers/sylin-org/ghostlight`; a 2026-08-05 refresh request was accepted, but its copied project text remains stale. |
+| Cline marketplace | Submission issue [#1989](https://github.com/cline/mcp-marketplace/issues/1989) was refreshed in place for 0.7.3 on 2026-08-05 and remains open. |
 | awesome-mcp-servers | PR [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) remains open and ready for review. |
 | GitHub MCP Registry | Owner records say approval completed 2026-08-03. No public catalog record was independently located, so do not claim public discoverability yet. |
 | mcp.so and PulseMCP | Not submitted. |

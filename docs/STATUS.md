@@ -7,14 +7,20 @@ when they disagree**, and update it when you land something that changes the pic
 
 ## Now
 
-- **The public README is shorter and Glama is synchronized; a larger delight pass is drafted on
-  `dev`.** With explicit owner approval, focused public commit
-  `dca064a9d60fbb01f3ef3ac75d2717557503869b` shortened the released-topology README and corrected
-  its public adapter fallback. No release code moved. Glama's maintainer sync then ingested that
-  exact commit; its anonymous overview shows the shorter copy. The current `dev` draft goes
-  further: it removes named-competitor promotion and the fit/anti-fit checklist, leads through
-  recognition, first success, coherent work, visible control, optional boundaries, and onward
-  routes, and remains unpublished pending owner review.
+- **The 0.7.3 public-presence sweep is live on every mutable surface reached in this pass.** The
+  delight-led README shipped to `main` in merge commit
+  `f1423bae55ebbd2d2f9a923a2122db7f32aaede2`. Glama ingested that README, and its editable profile
+  description now says what the product does in one line. GitHub's repository About text and the
+  Sylin organization profile are current; organization-profile PR #1 merged as `64f763cb`, and
+  Homebrew tap PR #1 merged as `f60cdd1c` with a clearer formula description, canonical homepage,
+  and exact extension/guide links. The v0.7.3 GitHub release notes now lead with the product and
+  give complete installation, compatibility, download, and verification guidance. The unlisted
+  YouTube tour now has a useful title, description, and canonical links. Cline marketplace issue
+  #1989 was refreshed in place with the current 25-tool, platform, package, extension, and trust
+  state. mcpservers.org accepted one refresh request, but its copied project text was still stale
+  when rechecked; do not claim that cache as current. Chrome remains untouched while adapter v0.8.0
+  is under review. npm, the official MCP Registry, and Winget retain their immutable v0.7.3 records;
+  refresh their release-owned copy with v0.8.0 instead.
 
 - **The public-documentation delight batch is at E6's owner-review gate.** The live website is
   deployed from exact commit `1568538ba5ca217e46b917688b41d17b7e672488`; its `main` and E5 work
