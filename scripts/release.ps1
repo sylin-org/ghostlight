@@ -238,17 +238,23 @@ function Test-VersionConsistency {
 # Replace the string-valued "hash" in the scoop manifest (NOT the autoupdate object form).
 function Set-ScoopHash([string] $Path, [string] $Hash) {
     $text = Get-Content -Raw $Path
-    $new = [regex]::Replace($text, '("hash":\s*")[0-9a-fA-F]{64}|("hash":\s*")TODO[^"]*',
+    $pattern = '("hash":\s*")[0-9a-fA-F]{64}|("hash":\s*")TODO[^"]*'
+    if (-not [regex]::IsMatch($text, $pattern)) {
+        throw "scoop: no string hash placeholder matched in $Path"
+    }
+    $new = [regex]::Replace($text, $pattern,
         { param($m) ($m.Groups[1].Value + $m.Groups[2].Value) + $Hash }, 1)
-    if ($new -eq $text) { throw "scoop: no string hash placeholder matched in $Path" }
-    Set-Content -Path $Path -Value $new -NoNewline
+    if ($new -ne $text) { Set-Content -Path $Path -Value $new -NoNewline }
 }
 
 function Set-WingetHash([string] $Path, [string] $Hash) {
     $text = Get-Content -Raw $Path
-    $new = [regex]::Replace($text, '(InstallerSha256:\s*)\S+', { param($m) $m.Groups[1].Value + $Hash }, 1)
-    if ($new -eq $text) { throw "winget: no InstallerSha256 line matched in $Path" }
-    Set-Content -Path $Path -Value $new -NoNewline
+    $pattern = '(InstallerSha256:\s*)\S+'
+    if (-not [regex]::IsMatch($text, $pattern)) {
+        throw "winget: no InstallerSha256 line matched in $Path"
+    }
+    $new = [regex]::Replace($text, $pattern, { param($m) $m.Groups[1].Value + $Hash }, 1)
+    if ($new -ne $text) { Set-Content -Path $Path -Value $new -NoNewline }
 }
 
 # In a homebrew formula, replace the sha256 that immediately follows the url line for a
@@ -257,9 +263,11 @@ function Set-HomebrewShaForTarget([string] $Path, [string] $Target, [string] $Ha
     $text = Get-Content -Raw $Path
     $tq = [regex]::Escape($Target)
     $pattern = '(url "[^"]*' + $tq + '[^"]*"\s*\r?\n\s*sha256 ")([0-9a-fA-F]{64}|TODO[^"]*)(")'
+    if (-not [regex]::IsMatch($text, $pattern)) {
+        throw "homebrew: no sha256 line found after the $Target url in $Path"
+    }
     $new = [regex]::Replace($text, $pattern, { param($m) $m.Groups[1].Value + $Hash + $m.Groups[3].Value }, 1)
-    if ($new -eq $text) { throw "homebrew: no sha256 line found after the $Target url in $Path" }
-    Set-Content -Path $Path -Value $new -NoNewline
+    if ($new -ne $text) { Set-Content -Path $Path -Value $new -NoNewline }
 }
 
 function Get-ChangelogSection([string] $Ver) {
