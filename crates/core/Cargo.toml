@@ -15,7 +15,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 # Lossless TOML editing for Codex's shared config.toml. The installer changes only its own
 # [mcp_servers.ghostlight] table and must preserve the user's model, project, and other MCP settings.
-toml_edit = "0.23"
+toml_edit = "0.25"
 tracing = "0.1"
 thiserror = "2"
 anyhow = "1"
