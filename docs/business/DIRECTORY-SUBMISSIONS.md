@@ -1,6 +1,6 @@
 # MCP directory submissions
 
-Last checked: 2026-08-05.
+Last checked: 2026-08-07.
 
 This file separates facts, ready copy, and external gates for the Claude and OpenAI directory
 paths. It is not proof that a submission was sent or accepted.
@@ -14,15 +14,17 @@ and each named external surface are ready.
 These are distribution observations, not user reception. The dated evidence and caveats live in
 [the August 2026 public-reception baseline](../research/public-reception-2026-08.md).
 
-| Surface | State observed 2026-08-05 |
+| Surface | State observed 2026-08-07 |
 | --- | --- |
-| Official MCP Registry | `org.sylin/ghostlight` 0.7.3 is active and latest. Its description still says `one portable binary`. |
-| Glama | Listed with A license, A quality, A maintenance, one favorite, and B for `computer`; its repository copy is synchronized to public README commit `f1423bae`, and its editable profile description is current. |
-| mcpservers.org | Development listing is live at `https://mcpservers.org/servers/sylin-org/ghostlight`; a 2026-08-05 refresh request was accepted, but its copied project text remains stale. |
-| Cline marketplace | Submission issue [#1989](https://github.com/cline/mcp-marketplace/issues/1989) was refreshed in place for 0.7.3 on 2026-08-05 and remains open. |
-| awesome-mcp-servers | PR [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) remains open and ready for review. |
-| GitHub MCP Registry | Owner records say approval completed 2026-08-03. No public catalog record was independently located, so do not claim public discoverability yet. |
-| mcp.so and PulseMCP | Not submitted. |
+| Official MCP Registry | `org.sylin/ghostlight` 0.8.0 is active and latest with current copy. |
+| Glama | Listed with A license, A quality, A maintenance, one favorite, and B for `computer`; explicit sync reached repository commit `9546875`. |
+| mcpservers.org | Development listing is live at `https://mcpservers.org/servers/sylin-org/ghostlight`; a 2026-08-07 refresh request was accepted. |
+| Cline marketplace | Submission issue [#1989](https://github.com/cline/mcp-marketplace/issues/1989) was refreshed in place for 0.8.0 and remains open. |
+| awesome-mcp-servers | PR [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) is open, clean, and has its submission check green. |
+| GitHub MCP Registry | Public search returns one `Sylin Ghostlight` result by `sylin-org` with current copy. |
+| Winget | PR [#413601](https://github.com/microsoft/winget-pkgs/pull/413601) is open with the CLA check green; Microsoft review is pending. |
+| PulseMCP | Its current form says official-registry entries are ingested daily and processed weekly. Recheck after one week before emailing. |
+| mcp.so | Its current submission path requires a $39 one-time fee. No spending was authorized. |
 
 Do not edit a directory or contact its maintainer without explicit owner confirmation. Canonical
 source and website text should be corrected before asking stale crawlers to refresh.
@@ -51,13 +53,15 @@ Apache-2.0 OR MIT, while the governance module is under the Ghostlight Commercia
 describe the bundle as MIT licensed or submit it until Anthropic confirms that this open-core
 license boundary is eligible.
 
-The second gate is mechanical. The form requires an uploaded MCPB, and the package needs the new
-`--no-clients` installer mode. Submit only after these changes ship in a new service release and
-the release asset passes the official MCPB validator.
+The former mechanical gate is clear. The v0.8.0 release contains the self-contained MCPB, the
+launcher uses the package-host-safe installer mode, and the release asset passes the official
+MCPB validator. Licensing eligibility is the only current submission gate.
 
 ### Eligibility inquiry draft
 
-Send to `mcp-review@anthropic.com` only after owner approval.
+Send to `mcp-review@anthropic.com` only after the owner explicitly approves this exact recipient,
+subject, and payload. A signed-in Gmail compose view was verified on 2026-08-07, but the message
+was not sent because the external-action guard required that narrower approval.
 
 Subject: Eligibility question for an open-core local MCPB
 
@@ -70,7 +74,7 @@ machine, includes no telemetry or runtime downloads, and publishes tool titles p
 read-only and destructive annotations.
 
 The current desktop-extension form says submitted extensions must be MIT licensed. Ghostlight is
-open-core: its engine and relay are Apache-2.0 OR MIT, while its optional governance module ships
+open-core: its engine and browser connector are Apache-2.0 OR MIT, while its optional governance module ships
 under the source-available Ghostlight Commercial License. The boundary is documented in
 https://github.com/sylin-org/ghostlight/blob/main/LICENSING.md.
 

@@ -1,34 +1,57 @@
 # Ghostlight 0.8 publication packet
 
-Prepared: 2026-08-05 15:14 -04:00
+Prepared: 2026-08-05 15:14 -04:00. Completed: 2026-08-07.
 
-Status: owner review required. This packet does not authorize any action below.
+Status: core publication complete. External review and eligibility follow-ups remain below.
 
 ## Exact source state
 
 | Surface | Commit | State |
 | --- | --- | --- |
-| Ghostlight 0.8 product and public-copy baseline | `57b4d24274942c03c4c6f8d7465ae7d2b31a7dd1` | Local `dev`; all candidate code, manifests, copy, and E1-E5 work are present |
-| Public Ghostlight repository `main` | `6de59b9920320a2e4b7f52e049c14c448cdaca56` | Does not contain the 0.8 candidate |
-| Website `main` | `1568538ba5ca217e46b917688b41d17b7e672488` | Live at `https://sylin.org/ghostlight/` |
-| Website work branch | `1568538ba5ca217e46b917688b41d17b7e672488` | Matches website `main` |
+| Ghostlight v0.8.0 tag | `993135b048b60622157266b53b21f1719c9df4b3` | Public release commit from PR #80 |
+| Public Ghostlight repository `main` | `95468758` | Release plus resumable checksum fills and refreshed package-manager copy |
+| Website `main` | `0c801c61f9373fd634bbeeae9438f756d62f30e9` | Live 0.8 fallbacks at `https://sylin.org/ghostlight/` |
+| Homebrew tap | `302c710` | Formula 0.8.0 with current description and checksums |
 
-The E6 evidence and packet commit is documentation-only. Record its final hash alongside the
-baseline above before authorizing a product push or merge. After the adapter reconciliation and
-public-service status edit described below, the resulting reviewed `main` commit becomes the exact
-release commit. Do not tag an earlier commit.
+The immutable release tag remains on the reviewed PR merge. Post-release checksum, trust-footer,
+website-fallback, and package-description commits do not move that tag.
+
+## Publication completion record
+
+| Channel | Result on 2026-08-07 |
+| --- | --- |
+| Chrome Web Store | Adapter 0.8.0 public; public CRX contents match the submitted zip except Chrome's injected `update_url` |
+| GitHub release | v0.8.0 public with 38 assets; workflow run `31152001239` passed |
+| npm | `ghostlight@0.8.0` live at `latest`; launcher fetched the published Windows binary and reached `doctor` |
+| Official MCP Registry | `org.sylin/ghostlight` 0.8.0 published |
+| Homebrew | Tap commit `302c710` carries 0.8.0 and current copy |
+| Website and Trust Center | 0.8 fallbacks deployed; reviewed-against footers restamped |
+| GitHub MCP catalog | Public search returns `Sylin Ghostlight` by `sylin-org` |
+| Glama | Explicit sync completed at repository commit `9546875` |
+| mcpservers.org | `Request update` accepted; directory refresh pending |
+| Cline marketplace | Issue #1989 refreshed for 0.8.0 |
+| awesome-mcp-servers | PR #11306 refreshed; automated submission check green; maintainer review pending |
+| Winget | PR #413601 opened; CLA green; Microsoft review pending |
+| Codex and Zed showcases | 0.8 update comments published |
+| Ghostlight Discussion | Existing welcome thread received the 0.8 release and feedback update |
+| Scoop | Direct v0.8.0 manifest is published; central Extras request is ineligible until its required 100 stars or 50 forks threshold is met |
+| PulseMCP | Await daily/weekly official-registry ingestion; recheck after one week |
+| mcp.so | Not submitted because the current path requires a $39 fee; separate spending approval required |
+| Claude directory | Released MCPB is ready, but the form's MIT-only rule conflicts with the complete open-core bundle; eligibility inquiry verified but not sent without exact email approval |
+| OpenAI public directory | Ineligible while the form requires a public production HTTPS MCP endpoint; no remote transport added |
+| Native Edge Add-ons | Intentionally deferred because individual enrollment exposes the owner's home contact address; Edge uses the Chrome other-store path |
 
 ## Current public truth
 
-Observed again on 2026-08-05 immediately before this packet:
+Observed again on 2026-08-07 after publication:
 
 | Fact | Current state |
 | --- | --- |
-| Public service | 0.7.3 on npm, GitHub, and the official MCP Registry |
-| Source service | 0.8.0, unreleased |
-| Public Chrome adapter | 0.7.1 from the public Chrome update feed |
-| Pending Chrome adapter | 0.8.0; an owner-provided dashboard screenshot on 2026-08-05 showed `Pending review` |
-| Compatibility | Adapter 0.7.1 covers services 0.7.1 through 0.7.3; adapter 0.8.x covers services 0.8.x |
+| Public service | 0.8.0 on npm, GitHub, and the official MCP Registry |
+| Source service | 0.8.0 |
+| Public Chrome adapter | 0.8.0 from the public Chrome update feed and listing |
+| Pending Chrome adapter | None for this release |
+| Compatibility | Adapter 0.8.x covers services 0.8.x |
 | Platforms | Windows and Linux live-browser verified; macOS build and full-suite CI verified, live-browser proof owed |
 | MCP revisions | Source candidate has exact local stdio shores for `2025-11-25` and `2026-07-28` |
 | Install command | `npx -y ghostlight install` |
@@ -36,9 +59,8 @@ Observed again on 2026-08-05 immediately before this packet:
 
 `scripts/check-public-surfaces.ps1 -Online` passes this state. The live Ghostlight, install,
 privacy, brief, foundry, Agyo, and Zen Garden routes return HTTP 200. The generated website assets
-carry commit marker `1568538ba5ca`. Glama and mcpservers.org still ingest the former relay copy,
-and search results still cache older Sylin text. Those are downstream cache facts, not permission
-to change canonical claims.
+carry the 0.8 fallbacks. Glama is synchronized to repository commit `9546875`; mcpservers.org has
+accepted a refresh request. Search and directory caches can still lag canonical copy.
 
 ## Test and live-proof evidence
 
@@ -79,12 +101,13 @@ Approval must name each allowed item. One approval does not cover the others.
   owner-selected Microsoft Partner Center home passed without retaining private contact values.
 - [x] Recheck the Chrome owner dashboard. The 2026-08-05 owner screenshot records adapter 0.8.0 as
   `Pending review`.
-- [ ] If approved, publish the already-submitted adapter 0.8.0 with deferred publication. Do not
+- [x] Publish the already-submitted adapter 0.8.0 with deferred publication. Do not
   edit its listing copy in the same action.
-- [ ] Authorize the Ghostlight `dev` push, review path, and `dev -> main` merge.
-- [ ] Authorize the v0.8.0 tag and release orchestration.
-- [ ] Authorize each later directory, issue, pull request, showcase, Discussion, or social edit by
-  destination.
+- [x] Authorize the Ghostlight `dev` push, review path, and `dev -> main` merge.
+- [x] Authorize the v0.8.0 tag and release orchestration.
+- [x] Authorize the publication sweep across eligible directories, issues, pull requests, and
+  showcases. Paid submission, ineligible forms, and messages needing exact external-action
+  approval remain separate gates as recorded above.
 
 ## Store-review implications
 
@@ -107,7 +130,9 @@ Approval must name each allowed item. One approval does not cover the others.
 
 ## Ordered publication runbook
 
-Each numbered mutation needs explicit owner confirmation.
+The owner approved the full 0.8 publication sequence on 2026-08-07. Steps 1-10 completed where
+eligible; the completion table above records the result. The numbered instructions remain as the
+historical recovery trail for this release.
 
 1. The owner-selected authenticated read is complete. Recheck the Chrome dashboard after its state
    changes. It currently says `Pending review`, so stop here and keep service 0.8.0 unreleased.
@@ -178,9 +203,11 @@ clear current-status note over attempting to hide a broken immutable version.
   protected from extension inspection, so their owner-only state still needs dashboard evidence.
 - Edge Add-ons is deferred because its individual enrollment makes the contact address
   customer-visible. No enrollment or store submission completed.
-- The owner dashboard was rechecked by screenshot on 2026-08-05 and still says `Pending review`.
-- Glama and mcpservers.org are stale; search caches still show older Sylin content.
-- GitHub catalog approval is owner-recorded, but a public catalog entry was not located.
+- Chrome adapter 0.8.0 became public on 2026-08-07 and its public CRX was validated against the
+  submitted archive.
+- Glama is current. mcpservers.org accepted a refresh request and still controls its cache timing;
+  search caches can also lag canonical copy.
+- GitHub's MCP catalog now publicly discovers `Sylin Ghostlight` by `sylin-org`.
 - No independent review, user-authored public workflow, or permitted user quote was located in the
   bounded evidence pass.
 - Chrome Web Store pages block extension scripting. The public version check therefore uses the

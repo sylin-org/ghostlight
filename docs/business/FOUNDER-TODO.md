@@ -4,7 +4,7 @@ Personal checklist for actions only the founder can take. Agentic work is NOT tr
 here (it lives in docs/tasks/licensing-1/ and the frontier queue in
 docs/business/PLAN.md). Check items off in place; add dates.
 
-Last reconciled: 2026-08-05. This checklist is current through Ghostlight v0.7.3.
+Last reconciled: 2026-08-07. This checklist is current through Ghostlight v0.8.0.
 
 ## Now (owner-only foundations)
 
@@ -39,13 +39,13 @@ Last reconciled: 2026-08-05. This checklist is current through Ghostlight v0.7.3
       GitHub description, homepage, and discovery topics are live.
 - [ ] Upload `docs/assets/social-preview.png` as the repository's custom social preview. GitHub
       still reports the generated default image as of 2026-08-01.
-- [x] Ghostlight v0.7.3 is published on GitHub, npm, Homebrew, the official MCP Registry, and the
-      website. The release and live-install checks passed on 2026-08-01.
-- [x] **Chrome Web Store is public.** Adapter v0.7.1 is live under store id
-      `lejccfmoeogmhemakeknjjdhkfkgncdl`; adapter v0.8.0 is pending review with deferred publishing.
+- [x] Ghostlight v0.8.0 is published on GitHub, npm, Homebrew, the official MCP Registry, and the
+      website. The release and live-install checks passed on 2026-08-07.
+- [x] **Chrome Web Store is public.** Adapter v0.8.0 is live and byte-validated under store id
+      `lejccfmoeogmhemakeknjjdhkfkgncdl`.
 - [x] Submit source adapter v0.8.0 for review before publishing service v0.8.0. The 0.8 contract
       block permits independent adapter and service patches after that.
-- [ ] After approval, publish the staged v0.8.0 adapter before its 30-day expiry and before the
+- [x] After approval, publish the staged v0.8.0 adapter before its 30-day expiry and before the
       service release. Keep Verified CRX uploads
       deferred until release cadence and offline key recovery are stable; losing that key would
       prevent future updates.
@@ -58,32 +58,34 @@ Last reconciled: 2026-08-05. This checklist is current through Ghostlight v0.7.3
 - [ ] Write and post the Show HN entry in founder voice. Protect the active window, stay in the
       thread, and follow up personally with serious users.
 - [x] GitHub Discussions, Q&A, and Ideas are enabled for Ghostlight.
-- [ ] Post and pin the first Ghostlight welcome Discussion, pointing to CONTRIBUTING.md's three
-      participation lanes.
+- [x] Post the first Ghostlight welcome Discussion, pointing to the public install path and
+      participation lanes. Its 0.8 release and feedback update was added on 2026-08-07.
 - [x] The official MCP Registry and Glama listings are live. Glama recognizes all 25 tools and
-      scores Ghostlight A for license, A for quality, and B for maintenance.
-- [x] Ghostlight was submitted to mcpservers.org under Development on 2026-08-04. The free
-      submission is in review; the site quoted a review window of 12 hours.
-- [ ] Watch `hello@sylin.org` for the mcpservers.org decision and verify the public listing before
-      marking it live.
+      scores Ghostlight A for license, A for quality, and A for maintenance.
+- [x] Ghostlight's mcpservers.org Development listing is live. A 0.8 refresh request was accepted
+      on 2026-08-07; the directory controls its cache timing.
 - [ ] Review and send the Anthropic open-core MCPB eligibility inquiry in
       `docs/business/DIRECTORY-SUBMISSIONS.md`. Do not submit the form as MIT-only; wait for a clear
-      answer and a released MCPB asset.
+      answer. The released v0.8.0 MCPB asset is ready and validated.
 - [ ] Ask OpenAI whether its public directory will accept local stdio MCP plugins. The current
       portal requires a public production HTTPS MCP URL, which Ghostlight will not add merely for
       listing eligibility.
-- [ ] Submit the remaining directory entries to mcp.so and PulseMCP.
+- [ ] Decide whether to approve mcp.so's new $39 submission fee. PulseMCP says it ingests the
+      official registry daily and processes records weekly; recheck after 2026-08-14 before
+      emailing its maintainers.
 - [ ] Monitor the open external submissions: Winget
-      [#411087](https://github.com/microsoft/winget-pkgs/pull/411087), Cline Marketplace
+      [#413601](https://github.com/microsoft/winget-pkgs/pull/413601), Cline Marketplace
       [#1989](https://github.com/cline/mcp-marketplace/issues/1989), and
       `awesome-mcp-servers` [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306).
-- [x] GitHub approved Ghostlight for inclusion in the GitHub MCP Registry on 2026-08-03. GitHub
-      will add the server to the catalog; no further founder action is required.
+- [x] GitHub approved Ghostlight for inclusion in the GitHub MCP Registry on 2026-08-03. Public
+      catalog search now returns one current `Sylin Ghostlight` result by `sylin-org`.
 - [ ] Edge Add-ons is deferred. Individual enrollment makes the contact address customer-visible,
       and the owner will not publish a home address. Revisit only after a legitimate non-home public
       address exists. Until then, Edge users can install the public Chrome Web Store adapter through
       Microsoft's supported other-store path.
-- [ ] Optionally submit the already working v0.7.3 Scoop manifest to Scoop Extras.
+- [ ] Revisit Scoop Extras only after its popularity criterion is met. The current package request
+      requires at least 100 GitHub stars or 50 forks; the v0.8.0 manifest remains available for
+      direct Scoop installation meanwhile.
 - [ ] Send client-specific founder outreach to Cursor, Zed, and Cline using a concrete proof, not
       a generic launch announcement.
 - [ ] Watch relevant `hangwin/mcp-chrome` and `BrowserMCP/mcp` discussions for genuine

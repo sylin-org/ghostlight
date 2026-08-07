@@ -1,11 +1,51 @@
 # STATUS -- where the project stands
 
-Last updated: 2026-08-05. This file is a point-in-time snapshot maintained by whoever
+Last updated: 2026-08-07. This file is a point-in-time snapshot maintained by whoever
 finishes significant work. It exists so a fresh agent (or human) can orient without any
 prior session context. **Trust the tree, `git log`, and the batch LEDGERs over this file
 when they disagree**, and update it when you land something that changes the picture.
 
 ## Now
+
+- **Ghostlight v0.8.0 is released.** PR #80 merged to `main` as
+  `993135b048b60622157266b53b21f1719c9df4b3`, the immutable `v0.8.0` tag points there, and
+  release workflow run `31152001239` passed. The GitHub release has 38 assets, including signed
+  native archives, checksums, SBOM, provenance, npm payloads, and the self-contained MCPB. npm
+  `ghostlight@0.8.0`, the official MCP Registry record, Homebrew, refreshed Trust Center footers,
+  and website fallbacks are public. The live npm launcher fetched the release binary and reached
+  `doctor`; its nonzero verdict only reported that this machine has no registered MCP client.
+  Local and online public-surface reconciliation pass. Post-release main also carries the
+  resumable checksum-fill repair and current package-manager descriptions at `95468758`.
+
+- **Chrome adapter v0.8.0 is public and byte-validated.** The public update feed and listing both
+  report 0.8.0. The downloaded CRX3 contained the same 37 files as the submitted store zip; its
+  only manifest difference was Chrome's injected `update_url`. The public CRX SHA-256 is
+  `3965be7d1de5cca362cdeeeddb83474ff87d641372c93aa429ba3835bd8ecf26`; the submitted zip SHA-256
+  is `54119b6820f942071053927e0a309e7745629f1d7b992530d3386113d1f46535`. Edge users can install
+  this public Chrome Web Store adapter through Edge's supported other-store path. A native Edge
+  listing remains intentionally deferred because individual Partner Center enrollment would make
+  the owner's home contact address customer-visible.
+
+- **The 0.8 public-presence sweep is published wherever Ghostlight is currently eligible.**
+  GitHub's MCP catalog publicly discovers Ghostlight. Glama was synchronized to repository commit
+  `9546875` and still reports A license, A quality, A maintenance, one favorite, and B for
+  `computer`. mcpservers.org accepted a new refresh request. Cline marketplace issue #1989 was
+  refreshed, awesome-mcp-servers PR #11306 is open with its check green, and Winget PR #413601 is
+  open with the CLA check green. The Codex and Zed showcase discussions have 0.8 updates. PulseMCP
+  now ingests the official registry on a daily/weekly cycle, so its correct next step is a dated
+  recheck rather than a duplicate submission. mcp.so now requires a $39 publishing fee and needs
+  separate spending approval. Anthropic's MCPB form remains gated by its stated MIT-only rule;
+  the exact eligibility email is verified but unsent pending explicit approval for that outward
+  message. OpenAI's public directory remains ineligible because it requires a public production
+  HTTPS MCP endpoint, which Ghostlight will not add merely for a listing.
+
+- **The public-delight batch has completed E6 publication and moved into its observation loop.**
+  The exact release checkpoint and external states live in
+  `docs/research/public-reception-loop-0.8.md`; the 7-day checkpoint is due 2026-08-14 06:00:52 UTC
+  and the 30-day checkpoint is due 2026-09-06 06:00:52 UTC. Project-authored distribution is
+  recorded separately from user reception. No telemetry, tracking, or phone-home path was added.
+
+## Pre-release record (superseded by the 2026-08-07 state above)
 
 - **The 0.7.3 public-presence sweep is live on every mutable surface reached in this pass.** The
   delight-led README shipped to `main` in merge commit
@@ -76,7 +116,9 @@ when they disagree**, and update it when you land something that changes the pic
   published at commit `1568538ba5ca217e46b917688b41d17b7e672488`, but no release tag, store
   publication, or registry publication has occurred. The online public-surface audit now passes.
 
-- **Browser-created tab continuity is implemented and live-verified in the working tree
+## Released engineering state and durable history
+
+- **Browser-created tab continuity is implemented, live-verified, and released in v0.8.0
   (ADR-0099).** Browser requests explicitly opt into bounded `tabDeltaV1` results. The extension
   passively adopts a new child only from an exact, uniquely owned opener and preserves Chrome's
   chosen window, group, and focus. The service validates and atomically claims still-open child
@@ -115,7 +157,7 @@ when they disagree**, and update it when you land something that changes the pic
   Ghostlight runtime code changed during the side quest. The conformance fork remains local and
   unpublished pending owner review; no upstream PR or issue comment has been created.
 
-- **Browser topology now belongs entirely to the extension in the working tree (ADR-0098).** The
+- **Browser topology now belongs entirely to the extension and is released in v0.8.0 (ADR-0098).** The
   service owns logical `WorkspaceId` authority, exact tab ownership, governance, scheduling, and
   browser-profile routing. Its private tool instruction carries only the desired `groupTitle`; it
   stores and sends no native Chrome window or group ids. The extension owns one browser-session
@@ -129,10 +171,10 @@ when they disagree**, and update it when you land something that changes the pic
   extension reload, a controlled call created tab 5541182382 in group 399144999. The user moved
   the whole group to another Chrome window; a creation-disabled context call returned that exact
   group and tab from its live location without creating or recovering anything. The candidate is
-  complete in the working tree. A subsequent `navigate` routed to that same moved tab and loaded
+  released in v0.8.0. A subsequent `navigate` routed to that same moved tab and loaded
   `https://example.com/`, proving ordinary addressed work follows it too.
 
-- **Closed MCP transport recovery is explicit and verified in the working tree.** A live
+- **Closed MCP transport recovery is explicit, verified, and released in v0.8.0.** A live
   connector-name cutover showed that an MCP client can retain cached Ghostlight tools after its
   host-owned stdio connector is gone. `Transport closed` is real for that client even while the
   shared service, browser extension, and other MCP edges remain healthy. Both date-named MCP
@@ -148,7 +190,7 @@ when they disagree**, and update it when you land something that changes the pic
   reconnect before live tool verification. The conformance-runner side quest has since resumed in
   the local `sylin-org/conformance` fork; no external PR or issue comment has been created.
 
-- **The ADR-0096 three-executable cutover is implemented and fully verified in the working tree.**
+- **The ADR-0096 three-executable cutover is implemented, verified, and released in v0.8.0.**
   Its naming amendment uses `ghostlight-mcp-connector`, `ghostlight`, and
   `ghostlight-browser-connector`, with matching `crates/mcp-connector/` and
   `crates/browser-connector/` source boundaries. This is a rename of the two existing shores, not
@@ -185,28 +227,28 @@ when they disagree**, and update it when you land something that changes the pic
   suite, all 31 Lightbox process scenarios, 164 extension tests, npm/MCPB launcher tests, and
   Anthropic's pinned MCPB validator. The official conformance server runner now has a local stdio
   implementation in the `sylin-org/conformance` fork and passes the live checks summarized above.
-  The batch ledger records the original gate evidence; do not treat this cutover as a published
-  release.
+  The batch ledger records the original gate evidence; the v0.8.0 release record above is the
+  public state.
 
-- **The local directory packaging path is implemented but not externally submitted.** ADR-0095
+- **The local directory packaging path shipped in v0.8.0 but remains eligibility-gated.** ADR-0095
   adds a self-contained Windows/macOS MCPB with a protocol-clean Node launcher, an installer mode
   that leaves MCP-client configuration to the package host, release assembly, and CI coverage.
   Anthropic's official validator accepts the manifest. The live Anthropic form also says submitted
   extensions must be MIT licensed; Ghostlight's complete bundle is open-core, so submission is
-  correctly gated on an eligibility answer and a new released MCPB asset. OpenAI's public plugin
+  correctly gated on an eligibility answer. The released MCPB asset is present and validated. An
+  exact inquiry to Anthropic is drafted and browser-verified but remains unsent until the owner
+  explicitly approves that recipient and payload. OpenAI's public plugin
   form requires a public production HTTPS MCP endpoint and remains incompatible with ADR-0077.
   Ready copy and inquiry drafts live in `docs/business/DIRECTORY-SUBMISSIONS.md`. Formatting,
   strict workspace clippy, the full Rust workspace suite, five MCPB launcher tests, archive-layout
   packaging, PowerShell syntax checks, ASCII checks, and diff hygiene pass.
 
-- **Ghostlight's mcpservers.org Development listing is live but stale.** The listing at
-  `https://mcpservers.org/servers/sylin-org/ghostlight` was verified on 2026-08-05. Its copied
-  project text still describes the old relay topology and development extension path. Correct the
-  canonical public copy before asking the directory to refresh.
+- **Ghostlight's mcpservers.org Development listing is live and queued for refresh.** Its page
+  already carries the current README body, while its short tagline still trails the canonical
+  copy. A 2026-08-07 `Request update` action was accepted; the directory controls refresh timing.
 
-- **GitHub approved Ghostlight for inclusion in the GitHub MCP Registry on 2026-08-03.** The
-  manually curated review of `org.sylin/ghostlight` is complete. GitHub will add the server to
-  its catalog, and no further owner action is required.
+- **GitHub's MCP Registry publicly discovers Ghostlight.** The catalog search returns one
+  `Sylin Ghostlight` result by `sylin-org` with the current visible-local-browser description.
 
 - **Agent-readable tool definitions and standard MCP annotations shipped in v0.7.3
   (ADR-0094).** All 25 tools now publish display titles plus conservative read-only, destructive,
@@ -221,9 +263,9 @@ when they disagree**, and update it when you land something that changes the pic
   improvable guidance. Formatting, strict workspace clippy, the full Rust workspace suite, and
   the focused 14-test fidelity suite pass. A guarded Windows dev-loop swap and real-relay probe
   also passed with the Chrome extension attached. PR #75 merged the change to `main`, and the
-  official MCP Registry now carries v0.7.3. On 2026-08-05 Glama scored Ghostlight A for license,
+  official MCP Registry now carries v0.8.0. On 2026-08-07 Glama scored Ghostlight A for license,
   A for quality, and A for maintenance; it showed one favorite and graded `computer` B. Its
-  ingested project copy remains stale.
+  ingested project copy is synchronized to repository commit `9546875`.
 
 - **The license layout now supports conventional repository discovery without blurring the
   open-core boundary.** Root `LICENSE` contains the standard Apache-2.0 text so repository
@@ -238,8 +280,7 @@ when they disagree**, and update it when you land something that changes the pic
   major/minor contract block: any 0.8 adapter patch covers any 0.8 service patch. Release packaging
   names the extension artifact from `extension/manifest.json`; checks require the source adapter
   to cover the source service and the public adapter to cover the public service. Source and
-  pending adapter v0.8.0 cover source service v0.8.0. Public adapter v0.7.1 covers published
-  service v0.7.3.
+  adapter v0.8.0 covers source and published service v0.8.0.
 
 - **v0.7.2 ships safe installed-engine activation (ADR-0092).** Windows identifies the
   exact adapter-pipe owner, verifies that its executable belongs to the managed Ghostlight install
@@ -395,15 +436,13 @@ when they disagree**, and update it when you land something that changes the pic
 
 - **Branches**: `main` = releases, `dev` = trunk. Work lands on `dev`; the owner reviews
   `dev -> main` PRs and cuts releases.
-- **Latest published release: v0.7.3** (2026-08-01). PR #75 merged at tag commit `8bf3b3f`.
-  GitHub Actions run `30722958396` passed and published all 28 expected release assets. npm
-  `ghostlight@0.7.3` is live at the `latest` tag, and its launcher fetched the integrity-pinned
-  Windows binary and passed `doctor`. Homebrew tap commit `5055db1` and the official MCP Registry
-  entry `org.sylin/ghostlight` also carry 0.7.3. Checksum fill `fc5b087`, trust restamp `2a26e1d`,
-  and website fallback commit `bc0e022` are published; the online public-surface check passes.
-  Chrome and Edge submission were skipped because the source adapter remains v0.7.2. Winget serves
-  v0.7.2 after PR #410996 merged; the validated v0.7.3 update is open as PR #411087, mergeable with
-  its CLA check green while Microsoft controls the remaining validation and merge.
+- **Latest published release: v0.8.0** (2026-08-07). PR #80 merged at tag commit `993135b0`.
+  GitHub Actions run `31152001239` passed and published all 38 expected release assets. npm
+  `ghostlight@0.8.0` is live at the `latest` tag, and its launcher fetched the integrity-pinned
+  Windows binary and reached `doctor`. Homebrew tap commit `302c710`, website commit `0c801c6`,
+  Trust Center commit `5cb24508`, and the official MCP Registry entry `org.sylin/ghostlight` carry
+  0.8.0. The online public-surface check passes. Chrome adapter 0.8.0 is public. Winget 0.8.0 is
+  awaiting Microsoft review in PR #413601 with its CLA check green.
 - **v0.6.0 is an intentional greenfield boundary.** The unpublished 0.5.8 draft became this minor
   release because browser-control web ingress and its scaffolding were removed outright. Public
   setup starts from a local service, same-user OS IPC, and the interactive user's authenticated
@@ -424,8 +463,7 @@ when they disagree**, and update it when you land something that changes the pic
   handoff (ADR-0070), agent narration (ADR-0072), reliable memory-only GIF recording and bounded
   browser transport (ADRs 0073/0074), the cohesive Card Foundry demo story, and the live Foundry
   companion route at `https://sylin.org/ghostlight/demo/foundry/`.
-- **The Chrome Web Store listing is public at v0.7.1; v0.8.0 is pending review with deferred
-  publishing.** The owner
+- **The Chrome Web Store listing is public at v0.8.0.** The owner
   completed the listing, Privacy practices, permission and remote-code justifications, data-use
   certifications, screenshots, video, and promotional tiles for the original v0.5.7 submission.
   After Google reinstated the `ghostlight-release` API project on 2026-07-15, the owner approved
@@ -433,10 +471,12 @@ when they disagree**, and update it when you land something that changes the pic
   The v0.6.0 package uploaded successfully and Chrome accepted the new submission as
   `ITEM_PENDING_REVIEW`. Chrome approved and published v0.6.0 by 2026-07-31. The v0.7.1 release
   then uploaded successfully and the publish API accepted it with `[OK] OK.`. The public listing
-  reports v0.7.1 updated on 2026-08-02. Adapter v0.8.0 was submitted on 2026-08-05; once approved,
-  its staged publication expires after 30 days. Broad host permissions can trigger an in-depth review;
-  that remains the intentional tradeoff for general-purpose automation across user-selected
-  sites. Edge remains unsubmitted because no `EDGE_*` credentials are configured.
+  reports v0.8.0 updated on 2026-08-07. The public CRX contents match the submitted adapter zip,
+  apart from Chrome's injected `update_url`. Broad host permissions can trigger an in-depth
+  review; that remains the intentional tradeoff for general-purpose automation across
+  user-selected sites. A native Edge listing remains deferred because individual enrollment would
+  expose the owner's home contact address; Edge can install the Chrome listing through its
+  supported other-store path.
 - **The ADR-0056 Lightbox consolidation is complete.** All 27 legacy ignored spawn tests have named
   parity scenarios, the originals and dual shell wrappers are retired, and CI runs the 34-scenario
   Lightbox suite as the sole service-side process-boundary gate. The repaired Playwright job stays

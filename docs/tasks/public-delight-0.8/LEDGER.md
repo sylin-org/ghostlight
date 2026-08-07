@@ -5,16 +5,15 @@ conversation history.
 
 ## RESUME HERE
 
-- State: E6 is in progress at the owner-review gate
-- Current pass: E6
-- Next action: adapter 0.8.0 remains in Chrome `Pending review`. Wait for that external state to
-  change. The owner may also select one signed-in page that permits extension inspection to finish
-  the full read-only proof. Any publication action still requires exact approval from
-  `docs/business/PUBLICATION-PACKET-0.8.md`.
-- External actions: website commit `1568538ba5ca217e46b917688b41d17b7e672488` was pushed to
-  `main` and deployed under the owner's explicit website-push instruction. No product push, merge,
-  release, store publication, registry publication, directory edit, Discussion, showcase update,
-  or social post is authorized.
+- State: E1-E6 complete; the 0.8 release is in its observation loop
+- Current pass: none
+- Next action: record the 7-day reception checkpoint at or after 2026-08-14 06:00:52 UTC. Recheck
+  Winget PR #413601, awesome-mcp-servers PR #11306, mcpservers.org, PulseMCP ingestion, and public
+  counters. Do not infer user reception from project-authored distribution.
+- External actions: the approved v0.8.0 release and eligible public-presence sweep are complete.
+  Anthropic's exact licensing inquiry remains unsent pending explicit approval for its recipient
+  and payload. mcp.so remains blocked on separate approval for its $39 fee. Native Edge and the
+  OpenAI public directory remain ineligible under the recorded product/privacy boundaries.
 
 ## Status
 
@@ -25,7 +24,7 @@ conversation history.
 | E3 | Core public surfaces | DONE | this pass's `docs(public): reshape core first-success surfaces` commit | - | none |
 | E4 | Agent guidance and metadata | DONE | this pass's `docs(tools): sharpen agent guidance` commit | - | none |
 | E5 | Website and directory surfaces | DONE | this pass's `docs(public): prepare E5 discovery surfaces` commit | `1568538ba5ca` | none |
-| E6 | Release reconciliation and reception loop | in-progress | this pass's packet commits | `1568538ba5ca` | Chrome review pending; authenticated agent read needs a scriptable source |
+| E6 | Release reconciliation and reception loop | DONE | release tag `993135b0`; post-release `95468758` | `0c801c6` | eligible channels published; external review, fee, and eligibility states recorded |
 
 Status values: `pending`, `in-progress`, `DONE`, or `BLOCKED`.
 
@@ -65,12 +64,12 @@ cited in the dated baseline.
 
 ## External gates
 
-- Chrome adapter 0.8.0 approval and intentional publication.
-- Ghostlight service 0.8.0 release, registry update, npm publication, and package-manager updates.
-- Website push or merge that triggers deployment.
-- Store description resubmission while 0.8.0 is under review.
-- Directory edits or submissions, GitHub Discussion creation, showcase updates, and social posts.
-- Permission to quote any user or identify any proof participant.
+- Anthropic's exact eligibility inquiry needs explicit approval for its recipient and payload;
+  directory submission then depends on Anthropic's answer and the owner's personal terms review.
+- mcp.so requires separate approval to spend its $39 submission fee.
+- Winget and awesome-mcp-servers are under external maintainer review; mcpservers.org controls its
+  refresh timing, and PulseMCP controls official-registry ingestion timing.
+- Permission remains required to quote any user or identify any proof participant.
 
 ## Execution log
 
@@ -299,7 +298,7 @@ commit hashes, external drafts, and numbered deviations.
 - This amendment supersedes E5's earlier no-deployment statement. It does not authorize any other
   external action.
 
-### E6 -- release reconciliation and reception loop -- 2026-08-05 (in progress)
+### E6 -- release reconciliation and reception loop -- 2026-08-05 to 2026-08-07 (complete)
 
 - Exact baselines: product `57b4d24274942c03c4c6f8d7465ae7d2b31a7dd1`; product public
   `main` `6de59b9920320a2e4b7f52e049c14c448cdaca56`; live website
@@ -351,3 +350,35 @@ commit hashes, external drafts, and numbered deviations.
   link; an exact measured coordinate action completed the proof and returned the unambiguous child.
   The authenticated Chrome dashboard proof reached a browser-protected surface: topology and
   signed-in continuity were visible, while page reading was not available to extensions.
+
+#### E6 publication completion amendment -- 2026-08-07
+
+- Chrome adapter 0.8.0 became public. The public update feed and listing agree, and the downloaded
+  CRX3 matched all 37 submitted files; only Chrome's injected manifest `update_url` differed.
+- PR #80 merged to `main` as `993135b048b60622157266b53b21f1719c9df4b3`. Release workflow
+  `31152001239` passed and the immutable v0.8.0 release published 38 assets. npm 0.8.0, the official
+  MCP Registry record, Homebrew, Trust Center footers, and website fallbacks are live. The release
+  script's checksum-fill setters were made idempotent after a safe resume stopped on an
+  already-correct Homebrew hash. The resumed orchestration and online surface check passed.
+- Package-manager descriptions now use the settled visible-local-browser copy. Homebrew is live at
+  tap commit `302c710`. Winget PR #413601 is open with its CLA check green; Microsoft controls
+  review and merge.
+- GitHub's MCP catalog now publicly discovers Ghostlight. Glama explicitly synchronized to
+  repository commit `9546875`. mcpservers.org accepted a refresh request. Cline issue #1989,
+  awesome-mcp-servers PR #11306, and the Codex and Zed showcase discussions carry the 0.8 update.
+- The existing Ghostlight welcome Discussion received the release checkpoint and feedback prompt.
+  Scoop's v0.8.0 direct manifest is public, but the central Extras request currently requires at
+  least 100 GitHub stars or 50 forks. Ghostlight has neither, so no false eligibility attestation
+  was made.
+- PulseMCP's current form says it ingests official-registry records daily and processes them
+  weekly, so the next action is a one-week recheck. mcp.so now charges a $39 submission fee, which
+  was not authorized. The OpenAI directory remains ineligible because it requires a public HTTPS
+  MCP endpoint. Native Edge remains deferred because individual enrollment exposes the owner's
+  home address; Edge uses the Chrome other-store route.
+- The released MCPB is mechanically ready for Anthropic, but the form's MIT-only rule still
+  conflicts with Ghostlight's complete open-core package. The exact eligibility inquiry was
+  verified in a signed-in Gmail compose view. It remains unsent because the external-action guard
+  requires explicit approval for that recipient and payload.
+- The release reception snapshot was recorded at 2026-08-07 06:37 UTC. The next checkpoints are
+  2026-08-14 06:00:52 UTC and 2026-09-06 06:00:52 UTC. No independent user report or quote was
+  available at release time, and no telemetry or tracking path was added.

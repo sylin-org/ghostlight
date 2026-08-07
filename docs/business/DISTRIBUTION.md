@@ -1,6 +1,6 @@
 # Distribution runbook
 
-Last checked: 2026-08-05.
+Last checked: 2026-08-07.
 
 The distribution push (2026-07-07 session; agentic Tier 0-2 implemented in-repo, external
 submissions and Tier 3 are founder actions). Ordered: each step assumes the ones above it.
@@ -32,57 +32,59 @@ winget/scoop/homebrew templates place them together in one directory. MCP-client
 
 ## Founder: accounts and publishes (order matters)
 
-- [x] **npm.** `ghostlight@0.7.3` is live at `latest`. The release pipeline publishes it and smoke
+- [x] **npm.** `ghostlight@0.8.0` is live at `latest`. The release pipeline publishes it and smoke
       tests the launcher against the integrity-pinned release binaries.
-- [x] **Chrome Web Store.** Adapter v0.7.1 is public. Adapter v0.8.0 is accepted for review with
-      deferred publication according to the owner dashboard and `docs/public-status.json`.
-      Recheck both before any release or store claim. Store id:
+- [x] **Chrome Web Store.** Adapter v0.8.0 is public and byte-validated against the submitted
+      package. Store id:
       `lejccfmoeogmhemakeknjjdhkfkgncdl`.
-- [ ] **Edge Add-ons store.** Submit the same packaged extension after configuring the Edge
-      publisher credentials.
-- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v0.7.3 is active and
+- [ ] **Edge Add-ons store.** Native submission is intentionally deferred because individual
+      enrollment makes the owner's home address customer-visible. Edge users can install the
+      Chrome listing through Microsoft's supported other-store path.
+- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v0.8.0 is active and
       latest. The release pipeline publishes each service version after npm.
 - [x] **GitHub MCP Registry / VS Code `@mcp` discovery.** The founder sent the one-time
       onboarding request to `partnerships@github.com` on 2026-07-31. GitHub completed its review
-      and approved `org.sylin/ghostlight` for inclusion on 2026-08-03. GitHub will add the server
-      to the catalog; no further founder action is required.
+      and approved `org.sylin/ghostlight` for inclusion on 2026-08-03. Public catalog search now
+      returns one current `Sylin Ghostlight` result by `sylin-org`.
 - [ ] **Cline MCP marketplace.** Submission issue
       [#1989](https://github.com/cline/mcp-marketplace/issues/1989) was refreshed in place on
-      2026-08-05 with the current 0.7.3 package, 25-tool surface, extension, platform proof,
+      2026-08-07 with the current 0.8.0 package, 25-tool surface, extension, platform proof,
       install path, and Trust Center link; awaiting maintainer review.
 - [ ] **Directory listings.** Glama indexes Ghostlight, and ownership was verified on 2026-08-01
       through the root `glama.json`. On 2026-08-05 its card scored Ghostlight A for license, A for
       quality, and A for maintenance, showed one favorite, and graded `computer` B. Its ingested
-      project copy was manually synchronized to public README commit `f1423bae`; the editable
+      project copy was manually synchronized to public repository commit `9546875`; the editable
       profile description was also shortened to one accurate sentence. Glama's overview renders
       the repository README and has no separate overview field in the maintainer profile. The free
       mcpservers.org Development listing is live at
-      `https://mcpservers.org/servers/sylin-org/ghostlight`. One refresh request was accepted on
-      2026-08-05, but the copied project text remained stale on later checks. A self-contained
+      `https://mcpservers.org/servers/sylin-org/ghostlight`. A refresh request was accepted on
+      2026-08-07. A self-contained
       Windows/macOS MCPB source, launcher, release packager, and validation gate now prepare the
-      Claude Desktop path. Anthropic submission remains gated on a released asset and clarification
-      of the live form's MIT-only requirement because Ghostlight is open-core. OpenAI's public
+      Claude Desktop path. The released v0.8.0 asset is ready; Anthropic submission remains gated
+      only on clarification of the live form's MIT-only requirement because Ghostlight is
+      open-core. OpenAI's public
       plugin form currently requires a public production HTTPS MCP endpoint and is incompatible
       with ADR-0077's local-only boundary. The exact packets and inquiry drafts are in
       `docs/business/DIRECTORY-SUBMISSIONS.md`. Smithery can be reconsidered after the MCPB ships,
       while its main audience remains hosted integrations. PR
       [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) adds Ghostlight to
       `punkpeye/awesome-mcp-servers` under Browser Automation. Its Glama badge check passes, and the
-      PR was marked ready for maintainer review on 2026-08-01. mcp.so and PulseMCP remain open.
-- [x] **Winget.** v0.7.2 PR #410996 merged and is publicly discoverable. The v0.7.3 manifest
-      validates locally, and PR [#411087](https://github.com/microsoft/winget-pkgs/pull/411087)
-      merged on 2026-08-02. The merge proves catalog ingestion, not installs.
-- [x] **Homebrew tap.** `sylin-org/homebrew-tap` is live. Release v0.7.3 was published in commit
-      `5055db1`; users install it with `brew install sylin-org/tap/ghostlight`. Formula metadata
-      was refreshed through PR #1 and merged as `f60cdd1c` on 2026-08-05 without changing the
-      package version, archives, or checksums.
-- [ ] **Scoop.** `packaging/scoop/ghostlight.json` with the sha filled can be installed
-      directly by URL (`scoop install <raw-url>`); optionally submit to the scoop `extras`
-      bucket later. The manifest carries autoupdate, so it is a one-time fill.
+      PR is clean with its submission check green. mcp.so now requires a $39 submission fee and
+      needs separate spending approval. PulseMCP says official-registry records are ingested daily
+      and processed weekly, so recheck after one week before emailing.
+- [ ] **Winget.** v0.7.3 is publicly discoverable. The v0.8.0 manifest validates locally, and PR
+      [#413601](https://github.com/microsoft/winget-pkgs/pull/413601) is open with the CLA check
+      green. Microsoft controls review and merge.
+- [x] **Homebrew tap.** `sylin-org/homebrew-tap` is live. Release v0.8.0 was published in commit
+      `302c710`; users install it with `brew install sylin-org/tap/ghostlight`.
+- [x] **Scoop direct manifest.** `packaging/scoop/ghostlight.json` carries v0.8.0 and can be
+      installed directly by URL. The central Extras package-request template currently requires
+      at least 100 GitHub stars or 50 forks; Ghostlight has neither, so an Extras request would
+      require a false attestation and was not opened.
 - [x] **Canonical website.** `https://sylin.org/ghostlight/` is live. The old GitHub Pages paths
       are redirect fallbacks, and extension/install entry points use the canonical domain.
 - [x] **GitHub front doors.** The repository About description and Sylin organization profile
-      carry the current delight-led 0.7.3 positioning. Organization-profile PR #1 merged as
+      carry the current delight-led positioning. Organization-profile PR #1 merged as
       `64f763cb` on 2026-08-05.
 
 ## Founder: the launch moment
