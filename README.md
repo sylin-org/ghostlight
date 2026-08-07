@@ -105,7 +105,9 @@ browser operating models when that is the question.
 
 **Platform state.** Windows and Linux are verified end to end against live browsers. macOS builds and passes the full test suite in CI; its live-browser verification is still owed.
 
-**Extension state.** The Chrome Web Store serves Chrome adapter v0.7.1. Chrome adapter v0.7.1 covers Ghostlight service versions v0.7.1-v0.7.3. Chrome adapter v0.8.0 is pending review. Chrome adapter v0.8.0 covers Ghostlight service versions v0.8.x. Install the extension from the public listing.
+**Extension state.** The Chrome Web Store serves Chrome adapter v0.8.0. Chrome adapter v0.8.0 covers
+Ghostlight service versions v0.8.x. Install the extension from the public listing. See the full
+[adapter compatibility map](compatibility.json).
 
 The service and Chrome adapter version independently. The
 [compatibility map](compatibility.json) is authoritative, and the
