@@ -12,4 +12,4 @@ relationships and your choices, not Ghostlight's subprocessors.
 If this ever changes, the change will be announced in release notes and will be visible in
 this file's git history. Until then, the correct answer to a subprocessor question is: none.
 
-Last reviewed: 2026-07-10 against v0.7.3 | Contact: support@sylin.org
+Last reviewed: 2026-07-10 against v0.8.0 | Contact: support@sylin.org

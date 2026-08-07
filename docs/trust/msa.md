@@ -152,4 +152,4 @@ subject matter. If any provision is unenforceable, the rest remains in effect. N
 may assign this Agreement without the other's consent, except in connection with a merger or
 sale of substantially all assets.
 
-Last reviewed: 2026-07-10 against v0.7.3 | Contact: support@sylin.org
+Last reviewed: 2026-07-10 against v0.8.0 | Contact: support@sylin.org
