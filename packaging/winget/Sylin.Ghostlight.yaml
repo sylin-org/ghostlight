@@ -38,7 +38,7 @@ PublisherUrl: https://sylin.org/
 PackageName: Ghostlight
 PackageUrl: https://github.com/sylin-org/ghostlight
 License: Apache-2.0 OR MIT (engine); source-available governance module
-ShortDescription: Governed browser automation over your own authenticated browser, for AI coding agents (MCP).
+ShortDescription: Visible local browser automation in your signed-in Chromium profile, with optional policy and audit.
 Moniker: ghostlight
 Tags:
   - mcp

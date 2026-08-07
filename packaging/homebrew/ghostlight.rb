@@ -2,7 +2,7 @@
 # Fill the four sha256 values from the release's .sha256 assets, then push to the tap.
 # Users: brew install sylin-org/tap/ghostlight
 class Ghostlight < Formula
-  desc "Governed browser automation over your own authenticated Chromium session (MCP)"
+  desc "Visible browser automation in your signed-in Chromium profile"
   homepage "https://sylin.org/ghostlight/"
   version "0.8.0"
   license "Apache-2.0"

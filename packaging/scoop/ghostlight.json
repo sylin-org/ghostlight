@@ -1,6 +1,6 @@
 {
   "version": "0.8.0",
-  "description": "Governed browser automation over your own authenticated Chromium session, for AI coding agents (MCP).",
+  "description": "Visible local browser automation in your signed-in Chromium profile, with optional policy and audit.",
   "homepage": "https://sylin.org/ghostlight/",
   "license": "Apache-2.0 OR MIT (engine); Ghostlight Commercial License (governance module, source-available)",
   "architecture": {
