@@ -5,17 +5,16 @@
 //! control stays local to the current OS user; governance is an optional overlay on the all-open
 //! engine.
 //!
-//! Since ADR-0046 this executable is the CLI + the standalone SERVICE; the thin pass-through relay
-//! ships as a SEPARATE executable, so a service rebuild never relinks (locks) it:
+//! This executable is the CLI + the standalone SERVICE. MCP protocol handling and Chromium native
+//! messaging live in separate shore executables, so service state stays protocol-neutral:
 //! - **service** (`ghostlight service`) -- the STANDALONE, persistent Hub. Owns the browser IPC
-//!   endpoint and the adapter/control endpoint for its whole life, multiplexes any number of
-//!   adapter sessions through the one governance chokepoint, and shuts down only on a continuous
-//!   idle-grace window (never on any client's death).
+//!   endpoint and typed MCP-edge endpoint for its whole life, multiplexes local connections through
+//!   the one governance chokepoint, and shuts down only on a continuous idle-grace window (never on
+//!   any client's death).
 //! - **install / uninstall / doctor / status / config / policy** -- synchronous subcommands.
-//! - a BARE `ghostlight` (no subcommand) no longer serves MCP: it prints guidance pointing at
-//!   `ghostlight-relay` and exits 2 (ADR-0046). The single `ghostlight-relay` binary carries both
-//!   pass-through roles (MCP-client agent + Chrome native-messaging browser), selected at launch
-//!   (ADR-0051 Phase 3); it is its own crate.
+//! - `ghostlight-mcp-connector` owns MCP stdio and exact revision state machines (ADR-0096).
+//! - `ghostlight-browser-connector` is the browser native-messaging adapter only.
+//! - a BARE `ghostlight` (no subcommand) prints installation guidance and exits 2.
 //!
 //! `main` deliberately has no `#[tokio::main]`: the async roles each build their own runtime, and
 //! the installer needs none.
@@ -385,6 +384,9 @@ struct InstallArgs {
     /// Add to every known client, not just detected ones.
     #[arg(long)]
     all_clients: bool,
+    /// Do not add Ghostlight to any MCP client configuration.
+    #[arg(long, conflicts_with_all = ["all_clients", "clients"])]
+    no_clients: bool,
     /// Add only to this client id (repeatable): claude-code, claude-desktop, cursor, vscode,
     /// codex, windsurf, zed, opencode, crush.
     #[arg(long = "client", value_name = "ID", conflicts_with = "all_clients")]
@@ -428,7 +430,7 @@ struct DoctorArgs {
     /// Print extra detail.
     #[arg(long)]
     verbose: bool,
-    /// Repair, not just report: reap orphaned mcp-server sessions (alive process, exited client)
+    /// Repair legacy debug state: reap orphaned agent-relay processes (alive process, exited client)
     /// and clear stale state files. The only doctor mode that kills or deletes anything (ADR-0029).
     #[arg(long)]
     fix: bool,
@@ -441,9 +443,11 @@ struct StatusArgs {
     json: bool,
 }
 
-/// Resolve a `Selection` from `--<thing>` (Only) / `--all-<things>` (ForceAll) / default (All).
-fn selection(only: Vec<String>, force_all: bool) -> Selection {
-    if !only.is_empty() {
+/// Resolve a `Selection` from explicit ids, force-all, none, or the detected-target default.
+fn selection(only: Vec<String>, force_all: bool, none: bool) -> Selection {
+    if none {
+        Selection::None
+    } else if !only.is_empty() {
         Selection::Only(only)
     } else if force_all {
         Selection::ForceAll
@@ -458,8 +462,8 @@ impl From<InstallArgs> for InstallOptions {
             extension_id: a.extension_id,
             dry_run: a.dry_run,
             system: a.system,
-            browsers: selection(a.browsers, a.all_browsers),
-            clients: selection(a.clients, a.all_clients),
+            browsers: selection(a.browsers, a.all_browsers, false),
+            clients: selection(a.clients, a.all_clients, a.no_clients),
             debug: a.debug,
             no_supervisor: a.no_supervisor,
             no_open: a.no_open,
@@ -472,8 +476,8 @@ impl From<UninstallArgs> for UninstallOptions {
         UninstallOptions {
             dry_run: a.dry_run,
             system: a.system,
-            browsers: selection(a.browsers, a.all_browsers),
-            clients: selection(a.clients, a.all_clients),
+            browsers: selection(a.browsers, a.all_browsers, false),
+            clients: selection(a.clients, a.all_clients, false),
         }
     }
 }
@@ -489,7 +493,7 @@ impl From<DoctorArgs> for DoctorOptions {
 
 fn main() -> Result<()> {
     // Debug mode can come from the flag (any position) or the env; detect it before clap so tracing
-    // verbosity is set for every role, including the native-host relay.
+    // verbosity is set consistently for the service and every synchronous CLI command.
     let debug_env = std::env::var_os("GHOSTLIGHT_DEBUG").is_some();
     let debug = debug_env || std::env::args().any(|a| a == "--debug");
     ghostlight::init_tracing(debug);
@@ -650,10 +654,10 @@ fn main() -> Result<()> {
             ..
         } => ghostlight::governance::license::cli::run(args.into())?,
         Cli { command: None, .. } => {
-            // ADR-0046 + ADR-0051 Phase 3: the bare `ghostlight` no longer serves MCP -- the MCP
-            // client launches `ghostlight-relay --role agent`, which relays to the running service.
+            // ADR-0096: the service binary never terminates MCP. Clients launch the dedicated
+            // protocol edge, while ghostlight-browser-connector remains browser-only.
             eprintln!(
-                "ghostlight no longer serves MCP directly; your MCP client launches ghostlight-relay."
+                "ghostlight does not serve MCP on stdio; your MCP client launches ghostlight-mcp-connector."
             );
             eprintln!(
                 "Run `ghostlight install` to update client registrations, then restart your editor."

@@ -355,7 +355,7 @@ pub const CONTENT_SECURITY_SECRETS_REDACT: &str = "content.security.secrets.reda
 
 /// `content.security.sacred_domains` -- user-authored never-touch domain patterns (ADR-0018
 /// step 2). Always enforced regardless of `governance.mode` or manifest presence, at the
-/// dispatch chokepoint (`browser::sacred`, `transport::mcp::server`). Values are validated
+/// neutral work pipeline (`browser::sacred`, `tool::pipeline::run_work`). Values are validated
 /// against the section 5.1 pattern grammar (`browser::pattern::is_valid_pattern`) at config
 /// load; matching semantics live in `browser::pattern`/`browser::sacred`.
 pub const CONTENT_SECURITY_SACRED_DOMAINS: &str = "content.security.sacred_domains";
@@ -379,9 +379,9 @@ pub const AUDIT_SYSLOG_ADDRESS: &str = "audit.syslog.address";
 /// manifest `mode` > this resolved value.
 pub const GOVERNANCE_MODE: &str = "governance.mode";
 
-/// `inbound.pipe.enabled` -- whether the inbound.pipe adapter (the named-pipe/UDS listener
-/// thin MCP adapters dial into) binds. Pipe admission is OS same-user by construction; this key
-/// exists for a deployment that wants the pipe path closed too.
+/// `inbound.pipe.enabled` -- whether the owner-only local bridge/control listener binds.
+/// Admission is OS same-user by construction; this key exists for a deployment that wants the
+/// local service ingress closed too.
 pub const INBOUND_PIPE_ENABLED: &str = "inbound.pipe.enabled";
 
 /// `outbound.browser.enabled` -- whether the outbound.browser executor participates. Reserved
@@ -481,7 +481,7 @@ pub const KEYS: &[KeyDef] = &[
     },
     KeyDef {
         key: INBOUND_PIPE_ENABLED,
-        description: "Whether the inbound.pipe adapter (the named-pipe/UDS listener thin MCP adapters dial into) binds.",
+        description: "Whether the owner-only local bridge/control listener binds.",
         constraint: KeyConstraint::None,
         default_fully_open: KeyValue::Bool(true),
         default_safe: KeyValue::Bool(true),
@@ -1091,10 +1091,10 @@ mod tests {
     }
 
     #[test]
-    fn adapter_enable_keys_default_true_in_every_preset() {
-        // ADR-0030 Decision 5: "OPEN MEANS OPEN" -- the channel axis resolves to the adapter's
-        // builtin default, never to a code gate. The OS-same-user adapters are enabled by default
-        // in every preset; an org-mandatory layer is what denies one.
+    fn runtime_zone_enable_keys_default_true_in_every_preset() {
+        // ADR-0030 Decision 5: "OPEN MEANS OPEN" -- each runtime zone resolves to its built-in
+        // default, never to an implicit code gate. The owner-only local ingress, browser executor,
+        // and management plane are enabled in every preset; an org-mandatory layer disables one.
         //
         for key in [
             INBOUND_PIPE_ENABLED,

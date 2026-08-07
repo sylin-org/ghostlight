@@ -2,36 +2,31 @@
 //! The Hub composition root (ADR-0030 Decision 2: "Extract the composition root into a
 //! free-licensed `src/hub` module hosting `HubCore`").
 //!
-//! ADR-0030 Decision 8 (amended 2026-07-04, "the always-ready-service amendment"): role is decided
-//! by ARGV, never a claim race. Since ADR-0046 the thin ADAPTER is a SEPARATE executable
-//! (`ghostlight-relay --role agent`, ADR-0051 Phase 3): it connects to an already-running SERVICE,
-//! relays its stdio as a
-//! pure byte pipe, and dies with its editor, asking the OS supervisor to self-heal-start the
-//! service if it is down (`supervisor::start_service`). [`run_service`] is the STANDALONE SERVICE
-//! (`ghostlight service`): it owns the shared [`ServiceContext`], the extension endpoint, and the
-//! adapter/control endpoint for its whole life, runs NO parent-death watchdog, and shuts down only
-//! on a continuous idle-grace window ([`run_service_loop`]/`idle_grace_watch`). There is NO
-//! promotion, NO in-process service, and NO on-demand in-editor spawn -- that mechanism (an
-//! earlier H2/H6 draft) is DELETED, not built. The session-hello constants the ADAPTER/CONTROL
-//! endpoint uses live in [`handshake`]; the OS-supervisor identifiers + self-heal in
-//! [`supervisor`]; the per-install anti-squat secret + HMAC proof in [`antisquat`].
+//! ADR-0096 keeps this as the persistent, protocol-neutral service. `ghostlight-mcp-connector` owns stdio,
+//! JSON-RPC, and exact MCP revision state; it connects here through the owner-only typed local
+//! bridge. [`run_service`] owns the shared [`ServiceContext`], bridge/control endpoint, and
+//! extension endpoint for its whole life. It runs no parent-death watchdog and shuts down only on
+//! a continuous idle-grace window ([`run_service_loop`]/`idle_grace_watch`). Bridge hello constants
+//! live in [`handshake`], OS-supervisor identifiers and self-heal in [`supervisor`], and the
+//! per-install anti-squat secret and HMAC proof in [`antisquat`].
 //!
 //! ADR-0030 Decision 3 ("D1 -- the honest singleton queue"): the single MV3 service worker plus
 //! the single native port is an ACCEPTED, TRUTHFUL serialization bottleneck -- fair ordering and
 //! truthful failure on a real drop, never a hidden work-around. H5 lands the three properties
 //! Decision 3 names: a bounded reconnect grace window (`hub::outbound::browser::Browser::attach`,
 //! `GRACE_WINDOW`, strictly less than `TOOL_TIMEOUT`), a per-peer (never global) mint quota
-//! (below, [`try_mint`]/[`PER_PEER_MINT_CAP`]), and mandatory oversize-reply chunking on the
-//! service<->adapter hop (`transport::mcp::server::write_chunked`,
-//! `SCREENSHOT_CHUNK_THRESHOLD`) so one session's large payload cannot head-of-line-block
-//! another's small one. See `docs/adr/0004-reject-second-session.md`'s amendment note for the
-//! cross-reference from the ORIGINAL single-session decision this multiplexes past.
+//! (below, [`try_mint`]/[`PER_PEER_MINT_CAP`]). See
+//! `docs/adr/0004-reject-second-session.md`'s amendment note for the cross-reference from the
+//! original single-session decision this multiplexes past.
 
-use crate::browser::pattern;
+use crate::browser::{advertise, pattern};
 use crate::governance::audit::Recorder;
 use crate::governance::config::reload::{ConfigStore, PolicySource};
+use crate::governance::manifest::identity::ManifestIdentity;
 use crate::governance::manifest::source;
 use crate::governance::manifest::source::LoadedPolicy;
+use crate::governance::ports::AuditSink;
+use crate::hub::authority::AuthorityStore;
 use crate::hub::outbound::browser::Browser;
 use anyhow::{Context, Result};
 use ghostlight_transport::ipc;
@@ -41,16 +36,20 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-pub use ghostlight_transport::{antisquat, handshake, role, supervisor};
+pub use ghostlight_transport::{antisquat, handshake, supervisor};
+pub mod authority;
+pub mod bridge;
 pub mod endpoint;
 pub mod inbound;
 pub mod manage;
 pub mod outbound;
+pub mod peer;
 pub mod scheduling;
-pub mod session;
+pub mod workspace;
 
 /// Idle-grace shutdown window (ADR-0030 Decision 8; PINNED, PINS.md SS5.4): the SERVICE exits only
-/// after zero live sessions AND the extension link gone, CONTINUOUSLY, for this long. Never a
+/// after zero live MCP-edge bridge streams AND the extension link gone, CONTINUOUSLY, for this
+/// long. Never a
 /// parent-death trigger -- the service has no client parent to watch.
 pub const IDLE_GRACE: Duration = Duration::from_secs(30);
 
@@ -60,12 +59,12 @@ pub const IDLE_POLL: Duration = Duration::from_secs(1);
 /// Per-peer (never global) mint quota (ADR-0030 Decision 3: "per-peer-identity mint/group
 /// quotas (never a single global cap, which is itself a lockout DoS)"; Decision 4's "per-peer
 /// rate-limit key" amendment). PINNED in `docs/tasks/hub/PINS.md` SS4: max CONCURRENT
-/// adapter-minted [`session::SessionGuid`] sessions per minting peer identity.
+/// service-minted workspaces per admitted peer identity.
 pub const PER_PEER_MINT_CAP: usize = 32;
 
 /// The paired per-peer live-tab-group cap (H7; PINNED in PINS.md SS4, equal to
 /// [`PER_PEER_MINT_CAP`] by design -- "the paired ... equal by design"). Not yet consumed: H7
-/// wires this in when it adds per-session tab groups.
+/// wires this in when it adds per-workspace tab groups.
 pub const PER_PEER_GROUP_CAP: usize = 32;
 
 /// The quota-exceeded result (PINNED in `docs/tasks/hub/PINS.md` SS4): a plain tool error, never
@@ -74,17 +73,17 @@ pub const PER_PEER_GROUP_CAP: usize = 32;
 pub const MINT_QUOTA_EXCEEDED: &str = "session limit reached for this client";
 
 /// Shared per-peer mint-quota table (ADR-0030 Decision 3 + Decision 4): keyed on the peer's OS
-/// credential ([`session::PeerUser`]), NEVER a single global counter. A `ServiceContext` field,
-/// added the same way H3's `session_registry` and H4's `owned_tabs` were.
-pub type MintQuota = Arc<Mutex<HashMap<session::PeerUser, usize>>>;
+/// credential ([`peer::PeerUser`]), NEVER a single global counter. A `ServiceContext` field,
+/// added beside the service's workspace and tab registries.
+pub type MintQuota = Arc<Mutex<HashMap<peer::PeerUser, usize>>>;
 
 /// RAII handle for one minted, live slot against a peer's [`PER_PEER_MINT_CAP`]. Decrements the
-/// SAME counter [`try_mint`] incremented when this drops (the connection/session ends), so the
-/// cap counts CONCURRENT sessions, never lifetime mints.
+/// SAME counter [`try_mint`] incremented when this drops (the workspace retires), so the cap
+/// counts concurrent workspaces, never lifetime mints.
 #[must_use = "dropping the guard immediately frees the peer's mint-quota slot"]
 pub struct MintGuard {
     quota: MintQuota,
-    peer: session::PeerUser,
+    peer: peer::PeerUser,
 }
 
 impl Drop for MintGuard {
@@ -106,7 +105,7 @@ impl Drop for MintGuard {
 /// thus its own admission) is completely unaffected (never a single global cap).
 pub fn try_mint(
     quota: &MintQuota,
-    peer: &session::PeerUser,
+    peer: &peer::PeerUser,
 ) -> std::result::Result<MintGuard, String> {
     let mut guard = quota.lock().unwrap_or_else(PoisonError::into_inner);
     let count = guard.entry(peer.clone()).or_insert(0);
@@ -164,11 +163,9 @@ fn managed_loaded_policy(
 
 /// The standalone SERVICE entry point (ADR-0030 Decision 8 amendment; PINS.md SS5.1), run only
 /// via the `ghostlight service` subcommand: loads policy (the ONLY role that does), then serves
-/// forever until [`IDLE_GRACE`] elapses with no live sessions and the extension link gone. NEVER
-/// captures a parent or runs the ADR-0029 watchdog -- that lifecycle belongs to the ADAPTER now.
+/// forever until [`IDLE_GRACE`] elapses with no live bridge peers and the extension link gone.
+/// Parent-death cleanup belongs to `ghostlight-mcp-connector`, not this persistent service.
 pub fn run_service(manifest: Option<String>, debug_on: bool, keep_warm: bool) -> Result<()> {
-    role::set_role(role::Role::Service);
-
     // Resolve the user-supplied manifest source (G12, shared format doc section 1.3): the
     // --manifest flag wins when both it and GHOSTLIGHT_MANIFEST are set. Plain synchronous
     // I/O, before the async runtime starts: a source that is SELECTED but cannot be read,
@@ -241,7 +238,7 @@ pub fn run_service(manifest: Option<String>, debug_on: bool, keep_warm: bool) ->
 }
 
 /// The async body of [`run_service`] (ADR-0030 Decision 1, Decision 2, Decision 8; PINS.md SS5.1):
-/// claim the ADAPTER/CONTROL endpoint as a single-instance guard (never a role election -- role
+/// claim the bridge/control endpoint as a single-instance guard (never a role election -- role
 /// was already decided by argv), then own both local endpoints for the rest of this process's
 /// life, and finally run the [`IDLE_GRACE`] watcher as the returning future. NEVER serves this
 /// process's own stdio as a session (Decision 8 amendment: a standalone service has no stdio
@@ -254,20 +251,20 @@ async fn run_service_loop(
     managed_poll: Option<std::time::Duration>,
     keep_warm: bool,
 ) -> i32 {
-    let adapter_listener = match endpoint::claim_adapter_endpoint(&endpoint).await {
+    let local_listener = match endpoint::claim_adapter_endpoint(&endpoint).await {
         Ok(listener) => listener,
         Err(crate::Error::SessionBusy) => {
             tracing::info!("a Ghostlight service is already running on this endpoint; exiting");
             return 0;
         }
         Err(e) => {
-            tracing::error!(error = %e, "failed to claim the adapter/control endpoint");
+            tracing::error!(error = %e, "failed to claim the MCP-edge/control endpoint");
             return 1;
         }
     };
 
     // Anti-squat (ADR-0030 Decision 8; PINS.md SS5.3): prepare the per-install secret now, before
-    // the adapter/control endpoint is actually served below, so no connection can ever race the
+    // the MCP-edge/control endpoint is actually served below, so no connection can ever race the
     // key file's first creation. Best-effort: a failure here degrades anti-squat protection for
     // this run rather than refusing browser automation entirely (defense-in-depth, not a hard
     // requirement -- Decision 8).
@@ -280,8 +277,7 @@ async fn run_service_loop(
 
     let browser = Browser::with_debug(debug_sink.clone());
 
-    // The EXTENSION endpoint: UNCHANGED, server-speaks-first, no hello (ADR-0030 Decision 1;
-    // PINS.md SS1).
+    // The browser endpoint admits only the browser-only relay and its extension hello.
     tokio::spawn({
         let browser = browser.clone();
         let ext_endpoint = endpoint.clone();
@@ -297,8 +293,7 @@ async fn run_service_loop(
         }
     });
 
-    // Build the SHARED ServiceContext ONCE (PINS.md SS1 pin 4); every multiplexed adapter session
-    // `serve_adapters` spawns clones it.
+    // Build the shared ServiceContext once; each admitted bridge/control peer receives a clone.
     let ctx = match ServiceContext::from_startup(
         browser,
         debug_sink,
@@ -313,9 +308,8 @@ async fn run_service_loop(
         }
     };
 
-    // The local inbound transport owns its listener lifecycle and feeds sessions into the
-    // pipeline. The pipe transport takes the already-claimed adapter listener.
-    let pipe = inbound::pipe::PipeTransport::new(adapter_listener);
+    // The local ingress wrapper owns the already-claimed bridge/control listener lifecycle.
+    let pipe = inbound::pipe::PipeTransport::new(local_listener);
     tokio::spawn(pipe.run(ctx.clone()));
 
     // The read-only management UI owns a separate loopback HTTP listener. It is not an MCP
@@ -342,13 +336,15 @@ async fn run_service_loop(
 }
 
 /// The idle-grace watcher (ADR-0030 Decision 8; PINS.md SS5.4, transcribed verbatim): the SERVICE
-/// exits once zero live sessions AND the extension link gone hold CONTINUOUSLY for [`IDLE_GRACE`];
-/// any session or a reconnected extension resets the counter to zero.
+/// exits once zero live MCP-edge bridge streams, zero settling work items, AND the extension link
+/// gone hold CONTINUOUSLY for [`IDLE_GRACE`]; any bridge stream, work item, or reconnected
+/// extension resets the counter to zero.
 async fn idle_grace_watch(ctx: ServiceContext) -> i32 {
     let mut idle_for = Duration::ZERO;
     loop {
         tokio::time::sleep(IDLE_POLL).await;
         let idle = ctx.live_sessions.load(std::sync::atomic::Ordering::Relaxed) == 0
+            && ctx.active_work.load(std::sync::atomic::Ordering::Relaxed) == 0
             && !ctx.browser.is_connected();
         idle_for = if idle {
             idle_for + IDLE_POLL
@@ -362,18 +358,14 @@ async fn idle_grace_watch(ctx: ServiceContext) -> i32 {
     }
 }
 
-/// SHARED per-service state (ADR-0030 Decision 2: "HubCore / ServiceContext vs per-session
-/// state"): the one [`Browser`] handle, the [`ConfigStore`], the audit [`Recorder`], and (H3) the
-/// GUID -> bound-peer [`session::SessionRegistry`] -- built ONCE at startup and handed to every
-/// `transport::mcp::server::serve_session` invocation. PER-SESSION state (the swappable
-/// `Governance`, the writer task, the policy-subscription task, and the `SessionGuid` itself) is
-/// built PER session, inside `serve_session` itself, never here.
+/// Shared protocol-neutral service state. The one [`Browser`] handle, [`ConfigStore`], audit
+/// [`Recorder`], current authority, workspace registry, and canonical catalog signal are built
+/// once at startup and cloned into each admitted bridge stream. MCP lifecycle and revision state
+/// remain in `ghostlight-mcp-connector`; per-call state remains in the bridge work future.
 ///
-/// `Clone` (H2, PINS.md SS1 pin 4): built ONCE at service start, then cloned per session for
-/// `serve_session` -- every field is a cheap `Arc` clone or an already-`Clone` value (`Browser`,
-/// `LoadedPolicy`). Never call [`ServiceContext::from_startup`] per session: it spawns a
-/// recorder-reload watcher task each time, so one per session would leak N duplicate watchers on
-/// the one store.
+/// Every field is a cheap `Arc` clone or an already-`Clone` value. Never call
+/// [`ServiceContext::from_startup`] per bridge stream: it spawns service-global watcher and reaper
+/// tasks, so doing so would duplicate them.
 #[derive(Clone)]
 pub struct ServiceContext {
     pub browser: Browser,
@@ -385,19 +377,18 @@ pub struct ServiceContext {
     pub capabilities: outbound::Registry,
     pub store: Arc<ConfigStore>,
     pub recorder: Arc<Recorder>,
+    /// One service-global, client-neutral authority snapshot slot.
+    pub authority: Arc<AuthorityStore>,
+    /// Service-owned browser workspaces and their handle membership.
+    pub workspaces: workspace::WorkspaceRegistry,
+    /// Monotonic generation signal for canonical catalog projections.
+    pub catalog_generation: tokio::sync::watch::Sender<u64>,
     pub initial_policy: LoadedPolicy,
-    pub session_registry: Arc<std::sync::Mutex<session::SessionRegistry>>,
-    pub owned_tabs: Arc<std::sync::Mutex<HashMap<i64, session::SessionGuid>>>,
-    /// Per-session Chrome group titles (ADR-0047 D4), keyed by guid string: the service-lifetime
-    /// registry `session_title` dedupes and caches into, so a session's title stays stable across
-    /// reconnects (ADR-0047 D2) and two clients sharing a name get distinct `(2)`/`(3)` suffixes.
-    pub session_titles: Arc<std::sync::Mutex<HashMap<String, String>>>,
-    pub mint_quota: MintQuota,
+    /// Number of live typed bridge streams from `ghostlight-mcp-connector` edges.
     pub live_sessions: Arc<AtomicUsize>,
-    /// Reference count of LIVE connections per guid (ADR-0047 D5): a tab owned by a guid with a
-    /// zero (or absent) count is adoptable by another session. Counted, not boolean, so a
-    /// reconnect's new connection can briefly overlap the old one's teardown without a liveness gap.
-    pub live_guids: Arc<std::sync::Mutex<HashMap<String, usize>>>,
+    /// Work futures still running or settling after their originating bridge stream closed.
+    /// Kept separate from live_sessions because it is service liveness, not client presence.
+    pub active_work: Arc<AtomicUsize>,
     /// The service's observability sink (a clone of the one the browser holds). The manage.web
     /// listener publishes its actual bound port through this once it binds, so a reader or test
     /// learns the real port even when it was OS-assigned.
@@ -405,11 +396,10 @@ pub struct ServiceContext {
 }
 
 impl ServiceContext {
-    /// The SHARED-lifetime startup sequence, moved verbatim from the pre-H1
-    /// `transport::mcp::server::run` (store load -> `spawn_watcher` -> recorder build ->
-    /// recorder-reload subscription spawn). This is a plain (non-async) fn that calls
-    /// `tokio::spawn` internally; it is only ever invoked from within the tokio runtime (by
-    /// `mcp::server::run`, itself polled inside `run_mcp_server`'s `rt.block_on` above).
+    /// Build the service-global state and start its watcher and reaper tasks.
+    ///
+    /// This plain function calls `tokio::spawn` internally and therefore must run inside the
+    /// service's Tokio runtime. Call it once per service process, never per bridge stream.
     pub fn from_startup(
         browser: Browser,
         debug_sink: DebugSink,
@@ -495,19 +485,126 @@ impl ServiceContext {
             outbound::browser::BrowserCapability::new(browser.clone()),
         )]);
 
+        let authority = Arc::new(AuthorityStore::new(
+            &store.current_authority(),
+            recorder.clone() as Arc<dyn AuditSink>,
+        ));
+        if loaded_policy.user_manifest_ignored {
+            authority
+                .current()
+                .governance
+                .record_user_manifest_ignored();
+        }
+        let catalog_generation = tokio::sync::watch::channel(1u64).0;
+        spawn_authority_watch(
+            Arc::clone(&store),
+            Arc::clone(&authority),
+            Arc::clone(&recorder),
+            browser.clone(),
+            catalog_generation.clone(),
+        );
+
+        let mint_quota: MintQuota = Arc::new(Mutex::new(HashMap::new()));
+        let workspaces = workspace::WorkspaceRegistry::new(Arc::clone(&mint_quota));
+        browser.bind_workspace_registry(workspaces.clone());
+        spawn_workspace_reaper(workspaces.clone(), browser.clone());
+
         Ok(Self {
             browser,
             capabilities,
             store,
             recorder,
+            authority,
+            workspaces,
+            catalog_generation,
             initial_policy: loaded_policy.clone(),
-            session_registry: Arc::new(std::sync::Mutex::new(session::SessionRegistry::new())),
-            owned_tabs: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            session_titles: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            mint_quota: Arc::new(Mutex::new(HashMap::new())),
             live_sessions: Arc::new(AtomicUsize::new(0)),
-            live_guids: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            active_work: Arc::new(AtomicUsize::new(0)),
             debug_sink,
         })
     }
+}
+
+fn manifest_identity_of(policy: &LoadedPolicy) -> Option<ManifestIdentity> {
+    policy.manifest.as_ref().map(|manifest| ManifestIdentity {
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        hash: manifest.hash.clone(),
+    })
+}
+
+fn spawn_authority_watch(
+    store: Arc<ConfigStore>,
+    authority: Arc<AuthorityStore>,
+    recorder: Arc<Recorder>,
+    browser: Browser,
+    catalog_generation: tokio::sync::watch::Sender<u64>,
+) {
+    tokio::spawn(async move {
+        let mut changes = store.subscribe_authority();
+        let mut ignored_in_force = changes.borrow().policy.user_manifest_ignored;
+        let canonical = crate::tool::tools::advertised_tools_json();
+        while changes.changed().await.is_ok() {
+            let inputs = changes.borrow_and_update().clone();
+            let outgoing = authority.current();
+            let policy_changed =
+                manifest_identity_of(&outgoing.policy) != manifest_identity_of(&inputs.policy);
+
+            if policy_changed {
+                browser.erase_all_recordings(crate::recording::StopReason::PolicyChanged);
+            }
+
+            match inputs.policy.origin {
+                Some(crate::governance::manifest::source::ManifestOrigin::Managed) => {
+                    let paths = crate::governance::paths::GovernancePaths::production();
+                    if let Some(cache_path) = paths.managed_cache.as_ref() {
+                        let sidecar = crate::governance::managed::status::sidecar_path(cache_path);
+                        if let Some(status) =
+                            crate::governance::managed::status::read_sidecar(&sidecar)
+                        {
+                            recorder.set_policy_seq(status.seq);
+                        }
+                    }
+                }
+                _ => recorder.set_policy_seq(None),
+            }
+
+            let before = advertise::advertised_tools(&canonical, outgoing.governance.grants());
+            browser.scheduler().advance_authority_epoch(inputs.epoch);
+            let next = authority.install(&inputs);
+            let after = advertise::advertised_tools(&canonical, next.governance.grants());
+
+            if policy_changed {
+                next.governance
+                    .record_manifest_reload_with_client(manifest_identity_of(&inputs.policy), None);
+            }
+            if before != after {
+                catalog_generation.send_modify(|generation| {
+                    *generation = generation.wrapping_add(1).max(1);
+                });
+            }
+            if policy_changed
+                && crate::governance::ports::user_manifest_ignored_transitioned(
+                    ignored_in_force,
+                    inputs.policy.user_manifest_ignored,
+                )
+            {
+                next.governance
+                    .record_user_manifest_ignored_with_client(None);
+            }
+            ignored_in_force = inputs.policy.user_manifest_ignored;
+        }
+    });
+}
+
+fn spawn_workspace_reaper(workspaces: workspace::WorkspaceRegistry, browser: Browser) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            workspaces.reap_expired(std::time::Instant::now());
+            for retired in workspaces.take_retired() {
+                browser.cleanup_workspace(retired.workspace.as_str(), &retired.tabs);
+            }
+        }
+    });
 }

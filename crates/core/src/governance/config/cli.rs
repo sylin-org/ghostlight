@@ -77,7 +77,7 @@ fn unknown_key_error(key: &str) -> crate::Error {
 /// exact pinned strings, not a logging format) and the [`LoadedPolicy`] itself so a caller (for
 /// example `run_list`'s [`shadow_line`]) never has to load the policy a second time. Delegates
 /// the file reads and layer composition to [`load::read_layers`]/[`load::layer_inputs`] -- the
-/// same functions the mcp-server startup path (`ConfigStore::load_initial_with_policy`) uses --
+/// same functions the service startup path (`ConfigStore::load_initial_with_policy`) uses --
 /// so there is exactly one implementation of "read the files and compose the layers". A broken
 /// policy file surfaces here as a hard error (propagated via `?`), the same one server startup
 /// gives; it is never swallowed.

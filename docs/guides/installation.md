@@ -1,11 +1,11 @@
 # Installing Ghostlight
 
-Ghostlight is a native Rust service, a small relay, and a thin browser extension. Installation wires
-three things together: your MCP client, the local service, and the extension. This guide covers both
-install paths, what the installer actually writes, how to verify the chain, and how to undo it.
+The goal is simple: install one local service, add the store extension, restart the MCP client,
+and get one useful browser result. A healthy setup ends with `ghostlight doctor` reporting the
+client, service, browser connection, and extension ready.
 
 If you just want the fast path, the four stages in the
-[README](../../README.md#try-it) are the whole story for most people. Come here
+[README](../../README.md#try-one-useful-task) are the whole story for most people. Come here
 when you want a different path, a per-OS detail, or an explanation of what got registered.
 
 ```text
@@ -13,10 +13,10 @@ when you want a different path, a per-OS detail, or an explanation of what got r
       automatic           visible step             once                useful proof
 ```
 
-Ghostlight has no hosted account to create or sign in to. The service, relay, and extension
-connect locally as the current OS user. Website sessions remain in the Chromium profile you are
-already using. Connect only MCP clients you trust: local browser access is powerful even when a
-policy constrains it.
+Ghostlight has no hosted account to create or sign in to. The MCP connector, service, browser
+connector, and extension connect locally as the current OS user. Website sessions remain in the
+Chromium profile you are already using. Connect only MCP clients you trust: local browser access
+is powerful even when optional policy constrains it.
 
 ## Prerequisites
 
@@ -29,8 +29,8 @@ policy constrains it.
 
 ## Path A: the npm launcher
 
-The launcher fetches the version-matched service and relay on first run and caches them. Nothing to
-compile.
+The launcher fetches and caches the version-matched MCP edge, service, and browser relay on first
+run. Nothing to compile.
 
 1. **Install and register Ghostlight** (idempotent, safe to re-run):
 
@@ -44,10 +44,10 @@ compile.
    [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
    from the Chrome Web Store. Chrome shows Ghostlight's blue mascot when it is ready.
 
-3. **Restart your MCP clients,** then try this read-only proof before asking it to act:
+3. **Restart your MCP clients,** then try this bounded first proof:
 
-       In my current browser, summarize the active page and tell me which tab you used.
-       Do not click or change anything.
+       Open https://example.com/ in a new Ghostlight tab, summarize the page, and tell me
+       which tab you used. Do not click, type, submit, or change the page.
 
    Verification is optional:
 
@@ -66,11 +66,12 @@ The path when you want to read what you are running.
     cd ghostlight
     cargo build --release
 
-The build produces two executables. `ghostlight` is the CLI and the persistent service.
-`ghostlight-relay` is the thin pass-through your MCP client and Chrome actually launch; it depends
-on almost nothing, so rebuilding the service never forces it to relink. To test the source tree
-immediately, open `chrome://extensions`, enable Developer mode, choose `Load unpacked`, and select
-the local `extension/` directory. Then register:
+The build produces three product executables. `ghostlight-mcp-connector` owns MCP stdio and the
+exact `2025-11-25` and `2026-07-28` wire state machines. `ghostlight` is the CLI and persistent,
+protocol-neutral service. `ghostlight-browser-connector` is the browser-only native host Chromium
+launches.
+To test the source tree immediately, open `chrome://extensions`, enable Developer mode, choose
+`Load unpacked`, and select the local `extension/` directory. Then register:
 
     ./target/release/ghostlight install --extension-id cjcmhepmagomefjggkcohdbfemacojoa
 
@@ -96,8 +97,9 @@ might expect." For each browser and client it targets, `install`:
 - **Offers the browser extension once** after a first install. The stable walkthrough
   URL contains no machine identifier or installation data. Use `--no-open` to suppress it.
 
-The client entry it writes points at `ghostlight-relay` with `--role agent`. You never launch the
-binary by hand; the client and the browser do.
+The client entry it writes points directly at the sibling `ghostlight-mcp-connector` executable
+with no role flag. The native-host manifest independently points Chromium at
+`ghostlight-browser-connector`.
 
 ### Which clients and browsers it knows
 
@@ -133,23 +135,31 @@ state.
     ghostlight uninstall
 
 This reverses what `install` wrote: the native-host registration, the client entries (again by
-idempotent merge, so a foreign config is left alone), the per-instance relay copy, and the
-supervisor. `--dry-run` shows the plan first.
+idempotent merge, so a foreign config is left alone), managed executable files, and the supervisor.
+`--dry-run` shows the plan first.
 
 ## Troubleshooting
 
-- **Start with `doctor`.** It pinpoints the common failures by name.
+- **Not sure which link failed?** Run `npx -y ghostlight doctor`. Start with its named finding
+  instead of reinstalling everything.
+- **No Ghostlight tools after install?** Restart or reconnect from the current MCP client. Do not
+  launch `ghostlight-mcp-connector` in a separate terminal; the client owns that stdio connection.
 - **Store extension shows disconnected?** Confirm that it is enabled in the browser's extension
-  manager, then restart the browser if needed.
+  manager. Run `doctor` again, and restart the browser only if the finding still asks for it.
 - **Source-development extension shows disconnected?** Reload it at `chrome://extensions`. A
   service worker can be evicted; reloading re-establishes the link.
+- **A tab or workspace is stale?** Ask the agent to call `tabs_context_mcp`. If no usable workspace
+  remains, it should call `tabs_create_mcp` once. Other tools do not silently switch workspaces.
+- **The MCP client reports `Transport closed`?** Stop and reconnect through that client. Inspect
+  tab and page state before retrying an effectful call whose result may be unknown.
+- **A governed call is denied?** Ask the agent to call `explain`. Treat the denial as a boundary,
+  not a reason to try a lower-level tool.
 - **Developing on Windows?** Use the isolated engine swap in
   [DEV-LOOP.md](../DEV-LOOP.md). It builds away from locked release executables, swaps only the
-  service holding the one endpoint, and lets the stable relays reconnect automatically.
+  persistent service, and lets existing MCP connectors and browser connectors reconnect.
 - **Ran `ghostlight` and got an error exit?** That is expected. A bare `ghostlight` with no
-  subcommand no longer serves anything; the MCP role lives in `ghostlight-relay`, which your client
-  launches. Run a real subcommand (`install`, `doctor`, `status`), or let the client drive the
-  relay.
+  subcommand does not serve MCP; your client launches `ghostlight-mcp-connector`. Run a real
+  subcommand (`install`, `doctor`, `status`), or let the client drive the MCP edge.
 
 ## Environment variables
 

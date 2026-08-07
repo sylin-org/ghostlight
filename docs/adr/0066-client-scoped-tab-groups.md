@@ -7,6 +7,20 @@ that the visible Chrome tab group is keyed on the per-process session GUID and i
 per live session. Builds on ADR-0061 (extension-owned browser identity) and ADR-0030 Decision 6
 (the SERVICE is the isolation boundary; the extension's group checks are defense-in-depth).
 
+## Amendment by ADR-0096 (2026-08-04)
+
+Decisions 1-4 retain their group-reuse and recovery intent but no longer key current frames on an
+MCP client name. `WorkspaceId`, carried in the compatibility `guid` field, is the sole extension
+routing and grouping identity. Current tool/group frames omit the former top-level
+presentation/routing `clientKey`; the extension may continue to parse it only for covered
+older-adapter overlap. A nested scheduler resource may retain that legacy field spelling while
+carrying `WorkspaceId`. Human client labels may title a group but never select a workspace, group,
+tab, browser, scheduler key, or authority. Decision 5's managed-tab reachability remains intact
+for tabs already owned by the current workspace. It no longer compensates for guessed input ids:
+explicit `tabId` arguments are verification-only, and membership is added only from successful,
+correlated `tabs_context_mcp` or `tabs_create_mcp` results at the browser shore. This supersedes
+the first-touch assumptions in the historical Context, D6, Consequences, and Provenance below.
+
 ## Context
 
 ADR-0047 set out to stop the browser accumulating orphan tab groups, and did -- within a single

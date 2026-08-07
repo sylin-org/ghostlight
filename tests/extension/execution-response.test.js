@@ -32,7 +32,7 @@ test("responses stay on their original connection when request ids are reused", 
   const newError = new Error("new failure");
   newError.hop = "page";
   newError.detail = "new detail";
-  newError.code = "workspace_window_ineligible";
+  newError.code = "topology_failed";
   responder.fail(newScope, newError);
   oldGate.resolve();
   await oldCompletion;
@@ -52,7 +52,7 @@ test("responses stay on their original connection when request ids are reused", 
     error: "new failure",
     hop: "page",
     detail: "new detail",
-    code: "workspace_window_ineligible",
+    code: "topology_failed",
     commandId: "new-command",
     executorGeneration: "executor-generation",
   }]);
@@ -129,7 +129,10 @@ test("worker carries response scopes instead of looking up raw request ids", () 
   );
   assert.doesNotMatch(source, /executionByRequest/);
   assert.match(source, /execute: async \(item\) => \{\s*await dispatch\(item\)/);
-  assert.match(source, /reply\(item\.response, await handler\(args, key, request\.workspace\)\)/);
+  assert.match(source, /const key = request\.guid;/);
+  assert.doesNotMatch(source, /request\.clientKey\s*\|\|/);
+  assert.match(source, /const result = await handler\(args, key, request\.workspace\)/);
+  assert.match(source, /reply\(item\.response, result\)/);
   assert.match(
     source,
     /createResponseScope\(requestId, connectedPort\)/,
@@ -147,7 +150,7 @@ test("worker carries response scopes instead of looking up raw request ids", () 
   assert.doesNotMatch(auxiliaryResponses, /\bnativePort\b/);
   assert.strictEqual(
     (auxiliaryResponses.match(/connectedResponder\.post/g) || []).length,
-    4,
-    "tab URL and group success/failure responses must use the connection responder"
+    2,
+    "tab URL success/failure responses must use the connection responder"
   );
 });

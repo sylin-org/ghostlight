@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Ghostlight one-line installer (Windows):
 #   irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1 | iex
-# Downloads the latest release binary, places it in %USERPROFILE%\.ghostlight\bin, and runs
+# Downloads the latest release binaries, places them in %USERPROFILE%\.ghostlight\bin, and runs
 # `ghostlight install` (idempotent: registers the native messaging host and any MCP clients
 # it finds). Safe to re-run. Set $env:GHOSTLIGHT_NO_REGISTER = "1" to download only.
 
@@ -54,9 +54,9 @@ function Install-VerifiedBinary([string]$Name) {
 
 New-Item -ItemType Directory -Force $BinDir | Out-Null
 Write-Host "ghostlight: downloading latest release..."
-# ADR-0046 + ADR-0051 Phase 3: two executables ship together (the ghostlight brain + the single
-# ghostlight-relay pass-through). They sit in one dir, so `ghostlight install` finds the relay sibling.
-foreach ($b in "ghostlight", "ghostlight-relay") {
+# ADR-0096: the persistent service, MCP stdio edge, and browser-only native relay ship together.
+# They sit in one directory so installation and MCP-client entries can resolve exact siblings.
+foreach ($b in "ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector") {
     Install-VerifiedBinary $b
 }
 $Version = try { & $Bin --version } catch { "version unknown" }

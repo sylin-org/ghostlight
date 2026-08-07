@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Node unit tests for extension/lib/debug.js (ADR-0059 developer diagnostics forwarder). Pure
 // module: an injected fake storage area and a `post` callback stand in for
-// chrome.storage.local / nativePort.postMessage, matching lib/grouping.js's injected-chrome
-// precedent -- no mocked extension globals needed.
+// chrome.storage.local / nativePort.postMessage -- no mocked extension globals needed.
 
 const { test } = require("node:test");
 const assert = require("node:assert");

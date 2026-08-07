@@ -9,8 +9,8 @@
 // announced to the service as the opening frame of each native-messaging connection. Always
 // present, never blank, unique per browser profile, stable across all the churn.
 //
-// Pure and storage-agnostic (matches lib/debug.js / lib/grouping.js's injected-dependency
-// precedent): the storage area and the UUID generator are parameters, so it is unit-testable with a
+// Pure and storage-agnostic (matches lib/debug.js's injected-dependency precedent): the storage
+// area and the UUID generator are parameters, so it is unit-testable with a
 // fake storage and a deterministic generator, no mocked extension globals.
 (function () {
 // The chrome.storage.local key the minted UUID lives under. `local`, not `session`: the identity

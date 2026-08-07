@@ -1,6 +1,6 @@
 [package]
 name = "ghostlight"
-version = "0.7.3"
+version = "0.8.0"
 edition = "2021"
 description = "Governed browser automation over the user's own authenticated Chromium session -- for AI coding agents."
 publish = false
@@ -8,20 +8,9 @@ publish = false
 # Commercial License. LICENSING.md defines the split and points to each governing text.
 license-file = "LICENSING.md"
 
-# cargo-binstall support: `cargo binstall --git https://github.com/sylin-org/ghostlight ghostlight`
-# fetches the prebuilt release archives instead of building from source. Naming matches
-# release.yml's Package step: ghostlight-v<version>-<target>.{zip|tar.gz} with the binary
-# inside a same-named directory.
-[package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }{ archive-suffix }"
-bin-dir = "{ name }-v{ version }-{ target }/{ bin }{ binary-ext }"
-pkg-fmt = "tgz"
-
-[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
-pkg-fmt = "zip"
-
 [workspace]
-members = [".", "crates/transport", "crates/core", "crates/relay", "crates/lightbox"]
+members = [".", "crates/transport", "crates/core", "crates/browser-connector", "crates/mcp-connector", "crates/lightbox"]
+default-members = [".", "crates/mcp-connector", "crates/browser-connector"]
 resolver = "2"
 
 [dependencies]

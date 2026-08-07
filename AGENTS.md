@@ -39,15 +39,16 @@ sessions; `coordination/RESULTS.md` carries the latest result.
 
 ## What this project is
 
-Ghostlight is a governed browser automation MCP server: a Rust service plus a thin
-Chromium extension that gives any MCP client (Claude Code, Cursor, Zed, Cline, ...)
-controlled access to the user's authenticated browser session, with identity-bound access
-control, per-action capability classification (read / action / write / execute), and
-structured audit logging. The unconstrained engine is first-class ("all-open stays
-first-class"); governance is an overlay, never a tax on the ungoverned.
+Ghostlight is a governed browser automation MCP server: a protocol-versioned MCP edge, a
+persistent Rust service, a browser-only relay, and a thin Chromium extension. Together they give
+any MCP client (Claude Code, Cursor, Zed, Cline, ...) controlled access to the user's authenticated
+browser session, with identity-bound access control, per-action capability classification (read /
+action / write / execute), and structured audit logging. The unconstrained engine is first-class
+("all-open stays first-class"); governance is an overlay, never a tax on the ungoverned.
 
 ```
-MCP Client <--stdio--> Relay <--IPC--> Service <--native messaging--> Extension <--CDP--> Browser
+MCP Client <--stdio--> ghostlight-mcp-connector <--typed IPC--> ghostlight service
+    <--browser IPC--> ghostlight-browser-connector <--native messaging--> Extension <--CDP--> Browser
 ```
 
 It is a clean-room Rust build. The sole external reference is Anthropic's official Claude
@@ -58,12 +59,16 @@ in Chrome extension: we harvest its observable interface and technique, never it
 
 The tree is a Cargo workspace (ADR-0044/0046, ADR-0051 P3):
 
-- `crates/core/` -- the engine and governance: `governance/`, `browser/`, `mcp/`, `hub/`
-  modules. `crates/core/src/governance/` is the commercially licensed module (ADR-0027);
-  everything else is Apache-2.0 OR MIT.
-- `crates/transport/` -- shared IPC, instance identity, observability.
-- `crates/relay/` -- the thin pass-through binary `ghostlight-relay` (one exe, two roles:
-  `--role agent` MCP stdio, browser role auto-detected from the Chrome extension origin).
+- `crates/core/` -- the protocol-neutral engine and governance: `governance/`, `browser/`,
+  `tool/`, and `hub/` modules. `crates/core/src/governance/` is the commercially licensed module
+  (ADR-0027); everything else is Apache-2.0 OR MIT.
+- `crates/transport/` -- typed owner-only service bridge, browser IPC, instance identity, and
+  observability. Its bridge vocabulary carries product work, never MCP JSON-RPC.
+- `crates/mcp-connector/` -- the `ghostlight-mcp-connector` stdio edge. Exact revision state machines live in
+  `mcp_2025_11_25` and `mcp_2026_07_28`; this crate does not depend on core, governance, or browser
+  execution.
+- `crates/browser-connector/` -- the browser-only native-messaging pass-through binary
+  `ghostlight-browser-connector`. It has no MCP-client role.
 - `crates/lightbox/` -- dev-only governance harness (ADR-0056); publish=false, never shipped.
 - `src/` -- the `ghostlight` binary crate (CLI + persistent service) re-exporting the crates.
 - `extension/` -- the Manifest V3 extension. Policy-free and thin: Chrome-API mechanism
@@ -97,8 +102,12 @@ policy-free** (all policy, classification, and audit live in the binary).
 
 Standing technical decisions (each has an ADR or spec section; do not re-litigate):
 
-- The MCP protocol is hand-rolled JSON-RPC 2.0 over stdio. Do NOT introduce an MCP SDK
-  crate (dependency risk, and it must match the preserved schema format exactly).
+- The MCP protocol is hand-rolled JSON-RPC 2.0 over stdio in `crates/mcp-connector/`. Do NOT introduce an
+  MCP SDK crate (dependency risk, and it must match the preserved schema format exactly). Protocol
+  dates, lifecycle, metadata, request ids, and response envelopes never enter the service core.
+- Runtime roles are structural: separate executable entry points and dependency direction replace
+  the old process-global role marker. Browser work routes only by `WorkspaceId` in compatibility
+  `guid`; a human client label is presentation/audit data, never routing or authority.
 - Screenshots return only on `computer` actions that produce one (`screenshot`, `scroll`,
   `zoom`); everything else returns a text confirmation (roughly 10x context savings).
   JPEG quality 55 falling back to 30; coordinate model per ADR-0010 (probe the CSS
@@ -108,10 +117,11 @@ Standing technical decisions (each has an ADR or spec section; do not re-litigat
 ## Building and testing
 
 **Load-bearing gotcha:** on a dev machine, live MCP clients continuously respawn
-`ghostlight-relay.exe` and a running service holds `target/*.exe` against the linker, so a
-plain `cargo build`/`cargo test` can fail with lock errors or leave stale binaries. Build
-and test in an isolated target dir (`CARGO_TARGET_DIR`). Lightbox manages its own isolated
-process build unless `--reuse-cache` is explicitly used on a clean CI worker.
+`ghostlight-mcp-connector.exe`, Chromium keeps `ghostlight-browser-connector.exe` alive, and a running service holds
+`ghostlight.exe` against the linker. A plain `cargo build`/`cargo test` can fail with lock errors
+or leave stale binaries. Build and test in an isolated target dir (`CARGO_TARGET_DIR`). Lightbox
+manages its own isolated process build unless `--reuse-cache` is explicitly used on a clean CI
+worker.
 
 Two test tiers (ADR-0032, ADR-0051):
 
@@ -125,11 +135,11 @@ Gate before every commit: `cargo fmt --check`, `cargo clippy --all-targets -- -D
 fast-tier tests green. Extension JS: `node --test` under `extension/`, plus `node --check`
 on changed files.
 
-The dev loop for seeing changes live (engine swap via `scripts/dev-loop.ps1`, extension
-reload at `chrome://extensions`) is in [docs/DEV-LOOP.md](docs/DEV-LOOP.md). One stack
-(ADR-0065): one native host, one endpoint, one `ghostlight` MCP entry; the engine is
-whichever service holds the endpoint. Named instances (`--instance`) are a test-isolation
-seam only, not a user or dev workflow.
+The dev loop for seeing changes live (engine swap via `scripts/dev-loop.ps1`, shore respawn when
+that shore changes, extension reload at `chrome://extensions`) is in
+[docs/DEV-LOOP.md](docs/DEV-LOOP.md). One stack (ADR-0065/0096): one native host, one installed
+service identity, one typed MCP-edge endpoint, one browser endpoint, and one `ghostlight` MCP
+entry. Named instances (`--instance`) are a test-isolation seam only, not a user or dev workflow.
 
 The Chrome adapter and service version independently (ADR-0093). The manifest owns the adapter
 version; `compatibility.json` owns its inclusive service range. Do not bump the manifest for a

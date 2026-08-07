@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-Ghostlight-Commercial
-//! Hub multiplex, kill fan-out, and two-phase adapter-wire parity scenarios.
+//! MCP-edge multiplex and kill fan-out parity scenarios.
 
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::sync::Arc;
@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use anyhow::{anyhow, ensure};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 
 use ghostlight_core::governance::audit::Recorder;
 use ghostlight_core::governance::dispatch::Governance;
@@ -17,11 +16,13 @@ use ghostlight_core::hub::outbound::browser::Browser;
 use crate::scenarios::Scenario;
 use crate::support::{self, TempRoot};
 
+type CreatorObservation = (i64, Value, Value);
+type ExtensionTranscript = (Vec<CreatorObservation>, Vec<Value>);
+
 pub(super) fn registry() -> Vec<Scenario> {
     vec![
-        ("legacy-hub-two-adapter-multiplex", two_adapter_multiplex),
+        ("mcp-edge-two-client-multiplex", two_mcp_edge_multiplex),
         ("legacy-hub-kill-audit-fanout", kill_audit_fanout),
-        ("legacy-hub-two-phase-wire", two_phase_wire),
     ]
 }
 
@@ -35,76 +36,102 @@ fn write_line(stdin: &mut std::process::ChildStdin, value: &Value) -> anyhow::Re
 fn read_line(reader: &mut BufReader<std::process::ChildStdout>) -> anyhow::Result<Value> {
     let mut line = String::new();
     reader.read_line(&mut line)?;
-    ensure!(!line.is_empty(), "adapter stdout closed");
+    ensure!(!line.is_empty(), "MCP edge stdout closed");
     Ok(serde_json::from_str(line.trim_end())?)
 }
 
-fn two_adapter_multiplex() -> anyhow::Result<()> {
-    let tmp = TempRoot::new("hub-two-adapter")?;
-    let endpoint = support::unique_endpoint("hub-two-adapter");
+fn two_mcp_edge_multiplex() -> anyhow::Result<()> {
+    let tmp = TempRoot::new("hub-two-mcp-edge")?;
+    let endpoint = support::unique_endpoint("hub-two-mcp-edge");
     let log_dir = tmp.path().join("logs");
     let _service = support::spawn_service(&endpoint, &log_dir)?;
-    let mut adapter_a = support::spawn_adapter(&endpoint, &log_dir)?;
-    let mut adapter_b = support::spawn_adapter(&endpoint, &log_dir)?;
-    let mut stdin_a = adapter_a
+    let mut edge_a = support::spawn_mcp_edge(&endpoint, &log_dir)?;
+    let mut edge_b = support::spawn_mcp_edge(&endpoint, &log_dir)?;
+    let mut stdin_a = edge_a
         .stdin
         .take()
-        .ok_or_else(|| anyhow!("adapter A stdin"))?;
-    let mut stdin_b = adapter_b
+        .ok_or_else(|| anyhow!("MCP edge A stdin"))?;
+    let mut stdin_b = edge_b
         .stdin
         .take()
-        .ok_or_else(|| anyhow!("adapter B stdin"))?;
+        .ok_or_else(|| anyhow!("MCP edge B stdin"))?;
     let mut reader_a = BufReader::new(
-        adapter_a
+        edge_a
             .stdout
             .take()
-            .ok_or_else(|| anyhow!("adapter A stdout"))?,
+            .ok_or_else(|| anyhow!("MCP edge A stdout"))?,
     );
     let mut reader_b = BufReader::new(
-        adapter_b
+        edge_b
             .stdout
             .take()
-            .ok_or_else(|| anyhow!("adapter B stdout"))?,
+            .ok_or_else(|| anyhow!("MCP edge B stdout"))?,
     );
-    write_line(
-        &mut stdin_a,
-        &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-    )?;
-    write_line(
-        &mut stdin_b,
-        &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-    )?;
+    write_line(&mut stdin_a, &support::initialize_2025(1, "lightbox-a"))?;
+    write_line(&mut stdin_b, &support::initialize_2025(1, "lightbox-b"))?;
     ensure!(read_line(&mut reader_a)?["id"] == 1);
     ensure!(read_line(&mut reader_b)?["id"] == 1);
+    write_line(&mut stdin_a, &support::initialized_2025())?;
+    write_line(&mut stdin_b, &support::initialized_2025())?;
 
     let fake_endpoint = endpoint.clone();
-    let extension = std::thread::spawn(move || -> anyhow::Result<(Vec<Value>, Vec<Value>)> {
+    let extension = std::thread::spawn(move || -> anyhow::Result<ExtensionTranscript> {
         tokio::runtime::Runtime::new()?.block_on(async move {
             let stream = ghostlight_transport::ipc::connect(&fake_endpoint).await?;
             let (mut reader, mut writer) = tokio::io::split(stream);
             support::send_extension_attach_frames(&mut writer).await?;
-            let mut groups = Vec::new();
             let mut tools = Vec::new();
-            while groups.len() < 2 || tools.len() < 2 {
+            let mut creators: Vec<CreatorObservation> = Vec::new();
+            while creators.len() < 2 || tools.len() < 2 {
                 let bytes = ghostlight_transport::host::read_message(&mut reader)
                     .await?
                     .ok_or_else(|| anyhow!("extension link closed"))?;
                 let value: Value = serde_json::from_slice(&bytes)?;
                 match value["type"].as_str() {
                     Some("tab_url_request") => support::answer_tab_url(&mut writer, &value).await?,
-                    Some("group_request") => groups.push(value),
                     Some("tool_request") => {
-                        let reply = json!({
-                            "id": value["id"],
-                            "type": "tool_response",
-                            "result": {"content":[{"type":"text","text":format!("navigated tabId={}", value["args"]["tabId"])}]},
-                        });
+                        let reply = match value["tool"].as_str() {
+                            Some("tabs_context_mcp") => {
+                                let native = match creators.len() {
+                                    0 => 101,
+                                    1 => 202,
+                                    _ => anyhow::bail!("unexpected third creator request"),
+                                };
+                                let guid = value["guid"].clone();
+                                ensure!(guid.is_string());
+                                let title = value["workspace"]["groupTitle"].clone();
+                                ensure!(title.is_string());
+                                creators.push((native, guid, title));
+                                json!({
+                                    "id": value["id"],
+                                    "type": "tool_response",
+                                    "result": support::creator_inventory_result(native),
+                                })
+                            }
+                            Some("navigate") => {
+                                let native = value["args"]["tabId"]
+                                    .as_i64()
+                                    .ok_or_else(|| anyhow!("navigate carried no native tab id"))?;
+                                let creator_guid = creators
+                                    .iter()
+                                    .find(|(tab_id, _, _)| *tab_id == native)
+                                    .map(|(_, guid, _)| guid)
+                                    .ok_or_else(|| anyhow!("navigate targeted no creator tab"))?;
+                                ensure!(&value["guid"] == creator_guid);
+                                tools.push(value.clone());
+                                json!({
+                                    "id": value["id"],
+                                    "type": "tool_response",
+                                    "result": {"content":[{"type":"text","text":format!("navigated tabId={native}")}]},
+                                })
+                            }
+                            other => anyhow::bail!("unexpected extension tool {other:?}: {value}"),
+                        };
                         ghostlight_transport::host::write_message(
                             &mut writer,
                             &serde_json::to_vec(&reply)?,
                         )
                         .await?;
-                        tools.push(value);
                     }
                     other => anyhow::bail!("unexpected extension frame {other:?}: {value}"),
                 }
@@ -114,17 +141,37 @@ fn two_adapter_multiplex() -> anyhow::Result<()> {
                 &serde_json::to_vec(&json!({"type":"session_killed"}))?,
             )
             .await?;
-            Ok((groups, tools))
+            Ok((creators, tools))
         })
     });
-    std::thread::sleep(Duration::from_millis(200));
+
     write_line(
         &mut stdin_a,
-        &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"navigate","arguments":{"tabId":101,"url":"https://a.example.com"}}}),
+        &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tabs_context_mcp","arguments":{}}}),
+    )?;
+    let context_a = read_line(&mut reader_a)?;
+    ensure!(context_a["id"] == 2 && context_a["result"]["isError"] != true);
+    let tab_a = support::creator_tab_id(&context_a)?;
+    let (slot_a, native_a) = ghostlight_core::constants::tab_id::decode(tab_a);
+    ensure!(slot_a != 0 && native_a == 101);
+
+    write_line(
+        &mut stdin_b,
+        &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tabs_context_mcp","arguments":{}}}),
+    )?;
+    let context_b = read_line(&mut reader_b)?;
+    ensure!(context_b["id"] == 2 && context_b["result"]["isError"] != true);
+    let tab_b = support::creator_tab_id(&context_b)?;
+    let (slot_b, native_b) = ghostlight_core::constants::tab_id::decode(tab_b);
+    ensure!(slot_b == slot_a && native_b == 202 && tab_b != tab_a);
+
+    write_line(
+        &mut stdin_a,
+        &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"tabId":tab_a,"url":"https://a.example.com"}}}),
     )?;
     write_line(
         &mut stdin_b,
-        &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"navigate","arguments":{"tabId":202,"url":"https://b.example.com"}}}),
+        &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"tabId":tab_b,"url":"https://b.example.com"}}}),
     )?;
     let reply_a = read_line(&mut reader_a)?;
     let reply_b = read_line(&mut reader_b)?;
@@ -134,47 +181,37 @@ fn two_adapter_multiplex() -> anyhow::Result<()> {
     let text_b = reply_b["result"]["content"][0]["text"]
         .as_str()
         .unwrap_or_default();
-    ensure!(reply_a["id"] == 2 && text_a.contains("101") && !text_a.contains("202"));
-    ensure!(reply_b["id"] == 2 && text_b.contains("202") && !text_b.contains("101"));
+    ensure!(reply_a["id"] == 3 && text_a.contains("101") && !text_a.contains("202"));
+    ensure!(reply_b["id"] == 3 && text_b.contains("202") && !text_b.contains("101"));
 
-    let (groups, tools) = extension
+    let (creators, tools) = extension
         .join()
         .map_err(|_| anyhow!("fake extension panicked"))??;
-    ensure!(groups.len() == 2 && tools.len() == 2);
+    ensure!(creators.len() == 2 && tools.len() == 2);
     let mut tabs: Vec<i64> = tools
         .iter()
         .filter_map(|value| value["args"]["tabId"].as_i64())
         .collect();
     tabs.sort_unstable();
     ensure!(tabs == [101, 202]);
-    ensure!(groups[0]["guid"] != groups[1]["guid"]);
-    let mut group_tabs: Vec<Vec<i64>> = groups
+    ensure!(creators[0].1 != creators[1].1);
+    let mut titles = creators
         .iter()
-        .map(|value| {
-            value["tabIds"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_i64)
-                .collect()
-        })
-        .collect();
-    group_tabs.sort();
-    ensure!(group_tabs == [vec![101], vec![202]]);
-    ensure!(groups.iter().all(|value| value["title"]
-        .as_str()
-        .is_some_and(|title| title.starts_with('\u{1F47B}'))));
+        .filter_map(|(_, _, title)| title.as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    titles.sort();
+    ensure!(titles == ["Ghostlight - lightbox-a", "Ghostlight - lightbox-b"]);
 
     write_line(
         &mut stdin_a,
-        &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"tabId":101,"url":"https://a.example.com"}}}),
+        &json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"navigate","arguments":{"tabId":tab_a,"url":"https://a.example.com"}}}),
     )?;
     write_line(
         &mut stdin_b,
-        &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"tabId":202,"url":"https://b.example.com"}}}),
+        &json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"navigate","arguments":{"tabId":tab_b,"url":"https://b.example.com"}}}),
     )?;
     for reply in [read_line(&mut reader_a)?, read_line(&mut reader_b)?] {
-        ensure!(reply["id"] == 3 && reply["result"]["isError"] == true);
+        ensure!(reply["id"] == 4 && reply["result"]["isError"] == true);
         ensure!(reply["result"]["content"][0]["text"]
             .as_str()
             .unwrap_or_default()
@@ -250,31 +287,6 @@ fn kill_audit_fanout() -> anyhow::Result<()> {
             ensure!(record["client"]["name"] == *name);
         }
         drop(handles);
-        Ok(())
-    })
-}
-
-fn two_phase_wire() -> anyhow::Result<()> {
-    let tmp = TempRoot::new("hub-two-phase-wire")?;
-    let endpoint = support::unique_endpoint("hub-two-phase-wire");
-    let _service = support::spawn_service(&endpoint, tmp.path())?;
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let mut stream = ghostlight_transport::ipc::connect(&format!("{endpoint}-adapter")).await?;
-        let hello = json!({"hub":1,"role":"adapter","guid":"00000000-0000-4000-8000-000000000000"});
-        ghostlight_transport::host::write_message(&mut stream, &serde_json::to_vec(&hello)?)
-            .await?;
-        let proof = ghostlight_transport::host::read_message(&mut stream)
-            .await?
-            .ok_or_else(|| anyhow!("service sent no proof"))?;
-        let proof: Value = serde_json::from_slice(&proof)?;
-        ensure!(proof["role"] == "service-proof");
-        stream
-            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
-            .await?;
-        let mut reader = tokio::io::BufReader::new(stream);
-        let mut line = String::new();
-        reader.read_line(&mut line).await?;
-        ensure!(serde_json::from_str::<Value>(line.trim_end())?["id"] == 1);
         Ok(())
     })
 }

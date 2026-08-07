@@ -1,19 +1,19 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "org.sylin/ghostlight",
-  "description": "Drive your real logged-in browser from any MCP client. Governed or wide open, one portable binary.",
+  "description": "Visible local browser automation in signed-in Chromium, with optional policy and audit.",
   "repository": {
     "url": "https://github.com/sylin-org/ghostlight",
     "source": "github"
   },
-  "version": "0.7.3",
+  "version": "0.8.0",
   "websiteUrl": "https://sylin.org/ghostlight/",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "ghostlight",
-      "version": "0.7.3",
+      "version": "0.8.0",
       "transport": {
         "type": "stdio"
       }

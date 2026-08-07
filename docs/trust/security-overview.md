@@ -7,19 +7,22 @@ the vendor ships, not about protecting a vendor-side data store.
 
 ## Architecture and trust boundaries
 
-Ghostlight runs as a persistent local service, a small relay executable in two roles, and a browser
-extension. Your MCP client talks over stdio to the agent relay, which forwards over owner-scoped
-local IPC to the service. Chromium talks through the browser relay using native messaging. Inside
-the browser, the extension drives pages over the DevTools protocol. Everything runs on the
-endpoint. The MCP client and the model behind it are yours: Ghostlight is the governed bridge
-between that client and a browser session you are already signed into, and it never relocates the
-session to a vendor-controlled or fresh-profile browser. The trust boundaries that matter are the
-local protocol hops and the policy decision point inside the service that every action passes
-through.
+Ghostlight runs as three local executables plus a browser extension. `ghostlight-mcp-connector` terminates
+MCP stdio and exact protocol state, then sends typed product work over owner-scoped local IPC to the
+persistent `ghostlight` service. The service owns workspaces, policy decisions, audit, scheduling,
+and browser coordination; MCP JSON-RPC and revision state do not enter it. Chromium launches the
+browser-only `ghostlight-browser-connector` through native messaging, and that connector connects to the service's
+browser endpoint. Inside Chromium, the policy-free extension drives pages over the DevTools
+protocol. Everything runs on the endpoint. The MCP client and the model behind it are yours:
+Ghostlight is the governed bridge between that client and a browser session you are already signed
+into, and it never relocates the session to a vendor-controlled or fresh-profile browser. The trust
+boundaries that matter are the local protocol hops and the policy decision point inside the service
+that every action passes through.
 
 ## The governance layer
 
-All policy lives in the binary; the extension holds mechanism but makes no access decision.
+All policy lives in the persistent service; the MCP edge, browser relay, and extension hold no
+governance authority.
 Every tool call is classified by capability (read, action, write, execute) and evaluated
 against the active policy before it runs. Identity-bound grants scope what an actor may do to
 which hosts, with host polarity distinguishing where an action is allowed from where it is
@@ -84,4 +87,4 @@ security audit of Ghostlight will be published in full, including findings.
 See [SECURITY.md](../../SECURITY.md), [supply-chain.md](supply-chain.md), and
 [data-flows.md](data-flows.md).
 
-Last reviewed: 2026-07-14 against v0.7.3 | Contact: support@sylin.org
+Last reviewed: 2026-08-04 against the unreleased ADR-0096 working tree | Contact: support@sylin.org

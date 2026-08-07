@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-Ghostlight-Commercial
-//! Adapter selection, reconnection, anti-squat, and browser-relay lifecycle parity scenarios.
+//! MCP-edge reconnect, anti-squat, and browser-relay lifecycle parity scenarios.
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::path::Path;
@@ -15,28 +15,18 @@ use crate::support::{self, ChildGuard, TempRoot};
 
 pub(super) fn registry() -> Vec<Scenario> {
     vec![
-        ("legacy-adapter-reconnect", adapter_reconnect),
-        ("legacy-adapter-five-second-gap", adapter_five_second_gap),
         (
-            "legacy-adapter-candidate-failover",
-            adapter_candidate_failover,
+            "mcp-edge-reconnects-future-call",
+            mcp_edge_reconnects_future_call,
         ),
-        (
-            "legacy-adapter-candidate-fallback",
-            adapter_candidate_fallback,
-        ),
-        ("legacy-service-survives-adapter", service_survives_adapter),
-        ("legacy-adapter-anti-squat", adapter_anti_squat),
-        ("legacy-browser-relay-restart", browser_relay_restart),
+        ("service-survives-mcp-edge", service_survives_mcp_edge),
+        ("mcp-edge-anti-squat", mcp_edge_anti_squat),
+        ("mcp-2026-exact-transcript", mcp_2026_exact_transcript),
+        ("browser-relay-restart", browser_relay_restart),
     ]
 }
 
-fn start_service(
-    endpoint: &str,
-    instance: Option<&str>,
-    log_dir: &Path,
-    keep_warm: bool,
-) -> anyhow::Result<ChildGuard> {
+fn start_service(endpoint: &str, log_dir: &Path, keep_warm: bool) -> anyhow::Result<ChildGuard> {
     std::fs::create_dir_all(log_dir)?;
     let mut command = support::service_command()?;
     command.arg("service");
@@ -51,37 +41,36 @@ fn start_service(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    if let Some(instance) = instance {
-        command.env("GHOSTLIGHT_INSTANCE", instance);
-    }
     let child = support::spawn_guard(&mut command)?;
     support::wait_for_debug_states(log_dir, 1, Duration::from_secs(15))?;
     Ok(child)
 }
 
-struct AgentRelay {
+struct McpEdge {
     child: ChildGuard,
     stdin: Option<ChildStdin>,
     replies: Receiver<String>,
 }
 
-impl AgentRelay {
-    fn start(endpoints: &[String], instance: &str, log_dir: &Path) -> anyhow::Result<Self> {
-        let mut command = support::relay_command()?;
+impl McpEdge {
+    fn start(endpoint: &str, log_dir: &Path) -> anyhow::Result<Self> {
+        let mut command = support::mcp_command()?;
         command
-            .arg("--role")
-            .arg("agent")
-            .env_remove("GHOSTLIGHT_ENDPOINT")
-            .env("GHOSTLIGHT_ENDPOINTS", endpoints.join(","))
-            .env("GHOSTLIGHT_INSTANCE", instance)
+            .env("GHOSTLIGHT_ENDPOINT", endpoint)
             .env("GHOSTLIGHT_LOG_DIR", log_dir)
             .env("GHOSTLIGHT_DEBUG", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         let mut child = support::spawn_guard(&mut command)?;
-        let stdin = child.stdin.take().ok_or_else(|| anyhow!("relay stdin"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("relay stdout"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("MCP edge stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("MCP edge stdout"))?;
         let (sender, replies) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -101,7 +90,7 @@ impl AgentRelay {
         let stdin = self
             .stdin
             .as_mut()
-            .ok_or_else(|| anyhow!("relay stdin closed"))?;
+            .ok_or_else(|| anyhow!("MCP edge stdin closed"))?;
         serde_json::to_writer(&mut *stdin, value)?;
         stdin.write_all(b"\n")?;
         stdin.flush()?;
@@ -111,8 +100,8 @@ impl AgentRelay {
     fn receive(&self, within: Duration) -> anyhow::Result<Value> {
         let line = match self.replies.recv_timeout(within) {
             Ok(line) => line,
-            Err(RecvTimeoutError::Timeout) => anyhow::bail!("no relay reply within {within:?}"),
-            Err(RecvTimeoutError::Disconnected) => anyhow::bail!("relay stdout closed"),
+            Err(RecvTimeoutError::Timeout) => anyhow::bail!("no MCP reply within {within:?}"),
+            Err(RecvTimeoutError::Disconnected) => anyhow::bail!("MCP edge stdout closed"),
         };
         Ok(serde_json::from_str(&line)?)
     }
@@ -123,12 +112,14 @@ impl AgentRelay {
     }
 }
 
-fn prime_relay(relay: &mut AgentRelay) -> anyhow::Result<()> {
-    relay.send(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}))?;
-    relay.send(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}))?;
-    relay.send(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}))?;
-    ensure!(relay.receive(Duration::from_secs(10))?["id"] == 1);
-    let tools = relay.receive(Duration::from_secs(10))?;
+fn initialize(edge: &mut McpEdge) -> anyhow::Result<()> {
+    edge.send(&support::initialize_2025(1, "lightbox-lifecycle"))?;
+    let initialized = edge.receive(Duration::from_secs(10))?;
+    ensure!(initialized["id"] == 1);
+    ensure!(initialized["result"]["protocolVersion"] == "2025-11-25");
+    edge.send(&support::initialized_2025())?;
+    edge.send(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}))?;
+    let tools = edge.receive(Duration::from_secs(10))?;
     ensure!(tools["id"] == 2);
     ensure!(
         tools["result"]["tools"].as_array().map(Vec::len)
@@ -137,130 +128,68 @@ fn prime_relay(relay: &mut AgentRelay) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn reconnect_case(gap: Duration) -> anyhow::Result<()> {
-    let tmp = TempRoot::new("adapter-reconnect")?;
-    let endpoint = support::unique_endpoint("adapter-reconnect");
+fn mcp_edge_reconnects_future_call() -> anyhow::Result<()> {
+    let tmp = TempRoot::new("mcp-edge-reconnect")?;
+    let endpoint = support::unique_endpoint("mcp-edge-reconnect");
     let log_dir = tmp.path().join("logs");
-    let instance = "lightboxreconnect";
-    let mut first = start_service(&endpoint, Some(instance), &log_dir, false)?;
-    let mut relay = AgentRelay::start(std::slice::from_ref(&endpoint), instance, &log_dir)?;
-    prime_relay(&mut relay)?;
+    let mut first = start_service(&endpoint, &log_dir, false)?;
+    let mut edge = McpEdge::start(&endpoint, &log_dir)?;
+    initialize(&mut edge)?;
 
     first.kill()?;
     first.wait()?;
-    std::thread::sleep(gap);
-    let _second = start_service(&endpoint, Some(instance), &log_dir, false)?;
-    relay.send(&json!({"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}))?;
-    let reply = relay.receive(Duration::from_secs(30))?;
+    std::thread::sleep(Duration::from_secs(1));
+    let _second = start_service(&endpoint, &log_dir, false)?;
+    edge.send(&json!({
+        "jsonrpc":"2.0",
+        "id":3,
+        "method":"tools/call",
+        "params":{"name":"explain","arguments":{}}
+    }))?;
+    let reply = edge.receive(Duration::from_secs(30))?;
+    ensure!(reply["id"] == 3, "unexpected future-call response: {reply}");
     ensure!(
-        reply["id"] == 3,
-        "replayed initialize leaked to the client: {reply}"
+        reply["result"]["isError"] != true,
+        "future call did not recover after service restart: {reply}"
     );
-    ensure!(
-        reply["result"]["tools"].as_array().map(Vec::len)
-            == Some(ghostlight_core::browser::directory::advertised_tool_count())
-    );
-    let state =
-        support::wait_state_for_role(&log_dir, "adapter", Duration::from_secs(10), |value| {
-            value["counters"]["reconnects"].as_u64().unwrap_or(0) >= 1
-        })?;
-    ensure!(state["counters"]["identity_mints"] == 1);
-    relay.close();
+    edge.close();
     Ok(())
 }
 
-fn adapter_reconnect() -> anyhow::Result<()> {
-    reconnect_case(Duration::ZERO)
-}
-
-fn adapter_five_second_gap() -> anyhow::Result<()> {
-    reconnect_case(Duration::from_secs(5))
-}
-
-fn adapter_candidate_failover() -> anyhow::Result<()> {
-    let tmp = TempRoot::new("candidate-failover")?;
-    let endpoint_a = support::unique_endpoint("candidate-a");
-    let endpoint_b = support::unique_endpoint("candidate-b");
+fn service_survives_mcp_edge() -> anyhow::Result<()> {
+    let tmp = TempRoot::new("service-survives-mcp-edge")?;
+    let endpoint = support::unique_endpoint("service-survives-mcp-edge");
     let log_dir = tmp.path().join("logs");
-    let instance_a = "lightboxa";
-    let instance_b = "lightboxb";
-    let mut first = start_service(&endpoint_a, Some(instance_a), &log_dir, true)?;
-    let _second = start_service(&endpoint_b, Some(instance_b), &log_dir, true)?;
-    support::wait_for_debug_states(&log_dir, 2, Duration::from_secs(15))?;
-    let mut relay = AgentRelay::start(
-        &[endpoint_a.clone(), endpoint_b.clone()],
-        "lightboxoverride",
-        &log_dir,
-    )?;
-    relay.send(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}))?;
-    let init = relay.receive(Duration::from_secs(20))?;
-    ensure!(init["result"]["serverInfo"]["name"] == format!("ghostlight-{instance_a}"));
-    support::wait_state_for_role(&log_dir, "adapter", Duration::from_secs(10), |value| {
-        value["counters"]["resolved_candidate"] == 1
-    })?;
-    relay.send(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}))?;
-    first.kill()?;
-    first.wait()?;
-    relay.send(&json!({"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}))?;
-    ensure!(relay.receive(Duration::from_secs(30))?["id"] == 3);
-    let state =
-        support::wait_state_for_role(&log_dir, "adapter", Duration::from_secs(15), |value| {
-            value["counters"]["resolved_candidate"] == 2
-        })?;
-    ensure!(state["counters"]["candidate_total"] == 2);
-    relay.close();
-    Ok(())
-}
-
-fn adapter_candidate_fallback() -> anyhow::Result<()> {
-    let tmp = TempRoot::new("candidate-fallback")?;
-    let absent = support::unique_endpoint("candidate-absent");
-    let live = support::unique_endpoint("candidate-live");
-    let log_dir = tmp.path().join("logs");
-    let instance = "lightboxfallback";
-    let _service = start_service(&live, Some(instance), &log_dir, true)?;
-    let mut relay = AgentRelay::start(&[absent, live], instance, &log_dir)?;
-    relay.send(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}))?;
-    let init = relay.receive(Duration::from_secs(20))?;
-    ensure!(init["result"]["serverInfo"]["name"] == format!("ghostlight-{instance}"));
-    relay.close();
-    Ok(())
-}
-
-fn service_survives_adapter() -> anyhow::Result<()> {
-    let tmp = TempRoot::new("service-survives-adapter")?;
-    let endpoint = support::unique_endpoint("service-survives-adapter");
-    let log_dir = tmp.path().join("logs");
-    let service = start_service(&endpoint, None, &log_dir, false)?;
+    let service = start_service(&endpoint, &log_dir, false)?;
     let service_pid = service.id();
-    let mut relay =
-        AgentRelay::start(std::slice::from_ref(&endpoint), "lightboxsurvive", &log_dir)?;
-    relay.send(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}))?;
-    ensure!(relay.receive(Duration::from_secs(10))?["id"] == 1);
-    drop(relay);
+    let mut edge = McpEdge::start(&endpoint, &log_dir)?;
+    edge.send(&support::initialize_2025(1, "lightbox-survival"))?;
+    ensure!(edge.receive(Duration::from_secs(10))?["id"] == 1);
+    drop(edge);
     std::thread::sleep(Duration::from_secs(2));
     ensure!(ghostlight_transport::proc::pid_exists(service_pid));
     Ok(())
 }
 
-fn adapter_anti_squat() -> anyhow::Result<()> {
-    let tmp = TempRoot::new("adapter-anti-squat")?;
-    let endpoint = support::unique_endpoint("adapter-anti-squat");
+fn mcp_edge_anti_squat() -> anyhow::Result<()> {
+    let tmp = TempRoot::new("mcp-edge-anti-squat")?;
+    let endpoint = support::unique_endpoint("mcp-edge-anti-squat");
     let service_logs = tmp.path().join("service-logs");
-    let adapter_logs = tmp.path().join("adapter-logs");
-    std::fs::create_dir_all(&adapter_logs)?;
-    let _service = start_service(&endpoint, None, &service_logs, false)?;
-    let mut command = support::relay_command()?;
+    let edge_logs = tmp.path().join("edge-logs");
+    std::fs::create_dir_all(&edge_logs)?;
+    let _service = start_service(&endpoint, &service_logs, false)?;
+    let mut command = support::mcp_command()?;
     command
-        .arg("--role")
-        .arg("agent")
         .env("GHOSTLIGHT_ENDPOINT", &endpoint)
-        .env("GHOSTLIGHT_LOG_DIR", &adapter_logs)
+        .env("GHOSTLIGHT_LOG_DIR", &edge_logs)
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    let mut relay = support::spawn_guard(&mut command)?;
-    let mut stderr = relay.stderr.take().ok_or_else(|| anyhow!("relay stderr"))?;
+    let mut edge = support::spawn_guard(&mut command)?;
+    let mut stderr = edge
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("MCP edge stderr"))?;
     let reader = std::thread::spawn(move || {
         let mut captured = String::new();
         let _ = stderr.read_to_string(&mut captured);
@@ -268,7 +197,7 @@ fn adapter_anti_squat() -> anyhow::Result<()> {
     });
     let deadline = Instant::now() + Duration::from_secs(10);
     let exited = loop {
-        if relay.try_wait()?.is_some() {
+        if edge.try_wait()?.is_some() {
             break true;
         }
         if Instant::now() >= deadline {
@@ -277,16 +206,104 @@ fn adapter_anti_squat() -> anyhow::Result<()> {
         std::thread::sleep(Duration::from_millis(50));
     };
     if !exited {
-        relay.kill()?;
+        edge.kill()?;
     }
-    relay.wait()?;
+    edge.wait()?;
     let captured = reader
         .join()
         .map_err(|_| anyhow!("stderr reader panicked"))?;
-    ensure!(exited, "anti-squat mismatch did not terminate the relay");
+    ensure!(exited, "anti-squat mismatch did not terminate the MCP edge");
     ensure!(captured.contains(
         "refusing to connect: the Ghostlight service on this endpoint is not the one this user installed"
     ));
+    Ok(())
+}
+
+fn params_2026() -> Value {
+    json!({
+        "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {},
+            "io.modelcontextprotocol/clientInfo": {
+                "name": "lightbox-2026",
+                "version": "1.0.0",
+            },
+        },
+    })
+}
+
+fn mcp_2026_exact_transcript() -> anyhow::Result<()> {
+    let tmp = TempRoot::new("mcp-2026-transcript")?;
+    let endpoint = support::unique_endpoint("mcp-2026-transcript");
+    let log_dir = tmp.path().join("logs");
+    let _service = start_service(&endpoint, &log_dir, false)?;
+    let mut edge = McpEdge::start(&endpoint, &log_dir)?;
+
+    edge.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "server/discover",
+        "params": params_2026(),
+    }))?;
+    let discovery = edge.receive(Duration::from_secs(10))?;
+    ensure!(
+        discovery["result"]["supportedVersions"] == json!(["2026-07-28", "2025-11-25"]),
+        "unexpected discovery response: {discovery}"
+    );
+    ensure!(discovery["result"]["resultType"] == "complete");
+    ensure!(discovery["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"].is_string());
+
+    edge.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": params_2026(),
+    }))?;
+    let tools = edge.receive(Duration::from_secs(10))?;
+    ensure!(tools["id"] == 2, "unexpected tools/list response: {tools}");
+    ensure!(tools["result"]["resultType"] == "complete");
+    ensure!(tools["result"]["cacheScope"] == "private");
+    ensure!(tools["result"]["ttlMs"].is_u64());
+    ensure!(
+        tools["result"]["tools"].as_array().map(Vec::len)
+            == Some(ghostlight_core::browser::directory::advertised_tool_count())
+    );
+    ensure!(tools["result"]["tools"][0]["outputSchema"]["properties"]["workspaceId"].is_object());
+
+    let mut listen_params = params_2026();
+    listen_params["notifications"] = json!({"toolsListChanged": true});
+    edge.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "subscriptions/listen",
+        "params": listen_params,
+    }))?;
+    let acknowledged = edge.receive(Duration::from_secs(10))?;
+    ensure!(acknowledged.get("id").is_none());
+    ensure!(
+        acknowledged["method"] == "notifications/subscriptions/acknowledged",
+        "subscription did not acknowledge first: {acknowledged}"
+    );
+    ensure!(acknowledged["params"]["_meta"]["io.modelcontextprotocol/subscriptionId"] == 3);
+
+    edge.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/list",
+        "params": params_2026(),
+    }))?;
+    let duplicate = edge.receive(Duration::from_secs(10))?;
+    ensure!(duplicate["error"]["code"] == -32600);
+
+    edge.stdin.take();
+    let terminal = edge.receive(Duration::from_secs(10))?;
+    ensure!(
+        terminal["id"] == 3,
+        "unexpected subscription close: {terminal}"
+    );
+    ensure!(terminal["result"]["resultType"] == "complete");
+    ensure!(terminal["result"]["_meta"]["io.modelcontextprotocol/subscriptionId"] == 3);
+    ensure!(edge.child.wait()?.success());
     Ok(())
 }
 
@@ -313,7 +330,7 @@ fn browser_relay_restart() -> anyhow::Result<()> {
     let tmp = TempRoot::new("browser-relay-restart")?;
     let endpoint = support::unique_endpoint("browser-relay-restart");
     let log_dir = tmp.path().join("logs");
-    let mut first = start_service(&endpoint, None, &log_dir, false)?;
+    let mut first = start_service(&endpoint, &log_dir, false)?;
     let mut command = support::relay_command()?;
     command
         .arg(format!("chrome-extension://{}/", "a".repeat(32)))
@@ -321,7 +338,7 @@ fn browser_relay_restart() -> anyhow::Result<()> {
         .env("GHOSTLIGHT_LOG_DIR", &log_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     let mut relay = support::spawn_guard(&mut command)?;
     let mut stdin = relay
         .stdin
@@ -336,12 +353,15 @@ fn browser_relay_restart() -> anyhow::Result<()> {
     first.kill()?;
     first.wait()?;
     std::thread::sleep(Duration::from_secs(2));
-    ensure!(
-        relay.try_wait()?.is_none(),
-        "browser relay exited with the service"
-    );
+    if let Some(status) = relay.try_wait()? {
+        let mut captured = String::new();
+        if let Some(stderr) = relay.stderr.as_mut() {
+            stderr.read_to_string(&mut captured)?;
+        }
+        anyhow::bail!("browser relay exited with the service ({status}): {captured}");
+    }
     clear_debug_states(&log_dir)?;
-    let _second = start_service(&endpoint, None, &log_dir, false)?;
+    let _second = start_service(&endpoint, &log_dir, false)?;
     support::wait_extension_connected(&log_dir, Duration::from_secs(20))?;
     drop(stdin);
     let deadline = Instant::now() + Duration::from_secs(5);

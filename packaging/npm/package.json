@@ -1,8 +1,8 @@
 {
   "name": "ghostlight",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "mcpName": "org.sylin/ghostlight",
-  "description": "Governed browser automation over your own authenticated Chromium session, for AI coding agents. Thin npm launcher for the ghostlight binary.",
+  "description": "Installer and launcher for visible local browser automation in your signed-in Chromium profile, with optional policy and audit.",
   "bin": {
     "ghostlight": "bin/ghostlight.js"
   },

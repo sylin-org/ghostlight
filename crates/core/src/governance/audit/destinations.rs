@@ -31,7 +31,7 @@ fn default_audit_path_from(override_dir: Option<std::ffi::OsString>) -> Option<s
 /// The size cap for the audit file sink before it rotates (OPS-MED-01: the audit file must not
 /// grow without bound during minimal-upkeep coasting). 50 MiB per generation; with a single
 /// retained backup (`.1`), on-disk audit is bounded at ~2x this. The syslog and stderr sinks are
-/// unaffected -- rotation is a file-sink concern only. High enough that a normal session never
+/// unaffected -- rotation is a file-sink concern only. High enough that a normal service run never
 /// rotates mid-run, low enough that an unattended machine cannot fill its disk with audit lines.
 pub const AUDIT_FILE_MAX_BYTES: u64 = 50 * 1024 * 1024;
 

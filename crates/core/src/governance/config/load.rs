@@ -73,7 +73,7 @@ pub struct UserConfig {
 /// Parse the user config file content. `path` is used only in messages. Returns the parsed
 /// file plus per-entry warnings for the caller to log.
 ///
-/// The user file is user-serviceable, so one bad entry must not take the whole session down;
+/// The user file is user-serviceable, so one bad entry must not take the whole service down;
 /// but an unreadable or structurally broken file is a hard error, because silently continuing
 /// without the user's own settings (for example a sacred-domains list) would be fail-open on a
 /// user-authored protection, and the engine is truthful.
@@ -204,7 +204,7 @@ fn merge_manifest_user_config(
 
 /// Read `path`; `Ok(None)` when the file does not exist. Any other I/O error (for example
 /// permission denied) is a hard error: a config file that exists but cannot be read must not
-/// silently yield an all-open session.
+/// silently yield an all-open configuration.
 fn read_optional(path: &std::path::Path) -> Result<Option<String>> {
     match std::fs::read_to_string(path) {
         Ok(s) => Ok(Some(s)),

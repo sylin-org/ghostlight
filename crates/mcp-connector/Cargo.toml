@@ -1,0 +1,17 @@
+[package]
+name = "ghostlight-mcp-connector"
+version = "0.8.0"
+edition = "2021"
+description = "Ghostlight's protocol-versioned MCP stdio edge."
+publish = false
+license = "Apache-2.0 OR MIT"
+
+[[bin]]
+name = "ghostlight-mcp-connector"
+path = "src/main.rs"
+
+[dependencies]
+ghostlight-transport = { path = "../transport" }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "net", "sync", "time"] }
+tracing = "0.1"

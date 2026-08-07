@@ -23,6 +23,7 @@ const DEBUG_ROLE_SERVICE: &str = "mcp-server";
 
 struct ProcessBinaries {
     service: PathBuf,
+    mcp: PathBuf,
     relay: PathBuf,
 }
 
@@ -83,12 +84,10 @@ pub fn spawn_service_with_manage_web(
     ))
 }
 
-/// Spawn the production agent-role relay against a running scenario service.
-pub fn spawn_adapter(endpoint: &str, log_dir: &Path) -> anyhow::Result<ChildGuard> {
-    let mut command = relay_command()?;
+/// Spawn the production MCP edge against a running scenario service.
+pub fn spawn_mcp_edge(endpoint: &str, log_dir: &Path) -> anyhow::Result<ChildGuard> {
+    let mut command = mcp_command()?;
     let child = command
-        .arg("--role")
-        .arg("agent")
         .env("GHOSTLIGHT_ENDPOINT", endpoint)
         .env("GHOSTLIGHT_LOG_DIR", log_dir)
         .stdin(Stdio::piped())
@@ -108,9 +107,64 @@ pub fn service_command() -> anyhow::Result<Command> {
     Ok(Command::new(&process_binaries()?.service))
 }
 
-/// Construct a command for the isolated production relay binary.
+/// Construct a command for the isolated production MCP edge binary.
+pub fn mcp_command() -> anyhow::Result<Command> {
+    Ok(Command::new(&process_binaries()?.mcp))
+}
+
+/// Construct a command for the isolated browser-only relay binary.
 pub fn relay_command() -> anyhow::Result<Command> {
     Ok(Command::new(&process_binaries()?.relay))
+}
+
+/// Build a strict MCP `2025-11-25` initialize request for a process scenario.
+pub fn initialize_2025(id: i64, client_name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {
+                "name": client_name,
+                "version": "1.0.0",
+            },
+        },
+    })
+}
+
+/// Build the MCP `2025-11-25` initialized notification for a process scenario.
+pub fn initialized_2025() -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {},
+    })
+}
+
+/// Build the trusted browser-result inventory returned by a context-creating tab operation.
+pub fn creator_inventory_result(native_tab_id: i64) -> serde_json::Value {
+    let structured = serde_json::json!({
+        "mcpGroupId": 1,
+        "tabs": [{
+            "tabId": native_tab_id,
+            "title": "Lightbox",
+            "url": "https://example.com/",
+        }],
+    });
+    serde_json::json!({
+        "content": [{ "type": "text", "text": structured.to_string() }],
+        "structuredContent": structured,
+    })
+}
+
+/// Read the first service-encoded tab id from an MCP creator response.
+pub fn creator_tab_id(response: &serde_json::Value) -> anyhow::Result<i64> {
+    response
+        .pointer("/result/structuredContent/tabs/0/tabId")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| anyhow::anyhow!("creator response returned no structured tab inventory"))
 }
 
 /// Wait for at least `count` parseable debug-state files in a scenario log directory.
@@ -198,6 +252,14 @@ pub fn wait_state_for_role(
 pub fn wait_extension_connected(log_dir: &Path, within: Duration) -> anyhow::Result<()> {
     wait_state_for_role(log_dir, DEBUG_ROLE_SERVICE, within, |value| {
         value["extension_connected"] == true
+    })
+    .map(|_| ())
+}
+
+/// Poll the service debug state until no extension is attached.
+pub fn wait_extension_disconnected(log_dir: &Path, within: Duration) -> anyhow::Result<()> {
+    wait_state_for_role(log_dir, DEBUG_ROLE_SERVICE, within, |value| {
+        value["extension_connected"] == false
     })
     .map(|_| ())
 }
@@ -326,9 +388,13 @@ fn build_or_reuse_process_binaries() -> anyhow::Result<ProcessBinaries> {
                 "--bin",
                 "ghostlight",
                 "--package",
-                "ghostlight-relay",
+                "ghostlight-mcp-connector",
                 "--bin",
-                "ghostlight-relay",
+                "ghostlight-mcp-connector",
+                "--package",
+                "ghostlight-browser-connector",
+                "--bin",
+                "ghostlight-browser-connector",
                 "--target-dir",
             ])
             .arg(&target)
@@ -339,10 +405,11 @@ fn build_or_reuse_process_binaries() -> anyhow::Result<ProcessBinaries> {
     let directory = target.join("debug");
     let binaries = ProcessBinaries {
         service: directory.join(format!("ghostlight{suffix}")),
-        relay: directory.join(format!("ghostlight-relay{suffix}")),
+        mcp: directory.join(format!("ghostlight-mcp-connector{suffix}")),
+        relay: directory.join(format!("ghostlight-browser-connector{suffix}")),
     };
     anyhow::ensure!(
-        binaries.service.is_file() && binaries.relay.is_file(),
+        binaries.service.is_file() && binaries.mcp.is_file() && binaries.relay.is_file(),
         "process binaries are absent under {}; omit --reuse-cache to build them",
         directory.display()
     );

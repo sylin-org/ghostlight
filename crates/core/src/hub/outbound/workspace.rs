@@ -1,77 +1,48 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Session-pinned browser workspace targets.
+//! Service-owned browser-profile bindings for unaddressed workspace calls.
 //!
-//! A workspace is placement, not authorization: it records the browser slot and native window
-//! chosen for topology operations that do not yet carry a tab id. Tab ownership, managed-surface
-//! checks, and governance remain the enforcement boundaries. Native window ids never leave the
-//! browser adapter boundary or become model-facing identifiers.
+//! A binding records only which connected browser profile owns a workspace's Chrome mechanism.
+//! Native windows, groups, and tabs remain browser-shore topology. Tab ownership, managed-surface
+//! checks, and governance remain the enforcement boundaries.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
-/// One MCP session's selected browser placement target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct WorkspaceTarget {
-    /// Stable service-local browser slot.
-    pub(super) browser_slot: u32,
-    /// Adapter-native window id, valid only for the current browser-process generation.
-    pub(super) native_window_id: i64,
-}
-
-/// Process-memory registry of MCP session workspace pins.
+/// Process-memory registry of workspace-to-browser-profile bindings.
 #[derive(Clone, Default)]
-pub(super) struct WorkspaceRegistry {
-    targets: Arc<Mutex<HashMap<String, WorkspaceTarget>>>,
+pub(super) struct WorkspaceBindings {
+    slots: Arc<Mutex<HashMap<String, u32>>>,
 }
 
-impl WorkspaceRegistry {
-    /// Return the target already pinned for `guid`, if any.
-    pub(super) fn get(&self, guid: &str) -> Option<WorkspaceTarget> {
-        self.targets
+impl WorkspaceBindings {
+    /// Return the browser slot already bound to the browser-wire `guid`, if any.
+    pub(super) fn get(&self, guid: &str) -> Option<u32> {
+        self.slots
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(guid)
             .copied()
     }
 
-    /// Pin `guid` to its first observed target and return the authoritative target.
+    /// Bind the browser-wire `guid` to its first successful browser slot and return it.
     ///
-    /// First-wins preserves session stability if duplicate initial topology requests race. The
-    /// client-topology scheduler serializes production calls, so a differing later candidate is a
-    /// defensive case rather than an ordinary path.
-    pub(super) fn pin(&self, guid: &str, target: WorkspaceTarget) -> WorkspaceTarget {
+    /// First-wins preserves browser-profile stability if duplicate initial topology requests race.
+    /// Chrome-native window placement is deliberately absent from this state.
+    pub(super) fn bind(&self, guid: &str, browser_slot: u32) -> u32 {
         *self
-            .targets
+            .slots
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .entry(guid.to_string())
-            .or_insert(target)
+            .or_insert(browser_slot)
     }
 
-    /// Replace `expected` with `replacement` for one session after explicit recovery succeeds.
-    pub(super) fn replace_if(
-        &self,
-        guid: &str,
-        expected: WorkspaceTarget,
-        replacement: WorkspaceTarget,
-    ) -> bool {
-        let mut targets = self.targets.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(current) = targets.get_mut(guid) else {
-            return false;
-        };
-        if *current != expected {
-            return false;
-        }
-        *current = replacement;
-        true
-    }
-
-    /// Remove pins whose native window ids were invalidated by a browser-process restart.
-    pub(super) fn clear_browser(&self, browser_slot: u32) {
-        self.targets
+    /// Remove one retired workspace's browser-profile binding.
+    pub(super) fn remove(&self, workspace: &str) {
+        self.slots
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .retain(|_, target| target.browser_slot != browser_slot);
+            .remove(workspace);
     }
 }
 
@@ -80,64 +51,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_session_pin_is_first_wins() {
-        let registry = WorkspaceRegistry::default();
-        let first = WorkspaceTarget {
-            browser_slot: 1,
-            native_window_id: 7,
-        };
-        let later = WorkspaceTarget {
-            browser_slot: 1,
-            native_window_id: 9,
-        };
-        assert_eq!(registry.pin("session", first), first);
-        assert_eq!(registry.pin("session", later), first);
-        assert_eq!(registry.get("session"), Some(first));
+    fn a_workspace_binding_is_first_wins() {
+        let registry = WorkspaceBindings::default();
+        assert_eq!(registry.bind("workspace", 1), 1);
+        assert_eq!(registry.bind("workspace", 2), 1);
+        assert_eq!(registry.get("workspace"), Some(1));
     }
 
     #[test]
-    fn browser_restart_clears_only_its_pins() {
-        let registry = WorkspaceRegistry::default();
-        registry.pin(
-            "a",
-            WorkspaceTarget {
-                browser_slot: 1,
-                native_window_id: 7,
-            },
-        );
-        let other = WorkspaceTarget {
-            browser_slot: 2,
-            native_window_id: 8,
-        };
-        registry.pin("b", other);
-        registry.clear_browser(1);
+    fn retiring_a_workspace_removes_only_its_binding() {
+        let registry = WorkspaceBindings::default();
+        registry.bind("a", 1);
+        registry.bind("b", 2);
+        registry.remove("a");
         assert_eq!(registry.get("a"), None);
-        assert_eq!(registry.get("b"), Some(other));
-    }
-
-    #[test]
-    fn explicit_recovery_replaces_only_the_expected_pin() {
-        let registry = WorkspaceRegistry::default();
-        let stale = WorkspaceTarget {
-            browser_slot: 1,
-            native_window_id: 7,
-        };
-        let fresh = WorkspaceTarget {
-            browser_slot: 1,
-            native_window_id: 9,
-        };
-        registry.pin("session", stale);
-
-        assert!(!registry.replace_if(
-            "session",
-            WorkspaceTarget {
-                browser_slot: 1,
-                native_window_id: 8,
-            },
-            fresh,
-        ));
-        assert_eq!(registry.get("session"), Some(stale));
-        assert!(registry.replace_if("session", stale, fresh));
-        assert_eq!(registry.get("session"), Some(fresh));
+        assert_eq!(registry.get("b"), Some(2));
     }
 }

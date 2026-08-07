@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Ghostlight-Commercial
 //! Read-only loopback Console parity scenarios migrated from the legacy spawn tier.
 
-use std::io::{Read as _, Write as _};
+use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
@@ -49,8 +49,8 @@ impl Console {
         })
     }
 
-    fn adapter(&self) -> anyhow::Result<ChildGuard> {
-        support::spawn_adapter(&self.endpoint, &self.log_dir)
+    fn mcp_edge(&self) -> anyhow::Result<ChildGuard> {
+        support::spawn_mcp_edge(&self.endpoint, &self.log_dir)
     }
 }
 
@@ -214,54 +214,53 @@ fn dns_rebind_denied() -> anyhow::Result<()> {
 
 fn live_sessions() -> anyhow::Result<()> {
     let console = Console::start("console-sessions")?;
-    let mut adapter = console.adapter()?;
-    let mut stdin = adapter
+    let mut edge = console.mcp_edge()?;
+    let mut stdin = edge
         .stdin
         .take()
-        .ok_or_else(|| anyhow!("adapter has no stdin"))?;
-    stdin.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")?;
-    stdin.write_all(
-        b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\
-          \"params\":{\"name\":\"navigate\",\"arguments\":{\"tabId\":424242}}}\n",
-    )?;
+        .ok_or_else(|| anyhow!("MCP edge has no stdin"))?;
+    let mut stdout = BufReader::new(
+        edge.stdout
+            .take()
+            .ok_or_else(|| anyhow!("MCP edge has no stdout"))?,
+    );
+    serde_json::to_writer(&mut stdin, &support::initialize_2025(1, "lightbox-console"))?;
+    stdin.write_all(b"\n")?;
+    stdin.flush()?;
+    let mut initialize_response = String::new();
+    stdout.read_line(&mut initialize_response)?;
+    let initialize_response: serde_json::Value = serde_json::from_str(&initialize_response)?;
+    ensure!(initialize_response["id"] == 1);
+    serde_json::to_writer(&mut stdin, &support::initialized_2025())?;
+    stdin.write_all(b"\n")?;
+    stdin.flush()?;
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let parsed = loop {
         let response = get(console.port, "/api/v1/sessions", "")?;
         ensure!(status(&response) == "HTTP/1.1 200 OK");
         let parsed: serde_json::Value = serde_json::from_str(body(&response))?;
-        let binding = parsed["adapter_bindings"].as_array().and_then(|bindings| {
-            bindings.iter().find(|binding| {
-                binding["owned_tab_ids"]
-                    .as_array()
-                    .map(|ids| ids.iter().any(|id| id == 424242))
-                    .unwrap_or(false)
-            })
-        });
-        if binding.is_some() {
+        if parsed["workspaces"]
+            .as_array()
+            .is_some_and(|workspaces| !workspaces.is_empty())
+        {
             break parsed;
         }
         ensure!(
             Instant::now() < deadline,
-            "no adapter binding appeared: {parsed}"
+            "no implicit MCP 2025 workspace appeared: {parsed}"
         );
         std::thread::sleep(Duration::from_millis(100));
     };
     ensure!(parsed["live_session_count"].as_u64().unwrap_or(0) >= 1);
-    let binding = parsed["adapter_bindings"]
+    let workspace = parsed["workspaces"]
         .as_array()
-        .and_then(|bindings| {
-            bindings.iter().find(|binding| {
-                binding["owned_tab_ids"]
-                    .as_array()
-                    .map(|ids| ids.iter().any(|id| id == 424242))
-                    .unwrap_or(false)
-            })
-        })
-        .ok_or_else(|| anyhow!("no binding owns the synthetic tab"))?;
-    ensure!(binding["guid"].as_str().map(str::len) == Some(8));
-    if cfg!(not(target_os = "macos")) {
-        ensure!(binding["pid"].as_u64().unwrap_or(0) > 0);
-    }
+        .and_then(|workspaces| workspaces.first())
+        .ok_or_else(|| anyhow!("no implicit MCP 2025 workspace"))?;
+    ensure!(workspace["attached"] == 1);
+    ensure!(workspace["active"] == 0);
+    ensure!(workspace["owned_tab_ids"] == serde_json::json!([]));
+    ensure!(workspace.get("workspaceId").is_none());
+    ensure!(workspace.get("pid").is_none());
     Ok(())
 }

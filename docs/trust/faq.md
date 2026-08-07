@@ -186,10 +186,10 @@ a manual one.
 
 See [security-overview.md](security-overview.md),
 [ADR-0005](../adr/0005-policy-free-extension.md), and
-[ADR-0065](../adr/0065-one-stack-endpoint-is-the-engine.md).
+[ADR-0096](../adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md).
 
 Evidence: security-overview.md (current process and trust boundaries); ADR-0005 (thin,
-policy-free extension); ADR-0065 (current service and relay topology).
+policy-free extension); ADR-0096 (current MCP edge, neutral service, and browser relay topology).
 
 ## Security posture
 
@@ -362,4 +362,4 @@ See the [licensing guide](../guides/licensing.md),
 
 Evidence: docs/guides/licensing.md; ADR-0027 (open-core split, source-available governance); ADR-0028 (expiry changes only the audit stamp); lightbox scenario license-expiry-continuity (same governed decision and audit fields, with only the expired marker added).
 
-Last reviewed: 2026-07-14 against v0.7.3 | Contact: support@sylin.org
+Last reviewed: 2026-08-04 against v0.7.3 plus the unreleased ADR-0096 topology | Contact: support@sylin.org

@@ -7,7 +7,7 @@
 //! later). It carries NO secrets (no bearer token, no key material) and NO trust: readers degrade
 //! gracefully when it is absent or unparseable ([`read_sidecar`] returns `None`), because the only
 //! trust anchor is the SIGNED cache, never this human-facing summary. It exists so an admin can ask
-//! "did my policy propagate?" without a live service session (ADR-0055 D9 professional register).
+//! "did my policy propagate?" without a running service (ADR-0055 D9 professional register).
 
 use std::path::{Path, PathBuf};
 

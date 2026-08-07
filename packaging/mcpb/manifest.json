@@ -1,0 +1,52 @@
+{
+  "manifest_version": "0.3",
+  "name": "ghostlight",
+  "display_name": "Ghostlight",
+  "version": "0.8.0",
+  "description": "Use signed-in Chromium from Claude with visible local execution and optional policy and audit.",
+  "long_description": "Ghostlight lets Claude work in the signed-in Chromium profile you already use. Browser work stays visible in a dedicated workspace, and you can interrupt or take over. It can read pages, navigate, fill forms, handle files and dialogs, follow supported browser-created child tabs, and inspect page, console, and network evidence. The MCP connector, persistent service, browser connector, and extension run locally, with no Ghostlight account, telemetry, or hosted control plane. Personal use is complete without a policy manifest; optional capability and domain policy can add structured local audit for work that needs stronger boundaries. Ghostlight in Browser from the Chrome Web Store is required.",
+  "author": {
+    "name": "Sylin",
+    "email": "hello@sylin.org",
+    "url": "https://github.com/sylin-org"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sylin-org/ghostlight.git"
+  },
+  "homepage": "https://sylin.org/ghostlight/",
+  "documentation": "https://github.com/sylin-org/ghostlight/blob/main/docs/guides/installation.md",
+  "support": "https://github.com/sylin-org/ghostlight/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/launch.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/launch.js"
+      ],
+      "env": {}
+    }
+  },
+  "tools_generated": true,
+  "keywords": [
+    "browser",
+    "automation",
+    "chromium",
+    "governance",
+    "audit"
+  ],
+  "privacy_policies": [
+    "https://sylin.org/ghostlight/privacy/"
+  ],
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}

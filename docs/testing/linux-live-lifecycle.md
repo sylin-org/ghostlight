@@ -125,7 +125,7 @@ Pass conditions:
 
 1. Open a normal Chrome window under the graphical test account.
 2. Confirm the intended extension is the only Ghostlight build enabled in that profile.
-3. Start a VS Code MCP session as the same user.
+3. Start a VS Code connection to Ghostlight as the same user.
 4. Ask Ghostlight to create its managed tab, navigate to a safe authenticated test application,
    read a bounded value, and perform one reversible write while the person watches.
 5. Confirm Ghostlight never touches a user-owned tab outside its managed group.
@@ -142,7 +142,7 @@ Pass conditions:
 
 1. Keep Chrome and the MCP client open.
 2. Restart the Ghostlight user service through `systemctl --user`.
-3. Observe the agent and browser relays reconnect.
+3. Observe the MCP edge and browser relay reconnect.
 4. Issue another bounded tool call without reloading the extension or restarting the client.
 
 Pass conditions:
@@ -172,8 +172,8 @@ Pass conditions:
 1. Install Codex for the test user.
 2. Run `ghostlight install --client codex` or follow the emitted manual step if the CLI cannot
    preserve the live configuration safely.
-3. Start a Codex MCP session while VS Code is closed, then while a VS Code session is also live.
-4. Confirm both sessions use the one service and receive separate managed ownership while sharing
+3. Start a Codex connection while VS Code is closed, then while a VS Code connection is also live.
+4. Confirm both clients use the one service and receive separate managed ownership while sharing
    the same user browser context.
 
 ### L7. Upgrade
@@ -181,8 +181,8 @@ Pass conditions:
 1. Preserve the installed release and configuration state.
 2. Verify the candidate archive and its hash manifest.
 3. Upgrade with the packaged installer as the ordinary user.
-4. Confirm the service binary, relay path, native-host manifest, and MCP entries point at the new
-   version.
+4. Confirm the service binary, MCP-edge path, browser-relay path, native-host manifest, and MCP
+   entries point at the new version.
 5. Repeat L2 through L4 without reimporting browser state.
 
 Pass conditions:
@@ -190,7 +190,7 @@ Pass conditions:
 - the upgrade does not require deleting the Chrome profile or client configuration;
 - the endpoint is owned by one current service;
 - stale binaries do not self-heal over the candidate;
-- browser and MCP sessions recover according to the documented lifecycle.
+- browser and MCP-client paths recover according to the documented lifecycle.
 
 ### L8. Recovery diagnostics
 

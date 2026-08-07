@@ -74,7 +74,7 @@ mod tests {
     use super::*;
     use crate::governance::manifest::document::HostRules;
     use crate::governance::ports::Capability;
-    use crate::mcp::tools::advertised_tools_json;
+    use crate::tool::tools::advertised_tools_json;
 
     fn advertisement() -> Value {
         advertised_tools_json()

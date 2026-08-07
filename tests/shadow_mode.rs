@@ -7,8 +7,8 @@
 //! after the bounded handshake wait -- a real, non-zero `duration_ms` that proves the tool
 //! actually ran, not merely that the response text differs.
 //!
-//! ADR-0051 Phase 4 (P4.2): migrated from spawn-a-service-plus-adapter onto the in-process
-//! `support::inproc::Harness`. The manifest still carries its own `audit.*` config pointing at a
+//! The test uses the ADR-0096 protocol-neutral `support::inproc::Harness`. The manifest still
+//! carries its own `audit.*` config pointing at a
 //! temp file, and the harness's user-layer config resolution writes there exactly as a `--manifest
 //! file://` spawn would -- so the audit reads below are unchanged, still with no OS process.
 //!
@@ -16,7 +16,7 @@
 //! site): a manifest's own `mode` field is itself hashed into `manifest_hash`, so two manifest
 //! FILES that differ only in `mode` are, by the denial-id design (ADR-0020), two different
 //! policy versions with two different ids. The same-manifest-hash invariant is proven at the
-//! `transport::mcp::server` inline test level instead.
+//! neutral governance/pipeline inline test level instead.
 
 mod support;
 
@@ -152,7 +152,7 @@ async fn enforce_blocks_observe_dispatches_and_records_shadow_deny() {
     // verification narrative actually describes -- SAME manifest_hash and grant, enforce vs
     // observe agree on the denial id -- holds only when `mode` is supplied OUTSIDE the hashed
     // manifest bytes (a per-grant `mode` override, or the `governance.mode` config key on an
-    // unchanged manifest); `transport::mcp::server`'s own inline test
+    // unchanged manifest); the neutral governance/pipeline inline test
     // (`grant_shadow_deny_runs_the_tool_and_matches_the_enforce_denial_id`) proves exactly that
     // scenario directly, holding `manifest_hash` and `grants` fixed and varying only the
     // `manifest_mode` parameter `Governance::governed` takes.

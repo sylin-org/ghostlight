@@ -9,8 +9,8 @@
 //! ([`navigate_target_host`]), and building the sacred-flavored [`Denial`]
 //! ([`sacred`]). Matching itself is entirely delegated to [`crate::browser::pattern`]; this
 //! module reimplements no matching semantics. Pure: no I/O, no policy-mode logic -- the
-//! always-on wiring (calling this unconditionally, regardless of mode) lives at the dispatch
-//! chokepoint (`transport::mcp::server`), not here.
+//! always-on wiring (calling this unconditionally, regardless of mode) lives in the neutral tool
+//! pipeline (`crate::tool::pipeline`), not here.
 
 use crate::browser::pattern::{self, DomainPattern, HostOutcome, MatchHost};
 use crate::governance::denial;

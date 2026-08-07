@@ -3,8 +3,8 @@
 //! active manifest comes from, and the selection rule when both an org policy file and a
 //! user-supplied source are present. Domain-agnostic core: the org policy path is reused from
 //! [`crate::governance::config::load::org_policy_path`] (G02) rather than re-derived a second
-//! time. Mid-session reload, file watching, and re-advertisement are NOT this module's job (the
-//! manifest is loaded once at startup); those are later stage-2 tasks.
+//! time. Live reload, file watching, authority publication, and catalog invalidation are not this
+//! module's job; the service composition root and config reload substrate own those concerns.
 
 use std::path::{Path, PathBuf};
 
@@ -89,7 +89,7 @@ pub struct LoadedPolicy {
     pub origin: Option<ManifestOrigin>,
     /// `true` when an org policy file displaced a user-supplied manifest's grants (shared
     /// format doc section 1.3 rule 1). The `user_manifest_ignored` session-event audit note
-    /// (ADR-0025 Decision 5) is recorded by `transport::mcp::server`'s startup and
+    /// (ADR-0025 Decision 5) is recorded by the service authority startup and
     /// policy-subscription logic, not here: this module stays domain-agnostic and audit-free.
     pub user_manifest_ignored: bool,
 }

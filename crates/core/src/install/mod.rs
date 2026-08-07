@@ -35,6 +35,8 @@ pub enum Hive {
 /// Which targets to act on.
 #[derive(Debug, Clone)]
 pub enum Selection {
+    /// No targets. Used when another package manager owns client registration.
+    None,
     /// Every *detected* target (default).
     All,
     /// Every *known* target (--all-browsers / --all-clients).
@@ -236,6 +238,7 @@ fn selected_browsers(sel: &Selection, ctx: &PlanCtx) -> Vec<&'static BrowserSpec
     native_host::BROWSERS
         .iter()
         .filter(|b| match sel {
+            Selection::None => false,
             Selection::ForceAll => true,
             Selection::All => native_host::detect_browser(b, ctx),
             Selection::Only(ids) => ids.iter().any(|id| id == b.id),
@@ -246,6 +249,7 @@ fn selected_clients(sel: &Selection, ctx: &PlanCtx) -> Vec<&'static clients::Cli
     clients::CLIENTS
         .iter()
         .filter(|c| match sel {
+            Selection::None => false,
             Selection::ForceAll => true,
             Selection::All => clients::detect(c, ctx),
             Selection::Only(ids) => ids.iter().any(|id| id == c.cli_id),
@@ -287,10 +291,11 @@ fn plan_install_for(opts: &InstallOptions, ctx: &PlanCtx) -> Result<Vec<Action>>
         // Place the per-instance binary copy FIRST (before the manifest that references it). Overwrite
         // so a re-install refreshes it; a size match is treated as already-current for the report.
         if needs_copy {
-            // ADR-0046: the per-instance copy is of the browser ADAPTER (the tiny pass-through Chrome
+            // The per-instance copy is the browser-only relay (the tiny pass-through Chrome
             // launches by name), never the multi-MB `ghostlight` brain -- so a service rebuild never
             // needs the copy refreshed.
-            let copy_from = native_host::sibling_bin(&ctx.current_exe, "ghostlight-relay");
+            let copy_from =
+                native_host::sibling_bin(&ctx.current_exe, "ghostlight-browser-connector");
             let up_to_date = std::fs::metadata(&launcher)
                 .ok()
                 .zip(std::fs::metadata(&copy_from).ok())
@@ -896,7 +901,7 @@ pub fn run_install(opts: InstallOptions) -> Result<()> {
     );
     let tally = apply(&actions, opts.dry_run);
     // The OS supervisor (auto-start) is ALWAYS per-user, regardless of --system (ADR-0030 Decision
-    // 8): register it, then start it once so the first session is already up. Best-effort: never
+    // 8): register it, then start it once so the service is already warm. Best-effort: never
     // folded into `tally`/`exit_result` -- a failure here warns (see supervisor::apply_steps) and
     // never turns an otherwise-successful install into a failure.
     println!("\nSupervisor (auto-start):");
@@ -924,19 +929,22 @@ pub fn run_install(opts: InstallOptions) -> Result<()> {
             install_usable,
         ) {
             Ok(handoff::HandoffOutcome::Opened) => println!(
-                "\nNext: install the browser extension in the page just opened, then restart your MCP clients."
+                "\nNext: install the browser extension in the page just opened."
             ),
             Ok(handoff::HandoffOutcome::AlreadyOffered | handoff::HandoffOutcome::Suppressed) => {
                 println!(
-                    "\nNext: install the browser extension at {}, then restart your MCP clients.",
+                    "\nNext: install the browser extension at {}.",
                     handoff::EXTENSION_INSTALL_URL
                 );
             }
             Err(e) => println!(
-                "\nNext: install the browser extension at {}, then restart your MCP clients.\n  [warn] could not open the page automatically: {e}",
+                "\nNext: install the browser extension at {}.\n  [warn] could not open the page automatically: {e}",
                 handoff::EXTENSION_INSTALL_URL
             ),
         }
+        println!(
+            "MCP clients: if an entry changed above, reopen that client's Ghostlight connection (or restart that client) before using it. Cached Ghostlight tools may remain listed after the old transport closes; their presence does not prove the connection is live. Do not start ghostlight-mcp-connector by hand as recovery."
+        );
     }
     exit_result(&tally)
 }
@@ -1324,5 +1332,36 @@ mod tests {
             "the plan also registers MCP-client entries"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn plan_install_can_leave_client_registration_to_a_package_manager() {
+        let dir =
+            std::env::temp_dir().join(format!("ghostlight-plan-no-clients-{}", std::process::id()));
+        let ctx = PlanCtx {
+            current_exe: PathBuf::from("/abs/ghostlight"),
+            home: dir.join("home"),
+            config: dir.join("config"),
+            local: dir.join("local"),
+        };
+        let opts = InstallOptions {
+            extension_id: None,
+            dry_run: true,
+            system: false,
+            browsers: Selection::ForceAll,
+            clients: Selection::None,
+            debug: false,
+            no_supervisor: false,
+            no_open: true,
+        };
+        let actions = plan_install_for(&opts, &ctx).unwrap();
+        assert!(
+            actions.iter().any(|a| a.label.contains("native host")),
+            "the browser-side stack is still registered"
+        );
+        assert!(
+            !actions.iter().any(|a| a.label.contains("(client)")),
+            "no MCP-client configuration is changed"
+        );
     }
 }

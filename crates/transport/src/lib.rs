@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Ghostlight transport: the small, stable substrate the role executables share (ADR-0046).
-//! Wire framing, dialing, the resilient relay, identity, and process-lifecycle primitives.
-//! The adapters depend on THIS crate only; a dependency on ghostlight-core here or in an
-//! adapter is a design error (it would reintroduce the exe-lock ADR-0046 removes).
+//! Ghostlight transport: the small, stable substrate the three product executables share.
+//! Typed edge/service bridge messages, browser framing, dialing, the resilient browser relay,
+//! workspace identity, and process-lifecycle primitives live here. The
+//! `ghostlight-mcp-connector` and `ghostlight-browser-connector` shores depend on this crate,
+//! never `ghostlight-core`.
 
 pub mod antisquat;
+pub mod bridge;
 pub mod error;
 pub mod handshake;
 pub mod host;
@@ -12,12 +14,11 @@ pub mod instance;
 pub mod ipc;
 pub mod observability;
 pub mod proc;
-pub mod role;
-pub mod session_guid;
 pub mod supervisor;
 #[cfg(unix)]
 mod user_session;
 pub mod watchdog;
+pub mod workspace_id;
 
 pub use error::{Error, Result, ToolError};
 

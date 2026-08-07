@@ -1,40 +1,54 @@
 # The Ghostlight dev loop
 
-Ghostlight runs ONE stack (ADR-0065): one native host (`org.sylin.ghostlight`, allowing both the
-Web Store extension and the unpacked dev extension), one service endpoint, one `ghostlight` MCP
-entry in your editor. The "engine" is whichever `ghostlight` service currently holds the endpoint
--- the installed release, or the build you made thirty seconds ago. Nothing selects an engine;
-ownership of the endpoint IS the selection.
+Ghostlight runs ONE stack (ADR-0065/0096): one native host
+(`org.sylin.ghostlight`, allowing both the Web Store extension and the unpacked dev extension), one
+installed service identity, one typed MCP-edge endpoint, one browser endpoint, and one
+`ghostlight` MCP entry in your editor. The "engine" is whichever persistent `ghostlight` service
+currently owns the endpoints -- the installed release, or the build you made thirty seconds ago.
 
-That works because the relays are dumb, resilient pipes: the agent relay reconnects to a restarted
-service and replays the MCP handshake (ADR-0045), and the browser relay reconnects and replays the
-extension's identity frame (ADR-0062), so an engine swap is invisible to your editor and your
-browser. `deploy.lock` (ADR-0063) keeps relay self-heal from respawning the OLD engine mid-swap.
+The two shores reconnect independently. `ghostlight-mcp-connector` keeps MCP JSON-RPC and exact revision
+state at the client shore, reconnects its typed bridge for future calls, and never replays an
+in-flight browser effect. `ghostlight-browser-connector` reconnects the browser shore and replays the
+extension's identity frame (ADR-0062). `deploy.lock` (ADR-0063) keeps either shore's self-heal from
+respawning the old engine mid-swap.
 
-There is no dev install, no `-dev` host, no second MCP entry, and no separate dev browser. Your
-real, authenticated browser and your real editors ride the engine under test -- which is the point:
-dev exercises the real scenario. The symmetric cost: while a broken build holds the endpoint, real
-use is broken until you swap back (`-Restore`) or land a fix.
+There is no separate dev install, no `-dev` host, no second MCP entry, and no separate dev browser.
+A source developer performs [Path B](guides/installation.md#path-b-build-from-source)'s ordinary
+one-stack registration once, so the one client entry and native-host manifest point at the
+repo-built shores. Your real, authenticated browser and real editors then ride the service under
+test. The symmetric cost: while a broken build owns the service endpoints, real use is broken until
+you swap back (`-Restore`) or land a fix.
 
 ## 1. When code changes: what to do
 
-The Rust engine and the JavaScript extension live in different processes and refresh by different
-mechanisms, so a new dev version "comes to life" through one of two triggers. Pick the row that
-matches what you edited.
+The service, MCP edge, browser relay, and JavaScript extension live in different processes and
+refresh by different mechanisms. Pick the row that matches what you edited.
 
-| You changed                         | Do this                                              | Editor / browser |
-| ----------------------------------- | ---------------------------------------------------- | ---------------- |
-| Rust: service or core code (usual)  | `.\scripts\dev-loop.ps1`                             | Both ride through untouched |
-| Extension JS or CSS                 | Reload at `chrome://extensions` (no rebuild)         | Reload the extension only |
-| Both of the above                   | `.\scripts\dev-loop.ps1`, then Reload the extension  | Engine first, then Reload |
-| Rust: the relay crate (rare)        | `.\scripts\dev-loop.ps1`, then respawn the relay     | See the relay note below |
-| Revert to the installed release     | `.\scripts\dev-loop.ps1 -Restore`                    | Both ride through untouched |
+| You changed | Do this | What must respawn |
+| --- | --- | --- |
+| Rust: service or core code (usual) | `.\scripts\dev-loop.ps1` | Nothing; both shores reconnect |
+| Rust: `crates/mcp-connector/` | `.\scripts\dev-loop.ps1`, then reopen the client's MCP connection | `ghostlight-mcp-connector` |
+| Rust: `crates/browser-connector/` | `.\scripts\dev-loop.ps1`, then Reload at `chrome://extensions` | `ghostlight-browser-connector` |
+| Extension JS or CSS | Reload at `chrome://extensions` (no Rust rebuild) | Extension worker and browser relay |
+| Service/core plus extension | `.\scripts\dev-loop.ps1`, then Reload the extension | Extension worker and browser relay |
+| Revert to the installed release | `.\scripts\dev-loop.ps1 -Restore` | Nothing; both shores reconnect |
 
-**Rust: service or core code** -- the everyday case. `dev-loop.ps1` swaps which engine holds the
-endpoint (see the mechanics below); your editor's agent relay and the browser's native relay stay
-alive and reconnect on their own (ADR-0045 replays the MCP handshake, ADR-0062 replays the
-extension identity frame and keeps the same browser slot). You do not restart the editor and do not
-touch the browser -- the next tool call is served by the new code.
+**Rust: service or core code** -- the everyday case. `dev-loop.ps1` swaps which service owns the
+endpoints (see the mechanics below). The editor's `ghostlight-mcp-connector` process and the
+browser's `ghostlight-browser-connector` stay alive and reconnect on their own. You do not restart
+the editor and do not
+touch the browser. A pending call ends truthfully if the bridge breaks; it is never replayed. The
+next call uses the new service code.
+
+**Rust: MCP edge code** -- run the swap so `ghostlight-mcp-connector` is rebuilt, then reopen the client's
+MCP connection (or restart the client) so it launches that fresh executable. A running edge can
+reconnect to a new service, but it cannot replace its own loaded image. This is also the boundary
+where changes to `mcp_2025_11_25` or `mcp_2026_07_28` take effect.
+
+If the client reports `Transport closed`, stop using the cached Ghostlight tools and reopen that
+client's Ghostlight connection. Do not launch `ghostlight-mcp-connector` by hand as a substitute:
+the standalone process does not repair the client's stdio and may create a different workspace.
+Inspect browser state before retrying an effectful call because the earlier call may have started.
 
 **Extension JS or CSS** -- no rebuild, no `dev-loop.ps1`. Click Reload at `chrome://extensions`.
 The reload tears down the service worker and its native port; the extension reconnects, re-reads
@@ -47,41 +61,40 @@ after a Reload (section 3).
 extension. Ordering it engine-first means the extension reconnects to a live endpoint instead of a
 down one (it would buffer and retry either way, but this avoids a needless reconnect churn).
 
-**The relay note.** The `ghostlight-relay` binary is the thin, stable crate (ADR-0046) and you will
-rarely touch it. `dev-loop.ps1` always rebuilds it, but the RUNNING relay processes are
-already-loaded images that keep the old code until they respawn. The browser relay respawns when
-you Reload the extension (the old native port EOFs, Chrome launches a fresh relay from the manifest
-path = your new binary), so an extension Reload covers the browser side for free. The agent relay
-is a child of your editor and only respawns when the editor relaunches it, so a relay-only change
-that must reach the AGENT side needs an editor restart (or reopening the MCP connection).
+**Rust: browser-connector code** -- `ghostlight-browser-connector` is browser-only and changes rarely.
+`dev-loop.ps1` rebuilds it, but an already-loaded relay keeps the old image until Chromium respawns
+it. Reload the extension: the old native port closes and Chromium launches the fresh relay from the
+native-host manifest. No editor restart is involved.
 
 ### What `dev-loop.ps1` does
 
 In order: writes `deploy.lock` into every candidate engine directory (the repo `target\` dir and
-each versioned dir under `~\.ghostlight\bin`) so no relay self-heals the old image mid-swap; stops
-SERVICE processes only (identified by executable path, never a bare taskkill -- and never relays,
-which stay connected and ride through); renames any running relay exe aside (Windows allows
-renaming a running image) so the build can write; builds `ghostlight` + `ghostlight-relay` +
-`lightbox`; starts the fresh build as THE engine (`--debug service --keep-warm`); waits for
-`ghostlight doctor` to report the endpoint healthy; removes the locks; and runs one offline
-`fake-browser` smoke check.
+each versioned dir under `~\.ghostlight\bin`) so no shore self-heals the old image mid-swap; stops
+SERVICE processes only (identified by executable path, never a bare taskkill); renames running
+`ghostlight-mcp-connector` and `ghostlight-browser-connector` images aside so Windows can write the
+new files; builds `ghostlight-mcp-connector` + `ghostlight` + `ghostlight-browser-connector` +
+`lightbox`; starts the fresh service
+(`--debug service --keep-warm`); waits for `ghostlight doctor` to report healthy; removes the
+locks; and runs one offline `fake-browser` smoke check. Existing shore processes stay alive until
+their own client or Chromium respawns them.
 
 `--keep-warm` disables the idle-grace shutdown so the engine stays up between actions. Add
 `-Manifest examples\dev-live-test.json` when you want the engine started under a restrictive test
 policy (default is none: the engine serves real use with the real config).
 
-When NO dev build is running and a relay finds the endpoint down, self-heal launches the engine
-sibling to that relay's own directory -- the system reverts to an available engine on its own.
-`-Restore` does it deterministically: stops the repo-built engine and starts the newest installed
-release that is one-stack capable (v0.5.5 or newer -- see the next section for why the floor
-exists). If no installed release meets the floor, `-Restore` refuses and leaves the repo build
-serving rather than resurrecting an engine that would fight the swap.
+When no dev build is running and either shore finds its service endpoint down, self-heal launches
+the sibling engine from that shore's directory. `-Restore` does it deterministically: it stops the
+repo-built engine and starts the newest installed release that has all three ADR-0096 executables
+and meets the established one-stack reconnect floor. If no installed release qualifies,
+`-Restore` refuses and leaves the repo build serving.
 
-### Machines with a pre-v0.5.5 release installed
+### Restore eligibility and older installations
 
-The one-stack swap only holds once the INSTALLED release is itself swap-aware. A release older
-than v0.5.5 predates the browser-relay reconnect (ADR-0062) and the `deploy.lock` quiesce
-(ADR-0063), which produces two concrete failures, both observed live:
+`-Restore` requires all three product executables. It refuses a two-executable installation even
+when that release already understands the one-stack swap, because its directory has no MCP edge
+for the current client-launch contract. Separately, a release older than v0.5.5 predates the
+browser-relay reconnect (ADR-0062) and `deploy.lock` quiesce (ADR-0063), which can produce two
+concrete failures, both observed live:
 
 - **The swap does not hold.** The old release's relays cannot see `deploy.lock`, so during the
   brief endpoint-down window of a swap they self-heal the OLD engine back, and it wins the pipe
@@ -91,12 +104,12 @@ than v0.5.5 predates the browser-relay reconnect (ADR-0062) and the `deploy.lock
   frame (ADR-0061 `browser_hello`), so doctor reports `extension not connected` even in steady
   state.
 
-The fix is a one-time upgrade of the machine: run `ghostlight install` from a current build (it
-repoints the host manifest, client entries, and the auto-start supervisor), then stop any
-still-running processes of the old release (service AND its agent relays -- identify them by
-executable path under `~\.ghostlight\bin\<old-version>`, never by bare name). After that,
-`dev-loop.ps1` swaps hold cleanly and the extension reconnects on its own. Deleting the old
-release directories under `~\.ghostlight\bin` removes the last way they can come back.
+The fix is a one-time upgrade of the machine: run `ghostlight install` from a three-executable
+build (it repoints the host manifest, client entries, and the auto-start supervisor), then stop any
+still-running processes of the old release. Identify them by executable path under
+`~\.ghostlight\bin\<old-version>`, never by bare name. After that, `dev-loop.ps1` swaps hold cleanly
+and both shores reconnect on their own. Deleting obsolete release directories removes the last way
+those images can come back.
 
 ## 2. Who is serving right now?
 
@@ -104,8 +117,8 @@ release directories under `~\.ghostlight\bin` removes the last way they can come
 ghostlight doctor
 ```
 
-Doctor names the endpoint state, the attached browsers, and the live sessions. Because there is
-one endpoint, there is no "which instance?" question -- only "who holds it?", and doctor answers
+Doctor names the service endpoint state, the attached browsers, and the live workspaces. There is
+one installed service identity, so the question is "which service owns it?", and doctor answers
 that. Every attach/detach/focus/reject decision (both sides: the service's own and, when the
 extension's "Developer diagnostics" option is on, the extension's `connect_attempt`/
 `connect_disconnect` notes) lands in the structured event ring `debug-state-<pid>.json` carries --
@@ -203,7 +216,8 @@ optional `description`, and renders the sticker immediately, bypassing governanc
 governance speaks through). It is deliberately absent from `tools/list` and NOT registered in
 `browser/directory.rs` -- the sticker is a governance-authority signal, not something the trained
 model should emit -- so it exists only as the first branch of `run_tool_call` in
-`crates/core/src/mcp/pipeline.rs`. Look there, not in the directory, when auditing what tools exist.
+`crates/core/src/tool/pipeline.rs`. Look there, not in the directory, when auditing what tools
+exist.
 
 For notification-design work this is the fast path: swap the engine ONCE (to pick up the tool),
 reload the extension ONCE (to pick up any renderer CSS), then fire every severity/icon combination
@@ -211,11 +225,11 @@ as plain `notify` calls -- no rebuild per variant.
 
 Two caveats when driving it:
 - Because it is unlisted, an MCP client's own tool list will not contain it. Send a raw JSON-RPC
-  `tools/call` (name `notify`) over the agent relay (`ghostlight-relay --role agent`) rather than
-  through a client's advertised-tool surface.
-- `server.rs`'s cross-session tab-ownership guard runs BEFORE `run_tool_call` and refuses a
-  `tools/call` naming a `tabId` a DIFFERENT live session owns (returns "unknown tab"). So the notify
-  call must come from a session that OWNS the tab: have the same relay session create its own tab
+  `tools/call` (name `notify`) through `ghostlight-mcp-connector` rather than through a client's
+  advertised-tool surface.
+- The neutral pipeline's workspace ownership guard runs before dispatch and refuses a `tools/call`
+  naming a `tabId` another live workspace owns (returns "unknown tab"). The notify call must come
+  from a workspace that owns the tab: have that same MCP path create its own tab
   (`tabs_create_mcp`) and navigate it before calling `notify`. The internal denial path is
   unaffected -- it calls `Browser::notify()` directly, never through an incoming `tools/call`.
 

@@ -2,12 +2,12 @@
 //! The OS supervisor identifiers + best-effort self-heal start (ADR-0030 Decision 8 amendment;
 //! PINS.md SS5.2). The installer (H9) registers a per-user, zero-admin OS supervisor under these
 //! SAME names (Windows Task Scheduler; macOS launchd; Linux systemd --user) that keeps
-//! `ghostlight service` warm and restarts it on crash. When a thin ADAPTER's first dial to the
-//! service fails, it asks this SAME supervisor to start the service (idempotent, out-of-job)
+//! `ghostlight service` warm and restarts it on crash. When `ghostlight-mcp-connector` cannot make its first
+//! typed-bridge connection, it asks this SAME supervisor to start the service (idempotent,
+//! out-of-job)
 //! before retrying the dial -- never spawning an in-job child itself (that mechanism is deleted;
 //! ADR-0030 Decision 8 Provenance, "the always-ready-service amendment").
 
-use crate::role;
 use std::time::Duration;
 
 /// Windows Task Scheduler task name for the active instance (ADR-0044). The default instance
@@ -32,10 +32,10 @@ pub fn supervisor_unit() -> String {
 }
 
 /// Self-heal retry window (PINNED, PINS.md SS5.2): after asking the supervisor to start the
-/// service, the adapter retries its dial for up to this long before giving up.
+/// service, the MCP edge retries its dial for up to this long before giving up.
 pub const SELF_HEAL_RETRY_WINDOW: Duration = Duration::from_secs(3);
 
-/// Self-heal retry interval (PINNED, PINS.md SS5.2): how often the adapter retries its dial
+/// Self-heal retry interval (PINNED, PINS.md SS5.2): how often the MCP edge retries its dial
 /// within [`SELF_HEAL_RETRY_WINDOW`].
 pub const SELF_HEAL_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -81,12 +81,13 @@ fn deploy_lock_present(service_exe: &std::path::Path) -> bool {
     }
 }
 
-/// Resolve the SIBLING service executable for a running relay (ADR-0054 Decision 2): the role
-/// executables ship side by side (ADR-0046/ADR-0051), so `<dir>/ghostlight-relay*[.exe]` maps to
-/// `<dir>/ghostlight[.exe]`. Pure: unit-tested against paths, never touches the filesystem.
-pub fn sibling_service_exe(relay_exe: &std::path::Path) -> Option<std::path::PathBuf> {
-    let dir = relay_exe.parent()?;
-    let name = match relay_exe.extension().and_then(|e| e.to_str()) {
+/// Resolve the service executable beside a product shore binary (ADR-0054/0096).
+///
+/// The three executables ship side by side, so the running `ghostlight-mcp-connector` edge can locate the
+/// bare `ghostlight` service without a registry or path broker. Pure and unit-tested.
+pub fn sibling_service_exe(shore_exe: &std::path::Path) -> Option<std::path::PathBuf> {
+    let dir = shore_exe.parent()?;
+    let name = match shore_exe.extension().and_then(|e| e.to_str()) {
         Some(ext) => format!("ghostlight.{ext}"),
         None => "ghostlight".to_string(),
     };
@@ -96,9 +97,7 @@ pub fn sibling_service_exe(relay_exe: &std::path::Path) -> Option<std::path::Pat
 /// Spawn `<exe> [--instance <n>] service` fully detached (ADR-0054 Decision 2): null stdio and
 /// [`DETACHED_SPAWN_FLAGS`], so the child inherits neither the caller's MCP pipes nor its console
 /// or process group -- the hazards that killed the old in-job spawn are structurally absent. The
-/// service's own singleton endpoint claim makes concurrent spawns harmless (losers exit). No role
-/// assertion here: the installer's start-once step (CLI role) shares this helper; the self-heal
-/// wrapper [`start_service`] carries the adapter-role assertion.
+/// service's own singleton endpoint claim makes concurrent spawns harmless (losers exit).
 #[cfg(windows)]
 pub fn spawn_service_detached(exe: &std::path::Path) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
@@ -139,17 +138,14 @@ pub fn supervisor_start_command() -> Option<(String, Vec<String>)> {
     ))
 }
 
-/// Best-effort start the service when an adapter's dial fails (ADR-0030 Decision 8; amended by
-/// ADR-0054): a hint, not a guarantee; the adapter's own bounded dial retry
-/// (`ipc::relay_adapter`), not this call, decides whether the service ever came up. On Windows it
+/// Best-effort start the service when the MCP edge's first bridge dial fails (ADR-0030 Decision 8,
+/// amended by ADR-0054 and ADR-0096). This is a hint, not a guarantee; the edge's own bounded dial
+/// retry decides whether the service came up. On Windows it
 /// spawns the sibling service executable detached (a Run key cannot be "run" on demand, and the
 /// old schtasks handle required an elevation-only registration -- issue #17); on Unix it asks the
-/// registered launchd/systemd supervisor as before. Asserts the ADAPTER role first (PINS.md SS8):
-/// a SERVICE must never trigger a service start (that would mean the SoC boundary already failed
-/// elsewhere).
+/// registered launchd/systemd supervisor as before. Only the edge binary calls this function; that
+/// boundary is structural because the service does not contain an MCP lifecycle or stdio path.
 pub fn start_service() {
-    role::assert_adapter_role("start_service");
-
     #[cfg(windows)]
     {
         let exe = std::env::current_exe()
@@ -235,14 +231,9 @@ mod tests {
         {
             use std::path::Path;
             assert_eq!(
-                sibling_service_exe(Path::new(r"C:\bin\ghostlight-relay.exe")),
+                sibling_service_exe(Path::new(r"C:\bin\ghostlight-mcp-connector.exe")),
                 Some(Path::new(r"C:\bin\ghostlight.exe").to_path_buf()),
-                "the relay's sibling is the bare service exe"
-            );
-            assert_eq!(
-                sibling_service_exe(Path::new(r"C:\bin\ghostlight-relay-dev.exe")),
-                Some(Path::new(r"C:\bin\ghostlight.exe").to_path_buf()),
-                "a per-instance relay copy still maps to the ONE service exe (instance rides the flag)"
+                "the edge's sibling is the bare service exe"
             );
             assert_eq!(
                 RUN_KEY_PATH,
@@ -276,9 +267,9 @@ mod tests {
 
     #[test]
     fn sibling_resolution_handles_unix_style_names() {
-        // Extension-less relays (Unix) map to the extension-less service binary.
+        // An extension-less edge (Unix) maps to the extension-less service binary.
         assert_eq!(
-            sibling_service_exe(std::path::Path::new("/opt/gl/ghostlight-relay")),
+            sibling_service_exe(std::path::Path::new("/opt/gl/ghostlight-mcp-connector")),
             Some(std::path::PathBuf::from("/opt/gl/ghostlight"))
         );
     }

@@ -13,9 +13,9 @@
 //! exact same keep-last-good, fail-closed-on-error posture the config layers already have. One
 //! `load_policy` result feeds BOTH consumers: the org config layers (as before) and the
 //! published policy (new). The subscription that turns a published policy into a live
-//! `Governance` swap, a `list_changed` notification, and the two new session events lives in
-//! `transport::mcp::server` (constraint 3: this module stays domain-agnostic and holds only the
-//! channel and the store).
+//! service authority swap, a catalog-generation signal, and the two new audit events lives in
+//! [`crate::hub`] (constraint 3: this module stays domain-agnostic and holds only the channel and
+//! the store).
 //!
 //! The swap slot is `Mutex<Arc<Config>>`, not `ArcSwap`: the read is a per-call event on the
 //! dispatch chokepoint, not a hot inner loop, and the critical section is a single `Arc` clone
@@ -43,9 +43,9 @@ use super::{layers, load, Config};
 
 /// One atomically published set of authority inputs (ADR-0080).
 ///
-/// Session code builds its identity-bound `Governance` facade from `policy` and keeps it beside
-/// `config` under this epoch. A command can therefore never combine config from one reload with
-/// policy from another.
+/// Service authority code builds its `Governance` facade from `policy` and keeps it beside `config`
+/// under this epoch. A command can therefore never combine config from one reload with policy from
+/// another.
 #[derive(Clone)]
 pub struct AuthorityInputs {
     /// The resolved configuration in force for this epoch.
@@ -208,9 +208,9 @@ pub struct ConfigStore {
     /// `Mutex<Arc<T>>` idiom exactly, so a policy swap is decided and applied the same way a
     /// config swap is (`apply_plan`'s `changed` check, transposed to manifest identity).
     policy_snapshot: Mutex<Arc<crate::governance::manifest::source::LoadedPolicy>>,
-    /// Broadcasts the new policy on every successful publish. `transport::mcp::server`'s
-    /// policy-subscription task subscribes here to rebuild `Governance`, emit `list_changed`
-    /// when the advertised set changed, and record the two ADR-0025 session events.
+    /// Broadcasts the new policy on every successful publish. The service authority watcher
+    /// subscribes here to rebuild `Governance`, advance the catalog generation when the projected
+    /// set changes, and record the two ADR-0025 audit events.
     policy_tx: watch::Sender<Arc<crate::governance::manifest::source::LoadedPolicy>>,
     /// Config and policy published together after a complete reload transaction (ADR-0080).
     authority_snapshot: Mutex<Arc<AuthorityInputs>>,
@@ -312,7 +312,7 @@ impl ConfigStore {
         )
     }
 
-    /// Build the store from the initial layered load, called once at mcp-server startup.
+    /// Build the store from the initial layered load, called once at service startup.
     /// Startup keeps the G02 FAIL-LOUD semantics: an invalid org policy file or a structurally
     /// broken user file at startup is a hard error and the server refuses to start (it must
     /// never boot open on a broken org push). The lenient, keep-last-good behavior is for
@@ -395,10 +395,9 @@ impl ConfigStore {
     /// `Arc<LoadedPolicy>` after every successful publish (a settled, identity-changing reload
     /// of the org policy file or a watched user `file://` manifest source). A subscriber
     /// created before any reload sees the startup policy as its current value and only wakes on
-    /// subsequent publishes. `transport::mcp::server`'s policy-subscription task uses this to
-    /// rebuild `Governance`, emit `list_changed` when the advertised set changed, and record the
-    /// two ADR-0025 session events; this store never emits any MCP notification or audit record
-    /// itself.
+    /// subsequent publishes. The service authority watcher uses this to rebuild `Governance`,
+    /// advance the catalog generation when the projected set changes, and record the two ADR-0025
+    /// audit events. This store never emits an MCP notification or audit record itself.
     pub fn policy(
         &self,
     ) -> watch::Receiver<Arc<crate::governance::manifest::source::LoadedPolicy>> {
@@ -416,7 +415,8 @@ impl ConfigStore {
     /// ADR-0025 Decision 3: this now also performs the FULL manifest re-selection (org file +
     /// the watched user `file://` source, exactly the same [`crate::governance::manifest::
     /// source::load_policy`] the startup path uses), re-evaluating the org-wins rule on every
-    /// call so an org-file creation/deletion mid-session transitions exactly as startup would.
+    /// call so an org-file creation/deletion while the service runs transitions exactly as startup
+    /// would.
     /// One `load_policy` result feeds BOTH the org config layers (as before, via
     /// [`load::org_config_from_policy`]) and the published policy: a failure of that single
     /// call -- an invalid org file, OR a configured user `file://` source that has gone missing
@@ -592,7 +592,7 @@ impl ConfigStore {
         }
     }
 
-    /// Spawn the debounced source watcher. mcp-server role ONLY (the native-host relay and the
+    /// Spawn the debounced source watcher. Persistent service only (the MCP edge, browser relay, and
     /// installer/config CLI roles must never start it). Polls the three source fingerprints
     /// every [`POLL_INTERVAL`]; when any source settles on a changed fingerprint, calls
     /// [`Self::reresolve`] once. Runs until the process exits. Takes `Arc<Self>` so the loop
@@ -775,7 +775,7 @@ fn merge_manifest_user_config(
 
 /// Build the layer inputs from the last-good state (used by startup and when every source
 /// fails on reload). Delegates to [`load::layer_inputs`], the same composition [`plan_reload`]
-/// and [`ConfigStore::load_initial_with_policy`] (the mcp-server startup path) use.
+/// and [`ConfigStore::load_initial_with_policy`] (the service startup path) use.
 fn compose_inputs(last_good: &LastGoodInputs) -> layers::LayerInputs {
     load::layer_inputs(
         last_good.org.clone(),
@@ -893,8 +893,8 @@ fn settle(prev: &PathWatch, current: Fingerprint) -> (PathWatch, bool) {
 
 #[cfg(test)]
 impl ConfigStore {
-    /// Crate-visible test constructor for other modules' test suites (for example
-    /// `transport::mcp::server`'s server-wiring tests): seeds a store at `config` with empty
+    /// Crate-visible test constructor for other modules' test suites (for example the neutral
+    /// service-pipeline wiring tests): seeds a store at `config` with empty
     /// last-good inputs, touching no filesystem. `LastGoodInputs` stays private to this module,
     /// so this is the seam other modules use instead.
     pub(crate) fn for_test_with_config(config: Config) -> Arc<ConfigStore> {
@@ -1552,8 +1552,8 @@ mod tests {
     fn keep_last_good_org_failure_does_not_publish_the_policy() {
         use crate::governance::manifest::source::ManifestOrigin;
 
-        // Subscribe BEFORE any reload (the real production usage: `transport::mcp::server`'s
-        // policy-subscription task subscribes once at startup, well before the watcher's first
+        // Subscribe BEFORE any reload (the real production usage: the service authority watcher
+        // subscribes once at startup, well before the file watcher's first
         // real settled change). `watch::Sender::send` is a documented no-op on the shared value
         // when it has zero receivers (the same reason `ConfigStore::subscribe`'s own existing
         // config tests all subscribe before the reload they observe), so a receiver created

@@ -1,7 +1,9 @@
 # Ghostlight in Browser: Extension (Manifest V3)
 
 The thin, **policy-free** Chromium extension: a CDP executor + native-messaging endpoint. It holds
-mechanism only; all governance lives in the `ghostlight` binary. Not a port: a clean
+mechanism only; all governance lives in the persistent `ghostlight` service. The browser-only
+`ghostlight-browser-connector` carries its native-messaging frames; MCP JSON-RPC ends separately in
+`ghostlight-mcp-connector`. Not a port: a clean
 re-implementation that harvests proven mechanics (MV3 keepalive, live-state tab-group recovery, the
 DPR-probe + downscale + coordinate-rescale screenshot model, JPEG 55->30 fallback, shadow-DOM
 `form_input` traversal, the phantom-cursor UI) reimplemented from the observed technique, not
@@ -19,7 +21,8 @@ copied. See [../docs/adr/](../docs/adr/) for the decisions behind it.
 
 The binary self-registers everything:
 
-1. **Build:** `cargo build --release` (or `--debug`).
+1. **Build:** `cargo build --release`. This produces `ghostlight-mcp-connector`, `ghostlight`, and
+   `ghostlight-browser-connector` side by side.
 2. **Load the extension:** open `chrome://extensions` (or `brave://`, `edge://`), enable Developer
    mode, click **Load unpacked**, and select this `extension/` directory. The extension ID is
    pinned by a committed manifest `key`, so it is deterministic across machines.

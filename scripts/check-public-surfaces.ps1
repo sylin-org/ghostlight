@@ -55,7 +55,7 @@ if ([string]::IsNullOrWhiteSpace($Status.extensionSummary)) { Add-Failure 'exten
 
 $Cargo = Get-Content -Raw (Join-Path $RepoRoot 'Cargo.toml')
 $CargoVersion = [regex]::Match($Cargo, '(?m)^version = "([^"]+)"').Groups[1].Value
-Assert-Equal 'Cargo.toml version' $Status.release $CargoVersion
+[void](ConvertTo-GhostlightVersion $CargoVersion 'Cargo.toml version')
 
 $Manifest = Get-Content -Raw (Join-Path $RepoRoot 'extension/manifest.json') | ConvertFrom-Json
 $SourceAdapterVersion = $Manifest.version
@@ -63,7 +63,7 @@ $SourceAdapterVersion = $Manifest.version
 try {
     $Compatibility = Read-GhostlightAdapterCompatibility $RepoRoot
     $SourceCoverage = Assert-GhostlightChromeAdapterCoversService `
-        $Compatibility $SourceAdapterVersion $Status.release
+        $Compatibility $SourceAdapterVersion $CargoVersion
 
     if (-not $Status.PSObject.Properties['chromeStore']) {
         throw 'docs/public-status.json has no chromeStore object'
@@ -72,30 +72,26 @@ try {
     if ([string]::IsNullOrWhiteSpace($PublicAdapterVersion)) {
         throw 'docs/public-status.json has no public Chrome adapter version'
     }
-    $PublicCoverage = Assert-GhostlightChromeAdapterCoversService `
-        $Compatibility $PublicAdapterVersion $Status.release
-    Assert-Contains 'extension summary public compatibility' $Status.extensionSummary `
-        (Format-GhostlightChromeAdapterCoverage $PublicCoverage)
+    if ($Status.chromeStore.itemId -notmatch '^[a-p]{32}$') {
+        throw 'docs/public-status.json has no valid Chrome Web Store item id'
+    }
 
     $PendingProperty = $Status.chromeStore.PSObject.Properties['pendingAdapterVersion']
     $PendingAdapterVersion = if ($PendingProperty) { [string]$PendingProperty.Value } else { '' }
-    if (-not [string]::IsNullOrWhiteSpace($PendingAdapterVersion)) {
-        $PendingCoverage = Assert-GhostlightChromeAdapterCoversService `
-            $Compatibility $PendingAdapterVersion $Status.release
-        Assert-Contains 'extension summary pending compatibility' $Status.extensionSummary `
-            (Format-GhostlightChromeAdapterCoverage $PendingCoverage)
-    }
+    $ExpectedExtensionSummary = Format-GhostlightExtensionSummary `
+        $Compatibility $Status.release $PublicAdapterVersion $PendingAdapterVersion $CargoVersion
+    Assert-Equal 'canonical extension summary' $ExpectedExtensionSummary $Status.extensionSummary
 }
 catch {
     Add-Failure "Chrome adapter compatibility: $($_.Exception.Message)"
 }
 
 $Npm = Get-Content -Raw (Join-Path $RepoRoot 'packaging/npm/package.json') | ConvertFrom-Json
-Assert-Equal 'npm package version' $Status.release $Npm.version
+Assert-Equal 'npm package version' $CargoVersion $Npm.version
 
 $Server = Get-Content -Raw (Join-Path $RepoRoot 'server.json') | ConvertFrom-Json
-Assert-Equal 'MCP server version' $Status.release $Server.version
-Assert-Equal 'MCP package version' $Status.release $Server.packages[0].version
+Assert-Equal 'MCP server version' $CargoVersion $Server.version
+Assert-Equal 'MCP package version' $CargoVersion $Server.packages[0].version
 
 $Readme = Get-Content -Raw (Join-Path $RepoRoot 'README.md')
 Assert-Contains 'README platform state' $Readme $Status.platformSummary
@@ -119,6 +115,7 @@ foreach ($Surface in @(
 }
 Assert-NotMatch 'release notes template' $ReleaseTemplate `
     '(?i)manual (?:extension )?install|manual installation|install by hand|load unpacked|chrome://extensions|sideload|side-load'
+Assert-Contains 'release notes template changelog slot' $ReleaseTemplate '${CHANGELOG}'
 
 $SourceGuide = Get-Content -Raw (Join-Path $RepoRoot 'docs/guides/installation.md')
 Assert-Contains 'README source-development exception' $Readme 'Build from source and test locally'
@@ -131,6 +128,15 @@ if ($Online) {
 
     $Registry = Invoke-RestMethod -Uri 'https://registry.npmjs.org/ghostlight/latest'
     Assert-Equal 'latest npm release' $Status.release $Registry.version
+
+    try {
+        $LiveChromeAdapterVersion = Get-GhostlightChromeStorePublicVersion $Status.chromeStore.itemId
+        Assert-Equal 'live Chrome Web Store adapter' `
+            $Status.chromeStore.publicAdapterVersion $LiveChromeAdapterVersion
+    }
+    catch {
+        Add-Failure "live Chrome Web Store adapter check failed: $($_.Exception.Message)"
+    }
 
     $Website = (Invoke-WebRequest -UseBasicParsing -Uri 'https://sylin.org/ghostlight/').Content
     $WebsiteText = ConvertFrom-HtmlText $Website
@@ -154,4 +160,4 @@ if ($Failures.Count -gt 0) {
 }
 
 $Mode = if ($Online) { 'local and live' } else { 'local' }
-Write-Host "Public-surface check passed ($Mode): service v$($Status.release), source Chrome adapter v$SourceAdapterVersion, platform, extension, and entry-path claims agree."
+Write-Host "Public-surface check passed ($Mode): public service v$($Status.release), source service v$CargoVersion, source Chrome adapter v$SourceAdapterVersion, platform, extension, and entry-path claims agree."

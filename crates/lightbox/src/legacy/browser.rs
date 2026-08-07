@@ -28,7 +28,7 @@ fn write_line(stdin: &mut std::process::ChildStdin, value: &Value) -> anyhow::Re
 fn read_line(reader: &mut BufReader<std::process::ChildStdout>) -> anyhow::Result<Value> {
     let mut line = String::new();
     reader.read_line(&mut line)?;
-    ensure!(!line.is_empty(), "adapter stdout closed");
+    ensure!(!line.is_empty(), "MCP edge stdout closed");
     Ok(serde_json::from_str(line.trim_end())?)
 }
 
@@ -38,43 +38,56 @@ fn start_pair(
     let tmp = TempRoot::new(tag)?;
     let endpoint = support::unique_endpoint(tag);
     let service = support::spawn_service(&endpoint, tmp.path())?;
-    let adapter = support::spawn_adapter(&endpoint, tmp.path())?;
-    Ok((tmp, endpoint, service, adapter))
+    let edge = support::spawn_mcp_edge(&endpoint, tmp.path())?;
+    Ok((tmp, endpoint, service, edge))
 }
 
 fn read_page_redaction() -> anyhow::Result<()> {
-    let (_tmp, endpoint, _service, mut adapter) = start_pair("read-page-redaction")?;
-    let mut stdin = adapter
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("adapter stdin"))?;
+    let (_tmp, endpoint, _service, mut edge) = start_pair("read-page-redaction")?;
+    let mut stdin = edge.stdin.take().ok_or_else(|| anyhow!("MCP edge stdin"))?;
     let mut reader = BufReader::new(
-        adapter
-            .stdout
+        edge.stdout
             .take()
-            .ok_or_else(|| anyhow!("adapter stdout"))?,
+            .ok_or_else(|| anyhow!("MCP edge stdout"))?,
     );
-    write_line(
-        &mut stdin,
-        &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-    )?;
-    write_line(
-        &mut stdin,
-        &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_page","arguments":{"tabId":1}}}),
-    )?;
+    write_line(&mut stdin, &support::initialize_2025(1, "lightbox-browser"))?;
+    ensure!(read_line(&mut reader)?["id"] == 1);
+    write_line(&mut stdin, &support::initialized_2025())?;
 
+    let extension_endpoint = endpoint.clone();
     let extension = std::thread::spawn(move || -> anyhow::Result<()> {
         tokio::runtime::Runtime::new()?.block_on(async move {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            let stream = ghostlight_transport::ipc::connect(&endpoint).await?;
+            let stream = ghostlight_transport::ipc::connect(&extension_endpoint).await?;
             let (mut ext_reader, mut ext_writer) = tokio::io::split(stream);
             support::send_extension_attach_frames(&mut ext_writer).await?;
+            let creator = support::read_frame_answering_tab_urls(
+                &mut ext_reader,
+                &mut ext_writer,
+                "tool_request",
+            )
+            .await?;
+            ensure!(creator["tool"] == "tabs_context_mcp");
+            let creator_guid = creator["guid"].clone();
+            ensure!(creator_guid.is_string());
+            let creator_reply = json!({
+                "id": creator["id"],
+                "type": "tool_response",
+                "result": support::creator_inventory_result(1),
+            });
+            ghostlight_transport::host::write_message(
+                &mut ext_writer,
+                &serde_json::to_vec(&creator_reply)?,
+            )
+            .await?;
             let request = support::read_frame_answering_tab_urls(
                 &mut ext_reader,
                 &mut ext_writer,
                 "tool_request",
             )
             .await?;
+            ensure!(request["tool"] == "read_page");
+            ensure!(request["args"]["tabId"] == 1);
+            ensure!(request["guid"] == creator_guid);
             let reply = json!({
                 "id": request["id"],
                 "type": "tool_response",
@@ -92,9 +105,21 @@ fn read_page_redaction() -> anyhow::Result<()> {
         })
     });
 
-    ensure!(read_line(&mut reader)?["id"] == 1);
+    write_line(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tabs_context_mcp","arguments":{}}}),
+    )?;
+    let context = read_line(&mut reader)?;
+    ensure!(context["id"] == 2 && context["result"]["isError"] != true);
+    let tab_id = support::creator_tab_id(&context)?;
+    let (slot, native_tab) = ghostlight_core::constants::tab_id::decode(tab_id);
+    ensure!(slot != 0 && native_tab == 1);
+    write_line(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_page","arguments":{"tabId":tab_id}}}),
+    )?;
     let response = read_line(&mut reader)?;
-    ensure!(response["id"] == 2 && response["result"]["isError"] != true);
+    ensure!(response["id"] == 3 && response["result"]["isError"] != true);
     let text = response["result"]["content"][0]["text"]
         .as_str()
         .ok_or_else(|| anyhow!("read_page returned no text"))?;
@@ -109,25 +134,61 @@ fn read_page_redaction() -> anyhow::Result<()> {
 }
 
 fn late_extension_wait() -> anyhow::Result<()> {
-    let (_tmp, endpoint, _service, mut adapter) = start_pair("late-extension")?;
-    let mut stdin = adapter
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("adapter stdin"))?;
+    let (tmp, endpoint, _service, mut edge) = start_pair("late-extension")?;
+    let mut stdin = edge.stdin.take().ok_or_else(|| anyhow!("MCP edge stdin"))?;
     let mut reader = BufReader::new(
-        adapter
-            .stdout
+        edge.stdout
             .take()
-            .ok_or_else(|| anyhow!("adapter stdout"))?,
+            .ok_or_else(|| anyhow!("MCP edge stdout"))?,
     );
+    write_line(&mut stdin, &support::initialize_2025(1, "lightbox-browser"))?;
+    ensure!(read_line(&mut reader)?["id"] == 1);
+    write_line(&mut stdin, &support::initialized_2025())?;
+
+    let creator_endpoint = endpoint.clone();
+    let creator_extension = std::thread::spawn(move || -> anyhow::Result<String> {
+        tokio::runtime::Runtime::new()?.block_on(async move {
+            let stream = ghostlight_transport::ipc::connect(&creator_endpoint).await?;
+            let (mut ext_reader, mut ext_writer) = tokio::io::split(stream);
+            support::send_extension_attach_frames(&mut ext_writer).await?;
+            let creator = support::read_frame_answering_tab_urls(
+                &mut ext_reader,
+                &mut ext_writer,
+                "tool_request",
+            )
+            .await?;
+            ensure!(creator["tool"] == "tabs_context_mcp");
+            let creator_guid = creator["guid"]
+                .as_str()
+                .ok_or_else(|| anyhow!("creator request carried no workspace guid"))?
+                .to_string();
+            let reply = json!({
+                "id": creator["id"],
+                "type": "tool_response",
+                "result": support::creator_inventory_result(1),
+            });
+            ghostlight_transport::host::write_message(
+                &mut ext_writer,
+                &serde_json::to_vec(&reply)?,
+            )
+            .await?;
+            Ok(creator_guid)
+        })
+    });
+
     write_line(
         &mut stdin,
-        &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+        &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tabs_context_mcp","arguments":{}}}),
     )?;
-    write_line(
-        &mut stdin,
-        &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://example.com","tabId":1}}}),
-    )?;
+    let context = read_line(&mut reader)?;
+    ensure!(context["id"] == 2 && context["result"]["isError"] != true);
+    let tab_id = support::creator_tab_id(&context)?;
+    let (slot, native_tab) = ghostlight_core::constants::tab_id::decode(tab_id);
+    ensure!(slot != 0 && native_tab == 1);
+    let creator_guid = creator_extension
+        .join()
+        .map_err(|_| anyhow!("creator extension panicked"))??;
+    support::wait_extension_disconnected(tmp.path(), Duration::from_secs(5))?;
 
     let extension = std::thread::spawn(move || -> anyhow::Result<()> {
         tokio::runtime::Runtime::new()?.block_on(async move {
@@ -141,6 +202,9 @@ fn late_extension_wait() -> anyhow::Result<()> {
                 "tool_request",
             )
             .await?;
+            ensure!(request["tool"] == "navigate");
+            ensure!(request["args"]["tabId"] == 1);
+            ensure!(request["guid"] == creator_guid);
             let reply = json!({
                 "id": request["id"],
                 "type":"tool_response",
@@ -155,9 +219,12 @@ fn late_extension_wait() -> anyhow::Result<()> {
         })
     });
 
-    ensure!(read_line(&mut reader)?["id"] == 1);
+    write_line(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://example.com","tabId":tab_id}}}),
+    )?;
     let response = read_line(&mut reader)?;
-    ensure!(response["id"] == 2 && response["result"]["isError"] != true);
+    ensure!(response["id"] == 3 && response["result"]["isError"] != true);
     let content = response["result"]["content"]
         .as_array()
         .ok_or_else(|| anyhow!("navigate returned no content"))?;
@@ -194,33 +261,71 @@ fn form_fill_parent_audit() -> anyhow::Result<()> {
     )?;
     let (_service, _port) =
         support::spawn_service_with_manage_web(&endpoint, tmp.path(), Some(&config_root))?;
-    let mut adapter = support::spawn_adapter(&endpoint, tmp.path())?;
-    let mut stdin = adapter
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("adapter stdin"))?;
+    let mut edge = support::spawn_mcp_edge(&endpoint, tmp.path())?;
+    let mut stdin = edge.stdin.take().ok_or_else(|| anyhow!("MCP edge stdin"))?;
     let mut reader = BufReader::new(
-        adapter
-            .stdout
+        edge.stdout
             .take()
-            .ok_or_else(|| anyhow!("adapter stdout"))?,
+            .ok_or_else(|| anyhow!("MCP edge stdout"))?,
     );
-    write_line(
-        &mut stdin,
-        &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-    )?;
-    write_line(
-        &mut stdin,
-        &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"form_fill","arguments":{"tabId":0,"fields":{"Email":"a@b.c"}}}}),
-    )?;
+    write_line(&mut stdin, &support::initialize_2025(1, "lightbox-browser"))?;
     ensure!(read_line(&mut reader)?["id"] == 1);
+    write_line(&mut stdin, &support::initialized_2025())?;
+
+    let creator_endpoint = endpoint.clone();
+    let creator_extension = std::thread::spawn(move || -> anyhow::Result<()> {
+        tokio::runtime::Runtime::new()?.block_on(async move {
+            let stream = ghostlight_transport::ipc::connect(&creator_endpoint).await?;
+            let (mut ext_reader, mut ext_writer) = tokio::io::split(stream);
+            support::send_extension_attach_frames(&mut ext_writer).await?;
+            let creator = support::read_frame_answering_tab_urls(
+                &mut ext_reader,
+                &mut ext_writer,
+                "tool_request",
+            )
+            .await?;
+            ensure!(creator["tool"] == "tabs_context_mcp");
+            let creator_guid = creator["guid"].clone();
+            ensure!(creator_guid.is_string());
+            let reply = json!({
+                "id": creator["id"],
+                "type": "tool_response",
+                "result": support::creator_inventory_result(1),
+            });
+            ghostlight_transport::host::write_message(
+                &mut ext_writer,
+                &serde_json::to_vec(&reply)?,
+            )
+            .await?;
+            Ok(())
+        })
+    });
+
+    write_line(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tabs_context_mcp","arguments":{}}}),
+    )?;
+    let context = read_line(&mut reader)?;
+    ensure!(context["id"] == 2 && context["result"]["isError"] != true);
+    let tab_id = support::creator_tab_id(&context)?;
+    let (slot, native_tab) = ghostlight_core::constants::tab_id::decode(tab_id);
+    ensure!(slot != 0 && native_tab == 1);
+    creator_extension
+        .join()
+        .map_err(|_| anyhow!("creator extension panicked"))??;
+    support::wait_extension_disconnected(tmp.path(), Duration::from_secs(5))?;
+
+    write_line(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"form_fill","arguments":{"tabId":tab_id,"fields":{"Email":"a@b.c"}}}}),
+    )?;
     let response = read_line(&mut reader)?;
-    ensure!(response["id"] == 2 && response["result"]["isError"] == true);
+    ensure!(response["id"] == 3 && response["result"]["isError"] == true);
     ensure!(response["result"]["content"][0]["text"]
         .as_str()
         .is_some_and(|text| text.contains("extension")));
     drop(stdin);
-    let _ = adapter.wait();
+    let _ = edge.wait();
 
     let audit: Vec<Value> = std::fs::read_to_string(&audit_path)?
         .lines()

@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Self-test + worked example for the in-process session fixture (ADR-0051 Phase 4, P4.1;
-//! `support::inproc`). Proves the fixture drives the REAL `serve_session` chokepoint -- governance
-//! decide, tool advertisement, dispatch, and a fake-extension round trip -- over an in-memory
-//! duplex with NO spawned process, so the P4.2 migrations that follow have a verified seam to build
-//! on. Each assertion mirrors one a spawn-based test already makes (named inline), demonstrating
-//! that migrating onto the fixture changes HOW a test reaches the code, never WHAT it proves.
+//! Self-test and worked example for the ADR-0096 neutral in-process fixture.
+//!
+//! The fixture drives canonical catalog projection, immutable work admission, governance,
+//! dispatch, and an optional fake-extension round trip with no MCP edge or spawned
+//! process. Exact MCP revision behavior is covered by `crates/mcp-connector`; these assertions pin the
+//! product invariants behind both handlers.
 
 mod support;
 
 use serde_json::json;
 use support::inproc::{by_id, init_and_call, manifest_from_value, text_of, Harness};
 
-/// The all-open `tools/list` surface reaches the wire byte-identically to the code-declared
-/// fixture, and advertises exactly `advertised_tool_count()` tools -- the same invariant
+/// The all-open catalog projection is byte-identical to the code-declared fixture and advertises
+/// exactly `advertised_tool_count()` tools -- the same invariant
 /// `tests/tool_enforcement.rs::all_open_invariant_no_manifest_means_no_denials` proves over a
 /// spawned service.
 #[tokio::test]
@@ -30,12 +30,12 @@ async fn all_open_tools_list_is_byte_identical_to_the_fixture() {
     assert_eq!(
         tools.len(),
         ghostlight::browser::directory::advertised_tool_count(),
-        "the wire advertises the full REGISTRY surface"
+        "the neutral projection advertises the full REGISTRY surface"
     );
     assert_eq!(
         list["result"],
-        ghostlight::mcp::tools::advertised_tools_json(),
-        "byte-identical tools/list"
+        ghostlight::tool::tools::advertised_tools_json(),
+        "byte-identical canonical catalog"
     );
 }
 
@@ -91,9 +91,8 @@ async fn governed_denies_an_uncovered_domain_before_dispatch() {
     assert!(text.contains("no grant covers evil.com"), "{text}");
 }
 
-/// With a fake extension attached, a dispatched call reaches it and comes back with the extension's
-/// reply instead of `not connected` -- proving the `Browser`-over-duplex leg of the fixture is
-/// wired (the `tests/hub_multiplex.rs` seam, now reusable).
+/// With a fake extension attached, a dispatched work item reaches it and comes back with the
+/// extension's reply instead of `not connected`, proving the service-to-browser shore is wired.
 #[tokio::test]
 async fn attached_extension_answers_a_dispatched_call() {
     let harness = Harness::all_open();

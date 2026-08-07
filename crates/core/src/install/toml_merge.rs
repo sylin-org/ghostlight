@@ -109,6 +109,23 @@ pub fn server_matches(existing: &str, entry: &ServerEntry) -> Result<bool, TomlM
     }
 }
 
+/// True when the configured command and arguments exactly match the expected MCP launch.
+/// Environment keys are intentionally ignored because a debug install may add them independently.
+pub(crate) fn server_launch_matches(
+    existing: &str,
+    entry: &ServerEntry,
+) -> Result<bool, TomlMergeError> {
+    let doc = parse(existing)?;
+    let Some(servers) = existing_servers_table(&doc)? else {
+        return Ok(false);
+    };
+    match servers.get(&entry.name) {
+        None => Ok(false),
+        Some(Item::Table(table)) => Ok(table_launch_matches(table, entry)),
+        Some(_) => Err(TomlMergeError::ServerNotTable(entry.name.clone())),
+    }
+}
+
 /// Exact semantic equality for the table Ghostlight owns. `toml_edit::Table` intentionally does
 /// not implement `PartialEq` because it preserves formatting metadata, so compare its values while
 /// requiring that no stale Ghostlight-owned keys remain.
@@ -144,6 +161,24 @@ fn table_matches(table: &Table, entry: &ServerEntry) -> bool {
     command_matches && args_match && env_matches && table.len() == expected_keys
 }
 
+fn table_launch_matches(table: &Table, entry: &ServerEntry) -> bool {
+    let command_matches = matches!(
+        table.get("command"),
+        Some(Item::Value(value)) if value.as_str() == Some(entry.command.as_str())
+    );
+    let args_match = match table.get("args") {
+        Some(Item::Value(value)) => value.as_array().is_some_and(|args| {
+            args.len() == entry.args.len()
+                && args
+                    .iter()
+                    .map(Value::as_str)
+                    .eq(entry.args.iter().map(|arg| Some(arg.as_str())))
+        }),
+        _ => false,
+    };
+    command_matches && args_match
+}
+
 /// Remove only the named server table. Absence is a semantic no-op.
 pub fn remove_server(existing: &str, name: &str) -> Result<String, TomlMergeError> {
     let mut doc = parse(existing)?;
@@ -164,8 +199,8 @@ mod tests {
     fn entry() -> ServerEntry {
         ServerEntry {
             name: "ghostlight".into(),
-            command: "/abs/ghostlight-relay".into(),
-            args: vec!["--role".into(), "agent".into()],
+            command: "/abs/ghostlight-mcp-connector".into(),
+            args: Vec::new(),
             env: BTreeMap::new(),
         }
     }
@@ -209,6 +244,16 @@ mod tests {
         let out = merge_server("", &entry).unwrap();
         assert!(out.contains("[mcp_servers.ghostlight.env]"));
         assert!(server_matches(&out, &entry).unwrap());
+    }
+
+    #[test]
+    fn launch_match_rejects_the_removed_agent_relay_but_ignores_environment() {
+        let configured = "[mcp_servers.ghostlight]\ncommand = \"/abs/ghostlight-mcp-connector\"\nargs = []\n\n[mcp_servers.ghostlight.env]\nGHOSTLIGHT_DEBUG = \"1\"\n";
+        assert!(server_launch_matches(configured, &entry()).unwrap());
+        let wrong_args = "[mcp_servers.ghostlight]\ncommand = \"/abs/ghostlight-mcp-connector\"\nargs = [\"--instance\", \"qa\"]\n";
+        assert!(!server_launch_matches(wrong_args, &entry()).unwrap());
+        let stale = "[mcp_servers.ghostlight]\ncommand = \"/abs/ghostlight-relay\"\nargs = [\"--role\", \"agent\"]\n";
+        assert!(!server_launch_matches(stale, &entry()).unwrap());
     }
 
     #[test]

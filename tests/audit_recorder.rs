@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Integration test for the audit flight recorder (G06) at its public-API boundary: the
-//! `Governance` facade wired to a file-backed `Recorder`, exactly as `transport::mcp::server`
-//! wires it in production. Adapts the g06 spec's test 13
+//! `Governance` facade wired to a file-backed `Recorder`, exactly as the persistent service
+//! authority path wires it in production. Adapts the g06 spec's test 13
 //! (`a_recorded_call_lands_as_one_wellformed_jsonl_line`) to the post-A3/A5 architecture, where
 //! `set_client`/`record_call` live on `Governance`, not on `Recorder` directly (Recorder only
 //! implements the bare `AuditSink::record`).
@@ -109,9 +109,8 @@ fn a_recorded_call_lands_as_one_wellformed_jsonl_line() {
     std::fs::remove_file(&path).ok();
 }
 
-/// g11 test 2 (spec section 9): the kill hook, registered on `Browser` exactly as
-/// `transport::mcp::server::run` registers it, writes exactly one well-formed session-event
-/// audit line when the extension signals `session_killed` over a real duplex connection.
+/// g11 test 2 (spec section 9): a `Browser` kill-hook subscriber writes exactly one well-formed
+/// session-event audit line when the extension signals `session_killed` over a real duplex.
 #[test]
 fn session_killed_writes_one_session_event_record() {
     let path = temp_path("session-killed");

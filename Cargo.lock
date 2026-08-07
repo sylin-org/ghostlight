@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -533,8 +533,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostlight-browser-connector"
+version = "0.8.0"
+dependencies = [
+ "ghostlight-transport",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ghostlight-core"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -566,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-lightbox"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -577,17 +586,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "ghostlight-relay"
-version = "0.7.3"
+name = "ghostlight-mcp-connector"
+version = "0.8.0"
 dependencies = [
  "ghostlight-transport",
+ "serde_json",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "ghostlight-transport"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "dirs",
  "getrandom 0.4.3",

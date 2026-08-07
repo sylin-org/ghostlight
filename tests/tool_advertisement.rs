@@ -4,10 +4,9 @@
 //! just the pure filtering logic (`browser::advertise`'s own exhaustive inline unit tests cover
 //! that). No extension is ever connected; `tools/list` never touches it.
 //!
-//! ADR-0051 Phase 4 (P4.2): migrated from the spawn-a-service-plus-adapter pattern onto the
-//! in-process `support::inproc::Harness`, which drives the SAME `serve_session` -> tools/list ->
-//! `advertise::advertised_tools(grants)` path with no OS process. The filtered name lists below are
-//! the pinned oracles this test exists to prove; they stay verbatim.
+//! The ADR-0096 protocol-neutral `support::inproc::Harness` drives the canonical service catalog
+//! projection through `advertise::advertised_tools(grants)` with no OS process. The filtered name
+//! lists below are the pinned oracles this test exists to prove.
 
 mod support;
 
@@ -117,7 +116,7 @@ async fn empty_grants_manifest_advertises_exactly_the_requires_empty_set() {
 /// in-process), unchanged by the P4.2 migration.
 #[test]
 fn instructions_carry_cost_notes() {
-    let text = ghostlight::mcp::tools::agent_guide_text();
+    let text = ghostlight::tool::tools::agent_guide_text();
     assert!(text.contains("Cost notes:"), "{text}");
     assert!(
         text.contains("get_page_text can return tens of thousands of tokens"),

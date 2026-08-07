@@ -2,8 +2,8 @@
 //! The manage zone -- the OPERATOR SURFACE: observe runtime state, diagnose the chain, and
 //! administer policy. Multiple deliveries (the loopback HTTP UI today; the `doctor`/`status` CLI
 //! and the instrumentation sink fold in later). It is a peer top-level to [`crate::hub::inbound`]
-//! and [`crate::hub::outbound`], NOT under `inbound/`: it does NOT ingest tool calls, never flows
-//! through `serve_session`, and reads the `ConfigStore` / audit / live state directly.
+//! and [`crate::hub::outbound`], NOT under `inbound/`: it does not ingest typed edge work and reads
+//! the `ConfigStore`, audit, and live state directly.
 //!
 //! The management plane is PERMANENTLY loopback. There is no legitimate case for administering
 //! Ghostlight remotely -- remote policy changes to a service driving an authenticated browser

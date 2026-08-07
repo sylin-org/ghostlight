@@ -83,7 +83,7 @@
           "default": "enforce"
         },
         "inbound.pipe.enabled": {
-          "description": "Whether the inbound.pipe adapter (the named-pipe/UDS listener thin MCP adapters dial into) binds.",
+          "description": "Whether the owner-only local bridge/control listener binds.",
           "type": "boolean",
           "default": true
         },

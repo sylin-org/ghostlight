@@ -2,13 +2,14 @@
 //! The binary <-> extension wire protocol (reference documentation).
 //!
 //! Both directions carry UTF-8 JSON, one object per native message (Chrome frames each with a
-//! 4-byte little-endian length prefix; see [`super::host`]). The native-host relays these objects
-//! verbatim; only the mcp-server (in [`crate::hub::outbound::browser`]) constructs and parses them, so
+//! 4-byte little-endian length prefix; see [`super::host`]). The browser-only relay carries these
+//! objects verbatim; only the persistent service (in [`crate::hub::outbound::browser`]) constructs
+//! and parses them, so
 //! they are documented here rather than modeled as types.
 //!
 //! ## binary -> extension
 //! ```json
-//! { "id": "<string>", "type": "tool_request", "tool": "<tool name>", "args": { ... } }
+//! { "id": "<string>", "type": "tool_request", "tool": "<tool name>", "args": { ... }, "guid": "<workspace id>", "resultFeatures": ["tabDeltaV1"] }
 //! ```
 //!
 //! ## extension -> binary
@@ -17,8 +18,9 @@
 //! { "id": "<string>", "type": "tool_error",    "error":  "<message>", "hop": "<cdp|page>", "detail": "<string>", "code": "<string>" }
 //! ```
 //!
-//! `result` is an MCP tool result object. Replies without an `id` (events, heartbeats) are ignored
-//! by the mcp-server in v1.0; Phase 3 will buffer console/network events pushed this way.
+//! `result` is the browser execution result later normalized by the service. Replies without an
+//! `id` are browser events; [`crate::hub::outbound::browser::Browser`] handles the recognized event
+//! vocabulary without involving MCP lifecycle.
 //!
 //! `hop`, `detail`, and `code` on a `tool_error` reply are optional. `hop` is only ever `"cdp"` or
 //! `"page"` -- the extension tags mechanism (which layer threw), never policy; an absent `hop`
@@ -28,6 +30,24 @@
 //! surfaced to the MCP client.
 //! `code` carries a small machine-readable extension state only where the service has a safe,
 //! explicit recovery path; unknown codes are ignored.
+//!
+//! ## Browser tab transition result (ADR-0099)
+//!
+//! `resultFeatures` is an additive per-request compatibility opt-in. When it contains
+//! `"tabDeltaV1"`, the extension may add this bounded observation to `structuredContent`:
+//! ```json
+//! { "tabDelta": {
+//!   "opened": [{ "tabId": 42, "active": true }],
+//!   "closed": [],
+//!   "activeTabId": 42,
+//!   "more": false
+//! } }
+//! ```
+//! The extension emits only transitions correlated with the exact managed opener tab and opaque
+//! workspace while the request ran. It reports observation, not causality. The service validates
+//! and atomically adopts every still-open `opened` tab before converting native ids to composite
+//! ids and returning the result. An older extension ignores the request member; a newer extension
+//! never exposes the result to an older service that did not opt in.
 //!
 //! ## Take-the-wheel hold (g10, ADR-0018 step 2)
 //!
@@ -55,7 +75,7 @@
 //! it atomically in the binary). A `set_hold` whose `held` member is missing or not a JSON
 //! boolean gets the `hold_error` reply above and changes nothing. Request/reply only: the
 //! binary never pushes an unsolicited `hold_state` or `hold_error`. The native-host relays these
-//! messages verbatim, exactly like every other frame; only the mcp-server
+//! messages verbatim, exactly like every other frame; only the service
 //! ([`crate::hub::outbound::browser::Browser`]) interprets them.
 //!
 //! ## Panic kill switch (g11, ADR-0018 step 2)
@@ -67,8 +87,8 @@
 //!
 //! Sent once the extension has detached its own debugger attachments (or begun to; the marker
 //! that guarantees the detach completes lives in the extension's own storage, not on the wire)
-//! and is tearing down the native port. The mcp-server marks the session killed, fails every
-//! in-flight and subsequent tool call with a truthful hop-attributed error until a fresh
+//! and is tearing down the native port. The service marks the browser connection killed, fails
+//! every in-flight and subsequent browser call with a truthful hop-attributed error until a fresh
 //! native-host connection attaches, and writes one audit session-event record. No framing
 //! change; the native-host relays this event verbatim like any other frame.
 //!
@@ -86,58 +106,19 @@
 //!
 //! Mechanism only: the extension reports `chrome.tabs.get(tabId).url` verbatim (`null` for an
 //! unknown/closed tab or a lookup failure) and makes no policy decision about it. The
-//! mcp-server's dispatch chokepoint ([`crate::hub::outbound::browser::Browser::tab_url`]) uses the
+//! service's neutral dispatch pipeline ([`crate::hub::outbound::browser::Browser::tab_url`]) uses the
 //! reported URL to resolve the governing domain for a tab-scoped tool call; it is never trusted
 //! from tool call parameters. This reply routes through the same generic (non-`tool_error`)
 //! reply path as a `tool_response` -- no new routing logic, only a new `type` value.
 //!
-//! ## Adapter/control session-hello's `guid` member (H3, ADR-0030 Decision 4)
+//! ## Browser wire `guid` member (ADR-0047, amended by ADR-0096)
 //!
-//! This section documents the wire vocabulary between the binary and the extension; the
-//! adapter/control session-hello below is a DIFFERENT connection (thin ADAPTER <-> persistent
-//! SERVICE, never the extension link) that rides the SAME 4-byte-LE `host.rs` framing. H2
-//! (`src/hub/handshake.rs`) defines the hello's `hub`/`role` members and its
-//! `ROLE_ADAPTER`/`ROLE_CONTROL` constants; this is not a second or separate handshake frame, only
-//! the documentation of one more member on that existing hello:
-//!
-//! ```json
-//! { "hub": 1, "role": "adapter", "guid": "<uuid-v4>" }
-//! ```
-//!
-//! `guid` is present only for `role == "adapter"` (absent for the reserved `"control"` role): the
-//! adapter-minted session identity (`crate::hub::session::SessionGuid`), a canonical lowercase
-//! hyphenated UUIDv4. The thin ADAPTER mints it once per process (`ipc::relay_adapter`) and reuses
-//! it for the process's lifetime; the SERVICE parses it (`SessionGuid::parse`), binds it to the
-//! presenting OS peer (`crate::hub::session::SessionRegistry::admit`), and threads it into
-//! `transport::mcp::server::serve_session` as that session's opaque identity. The EXTENSION link
-//! uses NO hello at all (its own endpoint, server-speaks-first; PINS.md SS1 as amended
-//! 2026-07-04), so there is no `ext` role and nothing about the extension link to document here.
-//!
-//! ## Tab-group-per-session request (H7, ADR-0030 Decision 6/7)
-//!
-//! ## binary -> extension
-//! ```json
-//! { "type": "group_request", "guid": "<session guid>", "tabIds": [<number>...], "title": "<string>" }
-//! ```
-//!
-//! ## extension -> binary
-//! ```json
-//! { "type": "group_response", "guid": "<echoed>", "ok": <bool> }
-//! ```
-//!
-//! Additive; ONE new `type` value on the SAME channel, out of band from tool dispatch exactly
-//! like the tab-URL query above. Mechanism only; the extension groups the named tabIds and makes
-//! no policy decision (never inspects a tab's url/host/domain/grant to decide membership --
-//! ADR-0030 Decision 6: "The extension's per-group checks remain defense-in-depth only"). No
-//! `id` member on either side: this is fire-and-forget presentation, never correlated back to a
-//! waiting caller the way a `tool_request`/`tab_url_request` reply is (an incoming
-//! `group_response` is simply an id-less event to [`crate::hub::outbound::browser::Browser`], same
-//! as `session_killed`). The service tracks which tabIds belong to which session
-//! (`crate::hub::session`, ADR-0030 Decision 6); this message is how it tells the extension to
-//! reflect that in a visible Chrome tab group. Same GUID reuses its existing group; a different
-//! GUID gets a distinct one (ADR-0030 Decision 7: "two adapters in one editor -> two GUIDs -> two
-//! groups"). The GUID here is the SAME secret material as the session-hello's `guid` member above
-//! and MUST NOT be written to any log/audit sink from this path.
+//! Browser `tool_request` frames retain the field spelling `guid` for browser adapter version
+//! skew. Its value is now the service-minted
+//! [`ghostlight_transport::workspace_id::WorkspaceId`] for the
+//! work's browser workspace. It is not an MCP request id, protocol session, process identity, or
+//! authentication credential. Domain code and the typed MCP-edge bridge use the honest
+//! `WorkspaceId` name. This compatibility field must never be written raw to logs or audit.
 //!
 //! ## On-screen notification (SAPS PRES-HIGH-01)
 //!
@@ -148,16 +129,16 @@
 //! ```
 //!
 //! `icon`, `description`, and `ref` are optional; `title` is always present. Additive; ONE new
-//! `type` value on the SAME channel, the same fire-and-forget-presentation posture as
-//! `group_request` above (no `id`, no reply, no policy decision on the extension side -- it
-//! renders exactly what it is told). `title` is deliberately NOT the extension's `caption()`
+//! `type` value on the SAME channel with a fire-and-forget presentation posture (no `id`, no
+//! reply, no policy decision on the extension side -- it renders exactly what it is told).
+//! `title` is deliberately NOT the extension's `caption()`
 //! mechanism (optional decorative flavor text, off by default) -- a notification is substantive
 //! and must always render. `class` is the standard severity taxonomy this codebase's own tracing
 //! already uses -- `"info"`/`"debug"`/`"warn"`/`"error"` -- so the primitive stays general-purpose
 //! rather than denial-specific (today: `"error"` for a sacred-domain denial, `"warn"` for a policy
 //! denial); `ref` is an opaque cross-reference
 //! (today: a denial_id) a viewer can correlate back to
-//! the structured audit record later. First caller: [`crate::mcp::pipeline::run_tool_call`], at
+//! the structured audit record later. First caller: [`crate::tool::pipeline::run_tool_call`], at
 //! each of the three points a call is denied.
 //!
 //! ## Extension debug events (ADR-0059)
@@ -169,7 +150,8 @@
 //!
 //! Sent ONLY when the extension's own `chrome.storage.local` debug flag is on (default off,
 //! toggled from the options page); never sent otherwise, so a normal install produces zero
-//! extra traffic. `event` is a short name (`"connect_attempt"`, `"connect_disconnect"` today);
+//! extra traffic. `event` is a short name (`"connect_attempt"`, `"connect_disconnect"`, or a
+//! `"managed_tab_*"` browser-topology lifecycle name);
 //! `detail` is optional, freeform, and never policy-bearing -- purely a developer breadcrumb.
 //! The binary appends it verbatim into [`crate::hub::outbound::browser::Browser`]'s existing
 //! debug-state event ring (the SAME file `ghostlight doctor`/a raw `debug-state-<pid>.json`

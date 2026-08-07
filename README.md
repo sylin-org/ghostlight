@@ -70,8 +70,8 @@ Ghostlight is at its best when browser work has a thread to follow:
   work with the session already there. Credentials stay with the browser.
 - **Finish the interaction.** Navigate, fill forms, upload files, resolve dialogs, wait for page
   state, and carry results from one step into the next.
-- **Keep the thread.** Move through known owned tabs and recover deliberately when a tab or
-  connection changes underneath the task.
+- **Follow the browser.** Keep working when a site opens a supported child tab or when a known
+  workspace changes underneath the task.
 - **See what failed.** Bring page state, console messages, and network requests together so the
   next debugging step comes from evidence instead of guesswork.
 
@@ -86,8 +86,9 @@ Ghostlight works in a dedicated sky-blue tab group inside the browser window you
 scans, clicks, typing, drags, and longer phases share one visual language, so the movement on screen
 has an explanation.
 
-Pause the workspace, take over for a delicate step, or stop it. Ghostlight works only in its owned
-tabs; ordinary tabs remain outside the agent's workspace.
+Pause the workspace, take over for a delicate step, or stop it. Move its tabs where you want them;
+Ghostlight follows the workspace instead of snapping it back. Ordinary tabs remain outside the
+agent's owned set.
 
 Personal use is complete without a policy manifest. Start with the full browser engine and get
 useful work done. When a workflow needs stronger boundaries, grant `read`, `action`, `write`, and
@@ -104,15 +105,16 @@ browser operating models when that is the question.
 
 **Platform state.** Windows and Linux are verified end to end against live browsers. macOS builds and passes the full test suite in CI; its live-browser verification is still owed.
 
-**Extension state.** The Chrome Web Store serves Chrome adapter v0.7.1. Chrome adapter v0.7.1
-covers Ghostlight service versions v0.7.1-v0.7.3. Chrome adapter v0.8.0 is pending review and must
-become public before service v0.8.0. Install the extension from the public listing.
+**Extension state.** The Chrome Web Store serves Chrome adapter v0.8.0. Chrome adapter v0.8.0 covers
+Ghostlight service versions v0.8.x. Install the extension from the public listing. See the full
+[adapter compatibility map](compatibility.json).
 
 The service and Chrome adapter version independently. The
 [compatibility map](compatibility.json) is authoritative, and the
 [public status file](docs/public-status.json) owns current release, platform, and store state.
 
-See the [changelog](CHANGELOG.md) for release changes and upgrade consequences.
+The 0.8 source candidate implements exact local stdio MCP revisions `2025-11-25` and
+`2026-07-28`. See the [changelog](CHANGELOG.md) for release changes and upgrade consequences.
 
 </details>
 
@@ -120,15 +122,15 @@ See the [changelog](CHANGELOG.md) for release changes and upgrade consequences.
 <summary><strong>How Ghostlight fits together</strong></summary>
 
 ```text
-MCP Client <--stdio--> Relay <--local IPC--> Service <--native messaging--> Relay
-                                                                        |
-                                                                     Extension <--CDP--> Browser
+MCP Client <--stdio--> ghostlight-mcp-connector <--typed local IPC--> ghostlight service
+    <--browser IPC--> ghostlight-browser-connector <--native messaging--> Extension <--CDP--> Browser
 ```
 
-The persistent Rust service owns workspaces, browser coordination, optional governance, and audit.
-MCP clients and Chromium launch separate roles of the small `ghostlight-relay` executable. The
-extension owns Chrome mechanism. Each component can reconnect independently.
+The connector owns MCP protocol state. The persistent service owns workspaces, browser
+coordination, optional governance, and audit. The browser connector passes native messages, while
+the extension owns Chrome mechanism. Each role can reconnect independently.
 
+[ADR-0096](docs/adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md) explains the boundary.
 [docs/SPEC.md](docs/SPEC.md) gives the deeper governance model. The
 [installation guide](docs/guides/installation.md) includes the source-development path.
 

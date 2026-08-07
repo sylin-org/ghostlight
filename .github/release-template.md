@@ -1,9 +1,13 @@
 Ghostlight ${VERSION} -- governed browser automation for AI agents.
 
-A native Rust service plus a thin Chromium adapter that gives an AI agent controlled
-access to your real, authenticated browser session, with an opt-in governance layer
-(capability grants, sacred domains, audit). See the README and docs/guides/ for the
+A native Rust service, protocol-versioned MCP edge, and thin Chromium adapter that give an AI
+agent controlled access to your real, authenticated browser session, with an opt-in governance
+layer (capability grants, sacred domains, audit). See the README and docs/guides/ for the
 full walkthrough.
+
+## What's changed
+
+${CHANGELOG}
 
 ## Install
 
@@ -11,6 +15,10 @@ full walkthrough.
 2. Install [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
    from the Chrome Web Store.
 3. Restart your MCP client, then verify the whole chain with `npx ghostlight doctor`.
+
+Each platform archive contains the persistent `ghostlight` service, the protocol-versioned
+`ghostlight-mcp-connector` stdio edge, and the browser-only `ghostlight-browser-connector` native host. MCP clients
+must start `ghostlight-mcp-connector`; the removed `ghostlight-relay --role agent` path is not a fallback.
 
 End-to-end verified on Windows and Linux. macOS builds and passes the full test suite in CI;
 live-browser verification there is still owed.
@@ -36,6 +44,7 @@ The SHA-256 checksums are below (the attestation is the stronger, signed check).
 | macOS | Intel | `ghostlight-${VERSION}-x86_64-apple-darwin.tar.gz` |
 | Linux | x86_64 | `ghostlight-${VERSION}-x86_64-unknown-linux-gnu.tar.gz` |
 | Chrome adapter | any | `ghostlight-extension-v${ADAPTER_VERSION}.zip` |
+| Claude Desktop MCPB | Windows/macOS | `ghostlight-${VERSION}.mcpb` |
 
 ## Checksums (SHA-256)
 

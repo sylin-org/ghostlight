@@ -10,8 +10,11 @@
 > **Historical design baseline.** This document preserves the original 2026-07-01 design and its
 > deep governance rationale. It is not a current topology or tool inventory. Accepted and amended
 > [ADRs](adr/README.md), the live tree, and generated schemas are authoritative where they differ.
-> In particular, Ghostlight now runs as a persistent local service plus a thin relay executable,
-> and its additive tool surface has grown beyond the inventory below.
+> In particular, Ghostlight now runs as `ghostlight-mcp-connector` at the exact-revision stdio
+> shore, the persistent protocol-neutral `ghostlight` service, and browser-only
+> `ghostlight-browser-connector`. Browser
+> routing uses service-minted `WorkspaceId` in the compatibility `guid` field, not a process role
+> or client-name key. Its additive tool surface has also grown beyond the inventory below.
 
 ---
 

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Debug / observability sink for the mcp-server role.
+//! Debug and observability sink for the persistent service and browser relay.
 //!
-//! When enabled (`--debug` or `GHOSTLIGHT_DEBUG=1`), the server records what it does at the three
-//! process boundaries -- MCP request/response, tool-call begin/end, extension connect/disconnect --
+//! When enabled (`--debug` or `GHOSTLIGHT_DEBUG=1`), a process records its local boundaries --
+//! service tool work and browser attach/detach, or browser-relay IPC --
 //! into two per-process files under the log directory:
 //! - `debug-state-<pid>.json`: a live snapshot (pid, uptime, extension connected?, in-flight calls,
-//!   counters, recent events) that `ghostlight status` reads (newest session wins).
+//!   counters, recent events) that `ghostlight status` reads (newest service process wins).
 //! - `debug-events-<pid>.jsonl`: the append-only structured event stream (one JSON object per
 //!   line), a full firehose for post-hoc inspection and a precursor to the v1.5 audit subsystem.
 //!
@@ -40,7 +40,7 @@ const IDENT_MAX: usize = 120;
 /// throttled. Connection transitions bypass this so the connected flag is always accurate.
 const STATE_THROTTLE_MS: u128 = 200;
 
-/// Session files older than this are best-effort cleaned up when a new session starts.
+/// Per-process debug files older than this are best-effort cleaned up when a new sink starts.
 const STALE_AFTER: Duration = Duration::from_secs(24 * 3600);
 
 /// Milliseconds since the Unix epoch (best-effort; 0 if the clock is before the epoch).
@@ -87,7 +87,7 @@ pub fn fmt_ms(ms: u128) -> String {
     }
 }
 
-/// Session `debug-state-*.json` files under `dir`, newest (by mtime) first.
+/// Per-process `debug-state-*.json` files under `dir`, newest (by mtime) first.
 pub fn session_state_files(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(dir)
         .into_iter()
@@ -107,7 +107,7 @@ pub fn session_state_files(dir: &Path) -> Vec<PathBuf> {
     found.into_iter().map(|(_, p)| p).collect()
 }
 
-/// Best-effort removal of session files older than [`STALE_AFTER`] (bounds log-dir litter).
+/// Best-effort removal of per-process debug files older than [`STALE_AFTER`] (bounds log-dir litter).
 fn cleanup_stale(dir: &Path) {
     let now = SystemTime::now();
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -132,19 +132,19 @@ fn cleanup_stale(dir: &Path) {
     }
 }
 
-/// The raw newest `debug-state-<pid>.json` contents, if a debug session has written one.
+/// The raw newest `debug-state-<pid>.json` contents, if a debug process has written one.
 pub fn raw_state() -> Option<String> {
     let dir = log_dir()?;
     let newest = session_state_files(&dir).into_iter().next()?;
     std::fs::read_to_string(newest).ok()
 }
 
-/// A human-readable `ghostlight status` report, or a hint when no debug session is found.
+/// A human-readable `ghostlight status` report, or a hint when no service debug record is found.
 ///
-/// Role-aware: `status` describes the mcp-server role only. A state file is a *candidate* when it
+/// Role-aware: `status` describes the persistent service only. A state file is a *candidate* when it
 /// parses as JSON and its `role` field is either absent (old-format files, written before the
-/// `role` field existed) or equal to `"mcp-server"`; native-host state files (see `doctor`, which
-/// does read those) are skipped here rather than misreported as a server session.
+/// `role` field existed) or equal to the compatibility value `"mcp-server"`; native-host state
+/// files (see `doctor`, which does read those) are skipped rather than misreported as the service.
 pub fn status_report() -> String {
     let Some(dir) = log_dir() else {
         return "no log directory available on this platform".to_string();
@@ -296,15 +296,14 @@ struct Counters {
     frames_in: u64,
     connects: u64,
     disconnects: u64,
-    /// ADR-0051 P4.3b: the adapter (relay --role agent) mints its session identity exactly once for
-    /// its whole process (ADR-0047 D2). Counted so a test reads a structured signal instead of
-    /// scraping the events log; the human event is still recorded alongside.
+    /// Legacy ADR-0051 counter retained in the debug snapshot schema. ADR-0096 removed the
+    /// process-minted edge-local identity, so current processes leave this at zero.
     identity_mints: u64,
-    /// ADR-0051 P4.3b: reconnect episodes this adapter completed across a service restart (ADR-0045);
-    /// `>= 1` after one restart.
+    /// Browser-shore reconnect episodes completed across a service restart; `>= 1` after one
+    /// restart.
     reconnects: u64,
     /// ADR-0051 P4.3b: under a multi-candidate override (ADR-0048), the 1-based index of the endpoint
-    /// candidate this adapter last resolved to. `None` outside an override (a single candidate).
+    /// candidate this process last resolved to. `None` outside an override (a single candidate).
     #[serde(skip_serializing_if = "Option::is_none")]
     resolved_candidate: Option<u32>,
     /// ADR-0051 P4.3b: the candidate count for [`Counters::resolved_candidate`]. `None` outside an
@@ -318,18 +317,19 @@ struct Counters {
 struct Snapshot<'a> {
     pid: u32,
     /// This process's own creation time (ADR-0029), so a reader (`doctor`, its `--fix` reaper) can
-    /// tell this session apart from a later process that reuses the pid: a pid that is alive but
-    /// carries a different creation time is a different, unrelated process, never this session. `0`
+    /// tell this process record apart from a later process that reuses the pid: a pid that is alive
+    /// but carries a different creation time is a different, unrelated process. `0`
     /// when the platform does not record it (Unix). Absent in state files written before this field.
     created: u64,
-    /// The parent (MCP client) pid at startup, and its creation time (`0` when unknown). Together
-    /// they let a reader decide whether this session has been orphaned (parent gone) without any
-    /// pid-reuse false positive. `0` ppid means "not recorded" (old files): a reader must then treat
-    /// the session as still-served, never reap it (ADR-0029 safety default).
+    /// The parent pid at startup, and its creation time (`0` when unknown). Together they let a
+    /// reader safely classify legacy edge-process records without a pid-reuse false positive. `0`
+    /// ppid means "not recorded" (old files): a reader must never reap that record's process
+    /// (ADR-0029 safety default).
     ppid: u32,
     parent_created: u64,
-    /// "mcp-server" or "native-host". Absent in state files written before this field existed;
-    /// consumers (see `doctor` / `status_report`) treat a missing field as `"mcp-server"`.
+    /// Stable serialized role value: `"mcp-server"` names the persistent service and
+    /// `"native-host"` names the browser relay. Absent in older files; consumers treat a missing
+    /// field as `"mcp-server"`.
     role: &'static str,
     /// The MCP client's self-reported identity (from `initialize`'s `clientInfo`), if recorded.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -612,7 +612,7 @@ impl DebugSink {
     }
 
     /// Record a frame sent to the extension (counter only; not an event -- too chatty). Refreshes
-    /// `updated_ms` (throttled, see `Inner::touch`) so an idle-but-relaying session does not look
+    /// `updated_ms` (throttled, see `Inner::touch`) so an idle-but-relaying process does not look
     /// stale in `status`/`doctor` just because no MCP request has arrived recently.
     pub fn frame_out(&self) {
         self.with(|i| {
@@ -706,9 +706,10 @@ impl DebugSink {
         });
     }
 
-    /// ADR-0051 P4.3b: the adapter minted its stable per-process session identity (ADR-0047 D2).
-    /// Increments the structured counter AND records the same human event `ipc_note` did, so a test
-    /// can read `counters.identity_mints == 1` instead of scraping the events log. Forces a snapshot.
+    /// Increment the legacy process-identity counter and record its compatibility event.
+    ///
+    /// ADR-0096 removed this identity from the current MCP path; the method remains only for
+    /// readers and older harnesses that understand the existing debug snapshot schema.
     pub fn note_identity_minted(&self) {
         self.with(|i| {
             i.counters.identity_mints += 1;
@@ -726,8 +727,8 @@ impl DebugSink {
         });
     }
 
-    /// ADR-0051 P4.3b: the adapter reconnected across a service restart (ADR-0045). Increments the
-    /// structured counter AND records the human event. Forces a snapshot.
+    /// Record that the browser relay reconnected across a service restart. Increments the
+    /// structured counter and records the human event. Forces a snapshot.
     pub fn note_reconnected(&self) {
         self.with(|i| {
             i.counters.reconnects += 1;
@@ -744,7 +745,7 @@ impl DebugSink {
         });
     }
 
-    /// ADR-0051 P4.3b: the adapter resolved a multi-candidate override (ADR-0048) to candidate
+    /// Record that a shore resolved a multi-candidate test override to candidate
     /// `index`/`total` (both 1-based counts). Records the current resolution in the structured state
     /// AND the human event. Forces a snapshot.
     pub fn note_resolved_candidate(&self, index: u32, total: u32) {
@@ -771,8 +772,9 @@ impl Default for DebugSink {
     }
 }
 
-/// Build the observability sink for `role` ("mcp-server" for the standalone SERVICE, "adapter",
-/// or "native-host" -- PINS.md SS5.5). Debug-off yields a no-op sink; if the log directory cannot
+/// Build the observability sink for a stable serialized role (`"mcp-server"` for the persistent
+/// service or `"native-host"` for the browser relay). Older `"adapter"` files remain readable but
+/// no current product executable writes them. Debug-off yields a no-op sink; if the log directory cannot
 /// be prepared we warn and continue without observability rather than failing the process.
 pub fn build_debug_sink(debug: bool, role: &'static str) -> DebugSink {
     if !debug {

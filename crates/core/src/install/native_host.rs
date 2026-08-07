@@ -235,9 +235,9 @@ pub fn linux_host_path(spec: &BrowserSpec, ctx: &PlanCtx) -> PathBuf {
 /// The native-host launcher for the active instance (ADR-0044 Decision 4 / ADR-0046): the path the
 /// host manifest `path` field points at, plus whether the installer must place a per-instance copy.
 ///
-/// The DEFAULT instance points the manifest straight at the `ghostlight-relay` sibling beside the
+/// The DEFAULT instance points the manifest straight at the `ghostlight-browser-connector` sibling beside the
 /// running binary -- no copy, byte-identical. A NON-DEFAULT instance points it at a per-instance copy
-/// named `ghostlight-relay-<n>[.exe]` under that instance's data dir, because Chrome launches the
+/// named `ghostlight-browser-connector-<n>[.exe]` under that instance's data dir, because Chrome launches the
 /// native host with a bare path and no argument room; the copied binary reads its own `argv[0]`
 /// basename to know which instance it is (SPEC 7), and detects the browser role from the
 /// `chrome-extension://` origin Chrome passes (ADR-0051 Phase 3). Only the tiny relay is ever copied,
@@ -246,13 +246,16 @@ pub fn linux_host_path(spec: &BrowserSpec, ctx: &PlanCtx) -> PathBuf {
 pub fn instance_launcher(ctx: &PlanCtx) -> (PathBuf, bool) {
     let instance = ghostlight_transport::instance::Instance::resolve();
     if instance.is_default() {
-        (sibling_bin(&ctx.current_exe, "ghostlight-relay"), false)
+        (
+            sibling_bin(&ctx.current_exe, "ghostlight-browser-connector"),
+            false,
+        )
     } else {
         let name = instance.name().expect("a non-default instance has a name");
         let file_name = if cfg!(windows) {
-            format!("ghostlight-relay-{name}.exe")
+            format!("ghostlight-browser-connector-{name}.exe")
         } else {
-            format!("ghostlight-relay-{name}")
+            format!("ghostlight-browser-connector-{name}")
         };
         let path = ctx.local.join(instance.dir_leaf()).join(file_name);
         (path, true)
@@ -459,9 +462,9 @@ mod tests {
         );
         let s = path.to_string_lossy();
         let suffix = if cfg!(windows) {
-            "ghostlight-relay.exe"
+            "ghostlight-browser-connector.exe"
         } else {
-            "ghostlight-relay"
+            "ghostlight-browser-connector"
         };
         assert!(
             s.ends_with(suffix),
