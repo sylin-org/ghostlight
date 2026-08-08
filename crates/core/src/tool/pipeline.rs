@@ -20,8 +20,7 @@
 //!    `Handler::Local` dispatch, in the position pinned by stage 3.
 //! 9. Governance authorization (ADR-0024 Decision 3), with resource resolution driven by the
 //!    descriptor's resource shape and skipped entirely when ungoverned or requires is empty.
-//! 10. Bounded first-call wait; dispatch via `Handler` (`ExtensionForward` -> `Browser::call`,
-//!     unchanged contract).
+//! 10. Bounded first-call wait; dispatch via `Handler` (`Mechanism` -> typed browser request).
 //! 11. `PostDispatch::NavigateLanding`: the landing re-check and park-on-real-deny (never on
 //!     shadow), driven by the marker instead of `name == "navigate"`.
 //! 12. Audit completion (ADR-0024 Decision 3), then the `postprocess` hook and wait-note.
@@ -30,10 +29,13 @@
 //! fixture parse, no resource resolution under all-open, no frames for free actions, shadow
 //! mode observably identical to allow.
 
+use crate::browser::mechanism::{
+    compile_operation, BrowserAuxiliaryPurpose, MechanismId, MechanismRequest,
+};
 use crate::browser::pattern::HostOutcome;
 use crate::browser::{pattern, resource, sacred};
 use crate::governance::config::reload::ConfigStore;
-use crate::governance::dispatch::{hold_message, Gate, Governance};
+use crate::governance::dispatch::{Gate, Governance, HOLD_HINT_AFTER};
 use crate::governance::ports::{Capability, Decision, Denial, EffectiveMode, GoverningResource};
 use crate::hub::authority::{AuthoritySnapshot, AuthorityStore};
 use crate::hub::outbound::browser::Browser;
@@ -263,7 +265,13 @@ fn render_outcome(id: Option<Value>, outcome: CallOutcome) -> TestResponse {
         CallOutcome::Denied { message, .. } => {
             TestResponse::success(id, text_content(with_org_contact_line(message)))
         }
-        CallOutcome::Held { message } => TestResponse::success(id, text_content(message)),
+        CallOutcome::Held { prolonged } => TestResponse::success(
+            id,
+            json!({
+                "content": [{"type": "text", "text": "browser session held by user"}],
+                "structuredContent": {"held": {"prolonged": prolonged}}
+            }),
+        ),
         CallOutcome::AttentionRequired { message } => {
             TestResponse::success(id, text_content(message))
         }
@@ -466,7 +474,7 @@ fn stamp_audit_signals(
 /// `action: None` variant carries an EMPTY requirement set (today: `explain`; C7's `script`
 /// joins it). `form_fill` (C10) declares `Read + Write` on its `action: None` variant, so it is
 /// never free-local -- it always falls through to grant enforcement and dispatches at the
-/// post-grant Local position instead, exactly like an `ExtensionForward` tool.
+/// post-grant Local position instead, exactly like a direct mechanism operation.
 fn is_free_local_action(descriptor: &OperationDescriptor) -> bool {
     matches!(descriptor.handler, Handler::Local(_)) && descriptor.requires.is_empty()
 }
@@ -680,7 +688,7 @@ pub(crate) async fn run_operation_call(
             audit.held();
         }
         return CallOutcome::Held {
-            message: hold_message(name, action, held_for),
+            prolonged: held_for >= HOLD_HINT_AFTER,
         };
     }
     if !dry_run
@@ -797,7 +805,12 @@ pub(crate) async fn run_operation_call(
     // deleted, and the grant path's `tab_url_request`). Nothing is probed until the first stage
     // that actually needs it calls `.get()` -- an all-open call, an ungoverned call, a free
     // action, or a call with no `tabId` at all issues zero frames.
-    let mut tab_url = LazyTabUrl::new(browser, args.get("tab").and_then(Value::as_i64), &execution);
+    let mut tab_url = LazyTabUrl::new(
+        browser,
+        guid,
+        args.get("tab").and_then(Value::as_i64),
+        &execution,
+    );
 
     // The sacred-domains never-touch check (ADR-0018 step 2, g08): always enforced,
     // independent of governance.mode or manifest presence -- RECONCILIATION.md section 1's
@@ -886,7 +899,7 @@ pub(crate) async fn run_operation_call(
     // does NOT qualify ([`is_free_local_action`] false -- C10's `form_fill`) falls through to
     // grant enforcement below and dispatches at the post-grant Local position instead. Every
     // OTHER free action (`tabs_create_mcp`, `resize_window`, `narrate`, `computer` `wait`) falls
-    // through to an ordinary allowed `ExtensionForward` dispatch below, and to
+    // through to an ordinary allowed typed mechanism dispatch below, and to
     // `governance.authorize`'s own free-action arm. All are audited as an allow with no grant
     // attribution and a real (not hardcoded) `duration_ms`.
     if is_free_local_action(descriptor) {
@@ -896,18 +909,6 @@ pub(crate) async fn run_operation_call(
         let Handler::Local(f) = descriptor.handler else {
             unreachable!("is_free_local_action only returns true for Handler::Local");
         };
-        let local_legacy_args = if descriptor.key.id == OperationId::BrowserFlow {
-            None
-        } else {
-            match descriptor.legacy_arguments(args) {
-                Ok(arguments) => Some(arguments),
-                Err(error) => {
-                    audit.complete();
-                    return CallOutcome::Failure { error };
-                }
-            }
-        };
-        let local_args = local_legacy_args.as_ref().unwrap_or(args);
         let ctx = LocalCtx {
             browser,
             store,
@@ -917,7 +918,6 @@ pub(crate) async fn run_operation_call(
             guid,
             config: &config,
             operation,
-            args: local_args,
             execution: &execution,
             overlay,
             work,
@@ -1125,20 +1125,9 @@ pub(crate) async fn run_operation_call(
     // something ([`is_free_local_action`] already returned early for the empty-requires case
     // above), so by construction this is the ONLY remaining way a Local tool reaches here --
     // `form_fill` (C10) is the first user. Same audit/postprocess/wait-note flow as
-    // `ExtensionForward` below, minus the navigate-only landing re-check no Local tool declares.
+    // typed mechanism dispatch below, minus the navigate-only landing re-check no Local operation
+    // declares.
     if let Handler::Local(f) = descriptor.handler {
-        let local_legacy_args = if descriptor.key.id == OperationId::BrowserFlow {
-            None
-        } else {
-            match descriptor.legacy_arguments(args) {
-                Ok(arguments) => Some(arguments),
-                Err(error) => {
-                    audit.complete();
-                    return CallOutcome::Failure { error };
-                }
-            }
-        };
-        let local_args = local_legacy_args.as_ref().unwrap_or(args);
         let ctx = LocalCtx {
             browser,
             store,
@@ -1148,7 +1137,6 @@ pub(crate) async fn run_operation_call(
             guid,
             config: &config,
             operation,
-            args: local_args,
             execution: &execution,
             overlay,
             work,
@@ -1202,24 +1190,25 @@ pub(crate) async fn run_operation_call(
         };
     }
 
-    let Some(dispatch_tool) = descriptor.legacy_dispatch_tool() else {
-        audit.complete();
-        return CallOutcome::Failure {
-            error: ToolError::invalid_request(format!(
-                "operation {} / {} has no browser mechanism",
-                descriptor.key.id, descriptor.key.intent
-            )),
-        };
-    };
-    let dispatch_args = match descriptor.legacy_arguments(args) {
-        Ok(arguments) => arguments,
+    debug_assert!(matches!(descriptor.handler, Handler::Mechanism));
+    let mechanism = match compile_operation(descriptor.key, args) {
+        Ok(Some(mechanism)) => mechanism,
+        Ok(None) => {
+            audit.complete();
+            return CallOutcome::Failure {
+                error: ToolError::invalid_request(format!(
+                    "operation {} / {} did not compile a required browser mechanism",
+                    descriptor.key.id, descriptor.key.intent
+                )),
+            };
+        }
         Err(error) => {
             audit.complete();
             return CallOutcome::Failure { error };
         }
     };
     let mut outcome = browser
-        .call_with_delivery_outcome(guid, dispatch_tool, &dispatch_args, &execution)
+        .execute_mechanism_with_delivery_outcome(guid, &mechanism, &execution)
         .await;
     audit.dispatch_finished();
 
@@ -1291,10 +1280,16 @@ pub(crate) async fn run_operation_call(
                             Some(&d.denial_id),
                         );
                     }
-                    return CallOutcome::Denied {
-                        message: d.message,
-                        source: DenialSource::Policy,
+                    let message = if orchestration.is_none() {
+                        with_org_contact_line(d.message)
+                    } else {
+                        d.message
                     };
+                    let mut result = crate::tool::result::text_content(message);
+                    if let Some(object) = result.as_object_mut() {
+                        object.insert("isError".to_string(), Value::Bool(true));
+                    }
+                    return CallOutcome::Success { result };
                 }
                 Decision::ShadowDeny(d) => {
                     audit.landing_shadow_deny(d, landing_domain);
@@ -1564,7 +1559,7 @@ async fn post_navigate_landing_check(
     config_mode: EffectiveMode,
     execution: &ExecutionContext,
 ) -> (Decision, Option<String>) {
-    let resolved = match browser.tab_url(tab_id, execution).await {
+    let resolved = match browser.tab_url(guid, tab_id, execution).await {
         Ok(Some(url)) => resource::resolved_url_resource(&url),
         Ok(None) | Err(_) => GoverningResource::Indeterminate,
     };
@@ -1574,13 +1569,14 @@ async fn post_navigate_landing_check(
     };
     let decision = governance.decide(tool, None, requires, resolved, config_mode);
     if let Decision::Deny(_) = &decision {
+        let park = MechanismRequest::for_auxiliary(
+            BrowserAuxiliaryPurpose::SafetyPark,
+            MechanismId::NavigateUrl,
+            json!({ "url": "about:blank", "tab": tab_id }),
+        )
+        .expect("post-landing safety park must be declared by its auxiliary plan");
         let _ = browser
-            .call_with_context(
-                guid,
-                "navigate",
-                &json!({ "url": "about:blank", "tabId": tab_id }),
-                &ExecutionContext::safety_protocol(),
-            )
+            .execute_mechanism(guid, &park, &ExecutionContext::safety_protocol())
             .await;
     }
     (decision, domain)
@@ -1600,15 +1596,22 @@ async fn post_navigate_landing_check(
 /// fails closed to [`GoverningResource::Indeterminate`]).
 struct LazyTabUrl<'a> {
     browser: &'a Browser,
+    guid: &'a str,
     tab_id: Option<i64>,
     execution: &'a ExecutionContext,
     resolved: Option<Option<String>>,
 }
 
 impl<'a> LazyTabUrl<'a> {
-    fn new(browser: &'a Browser, tab_id: Option<i64>, execution: &'a ExecutionContext) -> Self {
+    fn new(
+        browser: &'a Browser,
+        guid: &'a str,
+        tab_id: Option<i64>,
+        execution: &'a ExecutionContext,
+    ) -> Self {
         Self {
             browser,
+            guid,
             tab_id,
             execution,
             resolved: None,
@@ -1620,7 +1623,11 @@ impl<'a> LazyTabUrl<'a> {
     async fn get(&mut self) -> Option<String> {
         if self.resolved.is_none() {
             let url = match self.tab_id {
-                Some(tab_id) => match self.browser.tab_url(tab_id, self.execution).await {
+                Some(tab_id) => match self
+                    .browser
+                    .tab_url(self.guid, tab_id, self.execution)
+                    .await
+                {
                     Ok(Some(url)) => Some(url),
                     Ok(None) | Err(_) => None,
                 },
@@ -2431,10 +2438,9 @@ mod tests {
         assert!(!path.exists(), "no audit file must be created");
     }
 
-    /// Test 4 (g10 spec section 6): a held `Browser` with NO extension connected returns the
-    /// `Paused:` text as a successful result (never `isError`), proving the hold check
-    /// precedes the "extension not connected" failure path; with the hold released, the
-    /// existing `isError` result is unchanged.
+    /// Test 4 (g10 spec section 6): a held `Browser` with NO extension connected returns a
+    /// semantic held result (never `isError`), proving the hold check precedes the "extension not
+    /// connected" failure path. Surface-specific corrective copy is tested at the MCP edge.
     #[tokio::test]
     async fn held_call_returns_the_pause_text_before_the_not_connected_error() {
         let recorder = Arc::new(Recorder::disabled());
@@ -2443,6 +2449,14 @@ mod tests {
             crate::governance::config::reload::ConfigStore::for_test_with_config(Config::minimal());
         let browser = Browser::new();
         browser.set_held(true);
+        let assert_held = |result: &Value| {
+            assert_ne!(
+                result["isError"], true,
+                "a held reply must never be isError"
+            );
+            assert_eq!(result["content"][0]["text"], "browser session held by user");
+            assert_eq!(result["structuredContent"]["held"]["prolonged"], false);
+        };
 
         // o04: inputSchema validation now runs before dispatch; computer needs action + tabId.
         let params =
@@ -2462,16 +2476,7 @@ mod tests {
             "a held reply is an ordinary tool result"
         );
         let result = resp.result.as_ref().expect("tool result present");
-        assert_ne!(
-            result["isError"], true,
-            "a held reply must never be isError"
-        );
-        let text = result["content"][0]["text"].as_str().expect("text block");
-        assert!(text.starts_with("Paused:"), "{text}");
-        assert!(
-            text.contains("'browser.screenshot (screenshot.viewport)' call"),
-            "{text}"
-        );
+        assert_held(result);
 
         let dialog_params =
             json!({ "name": "dialog", "arguments": { "action": "status", "tabId": 5 } });
@@ -2485,14 +2490,7 @@ mod tests {
             None,
         )
         .await;
-        let dialog_text = dialog_resp.result.as_ref().expect("dialog result")["content"][0]["text"]
-            .as_str()
-            .expect("dialog pause text");
-        assert!(dialog_text.starts_with("Paused:"), "{dialog_text}");
-        assert!(
-            dialog_text.contains("'browser.dialog (dialog.status)' call"),
-            "{dialog_text}"
-        );
+        assert_held(dialog_resp.result.as_ref().expect("dialog result"));
 
         let tab_params =
             json!({ "name": "tab_control", "arguments": { "action": "focus", "tabId": 5 } });
@@ -2506,14 +2504,7 @@ mod tests {
             None,
         )
         .await;
-        let tab_text = tab_resp.result.as_ref().expect("tab result")["content"][0]["text"]
-            .as_str()
-            .expect("tab pause text");
-        assert!(tab_text.starts_with("Paused:"), "{tab_text}");
-        assert!(
-            tab_text.contains("'browser.tabs (tabs.focus)' call"),
-            "{tab_text}"
-        );
+        assert_held(tab_resp.result.as_ref().expect("tab result"));
 
         // ADR-0022 Decision 7: `explain` gets the ordinary pause text like any other tool
         // while held, even though its own directory requirement is `[]` -- the hold check
@@ -2530,19 +2521,7 @@ mod tests {
             None,
         )
         .await;
-        let explain_result = explain_resp.result.as_ref().expect("tool result present");
-        assert_ne!(
-            explain_result["isError"], true,
-            "a held reply is never isError"
-        );
-        let explain_text = explain_result["content"][0]["text"]
-            .as_str()
-            .expect("text block");
-        assert!(explain_text.starts_with("Paused:"), "{explain_text}");
-        assert!(
-            explain_text.contains("'browser.context (context.describe)' call"),
-            "{explain_text}"
-        );
+        assert_held(explain_resp.result.as_ref().expect("tool result present"));
 
         browser.set_held(false);
         let resp2 = handle_tools_call(
@@ -2707,8 +2686,9 @@ mod tests {
     }
 
     /// A landing that drifts off-grant (e.g. a redirect): the tab is best-effort parked on
-    /// `about:blank`, the navigate result is replaced with a denial naming the FINAL host, and
-    /// the audit record is a deny with the real elapsed duration (not the pre-dispatch `0`).
+    /// `about:blank`, the navigate result is replaced with an error result naming the FINAL host,
+    /// and the audit record is a deny with the real elapsed duration (not the pre-dispatch `0`).
+    /// The canonical result boundary classifies this as partial with a committed effect.
     #[tokio::test]
     async fn point5_navigate_landing_off_grant_parks_and_denies() {
         let path = temp_audit_path("point5-deny");
@@ -2745,11 +2725,14 @@ mod tests {
             None,
         )
         .await;
-        let text = resp.result.as_ref().expect("tool result present")["content"][0]["text"]
+        let result = resp.result.as_ref().expect("tool result present");
+        let text = result["content"][0]["text"]
             .as_str()
             .expect("text content block");
         assert!(text.starts_with("Denied (D-"), "{text}");
         assert!(text.contains("evil.com"), "{text}");
+        assert_eq!(result["isError"], true);
+        assert!(result.get("structuredContent").is_none());
         assert_eq!(
             *seen.lock().unwrap(),
             vec!["navigate", "tab_url_request:5", "navigate"],
@@ -3439,17 +3422,10 @@ mod tests {
             "a denial is never isError: {result:?}"
         );
 
-        let rendered = render_outcome(
-            Some(json!(4)),
-            CallOutcome::Held {
-                message: "Paused: the user has taken control".to_string(),
-            },
-        );
+        let rendered = render_outcome(Some(json!(4)), CallOutcome::Held { prolonged: false });
         let result = rendered.result.expect("result present");
-        assert_eq!(
-            result["content"][0]["text"],
-            "Paused: the user has taken control"
-        );
+        assert_eq!(result["content"][0]["text"], "browser session held by user");
+        assert_eq!(result["structuredContent"]["held"]["prolonged"], false);
         assert!(
             result.get("isError").is_none(),
             "a hold is never isError: {result:?}"
@@ -3482,7 +3458,6 @@ mod tests {
         let authority_snapshot = authority.current();
         let execution = ExecutionContext::local();
         let config = store.current();
-        let args = json!({});
         let operation = BrowserOperation::new(
             OperationId::BrowserContext,
             IntentId::ContextDescribe,
@@ -3497,7 +3472,6 @@ mod tests {
             guid: "test-guid",
             config: &config,
             operation: &operation,
-            args: &args,
             execution: &execution,
             overlay: None,
             work: None,

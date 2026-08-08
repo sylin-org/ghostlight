@@ -65,8 +65,8 @@ pub enum CallOutcome {
         message: String,
         source: DenialSource,
     },
-    /// A take-the-wheel pause: rendered as ordinary successful text.
-    Held { message: String },
+    /// A take-the-wheel pause, kept semantic until the selected edge profile renders it.
+    Held { prolonged: bool },
     /// This workspace's denial circuit is open: rendered as ordinary successful text.
     AttentionRequired { message: String },
     /// Cooperative cancellation stopped the call at a typed physical-effect boundary.
@@ -91,7 +91,21 @@ pub(crate) fn delivery_failure_outcome(failure: DeliveryFailure) -> CallOutcome 
         };
     }
     match failure.error {
-        ToolError::Held { message } => CallOutcome::Held { message },
+        ToolError::Held { prolonged } => CallOutcome::Held { prolonged },
+        ToolError::AttentionRequired { message } => CallOutcome::AttentionRequired { message },
+        error => CallOutcome::Failure { error },
+    }
+}
+
+/// Convert one conclusive browser mechanism error into its protocol-neutral terminal outcome.
+///
+/// Raw read and observation mechanisms do not carry delivery ambiguity because they cannot
+/// commit the requested page effect. They can still be refused by the final hold or attention
+/// admission check. Keep those refusals semantic instead of flattening them into an ordinary
+/// extension failure.
+pub(crate) fn tool_error_outcome(error: ToolError) -> CallOutcome {
+    match error {
+        ToolError::Held { prolonged } => CallOutcome::Held { prolonged },
         ToolError::AttentionRequired { message } => CallOutcome::AttentionRequired { message },
         error => CallOutcome::Failure { error },
     }
@@ -117,11 +131,8 @@ pub struct LocalCtx<'a> {
     pub guid: &'a str,
     pub config: &'a Config,
     /// Canonical operation admitted by the registry for this local handler invocation.
-    ///
-    /// Compound handlers use this identity and its semantic arguments directly. `args` remains
-    /// the bounded legacy implementation shape for local handlers not yet migrated in R1.
+    /// Compound handlers use this identity and its semantic arguments directly.
     pub operation: &'a BrowserOperation,
-    pub args: &'a Value,
     /// The admitted execution context retained by descriptor-gated compound handlers.
     pub execution: &'a ExecutionContext,
     /// This call's validated tighten-only policy restriction, when present, so a
@@ -143,3 +154,24 @@ pub struct LocalCtx<'a> {
 /// ordinary `fn` pointer, since Rust has no native `async fn` pointer type.
 pub type LocalFuture<'a> =
     std::pin::Pin<Box<dyn std::future::Future<Output = CallOutcome> + Send + 'a>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conclusive_safety_refusals_remain_semantic() {
+        assert!(matches!(
+            tool_error_outcome(ToolError::held(true)),
+            CallOutcome::Held { prolonged: true }
+        ));
+        assert!(matches!(
+            tool_error_outcome(ToolError::attention_required("review needed")),
+            CallOutcome::AttentionRequired { message } if message == "review needed"
+        ));
+        assert!(matches!(
+            tool_error_outcome(ToolError::extension("offline")),
+            CallOutcome::Failure { .. }
+        ));
+    }
+}

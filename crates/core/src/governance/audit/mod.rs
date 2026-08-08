@@ -298,10 +298,28 @@ mod tests {
             orchestrator: None,
             batch_id: None,
             step: None,
+            role: None,
             dry_run: false,
             target_assurance: None,
             outcome: None,
         }
+    }
+
+    #[test]
+    fn ordinary_record_bytes_omit_the_optional_role() {
+        let record = sample_record("navigate", None, "read");
+        assert_eq!(
+            serde_json::to_string(&record).unwrap(),
+            r#"{"event_id":"00000000-0000-4000-8000-000000000000","ts":"2026-07-02T00:00:00.000Z","identity":null,"client":null,"tool":"navigate","action":null,"capability":"read","domain":null,"decision":"allow","grant_id":null,"denial_id":null,"duration_ms":0,"manifest":null,"held":false,"attention_required":false,"orchestrator":null,"batch_id":null,"step":null,"dry_run":false}"#
+        );
+    }
+
+    #[test]
+    fn mechanism_phase_record_serializes_the_closed_role() {
+        let mut record = sample_record("browser.act", Some("act.click"), "action");
+        record.role = Some(crate::governance::ports::AuditRole::MechanismPhase);
+        let value = serde_json::to_value(record).unwrap();
+        assert_eq!(value["role"], "mechanism_phase");
     }
 
     fn sample_session_event() -> SessionEventRecord {

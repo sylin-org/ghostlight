@@ -470,16 +470,6 @@ impl Handler {
                 ));
             }
         };
-        let presentation =
-            match ghostlight_legacy::invocation_presentation(external_tool, &arguments) {
-                Ok(presentation) => presentation,
-                Err(error) => {
-                    return Effects::output(success_response(
-                        &id,
-                        tool_error_result(None, &error.to_string()),
-                    ));
-                }
-            };
         let operation = match ghostlight_legacy::decode_call(external_tool, arguments.clone()) {
             Ok(operation) => operation,
             Err(error) => {
@@ -489,6 +479,17 @@ impl Handler {
                 ));
             }
         };
+        let presentation =
+            match ghostlight_legacy::invocation_presentation(external_tool, &arguments, &operation)
+            {
+                Ok(presentation) => presentation,
+                Err(error) => {
+                    return Effects::output(success_response(
+                        &id,
+                        tool_error_result(None, &error.to_string()),
+                    ));
+                }
+            };
         let flow_render_hints =
             ghostlight_legacy::flow_render_hints(external_tool, &arguments, &operation);
         let Some(workspace) = self.workspace.clone() else {
@@ -732,10 +733,22 @@ fn render_outcome(pending: PendingRequest, outcome: TerminalOutcome) -> Effects 
         )),
         TerminalOutcome::NotDispatched { message }
         | TerminalOutcome::Denied { message, .. }
-        | TerminalOutcome::Held { message }
         | TerminalOutcome::AttentionRequired { message } => {
             Effects::output(success_response(&id, tool_error_result(None, &message)))
         }
+        TerminalOutcome::Held { prolonged } => match ghostlight_legacy::encode_held(
+            prolonged,
+            pending.presentation.as_ref(),
+            pending.expected_operation,
+        ) {
+            Ok(message) => {
+                Effects::output(success_response(&id, tool_error_result(None, &message)))
+            }
+            Err(_) => Effects::output(success_response(
+                &id,
+                tool_error_result(None, &ghostlight_legacy::encode_held_fallback(prolonged)),
+            )),
+        },
         TerminalOutcome::Cancelled {
             message,
             effect: OperationEffect::None,
@@ -837,8 +850,8 @@ mod tests {
         DenialSource, OperationAvailability, ServiceMessage, WorkId, WorkspaceUse,
     };
     use ghostlight_transport::operation::{
-        BrowserResult, BrowserResultStatus, IntentId, OperationEffect, OperationId, OperationKey,
-        ResultPart,
+        BrowserResult, BrowserResultStatus, IntentId, InvocationPresentation, OperationEffect,
+        OperationId, OperationKey, ResultPart,
     };
 
     fn initialize(id: i64) -> Request {
@@ -1165,6 +1178,88 @@ mod tests {
             &mut correlation,
         );
         assert_eq!(ping.output[0]["result"], json!({}));
+    }
+
+    #[test]
+    fn held_outcomes_render_the_exact_external_label_for_both_hold_boundaries() {
+        let cases = [
+            (
+                40,
+                "computer",
+                "left_click",
+                OperationKey::new(OperationId::BrowserInput, IntentId::InputPointerClick),
+                false,
+                "'computer (left_click)' call",
+            ),
+            (
+                41,
+                "computer",
+                "left_click",
+                OperationKey::new(OperationId::BrowserInput, IntentId::InputPointerClick),
+                true,
+                "'computer (left_click)' call",
+            ),
+            (
+                42,
+                "form_fill",
+                "submit",
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillFieldsAndSubmit),
+                true,
+                "'form_fill (submit)' call",
+            ),
+        ];
+        for (request_id, tool, action, expected, prolonged, expected_label) in cases {
+            let presentation = InvocationPresentation::new(
+                ghostlight_legacy::PROFILE_ID,
+                ghostlight_legacy::PROFILE_VERSION,
+                tool,
+                Some(action.into()),
+            )
+            .expect("valid legacy presentation");
+            let effects = render_outcome(
+                PendingRequest::tool_request(
+                    RequestId::Number(request_id.into()),
+                    PendingKind::CallTool2025,
+                    presentation,
+                    expected,
+                    None,
+                    None,
+                ),
+                TerminalOutcome::Held { prolonged },
+            );
+
+            let result = &effects.output[0]["result"];
+            let text = result["content"][0]["text"].as_str().expect("hold text");
+            assert!(text.contains(expected_label), "{text}");
+            assert!(!text.contains("browser.input"), "{text}");
+            assert!(!text.contains("pointer.click"), "{text}");
+            assert_eq!(text.contains("more than 2 minutes"), prolonged);
+            assert_eq!(result["isError"], true);
+            assert!(result.get("resultType").is_none());
+        }
+
+        let fallback = render_outcome(
+            PendingRequest {
+                request_id: Some(RequestId::Number(43.into())),
+                kind: PendingKind::CallTool2025,
+                service_workspace: None,
+                requested_workspace: None,
+                presentation: None,
+                expected_operation: Some(OperationKey::new(
+                    OperationId::BrowserInput,
+                    IntentId::InputPointerClick,
+                )),
+                flow_render_hints: None,
+                suppressed: false,
+                delivered: true,
+            },
+            TerminalOutcome::Held { prolonged: false },
+        );
+        assert!(fallback.output[0].get("error").is_none());
+        assert!(fallback.output[0]["result"]["content"][0]["text"]
+            .as_str()
+            .expect("fallback")
+            .contains("'browser tool' call"));
     }
 
     #[test]

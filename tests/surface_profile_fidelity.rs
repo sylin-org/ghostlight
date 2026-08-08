@@ -3,7 +3,7 @@
 //!
 //! Exact model-facing declarations and rendering belong to the MCP connector. The service core
 //! may retain only two bounded compatibility seams: historical audit replay aliases, and the
-//! temporary legacy extension-wire serializer that R3 removes.
+//! temporary legacy extension-wire serializer that R3 isolates below typed mechanisms.
 
 use serde_json::Value;
 use std::fs;
@@ -17,8 +17,8 @@ const EDGE_GUIDE: &str =
 const FROZEN_GUIDE: &str = include_str!("golden/surfaces/ghostlight-legacy-v1-agent-guide.txt");
 
 const HISTORICAL_AUDIT_ALIAS_MODULE: &str = "crates/core/src/operation/audit_compat.rs";
-const R3_EXTENSION_ALIAS_MODULE: &str = "crates/core/src/operation/registry.rs";
-const R3_EXTENSION_ALIAS_CONSUMER: &str = "crates/core/src/tool/pipeline.rs";
+const R3_EXTENSION_ALIAS_MODULE: &str = "crates/core/src/hub/outbound/legacy_mechanism.rs";
+const R3_EXTENSION_ALIAS_CONSUMER: &str = "crates/core/src/hub/outbound/browser.rs";
 
 fn repo_path(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
@@ -140,17 +140,18 @@ fn remaining_compatibility_seams_are_precisely_bounded() {
         "canonical audit identities must be attempted before historical aliases"
     );
 
-    let registry = read_repo_file(R3_EXTENSION_ALIAS_MODULE);
+    let serializer = read_repo_file(R3_EXTENSION_ALIAS_MODULE);
     for symbol in [
-        "legacy_dispatch_tool",
-        "legacy_arguments",
-        "encode_legacy_arguments",
+        "serialize_tool_request",
+        "serialize_tab_url_request",
+        "fn legacy_tool",
     ] {
         assert!(
-            registry.contains(symbol),
+            serializer.contains(symbol),
             "R3 extension serializer seam is missing its bounded {symbol} hook"
         );
     }
+    assert!(serializer.contains("use MechanismId::*"));
 
     let mut files = Vec::new();
     collect_rust_files(&repo_path("crates/core/src"), &mut files);
@@ -164,9 +165,19 @@ fn remaining_compatibility_seams_are_precisely_bounded() {
         if source.contains("HISTORICAL_ALIASES") {
             assert_eq!(relative, HISTORICAL_AUDIT_ALIAS_MODULE);
         }
-        if source.contains("legacy_dispatch_tool")
-            || source.contains("legacy_arguments")
-            || source.contains("encode_legacy_arguments")
+        for removed in [
+            ".legacy_dispatch_tool(",
+            "fn legacy_dispatch_tool(",
+            ".legacy_arguments(",
+            "fn legacy_arguments(",
+            "encode_legacy_arguments(",
+        ] {
+            assert!(
+                !source.contains(removed),
+                "obsolete operation-to-surface serializer remains in {relative}: {removed}"
+            );
+        }
+        if source.contains("serialize_tool_request") || source.contains("serialize_tab_url_request")
         {
             assert!(
                 relative == R3_EXTENSION_ALIAS_MODULE || relative == R3_EXTENSION_ALIAS_CONSUMER,
@@ -174,4 +185,11 @@ fn remaining_compatibility_seams_are_precisely_bounded() {
             );
         }
     }
+
+    let registry = read_repo_file("crates/core/src/operation/registry.rs");
+    assert!(registry.contains("Handler::Mechanism"));
+    assert!(!registry.contains("Handler::ExtensionForward"));
+    let pipeline = read_repo_file("crates/core/src/tool/pipeline.rs");
+    assert!(pipeline.contains("compile_operation"));
+    assert!(pipeline.contains("execute_mechanism_with_delivery_outcome"));
 }

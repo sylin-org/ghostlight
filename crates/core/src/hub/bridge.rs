@@ -719,7 +719,7 @@ fn terminal_outcome(
                 CoreDenialSource::Sacred => DenialSource::Sacred,
             },
         },
-        CallOutcome::Held { message } => TerminalOutcome::Held { message },
+        CallOutcome::Held { prolonged } => TerminalOutcome::Held { prolonged },
         CallOutcome::AttentionRequired { message } => {
             TerminalOutcome::AttentionRequired { message }
         }

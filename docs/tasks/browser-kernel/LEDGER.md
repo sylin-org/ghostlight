@@ -6,16 +6,16 @@ blocking a stage.
 
 ## RESUME HERE
 
-- State: ACTIVE; ADR-0101 authorizes the staged implementation and R2 is complete.
-- Current stage: R3 -- typed mechanism isolation.
-- Next action: introduce the closed physical mechanism vocabulary, compile canonical operations
-  and local semantic sequences to typed mechanism requests, and keep the old extension wire behind
-  one bounded outbound compatibility serializer.
+- State: ACTIVE; ADR-0101 authorizes the staged implementation and R3 is complete.
+- Current stage: R4 -- extension mechanism skew.
+- Next action: add a negotiated `mechanismRequestV1` extension wire, retain the bounded legacy
+  serializer as the old-extension fallback, and prove the new/new, new/old, and old/new matrix.
 - Blocking condition: none.
 - Shipping default: current 25-tool surface. `ghostlight-native/v1`, Claude, and Codex profiles are
   candidates only.
-- Last green gate: 2026-08-08 R2 full Rust formatting, Clippy, build, tests, diff, and ASCII gates
-  passed in `.target-browser-kernel-r2-final`.
+- Last green gate: 2026-08-08 R3 full Rust formatting, strict Clippy, build, no-fail-fast tests,
+  extension tests and syntax checks, package tests, diff, and ASCII gates passed in
+  `.target-browser-kernel-r2-final`.
 
 ## Stage table
 
@@ -23,9 +23,9 @@ blocking a stage.
 | --- | --- | --- | --- | --- |
 | R0 authority and inventory | COMPLETE | 5439e24c + a2a52ab7 | Current product unchanged | ADR-0101, immutable catalog/guide oracle, green baselines |
 | R1 canonical operation bridge | COMPLETE | c3c4020d | Current 25 tools through temporary decoder | Bridge major 2 fails loudly across old/new peers |
-| R2 legacy surface profile | COMPLETE | (this commit) | `ghostlight-legacy/v1` remains default | Exact declarations and rendering are edge-owned |
-| R3 typed mechanism isolation | IN PROGRESS | -- | Old extension wire only | Core no longer dispatches surface names |
-| R4 extension mechanism skew | NOT STARTED | -- | Negotiated new wire plus legacy fallback | Prove old/new matrix |
+| R2 legacy surface profile | COMPLETE | 641b332f | `ghostlight-legacy/v1` remains default | Exact declarations and rendering are edge-owned |
+| R3 typed mechanism isolation | COMPLETE | (this commit) | Old extension wire only | Core dispatches typed mechanisms; one bounded adapter owns old aliases |
+| R4 extension mechanism skew | IN PROGRESS | -- | Negotiated new wire plus legacy fallback | Prove old/new matrix |
 | R5 native surface and readiness | NOT STARTED | -- | Native explicit opt-in; legacy default | No planned pack is advertised |
 | R6 client/profile selection | NOT STARTED | -- | Exact selection; legacy fallback retained | No identity signal affects authority |
 | R7 Claude flat adapter | NOT STARTED | -- | Versioned opt-in supported surface | All 22 captured tools dispositioned |
@@ -47,7 +47,7 @@ or dated live record. A prose assertion is not evidence.
 | Canonical operation kernel | R1 | Typed operation/result/handle/default round trips; exhaustive concrete variant descriptors; no vendor or model-facing name as an execution key | COMPLETE | `crates/transport/src/operation.rs`; `crates/core/src/operation/registry.rs`; 26 operation families, 60 closed intents, and all 52 legacy variants covered by tests |
 | Operation bridge | R1 | Coordinated major cutover; old/new mismatch fails loudly; Start/catalog/result/cancel transcripts; recursive flow carries canonical operations only | COMPLETE | Bridge major 2 unit and integration transcripts in `crates/transport/src/bridge.rs`, both MCP revisions, `tests/hub_isolation.rs`, and `tests/operation_bridge.rs` |
 | Legacy profile | R2 | Byte-exact 25-tool order, identity, schemas, annotations, examples, results, and errors on both MCP revisions; legacy remains releasable | COMPLETE | Edge-owned catalog, guide, explain copy, schema validation, call decoder, and result renderer; exact full-catalog/context/success/denial handler transcripts for both revisions; `surface_profile_fidelity` architecture guard |
-| Mechanisms and extension skew | R3-R4 | Exhaustive operation-to-mechanism and legacy alias maps; negotiated new wire; new/new, new/old, and old/new process evidence | NOT STARTED | -- |
+| Mechanisms and extension skew | R3-R4 | Exhaustive operation-to-mechanism and legacy alias maps; negotiated new wire; new/new, new/old, and old/new process evidence | IN PROGRESS | R3 closes 57-operation planning, typed mechanisms/controls/events, the sole legacy-wire adapter, final-admission and exact-wire tests, and architecture guards; R4 negotiation and mixed-version process evidence remain |
 | Native surface | R5 | Strict twelve-tool core and honest supported packs; output schemas; workspace/addressing; bounded observations; opt-in journey evidence | NOT STARTED | -- |
 | Readiness | R5, R9 | Committed-document watcher; initial and landing authorization ordering; one dispatch-to-readiness deadline; condition/settlement result axes; timeout, unavailable, cancel, redirect, PDF/protected-page, and outcome-unknown tests | NOT STARTED | -- |
 | Client/profile selection | R6 | Exact precedence and version/fingerprint tests; sessionful and request-stateless state isolation; concurrent-profile and restriction tests; no authority/routing effect | NOT STARTED | -- |
@@ -64,7 +64,8 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-08-08 | R0 | 5439e24c + a2a52ab7 | `cargo test --workspace`: pass | `cargo test --locked --test surface_profile_golden`: 2 pass; `node --test tests/extension/*.test.js`: 164 pass; extension `node --check`: pass | Not required for docs/oracle stage | Current 25-tool product and extension wire unchanged |
 | 2026-08-08 | R1 | c3c4020d | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | transport 90, core 760, connector 87, architecture 11, operation bridge 3, frozen surface 2, schema fidelity 17, advertisement 3, protocol 4, enforcement 11, and four migrated integration targets 12: all pass | Extension 164/164 and syntax checks for 29 JavaScript files pass; process/e2e not required at R1 | Canonical bridge major 2, typed results, recursive flow, provenance, cancellation, image validation, workspace equality, and exact legacy edge rendering are green |
-| 2026-08-08 | R2 | (this commit) | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | connector 96, core 739, transport 90, `surface_profile_fidelity` 4, MCP protocol 4, schema fidelity 17, advertisement 3, and enforcement 11: all pass | Extension unchanged; process/e2e not required at R2 | Frozen 25-tool profile and explain copy are edge-owned; both revision handlers prove exact catalog/context/success/denial transcripts; core has no model-facing declaration or legacy call decoder |
+| 2026-08-08 | R2 | 641b332f | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | connector 96, core 739, transport 90, `surface_profile_fidelity` 4, MCP protocol 4, schema fidelity 17, advertisement 3, and enforcement 11: all pass | Extension unchanged; process/e2e not required at R2 | Frozen 25-tool profile and explain copy are edge-owned; both revision handlers prove exact catalog/context/success/denial transcripts; core has no model-facing declaration or legacy call decoder |
+| 2026-08-08 | R3 | (this commit) | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | core 810, architecture 16, mechanism mapping 9, enforcement 11, and script 2: all pass | Extension 164/164, syntax checks for every extension JavaScript file, and MCPB package tests 5/5 pass; process/e2e not required at R3 | All 57 canonical operations have closed physical plans; typed final admission, reply classes, recording FIFO/cancellation, semantic result truth, and exact old-wire compatibility are green; three independent P0/P1 audits are clean |
 
 ## Stage records
 
@@ -137,16 +138,33 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 
 ### R3 -- typed mechanism isolation
 
-- Status: IN PROGRESS.
-- Mechanism directory and exhaustive map: --
-- Legacy serializer/alias evidence: --
-- Browser behavior parity: --
-- Gate output: --
-- Deviations/blockers: --
+- Status: COMPLETE.
+- Mechanism directory and exhaustive map: `crates/core/src/browser/mechanism.rs` defines 43
+  mechanism ids, 6 control ids, 2 event ids, and 7 closed auxiliary purposes. The 57 canonical
+  operation descriptors are exhaustively classified as 38 direct, 14 dynamic, 2 composition,
+  and 3 local plans. `tests/mechanism_mapping.rs` proves every descriptor, dynamic request/control
+  set, and physical id has exactly one declared owner.
+- Legacy serializer/alias evidence: `crates/core/src/hub/outbound/legacy_mechanism.rs` is the sole
+  production owner of legacy extension aliases, presence-sensitive field translation, reply-class
+  parsing, controls, and recording events. Exhaustive adapter and architecture tests prove exact
+  coverage, fail-closed unknowns, and no raw alias, constructor, serializer, or enqueue escape.
+- Browser behavior parity: browser dispatch retains typed origin through final panic, hold, and
+  attention admission. One FIFO plus bounded ordinary permits preserves atomic frame order while
+  exact-generation recording cancellation bypasses capacity without overtaking earlier work.
+  Tests cover response-class mismatch, staged-start interruption, offline clear, one-shot frame
+  rejection, finalization races, direct/flow result equivalence, edge-owned held copy, and
+  mechanism-phase audit replay exclusion. The extension wire and handlers remain unchanged.
+- Gate output: full workspace formatting, strict all-target Clippy, build, and no-fail-fast tests
+  passed in `.target-browser-kernel-r2-final`; focused core 810, architecture 16, mechanism map 9,
+  enforcement 11, and script 2 tests passed. Extension 164/164, syntax checks for every extension
+  JavaScript file, MCPB package tests 5/5, diff check, and a 33-file ASCII scan passed. Independent
+  acceptance, mechanism, and exact-wire audits found no P0/P1 blocker.
+- Deviations/blockers: none. R3 deliberately retains only the old extension wire; negotiated typed
+  extension requests and mixed-version evidence are R4 work.
 
 ### R4 -- extension mechanism skew
 
-- Status: NOT STARTED.
+- Status: IN PROGRESS.
 - Negotiated feature and compatibility range: --
 - New service/new extension: --
 - New service/old extension: --

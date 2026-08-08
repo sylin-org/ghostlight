@@ -126,16 +126,29 @@ async fn unique_semantic_target_acts_waits_and_audits_only_content_free_outcome(
         .collect();
     let parents: Vec<&Value> = records
         .iter()
-        .filter(|record| record["tool"] == json!(OperationId::BrowserAct))
+        .filter(|record| {
+            record["tool"] == json!(OperationId::BrowserAct) && record["orchestrator"].is_null()
+        })
         .collect();
     assert_eq!(parents.len(), 1, "one parent decision: {records:?}");
     assert_eq!(parents[0]["target_assurance"], "semantic");
     assert_eq!(parents[0]["outcome"], "expect_met");
     assert_eq!(parents[0]["action"], json!(IntentId::ActClick));
-    assert!(records
+    let internals: Vec<&Value> = records
         .iter()
-        .filter(|record| record.get("orchestrator") == Some(&json!("act_on")))
-        .all(|record| record["batch_id"] == parents[0]["batch_id"]));
+        .filter(|record| record["orchestrator"] == json!(OperationId::BrowserAct))
+        .collect();
+    assert_eq!(
+        internals.len(),
+        4,
+        "all physical steps are audited: {records:?}"
+    );
+    assert!(internals.iter().all(|record| {
+        record["tool"] == json!(OperationId::BrowserAct)
+            && record["action"] == json!(IntentId::ActClick)
+            && record["batch_id"] == parents[0]["batch_id"]
+            && record["role"] == "mechanism_phase"
+    }));
     for forbidden in [
         "Save private draft",
         "Secret success text",

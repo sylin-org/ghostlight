@@ -12,6 +12,8 @@
 
 use serde_json::Value;
 
+use crate::browser::mechanism::MechanismId;
+
 use super::font;
 
 /// Ghostlight brand color (sky-blue #38BDF8), replacing the reference's Claude-coral overlays.
@@ -40,7 +42,7 @@ pub(crate) fn compute_frame_delays(timestamps_ms: &[i64]) -> Vec<u32> {
 /// Overlay metadata for one recorded action (ADR-0052 D4). Coordinates are CSS viewport px.
 #[derive(Debug, Clone)]
 pub struct ActionMeta {
-    /// The action kind: a `computer` action name, or "navigate".
+    /// Stable overlay action kind.
     pub kind: String,
     pub coordinate: Option<(f64, f64)>,
     pub start_coordinate: Option<(f64, f64)>,
@@ -77,43 +79,97 @@ fn coord_from(v: Option<&Value>) -> Option<(f64, f64)> {
     Some((arr[0].as_f64()?, arr[1].as_f64()?))
 }
 
-/// Build per-frame action metadata from a dispatched tool call. Returns None for tools we do not
-/// annotate. Coordinates are copied through in the caller's space; the recorder rescales them to
-/// CSS viewport px before storing.
-pub fn describe_action(tool: &str, args: &Value) -> Option<ActionMeta> {
-    if tool == "navigate" {
-        let description = match args.get("url").and_then(Value::as_str) {
-            Some(u) => format!("navigate: {}", short_url(u)),
-            None => "navigate".to_string(),
-        };
-        return Some(ActionMeta {
-            kind: "navigate".to_string(),
-            coordinate: None,
-            start_coordinate: None,
-            description,
-            ts_ms: 0,
-        });
+/// Build per-frame action metadata from one typed physical mechanism. Returns None for mechanisms
+/// that do not paint a useful action annotation. Coordinates stay in the caller's space; the
+/// recorder rescales them to CSS viewport pixels before storing.
+pub fn describe_action(id: MechanismId, input: &Value) -> Option<ActionMeta> {
+    use MechanismId::*;
+
+    let (kind, coordinate, start_coordinate, description) = match id {
+        NavigateUrl => {
+            let description = match input.get("url").and_then(Value::as_str) {
+                Some(url) => format!("navigate: {}", short_url(url)),
+                None => "navigate".to_string(),
+            };
+            ("navigate", None, None, description)
+        }
+        NavigateBack => ("navigate", None, None, "navigate: back".to_string()),
+        NavigateForward => ("navigate", None, None, "navigate: forward".to_string()),
+        ScreenshotViewport => ("screenshot", None, None, "screenshot".to_string()),
+        ScreenshotRegion => ("zoom", None, None, "zoom".to_string()),
+        PointerClick => {
+            let action = pointer_action(input)?;
+            (
+                action,
+                coord_from(input.get("point")),
+                None,
+                action.to_string(),
+            )
+        }
+        PointerHover => (
+            "hover",
+            coord_from(input.get("point")),
+            None,
+            "hover".to_string(),
+        ),
+        PointerDrag => (
+            "left_click_drag",
+            coord_from(input.get("to")),
+            coord_from(input.get("from")),
+            "left_click_drag".to_string(),
+        ),
+        TextType => {
+            let description = input
+                .get("text")
+                .and_then(Value::as_str)
+                .map(|text| format!("type: {}", truncate(text, 30)))
+                .unwrap_or_else(|| "type".to_string());
+            ("type", None, None, description)
+        }
+        KeyPress => {
+            let description = input
+                .get("key")
+                .and_then(Value::as_str)
+                .map(|key| format!("key: {key}"))
+                .unwrap_or_else(|| "key".to_string());
+            ("key", None, None, description)
+        }
+        WheelScroll => (
+            "scroll",
+            coord_from(input.get("point")),
+            None,
+            "scroll".to_string(),
+        ),
+        ScrollTargetIntoView => ("scroll_to", None, None, "scroll_to".to_string()),
+        ScrollViewportToOffset => (
+            "scroll_to",
+            coord_from(input.get("point")),
+            None,
+            "scroll_to".to_string(),
+        ),
+        WaitDelay => ("wait", None, None, "wait".to_string()),
+        _ => return None,
+    };
+    Some(ActionMeta {
+        kind: kind.to_string(),
+        coordinate,
+        start_coordinate,
+        description,
+        ts_ms: 0,
+    })
+}
+
+fn pointer_action(input: &Value) -> Option<&'static str> {
+    match (
+        input.get("button").and_then(Value::as_str),
+        input.get("count").and_then(Value::as_u64),
+    ) {
+        (Some("left"), Some(1)) => Some("left_click"),
+        (Some("right"), Some(1)) => Some("right_click"),
+        (Some("left"), Some(2)) => Some("double_click"),
+        (Some("left"), Some(3)) => Some("triple_click"),
+        _ => None,
     }
-    if tool == "computer" {
-        let action = args
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("action");
-        let text = args.get("text").and_then(Value::as_str);
-        let description = match (action, text) {
-            ("type", Some(t)) => format!("type: {}", truncate(t, 30)),
-            ("key", Some(t)) => format!("key: {t}"),
-            _ => action.to_string(),
-        };
-        return Some(ActionMeta {
-            kind: action.to_string(),
-            coordinate: coord_from(args.get("coordinate")),
-            start_coordinate: coord_from(args.get("start_coordinate")),
-            description,
-            ts_ms: 0,
-        });
-    }
-    None
 }
 
 /// Pop the action a newly KEPT frame should carry (ADR-0052 D4): the oldest pending action whose
@@ -612,8 +668,8 @@ mod tests {
     #[test]
     fn describe_action_builds_metadata() {
         let click = describe_action(
-            "computer",
-            &json!({"action":"left_click","coordinate":[100,200]}),
+            MechanismId::PointerClick,
+            &json!({"button":"left","count":1,"point":[100,200]}),
         )
         .unwrap();
         assert_eq!(click.kind, "left_click");
@@ -621,33 +677,40 @@ mod tests {
         assert_eq!(click.description, "left_click");
 
         let drag = describe_action(
-            "computer",
-            &json!({"action":"left_click_drag","start_coordinate":[10,20],"coordinate":[30,40]}),
+            MechanismId::PointerDrag,
+            &json!({"from":[10,20],"to":[30,40]}),
         )
         .unwrap();
         assert_eq!(drag.start_coordinate, Some((10.0, 20.0)));
         assert_eq!(drag.coordinate, Some((30.0, 40.0)));
 
-        let typed =
-            describe_action("computer", &json!({"action":"type","text":"hello world"})).unwrap();
+        let typed = describe_action(MechanismId::TextType, &json!({"text":"hello world"})).unwrap();
         assert_eq!(typed.description, "type: hello world");
         assert!(typed.coordinate.is_none());
 
-        let long =
-            describe_action("computer", &json!({"action":"type","text":"x".repeat(50)})).unwrap();
+        let long = describe_action(MechanismId::TextType, &json!({"text":"x".repeat(50)})).unwrap();
         assert!(long.description.ends_with("..."), "long text is truncated");
 
-        let key = describe_action("computer", &json!({"action":"key","text":"Enter"})).unwrap();
+        let key = describe_action(MechanismId::KeyPress, &json!({"key":"Enter"})).unwrap();
         assert_eq!(key.description, "key: Enter");
 
-        let nav =
-            describe_action("navigate", &json!({"url":"https://example.com/path?q=1"})).unwrap();
+        let nav = describe_action(
+            MechanismId::NavigateUrl,
+            &json!({"url":"https://example.com/path?q=1"}),
+        )
+        .unwrap();
         assert_eq!(nav.kind, "navigate");
         assert_eq!(nav.description, "navigate: example.com");
+        assert_eq!(
+            describe_action(MechanismId::NavigateBack, &json!({}))
+                .unwrap()
+                .description,
+            "navigate: back"
+        );
 
         assert!(
-            describe_action("read_page", &json!({})).is_none(),
-            "un-annotated tools return None"
+            describe_action(MechanismId::PageSnapshot, &json!({})).is_none(),
+            "un-annotated mechanisms return None"
         );
     }
 

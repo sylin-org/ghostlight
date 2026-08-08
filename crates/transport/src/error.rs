@@ -78,10 +78,10 @@ pub enum ToolError {
     /// The take-the-wheel hold won at the final dispatch boundary. The neutral pipeline converts
     /// this signal into an ordinary held result; it is typed here so it cannot be flattened into
     /// an extension failure during the last admission/enqueue race.
-    #[error("{message}")]
+    #[error("browser session is held by the user")]
     Held {
-        /// Complete user/model-facing explanation of the hold.
-        message: String,
+        /// Whether the hold crossed the service-owned long-pause threshold.
+        prolonged: bool,
     },
     /// The local service paused this one workspace after a denial burst. The MCP edge converts
     /// this final dispatch-boundary signal into an ordinary attention-required result.
@@ -151,10 +151,8 @@ pub enum ToolError {
 
 impl ToolError {
     /// Build a final dispatch-boundary take-the-wheel signal.
-    pub fn held(message: impl Into<String>) -> Self {
-        Self::Held {
-            message: message.into(),
-        }
+    pub const fn held(prolonged: bool) -> Self {
+        Self::Held { prolonged }
     }
 
     /// Build a final dispatch-boundary attention-required signal.
@@ -235,7 +233,7 @@ impl ToolError {
     pub fn next_step(self, step: impl Into<String>) -> Self {
         let step = step.into();
         match self {
-            Self::Held { message } => Self::Held { message },
+            Self::Held { prolonged } => Self::Held { prolonged },
             Self::AttentionRequired { message } => Self::AttentionRequired { message },
             Self::InvalidRequest { message, .. } => Self::InvalidRequest {
                 message,

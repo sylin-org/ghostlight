@@ -32,7 +32,7 @@ use std::path::Path;
 use crate::governance::enforcement::check_call;
 use crate::governance::manifest::document::{parse_manifest, Manifest, ManifestError};
 use crate::governance::ports::{
-    Capability, Decision, Denial, EffectiveMode, GoverningResource, HostRuleOutcome,
+    AuditRole, Capability, Decision, Denial, EffectiveMode, GoverningResource, HostRuleOutcome,
 };
 
 /// Why [`run_simulate`] could not produce an outcome. A malformed LINE inside the replay file
@@ -153,6 +153,7 @@ fn simulate_lines<'a>(
             continue;
         }
         match evaluate_line(manifest, line, requires_fn, evaluate_host) {
+            LineOutcome::Skip => {}
             LineOutcome::Allow => would_allow += 1,
             LineOutcome::Deny {
                 domain,
@@ -191,6 +192,7 @@ fn simulate_lines<'a>(
 }
 
 enum LineOutcome {
+    Skip,
     Allow,
     Deny {
         domain: Option<String>,
@@ -202,11 +204,11 @@ enum LineOutcome {
 
 /// Evaluate one non-empty replay line per the Required behavior section 4 bucket table, in
 /// the exact order specified there. The recorded `capability`/`decision`/`grant_id`/
-/// `denial_id` (or, on an old rw-era line, `rw`) and every other field besides
-/// `tool`/`action`/`domain` are read by nobody: simulate replays the action under the
-/// CANDIDATE manifest, never trusts or compares against the original decision. Old rw-era
-/// audit lines replay identically to capability-era ones, since only `tool`/`action`/`domain`
-/// are ever read.
+/// `denial_id` (or, on an old rw-era line, `rw`) and every other field besides the optional
+/// `role` plus `tool`/`action`/`domain` are read by nobody. A recognized `mechanism_phase` is
+/// correlated physical evidence under an already-recorded semantic decision, so it is skipped.
+/// An absent role remains replayable, including a true `browser.flow` child. Malformed or unknown
+/// roles fail closed into the not-evaluable bucket.
 fn evaluate_line(
     manifest: &Manifest,
     line: &str,
@@ -220,6 +222,19 @@ fn evaluate_line(
     let Some(obj) = value.as_object() else {
         return LineOutcome::NotEvaluable("malformed json".to_string());
     };
+
+    match obj.get("role") {
+        None => {}
+        Some(serde_json::Value::String(role)) => match AuditRole::parse(role) {
+            Some(AuditRole::MechanismPhase) => return LineOutcome::Skip,
+            None => {
+                return LineOutcome::NotEvaluable(format!("unknown audit role: {role}"));
+            }
+        },
+        Some(_) => {
+            return LineOutcome::NotEvaluable("malformed field: role".to_string());
+        }
+    }
 
     let Some(tool) = obj.get("tool").and_then(|v| v.as_str()) else {
         return LineOutcome::NotEvaluable("missing field: tool".to_string());
@@ -331,6 +346,7 @@ mod tests {
             ("computer", Some("screenshot")) => Some(&[Capability::Read]),
             ("computer", Some("left_click")) => Some(&[Capability::Action]),
             ("read_page", None) => Some(&[Capability::Read]),
+            ("browser.snapshot", Some("snapshot.capture")) => Some(&[Capability::Read]),
             ("navigate", None) => Some(&[Capability::Read]),
             ("javascript_tool", None) => Some(&[Capability::Execute]),
             ("update_plan", None) => Some(&[]),
@@ -406,6 +422,45 @@ mod tests {
         let m = sample_manifest(vec![]);
         let r = run(&m, &["", "   ", "\t"]);
         assert_eq!(r.would_allow + r.would_deny + r.not_evaluable, 0);
+    }
+
+    #[test]
+    fn mechanism_phases_are_skipped_but_true_flow_children_remain_replayable() {
+        let m = sample_manifest(vec![grant("g", &["example.com"], &[Capability::Read])]);
+        let r = run(
+            &m,
+            &[
+                r#"{"role":"mechanism_phase"}"#,
+                r#"{"tool":"browser.snapshot","action":"snapshot.capture","domain":"example.com","orchestrator":"browser.flow","batch_id":"00000000-0000-4000-8000-000000000001","step":1}"#,
+            ],
+        );
+        assert_eq!(r.would_allow, 1);
+        assert_eq!(r.would_deny, 0);
+        assert_eq!(r.not_evaluable, 0);
+    }
+
+    #[test]
+    fn malformed_and_unknown_audit_roles_fail_closed() {
+        let m = sample_manifest(vec![]);
+        let r = run(
+            &m,
+            &[
+                r#"{"role":"future_role","tool":"read_page","domain":null}"#,
+                r#"{"role":null,"tool":"read_page","domain":null}"#,
+                r#"{"role":7,"tool":"read_page","domain":null}"#,
+            ],
+        );
+        assert_eq!(r.would_allow, 0);
+        assert_eq!(r.would_deny, 0);
+        assert_eq!(r.not_evaluable, 3);
+        assert_eq!(
+            r.not_evaluable_lines,
+            vec![
+                (1, "unknown audit role: future_role".to_string()),
+                (2, "malformed field: role".to_string()),
+                (3, "malformed field: role".to_string()),
+            ]
+        );
     }
 
     #[test]

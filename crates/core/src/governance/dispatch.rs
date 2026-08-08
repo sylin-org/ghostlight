@@ -32,43 +32,15 @@ use std::time::{Duration, Instant};
 use crate::governance::manifest::document::Grant;
 use crate::governance::manifest::identity::ManifestIdentity;
 use crate::governance::ports::{
-    AttentionEventRecord, AuditRecord, AuditSink, Capability, ClientInfo, Decision,
+    AttentionEventRecord, AuditRecord, AuditRole, AuditSink, Capability, ClientInfo, Decision,
     DecisionRequest, Denial, EffectiveMode, GoverningResource, PolicyDecisionPoint,
     SessionEventRecord,
 };
 
-/// How long a take-the-wheel hold may last before [`hold_message`] appends the resume hint
+/// How long a take-the-wheel hold may last before the selected surface appends its resume hint
 /// (g10, ADR-0018 step 2). A constant for now; a future registry key
 /// (`engine.hold.hint_after_ms`) may make it configurable -- not this task's job.
 pub const HOLD_HINT_AFTER: Duration = Duration::from_secs(120);
-
-/// The take-the-wheel pause reply for a held tool call (g10, ADR-0018 step 2): a plain,
-/// truthful statement that the call was NOT executed, why, and what the agent should do
-/// (stop and wait, never retry-spin), rendered as a normal successful MCP text result --
-/// never an error, never a hint that the action happened. `action` is the `computer`
-/// sub-action, rendering the label `computer (<action>)`; every other tool renders its bare
-/// name (mirrors the denial-format convention, shared format doc section 7.2). Past
-/// [`HOLD_HINT_AFTER`], a second sentence names the only way to resume: the user, from the
-/// extension.
-pub fn hold_message(tool: &str, action: Option<&str>, held_for: Duration) -> String {
-    let label = crate::governance::ports::call_label(tool, action);
-    let mut message = format!(
-        "Paused: the user has taken control of the browser (take-the-wheel). The '{label}' \
-         call was NOT executed. This is not an error, and retrying will not help: every \
-         browser tool call receives this same reply until the user resumes. Stop issuing \
-         browser tool calls, tell the user the session is paused and you are waiting, and \
-         continue only after the user says they have resumed."
-    );
-    if held_for >= HOLD_HINT_AFTER {
-        message.push(' ');
-        message.push_str(
-            "This session has been paused for more than 2 minutes. Only the user can resume \
-             it, from the Ghostlight extension: the popup Pause/Resume button or the toggle \
-             keyboard shortcut.",
-        );
-    }
-    message
-}
 
 /// The status-surface governance summary (g15, shared format doc section 9.2): the
 /// manifest-level effective mode (`manifest_mode.unwrap_or(config_mode)`) and whether shadow
@@ -305,6 +277,7 @@ impl Governance {
             orchestrator: None,
             batch_id: None,
             step: None,
+            role: None,
             dry_run: false,
             target_assurance: None,
             outcome: None,
@@ -579,6 +552,7 @@ pub struct CallAudit {
     orchestrator: Option<&'static str>,
     batch_id: Option<String>,
     step: Option<u32>,
+    role: Option<AuditRole>,
     dry_run: bool,
     target_assurance: Option<String>,
     outcome: Option<String>,
@@ -634,13 +608,18 @@ impl CallAudit {
         }
     }
 
-    /// Stamp this call's record as an orchestrated internal execution (C7 script steps, C10
-    /// form_fill internals): correlates the record with its parent via `batch_id` and this
-    /// call's 1-indexed position within it.
+    /// Stamp this record as an orchestrated canonical step or internal physical phase. The
+    /// canonical parent operation, `batch_id`, and 1-indexed position preserve correlation.
     pub fn orchestrated(&mut self, orchestrator: &'static str, batch_id: &str, step: Option<u32>) {
         self.orchestrator = Some(orchestrator);
         self.batch_id = Some(batch_id.to_string());
         self.step = step;
+    }
+
+    /// Mark this correlated row as a physical mechanism phase rather than an independent policy
+    /// decision. Ordinary calls and true `browser.flow` children never call this method.
+    pub fn mark_mechanism_phase(&mut self) {
+        self.role = Some(AuditRole::MechanismPhase);
     }
 
     /// Mark this call's record as a script dry-run parent (C8): no dispatch occurred; every
@@ -829,6 +808,7 @@ impl CallAudit {
             orchestrator: self.orchestrator,
             batch_id: self.batch_id.clone(),
             step: self.step,
+            role: self.role,
             dry_run: self.dry_run,
             target_assurance: self.target_assurance.clone(),
             outcome: self.outcome.clone(),
@@ -981,6 +961,7 @@ mod tests {
         assert_eq!(rec.grant_id, None);
         assert!(!rec.held);
         assert!(!rec.attention_required);
+        assert_eq!(rec.role, None);
 
         // The 19-key field order pin, transcribed from tests/audit_recorder.rs.
         let v: serde_json::Value =
@@ -1011,6 +992,31 @@ mod tests {
             ],
             "field order matches the shared format"
         );
+    }
+
+    #[test]
+    fn orchestration_correlation_does_not_imply_a_mechanism_phase() {
+        let sink = Arc::new(CapturingAuditSink::default());
+        let g = Governance::all_open(sink.clone());
+
+        let mut flow_child = g.begin("browser.snapshot", Some("snapshot.capture"), None);
+        flow_child.orchestrated(
+            "browser.flow",
+            "00000000-0000-4000-8000-000000000001",
+            Some(1),
+        );
+        flow_child.complete();
+        assert_eq!(sink.last().role, None);
+
+        let mut physical_phase = g.begin("browser.act", Some("act.click"), None);
+        physical_phase.orchestrated(
+            "browser.act",
+            "00000000-0000-4000-8000-000000000002",
+            Some(1),
+        );
+        physical_phase.mark_mechanism_phase();
+        physical_phase.complete();
+        assert_eq!(sink.last().role, Some(AuditRole::MechanismPhase));
     }
 
     /// Test 2: a GOVERNED directory miss (`requires: None`) denies via `unknown_action` through
@@ -1309,39 +1315,6 @@ mod tests {
             .expect("explicit calls do not alter the legacy slot");
         assert_eq!(legacy.name, "legacy-client");
         assert_eq!(legacy.version, "0");
-    }
-
-    #[test]
-    fn hold_message_states_not_executed_with_no_hint_below_the_threshold() {
-        let msg = hold_message("navigate", None, Duration::from_secs(1));
-        assert!(msg.starts_with("Paused:"));
-        assert!(msg.contains("NOT executed"));
-        assert!(msg.contains("'navigate' call"));
-        assert!(!msg.contains("2 minutes"));
-    }
-
-    #[test]
-    fn hold_message_appends_the_hint_at_and_above_the_threshold() {
-        let at_threshold = hold_message("navigate", None, HOLD_HINT_AFTER);
-        assert!(at_threshold.contains("2 minutes"));
-        assert!(at_threshold.contains("Only the user can resume it"));
-
-        let above_threshold =
-            hold_message("navigate", None, HOLD_HINT_AFTER + Duration::from_secs(1));
-        assert!(above_threshold.contains("2 minutes"));
-
-        let below_threshold =
-            hold_message("navigate", None, HOLD_HINT_AFTER - Duration::from_secs(1));
-        assert!(!below_threshold.contains("2 minutes"));
-    }
-
-    #[test]
-    fn hold_message_renders_computer_action_label() {
-        let msg = hold_message("computer", Some("left_click"), Duration::from_secs(0));
-        assert!(msg.contains("'computer (left_click)' call"));
-
-        let plain = hold_message("read_page", None, Duration::from_secs(0));
-        assert!(plain.contains("'read_page' call"));
     }
 
     #[test]

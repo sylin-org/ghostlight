@@ -184,6 +184,35 @@ pub struct ClientInfo {
     pub version: String,
 }
 
+/// Closed semantic role for an audit record that is not an independent policy decision.
+///
+/// An absent role is an ordinary replayable operation record, including a concrete child of
+/// `browser.flow`. `MechanismPhase` marks one physical phase performed under an already-audited
+/// semantic parent operation. Policy simulation skips only this exact role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditRole {
+    /// A physical browser-mechanism phase inside one semantic operation.
+    MechanismPhase,
+}
+
+impl AuditRole {
+    /// Return the stable audit-wire spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MechanismPhase => "mechanism_phase",
+        }
+    }
+
+    /// Parse one exact audit-wire spelling.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "mechanism_phase" => Some(Self::MechanismPhase),
+            _ => None,
+        }
+    }
+}
+
 /// One audit record: exactly one JSON line per tool call (shared format doc section 6.1).
 /// Field ORDER is part of the format; `serde_json` is built with `preserve_order`. Grown by
 /// g06 from A2's single-field placeholder to the full shape, then by g10 (the `held`
@@ -200,9 +229,9 @@ pub struct AuditRecord {
     pub identity: Option<Identity>,
     /// MCP edge-supplied client presentation for this call; `None` if the client did not provide it.
     pub client: Option<ClientInfo>,
-    /// MCP tool name as received.
+    /// Canonical operation id. Historical pre-ADR-0101 records may contain a surface tool name.
     pub tool: String,
-    /// The `computer` sub-action (e.g. `left_click`); `None` for every other tool.
+    /// Canonical concrete intent id. Historical records may contain a surface action or `None`.
     pub action: Option<String>,
     /// The action's directory requirement rendered as one string (ADR-0022 Decision 8):
     /// the required set's single element's wire name for a singleton set, "none" for an
@@ -232,13 +261,17 @@ pub struct AuditRecord {
     pub held: bool,
     /// `true` when this workspace's denial circuit refused the call before dispatch.
     pub attention_required: bool,
-    /// `"script"` | `"form_fill"` | `None`. Present only on orchestrated internal executions.
+    /// Canonical parent operation id. Present only on orchestrated internal executions.
     pub orchestrator: Option<&'static str>,
     /// Correlates one parent call with its steps. Set on the parent AND each step/internal.
     /// UUID v4, lowercase, hyphenated.
     pub batch_id: Option<String>,
     /// 1-indexed position within the parent. `None` on the parent record itself.
     pub step: Option<u32>,
+    /// Non-decision role for this row. Omitted from ordinary roots and true flow children so
+    /// historical bytes and policy-replay semantics remain unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<AuditRole>,
     /// `true` only on a script dry-run parent record. `false` on every other record; always
     /// present, never omitted, matching `held`'s always-present style.
     pub dry_run: bool,
@@ -338,10 +371,9 @@ pub enum GoverningResource {
 pub struct DecisionRequest {
     /// The grants in force for this subject (empty under all-open).
     pub grants: Vec<Grant>,
-    /// The tool being called.
+    /// Canonical operation id being decided.
     pub tool: String,
-    /// The `computer` sub-action, when `tool == "computer"`; `None` otherwise. Carried only
-    /// for denial-message rendering (`computer (<action>)`, shared format doc section 7.2).
+    /// Canonical concrete intent id. Carried for deterministic denial rendering and replay.
     pub action: Option<String>,
     /// The bound capability requirement set for this action (ADR-0022 Decision 2), looked up
     /// from the browser plugin's action directory lookup by the caller.
@@ -437,6 +469,21 @@ impl AuditSink for NullSink {
 mod tests {
     use super::*;
 
+    #[test]
+    fn audit_role_has_one_exact_fail_closed_wire_value() {
+        assert_eq!(AuditRole::MechanismPhase.as_str(), "mechanism_phase");
+        assert_eq!(
+            AuditRole::parse("mechanism_phase"),
+            Some(AuditRole::MechanismPhase)
+        );
+        assert_eq!(AuditRole::parse("mechanism-phase"), None);
+        assert_eq!(
+            serde_json::to_string(&AuditRole::MechanismPhase).unwrap(),
+            r#""mechanism_phase""#
+        );
+        assert!(serde_json::from_str::<AuditRole>(r#""future_role""#).is_err());
+    }
+
     fn sample_grant(id: &str) -> Grant {
         Grant {
             id: id.to_string(),
@@ -519,6 +566,7 @@ mod tests {
             orchestrator: None,
             batch_id: None,
             step: None,
+            role: None,
             dry_run: false,
             target_assurance: None,
             outcome: None,

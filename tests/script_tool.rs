@@ -173,6 +173,10 @@ async fn script_reports_step_error_and_not_run_with_correlated_audit() {
         "parent has no orchestrator"
     );
     assert!(parent["step"].is_null(), "parent has no step number");
+    assert!(
+        parent.get("role").is_none(),
+        "ordinary parent omits the audit role"
+    );
     let batch_id = parent["batch_id"].as_str().unwrap();
 
     let step1 = lines
@@ -187,6 +191,10 @@ async fn script_reports_step_error_and_not_run_with_correlated_audit() {
         "step shares the parent's batch_id"
     );
     assert_eq!(step1["step"], 1, "step 1 is numbered 1");
+    assert!(
+        step1.get("role").is_none(),
+        "true flow child remains an ordinary replayable decision row"
+    );
 
     assert!(
         !lines.iter().any(|l| l["tool"] == "browser.find"),

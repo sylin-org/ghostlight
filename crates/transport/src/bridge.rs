@@ -182,8 +182,8 @@ pub enum TerminalOutcome {
     },
     /// The take-the-wheel hold prevented dispatch.
     Held {
-        /// Human-readable hold explanation.
-        message: String,
+        /// Whether the hold crossed the service-owned long-pause threshold.
+        prolonged: bool,
     },
     /// The workspace denial circuit requires user attention before more work can run.
     AttentionRequired {
@@ -488,6 +488,39 @@ mod tests {
                 .expect("read service message"),
             Some(message)
         );
+    }
+
+    #[tokio::test]
+    async fn held_terminal_outcome_is_semantic_and_framing_stable() {
+        for prolonged in [false, true] {
+            let message = ServiceMessage::Completed {
+                work_id: WorkId(10),
+                outcome: TerminalOutcome::Held { prolonged },
+            };
+            assert_eq!(
+                serde_json::to_value(&message).expect("held outcome serializes"),
+                serde_json::json!({
+                    "type": "completed",
+                    "work_id": 10,
+                    "outcome": {
+                        "type": "held",
+                        "prolonged": prolonged,
+                    }
+                })
+            );
+
+            let mut framed = Vec::new();
+            write_service_message(&mut framed, &message)
+                .await
+                .expect("write held outcome");
+            let mut reader: &[u8] = &framed;
+            assert_eq!(
+                read_service_message(&mut reader)
+                    .await
+                    .expect("read held outcome"),
+                Some(message)
+            );
+        }
     }
 
     #[test]

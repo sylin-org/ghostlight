@@ -132,9 +132,14 @@ impl Harness {
                     Ok(v) => v,
                     Err(_) => break,
                 };
+                let response_type = if v["type"] == "tab_url_request" {
+                    "tab_url_response"
+                } else {
+                    "tool_response"
+                };
                 let reply = json!({
                     "id": v["id"],
-                    "type": "tool_response",
+                    "type": response_type,
                     "result": responder(&v),
                 });
                 if host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
@@ -326,9 +331,13 @@ fn render_outcome(outcome: CallOutcome) -> Value {
         CallOutcome::OutcomeUnknown { message } => {
             execution_result("outcome_unknown", false, message)
         }
-        CallOutcome::Denied { message, .. }
-        | CallOutcome::Held { message }
-        | CallOutcome::AttentionRequired { message } => text_result(message),
+        CallOutcome::Denied { message, .. } | CallOutcome::AttentionRequired { message } => {
+            text_result(message)
+        }
+        CallOutcome::Held { prolonged } => json!({
+            "content": [{"type": "text", "text": "browser session held by user"}],
+            "structuredContent": {"held": {"prolonged": prolonged}}
+        }),
         CallOutcome::Cancelled { message, .. } => execution_result("cancelled", false, message),
     }
 }

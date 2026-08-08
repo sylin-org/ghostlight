@@ -4,12 +4,15 @@
 //! Both directions carry UTF-8 JSON, one object per native message (Chrome frames each with a
 //! 4-byte little-endian length prefix; see [`super::host`]). The browser-only relay carries these
 //! objects verbatim; only the persistent service (in [`crate::hub::outbound::browser`]) constructs
-//! and parses them, so
-//! they are documented here rather than modeled as types.
+//! and parses them. Service callers issue typed
+//! [`crate::browser::mechanism::MechanismRequest`] values. One isolated compatibility serializer
+//! translates those physical identities to the covered adapter wire below; the legacy `tool` and
+//! `args` members are never service dispatch authority or model-facing declarations. Adapter wire
+//! envelopes remain documented here rather than becoming a second domain type system.
 //!
 //! ## binary -> extension
 //! ```json
-//! { "id": "<string>", "type": "tool_request", "tool": "<tool name>", "args": { ... }, "guid": "<workspace id>", "resultFeatures": ["tabDeltaV1"] }
+//! { "id": "<string>", "type": "tool_request", "tool": "<legacy adapter alias>", "args": { ... }, "guid": "<workspace id>", "resultFeatures": ["tabDeltaV1"], "execution": { ... }, "workspace"?: { "groupTitle": "<presentation title>" } }
 //! ```
 //!
 //! ## extension -> binary

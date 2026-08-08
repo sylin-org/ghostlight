@@ -16,6 +16,7 @@
 //! depend back on this module.
 
 pub mod form_match;
+pub mod mechanism;
 pub mod pattern;
 pub mod polarity;
 pub mod redact;

@@ -11,7 +11,7 @@ use serde_json::Value;
 pub(crate) fn update_plan_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
     Box::pin(async move {
         CallOutcome::Success {
-            result: crate::tool::result::text_content(render(ctx.args)),
+            result: crate::tool::result::text_content(render(&ctx.operation.arguments)),
         }
     })
 }
@@ -58,5 +58,19 @@ mod tests {
              - report the heading"
         );
         assert!(!text.contains("approved"));
+    }
+
+    #[test]
+    fn unrelated_legacy_arguments_do_not_change_the_canonical_plan() {
+        let text = render(&json!({
+            "domains":["example.com"],
+            "approach":["inspect"],
+            "action":"left_click",
+            "tabId":99
+        }));
+        assert_eq!(
+            text,
+            "Plan (informational; permissions unchanged):\nDomains: example.com\n- inspect"
+        );
     }
 }

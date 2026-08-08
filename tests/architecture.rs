@@ -187,29 +187,198 @@ fn governance_core_has_no_forbidden_back_edges() {
     );
 }
 
-/// ADR-0080: production tool code may not use the legacy safety-protocol Browser::call wrapper.
-/// Every ordinary browser dispatch must name call_with_context and carry an ExecutionContext.
+/// ADR-0101: product operations may reach the browser only through typed mechanisms.
+/// String-keyed Browser call wrappers are test-fixture compatibility, never production dispatch.
 #[test]
-fn tool_browser_dispatches_require_an_execution_context() {
+fn tool_browser_dispatches_use_typed_mechanisms() {
     let mut files = Vec::new();
     collect_rust_files(&tool_dir(), &mut files);
     let mut violations = Vec::new();
     for file in files {
         let contents = fs::read_to_string(&file).expect("read tool source");
-        let production = contents.split("#[cfg(test)]").next().unwrap_or(&contents);
-        let compact: String = production
+        let compact: String = contents
             .chars()
             .filter(|character| !character.is_ascii_whitespace())
             .collect();
-        if compact.contains("browser.call(") {
+        if compact.contains(".call(")
+            || compact.contains(".call_with_context(")
+            || compact.contains(".call_with_delivery_outcome(")
+        {
             violations.push(file.display().to_string());
         }
     }
     assert!(
         violations.is_empty(),
-        "ordinary tool browser sends must use call_with_context; legacy call found in: {}",
+        "tool execution regained a string-keyed browser dispatch path: {}",
         violations.join(", ")
     );
+}
+
+/// ADR-0101 R3: response-dependent semantic handlers may emit only mechanisms and controls
+/// declared by their canonical operation's closed dynamic plan. Browser-wide instrumentation
+/// has separate authority and therefore is not part of this handler-only guard.
+#[test]
+fn dynamic_handlers_enforce_their_canonical_physical_plans() {
+    for relative in [
+        "crates/core/src/tool/act_on.rs",
+        "crates/core/src/tool/form_fill.rs",
+        "crates/core/src/tool/upload_image.rs",
+        "crates/core/src/tool/gif_creator.rs",
+    ] {
+        let source = read_repo_file(relative);
+        let production = production_source(&source);
+        assert!(
+            production.contains("for_operation("),
+            "dynamic handler does not bind physical work to its operation plan: {relative}"
+        );
+        for escape in [
+            "MechanismRequest::object(",
+            "MechanismRequest::new(",
+            "BrowserControl::object(",
+            "BrowserControl::new(",
+        ] {
+            assert!(
+                !production.contains(escape),
+                "dynamic handler bypasses its operation plan with {escape}: {relative}"
+            );
+        }
+    }
+}
+
+/// ADR-0101 R3: raw physical construction is private to the mechanism authority. Every
+/// production caller must bind the request to a canonical operation or one closed auxiliary
+/// purpose; a future handler cannot mint an arbitrary typed id and bypass those plans.
+#[test]
+fn raw_physical_construction_cannot_escape_the_mechanism_owner() {
+    let root = repo_path("crates/core/src");
+    let owner = repo_path("crates/core/src/browser/mechanism.rs");
+    let mut files = Vec::new();
+    collect_rust_files(&root, &mut files);
+    let mut violations = Vec::new();
+    for file in files {
+        if file == owner {
+            continue;
+        }
+        let source = fs::read_to_string(&file).expect("read core source");
+        let production = production_source(&source);
+        let compact = production
+            .chars()
+            .filter(|character| !character.is_ascii_whitespace())
+            .collect::<String>();
+        for escape in [
+            "MechanismRequest::object(",
+            "MechanismRequest::new(",
+            "BrowserControl::object(",
+            "BrowserControl::new(",
+            "MechanismRequest{id:",
+            "MechanismRequest{input:",
+            "BrowserControl{id:",
+            "BrowserControl{input:",
+        ] {
+            if compact.contains(escape) {
+                violations.push(format!("{}: {escape}", file.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "raw physical construction escaped the mechanism authority:\n{}",
+        violations.join("\n")
+    );
+
+    let browser = read_repo_file("crates/core/src/hub/outbound/browser.rs");
+    assert!(production_source(&browser).contains("send_and_await_delivery"));
+    assert!(browser.contains("pub(crate) async fn execute_mechanism("));
+    assert!(!browser.contains("pub async fn execute_mechanism("));
+}
+
+/// ADR-0101 R3: the auxiliary constructor is reserved for the exact cross-cutting owners named
+/// by the closed auxiliary-purpose vocabulary.
+#[test]
+fn auxiliary_physical_authority_has_only_the_declared_callers() {
+    let allowed = [
+        "crates/core/src/browser/mechanism.rs",
+        "crates/core/src/hub/outbound/browser.rs",
+        "crates/core/src/tool/pipeline.rs",
+    ];
+    let mut files = Vec::new();
+    collect_rust_files(&repo_path("crates/core/src"), &mut files);
+    let mut violations = Vec::new();
+    for file in files {
+        let source = fs::read_to_string(&file).expect("read core source");
+        let production = production_source(&source);
+        if production.contains("for_auxiliary(") {
+            let relative = file
+                .strip_prefix(repo_path("."))
+                .expect("core source under repository")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if !allowed.contains(&relative.as_str()) {
+                violations.push(relative);
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "auxiliary physical authority escaped its declared owners: {}",
+        violations.join(", ")
+    );
+}
+
+/// ADR-0101 R3: covered one-way controls and recording events cross production browser logic only
+/// as typed ids. Their old adapter spellings belong to the bounded compatibility serializer.
+#[test]
+fn browser_control_and_event_aliases_are_adapter_only() {
+    let adapter = read_repo_file("crates/core/src/hub/outbound/legacy_mechanism.rs");
+    let browser = read_repo_file("crates/core/src/hub/outbound/browser.rs");
+    let production = production_source(&browser);
+    assert!(production.contains("route_reply"));
+    let production_logic = production
+        .lines()
+        .filter(|line| {
+            let line = line.trim_start();
+            !line.starts_with("//")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for alias in [
+        "gif_lease_renew",
+        "gif_capture_cancel",
+        "narration_clear",
+        "notification",
+        "attention_required",
+        "attention_resolved",
+        "gif_frame",
+        "gif_capture_ended",
+        "tool_response",
+        "tool_error",
+        "tab_url_response",
+        "tool_accepted",
+        "tool_terminal",
+        "surface_destroyed",
+        "session_killed",
+        "debug_event",
+        "get_hold",
+        "set_hold",
+        "toggle_hold",
+        "get_attention",
+        "attention_action",
+        "hold_state",
+        "hold_error",
+        "attention_state",
+        "attention_error",
+    ] {
+        let quoted = format!("\"{alias}\"");
+        assert!(
+            adapter.contains(&quoted),
+            "legacy browser alias lost its one compatibility owner: {alias}"
+        );
+        assert!(
+            !production_logic.contains(&quoted),
+            "production Browser logic regained raw compatibility alias {alias}"
+        );
+    }
 }
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -219,6 +388,22 @@ fn repo_path(relative: &str) -> PathBuf {
 fn read_repo_file(relative: &str) -> String {
     let path = repo_path(relative);
     fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+}
+
+fn production_source(source: &str) -> &str {
+    ["#[cfg(test)]\nmod tests", "#[cfg(test)]\r\nmod tests"]
+        .into_iter()
+        .filter_map(|marker| source.find(marker))
+        .min()
+        .map_or(source, |index| &source[..index])
+}
+
+#[test]
+fn production_scanner_ignores_cfg_test_imports_without_truncating_live_code() {
+    let source = "#[cfg(test)]\nuse crate::test_support;\nfn live() {}\n#[cfg(test)]\nmod tests {}";
+    let production = production_source(source);
+    assert!(production.contains("fn live()"));
+    assert!(!production.contains("mod tests"));
 }
 
 /// ADR-0096: the protocol edge may depend on transport mechanics, never the service engine.

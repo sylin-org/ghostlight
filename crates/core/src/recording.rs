@@ -35,15 +35,6 @@ pub(crate) const HEALTH_LEASE: Duration = Duration::from_secs(15);
 /// Service renewal cadence for the extension-side health lease.
 pub(crate) const HEALTH_RENEW_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Stable gif_creator action vocabulary shared by schema, policy classification, and handler.
-pub(crate) mod action {
-    pub(crate) const START: &str = "start_recording";
-    pub(crate) const STOP: &str = "stop_recording";
-    pub(crate) const STATUS: &str = "status";
-    pub(crate) const CLEAR: &str = "clear";
-    pub(crate) const EXPORT: &str = "export";
-}
-
 /// The browser surface whose pixels a recording contains.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct SurfaceId {
@@ -151,6 +142,7 @@ pub(crate) struct DueFinalization {
 #[derive(Clone, Debug)]
 pub(crate) struct LeaseTarget {
     pub(crate) ticket: RecordingTicket,
+    pub(crate) owner: String,
 }
 
 /// Content-free recording status safe to return or log.
@@ -166,6 +158,26 @@ pub(crate) struct RecordingSummary {
     pub(crate) hard_remaining_ms: Option<u64>,
     pub(crate) expires_at_ms: Option<u64>,
     pub(crate) stop_reason: Option<StopReason>,
+}
+
+/// Why an acknowledged browser-side recording start could not become the active local capture.
+#[derive(Clone, Debug)]
+pub(crate) enum CommitStartError {
+    /// A hold, disconnect, or other terminal event interrupted the staged generation first.
+    Interrupted(RecordingSummary),
+    /// The generation was removed or replaced before the acknowledgement arrived.
+    Stale,
+}
+
+/// Coordinator decision for one extension recording frame.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FrameAdmission {
+    /// The frame was accepted, including an already-accepted duplicate sequence.
+    Accepted,
+    /// This exact live generation was rejected and transitioned to Interrupted. Queue one cancel.
+    RejectAndCancel,
+    /// The identity was stale, unknown, or already stopped. Do not enqueue another cancel.
+    Ignored,
 }
 
 struct StoredFrame {
@@ -308,15 +320,36 @@ impl RecordingCoordinator {
         &self,
         ticket: &RecordingTicket,
         vp_w: Option<f64>,
-    ) -> Option<RecordingSummary> {
+    ) -> Result<RecordingSummary, CommitStartError> {
         let now = Instant::now();
         let mut inner = self.inner.lock().unwrap();
         if inner.staging.get(&ticket.surface) != Some(&ticket.id) {
-            return None;
+            return Err(CommitStartError::Stale);
         }
-        let record = inner.records.get_mut(&ticket.id)?;
-        if record.generation != ticket.generation || record.state != RecordingState::Starting {
-            return None;
+        let replaces_current = inner.current.get(&ticket.surface).cloned();
+        let Some(record) = inner.records.get_mut(&ticket.id) else {
+            return Err(CommitStartError::Stale);
+        };
+        if record.generation != ticket.generation {
+            return Err(CommitStartError::Stale);
+        }
+        if record.state == RecordingState::Interrupted {
+            if replaces_current.is_some() {
+                record.frames.clear();
+                record.bytes_held = 0;
+                record.pending.clear();
+            }
+            let summary = record.summary(now);
+            inner.staging.remove(&ticket.surface);
+            if replaces_current.is_some() {
+                inner.records.remove(&ticket.id);
+            } else {
+                inner.current.insert(ticket.surface, ticket.id.clone());
+            }
+            return Err(CommitStartError::Interrupted(summary));
+        }
+        if record.state != RecordingState::Starting {
+            return Err(CommitStartError::Stale);
         }
         record.state = RecordingState::Recording;
         record.vp_w = vp_w;
@@ -326,7 +359,11 @@ impl RecordingCoordinator {
                 inner.records.remove(&old);
             }
         }
-        inner.records.get(&ticket.id).map(|r| r.summary(now))
+        inner
+            .records
+            .get(&ticket.id)
+            .map(|record| record.summary(now))
+            .ok_or(CommitStartError::Stale)
     }
 
     /// Roll back a staging start without touching the prior committed recording.
@@ -404,6 +441,7 @@ impl RecordingCoordinator {
     }
 
     /// Accept one base64 JPEG only when its complete identity matches the current generation.
+    /// A rejected live generation asks the caller for exactly one cancel; repeats are ignored.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn on_frame(
         &self,
@@ -415,18 +453,15 @@ impl RecordingCoordinator {
         ts_ms: i64,
         device_width: Option<f64>,
         final_frame: bool,
-    ) -> bool {
+    ) -> FrameAdmission {
         if data_b64.len() > MAX_FRAME_BYTES.saturating_mul(4).saturating_div(3) + 8 {
-            self.interrupt_identity(surface, recording_id, generation, StopReason::InvalidFrame);
-            return false;
+            return self.reject_frame(surface, recording_id, generation, StopReason::InvalidFrame);
         }
         let Some(bytes) = b64::decode(data_b64) else {
-            self.interrupt_identity(surface, recording_id, generation, StopReason::InvalidFrame);
-            return false;
+            return self.reject_frame(surface, recording_id, generation, StopReason::InvalidFrame);
         };
         if bytes.len() > MAX_FRAME_BYTES {
-            self.interrupt_identity(surface, recording_id, generation, StopReason::InvalidFrame);
-            return false;
+            return self.reject_frame(surface, recording_id, generation, StopReason::InvalidFrame);
         }
 
         let mut inner = self.inner.lock().unwrap();
@@ -437,16 +472,16 @@ impl RecordingCoordinator {
             .records
             .get_mut(&RecordingId(recording_id.to_string()))
         else {
-            return false;
+            return FrameAdmission::Ignored;
         };
         if record.surface != surface
             || record.generation != generation
             || !record.state.accepts_frames()
         {
-            return false;
+            return FrameAdmission::Ignored;
         }
         if sequence < record.next_seq {
-            return true;
+            return FrameAdmission::Accepted;
         }
         if global_bytes.saturating_add(bytes.len()) > MAX_GLOBAL_RECORDING_BYTES {
             let now = Instant::now();
@@ -455,7 +490,7 @@ impl RecordingCoordinator {
             record.retention_deadline = Some(now + RETENTION_TIMEOUT);
             record.retention_wall_ms =
                 Some(wall_ms().saturating_add(RETENTION_TIMEOUT.as_millis() as u64));
-            return false;
+            return FrameAdmission::RejectAndCancel;
         }
         record.next_seq = sequence.saturating_add(1);
         let action = take_action_for_frame(&mut record.pending, ts_ms);
@@ -467,7 +502,35 @@ impl RecordingCoordinator {
         });
         record.bytes_held = record.bytes_held.saturating_add(byte_len);
         thin_to_bounds(record);
-        record.state.accepts_frames()
+        if record.state == RecordingState::Interrupted {
+            FrameAdmission::RejectAndCancel
+        } else {
+            FrameAdmission::Accepted
+        }
+    }
+
+    fn reject_frame(
+        &self,
+        surface: SurfaceId,
+        recording_id: &str,
+        generation: u64,
+        reason: StopReason,
+    ) -> FrameAdmission {
+        let now = Instant::now();
+        let mut inner = self.inner.lock().unwrap();
+        let Some(record) = inner
+            .records
+            .get_mut(&RecordingId(recording_id.to_string()))
+            .filter(|record| {
+                record.surface == surface
+                    && record.generation == generation
+                    && record.state.accepts_frames()
+            })
+        else {
+            return FrameAdmission::Ignored;
+        };
+        Self::interrupt_record(record, reason, now);
+        FrameAdmission::RejectAndCancel
     }
 
     /// Move an active recording into finalization and return its generation token.
@@ -526,18 +589,14 @@ impl RecordingCoordinator {
     pub(crate) fn interrupt_surface(&self, surface: SurfaceId, reason: StopReason) {
         let now = Instant::now();
         let mut inner = self.inner.lock().unwrap();
-        let Some(id) = inner.current.get(&surface).cloned() else {
-            return;
-        };
-        let Some(record) = inner.records.get_mut(&id) else {
-            return;
-        };
-        if record.state.accepts_frames() {
-            record.state = RecordingState::Interrupted;
-            record.stop_reason = Some(reason);
-            record.retention_deadline = Some(now + RETENTION_TIMEOUT);
-            record.retention_wall_ms =
-                Some(wall_ms().saturating_add(RETENTION_TIMEOUT.as_millis() as u64));
+        let ids = [
+            inner.current.get(&surface).cloned(),
+            inner.staging.get(&surface).cloned(),
+        ];
+        for id in ids.into_iter().flatten() {
+            if let Some(record) = inner.records.get_mut(&id) {
+                Self::interrupt_record(record, reason, now);
+            }
         }
     }
 
@@ -550,18 +609,33 @@ impl RecordingCoordinator {
         generation: u64,
         reason: StopReason,
     ) {
-        let matches = {
-            let inner = self.inner.lock().unwrap();
-            inner.current.get(&surface).is_some_and(|id| {
-                id.as_str() == recording_id
-                    && inner
-                        .records
-                        .get(id)
-                        .is_some_and(|record| record.generation == generation)
+        let now = Instant::now();
+        let mut inner = self.inner.lock().unwrap();
+        let id = inner
+            .staging
+            .get(&surface)
+            .filter(|id| id.as_str() == recording_id)
+            .or_else(|| {
+                inner
+                    .current
+                    .get(&surface)
+                    .filter(|id| id.as_str() == recording_id)
             })
-        };
-        if matches {
-            self.interrupt_surface(surface, reason);
+            .cloned();
+        if let Some(record) = id.and_then(|id| inner.records.get_mut(&id)) {
+            if record.generation == generation {
+                Self::interrupt_record(record, reason, now);
+            }
+        }
+    }
+
+    fn interrupt_record(record: &mut Recording, reason: StopReason, now: Instant) {
+        if record.state.accepts_frames() {
+            record.state = RecordingState::Interrupted;
+            record.stop_reason = Some(reason);
+            record.retention_deadline = Some(now + RETENTION_TIMEOUT);
+            record.retention_wall_ms =
+                Some(wall_ms().saturating_add(RETENTION_TIMEOUT.as_millis() as u64));
         }
     }
 
@@ -582,19 +656,24 @@ impl RecordingCoordinator {
     }
 
     /// Interrupt all active captures, used for the global take-the-wheel and panic paths.
-    pub(crate) fn interrupt_all(&self, reason: StopReason) {
-        let surfaces: Vec<SurfaceId> = {
+    pub(crate) fn interrupt_all(&self, reason: StopReason) -> Vec<RecordingTicket> {
+        let tickets: Vec<RecordingTicket> = {
             let inner = self.inner.lock().unwrap();
             inner
                 .records
                 .values()
                 .filter(|record| record.state.accepts_frames())
-                .map(|record| record.surface)
+                .map(|record| RecordingTicket {
+                    id: record.id.clone(),
+                    generation: record.generation,
+                    surface: record.surface,
+                })
                 .collect()
         };
-        for surface in surfaces {
-            self.interrupt_surface(surface, reason);
+        for ticket in &tickets {
+            self.interrupt_surface(ticket.surface, reason);
         }
+        tickets
     }
 
     /// Move due active recordings into finalization and expire retained content. The caller owns
@@ -679,6 +758,7 @@ impl RecordingCoordinator {
                     generation: record.generation,
                     surface: record.surface,
                 },
+                owner: record.owner.clone(),
             })
             .collect()
     }
@@ -755,38 +835,78 @@ impl RecordingCoordinator {
     }
 
     /// Erase one owner's recording immediately and retain only a content-free tombstone.
-    pub(crate) fn clear(&self, owner: &str, surface: SurfaceId, reason: StopReason) {
+    ///
+    /// Returns whether an owned current or staging recording was actually erased. A prior
+    /// tombstone is not a new clear effect.
+    pub(crate) fn clear(&self, owner: &str, surface: SurfaceId, reason: StopReason) -> bool {
         let mut inner = self.inner.lock().unwrap();
         let ids = [
             inner.current.get(&surface).cloned(),
             inner.staging.get(&surface).cloned(),
         ];
+        let mut changed = false;
         for id in ids.into_iter().flatten() {
-            if inner
-                .records
-                .get(&id)
-                .is_some_and(|record| record.owner == owner)
-            {
-                if inner.current.get(&surface) == Some(&id) {
-                    inner.current.remove(&surface);
-                }
-                if inner.staging.get(&surface) == Some(&id) {
-                    inner.staging.remove(&surface);
-                }
-                let Some(mut record) = inner.records.remove(&id) else {
-                    continue;
-                };
-                record.frames.clear();
-                record.bytes_held = 0;
-                record.state = RecordingState::Erased;
-                record.stop_reason = Some(reason);
-                record.retention_deadline = None;
-                record.retention_wall_ms = None;
-                inner
-                    .tombstones
-                    .insert((owner.to_string(), surface), record.summary(Instant::now()));
-            }
+            changed |= Self::erase_exact(&mut inner, owner, surface, &id, None, reason);
         }
+        changed
+    }
+
+    /// Erase only the exact recording generation named by a previously captured ticket.
+    ///
+    /// A replacement that wins after the ticket snapshot is never erased or unmapped. Returns
+    /// whether the exact owned generation was present and erased.
+    pub(crate) fn clear_ticket(
+        &self,
+        owner: &str,
+        ticket: &RecordingTicket,
+        reason: StopReason,
+    ) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        Self::erase_exact(
+            &mut inner,
+            owner,
+            ticket.surface,
+            &ticket.id,
+            Some(ticket.generation),
+            reason,
+        )
+    }
+
+    fn erase_exact(
+        inner: &mut Inner,
+        owner: &str,
+        surface: SurfaceId,
+        id: &RecordingId,
+        generation: Option<u64>,
+        reason: StopReason,
+    ) -> bool {
+        let matches = inner.records.get(id).is_some_and(|record| {
+            record.owner == owner
+                && record.surface == surface
+                && generation.is_none_or(|expected| record.generation == expected)
+        });
+        if !matches {
+            return false;
+        }
+        if inner.current.get(&surface) == Some(id) {
+            inner.current.remove(&surface);
+        }
+        if inner.staging.get(&surface) == Some(id) {
+            inner.staging.remove(&surface);
+        }
+        let Some(mut record) = inner.records.remove(id) else {
+            return false;
+        };
+        record.frames.clear();
+        record.bytes_held = 0;
+        record.state = RecordingState::Erased;
+        record.stop_reason = Some(reason);
+        record.retention_deadline = None;
+        record.retention_wall_ms = None;
+        inner
+            .tombstones
+            .insert((owner.to_string(), surface), record.summary(Instant::now()));
+        true
     }
 
     /// Erase all content owned by a retiring workspace and return generations whose relays should
@@ -895,54 +1015,67 @@ mod tests {
     fn slot_and_generation_prevent_cross_recording_frames() {
         let coordinator = RecordingCoordinator::new();
         let ticket = coordinator.begin_start("g1", surface(2, 9)).unwrap();
-        assert!(!coordinator.on_frame(
-            surface(1, 9),
-            ticket.id.as_str(),
-            ticket.generation,
-            0,
-            &frame(),
-            100,
-            None,
-            false,
-        ));
-        assert!(!coordinator.on_frame(
-            surface(2, 9),
-            ticket.id.as_str(),
-            ticket.generation + 1,
-            0,
-            &frame(),
-            100,
-            None,
-            false,
-        ));
-        assert!(coordinator.on_frame(
-            surface(2, 9),
-            ticket.id.as_str(),
-            ticket.generation,
-            0,
-            &frame(),
-            100,
-            None,
-            false,
-        ));
+        assert_eq!(
+            coordinator.on_frame(
+                surface(1, 9),
+                ticket.id.as_str(),
+                ticket.generation,
+                0,
+                &frame(),
+                100,
+                None,
+                false,
+            ),
+            FrameAdmission::Ignored
+        );
+        assert_eq!(
+            coordinator.on_frame(
+                surface(2, 9),
+                ticket.id.as_str(),
+                ticket.generation + 1,
+                0,
+                &frame(),
+                100,
+                None,
+                false,
+            ),
+            FrameAdmission::Ignored
+        );
+        assert_eq!(
+            coordinator.on_frame(
+                surface(2, 9),
+                ticket.id.as_str(),
+                ticket.generation,
+                0,
+                &frame(),
+                100,
+                None,
+                false,
+            ),
+            FrameAdmission::Accepted
+        );
     }
 
     #[test]
     fn clear_erases_frames_and_leaves_only_a_tombstone() {
         let coordinator = RecordingCoordinator::new();
         let ticket = coordinator.begin_start("g1", surface(1, 3)).unwrap();
-        coordinator.commit_start(&ticket, None);
-        assert!(coordinator.on_frame(
-            surface(1, 3),
-            ticket.id.as_str(),
-            ticket.generation,
-            0,
-            &frame(),
-            100,
-            None,
-            false,
-        ));
-        coordinator.clear("g1", surface(1, 3), StopReason::Cleared);
+        coordinator.commit_start(&ticket, None).unwrap();
+        assert_eq!(
+            coordinator.on_frame(
+                surface(1, 3),
+                ticket.id.as_str(),
+                ticket.generation,
+                0,
+                &frame(),
+                100,
+                None,
+                false,
+            ),
+            FrameAdmission::Accepted
+        );
+        assert!(coordinator.clear("g1", surface(1, 3), StopReason::Cleared));
+        assert!(!coordinator.clear("g1", surface(1, 3), StopReason::Cleared));
         let status = coordinator.status("g1", surface(1, 3)).unwrap();
         assert_eq!(status.state, RecordingState::Erased);
         assert_eq!(status.bytes_held, 0);
@@ -955,7 +1088,7 @@ mod tests {
     fn idle_waits_for_in_flight_work_but_hard_deadline_does_not() {
         let coordinator = RecordingCoordinator::new();
         let ticket = coordinator.begin_start("g1", surface(1, 5)).unwrap();
-        coordinator.commit_start(&ticket, None);
+        coordinator.commit_start(&ticket, None).unwrap();
         assert!(coordinator.begin_activity("g1", surface(1, 5)));
         {
             let mut inner = coordinator.inner.lock().unwrap();
@@ -976,7 +1109,7 @@ mod tests {
     fn retention_expiry_erases_content_and_leaves_expired_status() {
         let coordinator = RecordingCoordinator::new();
         let ticket = coordinator.begin_start("g1", surface(1, 6)).unwrap();
-        coordinator.commit_start(&ticket, None);
+        coordinator.commit_start(&ticket, None).unwrap();
         let finishing = coordinator.begin_finalizing("g1", surface(1, 6)).unwrap();
         coordinator.finish_finalizing(&finishing, true, StopReason::Explicit);
         {
@@ -997,29 +1130,150 @@ mod tests {
     fn wrong_owner_cannot_clear_or_unmap_a_recording() {
         let coordinator = RecordingCoordinator::new();
         let ticket = coordinator.begin_start("g1", surface(1, 8)).unwrap();
-        coordinator.commit_start(&ticket, None);
-        coordinator.clear("g2", surface(1, 8), StopReason::Cleared);
+        coordinator.commit_start(&ticket, None).unwrap();
+        assert!(!coordinator.clear("g2", surface(1, 8), StopReason::Cleared));
         assert!(coordinator.status("g1", surface(1, 8)).is_some());
         assert!(coordinator.is_active("g1", surface(1, 8)));
+    }
+
+    #[test]
+    fn clear_ticket_is_generation_exact_and_reports_no_op() {
+        let coordinator = RecordingCoordinator::new();
+        let ticket = coordinator.begin_start("g1", surface(1, 9)).unwrap();
+        coordinator.commit_start(&ticket, None).unwrap();
+
+        let mut stale = ticket.clone();
+        stale.generation = stale.generation.saturating_add(1);
+        assert!(!coordinator.clear_ticket("g1", &stale, StopReason::Cleared));
+        assert!(coordinator.is_active("g1", surface(1, 9)));
+
+        assert!(coordinator.clear_ticket("g1", &ticket, StopReason::Cleared));
+        assert!(!coordinator.clear_ticket("g1", &ticket, StopReason::Cleared));
+        assert_eq!(
+            coordinator.status("g1", surface(1, 9)).unwrap().state,
+            RecordingState::Erased
+        );
+    }
+
+    #[test]
+    fn acknowledged_stop_can_lose_its_local_generation_before_finish() {
+        let coordinator = RecordingCoordinator::new();
+        let ticket = coordinator.begin_start("g1", surface(1, 10)).unwrap();
+        coordinator.commit_start(&ticket, None).unwrap();
+        let finishing = coordinator.begin_finalizing("g1", surface(1, 10)).unwrap();
+
+        assert!(coordinator.clear_ticket("g1", &finishing, StopReason::Cleared));
+        assert!(coordinator
+            .finish_finalizing(&finishing, true, StopReason::Explicit)
+            .is_none());
+    }
+
+    #[test]
+    fn disconnect_interrupts_a_staged_start_before_acknowledgement() {
+        let coordinator = RecordingCoordinator::new();
+        let ticket = coordinator.begin_start("g1", surface(4, 12)).unwrap();
+
+        coordinator.interrupt_slot(4, StopReason::BrowserDisconnected);
+        let CommitStartError::Interrupted(summary) =
+            coordinator.commit_start(&ticket, None).unwrap_err()
+        else {
+            panic!("staged disconnect must retain an interrupted acknowledgement outcome");
+        };
+        assert_eq!(summary.state, RecordingState::Interrupted);
+        assert_eq!(summary.stop_reason, Some(StopReason::BrowserDisconnected));
+        assert!(!coordinator.is_active("g1", surface(4, 12)));
+        assert_eq!(
+            coordinator.status("g1", surface(4, 12)).unwrap().state,
+            RecordingState::Interrupted
+        );
+    }
+
+    #[test]
+    fn hold_interrupts_current_and_staging_generations_atomically() {
+        let coordinator = RecordingCoordinator::new();
+        let current = coordinator.begin_start("g1", surface(5, 13)).unwrap();
+        coordinator.commit_start(&current, None).unwrap();
+        let finishing = coordinator.begin_finalizing("g1", surface(5, 13)).unwrap();
+        coordinator.finish_finalizing(&finishing, true, StopReason::Explicit);
+        let staged = coordinator.begin_start("g1", surface(5, 13)).unwrap();
+
+        let interrupted = coordinator.interrupt_all(StopReason::UserHold);
+        assert!(interrupted.iter().any(|ticket| ticket.id == staged.id));
+        let CommitStartError::Interrupted(summary) =
+            coordinator.commit_start(&staged, None).unwrap_err()
+        else {
+            panic!("held staged generation must not commit as recording");
+        };
+        assert_eq!(summary.state, RecordingState::Interrupted);
+        assert_eq!(summary.stop_reason, Some(StopReason::UserHold));
+        assert_eq!(
+            coordinator.status("g1", surface(5, 13)).unwrap().id,
+            current.id
+        );
     }
 
     #[test]
     fn invalid_current_frame_interrupts_capture() {
         let coordinator = RecordingCoordinator::new();
         let ticket = coordinator.begin_start("g1", surface(1, 11)).unwrap();
-        coordinator.commit_start(&ticket, None);
-        assert!(!coordinator.on_frame(
-            surface(1, 11),
-            ticket.id.as_str(),
-            ticket.generation,
-            0,
-            "not base64!",
-            100,
-            None,
-            false,
-        ));
+        coordinator.commit_start(&ticket, None).unwrap();
+        assert_eq!(
+            coordinator.on_frame(
+                surface(1, 11),
+                ticket.id.as_str(),
+                ticket.generation,
+                0,
+                "not base64!",
+                100,
+                None,
+                false,
+            ),
+            FrameAdmission::RejectAndCancel
+        );
+        assert_eq!(
+            coordinator.on_frame(
+                surface(1, 11),
+                ticket.id.as_str(),
+                ticket.generation,
+                1,
+                "still not base64!",
+                101,
+                None,
+                false,
+            ),
+            FrameAdmission::Ignored,
+            "an already-interrupted generation must not request another critical cancel"
+        );
         let status = coordinator.status("g1", surface(1, 11)).unwrap();
         assert_eq!(status.state, RecordingState::Interrupted);
         assert_eq!(status.stop_reason, Some(StopReason::InvalidFrame));
+    }
+
+    #[test]
+    fn oversized_staged_frame_interrupts_before_start_acknowledgement() {
+        let coordinator = RecordingCoordinator::new();
+        let ticket = coordinator.begin_start("g1", surface(1, 14)).unwrap();
+        let oversized = "A".repeat(MAX_FRAME_BYTES.saturating_mul(4).saturating_div(3) + 9);
+        assert_eq!(
+            coordinator.on_frame(
+                surface(1, 14),
+                ticket.id.as_str(),
+                ticket.generation,
+                0,
+                &oversized,
+                100,
+                None,
+                false,
+            ),
+            FrameAdmission::RejectAndCancel
+        );
+        let CommitStartError::Interrupted(summary) =
+            coordinator.commit_start(&ticket, None).unwrap_err()
+        else {
+            panic!("oversized staged frame must prevent Recording state");
+        };
+        assert_eq!(summary.state, RecordingState::Interrupted);
+        assert_eq!(summary.stop_reason, Some(StopReason::InvalidFrame));
+        assert!(!coordinator.is_active("g1", surface(1, 14)));
     }
 }

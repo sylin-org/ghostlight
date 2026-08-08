@@ -23,7 +23,6 @@ use ghostlight_transport::operation::{
     FlowStepStatus, FlowTermination, FlowTerminationReason, IntentId, OperationEffect,
     OperationKey, ResultPart, RetryDisposition,
 };
-#[cfg(test)]
 use serde_json::json;
 use serde_json::Value;
 use std::sync::Arc;
@@ -344,6 +343,24 @@ fn inherit_root_tab(mut operation: BrowserOperation, root_tab: Option<&Value>) -
     operation
 }
 
+const fn flow_step_status(status: BrowserResultStatus, dry_run: bool) -> FlowStepStatus {
+    if dry_run {
+        return FlowStepStatus::WouldAllow;
+    }
+    match status {
+        BrowserResultStatus::Ok => FlowStepStatus::Ok,
+        BrowserResultStatus::Partial => FlowStepStatus::Partial,
+        BrowserResultStatus::NotMet => FlowStepStatus::NotMet,
+        BrowserResultStatus::Blocked => FlowStepStatus::Blocked,
+        BrowserResultStatus::Held => FlowStepStatus::Held,
+        BrowserResultStatus::AttentionRequired => FlowStepStatus::AttentionRequired,
+        BrowserResultStatus::Cancelled => FlowStepStatus::Cancelled,
+        BrowserResultStatus::NotDispatched => FlowStepStatus::NotDispatched,
+        BrowserResultStatus::OutcomeUnknown => FlowStepStatus::OutcomeUnknown,
+        BrowserResultStatus::Unavailable => FlowStepStatus::Unavailable,
+    }
+}
+
 fn canonical_step(
     step: u32,
     operation: &BrowserOperation,
@@ -371,11 +388,7 @@ fn canonical_step(
             match canonicalize_success(operation.key(), disposition, None, result.clone()) {
                 Ok(result) => FlowStepResult {
                     step,
-                    status: if dry_run {
-                        FlowStepStatus::WouldAllow
-                    } else {
-                        FlowStepStatus::Ok
-                    },
+                    status: flow_step_status(result.status, dry_run),
                     result,
                 },
                 Err(error) => synthetic_step(
@@ -441,15 +454,19 @@ fn canonical_step(
             },
             message,
         ),
-        CallOutcome::Held { message } => synthetic_step(
-            step,
-            operation.key(),
-            FlowStepStatus::Held,
-            BrowserResultStatus::Held,
-            OperationEffect::None,
-            None,
-            message,
-        ),
+        CallOutcome::Held { prolonged } => {
+            let mut step_result = synthetic_step(
+                step,
+                operation.key(),
+                FlowStepStatus::Held,
+                BrowserResultStatus::Held,
+                OperationEffect::None,
+                None,
+                "browser session held by user",
+            );
+            step_result.result.data = json!({"held": {"prolonged": prolonged}});
+            step_result
+        }
         CallOutcome::AttentionRequired { message } => synthetic_step(
             step,
             operation.key(),
@@ -535,9 +552,7 @@ enum StopReason {
 impl StopReason {
     fn from_status(status: FlowStepStatus) -> Self {
         match status {
-            FlowStepStatus::Denied | FlowStepStatus::WouldDeny | FlowStepStatus::Blocked => {
-                Self::Denied
-            }
+            FlowStepStatus::Denied | FlowStepStatus::WouldDeny => Self::Denied,
             FlowStepStatus::Held => Self::Held,
             FlowStepStatus::AttentionRequired => Self::AttentionRequired,
             FlowStepStatus::Cancelled => Self::Cancelled,
@@ -910,7 +925,7 @@ mod tests {
     }
 
     #[test]
-    fn acknowledged_error_success_keeps_legacy_flow_control_and_truthful_result() {
+    fn partial_success_stops_and_propagates_its_committed_effect() {
         let args = flow(vec![
             operation(
                 OperationId::BrowserAct,
@@ -939,15 +954,72 @@ mod tests {
         ]);
         let run = run_flow(&args, &mut runner, 120_000, false);
 
-        assert_eq!(runner.calls.len(), 2, "acknowledged successes continue");
-        assert_eq!(run.data.steps[0].status, FlowStepStatus::Ok);
+        assert_eq!(runner.calls.len(), 1, "partial success stops by default");
+        assert_eq!(run.data.steps[0].status, FlowStepStatus::Partial);
         assert_eq!(
             run.data.steps[0].result.status,
             BrowserResultStatus::Partial
         );
         assert_eq!(run.data.steps[0].result.effect, OperationEffect::Committed);
-        assert_eq!(run.data.steps[1].status, FlowStepStatus::Ok);
-        assert_eq!(run.data.summary, "2/2 steps completed");
+        assert_eq!(run.data.steps[1].status, FlowStepStatus::NotRun);
+        assert_eq!(run.data.summary, "0/2 steps completed; step 1 failed");
+        assert_eq!(run.data.termination.reason, FlowTerminationReason::Failed);
+
+        let descriptor = operation_registry::descriptor(OperationKey::new(
+            OperationId::BrowserFlow,
+            IntentId::FlowExecute,
+        ))
+        .expect("flow descriptor");
+        assert_eq!(
+            descriptor.success_disposition_for(&json!({
+                "content": [],
+                "structuredContent": run.data,
+            })),
+            SuccessDisposition::new(
+                BrowserResultStatus::Partial,
+                OperationEffect::Committed,
+                Some(RetryDisposition::Unsafe),
+            )
+        );
+    }
+
+    #[test]
+    fn blocked_success_stops_without_claiming_a_policy_denial() {
+        let args = flow(vec![
+            operation(
+                OperationId::BrowserAct,
+                IntentId::ActClick,
+                json!({"tab": 7, "target": {"ref": "stale"}}),
+            ),
+            operation(
+                OperationId::BrowserFind,
+                IntentId::FindQuery,
+                json!({"tab": 7, "query": "Saved"}),
+            ),
+        ]);
+        let mut runner = StubRunner::new(vec![CallOutcome::Success {
+            result: json!({
+                "content": [{"type": "text", "text": "target is stale"}],
+                "isError": true,
+                "structuredContent": {
+                    "interactionReceipt": {
+                        "blockers": [{"kind": "stale_ref"}]
+                    }
+                }
+            }),
+        }]);
+
+        let run = run_flow(&args, &mut runner, 120_000, false);
+        assert_eq!(runner.calls.len(), 1);
+        assert_eq!(run.data.steps[0].status, FlowStepStatus::Blocked);
+        assert_eq!(
+            run.data.steps[0].result.status,
+            BrowserResultStatus::Blocked
+        );
+        assert_eq!(run.data.steps[0].result.effect, OperationEffect::None);
+        assert_eq!(run.data.steps[1].status, FlowStepStatus::NotRun);
+        assert_eq!(run.data.summary, "0/2 steps completed; step 1 failed");
+        assert_eq!(run.data.termination.reason, FlowTerminationReason::Failed);
     }
 
     #[test]

@@ -80,6 +80,8 @@ pub(crate) enum EncodeError {
     FlowStepIdentityMismatch { step: u32 },
     MalformedFlowData(&'static str),
     MalformedContextData(&'static str),
+    MissingHeldPresentation,
+    HeldIdentityMismatch,
     InvalidResultPart(ResultPartError),
     InvalidResultDisposition(BrowserResultValidationError),
 }
@@ -124,6 +126,12 @@ impl std::fmt::Display for EncodeError {
             Self::MalformedContextData(reason) => write!(
                 formatter,
                 "ghostlight-legacy/v1 cannot faithfully encode canonical context data: {reason}"
+            ),
+            Self::MissingHeldPresentation => formatter.write_str(
+                "ghostlight-legacy/v1 hold rendering requires its invocation presentation",
+            ),
+            Self::HeldIdentityMismatch => formatter.write_str(
+                "ghostlight-legacy/v1 hold presentation does not match its canonical operation",
             ),
             Self::InvalidResultPart(error) => write!(
                 formatter,
@@ -172,17 +180,33 @@ pub(crate) const fn agent_guide() -> &'static str {
 pub(crate) fn invocation_presentation(
     external_tool: &str,
     arguments: &Value,
+    operation: &BrowserOperation,
 ) -> Result<InvocationPresentation, DecodeError> {
     if tool_keys(external_tool).is_none() {
         return Err(DecodeError::UnknownTool(external_tool.to_owned()));
     }
-    let external_action = arguments
-        .as_object()
-        .and_then(|object| object.get("action"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    InvocationPresentation::new(PROFILE_ID, PROFILE_VERSION, external_tool, external_action)
-        .map_err(|error| DecodeError::InvalidShape(error.to_string()))
+    let external_action = match external_tool {
+        "computer" | "act_on" | "dialog" | "tab_control" | "gif_creator" => arguments
+            .as_object()
+            .and_then(|object| object.get("action"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        "form_fill" if arguments.get("submit").and_then(Value::as_bool) == Some(true) => {
+            Some("submit".to_owned())
+        }
+        _ => None,
+    };
+    let presentation =
+        InvocationPresentation::new(PROFILE_ID, PROFILE_VERSION, external_tool, external_action)
+            .map_err(|error| DecodeError::InvalidShape(error.to_string()))?;
+    if external_action_for_key(external_tool, operation.key())
+        != Some(presentation.external_action())
+    {
+        return Err(DecodeError::InvalidShape(format!(
+            "{external_tool} presentation does not match its decoded canonical operation"
+        )));
+    }
+    Ok(presentation)
 }
 
 /// Capture original nested flow labels in edge-local request correlation state.
@@ -319,6 +343,125 @@ pub(crate) fn encode_result(
         rendered.insert("isError".into(), Value::Bool(true));
     }
     Ok(Value::Object(rendered))
+}
+
+/// Render one semantic held outcome using the frozen external invocation label.
+pub(crate) fn encode_held(
+    prolonged: bool,
+    presentation: Option<&InvocationPresentation>,
+    expected_operation: Option<OperationKey>,
+) -> Result<String, EncodeError> {
+    let presentation = presentation.ok_or(EncodeError::MissingHeldPresentation)?;
+    if presentation.profile_id() != PROFILE_ID || presentation.profile_version() != PROFILE_VERSION
+    {
+        return Err(EncodeError::WrongProfile);
+    }
+    let expected_operation = expected_operation.ok_or(EncodeError::HeldIdentityMismatch)?;
+    if external_action_for_key(presentation.external_tool(), expected_operation)
+        != Some(presentation.external_action())
+    {
+        return Err(EncodeError::HeldIdentityMismatch);
+    }
+
+    Ok(encode_held_label(
+        prolonged,
+        presentation.external_tool(),
+        presentation.external_action(),
+    ))
+}
+
+/// Return a conservative profile-local fallback when invocation correlation is malformed.
+pub(crate) fn encode_held_fallback(prolonged: bool) -> String {
+    encode_held_label(prolonged, "browser tool", None)
+}
+
+fn encode_held_label(prolonged: bool, tool: &str, action: Option<&str>) -> String {
+    let label = action.map_or_else(|| tool.to_owned(), |action| format!("{tool} ({action})"));
+    let mut message = format!(
+        "Paused: the user has taken control of the browser (take-the-wheel). The '{label}' \
+         call was NOT executed. This is not an error, and retrying will not help: every \
+         browser tool call receives this same reply until the user resumes. Stop issuing \
+         browser tool calls, tell the user the session is paused and you are waiting, and \
+         continue only after the user says they have resumed."
+    );
+    if prolonged {
+        message.push(' ');
+        message.push_str(
+            "This session has been paused for more than 2 minutes. Only the user can resume \
+             it, from the Ghostlight extension: the popup Pause/Resume button or the toggle \
+             keyboard shortcut.",
+        );
+    }
+    message
+}
+
+fn external_action_for_key(tool: &str, key: OperationKey) -> Option<Option<&'static str>> {
+    use IntentId::*;
+    use OperationId::*;
+
+    let action = match tool {
+        "computer" => match (key.id, key.intent) {
+            (BrowserAct, ActClick) | (BrowserInput, InputPointerClick) => "left_click",
+            (BrowserAct, ActRightClick) | (BrowserInput, InputPointerRightClick) => "right_click",
+            (BrowserAct, ActDoubleClick) | (BrowserInput, InputPointerDoubleClick) => {
+                "double_click"
+            }
+            (BrowserAct, ActTripleClick) | (BrowserInput, InputPointerTripleClick) => {
+                "triple_click"
+            }
+            (BrowserAct, ActHover) | (BrowserInput, InputPointerHover) => "hover",
+            (BrowserAct, ActScrollIntoView) | (BrowserInput, InputScrollToOffset) => "scroll_to",
+            (BrowserInput, InputPointerDrag) => "left_click_drag",
+            (BrowserInput, InputTypeText) => "type",
+            (BrowserInput, InputPressKey) => "key",
+            (BrowserInput, InputWheel) => "scroll",
+            (BrowserScreenshot, ScreenshotViewport) => "screenshot",
+            (BrowserScreenshot, ScreenshotRegion) => "zoom",
+            (BrowserWait, WaitDelay) => "wait",
+            _ => return None,
+        },
+        "form_fill" => match (key.id, key.intent) {
+            (BrowserFill, FillFields) => return Some(None),
+            (BrowserFill, FillFieldsAndSubmit) => "submit",
+            _ => return None,
+        },
+        "act_on" => match (key.id, key.intent) {
+            (BrowserAct, ActClick) => "left_click",
+            (BrowserAct, ActRightClick) => "right_click",
+            (BrowserAct, ActDoubleClick) => "double_click",
+            (BrowserAct, ActHover) => "hover",
+            (BrowserAct, ActScrollIntoView) => "scroll_to",
+            (BrowserAct, ActSetValue) => "set_value",
+            _ => return None,
+        },
+        "dialog" => match (key.id, key.intent) {
+            (BrowserDialog, DialogStatus) => "status",
+            (BrowserDialog, DialogAccept) => "accept",
+            (BrowserDialog, DialogDismiss) => "dismiss",
+            (BrowserDialog, DialogRespond) => "respond",
+            _ => return None,
+        },
+        "tab_control" => match (key.id, key.intent) {
+            (BrowserTabs, TabsFocus) => "focus",
+            (BrowserNavigate, NavigateReload) => "reload",
+            (BrowserTabs, TabsClose) => "close",
+            _ => return None,
+        },
+        "gif_creator" => match (key.id, key.intent) {
+            (BrowserRecord, RecordStart) => "start",
+            (BrowserRecord, RecordStop) => "stop",
+            (BrowserRecord, RecordStatus) => "status",
+            (BrowserRecord, RecordClear) => "clear",
+            (BrowserRecord, RecordExport) => "export",
+            _ => return None,
+        },
+        _ => {
+            return tool_keys(tool)
+                .is_some_and(|keys| keys.into_iter().any(|candidate| candidate == key))
+                .then_some(None)
+        }
+    };
+    Some(Some(action))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -711,9 +854,7 @@ fn encode_flow_result(
 
     match presentation.external_tool() {
         "script" => encode_script_flow(data, hints),
-        "browser_batch" if result.intent == IntentId::FlowExecute => {
-            Ok(encode_batch_flow(data, hints))
-        }
+        "browser_batch" if result.intent == IntentId::FlowExecute => encode_batch_flow(data, hints),
         "browser_batch" => Err(EncodeError::MalformedFlowData(
             "browser_batch cannot render a flow preflight",
         )),
@@ -742,10 +883,14 @@ fn encode_script_flow(data: FlowResultData, hints: &FlowRenderHints) -> Result<V
             "tool": hint.label,
             "status": legacy_flow_status(step.status),
         });
-        if let Some(text) = first_step_text(&step) {
+        let held_text = held_step_text(&step, hint)?;
+        if let Some(text) = held_text.as_deref().or_else(|| first_step_text(&step)) {
             entry["result"] = Value::String(truncate_step_text(text));
         }
         let mut structured = step.result.data;
+        if step.status == FlowStepStatus::Held {
+            structured = Value::Null;
+        }
         if let Some(provenance) = step.result.provenance.as_ref() {
             reinsert_legacy_provenance(&mut structured, provenance)?;
         }
@@ -768,14 +913,18 @@ fn encode_script_flow(data: FlowResultData, hints: &FlowRenderHints) -> Result<V
     }))
 }
 
-fn encode_batch_flow(data: FlowResultData, hints: &FlowRenderHints) -> Value {
+fn encode_batch_flow(data: FlowResultData, hints: &FlowRenderHints) -> Result<Value, EncodeError> {
     let mut content = Vec::new();
     for (step, hint) in data.steps.into_iter().zip(&hints.steps) {
         match step.status {
             FlowStepStatus::NotRun => {}
             FlowStepStatus::Ok => content.extend(step.result.parts.into_iter().map(render_part)),
             status => {
-                let first_text = first_step_text(&step).unwrap_or("");
+                let held_text = held_step_text(&step, hint)?;
+                let first_text = held_text
+                    .as_deref()
+                    .or_else(|| first_step_text(&step))
+                    .unwrap_or("");
                 content.push(json!({
                     "type": "text",
                     "text": format!(
@@ -789,7 +938,27 @@ fn encode_batch_flow(data: FlowResultData, hints: &FlowRenderHints) -> Value {
         }
     }
     content.push(json!({"type": "text", "text": data.summary}));
-    json!({"content": content})
+    Ok(json!({"content": content}))
+}
+
+fn held_step_text(
+    step: &FlowStepResult,
+    hint: &FlowStepRenderHint,
+) -> Result<Option<String>, EncodeError> {
+    if step.status != FlowStepStatus::Held {
+        return Ok(None);
+    }
+    let prolonged = step
+        .result
+        .data
+        .pointer("/held/prolonged")
+        .and_then(Value::as_bool)
+        .ok_or(EncodeError::MalformedFlowData(
+            "held step is missing its prolonged state",
+        ))?;
+    let action = external_action_for_key(&hint.label, hint.expected_operation)
+        .ok_or(EncodeError::FlowStepIdentityMismatch { step: step.step })?;
+    Ok(Some(encode_held_label(prolonged, &hint.label, action)))
 }
 
 fn render_part(part: ResultPart) -> Value {
@@ -2058,6 +2227,76 @@ mod tests {
     use super::*;
     use ghostlight_transport::bridge::OperationAvailability;
 
+    #[test]
+    fn held_copy_is_profile_owned_and_identity_bound() {
+        let presentation = InvocationPresentation::new(
+            PROFILE_ID,
+            PROFILE_VERSION,
+            "computer",
+            Some("left_click".into()),
+        )
+        .expect("valid presentation");
+        let expected = OperationKey::new(OperationId::BrowserInput, IntentId::InputPointerClick);
+
+        let ordinary = encode_held(false, Some(&presentation), Some(expected)).expect("render");
+        assert!(ordinary.contains("'computer (left_click)' call"));
+        assert!(!ordinary.contains("2 minutes"));
+        assert!(!ordinary.contains("browser.input"));
+        assert!(!ordinary.contains("pointer.click"));
+
+        let prolonged = encode_held(true, Some(&presentation), Some(expected)).expect("render");
+        assert!(prolonged.contains("more than 2 minutes"));
+        assert!(prolonged.contains("Only the user can resume it"));
+
+        assert_eq!(
+            encode_held(
+                false,
+                Some(&presentation),
+                Some(OperationKey::new(
+                    OperationId::BrowserDialog,
+                    IntentId::DialogStatus,
+                )),
+            ),
+            Err(EncodeError::HeldIdentityMismatch)
+        );
+        assert_eq!(
+            encode_held(false, None, Some(expected)),
+            Err(EncodeError::MissingHeldPresentation)
+        );
+
+        let fill_arguments = json!({
+            "tabId": 7,
+            "fields": {"Email": "user@example.com"},
+            "submit": true,
+        });
+        let fill_operation = decode_call("form_fill", fill_arguments.clone()).expect("decode fill");
+        let fill_presentation =
+            invocation_presentation("form_fill", &fill_arguments, &fill_operation)
+                .expect("presentation");
+        assert_eq!(fill_presentation.external_action(), Some("submit"));
+        let fill_message = encode_held(false, Some(&fill_presentation), Some(fill_operation.key()))
+            .expect("fill hold copy");
+        assert!(fill_message.contains("'form_fill (submit)' call"));
+
+        let no_submit_arguments = json!({
+            "tabId": 7,
+            "fields": {"Email": "user@example.com"},
+        });
+        let no_submit_operation =
+            decode_call("form_fill", no_submit_arguments.clone()).expect("decode fill");
+        let no_submit_presentation =
+            invocation_presentation("form_fill", &no_submit_arguments, &no_submit_operation)
+                .expect("presentation");
+        assert_eq!(no_submit_presentation.external_action(), None);
+        assert!(encode_held(
+            false,
+            Some(&no_submit_presentation),
+            Some(no_submit_operation.key()),
+        )
+        .expect("fill hold copy")
+        .contains("'form_fill' call"));
+    }
+
     fn semantic_context_data(managed_governance: Value) -> Value {
         json!({
             "schema": CONTEXT_RESULT_SCHEMA,
@@ -2889,6 +3128,76 @@ mod tests {
     }
 
     #[test]
+    fn held_flow_steps_recover_exact_profile_copy_for_script_and_batch() {
+        let cases = [
+            (
+                "computer",
+                OperationKey::new(OperationId::BrowserInput, IntentId::InputPointerClick),
+                false,
+                "'computer (left_click)' call",
+            ),
+            (
+                "form_fill",
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillFieldsAndSubmit),
+                true,
+                "'form_fill (submit)' call",
+            ),
+        ];
+        for (label, key, prolonged, expected_label) in cases {
+            let mut held = BrowserResult::new(
+                key.id,
+                key.intent,
+                BrowserResultStatus::Held,
+                OperationEffect::None,
+            );
+            held.parts = vec![ResultPart::Text {
+                text: "browser session held by user".into(),
+            }];
+            held.data = json!({"held": {"prolonged": prolonged}});
+            let mut root = BrowserResult::new(
+                OperationId::BrowserFlow,
+                IntentId::FlowExecute,
+                BrowserResultStatus::Held,
+                OperationEffect::None,
+            );
+            root.data = serde_json::to_value(FlowResultData {
+                steps: vec![FlowStepResult {
+                    step: 1,
+                    status: FlowStepStatus::Held,
+                    result: held,
+                }],
+                summary: "0/1 steps completed; step 1 held".into(),
+                duration_ms: 1,
+                termination: FlowTermination {
+                    reason: FlowTerminationReason::Held,
+                    step: Some(1),
+                },
+            })
+            .expect("flow serializes");
+            let hints = FlowRenderHints {
+                steps: vec![FlowStepRenderHint {
+                    label: label.into(),
+                    expected_operation: key,
+                }],
+            };
+
+            for surface in ["script", "browser_batch"] {
+                let presentation =
+                    InvocationPresentation::new(PROFILE_ID, PROFILE_VERSION, surface, None)
+                        .expect("presentation");
+                let rendered = encode_result(root.clone(), Some(&presentation), Some(&hints))
+                    .expect("held flow render");
+                let wire = rendered.to_string();
+                assert!(wire.contains(expected_label), "{wire}");
+                assert_eq!(wire.contains("more than 2 minutes"), prolonged, "{wire}");
+                assert!(!wire.contains("browser.input"), "{wire}");
+                assert!(!wire.contains("pointer.click"), "{wire}");
+                assert!(!wire.contains("browser session held by user"), "{wire}");
+            }
+        }
+    }
+
+    #[test]
     fn executed_cancellation_tail_is_canonical_but_omitted_from_legacy_script() {
         let mut cancelled = BrowserResult::new(
             OperationId::BrowserAct,
@@ -3389,6 +3698,29 @@ mod tests {
             encode_result(result, None, None).expect("blocked has a faithful legacy shape");
         assert_eq!(encoded["isError"], true);
         assert_eq!(encoded["content"][0]["text"], "blocked before dispatch");
+    }
+
+    #[test]
+    fn committed_landing_denial_keeps_the_exact_legacy_error_shape() {
+        let message = "Denied (D-redirect): evil.example is outside the granted policy";
+        let mut result = BrowserResult::new(
+            OperationId::BrowserNavigate,
+            IntentId::NavigateUrl,
+            BrowserResultStatus::Partial,
+            OperationEffect::Committed,
+        );
+        result.retry = Some(ghostlight_transport::operation::RetryDisposition::Unsafe);
+        result.parts = vec![ResultPart::Text {
+            text: message.into(),
+        }];
+
+        assert_eq!(
+            encode_result(result, None, None).expect("landing denial has a faithful legacy shape"),
+            json!({
+                "content": [{"type": "text", "text": message}],
+                "isError": true,
+            })
+        );
     }
 
     #[test]

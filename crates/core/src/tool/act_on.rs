@@ -7,41 +7,22 @@
 //! resolution, cue, action, and wait calls go directly to the browser and receive correlated audit
 //! records; they never trigger a second policy prompt or use page content as authorization input.
 
+use crate::browser::mechanism::{MechanismId, MechanismRequest};
 use crate::governance::dispatch::Governance;
 use crate::governance::ports::Capability;
-use crate::hub::outbound::browser::Browser;
-use crate::hub::scheduling::ExecutionContext;
 use crate::operation::registry as operation_registry;
-use crate::tool::outcome::{delivery_failure_outcome, CallOutcome, LocalCtx, LocalFuture};
+use crate::tool::outcome::{
+    delivery_failure_outcome, tool_error_outcome, CallOutcome, LocalCtx, LocalFuture,
+};
 use crate::work::{CancellationToken, WorkContext};
 use ghostlight_transport::operation::{IntentId, OperationEffect, OperationId, OperationKey};
 use serde_json::{json, Map, Value};
 
-const ACTIONS: &[&str] = &[
-    "left_click",
-    "right_click",
-    "double_click",
-    "triple_click",
-    "hover",
-    "scroll_to",
-    "set_value",
-];
 const EXPECT_STATES: &[&str] = &["visible", "present", "gone"];
 
 /// Canonical registry entry point. The parent grant decision has completed before this runs.
 pub(crate) fn act_on_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
-    Box::pin(async move {
-        run(
-            ctx.browser,
-            ctx.governance,
-            ctx.guid,
-            ctx.args,
-            ctx.execution,
-            ctx.work,
-            ctx.cancellation,
-        )
-        .await
-    })
+    Box::pin(run(ctx))
 }
 
 fn invalid(message: impl Into<String>) -> CallOutcome {
@@ -52,8 +33,10 @@ fn invalid(message: impl Into<String>) -> CallOutcome {
     }
 }
 
-fn validate(args: &Value) -> Result<(), String> {
-    if args.get("tabId").and_then(Value::as_i64).is_none() {
+fn validate(intent: IntentId, args: &Value) -> Result<(), String> {
+    let profile = action_profile(intent)
+        .ok_or_else(|| format!("unsupported browser.act intent: {intent}"))?;
+    if args.get("tab").and_then(Value::as_i64).is_none() {
         return Err("act_on requires a numeric tabId".to_string());
     }
     let target = args
@@ -84,21 +67,16 @@ fn validate(args: &Value) -> Result<(), String> {
     {
         return Err("target contains an unsupported field".to_string());
     }
-    let action = args
-        .get("action")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "act_on requires an action".to_string())?;
-    if !ACTIONS.contains(&action) {
-        return Err(format!("unsupported act_on action: {action}"));
-    }
     let has_value = args.get("value").is_some();
-    if action == "set_value" && !has_value {
+    if profile.mechanism == MechanismId::FormSetValue && !has_value {
         return Err("value is required for set_value".to_string());
     }
-    if action == "set_value" && args.get("value").and_then(Value::as_str).is_none() {
+    if profile.mechanism == MechanismId::FormSetValue
+        && args.get("value").and_then(Value::as_str).is_none()
+    {
         return Err("value for set_value must be a string".to_string());
     }
-    if action != "set_value" && has_value {
+    if profile.mechanism != MechanismId::FormSetValue && has_value {
         return Err("value is valid only for set_value".to_string());
     }
     if let Some(expect) = args.get("expect") {
@@ -160,6 +138,82 @@ fn stamp(result: &mut Value, batch_id: &str, assurance: &str, outcome: &str) {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PostActionRefusal {
+    Paused,
+    Interrupted,
+}
+
+impl PostActionRefusal {
+    fn from_error(error: &crate::ToolError) -> Option<Self> {
+        match error {
+            crate::ToolError::Held { .. } => Some(Self::Paused),
+            crate::ToolError::AttentionRequired { .. } => Some(Self::Interrupted),
+            _ => None,
+        }
+    }
+
+    fn blocker(self, expected: bool) -> Value {
+        let observation = if expected {
+            "the requested postcondition"
+        } else {
+            "post-action settlement"
+        };
+        match self {
+            Self::Paused => json!({
+                "kind": "postcondition_paused",
+                "summary": format!(
+                    "The action committed, but {observation} was not observed because the user paused the browser session."
+                ),
+                "nextStep": "Ask the user to resume, then inspect the current page state before choosing another action."
+            }),
+            Self::Interrupted => json!({
+                "kind": "postcondition_interrupted",
+                "summary": format!(
+                    "The action committed, but {observation} was not observed because Ghostlight requires user attention."
+                ),
+                "nextStep": "Ask the user to review and resume Ghostlight, then inspect the current page state before choosing another action."
+            }),
+        }
+    }
+
+    const fn category(self) -> &'static str {
+        match self {
+            Self::Paused => "postcondition_paused",
+            Self::Interrupted => "postcondition_interrupted",
+        }
+    }
+}
+
+fn append_post_action_refusal(result: &mut Value, refusal: PostActionRefusal, expected: bool) {
+    if let Some(blockers) = result
+        .pointer_mut("/structuredContent/interactionReceipt/blockers")
+        .and_then(Value::as_array_mut)
+    {
+        blockers.push(refusal.blocker(expected));
+    }
+    if let Some(first) = result
+        .get_mut("content")
+        .and_then(Value::as_array_mut)
+        .and_then(|items| items.first_mut())
+        .and_then(Value::as_object_mut)
+    {
+        let text = first.get("text").and_then(Value::as_str).unwrap_or("");
+        let note = match refusal {
+            PostActionRefusal::Paused => {
+                "The action committed, but observation paused when the user held the browser session."
+            }
+            PostActionRefusal::Interrupted => {
+                "The action committed, but observation was interrupted when Ghostlight required user attention."
+            }
+        };
+        first.insert("text".to_string(), json!(format!("{text}\n{note}")));
+    }
+    if let Some(object) = result.as_object_mut() {
+        object.insert("isError".to_string(), json!(true));
+    }
+}
+
 fn recovery_result(
     message: String,
     batch_id: &str,
@@ -201,20 +255,20 @@ fn recovery_result(
 
 fn internal_audit(
     governance: &Governance,
-    tool: &str,
-    action: Option<&str>,
+    operation: OperationKey,
     requires: Option<&'static [Capability]>,
     batch_id: &str,
     step: u32,
     work: Option<&WorkContext>,
 ) -> crate::governance::dispatch::CallAudit {
     let mut audit = governance.begin_with_client(
-        tool,
-        action,
+        operation.id.as_str(),
+        Some(operation.intent.as_str()),
         requires,
         work.and_then(WorkContext::client).cloned(),
     );
-    audit.orchestrated("act_on", batch_id, Some(step));
+    audit.orchestrated(operation.id.as_str(), batch_id, Some(step));
+    audit.mark_mechanism_phase();
     audit.attribute_grant(None);
     audit
 }
@@ -225,34 +279,97 @@ fn canonical_requirements(key: OperationKey) -> &'static [Capability] {
         .requires
 }
 
-fn dispatched_operation(action: &str) -> OperationKey {
-    let (id, intent) = match action {
-        "left_click" => (OperationId::BrowserAct, IntentId::ActClick),
-        "right_click" => (OperationId::BrowserAct, IntentId::ActRightClick),
-        "double_click" => (OperationId::BrowserAct, IntentId::ActDoubleClick),
-        "triple_click" => (OperationId::BrowserAct, IntentId::ActTripleClick),
-        "hover" => (OperationId::BrowserAct, IntentId::ActHover),
-        "scroll_to" => (OperationId::BrowserAct, IntentId::ActScrollIntoView),
-        "set_value" => (OperationId::BrowserFill, IntentId::FillField),
-        _ => unreachable!("act_on action was validated"),
-    };
-    OperationKey::new(id, intent)
+#[derive(Clone, Copy)]
+struct ActionProfile {
+    mechanism: MechanismId,
+    cue_kind: &'static str,
+    operation: OperationKey,
+    button: Option<&'static str>,
+    count: Option<u64>,
 }
 
-async fn run(
-    browser: &Browser,
-    governance: &Governance,
-    guid: &str,
+fn action_profile(intent: IntentId) -> Option<ActionProfile> {
+    let click = |cue_kind, button, count, intent| ActionProfile {
+        mechanism: MechanismId::PointerClick,
+        cue_kind,
+        operation: OperationKey::new(OperationId::BrowserAct, intent),
+        button: Some(button),
+        count: Some(count),
+    };
+    Some(match intent {
+        IntentId::ActClick => click("click", "left", 1, intent),
+        IntentId::ActRightClick => click("right_click", "right", 1, intent),
+        IntentId::ActDoubleClick => click("double_click", "left", 2, intent),
+        IntentId::ActTripleClick => click("triple_click", "left", 3, intent),
+        IntentId::ActHover => ActionProfile {
+            mechanism: MechanismId::PointerHover,
+            cue_kind: "hover",
+            operation: OperationKey::new(OperationId::BrowserAct, intent),
+            button: None,
+            count: None,
+        },
+        IntentId::ActScrollIntoView => ActionProfile {
+            mechanism: MechanismId::ScrollTargetIntoView,
+            cue_kind: "scroll_into_view",
+            operation: OperationKey::new(OperationId::BrowserAct, intent),
+            button: None,
+            count: None,
+        },
+        IntentId::ActSetValue => ActionProfile {
+            mechanism: MechanismId::FormSetValue,
+            cue_kind: "set_value",
+            operation: OperationKey::new(OperationId::BrowserFill, IntentId::FillField),
+            button: None,
+            count: None,
+        },
+        _ => return None,
+    })
+}
+
+fn action_request(
+    operation: OperationKey,
+    profile: ActionProfile,
+    tab: i64,
+    reference: &str,
     args: &Value,
-    execution: &ExecutionContext,
-    work: Option<&WorkContext>,
-    cancellation: Option<&CancellationToken>,
-) -> CallOutcome {
-    if let Err(message) = validate(args) {
+) -> MechanismRequest {
+    let mut input = json!({ "tab": tab, "target": { "ref": reference } });
+    if let Some(button) = profile.button {
+        input["button"] = json!(button);
+    }
+    if let Some(count) = profile.count {
+        input["count"] = json!(count);
+    }
+    if profile.mechanism == MechanismId::FormSetValue {
+        input["value"] = args["value"].clone();
+    }
+    if let Some(modifiers) = args.get("modifiers") {
+        input["modifiers"] = modifiers.clone();
+    }
+    MechanismRequest::for_operation(operation, profile.mechanism, input)
+        .expect("browser.act mechanism must be declared by its dynamic plan")
+}
+
+async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
+    let LocalCtx {
+        browser,
+        governance,
+        guid,
+        operation,
+        execution,
+        work,
+        cancellation,
+        ..
+    } = ctx;
+    let intent = operation.intent;
+    let args = &operation.arguments;
+    if let Err(message) = validate(intent, args) {
         return invalid(message);
     }
+    let profile = action_profile(intent).expect("validated browser.act intent");
+    let root_operation = OperationKey::new(OperationId::BrowserAct, intent);
     let batch_id = uuid::Uuid::new_v4().to_string();
-    let tab_id = args["tabId"].as_i64().expect("validated tabId");
+    let tab_id = args["tab"].as_i64().expect("validated tab");
     let target = args["target"].clone();
     let assurance = if target.get("ref").is_some() {
         "ref"
@@ -268,28 +385,35 @@ async fn run(
 
     let mut resolve_audit = internal_audit(
         governance,
-        "resolve_actionable",
-        None,
+        root_operation,
         Some(&[Capability::Read]),
         &batch_id,
         1,
         work,
     );
     let resolved = browser
-        .call_with_context(
+        .execute_mechanism(
             guid,
-            "resolve_actionable_internal",
-            &json!({ "tabId": tab_id, "target": target }),
+            &MechanismRequest::for_operation(
+                root_operation,
+                MechanismId::ElementResolve,
+                json!({ "tab": tab_id, "target": target }),
+            )
+            .expect("browser.act resolution must be declared by its dynamic plan"),
             execution,
         )
         .await;
     resolve_audit.dispatch_finished();
-    resolve_audit.complete();
+    match resolved.as_ref().err() {
+        Some(crate::ToolError::Held { .. }) => resolve_audit.held(),
+        Some(crate::ToolError::AttentionRequired { .. }) => resolve_audit.attention_required(),
+        _ => resolve_audit.complete(),
+    }
     let resolved = match resolved {
         Ok(result) => first_text(&result)
             .and_then(|text| serde_json::from_str::<Value>(text).ok())
             .unwrap_or_else(|| json!({ "target": null, "candidates": [], "page": {} })),
-        Err(error) => return CallOutcome::Failure { error },
+        Err(error) => return tool_error_outcome(error),
     };
     let page = resolved.get("page").cloned().unwrap_or_else(|| json!({}));
     if let Some(error) = resolved.get("error").and_then(Value::as_str) {
@@ -368,31 +492,38 @@ async fn run(
         };
     }
 
-    let mut cue_audit = internal_audit(
-        governance,
-        "target_cue",
-        None,
-        Some(&[]),
-        &batch_id,
-        2,
-        work,
-    );
+    let mut cue_audit = internal_audit(governance, root_operation, Some(&[]), &batch_id, 2, work);
     let cue = browser
-        .call_with_context(
+        .execute_mechanism(
             guid,
-            "target_cue_internal",
-            &json!({
-                "tabId": tab_id,
-                "x": resolved_target.get("x").and_then(Value::as_f64).unwrap_or(0.0),
-                "y": resolved_target.get("y").and_then(Value::as_f64).unwrap_or(0.0),
-                "action": args["action"]
-            }),
+            &MechanismRequest::for_operation(
+                root_operation,
+                MechanismId::TargetCue,
+                json!({
+                    "tab": tab_id,
+                    "point": [
+                        resolved_target.get("x").and_then(Value::as_f64).unwrap_or(0.0),
+                        resolved_target.get("y").and_then(Value::as_f64).unwrap_or(0.0)
+                    ],
+                    "cue_kind": profile.cue_kind
+                }),
+            )
+            .expect("browser.act cue must be declared by its dynamic plan"),
             execution,
         )
         .await;
     cue_audit.dispatch_finished();
-    cue_audit.complete();
-    let _ = cue;
+    match cue.as_ref().err() {
+        Some(crate::ToolError::Held { .. }) => cue_audit.held(),
+        Some(crate::ToolError::AttentionRequired { .. }) => cue_audit.attention_required(),
+        _ => cue_audit.complete(),
+    }
+    if let Err(
+        error @ (crate::ToolError::Held { .. } | crate::ToolError::AttentionRequired { .. }),
+    ) = cue
+    {
+        return tool_error_outcome(error);
+    }
 
     if cancellation.is_some_and(CancellationToken::is_cancelled) {
         return CallOutcome::Cancelled {
@@ -402,36 +533,17 @@ async fn run(
         };
     }
 
-    let action = args["action"].as_str().expect("validated action");
-    let (tool, mut dispatch_args) = if action == "set_value" {
-        (
-            "form_input",
-            json!({ "tabId": tab_id, "ref": reference, "value": args["value"] }),
-        )
-    } else {
-        (
-            "computer",
-            json!({ "tabId": tab_id, "ref": reference, "action": action }),
-        )
-    };
-    if let Some(modifiers) = args.get("modifiers") {
-        dispatch_args["modifiers"] = modifiers.clone();
-    }
+    let request = action_request(root_operation, profile, tab_id, reference, args);
     let mut action_audit = internal_audit(
         governance,
-        tool,
-        if tool == "computer" {
-            Some(action)
-        } else {
-            None
-        },
-        Some(canonical_requirements(dispatched_operation(action))),
+        root_operation,
+        Some(canonical_requirements(profile.operation)),
         &batch_id,
         3,
         work,
     );
     let dispatched = browser
-        .call_with_delivery_outcome(guid, tool, &dispatch_args, execution)
+        .execute_mechanism_with_delivery_outcome(guid, &request, execution)
         .await;
     action_audit.dispatch_finished();
     match dispatched.as_ref().err().map(|failure| &failure.error) {
@@ -458,7 +570,7 @@ async fn run(
             };
         }
         let mut wait_args = Map::new();
-        wait_args.insert("tabId".to_string(), json!(tab_id));
+        wait_args.insert("tab".to_string(), json!(tab_id));
         wait_args.insert("settle".to_string(), json!(true));
         if let Some(expect) = expect {
             for key in ["selector", "text", "state", "timeout_ms"] {
@@ -472,8 +584,7 @@ async fn run(
         }
         let mut wait_audit = internal_audit(
             governance,
-            "wait_for",
-            None,
+            root_operation,
             Some(canonical_requirements(OperationKey::new(
                 OperationId::BrowserWait,
                 IntentId::WaitUntil,
@@ -483,10 +594,23 @@ async fn run(
             work,
         );
         let waited = browser
-            .call_with_context(guid, "wait_for", &Value::Object(wait_args), execution)
+            .execute_mechanism(
+                guid,
+                &MechanismRequest::for_operation(
+                    root_operation,
+                    MechanismId::WaitUntil,
+                    Value::Object(wait_args),
+                )
+                .expect("browser.act wait must be declared by its dynamic plan"),
+                execution,
+            )
             .await;
         wait_audit.dispatch_finished();
-        wait_audit.complete();
+        match waited.as_ref().err() {
+            Some(crate::ToolError::Held { .. }) => wait_audit.held(),
+            Some(crate::ToolError::AttentionRequired { .. }) => wait_audit.attention_required(),
+            _ => wait_audit.complete(),
+        }
         match waited {
             Ok(wait_result) => {
                 if let Some(observed) = result
@@ -515,6 +639,13 @@ async fn run(
                             .unwrap_or_else(|| json!({})),
                     );
                 }
+            }
+            Err(error) if PostActionRefusal::from_error(&error).is_some() => {
+                let refusal = PostActionRefusal::from_error(&error)
+                    .expect("guard proved a post-action safety refusal");
+                append_post_action_refusal(&mut result, refusal, expect.is_some());
+                stamp(&mut result, &batch_id, assurance, refusal.category());
+                return CallOutcome::Success { result };
             }
             Err(error) if expect.is_some() => {
                 if let Some(blockers) = result
@@ -570,86 +701,266 @@ async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::governance::ports::{
+        AttentionEventRecord, AuditRecord, AuditRole, AuditSink, SessionEventRecord,
+    };
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct Capture {
+        records: Mutex<Vec<AuditRecord>>,
+    }
+
+    impl AuditSink for Capture {
+        fn record(&self, record: &AuditRecord) {
+            self.records.lock().unwrap().push(record.clone());
+        }
+
+        fn record_session_event(&self, _record: &SessionEventRecord) {}
+
+        fn record_attention_event(&self, _record: &AttentionEventRecord) {}
+    }
 
     #[test]
     fn internal_dispatches_use_semantic_operation_keys() {
-        for (action, intent) in [
-            ("left_click", IntentId::ActClick),
-            ("right_click", IntentId::ActRightClick),
-            ("double_click", IntentId::ActDoubleClick),
-            ("triple_click", IntentId::ActTripleClick),
-            ("hover", IntentId::ActHover),
-            ("scroll_to", IntentId::ActScrollIntoView),
+        for intent in [
+            IntentId::ActClick,
+            IntentId::ActRightClick,
+            IntentId::ActDoubleClick,
+            IntentId::ActTripleClick,
+            IntentId::ActHover,
+            IntentId::ActScrollIntoView,
         ] {
             assert_eq!(
-                dispatched_operation(action),
+                action_profile(intent).unwrap().operation,
                 OperationKey::new(OperationId::BrowserAct, intent)
             );
         }
         assert_eq!(
-            dispatched_operation("set_value"),
+            action_profile(IntentId::ActSetValue).unwrap().operation,
             OperationKey::new(OperationId::BrowserFill, IntentId::FillField)
         );
         assert_eq!(
-            canonical_requirements(dispatched_operation("left_click")),
+            canonical_requirements(action_profile(IntentId::ActClick).unwrap().operation),
             &[Capability::Action]
         );
         assert_eq!(
-            canonical_requirements(dispatched_operation("hover")),
+            canonical_requirements(action_profile(IntentId::ActHover).unwrap().operation),
             &[Capability::Read]
         );
         assert_eq!(
-            canonical_requirements(dispatched_operation("set_value")),
+            canonical_requirements(action_profile(IntentId::ActSetValue).unwrap().operation),
             &[Capability::Write]
         );
     }
 
     #[test]
+    fn internal_physical_steps_are_marked_without_changing_canonical_identity() {
+        let sink = Arc::new(Capture::default());
+        let governance = Governance::all_open(sink.clone() as Arc<dyn AuditSink>);
+        let root = OperationKey::new(OperationId::BrowserAct, IntentId::ActClick);
+        let audit = internal_audit(
+            &governance,
+            root,
+            Some(&[Capability::Read]),
+            "00000000-0000-4000-8000-000000000001",
+            1,
+            None,
+        );
+        audit.complete();
+
+        let records = sink.records.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].tool, root.id.as_str());
+        assert_eq!(records[0].action.as_deref(), Some(root.intent.as_str()));
+        assert_eq!(records[0].orchestrator, Some(root.id.as_str()));
+        assert_eq!(records[0].step, Some(1));
+        assert_eq!(records[0].role, Some(AuditRole::MechanismPhase));
+    }
+
+    #[test]
     fn validates_target_value_and_expect_shapes() {
-        assert!(validate(&json!({
-            "tabId": 1,
-            "target": { "name": "Save", "role": "button" },
-            "action": "left_click",
-            "expect": { "text": "Saved", "state": "visible", "timeout_ms": 5000 }
-        }))
+        assert!(validate(
+            IntentId::ActClick,
+            &json!({
+                "tab": 1,
+                "target": { "name": "Save", "role": "button" },
+                "expect": { "text": "Saved", "state": "visible", "timeout_ms": 5000 }
+            })
+        )
         .is_ok());
-        assert!(validate(&json!({
-            "tabId": 1,
-            "target": { "ref": "ref_1", "query": "Save" },
-            "action": "left_click"
-        }))
+        assert!(validate(
+            IntentId::ActClick,
+            &json!({
+                "tab": 1,
+                "target": { "ref": "ref_1", "query": "Save" }
+            })
+        )
         .unwrap_err()
         .contains("exactly one"));
-        assert!(validate(&json!({
-            "tabId": 1, "target": { "ref": "ref_1" }, "action": "set_value"
-        }))
+        assert!(validate(
+            IntentId::ActSetValue,
+            &json!({
+                "tab": 1, "target": { "ref": "ref_1" }
+            })
+        )
         .unwrap_err()
         .contains("value is required"));
-        assert!(validate(&json!({
-            "tabId": 1,
-            "target": { "name": "Save" },
-            "action": "left_click",
-            "expect": { "text": "A", "selector": "#a" }
-        }))
+        assert!(validate(
+            IntentId::ActClick,
+            &json!({
+                "tab": 1,
+                "target": { "name": "Save" },
+                "expect": { "text": "A", "selector": "#a" }
+            })
+        )
         .unwrap_err()
         .contains("exactly one"));
-        assert!(validate(&json!({
-            "tabId": 1, "target": { "ref": "ref_1" }, "action": "set_value", "value": true
-        }))
+        assert!(validate(
+            IntentId::ActSetValue,
+            &json!({
+                "tab": 1, "target": { "ref": "ref_1" }, "value": true
+            })
+        )
         .unwrap_err()
         .contains("must be a string"));
-        assert!(validate(&json!({
-            "tabId": 1, "target": { "name": "Save", "role": 7 }, "action": "left_click"
-        }))
+        assert!(validate(
+            IntentId::ActClick,
+            &json!({
+                "tab": 1, "target": { "name": "Save", "role": 7 }
+            })
+        )
         .unwrap_err()
         .contains("role must be a string"));
-        assert!(validate(&json!({
-            "tabId": 1,
-            "target": { "name": "Save" },
-            "action": "left_click",
-            "expect": { "text": "A", "timeout_ms": 30001 }
-        }))
+        assert!(validate(
+            IntentId::ActClick,
+            &json!({
+                "tab": 1,
+                "target": { "name": "Save" },
+                "expect": { "text": "A", "timeout_ms": 30001 }
+            })
+        )
         .unwrap_err()
         .contains("0 through 30000"));
+    }
+
+    #[test]
+    fn canonical_intent_builds_typed_effect_requests() {
+        for (intent, mechanism, button, count) in [
+            (
+                IntentId::ActClick,
+                MechanismId::PointerClick,
+                Some("left"),
+                Some(1),
+            ),
+            (
+                IntentId::ActRightClick,
+                MechanismId::PointerClick,
+                Some("right"),
+                Some(1),
+            ),
+            (
+                IntentId::ActDoubleClick,
+                MechanismId::PointerClick,
+                Some("left"),
+                Some(2),
+            ),
+            (
+                IntentId::ActTripleClick,
+                MechanismId::PointerClick,
+                Some("left"),
+                Some(3),
+            ),
+            (IntentId::ActHover, MechanismId::PointerHover, None, None),
+            (
+                IntentId::ActScrollIntoView,
+                MechanismId::ScrollTargetIntoView,
+                None,
+                None,
+            ),
+        ] {
+            let profile = action_profile(intent).unwrap();
+            let request = action_request(
+                OperationKey::new(OperationId::BrowserAct, intent),
+                profile,
+                7,
+                "ref_1",
+                &json!({"modifiers":"SHIFT"}),
+            );
+            assert_eq!(request.id(), mechanism);
+            assert_eq!(request.input()["tab"], 7);
+            assert_eq!(
+                request.input().pointer("/target/ref"),
+                Some(&json!("ref_1"))
+            );
+            assert_eq!(
+                request.input().get("button").and_then(Value::as_str),
+                button
+            );
+            assert_eq!(request.input().get("count").and_then(Value::as_u64), count);
+            assert!(request.input().get("action").is_none());
+            assert!(request.input().get("tabId").is_none());
+        }
+
+        let request = action_request(
+            OperationKey::new(OperationId::BrowserAct, IntentId::ActSetValue),
+            action_profile(IntentId::ActSetValue).unwrap(),
+            7,
+            "ref_2",
+            &json!({"value":"hello"}),
+        );
+        assert_eq!(request.id(), MechanismId::FormSetValue);
+        assert_eq!(request.input()["value"], "hello");
+    }
+
+    #[test]
+    fn legacy_only_arguments_cannot_drive_the_canonical_handler() {
+        let error = validate(
+            IntentId::ActClick,
+            &json!({
+                "tabId": 1,
+                "target": {"ref":"ref_1"},
+                "action": "left_click"
+            }),
+        )
+        .unwrap_err();
+        assert!(error.contains("numeric tabId"));
+    }
+
+    #[test]
+    fn post_action_safety_refusals_have_distinct_committed_receipts() {
+        for (refusal, expected_kind, expected_copy) in [
+            (
+                PostActionRefusal::Paused,
+                "postcondition_paused",
+                "observation paused",
+            ),
+            (
+                PostActionRefusal::Interrupted,
+                "postcondition_interrupted",
+                "observation was interrupted",
+            ),
+        ] {
+            let mut result = json!({
+                "content": [{"type":"text","text":"interaction receipt: action committed"}],
+                "structuredContent": {
+                    "interactionReceipt": {
+                        "observedAfter": {},
+                        "blockers": []
+                    }
+                }
+            });
+            append_post_action_refusal(&mut result, refusal, true);
+            assert_eq!(result["isError"], true);
+            assert_eq!(
+                result.pointer("/structuredContent/interactionReceipt/blockers/0/kind"),
+                Some(&json!(expected_kind))
+            );
+            assert!(result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains(expected_copy));
+            assert_ne!(expected_kind, "expect_timeout");
+        }
     }
 }

@@ -46,8 +46,8 @@ pub enum ResourceShape {
 /// How an admitted operation reaches its implementation.
 #[derive(Clone, Copy)]
 pub enum Handler {
-    /// Forward through the browser mechanism compatibility serializer.
-    ExtensionForward,
+    /// Compile and dispatch one typed physical browser mechanism.
+    Mechanism,
     /// Execute a service-local semantic handler.
     Local(for<'a> fn(LocalCtx<'a>) -> LocalFuture<'a>),
 }
@@ -203,7 +203,6 @@ pub struct OperationDescriptor {
     pub post_dispatch: PostDispatch,
     /// Proven effect classification after an ordinary acknowledged success.
     pub success_effect: OperationEffect,
-    legacy_dispatch_tool: Option<&'static str>,
 }
 
 impl OperationDescriptor {
@@ -218,19 +217,6 @@ impl OperationDescriptor {
             validate_canonical_flow(arguments)?;
         }
         validate_semantic_shape(self.key, arguments)
-    }
-
-    /// Return the current extension command alias during the bounded R1-R3 migration.
-    pub fn legacy_dispatch_tool(&self) -> Option<&'static str> {
-        self.legacy_dispatch_tool
-    }
-
-    /// Serialize canonical arguments for the bounded pre-mechanism compatibility implementation.
-    ///
-    /// The returned action discriminator is derived from [`OperationDescriptor::key`]. A caller
-    /// cannot alter physical behavior by smuggling a surface action string through arguments.
-    pub fn legacy_arguments(&self, arguments: &Value) -> Result<Value, ToolError> {
-        encode_legacy_arguments(self.key, arguments)
     }
 
     /// Return whether a flow parent may inherit its concrete tab into this operation.
@@ -298,8 +284,19 @@ impl OperationDescriptor {
             return flow_success_disposition(result, self.key.intent == IntentId::FlowPreflight);
         }
 
+        if self.post_dispatch == PostDispatch::NavigateLanding && is_error_success(result) {
+            return SuccessDisposition::new(
+                BrowserResultStatus::Partial,
+                OperationEffect::Committed,
+                Some(RetryDisposition::Unsafe),
+            );
+        }
+
         if self.key.id == OperationId::BrowserAct {
-            if has_interaction_blocker(result, "expect_timeout") {
+            if has_interaction_blocker(result, "expect_timeout")
+                || has_interaction_blocker(result, "postcondition_paused")
+                || has_interaction_blocker(result, "postcondition_interrupted")
+            {
                 return SuccessDisposition::new(
                     BrowserResultStatus::Partial,
                     OperationEffect::Committed,
@@ -331,13 +328,6 @@ impl OperationDescriptor {
                 IntentId::FillFields | IntentId::FillFieldsAndSubmit
             )
         {
-            if is_error_success(result) {
-                return SuccessDisposition::new(
-                    BrowserResultStatus::Blocked,
-                    OperationEffect::None,
-                    None,
-                );
-            }
             let committed = result
                 .pointer("/structuredContent/filled")
                 .and_then(Value::as_array)
@@ -346,6 +336,21 @@ impl OperationDescriptor {
                     .pointer("/structuredContent/submitted")
                     .and_then(Value::as_bool)
                     == Some(true);
+            if is_error_success(result) {
+                return SuccessDisposition::new(
+                    if committed {
+                        BrowserResultStatus::Partial
+                    } else {
+                        BrowserResultStatus::Blocked
+                    },
+                    if committed {
+                        OperationEffect::Committed
+                    } else {
+                        OperationEffect::None
+                    },
+                    None,
+                );
+            }
             return SuccessDisposition::new(
                 BrowserResultStatus::Ok,
                 if committed {
@@ -355,6 +360,184 @@ impl OperationDescriptor {
                 },
                 None,
             );
+        }
+
+        if self.key.id == OperationId::BrowserRecord {
+            let changed = result
+                .pointer("/structuredContent/changed")
+                .and_then(Value::as_bool);
+            match self.key.intent {
+                IntentId::RecordStart => {
+                    let start_acknowledged = result
+                        .pointer("/structuredContent/start_acknowledged")
+                        .and_then(Value::as_bool);
+                    let start_committed = result
+                        .pointer("/structuredContent/start_committed")
+                        .and_then(Value::as_bool);
+                    let (Some(changed), Some(start_acknowledged), Some(start_committed)) =
+                        (changed, start_acknowledged, start_committed)
+                    else {
+                        return SuccessDisposition::new(
+                            BrowserResultStatus::Unavailable,
+                            OperationEffect::None,
+                            None,
+                        );
+                    };
+                    if changed != start_acknowledged || start_committed != start_acknowledged {
+                        return SuccessDisposition::new(
+                            BrowserResultStatus::Unavailable,
+                            OperationEffect::None,
+                            None,
+                        );
+                    }
+                    let partial = is_error_success(result);
+                    return SuccessDisposition::new(
+                        if partial {
+                            BrowserResultStatus::Partial
+                        } else {
+                            BrowserResultStatus::Ok
+                        },
+                        if changed {
+                            OperationEffect::Committed
+                        } else {
+                            OperationEffect::None
+                        },
+                        partial.then_some(RetryDisposition::Unsafe),
+                    );
+                }
+                IntentId::RecordStop => {
+                    let stop_committed = result
+                        .pointer("/structuredContent/stop_committed")
+                        .and_then(Value::as_bool);
+                    let finalization_effect = result
+                        .pointer("/structuredContent/finalization_effect")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value::<OperationEffect>(value).ok());
+                    let (Some(changed), Some(stop_committed), Some(effect)) =
+                        (changed, stop_committed, finalization_effect)
+                    else {
+                        return SuccessDisposition::new(
+                            BrowserResultStatus::Unavailable,
+                            OperationEffect::None,
+                            None,
+                        );
+                    };
+                    if effect == OperationEffect::Unknown
+                        || changed != (effect != OperationEffect::None)
+                        || (stop_committed && effect == OperationEffect::None)
+                    {
+                        return SuccessDisposition::new(
+                            BrowserResultStatus::Unavailable,
+                            OperationEffect::None,
+                            None,
+                        );
+                    }
+                    if effect == OperationEffect::Dispatched {
+                        return SuccessDisposition::new(
+                            BrowserResultStatus::OutcomeUnknown,
+                            OperationEffect::Unknown,
+                            Some(RetryDisposition::Unsafe),
+                        );
+                    }
+                    return SuccessDisposition::new(
+                        if is_error_success(result) {
+                            if changed {
+                                BrowserResultStatus::Partial
+                            } else {
+                                BrowserResultStatus::Blocked
+                            }
+                        } else {
+                            BrowserResultStatus::Ok
+                        },
+                        effect,
+                        is_error_success(result).then_some(RetryDisposition::Unsafe),
+                    );
+                }
+                IntentId::RecordClear => {
+                    let clear_committed = result
+                        .pointer("/structuredContent/clear_committed")
+                        .and_then(Value::as_bool);
+                    let (Some(changed), Some(clear_committed)) = (changed, clear_committed) else {
+                        return SuccessDisposition::new(
+                            BrowserResultStatus::Unavailable,
+                            OperationEffect::None,
+                            None,
+                        );
+                    };
+                    if clear_committed != changed {
+                        return SuccessDisposition::new(
+                            BrowserResultStatus::Unavailable,
+                            OperationEffect::None,
+                            None,
+                        );
+                    }
+                    return SuccessDisposition::new(
+                        BrowserResultStatus::Ok,
+                        if changed {
+                            OperationEffect::Committed
+                        } else {
+                            OperationEffect::None
+                        },
+                        None,
+                    );
+                }
+                IntentId::RecordExport => {
+                    let export_completed = result
+                        .pointer("/structuredContent/export_completed")
+                        .and_then(Value::as_bool);
+                    let finalization_effect = result
+                        .pointer("/structuredContent/finalization_effect")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value::<OperationEffect>(value).ok());
+                    let (Some(changed), Some(export_completed), Some(finalization_effect)) =
+                        (changed, export_completed, finalization_effect)
+                    else {
+                        return SuccessDisposition::new(
+                            BrowserResultStatus::Unavailable,
+                            OperationEffect::None,
+                            None,
+                        );
+                    };
+                    if finalization_effect == OperationEffect::Unknown
+                        || changed
+                            != (export_completed || finalization_effect != OperationEffect::None)
+                    {
+                        return SuccessDisposition::new(
+                            BrowserResultStatus::Unavailable,
+                            OperationEffect::None,
+                            None,
+                        );
+                    }
+                    if !export_completed && finalization_effect == OperationEffect::Dispatched {
+                        return SuccessDisposition::new(
+                            BrowserResultStatus::OutcomeUnknown,
+                            OperationEffect::Unknown,
+                            Some(RetryDisposition::Unsafe),
+                        );
+                    }
+                    let partial = is_error_success(result) || (changed && !export_completed);
+                    let retry = (result
+                        .pointer("/structuredContent/retry_safe")
+                        .and_then(Value::as_bool)
+                        == Some(false))
+                    .then_some(RetryDisposition::Unsafe)
+                    .or_else(|| partial.then_some(RetryDisposition::Unsafe));
+                    return SuccessDisposition::new(
+                        if partial {
+                            BrowserResultStatus::Partial
+                        } else {
+                            BrowserResultStatus::Ok
+                        },
+                        if export_completed {
+                            OperationEffect::Committed
+                        } else {
+                            finalization_effect
+                        },
+                        retry,
+                    );
+                }
+                _ => {}
+            }
         }
 
         if is_error_success(result) {
@@ -565,13 +748,12 @@ struct Seed {
     page_output: PageOutput,
     post_dispatch: PostDispatch,
     success_effect: OperationEffect,
-    legacy_dispatch_tool: Option<&'static str>,
 }
 
 macro_rules! seed {
-    ($id:ident, $intent:ident, $schema:expr, $workspace:ident, $requires:expr,
+    ($id:ident, $intent:ident, $workspace:ident, $requires:expr,
      $resource:ident, $scheduling:expr, $handler:expr, $postprocess:expr,
-     $page:ident, $post_dispatch:ident, $effect:ident, $validation:expr, $wire:expr) => {
+     $page:ident, $post_dispatch:ident, $effect:ident $(,)?) => {
         Seed {
             key: OperationKey::new(OperationId::$id, IntentId::$intent),
             workspace_use: WorkspaceUse::$workspace,
@@ -583,7 +765,6 @@ macro_rules! seed {
             page_output: PageOutput::$page,
             post_dispatch: PostDispatch::$post_dispatch,
             success_effect: OperationEffect::$effect,
-            legacy_dispatch_tool: $wire,
         }
     };
 }
@@ -594,236 +775,175 @@ const SEEDS: &[Seed] = &[
     seed!(
         BrowserTabs,
         TabsList,
-        0,
         Creates,
         &[Capability::Read],
         DomainLess,
         Scheduling::WORKSPACE_TOPOLOGY,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         None,
         None,
-        ValidationRule::LegacySchema,
-        Some("tabs_context_mcp")
     ),
     seed!(
         BrowserTabs,
         TabsNew,
-        1,
         Creates,
         &[],
         DomainLess,
         Scheduling::WORKSPACE_TOPOLOGY,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         None,
         Committed,
-        ValidationRule::LegacySchema,
-        Some("tabs_create_mcp")
     ),
     seed!(
         BrowserTabs,
         TabsFocus,
-        19,
         Uses,
         &[],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         None,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "focus"
-        },
-        Some("tab_control")
     ),
     seed!(
         BrowserTabs,
         TabsClose,
-        19,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         None,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "close"
-        },
-        Some("tab_control")
     ),
     seed!(
         BrowserNavigate,
         NavigateUrl,
-        2,
         Uses,
         &[Capability::Read],
         TargetArg,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         NavigateLanding,
         Committed,
-        ValidationRule::LegacySchema,
-        Some("navigate")
     ),
     seed!(
         BrowserNavigate,
         NavigateBack,
-        2,
         Uses,
         &[Capability::Read],
         TargetArg,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         NavigateLanding,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "url",
-            value: "back"
-        },
-        Some("navigate")
     ),
     seed!(
         BrowserNavigate,
         NavigateForward,
-        2,
         Uses,
         &[Capability::Read],
         TargetArg,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         NavigateLanding,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "url",
-            value: "forward"
-        },
-        Some("navigate")
     ),
     seed!(
         BrowserNavigate,
         NavigateReload,
-        19,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         None,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "reload"
-        },
-        Some("tab_control")
     ),
     seed!(
         BrowserSnapshot,
         SnapshotCapture,
-        10,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Text,
         None,
         None,
-        ValidationRule::LegacySchema,
-        Some("read_page")
     ),
     seed!(
         BrowserRead,
         ReadText,
-        6,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         None,
         None,
-        ValidationRule::LegacySchema,
-        Some("get_page_text")
     ),
     seed!(
         BrowserFind,
         FindQuery,
-        4,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Text,
         None,
         None,
-        ValidationRule::LegacySchema,
-        Some("find")
     ),
     seed!(
         BrowserScreenshot,
         ScreenshotViewport,
-        3,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         None,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "screenshot"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserScreenshot,
         ScreenshotRegion,
-        3,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         None,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "zoom"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserAct,
         ActClick,
-        17,
         Uses,
         &[Capability::Action],
         TabScoped,
@@ -833,15 +953,10 @@ const SEEDS: &[Seed] = &[
         Receipt,
         None,
         Committed,
-        ValidationRule::CanonicalAct {
-            action: "left_click"
-        },
-        None
     ),
     seed!(
         BrowserAct,
         ActRightClick,
-        17,
         Uses,
         &[Capability::Action],
         TabScoped,
@@ -851,15 +966,10 @@ const SEEDS: &[Seed] = &[
         Receipt,
         None,
         Committed,
-        ValidationRule::CanonicalAct {
-            action: "right_click"
-        },
-        None
     ),
     seed!(
         BrowserAct,
         ActDoubleClick,
-        17,
         Uses,
         &[Capability::Action],
         TabScoped,
@@ -869,15 +979,10 @@ const SEEDS: &[Seed] = &[
         Receipt,
         None,
         Committed,
-        ValidationRule::CanonicalAct {
-            action: "double_click"
-        },
-        None
     ),
     seed!(
         BrowserAct,
         ActTripleClick,
-        17,
         Uses,
         &[Capability::Action],
         TabScoped,
@@ -887,15 +992,10 @@ const SEEDS: &[Seed] = &[
         Receipt,
         None,
         Committed,
-        ValidationRule::CanonicalAct {
-            action: "triple_click"
-        },
-        None
     ),
     seed!(
         BrowserAct,
         ActHover,
-        17,
         Uses,
         &[Capability::Read],
         TabScoped,
@@ -905,13 +1005,10 @@ const SEEDS: &[Seed] = &[
         Receipt,
         None,
         Committed,
-        ValidationRule::CanonicalAct { action: "hover" },
-        None
     ),
     seed!(
         BrowserAct,
         ActScrollIntoView,
-        17,
         Uses,
         &[Capability::Read],
         TabScoped,
@@ -921,15 +1018,10 @@ const SEEDS: &[Seed] = &[
         Receipt,
         None,
         Committed,
-        ValidationRule::CanonicalAct {
-            action: "scroll_to"
-        },
-        None
     ),
     seed!(
         BrowserAct,
         ActSetValue,
-        17,
         Uses,
         &[Capability::Write],
         TabScoped,
@@ -939,31 +1031,23 @@ const SEEDS: &[Seed] = &[
         Receipt,
         None,
         Committed,
-        ValidationRule::CanonicalAct {
-            action: "set_value"
-        },
-        None
     ),
     seed!(
         BrowserFill,
         FillField,
-        5,
         Uses,
         &[Capability::Write],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::LegacySchema,
-        Some("form_input")
     ),
     seed!(
         BrowserFill,
         FillFields,
-        16,
         Uses,
         &[Capability::Read, Capability::Write],
         TabScoped,
@@ -973,16 +1057,10 @@ const SEEDS: &[Seed] = &[
         Structured,
         None,
         Committed,
-        ValidationRule::ExpectedBoolean {
-            field: "submit",
-            value: false
-        },
-        None
     ),
     seed!(
         BrowserFill,
         FillFieldsAndSubmit,
-        16,
         Uses,
         &[Capability::Read, Capability::Write, Capability::Action],
         TabScoped,
@@ -992,51 +1070,36 @@ const SEEDS: &[Seed] = &[
         Structured,
         None,
         Committed,
-        ValidationRule::ExpectedBoolean {
-            field: "submit",
-            value: true
-        },
-        None
     ),
     seed!(
         BrowserWait,
         WaitDelay,
-        3,
         Uses,
         &[],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         None,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "wait"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserWait,
         WaitUntil,
-        14,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         None,
         None,
-        ValidationRule::LegacySchema,
-        Some("wait_for")
     ),
     seed!(
         BrowserFlow,
         FlowExecute,
-        15,
         Uses,
         &[],
         DomainLess,
@@ -1046,13 +1109,10 @@ const SEEDS: &[Seed] = &[
         None,
         None,
         None,
-        ValidationRule::CanonicalFlow,
-        None
     ),
     seed!(
         BrowserFlow,
         FlowPreflight,
-        15,
         Uses,
         &[],
         DomainLess,
@@ -1062,311 +1122,218 @@ const SEEDS: &[Seed] = &[
         None,
         None,
         None,
-        ValidationRule::CanonicalFlow,
-        None
     ),
     seed!(
         BrowserDialog,
         DialogStatus,
-        18,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Text,
         None,
         None,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "status"
-        },
-        Some("dialog")
     ),
     seed!(
         BrowserDialog,
         DialogAccept,
-        18,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Text,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "accept"
-        },
-        Some("dialog")
     ),
     seed!(
         BrowserDialog,
         DialogDismiss,
-        18,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Text,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "dismiss"
-        },
-        Some("dialog")
     ),
     seed!(
         BrowserDialog,
         DialogRespond,
-        18,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Text,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "respond"
-        },
-        Some("dialog")
     ),
     seed!(
         BrowserInput,
         InputPointerClick,
-        3,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "left_click"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserInput,
         InputPointerRightClick,
-        3,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "right_click"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserInput,
         InputPointerDoubleClick,
-        3,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "double_click"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserInput,
         InputPointerTripleClick,
-        3,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "triple_click"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserInput,
         InputPointerHover,
-        3,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "hover"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserInput,
         InputPointerDrag,
-        3,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "left_click_drag"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserInput,
         InputTypeText,
-        3,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "type"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserInput,
         InputPressKey,
-        3,
         Uses,
         &[Capability::Action],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "key"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserInput,
         InputWheel,
-        3,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "scroll"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserInput,
         InputScrollToOffset,
-        3,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "scroll_to"
-        },
-        Some("computer")
     ),
     seed!(
         BrowserViewport,
         ViewportResizeWindow,
-        11,
         Uses,
         &[],
         TabScoped,
         Scheduling::BROWSER,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         None,
         None,
         Committed,
-        ValidationRule::LegacySchema,
-        Some("resize_window")
     ),
     seed!(
         BrowserUpload,
         UploadClientFiles,
-        20,
         Uses,
         &[Capability::Write],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         REDACT,
         Receipt,
         None,
         Committed,
-        ValidationRule::LegacySchema,
-        Some("file_upload")
     ),
     seed!(
         BrowserUpload,
         UploadCapturedArtifact,
-        22,
         Uses,
         &[Capability::Write],
         TabScoped,
@@ -1376,108 +1343,75 @@ const SEEDS: &[Seed] = &[
         Receipt,
         None,
         Committed,
-        ValidationRule::LegacySchema,
-        None
     ),
     seed!(
         BrowserConsole,
         ConsoleRead,
-        8,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         None,
         None,
-        ValidationRule::ExpectedBoolean {
-            field: "clear",
-            value: false
-        },
-        Some("read_console_messages")
     ),
     seed!(
         BrowserConsole,
         ConsoleReadAndClear,
-        8,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         None,
         Committed,
-        ValidationRule::ExpectedBoolean {
-            field: "clear",
-            value: true
-        },
-        Some("read_console_messages")
     ),
     seed!(
         BrowserNetwork,
         NetworkRead,
-        9,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         None,
         None,
-        ValidationRule::ExpectedBoolean {
-            field: "clear",
-            value: false
-        },
-        Some("read_network_requests")
     ),
     seed!(
         BrowserNetwork,
         NetworkReadAndClear,
-        9,
         Uses,
         &[Capability::Read],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         None,
         Committed,
-        ValidationRule::ExpectedBoolean {
-            field: "clear",
-            value: true
-        },
-        Some("read_network_requests")
     ),
     seed!(
         BrowserEvaluate,
         EvaluateJavascript,
-        7,
         Uses,
         &[Capability::Execute],
         TabScoped,
         Scheduling::SURFACE,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         Text,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "javascript_exec"
-        },
-        Some("javascript_tool")
     ),
     seed!(
         BrowserRecord,
         RecordStart,
-        23,
         Uses,
         &[Capability::Read],
         TabScoped,
@@ -1487,16 +1421,10 @@ const SEEDS: &[Seed] = &[
         Structured,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "start_recording"
-        },
-        None
     ),
     seed!(
         BrowserRecord,
         RecordStop,
-        23,
         Uses,
         &[],
         RecordingScoped,
@@ -1506,16 +1434,10 @@ const SEEDS: &[Seed] = &[
         Structured,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "stop_recording"
-        },
-        None
     ),
     seed!(
         BrowserRecord,
         RecordStatus,
-        23,
         Uses,
         &[],
         RecordingScoped,
@@ -1525,16 +1447,10 @@ const SEEDS: &[Seed] = &[
         Structured,
         None,
         None,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "status"
-        },
-        None
     ),
     seed!(
         BrowserRecord,
         RecordClear,
-        23,
         Uses,
         &[],
         RecordingScoped,
@@ -1544,16 +1460,10 @@ const SEEDS: &[Seed] = &[
         Structured,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "clear"
-        },
-        None
     ),
     seed!(
         BrowserRecord,
         RecordExport,
-        23,
         Uses,
         &[Capability::Read],
         RecordingScoped,
@@ -1563,32 +1473,23 @@ const SEEDS: &[Seed] = &[
         Structured,
         None,
         Committed,
-        ValidationRule::ExpectedString {
-            field: "action",
-            value: "export"
-        },
-        None
     ),
     seed!(
         BrowserPresent,
         PresentNarrate,
-        13,
         Uses,
         &[],
         DomainLess,
         Scheduling::PRESENTATION,
-        Handler::ExtensionForward,
+        Handler::Mechanism,
         None,
         None,
         None,
         Committed,
-        ValidationRule::LegacySchema,
-        Some("narrate")
     ),
     seed!(
         WorkflowPlan,
         PlanUpdate,
-        12,
         Independent,
         &[],
         DomainLess,
@@ -1598,13 +1499,10 @@ const SEEDS: &[Seed] = &[
         None,
         None,
         None,
-        ValidationRule::LegacySchema,
-        None
     ),
     seed!(
         BrowserContext,
         ContextDescribe,
-        24,
         Independent,
         &[],
         DomainLess,
@@ -1614,8 +1512,6 @@ const SEEDS: &[Seed] = &[
         None,
         None,
         None,
-        ValidationRule::LegacySchema,
-        None
     ),
 ];
 
@@ -1637,7 +1533,6 @@ pub fn descriptors() -> &'static [OperationDescriptor] {
                 page_output: seed.page_output,
                 post_dispatch: seed.post_dispatch,
                 success_effect: seed.success_effect,
-                legacy_dispatch_tool: seed.legacy_dispatch_tool,
             })
             .collect()
     })
@@ -1695,6 +1590,22 @@ fn canonical_schema(key: OperationKey) -> Value {
             "name": { "type": "string" },
             "role": { "type": "string" }
         },
+        "additionalProperties": false
+    });
+    let ref_target = json!({
+        "type": "object",
+        "properties": {
+            "ref": { "type": "string", "minLength": 1 }
+        },
+        "required": ["ref"],
+        "additionalProperties": false
+    });
+    let query_target = json!({
+        "type": "object",
+        "properties": {
+            "query": { "type": "string", "minLength": 1 }
+        },
+        "required": ["query"],
         "additionalProperties": false
     });
     let point = json!({
@@ -1773,7 +1684,7 @@ fn canonical_schema(key: OperationKey) -> Value {
         }),
         (OperationId::BrowserFill, IntentId::FillField) => json!({
             "type": "object", "properties": {
-                "tab": { "type": "number" }, "target": target, "value": {}
+                "tab": { "type": "number" }, "target": ref_target, "value": {}
             }, "required": ["tab", "target", "value"], "additionalProperties": false
         }),
         (OperationId::BrowserFill, IntentId::FillFields | IntentId::FillFieldsAndSubmit) => json!({
@@ -1783,7 +1694,7 @@ fn canonical_schema(key: OperationKey) -> Value {
                     "type": "array", "minItems": 1,
                     "items": {
                         "type": "object", "properties": {
-                            "target": target, "value": {}
+                            "target": query_target, "value": {}
                         }, "required": ["target", "value"], "additionalProperties": false
                     }
                 }
@@ -1843,7 +1754,7 @@ fn canonical_schema(key: OperationKey) -> Value {
         }),
         (OperationId::BrowserInput, IntentId::InputWheel) => json!({
             "type": "object", "properties": {
-                "tab": { "type": "number" }, "point": point, "target": target,
+                "tab": { "type": "number" }, "point": point, "target": ref_target,
                 "direction": { "type": "string", "enum": ["up", "down", "left", "right"] },
                 "amount": { "type": "number" }, "modifiers": { "type": "string" }
             }, "required": ["tab", "direction"], "additionalProperties": false
@@ -1859,14 +1770,14 @@ fn canonical_schema(key: OperationKey) -> Value {
         }),
         (OperationId::BrowserUpload, IntentId::UploadClientFiles) => json!({
             "type": "object", "properties": {
-                "tab": { "type": "number" }, "target": target,
+                "tab": { "type": "number" }, "target": ref_target,
                 "files": { "type": "array" }, "paths": { "type": "array" }
             }, "required": ["tab", "target"], "additionalProperties": false
         }),
         (OperationId::BrowserUpload, IntentId::UploadCapturedArtifact) => json!({
             "type": "object", "properties": {
                 "tab": { "type": "number" }, "artifact": { "type": "string" },
-                "target": target, "point": point, "filename": { "type": "string" }
+                "target": ref_target, "point": point, "filename": { "type": "string" }
             }, "required": ["tab", "artifact"], "additionalProperties": false
         }),
         (OperationId::BrowserConsole, _) => json!({
@@ -1886,7 +1797,7 @@ fn canonical_schema(key: OperationKey) -> Value {
         }),
         (OperationId::BrowserRecord, IntentId::RecordExport) => json!({
             "type": "object", "properties": {
-                "tab": { "type": "number" }, "target": target, "point": point,
+                "tab": { "type": "number" }, "target": ref_target, "point": point,
                 "download": { "type": "boolean" }, "filename": { "type": "string" }, "options": { "type": "object" }
             }, "required": ["tab"], "additionalProperties": false
         }),
@@ -1973,17 +1884,39 @@ fn validate_semantic_shape(key: OperationKey, arguments: &Value) -> Result<(), T
             }));
         }
     }
-    if key.id == OperationId::BrowserUpload {
-        let ref_target = arguments
+    if matches!(
+        key,
+        OperationKey {
+            id: OperationId::BrowserInput,
+            intent: IntentId::InputWheel,
+        } | OperationKey {
+            id: OperationId::BrowserUpload,
+            intent: IntentId::UploadCapturedArtifact,
+        } | OperationKey {
+            id: OperationId::BrowserRecord,
+            intent: IntentId::RecordExport,
+        }
+    ) && arguments.get("target").is_some()
+        && arguments
             .pointer("/target/ref")
             .and_then(Value::as_str)
-            .is_some();
-        if key.intent == IntentId::UploadClientFiles && !ref_target {
+            .is_none_or(str::is_empty)
+    {
+        return Err(ToolError::invalid_request(
+            "physical target requires a non-empty target.ref",
+        ));
+    }
+    if key.id == OperationId::BrowserUpload {
+        let target_ref = arguments.pointer("/target/ref").and_then(Value::as_str);
+        if key.intent == IntentId::UploadClientFiles
+            && target_ref.is_none_or(|reference| reference.is_empty())
+        {
             return Err(ToolError::invalid_request(
                 "upload.client_files requires target.ref",
             ));
         }
         if key.intent == IntentId::UploadCapturedArtifact {
+            let ref_target = target_ref.is_some();
             let point = arguments.get("point").is_some();
             if ref_target == point {
                 return Err(ToolError::invalid_request(
@@ -1993,197 +1926,6 @@ fn validate_semantic_shape(key: OperationKey, arguments: &Value) -> Result<(), T
         }
     }
     Ok(())
-}
-
-fn operation_action(intent: IntentId) -> Option<&'static str> {
-    match intent {
-        IntentId::TabsFocus => Some("focus"),
-        IntentId::TabsClose => Some("close"),
-        IntentId::NavigateReload => Some("reload"),
-        IntentId::ScreenshotViewport => Some("screenshot"),
-        IntentId::ScreenshotRegion => Some("zoom"),
-        IntentId::ActClick | IntentId::InputPointerClick => Some("left_click"),
-        IntentId::ActRightClick | IntentId::InputPointerRightClick => Some("right_click"),
-        IntentId::ActDoubleClick | IntentId::InputPointerDoubleClick => Some("double_click"),
-        IntentId::ActTripleClick | IntentId::InputPointerTripleClick => Some("triple_click"),
-        IntentId::ActHover | IntentId::InputPointerHover => Some("hover"),
-        IntentId::ActScrollIntoView | IntentId::InputScrollToOffset => Some("scroll_to"),
-        IntentId::ActSetValue => Some("set_value"),
-        IntentId::WaitDelay => Some("wait"),
-        IntentId::DialogStatus => Some("status"),
-        IntentId::DialogAccept => Some("accept"),
-        IntentId::DialogDismiss => Some("dismiss"),
-        IntentId::DialogRespond => Some("respond"),
-        IntentId::InputPointerDrag => Some("left_click_drag"),
-        IntentId::InputTypeText => Some("type"),
-        IntentId::InputPressKey => Some("key"),
-        IntentId::InputWheel => Some("scroll"),
-        IntentId::EvaluateJavascript => Some("javascript_exec"),
-        IntentId::RecordStart => Some("start_recording"),
-        IntentId::RecordStop => Some("stop_recording"),
-        IntentId::RecordStatus => Some("status"),
-        IntentId::RecordClear => Some("clear"),
-        IntentId::RecordExport => Some("export"),
-        _ => None,
-    }
-}
-
-fn rename(object: &mut serde_json::Map<String, Value>, from: &str, to: &str) {
-    if let Some(value) = object.remove(from) {
-        object.insert(to.to_string(), value);
-    }
-}
-
-fn target_ref(arguments: &Value) -> Option<Value> {
-    arguments.pointer("/target/ref").cloned()
-}
-
-fn canonical_fields_to_legacy(
-    object: &mut serde_json::Map<String, Value>,
-) -> Result<(), ToolError> {
-    let fields = object
-        .remove("fields")
-        .ok_or_else(|| ToolError::invalid_request("canonical fill requires fields"))?;
-    if is_deferred_flow_reference(&fields) {
-        object.insert("fields".into(), fields);
-        return Ok(());
-    }
-    let fields = fields
-        .as_array()
-        .cloned()
-        .ok_or_else(|| ToolError::invalid_request("canonical fill fields must be an array"))?;
-    let mut legacy = serde_json::Map::new();
-    for field in fields {
-        let query = field
-            .pointer("/target/query")
-            .and_then(Value::as_str)
-            .filter(|query| !query.is_empty())
-            .ok_or_else(|| ToolError::invalid_request("fill fields require target.query"))?;
-        let value = field
-            .get("value")
-            .cloned()
-            .ok_or_else(|| ToolError::invalid_request("fill fields require value"))?;
-        if legacy.insert(query.to_owned(), value).is_some() {
-            return Err(ToolError::invalid_request(
-                "fill fields cannot contain duplicate target.query values",
-            ));
-        }
-    }
-    object.insert("fields".into(), Value::Object(legacy));
-    Ok(())
-}
-
-fn encode_legacy_arguments(key: OperationKey, arguments: &Value) -> Result<Value, ToolError> {
-    let mut object = arguments
-        .as_object()
-        .cloned()
-        .ok_or_else(|| ToolError::invalid_request("canonical arguments must be an object"))?;
-    rename(&mut object, "tab", "tabId");
-    rename(&mut object, "create_if_empty", "createIfEmpty");
-    rename(&mut object, "scope_ref", "ref_id");
-    rename(&mut object, "only_errors", "onlyErrors");
-    rename(&mut object, "url_pattern", "urlPattern");
-    rename(&mut object, "image_id", "imageId");
-
-    match (key.id, key.intent) {
-        (OperationId::BrowserNavigate, IntentId::NavigateBack) => {
-            object.insert("url".into(), json!("back"));
-        }
-        (OperationId::BrowserNavigate, IntentId::NavigateForward) => {
-            object.insert("url".into(), json!("forward"));
-        }
-        (OperationId::BrowserAct, _) => {
-            object.insert(
-                "action".into(),
-                json!(operation_action(key.intent).expect("act intent has action")),
-            );
-        }
-        (OperationId::BrowserFill, IntentId::FillField) => {
-            if let Some(reference) = target_ref(arguments) {
-                object.insert("ref".into(), reference);
-            }
-            object.remove("target");
-        }
-        (OperationId::BrowserFill, IntentId::FillFields) => {
-            canonical_fields_to_legacy(&mut object)?;
-            object.insert("submit".into(), json!(false));
-        }
-        (OperationId::BrowserFill, IntentId::FillFieldsAndSubmit) => {
-            canonical_fields_to_legacy(&mut object)?;
-            object.insert("submit".into(), json!(true));
-        }
-        (OperationId::BrowserWait, IntentId::WaitDelay) => {
-            rename(&mut object, "seconds", "duration");
-            object.insert("action".into(), json!("wait"));
-        }
-        (OperationId::BrowserFlow, _) => {
-            return Err(ToolError::invalid_request(
-                "browser.flow has no legacy browser mechanism",
-            ));
-        }
-        (OperationId::BrowserInput, IntentId::InputPointerDrag) => {
-            rename(&mut object, "from", "start_coordinate");
-            rename(&mut object, "to", "coordinate");
-        }
-        (OperationId::BrowserInput, IntentId::InputPressKey) => {
-            rename(&mut object, "key", "text");
-        }
-        (OperationId::BrowserInput, IntentId::InputWheel) => {
-            rename(&mut object, "point", "coordinate");
-            rename(&mut object, "direction", "scroll_direction");
-            rename(&mut object, "amount", "scroll_amount");
-            if let Some(reference) = target_ref(arguments) {
-                object.insert("ref".into(), reference);
-            }
-            object.remove("target");
-        }
-        (OperationId::BrowserInput, _) => {
-            rename(&mut object, "point", "coordinate");
-            if let Some(reference) = target_ref(arguments) {
-                object.insert("ref".into(), reference);
-            }
-            object.remove("target");
-        }
-        (OperationId::BrowserUpload, IntentId::UploadClientFiles) => {
-            if let Some(reference) = target_ref(arguments) {
-                object.insert("ref".into(), reference);
-            }
-            object.remove("target");
-            if let Some(Value::Array(files)) = object.get_mut("files") {
-                for file in files {
-                    if let Some(file) = file.as_object_mut() {
-                        rename(file, "mime_type", "mimeType");
-                    }
-                }
-            }
-        }
-        (OperationId::BrowserUpload, IntentId::UploadCapturedArtifact) => {
-            rename(&mut object, "artifact", "imageId");
-            rename(&mut object, "point", "coordinate");
-            if let Some(reference) = target_ref(arguments) {
-                object.insert("ref".into(), reference);
-            }
-            object.remove("target");
-        }
-        (OperationId::BrowserEvaluate, IntentId::EvaluateJavascript) => {
-            rename(&mut object, "script", "text");
-        }
-        (OperationId::BrowserRecord, IntentId::RecordExport) => {
-            rename(&mut object, "point", "coordinate");
-            if let Some(reference) = target_ref(arguments) {
-                object.insert("ref".into(), reference);
-            }
-            object.remove("target");
-        }
-        _ => {}
-    }
-    if let Some(action) = operation_action(key.intent) {
-        object.insert("action".into(), json!(action));
-    }
-    if key.intent == IntentId::ConsoleReadAndClear || key.intent == IntentId::NetworkReadAndClear {
-        object.insert("clear".into(), json!(true));
-    }
-    Ok(Value::Object(object))
 }
 
 fn is_deferred_flow_reference(value: &Value) -> bool {
@@ -2611,6 +2353,214 @@ mod tests {
     }
 
     #[test]
+    fn canonical_target_schemas_advertise_only_supported_target_forms() {
+        let ref_target = json!({
+            "type": "object",
+            "properties": {
+                "ref": { "type": "string", "minLength": 1 }
+            },
+            "required": ["ref"],
+            "additionalProperties": false
+        });
+        let query_target = json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "minLength": 1 }
+            },
+            "required": ["query"],
+            "additionalProperties": false
+        });
+
+        for (key, pointer, expected) in [
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillField),
+                "/properties/target",
+                ref_target.clone(),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillFields),
+                "/properties/fields/items/properties/target",
+                query_target.clone(),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillFieldsAndSubmit),
+                "/properties/fields/items/properties/target",
+                query_target.clone(),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserUpload, IntentId::UploadClientFiles),
+                "/properties/target",
+                ref_target.clone(),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserInput, IntentId::InputWheel),
+                "/properties/target",
+                ref_target.clone(),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserUpload, IntentId::UploadCapturedArtifact),
+                "/properties/target",
+                ref_target.clone(),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserRecord, IntentId::RecordExport),
+                "/properties/target",
+                ref_target.clone(),
+            ),
+        ] {
+            let schema = canonical_schema(key);
+            assert_eq!(schema.pointer(pointer), Some(&expected), "{key:?}");
+        }
+
+        let general_target = json!({
+            "type": "object",
+            "properties": {
+                "ref": { "type": "string" },
+                "query": { "type": "string" },
+                "name": { "type": "string" },
+                "role": { "type": "string" }
+            },
+            "additionalProperties": false
+        });
+        let key = OperationKey::new(OperationId::BrowserAct, IntentId::ActClick);
+        assert_eq!(
+            canonical_schema(key).pointer("/properties/target"),
+            Some(&general_target),
+            "general target changed for {key:?}"
+        );
+    }
+
+    #[test]
+    fn canonical_target_semantics_accept_exactly_the_advertised_forms() {
+        for (key, arguments) in [
+            (
+                OperationKey::new(OperationId::BrowserAct, IntentId::ActClick),
+                json!({"tab":1,"target":{"query":"Submit order"}}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserAct, IntentId::ActClick),
+                json!({"tab":1,"target":{"name":"Submit","role":"button"}}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillField),
+                json!({"tab":1,"target":{"ref":"ref_1"},"value":"Ada"}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillFields),
+                json!({
+                    "tab":1,
+                    "fields":[{"target":{"query":"Email"},"value":"a@example.com"}]
+                }),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillFieldsAndSubmit),
+                json!({
+                    "tab":1,
+                    "fields":[{"target":{"query":"Email"},"value":"a@example.com"}]
+                }),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserUpload, IntentId::UploadClientFiles),
+                json!({"tab":1,"target":{"ref":"ref_2"}}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserInput, IntentId::InputWheel),
+                json!({"tab":1,"target":{"ref":"ref_3"},"direction":"down"}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserUpload, IntentId::UploadCapturedArtifact),
+                json!({"tab":1,"artifact":"artifact_1","target":{"ref":"ref_4"}}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserUpload, IntentId::UploadCapturedArtifact),
+                json!({"tab":1,"artifact":"artifact_1","point":[10,20]}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserRecord, IntentId::RecordExport),
+                json!({"tab":1,"target":{"ref":"ref_5"}}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserRecord, IntentId::RecordExport),
+                json!({"tab":1,"point":[10,20]}),
+            ),
+        ] {
+            assert!(
+                descriptor(key)
+                    .expect("target-form descriptor")
+                    .validate(&arguments)
+                    .is_ok(),
+                "advertised target form failed semantic validation for {key:?}"
+            );
+        }
+
+        for (key, arguments) in [
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillField),
+                json!({"tab":1,"target":{"query":"Email"},"value":"Ada"}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillField),
+                json!({"tab":1,"target":{"ref":""},"value":"Ada"}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillFields),
+                json!({"tab":1,"fields":[{"target":{"ref":"ref_1"},"value":"Ada"}]}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillFieldsAndSubmit),
+                json!({
+                    "tab":1,
+                    "fields":[{"target":{"name":"Email","role":"textbox"},"value":"Ada"}]
+                }),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserFill, IntentId::FillFields),
+                json!({"tab":1,"fields":[{"target":{"query":""},"value":"Ada"}]}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserUpload, IntentId::UploadClientFiles),
+                json!({"tab":1,"target":{"query":"input[type=file]"}}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserUpload, IntentId::UploadClientFiles),
+                json!({"tab":1,"target":{"ref":""}}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserInput, IntentId::InputWheel),
+                json!({"tab":1,"target":{"query":"Scrollable area"},"direction":"down"}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserInput, IntentId::InputWheel),
+                json!({"tab":1,"target":{"ref":""},"direction":"down"}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserUpload, IntentId::UploadCapturedArtifact),
+                json!({"tab":1,"artifact":"artifact_1","target":{"query":"Drop zone"}}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserUpload, IntentId::UploadCapturedArtifact),
+                json!({"tab":1,"artifact":"artifact_1","target":{"ref":""}}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserRecord, IntentId::RecordExport),
+                json!({"tab":1,"target":{"query":"Drop zone"}}),
+            ),
+            (
+                OperationKey::new(OperationId::BrowserRecord, IntentId::RecordExport),
+                json!({"tab":1,"target":{"ref":""}}),
+            ),
+        ] {
+            assert!(
+                descriptor(key)
+                    .expect("target-form descriptor")
+                    .validate(&arguments)
+                    .is_err(),
+                "unadvertised target form passed semantic validation for {key:?}"
+            );
+        }
+    }
+
+    #[test]
     fn canonical_flow_validates_concrete_fields_while_preserving_typed_references() {
         let flow = super::descriptor(OperationKey::new(
             OperationId::BrowserFlow,
@@ -2651,21 +2601,10 @@ mod tests {
                 "steps":[serde_json::to_value(invalid_step).expect("serialize step")]
             }))
             .is_err());
-
-        let fill = super::descriptor(OperationKey::new(
-            OperationId::BrowserFill,
-            IntentId::FillFields,
-        ))
-        .expect("fill descriptor");
-        assert_eq!(
-            fill.legacy_arguments(&json!({"tab":1,"fields":"$prev.fields"}))
-                .expect("deferred fields serialize"),
-            json!({"tabId":1,"fields":"$prev.fields","submit":false})
-        );
     }
 
     #[test]
-    fn ordinary_success_uses_the_descriptor_effect_and_other_errors_do_not_commit() {
+    fn ordinary_success_uses_the_descriptor_effect_and_generic_errors_do_not_commit() {
         let descriptor = super::descriptor(OperationKey::new(
             OperationId::BrowserNavigate,
             IntentId::NavigateUrl,
@@ -2675,10 +2614,39 @@ mod tests {
             descriptor.success_disposition_for(&json!({"content": []})),
             SuccessDisposition::new(BrowserResultStatus::Ok, OperationEffect::Committed, None)
         );
+        let read = super::descriptor(OperationKey::new(
+            OperationId::BrowserRead,
+            IntentId::ReadText,
+        ))
+        .expect("read descriptor");
         assert_eq!(
-            descriptor.success_disposition_for(&json!({"content": [], "isError": true})),
+            read.success_disposition_for(&json!({"content": [], "isError": true})),
             SuccessDisposition::new(BrowserResultStatus::Partial, OperationEffect::None, None)
         );
+    }
+
+    #[test]
+    fn landing_denial_after_navigation_is_partial_committed_and_unsafe_to_retry() {
+        for intent in [
+            IntentId::NavigateUrl,
+            IntentId::NavigateBack,
+            IntentId::NavigateForward,
+        ] {
+            let descriptor =
+                super::descriptor(OperationKey::new(OperationId::BrowserNavigate, intent))
+                    .expect("navigate landing descriptor");
+            assert_eq!(
+                descriptor.success_disposition_for(&json!({
+                    "content": [{"type":"text","text":"blocked landing"}],
+                    "isError": true
+                })),
+                SuccessDisposition::new(
+                    BrowserResultStatus::Partial,
+                    OperationEffect::Committed,
+                    Some(RetryDisposition::Unsafe)
+                )
+            );
+        }
     }
 
     #[test]
@@ -2748,6 +2716,33 @@ mod tests {
     }
 
     #[test]
+    fn act_post_action_safety_refusals_are_partial_after_commit() {
+        let descriptor = super::descriptor(OperationKey::new(
+            OperationId::BrowserAct,
+            IntentId::ActClick,
+        ))
+        .expect("act descriptor");
+        for kind in ["postcondition_paused", "postcondition_interrupted"] {
+            assert_eq!(
+                descriptor.success_disposition_for(&json!({
+                    "content": [],
+                    "isError": true,
+                    "structuredContent": {
+                        "interactionReceipt": {
+                            "blockers": [{"kind": kind}]
+                        }
+                    }
+                })),
+                SuccessDisposition::new(
+                    BrowserResultStatus::Partial,
+                    OperationEffect::Committed,
+                    None
+                )
+            );
+        }
+    }
+
+    #[test]
     fn form_fill_commits_only_when_a_field_or_submit_committed() {
         let fill = super::descriptor(OperationKey::new(
             OperationId::BrowserFill,
@@ -2775,6 +2770,22 @@ mod tests {
             })),
             SuccessDisposition::new(BrowserResultStatus::Ok, OperationEffect::Committed, None)
         );
+        assert_eq!(
+            fill.success_disposition_for(&json!({
+                "content": [],
+                "isError": true,
+                "structuredContent": {
+                    "filled": [{"label": "Email"}],
+                    "skipped": [{"label": "Name", "reason": "not_run_after_pause"}],
+                    "submitted": false
+                }
+            })),
+            SuccessDisposition::new(
+                BrowserResultStatus::Partial,
+                OperationEffect::Committed,
+                None
+            )
+        );
 
         let submit = super::descriptor(OperationKey::new(
             OperationId::BrowserFill,
@@ -2787,6 +2798,275 @@ mod tests {
                 "structuredContent": {"filled": [], "submitted": true}
             })),
             SuccessDisposition::new(BrowserResultStatus::Ok, OperationEffect::Committed, None)
+        );
+    }
+
+    #[test]
+    fn recording_no_ops_and_post_effect_failures_have_exact_dispositions() {
+        let descriptor = |intent| {
+            super::descriptor(OperationKey::new(OperationId::BrowserRecord, intent))
+                .expect("record descriptor")
+        };
+        for (intent, structured) in [
+            (
+                IntentId::RecordStart,
+                json!({
+                    "changed":false,
+                    "start_acknowledged":false,
+                    "start_committed":false
+                }),
+            ),
+            (
+                IntentId::RecordStop,
+                json!({
+                    "changed":false,
+                    "stop_committed":false,
+                    "finalization_effect":"none"
+                }),
+            ),
+            (
+                IntentId::RecordClear,
+                json!({"changed":false,"clear_committed":false}),
+            ),
+            (
+                IntentId::RecordExport,
+                json!({
+                    "changed":false,
+                    "stop_committed":false,
+                    "finalization_effect":"none",
+                    "export_completed":false,
+                    "delivery":"not_started"
+                }),
+            ),
+        ] {
+            assert_eq!(
+                descriptor(intent).success_disposition_for(&json!({
+                    "content": [],
+                    "structuredContent": structured
+                })),
+                SuccessDisposition::new(BrowserResultStatus::Ok, OperationEffect::None, None)
+            );
+        }
+
+        let stop_partial = descriptor(IntentId::RecordStop).success_disposition_for(&json!({
+            "content": [],
+            "isError": true,
+            "structuredContent": {
+                "changed":true,
+                "stop_committed":true,
+                "stop_acknowledged":true,
+                "recording_state_changed":false,
+                "cancel_enqueued":false,
+                "finalization_effect":"committed"
+            }
+        }));
+        assert_eq!(
+            stop_partial,
+            SuccessDisposition::new(
+                BrowserResultStatus::Partial,
+                OperationEffect::Committed,
+                Some(RetryDisposition::Unsafe)
+            )
+        );
+
+        assert_eq!(
+            descriptor(IntentId::RecordStart).success_disposition_for(&json!({
+                "content": [],
+                "isError": true,
+                "structuredContent": {
+                    "changed":true,
+                    "start_acknowledged":true,
+                    "start_committed":true,
+                    "retry_safe":false
+                }
+            })),
+            SuccessDisposition::new(
+                BrowserResultStatus::Partial,
+                OperationEffect::Committed,
+                Some(RetryDisposition::Unsafe)
+            )
+        );
+
+        let export = descriptor(IntentId::RecordExport);
+        assert_eq!(
+            export.success_disposition_for(&json!({
+                "content": [],
+                "isError": true,
+                "structuredContent": {
+                    "changed":true,
+                    "stop_committed":true,
+                    "finalization_effect":"committed",
+                    "export_completed":false,
+                    "delivery":"not_completed"
+                }
+            })),
+            SuccessDisposition::new(
+                BrowserResultStatus::Partial,
+                OperationEffect::Committed,
+                Some(RetryDisposition::Unsafe)
+            )
+        );
+        assert_eq!(
+            export.success_disposition_for(&json!({
+                "content": [],
+                "structuredContent": {
+                    "changed":true,
+                    "stop_committed":false,
+                    "finalization_effect":"none",
+                    "export_completed":true,
+                    "delivery":"dispatched",
+                    "retry_safe":false
+                }
+            })),
+            SuccessDisposition::new(
+                BrowserResultStatus::Ok,
+                OperationEffect::Committed,
+                Some(RetryDisposition::Unsafe)
+            )
+        );
+
+        assert_eq!(
+            export.success_disposition_for(&json!({"content":[]})),
+            SuccessDisposition::new(
+                BrowserResultStatus::Unavailable,
+                OperationEffect::None,
+                None
+            )
+        );
+
+        assert_eq!(
+            descriptor(IntentId::RecordStop).success_disposition_for(&json!({
+                "content": [],
+                "isError": true,
+                "structuredContent": {
+                    "changed":true,
+                    "stop_committed":true,
+                    "finalization_effect":"dispatched"
+                }
+            })),
+            SuccessDisposition::new(
+                BrowserResultStatus::OutcomeUnknown,
+                OperationEffect::Unknown,
+                Some(RetryDisposition::Unsafe)
+            )
+        );
+    }
+
+    #[test]
+    fn recording_receipts_keep_root_and_flow_effects_truthful() {
+        let stop = super::descriptor(OperationKey::new(
+            OperationId::BrowserRecord,
+            IntentId::RecordStop,
+        ))
+        .expect("record stop descriptor");
+        let no_op = stop.success_disposition_for(&json!({
+            "content": [],
+            "structuredContent": {
+                "changed":false,
+                "stop_committed":false,
+                "finalization_effect":"none"
+            }
+        }));
+        assert_eq!(no_op.effect, OperationEffect::None);
+        assert_eq!(
+            flow_disposition(
+                IntentId::FlowExecute,
+                vec![flow_step(
+                    1,
+                    FlowStepStatus::Ok,
+                    OperationId::BrowserRecord,
+                    IntentId::RecordStop,
+                    no_op.status,
+                    no_op.effect,
+                )],
+            ),
+            SuccessDisposition::new(BrowserResultStatus::Ok, OperationEffect::None, None)
+        );
+
+        let partial = stop.success_disposition_for(&json!({
+            "content": [],
+            "isError": true,
+            "structuredContent": {
+                "changed":true,
+                "stop_committed":true,
+                "finalization_effect":"committed"
+            }
+        }));
+        assert_eq!(partial.effect, OperationEffect::Committed);
+        assert_eq!(partial.retry, Some(RetryDisposition::Unsafe));
+        assert_eq!(
+            flow_disposition(
+                IntentId::FlowExecute,
+                vec![flow_step(
+                    1,
+                    FlowStepStatus::Partial,
+                    OperationId::BrowserRecord,
+                    IntentId::RecordStop,
+                    partial.status,
+                    partial.effect,
+                )],
+            ),
+            SuccessDisposition::new(
+                BrowserResultStatus::Partial,
+                OperationEffect::Committed,
+                Some(RetryDisposition::Unsafe)
+            )
+        );
+
+        let export = super::descriptor(OperationKey::new(
+            OperationId::BrowserRecord,
+            IntentId::RecordExport,
+        ))
+        .expect("record export descriptor");
+        let export_partial = export.success_disposition_for(&json!({
+            "content": [],
+            "isError": true,
+            "structuredContent": {
+                "changed":true,
+                "stop_committed":true,
+                "finalization_effect":"committed",
+                "export_completed":false,
+                "delivery":"not_completed"
+            }
+        }));
+        assert_eq!(export_partial.retry, Some(RetryDisposition::Unsafe));
+        assert_eq!(
+            flow_disposition(
+                IntentId::FlowExecute,
+                vec![flow_step(
+                    1,
+                    FlowStepStatus::Partial,
+                    OperationId::BrowserRecord,
+                    IntentId::RecordExport,
+                    export_partial.status,
+                    export_partial.effect,
+                )],
+            ),
+            export_partial
+        );
+
+        let uncertain = stop.success_disposition_for(&json!({
+            "content": [],
+            "isError": true,
+            "structuredContent": {
+                "changed":true,
+                "stop_committed":true,
+                "finalization_effect":"dispatched"
+            }
+        }));
+        assert_eq!(
+            flow_disposition(
+                IntentId::FlowExecute,
+                vec![flow_step(
+                    1,
+                    FlowStepStatus::OutcomeUnknown,
+                    OperationId::BrowserRecord,
+                    IntentId::RecordStop,
+                    uncertain.status,
+                    uncertain.effect,
+                )],
+            ),
+            uncertain
         );
     }
 
