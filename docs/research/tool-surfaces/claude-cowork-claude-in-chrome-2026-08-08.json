@@ -1,0 +1,738 @@
+{
+  "record_type": "capture",
+  "format": "ghostlight-tool-surface-capture/v2",
+  "acquisition": "deferred_tool_search",
+  "client": "Cowork mode (Claude desktop app)",
+  "model": "claude-opus-5",
+  "capture_date": "2026-08-08",
+  "tools_expected": 22,
+  "tools_captured": 22,
+  "tools_unobserved": [],
+  "browser_tools_invoked": false,
+  "notes": [
+    "All declarations were loaded via the client's ToolSearch deferred-tool lookup using exact-name select queries. No mcp__claude-in-chrome__* browser tool was invoked.",
+    "The client declaration surface exposed only `name`, `description`, and `parameters` for every tool. No outputSchema, annotations, or _meta fields were present; those are recorded as null (unobserved), not inferred.",
+    "server_declared_name is null for every tool: the underlying (non-namespaced) server declaration name is not exposed by this client surface.",
+    "deferred_listing_ordinal reflects the ordinal supplied by the requester, not proven server declaration order.",
+    "Schemas are reproduced verbatim, including absent `required` arrays, absent property types, and properties described in prose but not declared. No normalization or repair was performed."
+  ],
+  "tools": [
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 1,
+      "client_visible_name": "mcp__claude-in-chrome__browser_batch",
+      "server_declared_name": null,
+      "description_exact": "Execute a sequence of browser tool calls in ONE round trip. Each item is {name, input} where input is exactly what you'd pass to that tool standalone. Actions execute SEQUENTIALLY (not in parallel) and stop on the first error. Use this tool extensively to quickly execute work whenever you can predict two or more steps ahead \u2014 e.g. navigate, click a field, type, press Return, screenshot. Each tool's own permission check runs per item \u2014 if an action navigates to a domain without permission, the next item's check fails and the batch stops. Screenshots and other images are returned interleaved with outputs; coordinates you write in THIS batch refer to the screenshot taken BEFORE this call. browser_batch cannot be nested.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "actions": {
+            "description": "List of tool calls to execute sequentially. Example: [{\"name\":\"computer\",\"input\":{\"action\":\"left_click\",\"coordinate\":[100,200],\"tabId\":123}},{\"name\":\"computer\",\"input\":{\"action\":\"type\",\"text\":\"hello\",\"tabId\":123}},{\"name\":\"navigate\",\"input\":{\"url\":\"https://example.com\",\"tabId\":123}}]",
+            "items": {
+              "additionalProperties": {},
+              "properties": {
+                "input": {
+                  "additionalProperties": {},
+                  "properties": {},
+                  "type": "object"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": ["input"],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": ["actions"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "Item schema declares `required: [\"input\"]` only; `name` is declared but not required. Reproduced verbatim."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 2,
+      "client_visible_name": "mcp__claude-in-chrome__computer",
+      "server_declared_name": null,
+      "description_exact": "Use a mouse and keyboard to interact with a web browser, and take screenshots. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.\n* Whenever you intend to click on an element like an icon, you should consult a screenshot to determine the coordinates of the element before moving the cursor.\n* If you tried clicking on a program or link but it failed to load, even after waiting, try adjusting your click location so that the tip of the cursor visually falls on the element that you want to click.\n* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "action": {
+            "description": "The action to perform:\n* `left_click`: Click the left mouse button at the specified coordinates.\n* `right_click`: Click the right mouse button at the specified coordinates to open context menus.\n* `double_click`: Double-click the left mouse button at the specified coordinates.\n* `triple_click`: Triple-click the left mouse button at the specified coordinates.\n* `type`: Type a string of text.\n* `screenshot`: Take a screenshot of the screen.\n* `wait`: Wait for a specified number of seconds.\n* `scroll`: Scroll up, down, left, or right at the specified coordinates.\n* `key`: Press a specific keyboard key.\n* `left_click_drag`: Drag from start_coordinate to coordinate.\n* `zoom`: Take a screenshot of a specific region for closer inspection.\n* `scroll_to`: Scroll an element into view using its element reference ID from read_page or find tools.\n* `hover`: Move the mouse cursor to the specified coordinates or element without clicking. Useful for revealing tooltips, dropdown menus, or triggering hover states.",
+            "enum": [
+              "left_click",
+              "right_click",
+              "type",
+              "screenshot",
+              "wait",
+              "scroll",
+              "key",
+              "left_click_drag",
+              "double_click",
+              "triple_click",
+              "zoom",
+              "scroll_to",
+              "hover"
+            ],
+            "type": "string"
+          },
+          "coordinate": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "duration": {
+            "type": "number"
+          },
+          "modifiers": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "region": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "repeat": {
+            "type": "number"
+          },
+          "save_to_disk": {
+            "type": "boolean"
+          },
+          "scroll_amount": {
+            "type": "number"
+          },
+          "scroll_direction": {
+            "enum": ["up", "down", "left", "right"],
+            "type": "string"
+          },
+          "start_coordinate": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "tabId": {
+            "description": "Tab ID to execute the action on. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": ["action", "tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "Most properties carry no description in the declaration; absence reproduced verbatim."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 3,
+      "client_visible_name": "mcp__claude-in-chrome__file_upload",
+      "server_declared_name": null,
+      "description_exact": "Upload one or multiple files to a file input element on the page. Do not click on file upload buttons or file inputs \u2014 clicking opens a native file picker dialog that you cannot see or interact with. Instead, use read_page or find to locate the file input element, then use this tool with its ref to upload files directly. Only files the user has shared with this session (attachments, the session's outputs/uploads folders, or folders the user has connected) can be uploaded; other paths will be rejected. The combined size of all files in a single call must stay under 10 MB.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "paths": {
+            "description": "Absolute paths to the files to upload. Each path must be a file the user has shared with this session.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ref": {
+            "description": "Element reference ID of the file input from read_page or find tools (e.g., \"ref_1\", \"ref_2\").",
+            "type": "string"
+          },
+          "tabId": {
+            "description": "Tab ID where the file input is located. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          }
+        },
+        "required": ["paths", "tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "`ref` is described but not listed in `required`. Reproduced verbatim."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 4,
+      "client_visible_name": "mcp__claude-in-chrome__find",
+      "server_declared_name": null,
+      "description_exact": "Find elements on the page using natural language. Can search for elements by their purpose (e.g., \"search bar\", \"login button\") or by text content (e.g., \"organic mango product\"). Returns up to 20 matching elements with references that can be used with other tools. If more than 20 matches exist, you'll be notified to use a more specific query. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "query": {
+            "description": "Natural language description of what to find (e.g., \"search bar\", \"add to cart button\", \"product title containing organic\")",
+            "type": "string"
+          },
+          "tabId": {
+            "description": "Tab ID to search in. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          }
+        },
+        "required": ["tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "`required` contains only \"tabId\"; `query` is not required in the declaration."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 5,
+      "client_visible_name": "mcp__claude-in-chrome__form_input",
+      "server_declared_name": null,
+      "description_exact": "Set values in form elements using element reference ID from the read_page tool. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "ref": {
+            "description": "Element reference ID from the read_page tool (e.g., \"ref_1\", \"ref_2\")",
+            "type": "string"
+          },
+          "tabId": {
+            "description": "Tab ID to set form value in. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          },
+          "value": {
+            "description": "The value to set. For checkboxes use boolean, for selects use option value or text, for other inputs use appropriate string/number"
+          }
+        },
+        "required": ["value", "tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "The `value` property declares no `type`; that omission is reproduced verbatim and was not repaired."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 6,
+      "client_visible_name": "mcp__claude-in-chrome__get_page_text",
+      "server_declared_name": null,
+      "description_exact": "Extract raw text content from the page, prioritizing article content. Ideal for reading articles, blog posts, or other text-heavy pages. Returns plain text without HTML formatting. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "tabId": {
+            "description": "Tab ID to extract text from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          }
+        },
+        "required": ["tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": null
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 7,
+      "client_visible_name": "mcp__claude-in-chrome__gif_creator",
+      "server_declared_name": null,
+      "description_exact": "Manage GIF recording and export for browser automation sessions. Control when to start/stop recording browser actions (clicks, scrolls, navigation), then export as an animated GIF with visual overlays (click indicators, action labels, progress bar, watermark). All operations are scoped to the tab's group. When starting recording, take a screenshot immediately after to capture the initial state as the first frame. When stopping recording, take a screenshot immediately before to capture the final state as the last frame. For export, either provide 'coordinate' to drag/drop upload to a page element, or set 'download: true' to download the GIF.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "action": {
+            "description": "Action to perform: 'start_recording' (begin capturing), 'stop_recording' (stop capturing but keep frames), 'export' (generate and export GIF), 'clear' (discard frames)",
+            "enum": ["start_recording", "stop_recording", "export", "clear"],
+            "type": "string"
+          },
+          "download": {
+            "type": "boolean"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "options": {
+            "additionalProperties": {},
+            "properties": {
+              "quality": {
+                "type": "number"
+              },
+              "showActionLabels": {
+                "type": "boolean"
+              },
+              "showClickIndicators": {
+                "type": "boolean"
+              },
+              "showDragPaths": {
+                "type": "boolean"
+              },
+              "showProgressBar": {
+                "type": "boolean"
+              },
+              "showWatermark": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "tabId": {
+            "description": "Tab ID to identify which tab group this operation applies to",
+            "type": "number"
+          }
+        },
+        "required": ["action", "tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "The prose description references a 'coordinate' parameter that is not present in the declared input schema. Discrepancy preserved, not reconciled."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 8,
+      "client_visible_name": "mcp__claude-in-chrome__javascript_tool",
+      "server_declared_name": null,
+      "description_exact": "Execute JavaScript code in the context of the current page. The code runs in the page's context and can interact with the DOM, window object, and page variables. Returns the result of the last expression or any thrown errors. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "action": {
+            "description": "Must be set to 'javascript_exec'",
+            "type": "string"
+          },
+          "tabId": {
+            "description": "Tab ID to execute the code in. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          },
+          "text": {
+            "description": "The JavaScript code to execute. Evaluated in the page context with REPL semantics: top-level `await` works, and the result of the last expression is returned automatically \u2014 write the expression you want (e.g. `window.myData.value`, or `await fetch(url).then(r=>r.json())`) rather than `return ...`. You can access and modify the DOM, call page functions, and interact with page variables.",
+            "type": "string"
+          }
+        },
+        "required": ["tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "`action` is described as mandatory in prose but is not listed in the declared `required` array; only \"tabId\" is required."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 9,
+      "client_visible_name": "mcp__claude-in-chrome__list_connected_browsers",
+      "server_declared_name": null,
+      "description_exact": "List all Chrome browsers (extension instances) currently connected to this account. Returns each browser's deviceId, display name, OS platform, and whether it appears to be on this computer. Use this before select_browser to present choices to the user.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {},
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "Declared properties object is empty; no `required` array present."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 10,
+      "client_visible_name": "mcp__claude-in-chrome__navigate",
+      "server_declared_name": null,
+      "description_exact": "Navigate to a URL, or go forward/back in browser history. tabId may be omitted for URL navigation when calling navigate STANDALONE (not inside browser_batch): tabs_context_mcp{createIfEmpty:true} is called for you and the first tab in the session's group is navigated \u2014 its result is appended to this call's output so you have the tab list and ids for subsequent calls. Inside browser_batch, navigate (and other tools that act on a page) requires an explicit tabId. Pass an explicit tabId when you need a specific tab or when the session's group has multiple tabs whose state you must preserve. tabId is required for url:\"back\"/\"forward\".",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "tabId": {
+            "type": "number"
+          },
+          "url": {
+            "description": "The URL to navigate to. Can be provided with or without protocol (defaults to https://). Use \"forward\" to go forward in history or \"back\" to go back in history.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "No `required` array is present in the declared input schema; absence reproduced verbatim."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 11,
+      "client_visible_name": "mcp__claude-in-chrome__read_console_messages",
+      "server_declared_name": null,
+      "description_exact": "Read browser console messages (console.log, console.error, console.warn, etc.) from a specific tab. Useful for debugging JavaScript errors, viewing application logs, or understanding what's happening in the browser console. Returns console messages from the current domain only. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs. IMPORTANT: Always provide a pattern to filter messages - without a pattern, you may get too many irrelevant messages.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "clear": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "onlyErrors": {
+            "type": "boolean"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "tabId": {
+            "description": "Tab ID to read console messages from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          }
+        },
+        "required": ["tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "`pattern` is emphasized in prose but not listed in `required`."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 12,
+      "client_visible_name": "mcp__claude-in-chrome__read_network_requests",
+      "server_declared_name": null,
+      "description_exact": "Read HTTP network requests (XHR, Fetch, documents, images, etc.) from a specific tab. Useful for debugging API calls, monitoring network activity, or understanding what requests a page is making. Returns all network requests made by the current page, including cross-origin requests. Requests are automatically cleared when the page navigates to a different domain. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "clear": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "tabId": {
+            "description": "Tab ID to read network requests from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          },
+          "urlPattern": {
+            "type": "string"
+          }
+        },
+        "required": ["tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": null
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 13,
+      "client_visible_name": "mcp__claude-in-chrome__read_page",
+      "server_declared_name": null,
+      "description_exact": "Get an accessibility tree representation of elements on the page. By default returns all elements including non-visible ones. Output is limited to 50000 characters by default. If the output exceeds this limit it is truncated at a line boundary, with a note giving the full size \u2014 pass a larger max_chars, or use depth/ref_id to focus on part of the page. Optionally filter for only interactive elements. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "depth": {
+            "type": "number"
+          },
+          "filter": {
+            "enum": ["interactive", "all"],
+            "type": "string"
+          },
+          "max_chars": {
+            "type": "number"
+          },
+          "ref_id": {
+            "type": "string"
+          },
+          "tabId": {
+            "description": "Tab ID to read from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          }
+        },
+        "required": ["tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "Defaults mentioned in prose (all elements, 50000 characters) are not declared as JSON Schema `default` values; no defaults were inferred."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 14,
+      "client_visible_name": "mcp__claude-in-chrome__resize_window",
+      "server_declared_name": null,
+      "description_exact": "Resize the current browser window to specified dimensions. Useful for testing responsive designs or setting up specific screen sizes. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "height": {
+            "description": "Target window height in pixels",
+            "type": "number"
+          },
+          "tabId": {
+            "description": "Tab ID to get the window for. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          },
+          "width": {
+            "description": "Target window width in pixels",
+            "type": "number"
+          }
+        },
+        "required": ["width", "height", "tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "`required` order is [\"width\", \"height\", \"tabId\"], which differs from the alphabetical property order. Order preserved as declared."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 15,
+      "client_visible_name": "mcp__claude-in-chrome__select_browser",
+      "server_declared_name": null,
+      "description_exact": "Select a specific Chrome browser by deviceId for browser automation, without broadcasting a pairing request. Use this after list_connected_browsers when the user has chosen one from the list.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "deviceId": {
+            "description": "The deviceId from list_connected_browsers.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "No `required` array present despite the described `deviceId` property; absence reproduced verbatim."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 16,
+      "client_visible_name": "mcp__claude-in-chrome__shortcuts_execute",
+      "server_declared_name": null,
+      "description_exact": "Execute a shortcut or workflow by running it in a new sidepanel window using the current tab (shortcuts and workflows are interchangeable). Use shortcuts_list first to see available shortcuts. This starts the execution and returns immediately - it does not wait for completion.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "shortcutId": {
+            "type": "string"
+          },
+          "tabId": {
+            "description": "Tab ID to execute the shortcut on. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          }
+        },
+        "required": ["tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "`command` and `shortcutId` carry no descriptions and are not required."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 17,
+      "client_visible_name": "mcp__claude-in-chrome__shortcuts_list",
+      "server_declared_name": null,
+      "description_exact": "List all available shortcuts and workflows (shortcuts and workflows are interchangeable). Returns shortcuts with their commands, descriptions, and whether they are workflows. Use shortcuts_execute to run a shortcut or workflow.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "tabId": {
+            "description": "Tab ID to list shortcuts from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
+            "type": "number"
+          }
+        },
+        "required": ["tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": null
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 18,
+      "client_visible_name": "mcp__claude-in-chrome__switch_browser",
+      "server_declared_name": null,
+      "description_exact": "Send a connection request to every Chrome browser with the extension installed and wait (up to 2 minutes) for the user to click 'Connect' in the one they want to use. The user can name the browser when they connect. Use this when the user wants to pick the browser themselves from inside Chrome rather than choosing from a list; otherwise prefer select_browser with a known deviceId.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {},
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "Declared properties object is empty; no `required` array present."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 19,
+      "client_visible_name": "mcp__claude-in-chrome__tabs_close_mcp",
+      "server_declared_name": null,
+      "description_exact": "Close a tab in the MCP tab group by its ID. Use to clean up tabs you're done with. Only tabs in this session's group are closable; call tabs_context_mcp first to get valid IDs. If you close the group's last tab, Chrome auto-removes the group \u2014 the next tabs_context_mcp with createIfEmpty starts fresh.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "tabId": {
+            "description": "The ID of the tab to close. Must be in this session's tab group. Get valid IDs from tabs_context_mcp.",
+            "type": "number"
+          }
+        },
+        "required": ["tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": null
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 20,
+      "client_visible_name": "mcp__claude-in-chrome__tabs_context_mcp",
+      "server_declared_name": null,
+      "description_exact": "Get context information about the current MCP tab group. Returns all tab IDs inside the group if it exists. CRITICAL: You must get the context at least once before using other browser automation tools so you know what tabs exist. Each new conversation should create its own new tab (using tabs_create_mcp) rather than reusing existing tabs, unless the user explicitly asks to use an existing tab.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "createIfEmpty": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "`createIfEmpty` carries no description and no default in the declaration; no `required` array present."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 21,
+      "client_visible_name": "mcp__claude-in-chrome__tabs_create_mcp",
+      "server_declared_name": null,
+      "description_exact": "Creates a new empty tab in the MCP tab group. CRITICAL: You must get the context using tabs_context_mcp at least once before using other browser automation tools so you know what tabs exist.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {},
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "Declared properties object is empty; no `required` array present."
+    },
+    {
+      "record_type": "tool",
+      "deferred_listing_ordinal": 22,
+      "client_visible_name": "mcp__claude-in-chrome__upload_image",
+      "server_declared_name": null,
+      "description_exact": "Upload a previously captured screenshot or user-uploaded image to a file input or drag & drop target. Supports two approaches: (1) ref - for targeting specific elements, especially hidden file inputs, (2) coordinate - for drag & drop to visible locations like Google Docs. Provide either ref or coordinate, not both.",
+      "input_schema_exact": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "coordinate": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "imageId": {
+            "description": "ID of a previously captured screenshot (from the computer tool's screenshot action) or a user-uploaded image",
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "tabId": {
+            "description": "Tab ID where the target element is located. This is where the image will be uploaded to.",
+            "type": "number"
+          }
+        },
+        "required": ["tabId"],
+        "type": "object"
+      },
+      "output_schema_exact": null,
+      "annotations_exact": null,
+      "meta_exact": null,
+      "other_declaration_fields_exact": null,
+      "evidence_status": "exact_tool_reference",
+      "evidence_note": "The prose describes a mutual exclusivity constraint between `ref` and `coordinate`, but no `oneOf`/`anyOf`/`allOf` construct is declared in the schema. Not synthesized."
+    }
+  ],
+  "record_type_end": "capture_end",
+  "complete": true
+}

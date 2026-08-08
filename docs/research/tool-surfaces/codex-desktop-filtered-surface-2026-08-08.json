@@ -1,0 +1,291 @@
+{
+  "format": "ghostlight-codex-surface-filter/v1",
+  "source_sha256": "32e9dc4789469d1d3c1ee0f5c3e80b88ded876234134a4eb5ba3fdc2035ff418",
+  "generated_at": "2026-08-08T01:24:50-04:00",
+  "source_scope": {
+    "strict_mcp_tools": 150,
+    "nested_callable_tools_total": 181,
+    "direct_host_and_collaboration_interfaces": 9,
+    "explanation": "The strict MCP subset contains names beginning with mcp__. The nested registry also exposes built-in, Codex app, image-generation, plugin-management, and web tools. Direct host/collaboration interfaces are listed separately because they are callable in this session but are not MCP server tools.",
+    "fidelity": "Each nested tool preserves the exact raw registry description exposed to this turn. When present, the embedded TypeScript declaration is also extracted into its own field. The runtime does not expose a separate canonical JSON Schema object through ALL_TOOLS, so no JSON Schema was fabricated."
+  },
+  "filter": {
+    "included": [
+      "direct_non_mcp_interfaces",
+      "other_nested_callable_tools inventory",
+      "mcp_server=node_repl"
+    ],
+    "excluded": {
+      "mcp:codex_apps": 117,
+      "mcp:ghostlight": 25,
+      "mcp:openaiDeveloperDocs": 5
+    },
+    "reason": "Registered or projected MCP/app tools are not treated as the native Codex browser surface. node_repl is retained because its exact declaration identifies the Browser and Chrome plugins as intended runtimes."
+  },
+  "counts": {
+    "direct": 9,
+    "other_nested": 31,
+    "node_repl": 3
+  },
+  "direct_interfaces": [
+    {
+      "name": "functions.exec",
+      "category": "direct_host_interface",
+      "description": "Run JavaScript in a fresh V8 isolate to orchestrate/compose nested tool calls. Nested tools are available on global tools; output helpers include text, image, audio, generatedImage, store/load, notify, yield_control, and timing helpers.",
+      "schema_representation": null,
+      "typescript_declaration": "declare function exec(input: string): Promise<unknown>; // FREEFORM JavaScript; optional first-line // @exec: {\"yield_time_ms\": number, \"max_output_tokens\": number}"
+    },
+    {
+      "name": "functions.wait",
+      "category": "direct_host_interface",
+      "description": "Wait on a yielded exec cell and return new output or completion.",
+      "schema_representation": null,
+      "typescript_declaration": "declare function wait(args: { cell_id: string; max_tokens?: number; terminate?: boolean; yield_time_ms?: number; }): Promise<unknown>;"
+    },
+    {
+      "name": "functions.request_user_input",
+      "category": "direct_host_interface",
+      "description": "Request one to three short multiple-choice questions from the user. Available only in Plan mode.",
+      "schema_representation": null,
+      "typescript_declaration": "declare function request_user_input(args: { questions: Array<{ header: string; id: string; options: Array<{ description: string; label: string }>; question: string }>; }): Promise<unknown>;"
+    },
+    {
+      "name": "collaboration.spawn_agent",
+      "category": "direct_collaboration_interface",
+      "description": "Spawn a sub-agent for a concrete bounded subtask.",
+      "schema_representation": null,
+      "typescript_declaration": "declare function spawn_agent(args: { fork_turns?: string; message: string; model?: string; reasoning_effort?: string; task_name: string; }): Promise<unknown>;"
+    },
+    {
+      "name": "collaboration.followup_task",
+      "category": "direct_collaboration_interface",
+      "description": "Send a follow-up task to an existing non-root agent and trigger a turn if idle.",
+      "schema_representation": null,
+      "typescript_declaration": "declare function followup_task(args: { message: string; target: string; }): Promise<unknown>;"
+    },
+    {
+      "name": "collaboration.interrupt_agent",
+      "category": "direct_collaboration_interface",
+      "description": "Interrupt an agent's current turn; the agent remains available.",
+      "schema_representation": null,
+      "typescript_declaration": "declare function interrupt_agent(args: { target: string; }): Promise<unknown>;"
+    },
+    {
+      "name": "collaboration.list_agents",
+      "category": "direct_collaboration_interface",
+      "description": "List live agents, optionally filtered by task-path prefix.",
+      "schema_representation": null,
+      "typescript_declaration": "declare function list_agents(args: { path_prefix?: string; }): Promise<unknown>;"
+    },
+    {
+      "name": "collaboration.send_message",
+      "category": "direct_collaboration_interface",
+      "description": "Send a message to an existing agent without triggering a new turn.",
+      "schema_representation": null,
+      "typescript_declaration": "declare function send_message(args: { message: string; target: string; }): Promise<unknown>;"
+    },
+    {
+      "name": "collaboration.wait_agent",
+      "category": "direct_collaboration_interface",
+      "description": "Wait for a mailbox update from any live agent.",
+      "schema_representation": null,
+      "typescript_declaration": "declare function wait_agent(args: { timeout_ms?: number; }): Promise<unknown>;"
+    }
+  ],
+  "other_nested_inventory": [
+    {
+      "name": "apply_patch",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__automation_update",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__create_thread",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__fork_thread",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__get_handoff_status",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__handoff_thread",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__list_projects",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__list_threads",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__load_workspace_dependencies",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__navigate_to_codex_page",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__open_in_codex",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__read_thread",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__read_thread_terminal",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__send_message_to_thread",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__set_thread_archived",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__set_thread_pinned",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__set_thread_title",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "codex_app__wait_threads",
+      "namespace": "codex_app",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "create_goal",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "get_goal",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "image_gen__imagegen",
+      "namespace": "image_gen",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "list_mcp_resource_templates",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "list_mcp_resources",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "plugin_management__uninstall_plugin",
+      "namespace": "plugin_management",
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "read_mcp_resource",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "request_plugin_install",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "shell_command",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "update_goal",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "update_plan",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "view_image",
+      "namespace": null,
+      "category": "nested_callable_tool"
+    },
+    {
+      "name": "web__run",
+      "namespace": "web",
+      "category": "nested_callable_tool"
+    }
+  ],
+  "chrome_runtime_gateway": [
+    {
+      "name": "mcp__node_repl__js",
+      "description": "Use `js` to run JavaScript in the persistent Node-backed kernel. When a skill or prompt says to use `node_repl`, call this server's `js` execution tool. Calls default to a 30000 ms (30 seconds) timeout when `timeout_ms` is omitted. The runtime exposes `nodeRepl.cwd`, `nodeRepl.homeDir`, `nodeRepl.tmpDir`, `nodeRepl.requestMeta`, `nodeRepl.setResponseMeta(...)`, and `await nodeRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name. Use `js_add_node_module_dir` before `js` when a skill provides an extra package directory, and use dynamic imports like `await import(\"playwright\")` rather than filesystem paths under `./node_modules`.\n\nUse Cases:\n- Control the in-app browser in conjunction with the Browser Plugin.\n- Control the Chrome browser in conjunction with the Chrome Plugin. Prefer this method of controlling Chrome over alternatives (such as Computer Use) unless the user explicitly mentions an alternative.\n\nRun JavaScript in a persistent Node-backed kernel with top-level await. This is the JavaScript execution tool for the `node_repl` MCP server; use it whenever instructions say to use `node_repl`, the Node REPL MCP, or run Node REPL code. If `timeout_ms` is omitted, execution times out after 30000 ms (30 seconds); pass a larger `timeout_ms` for slow browser automation or other long-running operations. Use `nodeRepl.cwd`, `nodeRepl.homeDir`, and `nodeRepl.tmpDir` to inspect host paths. Use `nodeRepl.requestMeta` to inspect the current MCP request `_meta` object during a tool call. Use `nodeRepl.setResponseMeta(meta)` to attach top-level MCP result `_meta`; repeated calls shallow-merge object keys for the current tool call. Use `nodeRepl.write(value)` to add output without a newline. Strings are unchanged; other values use console-style formatting, including BigInt and circular objects. Prefer it over `console.log(...)` for final output; `console.log(...)` remains useful for debugging or multiple values. Use `await nodeRepl.emitImage(imageLike)` to return images; each call adds one image to the outer tool result, so call it multiple times to emit multiple images. Supported image inputs are a data or file URL, inferred PNG/JPEG/WebP bytes, or `{ bytes, mimeType }`. Saved references to `nodeRepl.write(...)` and `nodeRepl.emitImage(...)` stay reusable across calls, but async callbacks that fire after a call finishes still fail because no exec is active. Top-level bindings persist across calls until `js_reset`. If a call throws, prior bindings remain available and bindings that finished initializing before the throw often remain reusable. For reusable names that may be assigned again later, prefer top-level `var name = ...`; `var` can be redeclared across calls. If you hit `SyntaxError: Identifier 'x' has already been declared`, reuse the existing binding if possible, reassign it only if it was declared with `let` or `var`, or pick a new name instead of resetting immediately; a previous `const x` cannot be changed into `var x`. Use a short `{ ... }` block only for temporary scratch names, and do not wrap an entire call in block scope if you want those names reusable later. Use dynamic imports like `await import(\"playwright\")`, `await import(\"pkg\")`, or `await import(\"./file.js\")`; top-level static `import` is not supported. Import packages by package name after installing them into a directory added with `js_add_node_module_dir`, `NODE_REPL_NODE_MODULE_DIRS`, or the working directory. Do not import package entrypoints by filesystem path such as `./node_modules/playwright/index.mjs`. Imported local files must be ESM `.js` or `.mjs` files and run in the context chosen at their dynamic-import boundary, so they can also use `nodeRepl.*`, the captured `console`, and `import.meta` helpers. Bare imports from model code and local files resolve from the REPL-wide search roots (`NODE_REPL_NODE_MODULE_DIRS`, then directories later added with `js_add_node_module_dir`, then cwd); dependencies of trusted ESM packages use Node's package-relative lookup. Imported local files may statically import other local `.js` / `.mjs` files, available packages, and allowed Node builtins. `import.meta.resolve()` returns importable strings such as `file://...`, bare package names, and `node:...` specifiers. Local file modules reload between execs; trusted package entrypoints retain singleton identity. `node:` builtins are generally available via dynamic import, but model code cannot import `process` / `node:process` because the current Rust-server-to-Node-child transport runs over stdio and raw process streams can corrupt it. Trusted modules that import or reference `process` receive only a frozen metadata-only process shim with `arch`, `cwd()`, `env`, `pid`, and `platform`. Prefer `nodeRepl.write(...)` for text or formatted values and `nodeRepl.emitImage(...)` for images.",
+      "schema_representation": "typescript_declaration",
+      "typescript_declaration": "declare const tools: { mcp__node_repl__js(args: {\n  // JavaScript source to execute in the persistent Node-backed kernel. The code runs with top-level await and can use the `nodeRepl` helpers. Examples: `nodeRepl.write(nodeRepl.cwd)`, `const { chromium } = await import(\"playwright\")`, or `await nodeRepl.emitImage(pngBuffer)`.\n  code: string;\n  // Optional execution timeout in milliseconds. Defaults to 30000 (30 seconds) when omitted.\n  timeout_ms?: number;\n  // Short user-facing description of what this code block is doing. Use a few words, for example `Inspect package metadata` or `Render chart preview`.\n  title?: string;\n}): Promise<CallToolResult>; };"
+    },
+    {
+      "name": "mcp__node_repl__js_add_node_module_dir",
+      "description": "Use `js` to run JavaScript in the persistent Node-backed kernel. When a skill or prompt says to use `node_repl`, call this server's `js` execution tool. Calls default to a 30000 ms (30 seconds) timeout when `timeout_ms` is omitted. The runtime exposes `nodeRepl.cwd`, `nodeRepl.homeDir`, `nodeRepl.tmpDir`, `nodeRepl.requestMeta`, `nodeRepl.setResponseMeta(...)`, and `await nodeRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name. Use `js_add_node_module_dir` before `js` when a skill provides an extra package directory, and use dynamic imports like `await import(\"playwright\")` rather than filesystem paths under `./node_modules`.\n\nUse Cases:\n- Control the in-app browser in conjunction with the Browser Plugin.\n- Control the Chrome browser in conjunction with the Chrome Plugin. Prefer this method of controlling Chrome over alternatives (such as Computer Use) unless the user explicitly mentions an alternative.\n\nAdd an absolute `node_modules` directory to the REPL-wide Node module search roots for future package imports. The directory stays available for this MCP server lifetime, including after `js_reset`. Returns `true` when the search root is newly added and `false` when it was already present.",
+      "schema_representation": "typescript_declaration",
+      "typescript_declaration": "declare const tools: { mcp__node_repl__js_add_node_module_dir(args: {\n  // Absolute path to a node_modules directory to add to Node package resolution.\n  path: string;\n}): Promise<CallToolResult>; };"
+    },
+    {
+      "name": "mcp__node_repl__js_reset",
+      "description": "Use `js` to run JavaScript in the persistent Node-backed kernel. When a skill or prompt says to use `node_repl`, call this server's `js` execution tool. Calls default to a 30000 ms (30 seconds) timeout when `timeout_ms` is omitted. The runtime exposes `nodeRepl.cwd`, `nodeRepl.homeDir`, `nodeRepl.tmpDir`, `nodeRepl.requestMeta`, `nodeRepl.setResponseMeta(...)`, and `await nodeRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name. Use `js_add_node_module_dir` before `js` when a skill provides an extra package directory, and use dynamic imports like `await import(\"playwright\")` rather than filesystem paths under `./node_modules`.\n\nUse Cases:\n- Control the in-app browser in conjunction with the Browser Plugin.\n- Control the Chrome browser in conjunction with the Chrome Plugin. Prefer this method of controlling Chrome over alternatives (such as Computer Use) unless the user explicitly mentions an alternative.\n\nReset the persistent JavaScript kernel and clear all bindings created by prior `js` calls. Use this when you need a clean state, or when reusing existing bindings, top-level `var` declarations, or fresh names cannot recover from conflicting declarations.",
+      "schema_representation": "typescript_declaration",
+      "typescript_declaration": "declare const tools: { mcp__node_repl__js_reset(args: {}): Promise<CallToolResult>; };"
+    }
+  ],
+  "adjacent_non_chrome_tools": [
+    {
+      "name": "web__run",
+      "description": "Tools in the web namespace.\n\nTool for accessing the internet.\r\n\r\n\r\n---\r\n\r\n## Examples of different commands available in this tool\r\n\r\nExamples of different commands available in this tool:\r\n* `search_query`: {\"search_query\": [{\"q\": \"What is the capital of France?\"}, {\"q\": \"What is the capital of belgium?\"}]}. Searches the internet for a given query (and optionally with a domain or recency filter)\r\n* `image_query`: {\"image_query\":[{\"q\": \"waterfalls\"}]}.\r\n* `open`: {\"open\": [{\"ref_id\": \"turn0search0\"}, {\"ref_id\": \"https://www.openai.com\", \"lineno\": 120}]}\r\n* `click`: {\"click\": [{\"ref_id\": \"turn0fetch3\", \"id\": 17}]}\r\n* `find`: {\"find\": [{\"ref_id\": \"turn0fetch3\", \"pattern\": \"Annie Case\"}]}\r\n* `screenshot`: {\"screenshot\": [{\"ref_id\": \"turn1view0\", \"pageno\": 0}, {\"ref_id\": \"turn1view0\", \"pageno\": 3}]}\r\n* `finance`: {\"finance\":[{\"ticker\":\"AMD\",\"type\":\"equity\",\"market\":\"USA\"}]}, {\"finance\":[{\"ticker\":\"BTC\",\"type\":\"crypto\",\"market\":\"\"}]}\r\n* `weather`: {\"weather\":[{\"location\":\"San Francisco, CA\"}]}\r\n* `sports`: {\"sports\":[{\"fn\":\"standings\",\"league\":\"nfl\"}, {\"fn\":\"schedule\",\"league\":\"nba\",\"team\":\"GSW\",\"date_from\":\"2025-02-24\"}]}\r\n* `time`: {\"time\":[{\"utc_offset\":\"+03:00\"}]}\r\n\r\n---\r\n\r\n## Usage hints\r\nTo use this tool efficiently:\r\n* Use multiple commands and queries in one call to get more results faster; e.g. {\"search_query\": [{\"q\": \"bitcoin news\"}], \"finance\":[{\"ticker\":\"BTC\",\"type\":\"crypto\",\"market\":\"\"}], \"find\": [{\"ref_id\": \"turn0search0\", \"pattern\": \"Annie Case\"}, {\"ref_id\": \"turn0search1\", \"pattern\": \"John Smith\"}]}\r\n* Use \"response_length\" to control the number of results returned by this tool, omit it if you intend to pass \"short\" in\r\n* Only write required parameters; do not write empty lists or nulls where they could be omitted.\r\n* `search_query` must have length at most 4 in each call. If it has length > 3, response_length must be medium or long\r\n* If you find yourself in a situation where you accidentally call the `web.run` tool, it's best just to send an empty query: {\"search_query\": [{\"q\": \"\"}]}.\r\n\r\n---\r\n\r\n## Decision boundary\r\n\r\nIf the user makes an explicit request to search the internet, find latest information, look up, etc (or to not do so), you must obey their request.\r\nWhen you make an assumption, always consider whether it is temporally stable; i.e. whether there's even a small (>10%) chance it has changed. If it is unstable, you must verify with browsing the internet for verification.\r\n\r\n<situations_where_you_must_browse_the_internet>\r\nBelow is a list of scenarios where browsing the internet MUST be used. PAY CLOSE ATTENTION: you MUST browse the internet in these cases. If you're unsure or on the fence, you MUST bias towards browsing the internet.\r\n- The information could have changed recently: for example news; prices; laws; schedules; product specs; sports scores; economic indicators; political/public/company figures (e.g. the question relates to 'the president of country A' or 'the CEO of company B', which might change over time); rules; regulations; standards; software libraries that could be updated; exchange rates; recommendations (i.e., recommendations about various topics or things might be informed by what currently exists / is popular / is safe / is unsafe / is in the zeitgeist / etc.); and many many many more categories -- again, if you're on the fence, you MUST browse the internet!\r\n  - For news queries, prioritize more recent events, ensuring you compare publish dates and the date that the event happened.\r\n- The user is seeking recommendations that could lead them to spend substantial time or money -- researching products, restaurants, travel plans, etc.\r\n- The user wants (or would benefit from) direct quotes, links, or precise source attribution.\r\n- A specific page, paper, dataset, PDF, or site is referenced and you haven't been given its contents.\r\n- You're unsure about a fact, the topic is niche or emerging, or you suspect there's at least a 10% chance you will incorrectly recall it\r\n- High-stakes accuracy matters (medical, legal, financial guidance). For these you generally should search by default because this information is highly temporally unstable\r\n- The user explicitly says to search, browse, verify, or look it up.\r\n</situations_where_you_must_browse_the_internet>\r\n\r\n---\r\n\r\n## Citations\r\n\r\nResults from `web.run` include internal reference IDs such as `turn2search5`. Use\r\nthose reference IDs only in calls to `web.run`; do not expose them in the final\r\nresponse.\r\n\r\nCite sources in the final response using Markdown links:\r\n\r\n- Cite a single source as `[descriptive source title](https://example.com/page)`.\r\n- Cite multiple sources with separate Markdown links, for example\r\n  `[first source](https://example.com/one), [second source](https://example.com/two)`.\r\n- Link directly to the page that supports the claim. Do not link to search result\r\n  pages or use bare URLs.\r\n\r\nFormatting of citations:\r\n\r\n- Place each citation as near as possible to the claim it supports, normally at\r\n  the end of the sentence or paragraph and after punctuation.\r\n- Do not place citations inside code fences.\r\n- Do not put citations on a line by themselves or collect all citations at the\r\n  end of the response.\r\n\r\nIf you browse the internet, cite statements supported by web sources. Each cited\r\nsource must directly support the associated claim. Prefer primary and\r\nauthoritative sources, and use sources from different domains when the response\r\nbenefits from multiple perspectives.\r\n\r\n---\r\n\r\n## Special cases\r\nIf these conflict with any other instructions, these should take precedence.\r\n\r\n<special_cases>\r\n- When the user asks for information about how to use OpenAI products, (ChatGPT, the OpenAI API, etc.), you should check the code in local env and only browse as fallback, when you browse restrict your sources to official OpenAI websites using the domains filter, unless otherwise requested.\r\n- When using search to answer technical questions, you must only rely on primary sources (research papers, official documentation, etc.)\r\n- Clearly indicate when you are making an inference from sources.\r\n</special_cases>\r\n\r\n---\r\n\r\n## Word limits\r\nResponses may not excessively quote or draw on a specific source. There are several limits here:\r\n- **Limit on verbatim quotes:**\r\n  - You may not quote more than 25 words verbatim from any single non-lyrical source, unless the source is reddit.\r\n  - For song lyrics, verbatim quotes must be limited to at most 10 words.\r\n  - Long quotes from reddit are allowed, as long as you indicate that those are direct quotes via a markdown blockquote starting with \">\", copy verbatim, and link the source.\r\n- **Word limits:**\r\n  - Each webpage source in the sources has a word limit label formatted like \"[wordlim N]\", in which N is the maximum number of words in the whole response that are attributed to that source. If omitted, the word limit is 200 words.\r\n  - Non-contiguous words derived from a given source must be counted to the word limit.\r\n  - The summarization limit N is a maximum for each source.\r\n  - When using multiple sources, their summarization limits add together. However, each article used must be relevant to the response.\r\n- **Copyright compliance:**\r\n  - You must avoid providing full articles, long verbatim passages, or extensive direct quotes due to copyright concerns.\r\n  - If the user asked for a verbatim quote, the response should provide a short compliant excerpt and then answer with paraphrases and summaries.\r\n  - Again, this limit does not apply to reddit content, as long as it's appropriately indicated that those are direct quotes and you link to the source.\r\n",
+      "schema_representation": "typescript_declaration",
+      "typescript_declaration": "declare const tools: { web__run(args: {\n  // Open links from previously opened pages.\n  click?: Array<{\n  // Numbered link id to open.\n  id: number;\n  // Reference id containing the numbered link.\n  ref_id: string;\n}>;\n  // Look up prices for the given stock symbols.\n  finance?: Array<{\n  // ISO 3166-1 alpha-3 country code, \"OTC\", or \"\" for cryptocurrency.\n  market?: string;\n  // Ticker symbol to look up.\n  ticker: string;\n  // Asset type to look up.\n  type: \"equity\" | \"fund\" | \"crypto\" | \"index\";\n}>;\n  // Find text patterns in pages.\n  find?: Array<{\n  // Text pattern to find.\n  pattern: string;\n  // Reference id or URL to search within.\n  ref_id: string;\n}>;\n  // Query the image search engine for a given list of queries.\n  image_query?: Array<{\n  // Whether to filter by a specific list of domains.\n  domains?: Array<string>;\n  // Search query.\n  q: string;\n  // Whether to filter by recency, as a number of recent days.\n  recency?: number;\n}>;\n  // Open pages by reference id or URL.\n  open?: Array<{\n  // Line number to position the page at.\n  lineno?: number;\n  // Reference id or URL to open.\n  ref_id: string;\n}>;\n  // Set the length of the response to be returned.\n  response_length?: \"short\" | \"medium\" | \"long\";\n  // Take screenshots of PDF pages.\n  screenshot?: Array<{\n  // Zero-indexed PDF page number.\n  pageno: number;\n  // Reference id or URL to screenshot.\n  ref_id: string;\n}>;\n  // Query the internet search engine for a given list of queries.\n  search_query?: Array<{\n  // Whether to filter by a specific list of domains.\n  domains?: Array<string>;\n  // Search query.\n  q: string;\n  // Whether to filter by recency, as a number of recent days.\n  recency?: number;\n}>;\n  // Look up sports schedules and standings.\n  sports?: Array<{\n  // Start date in YYYY-MM-DD format.\n  date_from?: string;\n  // End date in YYYY-MM-DD format.\n  date_to?: string;\n  // Sports function to call.\n  fn: \"schedule\" | \"standings\";\n  // League to look up.\n  league: \"nba\" | \"wnba\" | \"nfl\" | \"nhl\" | \"mlb\" | \"epl\" | \"ncaamb\" | \"ncaawb\" | \"ipl\";\n  // Locale for the lookup.\n  locale?: string;\n  // Number of games to return.\n  num_games?: number;\n  // Opponent to use with `team` when narrowing the lookup.\n  opponent?: string;\n  // Team to look up, using the common 3 or 4 letter alias used in broadcasts.\n  team?: string;\n  // Tool name for sports requests.\n  tool?: \"sports\";\n}>;\n  // Get time for the given UTC offsets.\n  time?: Array<{\n  // UTC offset formatted like \"+03:00\".\n  utc_offset: string;\n}>;\n  // Look up weather forecasts.\n  weather?: Array<{\n  // Number of days to return. Defaults to 7.\n  duration?: number;\n  // Location in \"Country, Area, City\" format.\n  location: string;\n  // Start date in YYYY-MM-DD format. Defaults to today.\n  start?: string;\n}>;\n}): Promise<unknown>; };"
+    },
+    {
+      "name": "codex_app__open_in_codex",
+      "description": "Tools provided by the Codex app.\n\nShow a workspace file, browser tab, terminal, or review in a Codex panel. The calling thread in the calling window receives the tab by default. Set threadId only when the user explicitly asks to open the tab in another thread; if that thread is hidden, this returns queued and opens the tab the next time it is shown in the same window without navigating there. Use this after creating or editing an artifact when showing the result would help the user. Terminals require a local thread. This only opens Codex UI; use file, browser, or terminal tools to inspect or interact with the content.",
+      "schema_representation": "typescript_declaration",
+      "typescript_declaration": "declare const tools: { codex_app__open_in_codex(args: {\n  placement?: \"right\" | \"bottom\";\n  target: { line?: number; path: string; type: \"file\"; } | { tabId?: string; type: \"browser\"; url?: string; } | { sessionId?: string; type: \"terminal\"; } | { path?: string; type: \"review\"; view?: \"last-turn\" | \"branch\" | \"unstaged\" | \"staged\"; } | {\n  // Git revision to compare with HEAD. Must resolve locally to a commit. Selects branch view.\n  baseBranch: string;\n  path?: string;\n  type: \"review\";\n  view?: \"branch\";\n};\n  // Thread whose Codex panel should receive the tab. Defaults to the calling thread.\n  threadId?: string;\n}): Promise<unknown>; };"
+    }
+  ],
+  "limitations": [
+    "This is a point-in-time session inventory; installed plugins, connector state, app version, and lazy-loading can change it.",
+    "Schemas are preserved in the TypeScript declaration format exposed by the live registry; a distinct canonical JSON Schema was not available.",
+    "Availability does not imply authorization for every operation; individual calls remain subject to permissions, user intent, sandboxing, and connector authentication."
+  ]
+}

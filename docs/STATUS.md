@@ -1,6 +1,6 @@
 # STATUS -- where the project stands
 
-Last updated: 2026-08-07. This file is a point-in-time snapshot maintained by whoever
+Last updated: 2026-08-08. This file is a point-in-time snapshot maintained by whoever
 finishes significant work. It exists so a fresh agent (or human) can orient without any
 prior session context. **Trust the tree, `git log`, and the batch LEDGERs over this file
 when they disagree**, and update it when you land something that changes the picture.
@@ -44,6 +44,20 @@ when they disagree**, and update it when you land something that changes the pic
   `docs/research/public-reception-loop-0.8.md`; the 7-day checkpoint is due 2026-08-14 06:00:52 UTC
   and the 30-day checkpoint is due 2026-09-06 06:00:52 UTC. Project-authored distribution is
   recorded separately from user reception. No telemetry, tracking, or phone-home path was added.
+
+- **Vendor-paired tool-surface discovery is complete and ADR-0101 now authorizes the staged
+  browser-kernel implementation without changing the current product yet.** Research 21 preserves
+  a complete 22-tool Claude
+  Cowork / Claude-in-Chrome declaration capture, a filtered Codex desktop registry, the sanitized
+  22-interface and 136-member Codex Chrome runtime schema, and exact Playwright MCP v0.0.79
+  default and optional declarations. Gemini in Chrome remains capability-only because Google
+  publishes no model-visible dictionary. Research 22 proposes the typed semantic-operation
+  kernel, one-to-one Ghostlight-native profile, stateful surface sessions, readiness/result
+  contracts, classifier, capability packs, migration order, and evaluation gates. ADR-0101
+  separates edge-owned versioned surfaces, canonical service operations, and policy-free browser
+  mechanisms. The `docs/tasks/browser-kernel/` batch is in R0, freezing the current catalog and
+  wire oracles before production migration. The current product surface and extension wire are
+  still unchanged.
 
 ## Pre-release record (superseded by the 2026-08-07 state above)
 
