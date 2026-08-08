@@ -6,21 +6,22 @@ blocking a stage.
 
 ## RESUME HERE
 
-- State: ACTIVE; ADR-0101 authorizes the staged implementation.
-- Current stage: R1 -- canonical operation bridge.
-- Next action: introduce the closed operation/result DTOs and migrate bridge major 2 while the
-  frozen legacy surface remains the external oracle.
+- State: ACTIVE; ADR-0101 authorizes the staged implementation and R1 is complete.
+- Current stage: R2 -- legacy surface profile, ready to start.
+- Next action: remove the remaining model-facing declaration, legacy decoder, and trained-name
+  dependencies from the core while `ghostlight-legacy/v1` remains byte exact at the edge.
 - Blocking condition: none.
 - Shipping default: current 25-tool surface. `ghostlight-native/v1`, Claude, and Codex profiles are
   candidates only.
-- Last green gate: not yet run for this batch.
+- Last green gate: 2026-08-08 R1 full Rust, extension, formatting, Clippy, build, diff, and ASCII
+  gates passed in `.target-browser-kernel-r1-core`.
 
 ## Stage table
 
 | Stage | Status | Closing commit(s) | Release checkpoint | Notes |
 | --- | --- | --- | --- | --- |
-| R0 authority and inventory | COMPLETE | 5439e24c + pending oracle commit | Current product unchanged | ADR-0101, immutable catalog/guide oracle, green baselines |
-| R1 canonical operation bridge | IN PROGRESS | -- | Current 25 tools through temporary decoder | Bridge-major cutover must fail loudly |
+| R0 authority and inventory | COMPLETE | 5439e24c + a2a52ab7 | Current product unchanged | ADR-0101, immutable catalog/guide oracle, green baselines |
+| R1 canonical operation bridge | COMPLETE | (this commit) | Current 25 tools through temporary decoder | Bridge major 2 fails loudly across old/new peers |
 | R2 legacy surface profile | NOT STARTED | -- | `ghostlight-legacy/v1` remains default | Exact declarations and rendering move to edge |
 | R3 typed mechanism isolation | NOT STARTED | -- | Old extension wire only | Core no longer dispatches surface names |
 | R4 extension mechanism skew | NOT STARTED | -- | Negotiated new wire plus legacy fallback | Prove old/new matrix |
@@ -42,8 +43,8 @@ or dated live record. A prose assertion is not evidence.
 | Area | Owning stage(s) | Required completion evidence | Status | Evidence |
 | --- | --- | --- | --- | --- |
 | Inventory and authority | R0 | Accepted ADR ids; hashes and provenance for all captures; exact current catalog/result/RAWX/scheduling/workspace map; bridge and extension-wire baselines | COMPLETE | ADR-0101; Research 21 capture table; `tests/golden/surfaces/ghostlight-legacy-v1*`; current directory plus bridge/extension regression suites; 2026-08-08 baseline gates |
-| Canonical operation kernel | R1 | Typed operation/result/handle/default round trips; exhaustive concrete variant descriptors; no vendor or model-facing name as an execution key | NOT STARTED | -- |
-| Operation bridge | R1 | Coordinated major cutover; old/new mismatch fails loudly; Start/catalog/result/cancel transcripts; recursive flow carries canonical operations only | NOT STARTED | -- |
+| Canonical operation kernel | R1 | Typed operation/result/handle/default round trips; exhaustive concrete variant descriptors; no vendor or model-facing name as an execution key | COMPLETE | `crates/transport/src/operation.rs`; `crates/core/src/operation/registry.rs`; 26 operation families, 60 closed intents, and all 52 legacy variants covered by tests |
+| Operation bridge | R1 | Coordinated major cutover; old/new mismatch fails loudly; Start/catalog/result/cancel transcripts; recursive flow carries canonical operations only | COMPLETE | Bridge major 2 unit and integration transcripts in `crates/transport/src/bridge.rs`, both MCP revisions, `tests/hub_isolation.rs`, and `tests/operation_bridge.rs` |
 | Legacy profile | R2 | Byte-exact 25-tool order, identity, schemas, annotations, examples, results, and errors on both MCP revisions; legacy remains releasable | NOT STARTED | -- |
 | Mechanisms and extension skew | R3-R4 | Exhaustive operation-to-mechanism and legacy alias maps; negotiated new wire; new/new, new/old, and old/new process evidence | NOT STARTED | -- |
 | Native surface | R5 | Strict twelve-tool core and honest supported packs; output schemas; workspace/addressing; bounded observations; opt-in journey evidence | NOT STARTED | -- |
@@ -60,7 +61,8 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 
 | Date | Stage | Commit/tree | Common gates | Focused gates | Live/e2e evidence | Result and notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-08-08 | R0 | 5439e24c + legacy-oracle working tree | `cargo test --workspace`: pass | `cargo test --locked --test surface_profile_golden`: 2 pass; `node --test tests/extension/*.test.js`: 164 pass; extension `node --check`: pass | Not required for docs/oracle stage | Current 25-tool product and extension wire unchanged |
+| 2026-08-08 | R0 | 5439e24c + a2a52ab7 | `cargo test --workspace`: pass | `cargo test --locked --test surface_profile_golden`: 2 pass; `node --test tests/extension/*.test.js`: 164 pass; extension `node --check`: pass | Not required for docs/oracle stage | Current 25-tool product and extension wire unchanged |
+| 2026-08-08 | R1 | (this commit) | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | transport 90, core 760, connector 87, architecture 11, operation bridge 3, frozen surface 2, schema fidelity 17, advertisement 3, protocol 4, enforcement 11, and four migrated integration targets 12: all pass | Extension 164/164 and syntax checks for 29 JavaScript files pass; process/e2e not required at R1 | Canonical bridge major 2, typed results, recursive flow, provenance, cancellation, image validation, workspace equality, and exact legacy edge rendering are green |
 
 ## Stage records
 
@@ -87,14 +89,29 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 
 ### R1 -- canonical operation bridge
 
-- Status: IN PROGRESS.
-- Operation/result DTO evidence: --
-- Descriptor and variant coverage: --
-- Bridge-major and mismatch evidence: --
-- Recursive composition evidence: --
-- Current-surface compatibility evidence: --
-- Gate output: --
-- Deviations/blockers: --
+- Status: COMPLETE.
+- Operation/result DTO evidence: `crates/transport/src/operation.rs` has closed operation and
+  intent ids, canonical operations/results, typed flow results, bounded handles, provenance,
+  cancellation effects, readiness facts, and validated image parts. Its 90 transport tests pass.
+- Descriptor and variant coverage: `crates/core/src/operation/registry.rs` is the execution lookup
+  authority. Tests cover 26 operation families, 60 intents, valid family/intent pairs, all 52
+  legacy variants, action-specific normalization, RAWX/resource/scheduling facts, and truthful
+  success dispositions.
+- Bridge-major and mismatch evidence: the owner bridge is major 2 and carries operation
+  availability, typed Start, canonical result, and cancellation effect. Unit transcripts plus
+  `tests/hub_isolation.rs` prove both old/new directions fail before catalog or browser work.
+- Recursive composition evidence: `crates/core/src/tool/flow.rs`, edge flow-hint tests, and
+  `tests/operation_bridge.rs` prove nested steps cross as canonical operations only, re-enter
+  governance, retain typed termination/effect state, and cannot be mislabeled by a result renderer.
+- Current-surface compatibility evidence: the edge-owned legacy declarations and guide match the
+  frozen 25-tool assets byte for byte. Both MCP revisions reconstruct legacy text, images,
+  structured content, provenance, flow shapes, workspace behavior, and error semantics from the
+  canonical result.
+- Gate output: full workspace tests, formatting, strict Clippy, workspace build, extension
+  164/164, 29 JavaScript syntax checks, diff check, and a 46-file ASCII scan passed on 2026-08-08.
+- Deviations/blockers: the edge profile extraction needed to land in R1 as part of the coordinated
+  bridge-major cutover. Core still retains bounded legacy declaration and serializer seams; R2
+  removes them before any new profile is enabled. No blocker remains.
 
 ### R2 -- legacy surface profile
 

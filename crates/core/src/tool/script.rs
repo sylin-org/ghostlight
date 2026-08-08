@@ -12,12 +12,12 @@
 //! Testability seam: the interpreter is generic over a [`StepRunner`] so unit tests can drive
 //! fixed outcomes without a live `Browser`; the real handler wires [`pipeline::run_tool_call`] in.
 
-use crate::browser::directory::{self, SchedulingScope};
 use crate::governance::config::reload::ConfigStore;
 use crate::hub::authority::AuthorityStore;
 use crate::hub::outbound::browser::Browser;
 use crate::hub::scheduling::ExecutionContext;
 use crate::hub::workspace::WorkspaceRegistry;
+use crate::operation::registry::{self as operation_registry, SchedulingScope};
 use crate::tool::outcome::{CallOutcome, LocalCtx, LocalFuture};
 use crate::tool::pipeline::{run_tool_call, schedule_failure_message};
 use crate::tool::refs::resolve_refs;
@@ -258,7 +258,9 @@ pub(crate) fn single_surface_tab(args: &Value) -> Option<i64> {
     let mut surface = None;
     for step in steps {
         let name = step.get("tool").and_then(Value::as_str)?;
-        let descriptor = directory::descriptor(name)?;
+        let step_args = step.get("args").cloned().unwrap_or_else(|| json!({}));
+        let operation = operation_registry::decode_legacy_call(name, &step_args).ok()?;
+        let descriptor = operation_registry::descriptor(operation.key())?;
         match descriptor.scheduling.scope {
             SchedulingScope::Surface => {
                 let tab = step

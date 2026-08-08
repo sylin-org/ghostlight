@@ -2,14 +2,20 @@
 //! Workspace ownership gates browser handles before any browser probe or dispatch.
 
 use ghostlight::governance::manifest::source::LoadedPolicy;
+use ghostlight::hub::bridge::serve_bridge;
 use ghostlight::hub::outbound::browser::Browser;
-use ghostlight::hub::peer::PeerUser;
+use ghostlight::hub::peer::{PeerCred, PeerUser};
 use ghostlight::hub::ServiceContext;
 use ghostlight::native::host;
 use ghostlight::observability::DebugSink;
 use ghostlight::tool::outcome::CallOutcome;
 use ghostlight::tool::pipeline::run_work;
 use ghostlight::work::{CancellationToken, WorkContext};
+use ghostlight_transport::bridge::{
+    read_service_message, write_edge_message, BridgeSequence, EdgeMessage, RequestContext,
+    BRIDGE_MAJOR,
+};
+use ghostlight_transport::operation::{BrowserOperation, IntentId, OperationId};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -88,7 +94,12 @@ async fn denied_for(
     workspace: ghostlight_transport::workspace_id::WorkspaceId,
     tab_id: i64,
 ) -> String {
-    let work = WorkContext::new(Some(workspace), "read_page", None, None);
+    let operation = ghostlight::operation::registry::decode_legacy_call(
+        "read_page",
+        &json!({ "tabId": tab_id }),
+    )
+    .expect("read_page decodes");
+    let work = WorkContext::new(Some(workspace), operation, None, None, None);
     match run_work(
         &ctx.browser,
         &ctx.store,
@@ -96,13 +107,87 @@ async fn denied_for(
         &ctx.workspaces,
         &work,
         &CancellationToken::new(),
-        &json!({ "tabId": tab_id }),
+        work.arguments(),
     )
     .await
     {
         CallOutcome::Denied { message, .. } => message,
         _ => panic!("unknown or cross-workspace tab must be denied"),
     }
+}
+
+#[tokio::test]
+async fn old_edge_is_rejected_before_service_acceptance_or_browser_dispatch() {
+    assert_eq!(
+        BRIDGE_MAJOR, 2,
+        "this fixture represents the bridge-v1 edge"
+    );
+
+    let browser = Browser::new();
+    let seen = attach_observer(&browser).await;
+    let ctx = build_ctx(browser);
+    let peer = PeerCred {
+        user: PeerUser("bridge-v1-edge".into()),
+        pid: 1,
+    };
+    let workspace = ctx.workspaces.mint(&peer.user, false).unwrap();
+    assert_eq!(
+        ctx.workspaces.claim_tab(&workspace, 5),
+        ghostlight::hub::workspace::TabClaim::Adopted
+    );
+
+    let (service_stream, mut edge_stream) = tokio::io::duplex(64 * 1024);
+    write_edge_message(&mut edge_stream, &EdgeMessage::Hello { bridge_major: 1 })
+        .await
+        .expect("write old edge hello");
+    write_edge_message(
+        &mut edge_stream,
+        &EdgeMessage::Catalog {
+            sequence: BridgeSequence(1),
+            workspace: Some(workspace.clone()),
+            context: RequestContext::default(),
+        },
+    )
+    .await
+    .expect("queue catalog behind old edge hello");
+    write_edge_message(
+        &mut edge_stream,
+        &EdgeMessage::Start {
+            sequence: BridgeSequence(2),
+            operation: BrowserOperation::new(
+                OperationId::BrowserSnapshot,
+                IntentId::SnapshotCapture,
+                json!({ "tab": 5 }),
+            ),
+            presentation: None,
+            workspace: Some(workspace),
+            context: RequestContext::default(),
+        },
+    )
+    .await
+    .expect("queue start behind old edge hello");
+
+    let service = tokio::spawn(serve_bridge(service_stream, ctx, peer));
+    let error = tokio::time::timeout(Duration::from_secs(1), service)
+        .await
+        .expect("bridge-major mismatch must fail promptly")
+        .expect("service task must not panic")
+        .expect_err("bridge-v1 edge must not be admitted by bridge-v2 service");
+    assert_eq!(
+        error.to_string(),
+        "ipc error: unsupported owner bridge major 1; this service requires 2"
+    );
+    assert!(
+        read_service_message(&mut edge_stream)
+            .await
+            .expect("read closed service stream")
+            .is_none(),
+        "mismatched edge must receive no hello, catalog, or start acceptance"
+    );
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "mismatched edge must not reach the browser"
+    );
 }
 
 #[tokio::test]
@@ -146,7 +231,10 @@ async fn already_owned_tab_dispatches_only_the_requested_tool() {
         ctx.workspaces.claim_tab(&workspace, 5),
         ghostlight::hub::workspace::TabClaim::Adopted
     );
-    let work = WorkContext::new(Some(workspace), "read_page", None, None);
+    let operation =
+        ghostlight::operation::registry::decode_legacy_call("read_page", &json!({"tabId": 5}))
+            .expect("read_page decodes");
+    let work = WorkContext::new(Some(workspace), operation, None, None, None);
 
     let outcome = run_work(
         &ctx.browser,
@@ -155,7 +243,7 @@ async fn already_owned_tab_dispatches_only_the_requested_tool() {
         &ctx.workspaces,
         &work,
         &CancellationToken::new(),
-        &json!({"tabId": 5}),
+        work.arguments(),
     )
     .await;
 

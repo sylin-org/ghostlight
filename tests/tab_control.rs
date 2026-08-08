@@ -103,19 +103,49 @@ async fn focus_reload_and_close_return_receipts_and_content_free_audit_categorie
     let records: Vec<Value> = audit
         .lines()
         .map(|line| serde_json::from_str(line).expect("audit JSON"))
-        .filter(|record: &Value| record["tool"] == "tab_control")
         .collect();
-    let outcomes: Vec<&str> = records
+    let categories: Vec<Value> = records
         .iter()
-        .map(|record| record["outcome"].as_str().expect("outcome"))
+        .map(|record| {
+            json!({
+                "tool": record["tool"],
+                "action": record["action"],
+                "capability": record["capability"],
+                "decision": record["decision"],
+                "grant_id": record["grant_id"],
+                "outcome": record["outcome"],
+            })
+        })
         .collect();
-    assert_eq!(outcomes.len(), 3);
-    for expected in ["tab_focused", "tab_reloaded", "tab_closed"] {
-        assert!(
-            outcomes.contains(&expected),
-            "missing {expected}: {outcomes:?}"
-        );
-    }
+    assert_eq!(
+        categories,
+        [
+            json!({
+                "tool": "browser.tabs",
+                "action": "tabs.focus",
+                "capability": "none",
+                "decision": "allow",
+                "grant_id": null,
+                "outcome": "tab_focused",
+            }),
+            json!({
+                "tool": "browser.navigate",
+                "action": "navigate.reload",
+                "capability": "action",
+                "decision": "allow",
+                "grant_id": "tabs",
+                "outcome": "tab_reloaded",
+            }),
+            json!({
+                "tool": "browser.tabs",
+                "action": "tabs.close",
+                "capability": "action",
+                "decision": "allow",
+                "grant_id": "tabs",
+                "outcome": "tab_closed",
+            }),
+        ]
+    );
     for forbidden in ["private-tab", "Private title", "sessionNonce"] {
         assert!(!audit.contains(forbidden), "audit leaked {forbidden}");
     }

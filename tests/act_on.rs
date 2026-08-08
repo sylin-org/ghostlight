@@ -3,6 +3,7 @@
 
 mod support;
 
+use ghostlight_transport::operation::{IntentId, OperationId};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -125,12 +126,12 @@ async fn unique_semantic_target_acts_waits_and_audits_only_content_free_outcome(
         .collect();
     let parents: Vec<&Value> = records
         .iter()
-        .filter(|record| record["tool"] == "act_on")
+        .filter(|record| record["tool"] == json!(OperationId::BrowserAct))
         .collect();
     assert_eq!(parents.len(), 1, "one parent decision: {records:?}");
     assert_eq!(parents[0]["target_assurance"], "semantic");
     assert_eq!(parents[0]["outcome"], "expect_met");
-    assert_eq!(parents[0]["action"], "left_click");
+    assert_eq!(parents[0]["action"], json!(IntentId::ActClick));
     assert!(records
         .iter()
         .filter(|record| record.get("orchestrator") == Some(&json!("act_on")))

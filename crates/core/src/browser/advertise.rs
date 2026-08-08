@@ -22,7 +22,7 @@
 
 use crate::browser::directory;
 use crate::governance::manifest::document::Grant;
-use crate::governance::ports::capability_subset;
+use ghostlight_transport::operation::OperationKey;
 use serde_json::Value;
 
 /// Compute the advertised `{ "tools": [...] }` object. `advertisement` is the parsed
@@ -62,10 +62,13 @@ fn tool_has_a_reachable_variant(tool_name: &str, grants: &[Grant]) -> bool {
         .filter(|row| row.tool == tool_name)
         .flat_map(|row| row.variants.iter())
         .any(|variant| {
-            variant.requires.is_empty()
-                || grants
-                    .iter()
-                    .any(|g| capability_subset(variant.requires, &g.allowed))
+            crate::operation::registry::descriptor(OperationKey::new(
+                variant.operation,
+                variant.intent,
+            ))
+            .is_some_and(|descriptor| {
+                crate::operation::registry::reachable(descriptor, Some(grants))
+            })
         })
 }
 

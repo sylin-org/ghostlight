@@ -6,7 +6,7 @@
 //! adds boundaries after browser dispatch. This is a model-facing trust signal, not a sanitizer,
 //! content policy, or authorization input.
 
-use crate::browser::directory::PageOutput;
+use crate::operation::registry::PageOutput;
 use serde_json::{json, Value};
 
 /// Injectable nonce-byte source used by deterministic tests and the workspace routing-key adapter.

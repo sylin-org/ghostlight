@@ -13,12 +13,14 @@ use crate::hub::outbound::browser::Browser;
 use crate::hub::scheduling::ExecutionContext;
 use crate::tool::outcome::{delivery_failure_outcome, CallOutcome, LocalCtx, LocalFuture};
 use crate::work::{CancellationToken, WorkContext};
+use ghostlight_transport::operation::OperationEffect;
 use serde_json::{json, Map, Value};
 
 const ACTIONS: &[&str] = &[
     "left_click",
     "right_click",
     "double_click",
+    "triple_click",
     "hover",
     "scroll_to",
     "set_value",
@@ -239,6 +241,7 @@ async fn run(
     if cancellation.is_some_and(CancellationToken::is_cancelled) {
         return CallOutcome::Cancelled {
             message: "act_on was cancelled before target resolution.".to_string(),
+            effect: OperationEffect::None,
         };
     }
 
@@ -340,6 +343,7 @@ async fn run(
         return CallOutcome::Cancelled {
             message: "act_on stopped after target resolution and before the action; resolved state was not reused."
                 .to_string(),
+            effect: OperationEffect::None,
         };
     }
 
@@ -373,11 +377,12 @@ async fn run(
         return CallOutcome::Cancelled {
             message: "act_on stopped after its presentation cue and before the browser action."
                 .to_string(),
+            effect: OperationEffect::None,
         };
     }
 
     let action = args["action"].as_str().expect("validated action");
-    let (tool, dispatch_args, requirements) = if action == "set_value" {
+    let (tool, mut dispatch_args, requirements) = if action == "set_value" {
         (
             "form_input",
             json!({ "tabId": tab_id, "ref": reference, "value": args["value"] }),
@@ -390,6 +395,9 @@ async fn run(
             directory::requires("computer", Some(action)),
         )
     };
+    if let Some(modifiers) = args.get("modifiers") {
+        dispatch_args["modifiers"] = modifiers.clone();
+    }
     let mut action_audit = internal_audit(
         governance,
         tool,
@@ -427,6 +435,7 @@ async fn run(
             return CallOutcome::Cancelled {
                 message: "act_on cancellation arrived after the atomic action; the action completed and was audited, and no postcondition wait was started."
                     .to_string(),
+                effect: OperationEffect::Committed,
             };
         }
         let mut wait_args = Map::new();

@@ -11,11 +11,13 @@ use crate::jsonrpc::{
     error_response, notification, success_response, Request, RequestId, INVALID_PARAMS,
     INVALID_REQUEST, METHOD_NOT_FOUND,
 };
+use crate::surface::ghostlight_legacy;
 use ghostlight_transport::bridge::{
     BridgeError, BridgeErrorKind, CatalogProjection, ClientPresentation, EdgeMessage,
     RequestContext, TerminalOutcome, WorkspaceId,
 };
 use ghostlight_transport::instance::Instance;
+use ghostlight_transport::operation::OperationEffect;
 use serde_json::{json, Value};
 
 /// The exact protocol revision implemented by this shore.
@@ -448,7 +450,7 @@ impl Handler {
                 None,
             ));
         };
-        let Some(operation) = params.get("name").and_then(Value::as_str) else {
+        let Some(external_tool) = params.get("name").and_then(Value::as_str) else {
             return Effects::output(error_response(
                 Some(&id),
                 INVALID_PARAMS,
@@ -468,6 +470,27 @@ impl Handler {
                 ));
             }
         };
+        let presentation =
+            match ghostlight_legacy::invocation_presentation(external_tool, &arguments) {
+                Ok(presentation) => presentation,
+                Err(error) => {
+                    return Effects::output(success_response(
+                        &id,
+                        tool_error_result(None, &error.to_string()),
+                    ));
+                }
+            };
+        let operation = match ghostlight_legacy::decode_call(external_tool, arguments.clone()) {
+            Ok(operation) => operation,
+            Err(error) => {
+                return Effects::output(success_response(
+                    &id,
+                    tool_error_result(None, &error.to_string()),
+                ));
+            }
+        };
+        let flow_render_hints =
+            ghostlight_legacy::flow_render_hints(external_tool, &arguments, &operation);
         let Some(workspace) = self.workspace.clone() else {
             return Effects::output(error_response(
                 Some(&id),
@@ -476,9 +499,13 @@ impl Handler {
                 None,
             ));
         };
-        let sequence = match correlation.track(PendingRequest::request(
+        let sequence = match correlation.track(PendingRequest::tool_request(
             id.clone(),
             PendingKind::CallTool2025,
+            presentation.clone(),
+            operation.key(),
+            flow_render_hints,
+            Some(workspace.clone()),
         )) {
             Ok(sequence) => sequence,
             Err(message) => {
@@ -487,8 +514,8 @@ impl Handler {
         };
         Effects::service(EdgeMessage::Start {
             sequence,
-            operation: operation.to_owned(),
-            arguments,
+            operation,
+            presentation: Some(presentation),
             workspace: Some(workspace),
             context: self.context.clone(),
         })
@@ -611,7 +638,7 @@ fn cancellation(request: &Request, correlation: &mut Correlation) -> Effects {
         .map_or_else(Effects::default, Effects::service)
 }
 
-fn initialize_result(projection: &CatalogProjection) -> Value {
+fn initialize_result(_projection: &CatalogProjection) -> Value {
     json!({
         "protocolVersion": PROTOCOL_VERSION,
         "capabilities": {"tools": {"listChanged": true}},
@@ -621,7 +648,7 @@ fn initialize_result(projection: &CatalogProjection) -> Value {
         },
         "instructions": format!(
             "{} {}",
-            projection.instructions,
+            ghostlight_legacy::agent_guide(),
             crate::TRANSPORT_CLOSED_RECOVERY_INSTRUCTIONS
         ),
     })
@@ -629,8 +656,7 @@ fn initialize_result(projection: &CatalogProjection) -> Value {
 
 fn list_tools_result(projection: &CatalogProjection) -> Value {
     json!({
-        "tools": projection
-            .tools
+        "tools": ghostlight_legacy::filtered_declarations(projection)
             .iter()
             .map(|tool| tool.declaration.clone())
             .collect::<Vec<_>>()
@@ -656,12 +682,49 @@ fn render_outcome(pending: PendingRequest, outcome: TerminalOutcome) -> Effects 
     if pending.suppressed {
         return Effects::default();
     }
-    let Some(id) = pending.request_id else {
+    let Some(id) = pending.request_id.clone() else {
         return Effects::default();
     };
     match outcome {
         TerminalOutcome::Success { result } => {
-            Effects::output(success_response(&id, without_result_type(result)))
+            if !pending.result_matches_expected_operation(&result) {
+                return Effects::output(error_response(
+                    Some(&id),
+                    OUTCOME_UNKNOWN,
+                    "Ghostlight received a result for a different canonical operation. Do not retry automatically; reconnect the client before continuing.",
+                    Some(json!({"disposition": "outcome_unknown"})),
+                ));
+            }
+            if let Err(message) = validated_result_workspace_2025(&pending, &result) {
+                return Effects::output(error_response(
+                    Some(&id),
+                    OUTCOME_UNKNOWN,
+                    message,
+                    Some(json!({"disposition": "outcome_unknown"})),
+                ));
+            }
+            let effect = result.effect;
+            match ghostlight_legacy::encode_result(
+                *result,
+                pending.presentation.as_ref(),
+                pending.flow_render_hints.as_ref(),
+            ) {
+                Ok(result) => Effects::output(success_response(&id, without_result_type(result))),
+                Err(error) if effect != OperationEffect::None => Effects::output(error_response(
+                    Some(&id),
+                    OUTCOME_UNKNOWN,
+                    "Ghostlight could not render the canonical result after an effect may have occurred. Do not retry automatically; inspect current browser state first.",
+                    Some(json!({
+                        "disposition": "outcome_unknown",
+                        "effect": effect.as_str(),
+                        "renderError": error.to_string(),
+                    })),
+                )),
+                Err(error) => Effects::output(success_response(
+                    &id,
+                    tool_error_result(None, &error.to_string()),
+                )),
+            }
         }
         TerminalOutcome::ToolFailure { result, message } => Effects::output(success_response(
             &id,
@@ -670,10 +733,22 @@ fn render_outcome(pending: PendingRequest, outcome: TerminalOutcome) -> Effects 
         TerminalOutcome::NotDispatched { message }
         | TerminalOutcome::Denied { message, .. }
         | TerminalOutcome::Held { message }
-        | TerminalOutcome::AttentionRequired { message }
-        | TerminalOutcome::Cancelled { message } => {
+        | TerminalOutcome::AttentionRequired { message } => {
             Effects::output(success_response(&id, tool_error_result(None, &message)))
         }
+        TerminalOutcome::Cancelled {
+            message,
+            effect: OperationEffect::None,
+        } => Effects::output(success_response(&id, tool_error_result(None, &message))),
+        TerminalOutcome::Cancelled { message, effect } => Effects::output(error_response(
+            Some(&id),
+            OUTCOME_UNKNOWN,
+            format!("{message} Do not retry automatically; inspect current browser state first."),
+            Some(json!({
+                "disposition": "outcome_unknown",
+                "effect": effect.as_str(),
+            })),
+        )),
         TerminalOutcome::OutcomeUnknown { message } => Effects::output(error_response(
             Some(&id),
             OUTCOME_UNKNOWN,
@@ -681,6 +756,27 @@ fn render_outcome(pending: PendingRequest, outcome: TerminalOutcome) -> Effects 
             Some(json!({"disposition": "outcome_unknown"})),
         )),
     }
+}
+
+fn validated_result_workspace_2025(
+    pending: &PendingRequest,
+    result: &ghostlight_transport::operation::BrowserResult,
+) -> Result<(), &'static str> {
+    let (Some(requested), Some(started), Some(returned)) = (
+        pending.requested_workspace.as_ref(),
+        pending.service_workspace.as_ref(),
+        result.workspace.as_ref(),
+    ) else {
+        return Err(
+            "Ghostlight received incomplete workspace facts after the operation. Do not retry automatically; reconnect the client before continuing.",
+        );
+    };
+    if requested != started || started != returned {
+        return Err(
+            "Ghostlight received inconsistent workspace facts after the operation. Do not retry automatically; reconnect the client before continuing.",
+        );
+    }
+    Ok(())
 }
 
 fn render_rejection(pending: PendingRequest, error: BridgeError) -> Effects {
@@ -737,7 +833,10 @@ fn response_error(request: &Request, code: i64, message: impl Into<String>) -> E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ghostlight_transport::bridge::{CatalogTool, ServiceMessage, WorkspaceUse};
+    use ghostlight_transport::bridge::{OperationAvailability, ServiceMessage, WorkspaceUse};
+    use ghostlight_transport::operation::{
+        BrowserResult, BrowserResultStatus, IntentId, OperationEffect, OperationId, OperationKey,
+    };
 
     fn initialize(id: i64) -> Request {
         Request {
@@ -754,17 +853,22 @@ mod tests {
     fn projection() -> CatalogProjection {
         CatalogProjection {
             generation: 1,
-            instructions: "Use Ghostlight carefully.".into(),
-            tools: vec![CatalogTool {
-                declaration: json!({
-                    "name": "click",
-                    "description": "Click a page target.",
-                    "inputSchema": {"type": "object"}
-                }),
-                workspace_use: WorkspaceUse::Uses,
+            operations: vec![OperationAvailability {
+                id: OperationId::BrowserTabs,
+                intent: IntentId::TabsList,
+                workspace_use: WorkspaceUse::Creates,
             }],
             restricted: false,
         }
+    }
+
+    fn empty_result() -> BrowserResult {
+        BrowserResult::new(
+            OperationId::BrowserTabs,
+            IntentId::TabsList,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        )
     }
 
     fn operational_handler() -> Handler {
@@ -847,7 +951,7 @@ mod tests {
         );
         assert_eq!(
             listed.output[0]["result"]["tools"][0],
-            projection().tools[0].declaration,
+            ghostlight_legacy::declarations()["tools"][0],
             "the 2025 tools/list shore must preserve the canonical declaration exactly"
         );
         assert!(listed.output[0]["result"].get("resultType").is_none());
@@ -859,7 +963,8 @@ mod tests {
         assert_eq!(
             result["instructions"],
             format!(
-                "Use Ghostlight carefully. {}",
+                "{} {}",
+                ghostlight_legacy::agent_guide(),
                 crate::TRANSPORT_CLOSED_RECOVERY_INSTRUCTIONS
             )
         );
@@ -886,16 +991,97 @@ mod tests {
             request_id: Some(RequestId::Number(4.into())),
             kind: PendingKind::CallTool2025,
             service_workspace: None,
+            requested_workspace: None,
+            presentation: None,
+            expected_operation: Some(OperationKey::new(
+                OperationId::BrowserTabs,
+                IntentId::TabsList,
+            )),
+            flow_render_hints: None,
             suppressed: true,
             delivered: true,
         };
         let effects = render_outcome(
             pending,
             TerminalOutcome::Success {
-                result: json!({"content": []}),
+                result: Box::new(empty_result()),
             },
         );
         assert!(effects.output.is_empty());
+    }
+
+    #[test]
+    fn mismatched_result_operation_fails_closed_before_profile_rendering() {
+        let pending = PendingRequest {
+            request_id: Some(RequestId::Number(5.into())),
+            kind: PendingKind::CallTool2025,
+            service_workspace: None,
+            requested_workspace: None,
+            presentation: None,
+            expected_operation: Some(OperationKey::new(
+                OperationId::BrowserTabs,
+                IntentId::TabsList,
+            )),
+            flow_render_hints: None,
+            suppressed: false,
+            delivered: true,
+        };
+        let result = BrowserResult::new(
+            OperationId::BrowserSnapshot,
+            IntentId::SnapshotCapture,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        );
+        let effects = render_outcome(
+            pending,
+            TerminalOutcome::Success {
+                result: Box::new(result),
+            },
+        );
+        assert_eq!(effects.output[0]["error"]["code"], OUTCOME_UNKNOWN);
+        assert_eq!(
+            effects.output[0]["error"]["data"]["disposition"],
+            "outcome_unknown"
+        );
+    }
+
+    #[test]
+    fn result_workspace_must_match_requested_and_started_workspace() {
+        let requested = WorkspaceId::mint();
+        let substituted = WorkspaceId::mint();
+        let requested_raw = requested.as_str().to_owned();
+        let substituted_raw = substituted.as_str().to_owned();
+        let mut result = BrowserResult::new(
+            OperationId::BrowserTabs,
+            IntentId::TabsList,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        );
+        result.workspace = Some(substituted.clone());
+        let effects = render_outcome(
+            PendingRequest {
+                request_id: Some(RequestId::Number(6.into())),
+                kind: PendingKind::CallTool2025,
+                service_workspace: Some(substituted),
+                requested_workspace: Some(requested),
+                presentation: None,
+                expected_operation: Some(OperationKey::new(
+                    OperationId::BrowserTabs,
+                    IntentId::TabsList,
+                )),
+                flow_render_hints: None,
+                suppressed: false,
+                delivered: true,
+            },
+            TerminalOutcome::Success {
+                result: Box::new(result),
+            },
+        );
+
+        assert_eq!(effects.output[0]["error"]["code"], OUTCOME_UNKNOWN);
+        let rendered = effects.output[0].to_string();
+        assert!(!rendered.contains(&requested_raw));
+        assert!(!rendered.contains(&substituted_raw));
     }
 
     #[test]
@@ -1021,8 +1207,8 @@ mod tests {
                 id: Some(RequestId::Number(7.into())),
                 method: "tools/call".into(),
                 params: json!({
-                    "name": "click",
-                    "arguments": {"coordinate": [4, 8]},
+                    "name": "computer",
+                    "arguments": {"action":"left_click","tabId":7,"coordinate": [4, 8]},
                     "task": {"ttl": 60_000}
                 }),
             },
@@ -1032,15 +1218,15 @@ mod tests {
         let EdgeMessage::Start {
             operation,
             workspace,
-            arguments,
             ..
         } = &effects.service[0]
         else {
             panic!("start expected");
         };
-        assert_eq!(operation, "click");
+        assert_eq!(operation.id, OperationId::BrowserInput);
+        assert_eq!(operation.intent, IntentId::InputPointerClick);
         assert_eq!(workspace, &expected_workspace);
-        assert_eq!(arguments["coordinate"], json!([4, 8]));
+        assert_eq!(operation.arguments["point"], json!([4, 8]));
     }
 
     #[test]

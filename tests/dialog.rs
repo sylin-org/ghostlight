@@ -3,6 +3,7 @@
 
 mod support;
 
+use ghostlight_transport::operation::{IntentId, OperationId};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -129,17 +130,22 @@ async fn status_and_each_resolution_action_are_governed_and_content_minimized_in
     let records: Vec<Value> = audit
         .lines()
         .map(|line| serde_json::from_str(line).expect("audit JSON"))
-        .filter(|record: &Value| record["tool"] == "dialog")
+        .filter(|record: &Value| record["tool"] == json!(OperationId::BrowserDialog))
         .collect();
-    let actions: Vec<&str> = records
+    let intents: Vec<&str> = records
         .iter()
-        .map(|record| record["action"].as_str().expect("dialog action"))
+        .map(|record| record["action"].as_str().expect("dialog intent"))
         .collect();
-    assert_eq!(actions.len(), 4);
-    for expected in ["status", "accept", "dismiss", "respond"] {
+    assert_eq!(intents.len(), 4);
+    for expected in [
+        IntentId::DialogStatus,
+        IntentId::DialogAccept,
+        IntentId::DialogDismiss,
+        IntentId::DialogRespond,
+    ] {
         assert!(
-            actions.contains(&expected),
-            "missing {expected}: {actions:?}"
+            intents.contains(&expected.as_str()),
+            "missing {expected}: {intents:?}"
         );
     }
     for forbidden in ["Private question", "Private reply", "sessionNonce"] {

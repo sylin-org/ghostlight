@@ -11,6 +11,10 @@
 
 mod support;
 
+use ghostlight_transport::operation::{
+    BrowserResultStatus, FlowResultData, FlowStepStatus, FlowTerminationReason, IntentId,
+    OperationEffect, OperationId, ResultPart,
+};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -53,11 +57,24 @@ fn read_audit_lines(path: &Path) -> Vec<Value> {
         .collect()
 }
 
+fn flow_result(call: &Value) -> FlowResultData {
+    serde_json::from_value(call["result"]["structuredContent"].clone())
+        .expect("structured content is a canonical flow result")
+}
+
+fn first_text(parts: &[ResultPart]) -> Option<&str> {
+    parts.iter().find_map(|part| match part {
+        ResultPart::Text { text } => Some(text.as_str()),
+        ResultPart::Image { .. } => None,
+    })
+}
+
 /// The script tool with two extension-forwarded steps and no extension connected: step 1 (navigate)
-/// fails at execution with an extension hop error; step 2 (find) never runs. The compact result
-/// reports the honest per-step statuses, and the audit log carries exactly the parent `script`
+/// fails at execution with an extension hop error; step 2 (find) never runs. The canonical flow
+/// result reports the honest per-step statuses, and the audit log carries exactly the parent flow
 /// record plus the one step that actually ran (navigate), correlated by batch_id -- NO record for
-/// `find` (it was never dispatched).
+/// `find` (it was never dispatched). The MCP edge separately proves the exact legacy compact
+/// `script` rendering from this typed result.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn script_reports_step_error_and_not_run_with_correlated_audit() {
     let audit_path = temp_path("script-audit");
@@ -84,38 +101,52 @@ async fn script_reports_step_error_and_not_run_with_correlated_audit() {
         "script itself succeeds: {call:?}"
     );
 
-    // The compact result is the first text content block, parsed back as JSON.
-    let text = call["result"]["content"][0]["text"]
-        .as_str()
-        .expect("compact result text");
-    let compact: Value = serde_json::from_str(text).expect("compact result is JSON");
-    let results = compact["results"].as_array().expect("results array");
-    let status: Vec<&str> = results
-        .iter()
-        .map(|r| r["status"].as_str().unwrap())
-        .collect();
-    assert_eq!(status, vec!["error", "not_run"], "got: {status:?}");
-    let step1_text = results[0]["result"].as_str().unwrap_or("");
+    let flow = flow_result(call);
+    assert_eq!(flow.steps.len(), 2);
+    assert_eq!(flow.steps[0].status, FlowStepStatus::Unavailable);
+    assert_eq!(flow.steps[0].result.operation, OperationId::BrowserNavigate);
+    assert_eq!(flow.steps[0].result.intent, IntentId::NavigateUrl);
+    assert_eq!(
+        flow.steps[0].result.status,
+        BrowserResultStatus::Unavailable
+    );
+    assert_eq!(flow.steps[0].result.effect, OperationEffect::None);
+    assert_eq!(flow.steps[1].status, FlowStepStatus::NotRun);
+    assert_eq!(flow.steps[1].result.operation, OperationId::BrowserFind);
+    assert_eq!(flow.steps[1].result.intent, IntentId::FindQuery);
+    assert_eq!(
+        flow.steps[1].result.status,
+        BrowserResultStatus::NotDispatched
+    );
+    assert_eq!(flow.steps[1].result.effect, OperationEffect::None);
+    let step1_text = first_text(&flow.steps[0].result.parts).unwrap_or("");
     assert!(
         step1_text.contains("extension"),
         "step 1 text should name the extension hop failure: {step1_text}"
     );
     assert_eq!(
-        compact["summary"], "0/2 steps completed; step 1 failed",
+        flow.summary, "0/2 steps completed; step 1 failed",
         "got: {}",
-        compact["summary"]
+        flow.summary
+    );
+    assert_eq!(flow.termination.reason, FlowTerminationReason::Failed);
+    assert_eq!(flow.termination.step, Some(1));
+    assert_eq!(
+        call["result"]["content"][0]["text"], flow.summary,
+        "the neutral text view is the concise flow summary"
     );
 
-    // Correlated audit: exactly the parent script record + the navigate step record. No find record
+    // Correlated audit: exactly the parent flow record + the navigate step record. No find record
     // (find was never dispatched -- onError stop halted the chain at step 1's failure).
     let lines = read_audit_lines(&audit_path);
     assert_eq!(lines.len(), 2, "parent + one step: {lines:?}");
 
     let parent = lines
         .iter()
-        .find(|l| l["tool"] == "script")
-        .unwrap_or_else(|| panic!("no script parent record in {lines:?}"));
-    assert_eq!(parent["tool"], "script");
+        .find(|l| l["tool"] == "browser.flow")
+        .unwrap_or_else(|| panic!("no canonical flow parent record in {lines:?}"));
+    assert_eq!(parent["tool"], "browser.flow");
+    assert_eq!(parent["action"], "flow.execute");
     assert!(parent["batch_id"].is_string(), "parent batch_id set");
     assert!(
         parent["orchestrator"].is_null(),
@@ -126,10 +157,11 @@ async fn script_reports_step_error_and_not_run_with_correlated_audit() {
 
     let step1 = lines
         .iter()
-        .find(|l| l["tool"] == "navigate")
+        .find(|l| l["tool"] == "browser.navigate")
         .unwrap_or_else(|| panic!("no navigate step record in {lines:?}"));
-    assert_eq!(step1["tool"], "navigate");
-    assert_eq!(step1["orchestrator"], "script");
+    assert_eq!(step1["tool"], "browser.navigate");
+    assert_eq!(step1["action"], "navigate.url");
+    assert_eq!(step1["orchestrator"], "browser.flow");
     assert_eq!(
         step1["batch_id"], batch_id,
         "step shares the parent's batch_id"
@@ -137,7 +169,7 @@ async fn script_reports_step_error_and_not_run_with_correlated_audit() {
     assert_eq!(step1["step"], 1, "step 1 is numbered 1");
 
     assert!(
-        !lines.iter().any(|l| l["tool"] == "find"),
+        !lines.iter().any(|l| l["tool"] == "browser.find"),
         "no audit record for the not-run find step: {lines:?}"
     );
 
@@ -146,7 +178,7 @@ async fn script_reports_step_error_and_not_run_with_correlated_audit() {
 
 /// A dry run evaluates every step's verdict through the REAL governance decision but dispatches
 /// nothing: no extension frame, no step audit records. The audit log carries exactly ONE record --
-/// the parent `script` call with `dry_run: true`. `find` (tab-scoped, no extension -> tab URL
+/// the parent canonical flow call with `dry_run: true`. `find` (tab-scoped, no extension -> tab URL
 /// unknowable) is `would_deny`; navigate to the granted `example.com` is `would_allow` (the real
 /// authorize verdict, not a guess).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -176,23 +208,27 @@ async fn dry_run_verdicts_without_step_records() {
         "dry run succeeds: {call:?}"
     );
 
-    let text = call["result"]["content"][0]["text"]
-        .as_str()
-        .expect("compact result text");
-    let compact: Value = serde_json::from_str(text).expect("compact result is JSON");
-    let status: Vec<&str> = compact["results"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|r| r["status"].as_str().unwrap())
-        .collect();
+    let flow = flow_result(call);
+    let status: Vec<FlowStepStatus> = flow.steps.iter().map(|step| step.status).collect();
     assert_eq!(
         status,
-        vec!["would_deny", "would_allow"],
+        vec![FlowStepStatus::WouldDeny, FlowStepStatus::WouldAllow],
         "the real authorize verdict per step: got {status:?}"
     );
+    assert_eq!(flow.steps[0].result.operation, OperationId::BrowserFind);
+    assert_eq!(flow.steps[0].result.intent, IntentId::FindQuery);
+    assert_eq!(flow.steps[0].result.status, BrowserResultStatus::Blocked);
+    assert_eq!(flow.steps[1].result.operation, OperationId::BrowserNavigate);
+    assert_eq!(flow.steps[1].result.intent, IntentId::NavigateUrl);
+    assert_eq!(flow.steps[1].result.status, BrowserResultStatus::Ok);
+    assert!(flow
+        .steps
+        .iter()
+        .all(|step| step.result.effect == OperationEffect::None));
+    assert_eq!(flow.termination.reason, FlowTerminationReason::Completed);
+    assert_eq!(flow.termination.step, None);
 
-    // Exactly one audit record: the parent script call, marked dry_run. No step records (nothing
+    // Exactly one audit record: the parent flow call, marked dry_run. No step records (nothing
     // dispatched -- the audit scopes for steps dropped without complete()).
     let lines = read_audit_lines(&audit_path);
     assert_eq!(
@@ -200,7 +236,8 @@ async fn dry_run_verdicts_without_step_records() {
         1,
         "dry run writes only the parent record: {lines:?}"
     );
-    assert_eq!(lines[0]["tool"], "script");
+    assert_eq!(lines[0]["tool"], "browser.flow");
+    assert_eq!(lines[0]["action"], "flow.preflight");
     assert_eq!(lines[0]["dry_run"], true, "parent is marked dry_run");
 
     std::fs::remove_file(&audit_path).ok();

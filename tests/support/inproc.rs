@@ -21,7 +21,6 @@
 
 #![allow(dead_code)]
 
-use ghostlight::browser::directory::WorkspaceUse;
 use ghostlight::browser::pattern::is_valid_pattern;
 use ghostlight::governance::manifest::document::{parse_manifest, Manifest};
 use ghostlight::governance::manifest::source::{LoadedPolicy, ManifestOrigin};
@@ -33,6 +32,8 @@ use ghostlight::native::host;
 use ghostlight::observability::DebugSink;
 use ghostlight::tool::outcome::CallOutcome;
 use ghostlight::work::{CancellationToken, WorkContext};
+use ghostlight_transport::bridge::WorkspaceUse;
+use ghostlight_transport::operation::BrowserOperation;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -224,15 +225,10 @@ impl Harness {
 
     fn catalog_result(&self) -> Value {
         let authority = self.ctx.authority.current();
-        let generation = *self.ctx.catalog_generation.borrow();
-        let projection =
-            ghostlight::tool::catalog::project_catalog(&authority.governance, None, generation);
-        let tools: Vec<Value> = projection
-            .tools
-            .into_iter()
-            .map(|tool| tool.declaration)
-            .collect();
-        json!({"tools": tools})
+        ghostlight::browser::advertise::advertised_tools(
+            &ghostlight::tool::tools::advertised_tools_json(),
+            authority.governance.grants(),
+        )
     }
 
     async fn execute(
@@ -243,10 +239,15 @@ impl Harness {
         owner: &PeerUser,
         client: Option<ClientInfo>,
     ) -> Value {
-        let workspace = match ghostlight::browser::directory::descriptor(operation)
-            .map(|descriptor| descriptor.workspace_use)
-        {
-            Some(WorkspaceUse::Independent) => None,
+        let canonical =
+            match ghostlight::operation::registry::decode_legacy_call(operation, arguments) {
+                Ok(operation) => operation,
+                Err(error) => return error_result(error.to_string()),
+            };
+        let descriptor = ghostlight::operation::registry::descriptor(canonical.key())
+            .expect("fixture call maps to an implemented operation");
+        let workspace = match descriptor.workspace_use {
+            WorkspaceUse::Independent => None,
             _ => Some(workspace.clone()),
         };
         let lease = workspace.as_ref().map(|workspace| {
@@ -255,7 +256,7 @@ impl Harness {
                 .lease(workspace, owner)
                 .expect("lease the fixture workspace")
         });
-        let work = WorkContext::new(workspace, operation.to_string(), client, None);
+        let work = WorkContext::new(workspace, canonical, None, client, None);
         let cancellation = CancellationToken::new();
         let outcome = ghostlight::tool::pipeline::run_work(
             &self.ctx.browser,
@@ -264,10 +265,31 @@ impl Harness {
             &self.ctx.workspaces,
             &work,
             &cancellation,
-            arguments,
+            work.arguments(),
         )
         .await;
         drop(lease);
+        render_outcome(outcome)
+    }
+
+    /// Execute a canonical operation without a workspace for pre-admission service-boundary tests.
+    ///
+    /// This seam is intentionally narrow: callers use it to prove that an invalid canonical pair
+    /// fails before workspace or browser dispatch. Ordinary fixture calls must continue through
+    /// [`Harness::drive`], which mints and verifies a real workspace.
+    pub async fn execute_unscoped_canonical(&self, operation: BrowserOperation) -> Value {
+        let work = WorkContext::new(None, operation, None, None, None);
+        let cancellation = CancellationToken::new();
+        let outcome = ghostlight::tool::pipeline::run_work(
+            &self.ctx.browser,
+            &self.ctx.store,
+            &self.ctx.authority,
+            &self.ctx.workspaces,
+            &work,
+            &cancellation,
+            work.arguments(),
+        )
+        .await;
         render_outcome(outcome)
     }
 }
@@ -310,7 +332,7 @@ fn render_outcome(outcome: CallOutcome) -> Value {
         CallOutcome::Denied { message, .. }
         | CallOutcome::Held { message }
         | CallOutcome::AttentionRequired { message } => text_result(message),
-        CallOutcome::Cancelled { message } => execution_result("cancelled", false, message),
+        CallOutcome::Cancelled { message, .. } => execution_result("cancelled", false, message),
     }
 }
 

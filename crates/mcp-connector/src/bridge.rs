@@ -10,6 +10,7 @@ use ghostlight_transport::bridge::{
     self as wire, BridgeError, BridgeSequence, CatalogProjection, EdgeMessage, ServiceMessage,
     TerminalOutcome, WorkId, WorkspaceId, BRIDGE_MAJOR,
 };
+use ghostlight_transport::operation::{BrowserResult, InvocationPresentation, OperationKey};
 use ghostlight_transport::{ipc, supervisor};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -78,6 +79,26 @@ pub enum PendingKind {
     ReleaseWorkspace2025,
 }
 
+/// Edge-only labels needed to reconstruct one legacy flow result.
+///
+/// The canonical operation and result carry only semantic operation identities. These original
+/// nested surface labels remain in the request correlation table and never cross the service
+/// bridge or participate in routing, authority, scheduling, or audit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FlowRenderHints {
+    /// Original labels bound to their decoded canonical identities in declared order.
+    pub(crate) steps: Vec<FlowStepRenderHint>,
+}
+
+/// One edge-only legacy label bound to the operation decoded from the same nested call.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FlowStepRenderHint {
+    /// Original nested external tool label.
+    pub(crate) label: String,
+    /// Canonical identity that the matching result entry must carry.
+    pub(crate) expected_operation: OperationKey,
+}
+
 /// Correlation retained while one bridge operation is unresolved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingRequest {
@@ -87,6 +108,19 @@ pub struct PendingRequest {
     pub kind: PendingKind,
     /// Workspace reported when the service accepted a tool call.
     pub service_workspace: Option<WorkspaceId>,
+    /// Workspace placed on the immutable matching Start request.
+    pub requested_workspace: Option<WorkspaceId>,
+    /// Edge-local surface invocation used to render the matching profile result.
+    ///
+    /// This is presentation state only. It is never used for routing, authority, scheduling, or
+    /// service operation lookup.
+    pub presentation: Option<InvocationPresentation>,
+    /// Canonical identity sent in the matching start request.
+    ///
+    /// A terminal success must carry this same identity before any profile renderer runs.
+    pub expected_operation: Option<OperationKey>,
+    /// Edge-only nested labels for a legacy flow renderer.
+    pub(crate) flow_render_hints: Option<FlowRenderHints>,
     /// Whether the client cancelled and no response may be written.
     pub suppressed: bool,
     /// Whether the complete request frame was flushed to the service.
@@ -100,6 +134,32 @@ impl PendingRequest {
             request_id: Some(request_id),
             kind,
             service_workspace: None,
+            requested_workspace: None,
+            presentation: None,
+            expected_operation: None,
+            flow_render_hints: None,
+            suppressed: false,
+            delivered: false,
+        }
+    }
+
+    /// Construct a response-bearing tool call with its immutable surface invocation.
+    pub fn tool_request(
+        request_id: RequestId,
+        kind: PendingKind,
+        presentation: InvocationPresentation,
+        expected_operation: OperationKey,
+        flow_render_hints: Option<FlowRenderHints>,
+        requested_workspace: Option<WorkspaceId>,
+    ) -> Self {
+        Self {
+            request_id: Some(request_id),
+            kind,
+            service_workspace: None,
+            requested_workspace,
+            presentation: Some(presentation),
+            expected_operation: Some(expected_operation),
+            flow_render_hints,
             suppressed: false,
             delivered: false,
         }
@@ -111,6 +171,10 @@ impl PendingRequest {
             request_id: None,
             kind: PendingKind::ReleaseWorkspace2025,
             service_workspace: None,
+            requested_workspace: None,
+            presentation: None,
+            expected_operation: None,
+            flow_render_hints: None,
             suppressed: false,
             delivered: false,
         }
@@ -122,9 +186,18 @@ impl PendingRequest {
             request_id: None,
             kind,
             service_workspace: None,
+            requested_workspace: None,
+            presentation: None,
+            expected_operation: None,
+            flow_render_hints: None,
             suppressed: false,
             delivered: false,
         }
+    }
+
+    /// Return whether a successful service result matches the operation sent for this request.
+    pub fn result_matches_expected_operation(&self, result: &BrowserResult) -> bool {
+        self.expected_operation == Some(OperationKey::new(result.operation, result.intent))
     }
 }
 
@@ -685,6 +758,10 @@ where
 mod tests {
     use super::*;
     use ghostlight_transport::bridge::RequestContext;
+    use ghostlight_transport::operation::{
+        BrowserOperation, BrowserResult, BrowserResultStatus, IntentId, OperationEffect,
+        OperationId,
+    };
 
     fn request_id(value: i64) -> RequestId {
         RequestId::Number(value.into())
@@ -696,6 +773,69 @@ mod tests {
             workspace: None,
             context: RequestContext::default(),
         }
+    }
+
+    fn navigate_operation(arguments: Value) -> BrowserOperation {
+        BrowserOperation::new(
+            OperationId::BrowserNavigate,
+            IntentId::NavigateUrl,
+            arguments,
+        )
+    }
+
+    fn empty_result() -> BrowserResult {
+        BrowserResult::new(
+            OperationId::BrowserContext,
+            IntentId::ContextDescribe,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        )
+    }
+
+    #[tokio::test]
+    async fn new_edge_rejects_an_old_service_before_marking_the_stream_ready() {
+        let (edge_stream, mut service_stream) = tokio::io::duplex(1024);
+        let service = tokio::spawn(async move {
+            let hello = wire::read_edge_message(&mut service_stream)
+                .await
+                .expect("read edge hello")
+                .expect("edge hello frame");
+            assert!(matches!(
+                hello,
+                EdgeMessage::Hello {
+                    bridge_major: BRIDGE_MAJOR
+                }
+            ));
+            wire::write_service_message(
+                &mut service_stream,
+                &ServiceMessage::Hello { bridge_major: 1 },
+            )
+            .await
+            .expect("write old service hello");
+        });
+
+        let (_outbound_tx, mut outbound_rx) = mpsc::channel(1);
+        let (event_tx, mut events) = mpsc::channel(1);
+        let generation = AtomicU64::new(0);
+        let ready = Notify::new();
+        let reason = run_connected(
+            edge_stream,
+            1,
+            &mut outbound_rx,
+            &event_tx,
+            &generation,
+            &ready,
+            Duration::from_millis(20),
+        )
+        .await;
+
+        assert_eq!(
+            reason,
+            "Ghostlight service selected unsupported bridge major 1"
+        );
+        assert_eq!(generation.load(Ordering::Acquire), 0);
+        assert!(events.try_recv().is_err());
+        service.await.expect("old service task");
     }
 
     #[tokio::test]
@@ -749,8 +889,8 @@ mod tests {
                 generation: 1,
                 message: EdgeMessage::Start {
                     sequence: BridgeSequence(1),
-                    operation: "navigate".to_string(),
-                    arguments: serde_json::json!({ "url": "x".repeat(4096) }),
+                    operation: navigate_operation(serde_json::json!({ "url": "x".repeat(4096) })),
+                    presentation: None,
                     workspace: None,
                     context: RequestContext::default(),
                 },
@@ -803,7 +943,7 @@ mod tests {
             correlation.observe(ServiceMessage::Completed {
                 work_id: WorkId(9),
                 outcome: TerminalOutcome::Success {
-                    result: serde_json::json!({"content": []})
+                    result: Box::new(empty_result())
                 },
             }),
             Observation::Resolved(Resolution::Completed { .. })
@@ -833,7 +973,7 @@ mod tests {
             correlation.observe(ServiceMessage::Completed {
                 work_id: WorkId(12),
                 outcome: TerminalOutcome::Success {
-                    result: serde_json::json!({"content": []}),
+                    result: Box::new(empty_result()),
                 },
             })
         else {

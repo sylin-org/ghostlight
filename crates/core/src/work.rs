@@ -8,6 +8,7 @@
 
 use crate::governance::overlay::SessionOverlay;
 use crate::governance::ports::ClientInfo;
+use ghostlight_transport::operation::{BrowserOperation, InvocationPresentation, OperationKey};
 use ghostlight_transport::workspace_id::WorkspaceId;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -17,7 +18,8 @@ use tokio::sync::Notify;
 #[derive(Clone)]
 pub struct WorkContext {
     workspace: Option<WorkspaceId>,
-    operation: Arc<str>,
+    operation: BrowserOperation,
+    presentation: Option<InvocationPresentation>,
     client: Option<ClientInfo>,
     restriction: Option<Arc<SessionOverlay>>,
 }
@@ -26,13 +28,15 @@ impl WorkContext {
     /// Construct a complete context after workspace and restriction validation.
     pub fn new(
         workspace: Option<WorkspaceId>,
-        operation: impl Into<Arc<str>>,
+        operation: BrowserOperation,
+        presentation: Option<InvocationPresentation>,
         client: Option<ClientInfo>,
         restriction: Option<Arc<SessionOverlay>>,
     ) -> Self {
         Self {
             workspace,
-            operation: operation.into(),
+            operation,
+            presentation,
             client,
             restriction,
         }
@@ -54,9 +58,24 @@ impl WorkContext {
             .unwrap_or("service-local")
     }
 
-    /// Return the canonical operation name.
-    pub fn operation(&self) -> &str {
+    /// Return the complete canonical operation admitted for this work.
+    pub fn operation(&self) -> &BrowserOperation {
         &self.operation
+    }
+
+    /// Return the closed semantic key used by validation, governance, scheduling, and audit.
+    pub const fn operation_key(&self) -> OperationKey {
+        self.operation.key()
+    }
+
+    /// Return the canonical operation arguments.
+    pub fn arguments(&self) -> &serde_json::Value {
+        &self.operation.arguments
+    }
+
+    /// Return bounded external presentation facts for corrective copy and audit display only.
+    pub fn presentation(&self) -> Option<&InvocationPresentation> {
+        self.presentation.as_ref()
     }
 
     /// Return presentation metadata for this call only.

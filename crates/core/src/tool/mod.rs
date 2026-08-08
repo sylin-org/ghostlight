@@ -5,8 +5,8 @@
 //! normalized product operations and returns semantic outcomes.
 
 pub mod act_on;
-pub mod browser_batch;
 pub mod catalog;
+pub mod flow;
 pub mod form_fill;
 pub mod gif_creator;
 pub mod outcome;
@@ -14,7 +14,6 @@ pub mod pipeline;
 pub mod provenance;
 pub mod refs;
 pub mod result;
-pub mod script;
 pub mod tools;
 pub mod update_plan;
 pub mod upload_image;

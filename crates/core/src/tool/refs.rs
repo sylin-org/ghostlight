@@ -53,64 +53,50 @@ struct ParsedRef {
     path: Vec<String>,
 }
 
-fn parse_ref(s: &str) -> Option<ParsedRef> {
+fn parse_ref(s: &str) -> Result<Option<ParsedRef>, ()> {
     // The head is `$prev` or `$<digits starting 1-9>`. `$0` does NOT match (index must be >= 1).
-    let body = s.strip_prefix('$')?;
-    let (step, is_prev, rest) = if let Some(rest) = body.strip_prefix("prev") {
-        // `$prev` -- the previous step, resolved by the caller against `structured.len()`.
-        (0, true, rest)
-    } else {
-        // `$N` where N is [1-9][0-9]*. A leading '0' (or non-digit) is not a valid index, so the
-        // whole string is not a reference and passes through unchanged.
-        let mut digits = String::new();
-        let mut chars = body.chars();
-        let first = chars.next()?;
-        if !('1'..='9').contains(&first) {
-            return None;
-        }
-        digits.push(first);
-        for c in chars.by_ref() {
-            if c.is_ascii_digit() {
-                digits.push(c);
-            } else {
-                // The path begins here; re-attach c and the rest.
-                let remainder = format!("{c}{}", chars.as_str());
-                let step: usize = digits.parse().ok()?;
-                let path = parse_path(&remainder);
-                return Some(ParsedRef {
-                    step,
-                    is_prev: false,
-                    path,
-                });
-            }
-        }
-        let step: usize = digits.parse().ok()?;
-        return Some(ParsedRef {
-            step,
-            is_prev: false,
-            path: Vec::new(),
-        });
+    let Some(body) = s.strip_prefix('$') else {
+        return Ok(None);
     };
-    // Reached only for the `$prev` head: any remainder must be a dot-path.
+    if let Some(rest) = body.strip_prefix("prev") {
+        let path = if rest.is_empty() {
+            Vec::new()
+        } else {
+            parse_path(rest).ok_or(())?
+        };
+        return Ok(Some(ParsedRef {
+            step: 0,
+            is_prev: true,
+            path,
+        }));
+    }
+
+    let digit_bytes = body.bytes().take_while(u8::is_ascii_digit).count();
+    if digit_bytes == 0 || body.as_bytes().first() == Some(&b'0') {
+        return Ok(None);
+    }
+    let step = body[..digit_bytes].parse::<usize>().map_err(|_| ())?;
+    let rest = &body[digit_bytes..];
     let path = if rest.is_empty() {
         Vec::new()
     } else {
-        parse_path(rest)
+        parse_path(rest).ok_or(())?
     };
-    Some(ParsedRef {
+    Ok(Some(ParsedRef {
         step,
-        is_prev,
+        is_prev: false,
         path,
-    })
+    }))
 }
 
 /// Split `.a.b.0` (with a leading dot) into `["a", "b", "0"]`. The grammar guarantees segments are
 /// non-empty and dot-separated; an empty segment would mean the regex did not match.
-fn parse_path(rest: &str) -> Vec<String> {
-    rest.split('.')
-        .filter(|seg| !seg.is_empty())
-        .map(str::to_string)
-        .collect()
+fn parse_path(rest: &str) -> Option<Vec<String>> {
+    let path = rest.strip_prefix('.')?;
+    if path.is_empty() || path.split('.').any(str::is_empty) {
+        return None;
+    }
+    Some(path.split('.').map(str::to_string).collect())
 }
 
 fn resolve_string(s: &str, structured: &[Option<Value>]) -> Result<Value, String> {
@@ -120,8 +106,15 @@ fn resolve_string(s: &str, structured: &[Option<Value>]) -> Result<Value, String
     }
     // Only a string that is EXACTLY a reference (head + optional dot-path) resolves. A `$`-string
     // that does not match the grammar (e.g. "$hello", "$0.x") passes through unchanged.
-    let Some(parsed) = parse_ref(s) else {
-        return Ok(Value::String(s.to_string()));
+    let parsed = match parse_ref(s) {
+        Ok(Some(parsed)) => parsed,
+        Ok(None) => return Ok(Value::String(s.to_string())),
+        Err(()) => {
+            return Err(format!(
+                "invalid reference \"{s}\": expected $prev or $N followed only by non-empty dot-path segments. If you meant a literal string starting with \"$\", write \"$${}\".",
+                s.strip_prefix('$').unwrap_or(s)
+            ));
+        }
     };
 
     // Resolve the target step index (1-indexed). `$prev` targets the most-recent step.
@@ -256,6 +249,16 @@ mod tests {
     fn zero_index_passes_through() {
         // `$0.x` is not grammar (index must be >= 1) -> unchanged.
         assert_eq!(resolve_refs(&json!("$0.x"), &[]).unwrap(), json!("$0.x"));
+    }
+
+    #[test]
+    fn malformed_reference_heads_and_paths_are_rejected() {
+        for malformed in ["$prevfoo", "$1foo", "$prev.", "$1..x"] {
+            let error = resolve_refs(&json!(malformed), &[Some(json!({"x": 1}))])
+                .expect_err("malformed reference must fail closed");
+            assert!(error.contains("invalid reference"), "{malformed}: {error}");
+            assert!(error.contains("$$"), "{malformed}: {error}");
+        }
     }
 
     #[test]

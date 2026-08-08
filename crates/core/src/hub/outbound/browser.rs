@@ -56,14 +56,15 @@
 
 use super::diagnostics::Diagnostic;
 use super::workspace::WorkspaceBindings;
-use crate::browser::directory::{SchedulingScope, ToolDescriptor};
 use crate::governance::dispatch::hold_message;
 use crate::hub::scheduling::{
     BrowserSurface, CommandScheduler, ExecutionContext, ProducerId, RetirementReason,
     ScheduleFailure, ScheduleKey,
 };
 use crate::hub::workspace::WorkspaceRegistry;
+use crate::operation::registry::{OperationDescriptor, SchedulingScope};
 use crate::ToolError;
+use ghostlight_transport::bridge::WorkspaceUse;
 use ghostlight_transport::host;
 use ghostlight_transport::observability::DebugSink;
 use serde_json::{json, Value};
@@ -780,7 +781,7 @@ impl Browser {
     /// Resolve and acquire the descriptor-declared execution context for one call.
     pub async fn acquire_execution(
         &self,
-        descriptor: &ToolDescriptor,
+        descriptor: &OperationDescriptor,
         guid: &str,
         args: &Value,
         authority_epoch: u64,
@@ -793,7 +794,7 @@ impl Browser {
     /// Resolve and acquire descriptor-declared execution with exact queued-work cancellation.
     pub async fn acquire_execution_cancellable(
         &self,
-        descriptor: &ToolDescriptor,
+        descriptor: &OperationDescriptor,
         guid: &str,
         args: &Value,
         authority_epoch: u64,
@@ -813,7 +814,7 @@ impl Browser {
 
     async fn acquire_execution_inner(
         &self,
-        descriptor: &ToolDescriptor,
+        descriptor: &OperationDescriptor,
         guid: &str,
         args: &Value,
         authority_epoch: u64,
@@ -821,7 +822,7 @@ impl Browser {
         cancellation: Option<&crate::work::CancellationToken>,
     ) -> Result<ExecutionContext, ScheduleFailure> {
         let producer = ProducerId::new(guid);
-        let composite_tab = args.get("tabId").and_then(Value::as_i64);
+        let composite_tab = args.get("tab").and_then(Value::as_i64);
         match descriptor.scheduling.scope {
             SchedulingScope::Presentation => Ok(ExecutionContext::presentation()),
             SchedulingScope::Local => Ok(ExecutionContext::local()),
@@ -839,7 +840,9 @@ impl Browser {
                 .await
             }
             SchedulingScope::WorkspaceTopology => {
-                let slot = if uses_workspace(descriptor.tool, args) && composite_tab.is_none() {
+                let slot = if descriptor.workspace_use == WorkspaceUse::Creates
+                    && composite_tab.is_none()
+                {
                     // Before first selection, all concurrent topology calls from this client use
                     // the slot-zero bootstrap queue. This prevents two browser profiles from
                     // racing to establish different first-workspace pins. Dispatch resolves the
@@ -3602,7 +3605,13 @@ mod tests {
     #[tokio::test]
     async fn workspace_bootstrap_schedules_globally_then_on_the_bound_browser_profile() {
         let browser = Browser::new();
-        let descriptor = crate::browser::directory::descriptor("tabs_create_mcp").unwrap();
+        let descriptor = crate::operation::registry::descriptor(
+            ghostlight_transport::operation::OperationKey::new(
+                ghostlight_transport::operation::OperationId::BrowserTabs,
+                ghostlight_transport::operation::IntentId::TabsNew,
+            ),
+        )
+        .unwrap();
         let bootstrap = browser
             .acquire_execution(descriptor, "guid", &json!({}), 0, None)
             .await

@@ -76,7 +76,7 @@ fn non_page_result_is_byte_unchanged() {
     let before = result.clone();
     ghostlight::tool::provenance::apply(
         &mut result,
-        ghostlight::browser::directory::PageOutput::None,
+        ghostlight::operation::registry::PageOutput::None,
         "00112233-4455-4677-8899-aabbccddeeff",
     );
     assert_eq!(result, before);

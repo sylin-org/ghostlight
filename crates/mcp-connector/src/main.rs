@@ -8,6 +8,7 @@ mod bridge;
 mod jsonrpc;
 mod mcp_2025_11_25;
 mod mcp_2026_07_28;
+mod surface;
 
 use bridge::{
     sequence_of, BridgeClient, BridgeEvent, Correlation, DisconnectedPending, Effects, Observation,
@@ -506,8 +507,12 @@ mod tests {
     fn ambiguous_start_write_is_outcome_unknown_and_never_retry_safe() {
         let mut machine = Machine::default();
         let mut call = request_2026(12, "tools/call");
-        call.params["name"] = json!("click");
-        call.params["arguments"] = json!({"coordinate": [10, 20]});
+        call.params["name"] = json!("computer");
+        call.params["arguments"] = json!({
+            "action": "left_click",
+            "tabId": 7,
+            "coordinate": [10, 20]
+        });
         let start = machine.on_request(call);
         let ghostlight_transport::bridge::EdgeMessage::Start { sequence, .. } =
             start.service[0].clone()

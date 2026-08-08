@@ -8,6 +8,7 @@
 
 mod support;
 
+use ghostlight_transport::operation::{BrowserOperation, IntentId, OperationId};
 use serde_json::{json, Value};
 use support::inproc::{by_id, init_and_call, manifest_from_value, text_of, Harness};
 
@@ -90,16 +91,21 @@ async fn explain_output_is_byte_identical_across_manifest_postures() {
 #[tokio::test]
 async fn unknown_operation_is_rejected_before_browser_dispatch() {
     let started = std::time::Instant::now();
-    let responses = Harness::all_open()
-        .drive(&init_and_call("bogus_tool", json!({})))
+    let result = Harness::all_open()
+        .execute_unscoped_canonical(BrowserOperation::new(
+            OperationId::BrowserContext,
+            IntentId::ActClick,
+            json!({}),
+        ))
         .await;
     let elapsed = started.elapsed();
 
-    let call = by_id(&responses, 2);
-    assert_eq!(call["result"]["isError"], true);
-    let text = text_of(call);
+    assert_eq!(result["isError"], true);
+    let text = result["content"][0]["text"]
+        .as_str()
+        .expect("canonical rejection text");
     assert!(text.starts_with("[hop: invalid-request]"), "{text}");
-    assert!(text.contains("Unknown tool: bogus_tool"), "{text}");
+    assert!(text.contains("Unknown operation pair"), "{text}");
     assert!(
         elapsed < std::time::Duration::from_secs(2),
         "registry misses must not wait for the browser channel: {elapsed:?}"

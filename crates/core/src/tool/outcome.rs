@@ -7,7 +7,7 @@
 //! dependencies beyond `core`/`std`/`serde_json::Value`, and [`LocalCtx`] must name
 //! `Browser`/`ConfigStore`/`Governance`/`Config` to give a local handler what it needs to behave
 //! like an ordinary dispatch. Living here instead keeps that purity claim true while still
-//! letting `directory::Handler::Local`'s function-pointer variant name these types.
+//! letting `operation::registry::Handler::Local`'s function-pointer variant name these types.
 //!
 //! [`CallOutcome`] is the pipeline's own honest account of what happened to one tool call,
 //! BEFORE it is rendered into an MCP envelope: `pipeline::run_tool_call` returns this; the exact
@@ -27,6 +27,7 @@ use crate::hub::outbound::browser::{Browser, DeliveryFailure};
 use crate::hub::scheduling::ExecutionContext;
 use crate::work::{CancellationToken, WorkContext};
 use crate::ToolError;
+use ghostlight_transport::operation::{BrowserOperation, OperationEffect};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -35,8 +36,8 @@ use std::sync::Arc;
 /// decision), or the always-on sacred-domains never-touch check.
 ///
 /// `pub`, not `pub(crate)` (a deliberate, mechanically-forced widening from PINS.md SS1's
-/// literal annotation): `directory::Handler`, `ToolDescriptor`, and `REGISTRY` are already fully
-/// `pub` and reachable outside this crate (integration tests under `tests/`), and
+/// literal annotation): `operation::registry::Handler` is public and reachable outside this
+/// crate (integration tests under `tests/`), and
 /// `Handler::Local`'s function-pointer variant names [`CallOutcome`] (which itself carries this
 /// type) directly. A `pub(crate)` `CallOutcome`/`DenialSource` behind a `pub enum Handler`
 /// triggers rustc's `private_interfaces` lint, which `-D warnings` promotes to a hard failure.
@@ -70,9 +71,12 @@ pub enum CallOutcome {
     Held { message: String },
     /// This workspace's denial circuit is open: rendered as ordinary successful text.
     AttentionRequired { message: String },
-    /// Cooperative cancellation stopped the call at a safe boundary or after an atomic effect
-    /// drained. The message states the truthful disposition.
-    Cancelled { message: String },
+    /// Cooperative cancellation stopped the call at a typed physical-effect boundary.
+    Cancelled {
+        message: String,
+        /// Proven effect at cancellation: none, committed, or unknown.
+        effect: OperationEffect,
+    },
 }
 
 /// Convert one browser-delivery failure into the protocol-neutral terminal disposition.
@@ -95,7 +99,7 @@ pub(crate) fn delivery_failure_outcome(failure: DeliveryFailure) -> CallOutcome 
     }
 }
 
-/// The context one [`crate::browser::directory::Handler::Local`] invocation receives (ADR-0035
+/// The context one [`crate::operation::registry::Handler::Local`] invocation receives (ADR-0035
 /// Decision 6, PINS.md SS2): everything a local handler needs to behave like an ordinary
 /// pipeline dispatch -- the browser handle, the live config store, the governance facade, this
 /// call's own config snapshot, and its arguments. Deliberately carries no `CallAudit`: a local
@@ -114,6 +118,11 @@ pub struct LocalCtx<'a> {
     /// its `Browser::call` envelopes.
     pub guid: &'a str,
     pub config: &'a Config,
+    /// Canonical operation admitted by the registry for this local handler invocation.
+    ///
+    /// Compound handlers use this identity and its semantic arguments directly. `args` remains
+    /// the bounded legacy implementation shape for local handlers not yet migrated in R1.
+    pub operation: &'a BrowserOperation,
     pub args: &'a Value,
     /// The admitted execution context retained by descriptor-gated compound handlers.
     pub execution: &'a ExecutionContext,

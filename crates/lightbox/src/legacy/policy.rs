@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::ensure;
 use serde_json::{json, Value};
 
-use ghostlight_core::browser::{directory, pattern};
+use ghostlight_core::browser::pattern;
 use ghostlight_core::governance::config::reload::PolicySource;
 use ghostlight_core::governance::manifest::source;
 use ghostlight_core::governance::paths::GovernancePaths;
@@ -17,6 +17,7 @@ use ghostlight_core::hub::peer::PeerUser;
 use ghostlight_core::hub::ServiceContext;
 use ghostlight_core::tool::outcome::CallOutcome;
 use ghostlight_core::work::{CancellationToken, WorkContext};
+use ghostlight_transport::bridge::WorkspaceUse;
 use ghostlight_transport::observability::DebugSink;
 use ghostlight_transport::workspace_id::WorkspaceId;
 
@@ -146,25 +147,30 @@ impl WorkDriver {
 
     fn tool_names(&self) -> Vec<String> {
         let authority = self.context.authority.current();
-        ghostlight_core::tool::catalog::project_catalog(
-            &authority.governance,
-            None,
-            self.generation(),
-        )
-        .tools
-        .into_iter()
-        .map(|tool| {
-            tool.declaration["name"]
-                .as_str()
-                .expect("canonical tool declaration has a name")
-                .to_string()
-        })
-        .collect()
+        ghostlight_core::browser::advertise::advertised_tools(
+            &ghostlight_core::tool::tools::advertised_tools_json(),
+            authority.governance.grants(),
+        )["tools"]
+            .as_array()
+            .expect("legacy test catalog has tools")
+            .iter()
+            .map(|tool| {
+                tool["name"]
+                    .as_str()
+                    .expect("canonical tool declaration has a name")
+                    .to_string()
+            })
+            .collect()
     }
 
     async fn call(&self, operation: &str, arguments: &Value) -> CallOutcome {
-        let workspace = match directory::descriptor(operation).map(|tool| tool.workspace_use) {
-            Some(directory::WorkspaceUse::Independent) => None,
+        let canonical =
+            ghostlight_core::operation::registry::decode_legacy_call(operation, arguments)
+                .expect("Lightbox legacy call decodes");
+        let descriptor = ghostlight_core::operation::registry::descriptor(canonical.key())
+            .expect("Lightbox call maps to an implemented operation");
+        let workspace = match descriptor.workspace_use {
+            WorkspaceUse::Independent => None,
             _ => Some(self.workspace.clone()),
         };
         let lease = workspace.as_ref().map(|workspace| {
@@ -173,7 +179,7 @@ impl WorkDriver {
                 .lease(workspace, &self.owner)
                 .expect("live Lightbox workspace leases")
         });
-        let work = WorkContext::new(workspace, operation.to_string(), self.client.clone(), None);
+        let work = WorkContext::new(workspace, canonical, None, self.client.clone(), None);
         let cancellation = CancellationToken::new();
         let outcome = ghostlight_core::tool::pipeline::run_work(
             &self.context.browser,
@@ -182,7 +188,7 @@ impl WorkDriver {
             &self.context.workspaces,
             &work,
             &cancellation,
-            arguments,
+            work.arguments(),
         )
         .await;
         drop(lease);

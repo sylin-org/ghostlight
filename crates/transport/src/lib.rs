@@ -13,6 +13,7 @@ pub mod host;
 pub mod instance;
 pub mod ipc;
 pub mod observability;
+pub mod operation;
 pub mod proc;
 pub mod supervisor;
 #[cfg(unix)]

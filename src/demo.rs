@@ -600,7 +600,7 @@ mod tests {
         });
         ghostlight::tool::provenance::apply(
             &mut result,
-            ghostlight::browser::directory::PageOutput::Text,
+            ghostlight::operation::registry::PageOutput::Text,
             "00112233-4455-4677-8899-aabbccddeeff",
         );
         result

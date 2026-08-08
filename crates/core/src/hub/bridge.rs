@@ -5,21 +5,23 @@
 //! protocol-neutral service work. It owns one bounded writer and one bounded active-work map per
 //! admitted stream. Client protocol lifecycle and response envelopes stay at the edge.
 
-use crate::browser::directory::{self, WorkspaceUse};
 use crate::governance::overlay::SessionOverlay;
 use crate::governance::ports::ClientInfo;
 use crate::hub::peer::PeerCred;
 use crate::hub::workspace::{WorkspaceError, WorkspaceLease};
 use crate::hub::ServiceContext;
+use crate::operation::registry;
+use crate::operation::result::canonicalize_success;
 use crate::tool::outcome::{CallOutcome, DenialSource as CoreDenialSource};
 use crate::work::{CancellationToken, WorkContext};
 use crate::{Error, ToolError};
 use ghostlight_transport::bridge::{
     read_edge_message, write_service_message, BridgeError, BridgeErrorKind, BridgeSequence,
     DenialSource, EdgeMessage, RequestContext, ServiceMessage, TerminalOutcome, WorkId,
-    WorkspaceId, BRIDGE_MAJOR,
+    WorkspaceId, WorkspaceUse, BRIDGE_MAJOR,
 };
-use serde_json::{json, Value};
+use ghostlight_transport::operation::{OperationEffect, OperationKey};
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -250,18 +252,23 @@ where
                     EdgeMessage::Start {
                         sequence,
                         operation,
-                        arguments,
+                        presentation,
                         workspace,
                         context,
                     } => {
                         let workspace_was_supplied = workspace.is_some();
-                        let Some(descriptor) = directory::descriptor(&operation) else {
+                        let key = operation.key();
+                        let Some(descriptor) = registry::descriptor(key) else {
                             if let Err(error) = send_rejection(
                                 &writer_tx,
                                 sequence,
                                 BridgeError {
                                     kind: BridgeErrorKind::InvalidRequest,
-                                    message: format!("unknown operation: {operation}"),
+                                    message: format!(
+                                        "unknown operation: {}/{}",
+                                        key.id.as_str(),
+                                        key.intent.as_str()
+                                    ),
                                     next_step: Some(
                                         "request the current catalog and use an advertised operation"
                                             .to_string(),
@@ -272,6 +279,25 @@ where
                             }
                             continue;
                         };
+                        if let Err(error) = descriptor.validate(&operation.arguments) {
+                            if let Err(error) = send_rejection(
+                                &writer_tx,
+                                sequence,
+                                BridgeError {
+                                    kind: BridgeErrorKind::InvalidRequest,
+                                    message: error.to_string(),
+                                    next_step: Some(
+                                        "request the current catalog and correct the operation arguments"
+                                            .to_string(),
+                                    ),
+                                },
+                            )
+                            .await
+                            {
+                                break Err(error);
+                            }
+                            continue;
+                        }
                         let validated = match validate_context(context) {
                             Ok(validated) => validated,
                             Err(error) => {
@@ -382,11 +408,11 @@ where
                             WorkContext::new(
                                 workspace,
                                 operation,
+                                presentation,
                                 validated.client,
                                 validated.restriction,
                             ),
                             cancellation,
-                            arguments,
                             lease,
                         );
 
@@ -571,7 +597,6 @@ fn spawn_work(
     work_id: WorkId,
     work: WorkContext,
     cancellation: CancellationToken,
-    arguments: Value,
     lease: Option<WorkspaceLease>,
 ) {
     // Increment before spawning so idle shutdown cannot observe a gap between accepting work and
@@ -581,6 +606,8 @@ fn spawn_work(
     tokio::spawn(async move {
         let _activity = activity;
         let _lease = lease;
+        let key = work.operation_key();
+        let workspace = work.workspace().cloned();
         let work_future = crate::tool::pipeline::run_work(
             &ctx.browser,
             &ctx.store,
@@ -588,9 +615,17 @@ fn spawn_work(
             &ctx.workspaces,
             &work,
             &cancellation,
-            &arguments,
+            work.arguments(),
         );
-        report_work_with_deadline(&writer, work_id, CALLER_RESPONSE_DEADLINE, work_future).await;
+        report_work_with_deadline(
+            &writer,
+            work_id,
+            key,
+            workspace,
+            CALLER_RESPONSE_DEADLINE,
+            work_future,
+        )
+        .await;
         // A settled task still occupies the stream bound while its terminal message is waiting
         // for the bounded writer queue. Removing it earlier would turn blocked senders into an
         // unbounded hidden result backlog under a stalled peer.
@@ -601,6 +636,8 @@ fn spawn_work(
 async fn report_work_with_deadline<F>(
     writer: &mpsc::Sender<ServiceMessage>,
     work_id: WorkId,
+    key: OperationKey,
+    workspace: Option<WorkspaceId>,
     response_deadline: Duration,
     work: F,
 ) where
@@ -613,7 +650,7 @@ async fn report_work_with_deadline<F>(
             let _ = writer
                 .send(ServiceMessage::Completed {
                     work_id,
-                    outcome: terminal_outcome(outcome),
+                    outcome: terminal_outcome(outcome, key, workspace),
                 })
                 .await;
         }
@@ -638,9 +675,41 @@ async fn cancel_active(active: &ActiveWork) {
     }
 }
 
-fn terminal_outcome(outcome: CallOutcome) -> TerminalOutcome {
+fn terminal_outcome(
+    outcome: CallOutcome,
+    key: OperationKey,
+    workspace: Option<WorkspaceId>,
+) -> TerminalOutcome {
     match outcome {
-        CallOutcome::Success { result } => TerminalOutcome::Success { result },
+        CallOutcome::Success { result } => {
+            let disposition = registry::descriptor(key)
+                .expect("accepted work retains a registered canonical operation")
+                .success_disposition_for(&result);
+            match canonicalize_success(key, disposition, workspace, result) {
+                Ok(result) => TerminalOutcome::Success {
+                    result: Box::new(result),
+                },
+                Err(error) => {
+                    tracing::error!(
+                        operation = key.id.as_str(),
+                        intent = key.intent.as_str(),
+                        error = %error,
+                        "successful operation produced an invalid canonical result"
+                    );
+                    if disposition.effect == OperationEffect::None {
+                        tool_failure(ToolError::binary(format!(
+                            "failed to construct the canonical browser result: {error}"
+                        )))
+                    } else {
+                        TerminalOutcome::OutcomeUnknown {
+                            message: format!(
+                                "The browser operation completed, but Ghostlight could not render its result ({error}). Do not retry automatically; inspect the browser before deciding what to do next."
+                            ),
+                        }
+                    }
+                }
+            }
+        }
         CallOutcome::Failure { error } => tool_failure(error),
         CallOutcome::NotDispatched { message } => TerminalOutcome::NotDispatched { message },
         CallOutcome::OutcomeUnknown { message } => TerminalOutcome::OutcomeUnknown { message },
@@ -655,7 +724,9 @@ fn terminal_outcome(outcome: CallOutcome) -> TerminalOutcome {
         CallOutcome::AttentionRequired { message } => {
             TerminalOutcome::AttentionRequired { message }
         }
-        CallOutcome::Cancelled { message } => TerminalOutcome::Cancelled { message },
+        CallOutcome::Cancelled { message, effect } => {
+            TerminalOutcome::Cancelled { message, effect }
+        }
     }
 }
 
@@ -672,6 +743,10 @@ fn tool_failure(error: ToolError) -> TerminalOutcome {
 mod tests {
     use super::*;
     use ghostlight_transport::bridge::ClientPresentation;
+    use ghostlight_transport::operation::{BrowserResultStatus, IntentId, OperationId};
+
+    const TEST_KEY: OperationKey =
+        OperationKey::new(OperationId::BrowserContext, IntentId::ContextDescribe);
 
     #[test]
     fn active_work_guard_covers_the_entire_spawned_future_lifetime() {
@@ -712,32 +787,77 @@ mod tests {
 
     #[test]
     fn semantic_outcomes_remain_distinct_at_the_edge_boundary() {
+        let TerminalOutcome::Success { result } = terminal_outcome(
+            CallOutcome::Success {
+                result: json!({"structuredContent": {"ok": true}}),
+            },
+            TEST_KEY,
+            None,
+        ) else {
+            panic!("expected canonical success");
+        };
+        assert_eq!(result.operation, TEST_KEY.id);
+        assert_eq!(result.intent, TEST_KEY.intent);
+        assert_eq!(result.status, BrowserResultStatus::Ok);
+        assert_eq!(result.effect, OperationEffect::None);
+        assert_eq!(result.data, json!({"ok": true}));
         assert_eq!(
-            terminal_outcome(CallOutcome::Success {
-                result: json!({"ok": true}),
-            }),
-            TerminalOutcome::Success {
-                result: json!({"ok": true}),
-            }
-        );
-        assert_eq!(
-            terminal_outcome(CallOutcome::Denied {
-                message: "no".to_string(),
-                source: CoreDenialSource::Sacred,
-            }),
+            terminal_outcome(
+                CallOutcome::Denied {
+                    message: "no".to_string(),
+                    source: CoreDenialSource::Sacred,
+                },
+                TEST_KEY,
+                None,
+            ),
             TerminalOutcome::Denied {
                 message: "no".to_string(),
                 source: DenialSource::Sacred,
             }
         );
         assert_eq!(
-            terminal_outcome(CallOutcome::Cancelled {
-                message: "stopped between steps".to_string(),
-            }),
+            terminal_outcome(
+                CallOutcome::Cancelled {
+                    message: "stopped between steps".to_string(),
+                    effect: OperationEffect::None,
+                },
+                TEST_KEY,
+                None,
+            ),
             TerminalOutcome::Cancelled {
                 message: "stopped between steps".to_string(),
+                effect: OperationEffect::None,
             }
         );
+    }
+
+    #[test]
+    fn invalid_success_payload_never_invites_replay_after_a_committed_effect() {
+        let outcome = terminal_outcome(
+            CallOutcome::Success {
+                result: json!({"unsupported": true}),
+            },
+            OperationKey::new(OperationId::BrowserAct, IntentId::ActClick),
+            None,
+        );
+        let TerminalOutcome::OutcomeUnknown { message } = outcome else {
+            panic!("committed result-conversion failure must be outcome unknown");
+        };
+        assert!(message.contains("Do not retry automatically"));
+    }
+
+    #[test]
+    fn invalid_read_only_success_payload_is_a_tool_failure() {
+        assert!(matches!(
+            terminal_outcome(
+                CallOutcome::Success {
+                    result: json!({"unsupported": true}),
+                },
+                TEST_KEY,
+                None,
+            ),
+            TerminalOutcome::ToolFailure { .. }
+        ));
     }
 
     #[test]
@@ -758,9 +878,11 @@ mod tests {
         report_work_with_deadline(
             &writer,
             WorkId(7),
+            TEST_KEY,
+            None,
             Duration::ZERO,
             std::future::ready(CallOutcome::Success {
-                result: json!({"settled": true}),
+                result: json!({"structuredContent": {"settled": true}}),
             }),
         )
         .await;
@@ -783,12 +905,19 @@ mod tests {
         let (writer, mut messages) = mpsc::channel(2);
         let (settle, settled) = tokio::sync::oneshot::channel::<()>();
         let reporter = tokio::spawn(async move {
-            report_work_with_deadline(&writer, WorkId(8), Duration::from_millis(5), async move {
-                let _ = settled.await;
-                CallOutcome::Success {
-                    result: json!({"late": true}),
-                }
-            })
+            report_work_with_deadline(
+                &writer,
+                WorkId(8),
+                TEST_KEY,
+                None,
+                Duration::from_millis(5),
+                async move {
+                    let _ = settled.await;
+                    CallOutcome::Success {
+                        result: json!({"structuredContent": {"late": true}}),
+                    }
+                },
+            )
             .await;
         });
 
@@ -817,13 +946,20 @@ mod tests {
             .unwrap();
         let (work_polled, work_observed) = tokio::sync::oneshot::channel::<()>();
         let reporter = tokio::spawn(async move {
-            report_work_with_deadline(&writer, WorkId(9), Duration::ZERO, async move {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                work_polled.send(()).ok();
-                CallOutcome::Success {
-                    result: json!({"late": true}),
-                }
-            })
+            report_work_with_deadline(
+                &writer,
+                WorkId(9),
+                TEST_KEY,
+                None,
+                Duration::ZERO,
+                async move {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    work_polled.send(()).ok();
+                    CallOutcome::Success {
+                        result: json!({"structuredContent": {"late": true}}),
+                    }
+                },
+            )
             .await;
         });
 

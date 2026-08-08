@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! The protocol-neutral work pipeline (ADR-0024 Decision 2 and ADR-0096). Every per-tool
-//! `if name == ...` branch is replaced by a read of the tool's
-//! [`crate::browser::directory::ToolDescriptor`] row (ADR-0024 Decision 1); per-tool variance
+//! surface branches are replaced by a read of the canonical
+//! [`crate::operation::registry::OperationDescriptor`] row; per-operation variance
 //! lives in the registry, not here.
 //!
 //! The pipeline keeps the exact, test-pinned stage order the pre-move `handle_tools_call` had:
@@ -30,8 +30,10 @@
 //! fixture parse, no resource resolution under all-open, no frames for free actions, shadow
 //! mode observably identical to allow.
 
+#[cfg(test)]
+use crate::browser::directory;
 use crate::browser::pattern::HostOutcome;
-use crate::browser::{directory, pattern, resource, sacred};
+use crate::browser::{pattern, resource, sacred};
 use crate::governance::config::reload::ConfigStore;
 use crate::governance::dispatch::{hold_message, Gate, Governance};
 use crate::governance::ports::{Capability, Decision, Denial, EffectiveMode, GoverningResource};
@@ -39,11 +41,15 @@ use crate::hub::authority::{AuthoritySnapshot, AuthorityStore};
 use crate::hub::outbound::browser::Browser;
 use crate::hub::scheduling::{ExecutionClass, ExecutionContext, ScheduleFailure};
 use crate::hub::workspace::WorkspaceRegistry;
+use crate::operation::registry::{
+    self as operation_registry, Handler, OperationDescriptor, PostDispatch, ResourceShape,
+};
 use crate::tool::outcome::{delivery_failure_outcome, CallOutcome, DenialSource, LocalCtx};
 #[cfg(test)]
 use crate::tool::result::text_content;
 use crate::work::{CancellationToken, WorkContext};
 use crate::ToolError;
+use ghostlight_transport::operation::{BrowserOperation, IntentId, OperationEffect, OperationId};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -134,7 +140,7 @@ fn render_outcome(id: Option<Value>, outcome: CallOutcome) -> TestResponse {
         CallOutcome::AttentionRequired { message } => {
             TestResponse::success(id, text_content(message))
         }
-        CallOutcome::Cancelled { message } => {
+        CallOutcome::Cancelled { message, .. } => {
             TestResponse::success(id, execution_status_result("cancelled", false, message))
         }
     }
@@ -179,6 +185,18 @@ pub(crate) fn schedule_failure_message(error: ScheduleFailure) -> String {
         ScheduleFailure::Cancelled => {
             "Browser command was cancelled before it was dispatched.".to_string()
         }
+    }
+}
+
+fn schedule_failure_outcome(error: ScheduleFailure) -> CallOutcome {
+    match error {
+        ScheduleFailure::Cancelled => CallOutcome::Cancelled {
+            message: schedule_failure_message(ScheduleFailure::Cancelled),
+            effect: OperationEffect::None,
+        },
+        other => CallOutcome::NotDispatched {
+            message: schedule_failure_message(other),
+        },
     }
 }
 
@@ -322,13 +340,38 @@ fn stamp_audit_signals(
 /// joins it). `form_fill` (C10) declares `Read + Write` on its `action: None` variant, so it is
 /// never free-local -- it always falls through to grant enforcement and dispatches at the
 /// post-grant Local position instead, exactly like an `ExtensionForward` tool.
-fn is_free_local_action(descriptor: &directory::ToolDescriptor) -> bool {
-    matches!(descriptor.handler, directory::Handler::Local(_))
-        && descriptor
-            .variants
-            .iter()
-            .find(|v| v.action.is_none())
-            .is_some_and(|v| v.requires.is_empty())
+fn is_free_local_action(descriptor: &OperationDescriptor) -> bool {
+    matches!(descriptor.handler, Handler::Local(_)) && descriptor.requires.is_empty()
+}
+
+fn completed_local_effect(
+    descriptor: &OperationDescriptor,
+    outcome: &CallOutcome,
+) -> OperationEffect {
+    match outcome {
+        CallOutcome::Success { result } => descriptor.success_disposition_for(result).effect,
+        CallOutcome::NotDispatched { .. }
+        | CallOutcome::Denied { .. }
+        | CallOutcome::Held { .. }
+        | CallOutcome::AttentionRequired { .. } => OperationEffect::None,
+        CallOutcome::Failure { .. } | CallOutcome::OutcomeUnknown { .. } => {
+            OperationEffect::Unknown
+        }
+        CallOutcome::Cancelled { effect, .. } => *effect,
+    }
+}
+
+fn dry_run_accepted(descriptor: &OperationDescriptor, action: Option<&str>) -> CallOutcome {
+    let mut label = match action {
+        Some(action) => format!("{} ({action}) would be accepted", descriptor.key.id),
+        None => format!("{} would be accepted", descriptor.key.id),
+    };
+    if descriptor.post_dispatch == PostDispatch::NavigateLanding {
+        label.push_str(" (pre-dispatch verdict; the post-redirect landing is checked live)");
+    }
+    CallOutcome::Success {
+        result: crate::tool::result::text_content(label),
+    }
 }
 
 fn reentrant_authority_snapshot(
@@ -356,6 +399,7 @@ fn reentrant_authority_snapshot(
 /// looked up and audited as the action `"submit"`); `false`, an absent key, or any other value
 /// type yields no action. `action_key: None` always
 /// yields `None`, ignoring whatever the args carry.
+#[cfg(test)]
 fn extract_action<'a>(action_key: Option<&'a str>, args: &'a Value) -> Option<&'a str> {
     let key = action_key?;
     match args.get(key) {
@@ -400,15 +444,14 @@ pub async fn run_work(
     workspaces: &WorkspaceRegistry,
     work: &WorkContext,
     cancellation: &CancellationToken,
-    args: &Value,
+    _args: &Value,
 ) -> CallOutcome {
-    let mut outcome = run_tool_call(
+    let mut outcome = run_operation_call(
         browser,
         store,
         authority,
         work.routing_key(),
         work.operation(),
-        args,
         None,
         false,
         work.restriction(),
@@ -420,7 +463,7 @@ pub async fn run_work(
     )
     .await;
 
-    release_closed_workspace_tab(workspaces, work, args, &outcome);
+    release_closed_workspace_tab(workspaces, work, work.arguments(), &outcome);
     if let CallOutcome::Denied { message, .. } = &mut outcome {
         *message = with_org_contact_line(std::mem::take(message));
     }
@@ -428,6 +471,7 @@ pub async fn run_work(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(crate) async fn run_tool_call(
     browser: &Browser,
     store: &Arc<ConfigStore>,
@@ -447,6 +491,7 @@ pub(crate) async fn run_tool_call(
     if cancellation.is_some_and(CancellationToken::is_cancelled) {
         return CallOutcome::Cancelled {
             message: "The browser command was cancelled before dispatch.".to_string(),
+            effect: OperationEffect::None,
         };
     }
     // Unknown tool names are rejected before dispatch (and before waiting on the extension
@@ -457,7 +502,7 @@ pub(crate) async fn run_tool_call(
     // (ADR-0024 Decision 1): the registry lookup itself IS the validity check now
     // (`directory::descriptor`, replacing the transport layer's former per-call fixture
     // re-parse); a miss still returns the byte-identical "Unknown tool: {name}" result.
-    let Some(descriptor) = directory::descriptor(name) else {
+    let Some(_declaration) = directory::descriptor(name) else {
         let err = ToolError::invalid_request(format!("Unknown tool: {name}"))
             .next_step("call tools/list and use one of the advertised tool names");
         return CallOutcome::Failure { error: err };
@@ -474,15 +519,72 @@ pub(crate) async fn run_tool_call(
         }
     }
 
-    let action = extract_action(descriptor.action_key, args);
-    let lookup: Option<&'static [Capability]> =
-        directory::requires_for_call(descriptor, action, args);
+    let operation = match operation_registry::decode_legacy_call(name, args) {
+        Ok(operation) => operation,
+        Err(error) => return CallOutcome::Failure { error },
+    };
+    run_operation_call(
+        browser,
+        store,
+        authority,
+        guid,
+        &operation,
+        orchestration,
+        dry_run,
+        overlay,
+        inherited_execution,
+        inherited_authority,
+        work,
+        cancellation,
+        workspaces,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_operation_call(
+    browser: &Browser,
+    store: &Arc<ConfigStore>,
+    authority: &AuthorityStore,
+    guid: &str,
+    operation: &BrowserOperation,
+    orchestration: Option<(&'static str, &str, u32)>,
+    dry_run: bool,
+    overlay: Option<&crate::governance::overlay::SessionOverlay>,
+    inherited_execution: Option<&ExecutionContext>,
+    inherited_authority: Option<&Arc<AuthoritySnapshot>>,
+    work: Option<&WorkContext>,
+    cancellation: Option<&CancellationToken>,
+    workspaces: Option<&WorkspaceRegistry>,
+) -> CallOutcome {
+    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        return CallOutcome::Cancelled {
+            message: "The browser command was cancelled before dispatch.".to_string(),
+            effect: OperationEffect::None,
+        };
+    }
+    let Some(descriptor) = operation_registry::descriptor(operation.key()) else {
+        return CallOutcome::Failure {
+            error: ToolError::invalid_request(format!(
+                "Unknown operation pair: {} / {}",
+                operation.id, operation.intent
+            )),
+        };
+    };
+    if let Err(error) = descriptor.validate(&operation.arguments) {
+        return CallOutcome::Failure { error };
+    }
+    let args = &operation.arguments;
+    let name = descriptor.key.id.as_str();
+    let action = Some(descriptor.key.intent.as_str());
+    let requirements = descriptor.requirements_for_call(args);
+    let lookup = Some(requirements);
 
     if let (Some(workspaces), Some(work), Some(workspace), Some(tab_id)) = (
         workspaces,
         work,
         work.and_then(WorkContext::workspace),
-        args.get("tabId").and_then(Value::as_i64),
+        args.get("tab").and_then(Value::as_i64),
     ) {
         if !workspaces.owns_tab(workspace, tab_id) {
             let snapshot = authority.current();
@@ -526,7 +628,12 @@ pub(crate) async fn run_tool_call(
             message: hold_message(name, action, held_for),
         };
     }
-    if !dry_run && !matches!(name, "explain" | "script" | "browser_batch") {
+    if !dry_run
+        && !matches!(
+            descriptor.key.id,
+            OperationId::BrowserContext | OperationId::BrowserFlow
+        )
+    {
         if let Some(message) = browser.attention_message(guid) {
             let snapshot = authority.current();
             let mut audit = snapshot.governance.begin_with_client(
@@ -570,11 +677,7 @@ pub(crate) async fn run_tool_call(
         };
         let execution = match admitted {
             Ok(execution) => execution,
-            Err(error) => {
-                return CallOutcome::NotDispatched {
-                    message: schedule_failure_message(error),
-                }
-            }
+            Err(error) => return schedule_failure_outcome(error),
         };
         let reentrant = inherited_execution.is_some_and(|inherited| {
             execution.command_id().is_some() && execution.command_id() == inherited.command_id()
@@ -587,9 +690,7 @@ pub(crate) async fn run_tool_call(
                     // A retained lease is immutable. Dropping this clone and reacquiring would
                     // return the same stale lease forever, so fail at this safe step boundary.
                     drop(execution);
-                    return CallOutcome::NotDispatched {
-                        message: schedule_failure_message(error),
-                    };
+                    return schedule_failure_outcome(error);
                 }
             }
         }
@@ -608,6 +709,7 @@ pub(crate) async fn run_tool_call(
         drop(execution);
         return CallOutcome::Cancelled {
             message: "The browser command was cancelled before dispatch.".to_string(),
+            effect: OperationEffect::None,
         };
     }
 
@@ -617,12 +719,11 @@ pub(crate) async fn run_tool_call(
     // this instead of a hardcoded `name == "computer"` check -- `computer` is the only
     // descriptor carrying one today. C10 (PINS.md SS13 point 1) extends this to a BOOLEAN
     // action key (`form_fill`'s `submit`): see [`extract_action`].
-    // The single per-call action-directory lookup (ADR-0022 Decision 2, ADR-0024 Decision 3): a
-    // pure static table scan, no I/O, performed ONCE and kept as the `Option` it is (a registry
-    // miss is `None`, never coerced to an empty slice here): `governance.begin` and
-    // `governance.authorize` both consume this SAME value, so there is exactly one lookup for
-    // the whole call, feeding both the decision and the audit `capability` field.
-    let resource_shape = directory::resource_for_call(descriptor, action, args);
+    // The single per-call canonical requirement lookup (ADR-0022 Decision 2, ADR-0024 Decision
+    // 3): a pure static descriptor read, no I/O, performed once after the operation pair was
+    // validated. `governance.begin` receives that same known slice through its compatibility
+    // Option, while authorization and attention signals consume the slice directly.
+    let resource_shape = descriptor.resource_for_call(args);
     let mut audit = governance.begin_with_client(
         name,
         action,
@@ -641,11 +742,7 @@ pub(crate) async fn run_tool_call(
     // deleted, and the grant path's `tab_url_request`). Nothing is probed until the first stage
     // that actually needs it calls `.get()` -- an all-open call, an ungoverned call, a free
     // action, or a call with no `tabId` at all issues zero frames.
-    let mut tab_url = LazyTabUrl::new(
-        browser,
-        args.get("tabId").and_then(Value::as_i64),
-        &execution,
-    );
+    let mut tab_url = LazyTabUrl::new(browser, args.get("tab").and_then(Value::as_i64), &execution);
 
     // The sacred-domains never-touch check (ADR-0018 step 2, g08): always enforced,
     // independent of governance.mode or manifest presence -- RECONCILIATION.md section 1's
@@ -687,13 +784,13 @@ pub(crate) async fn run_tool_call(
             audit.sacred_deny(&denial, tab_domain.as_deref());
             let (title, description) =
                 denial_notification("on the never-touch list", &denial.domain);
-            let tab_id = args.get("tabId").and_then(Value::as_i64);
+            let tab_id = args.get("tab").and_then(Value::as_i64);
             let present = browser.observe_denial(
                 guid,
                 tab_id,
                 crate::governance::attention::DenialSignal {
                     origin: tab_domain.clone().or_else(|| Some(denial.domain.clone())),
-                    capabilities: lookup.unwrap_or(&[]).to_vec(),
+                    capabilities: requirements.to_vec(),
                     category: crate::governance::attention::DenialCategory::Sacred,
                 },
             );
@@ -738,9 +835,24 @@ pub(crate) async fn run_tool_call(
     // `governance.authorize`'s own free-action arm. All are audited as an allow with no grant
     // attribution and a real (not hardcoded) `duration_ms`.
     if is_free_local_action(descriptor) {
-        let directory::Handler::Local(f) = descriptor.handler else {
+        if dry_run {
+            return dry_run_accepted(descriptor, action);
+        }
+        let Handler::Local(f) = descriptor.handler else {
             unreachable!("is_free_local_action only returns true for Handler::Local");
         };
+        let local_legacy_args = if descriptor.key.id == OperationId::BrowserFlow {
+            None
+        } else {
+            match descriptor.legacy_arguments(args) {
+                Ok(arguments) => Some(arguments),
+                Err(error) => {
+                    audit.complete();
+                    return CallOutcome::Failure { error };
+                }
+            }
+        };
+        let local_args = local_legacy_args.as_ref().unwrap_or(args);
         let ctx = LocalCtx {
             browser,
             store,
@@ -749,7 +861,8 @@ pub(crate) async fn run_tool_call(
             governance,
             guid,
             config: &config,
-            args,
+            operation,
+            args: local_args,
             execution: &execution,
             overlay,
             work,
@@ -770,22 +883,16 @@ pub(crate) async fn run_tool_call(
 
     // Grant enforcement (g13, ADR-0018 step 3, ADR-0024 Decision 3): resolve the governing
     // resource for this call, then consult the single policy gate. Resource resolution stays
-    // gated on being governed with a KNOWN, non-empty requirement set (a miss resolves nothing --
-    // no wasted probe before its `unknown_action` denial; a free action was already allowed
-    // above); `governance.authorize` itself is called for EVERY call that reaches this point
-    // (governed or not, miss or not) -- its own precedence table makes the ungoverned/free/miss
-    // arms cheap and correct, restoring ADR-0022's absent-means-DENY for a governed miss (the
-    // ADR-0024 sanctioned delta this task owns) while leaving all-open and free-action behavior
-    // byte-identical. Resolution itself is now shape-driven (ADR-0024 Decision 1's
-    // `ResourceShape`) instead of a per-tool name match.
+    // gated on being governed with a known, non-empty requirement set; a free action was already
+    // allowed above. `governance.authorize` itself is called for every live call that reaches this
+    // point. Resolution is shape-driven (ADR-0024 Decision 1's `ResourceShape`) instead of a
+    // per-tool name match.
     let config_mode = config.governance_mode();
     // ADR-0060/0096: a request restriction must be able to tighten even when the SERVICE is all-open, so
     // the resource (the tabId->host probe) is resolved when EITHER the service is governed OR an
     // restriction is present. A call with no restriction under an all-open service keeps the exact
     // zero-probe fast path.
-    let resolved = if (governance.is_governed() || overlay.is_some())
-        && matches!(lookup, Some(r) if !r.is_empty())
-    {
+    let resolved = if (governance.is_governed() || overlay.is_some()) && !requirements.is_empty() {
         resolve_governing_resource(&mut tab_url, resource_shape, args).await
     } else {
         None
@@ -800,19 +907,15 @@ pub(crate) async fn run_tool_call(
     // descriptor marks this tool for the navigate landing re-check (today: `navigate` only) --
     // preserving today's exact `name == "navigate"` gating via the marker instead.
     let navigate_post_check =
-        resolved.is_some() && descriptor.post_dispatch == directory::PostDispatch::NavigateLanding;
+        resolved.is_some() && descriptor.post_dispatch == PostDispatch::NavigateLanding;
     let resource = resolved.map(|(r, _)| r);
     // ADR-0060/0096: the request restriction's decision for this call, evaluated against the SAME resolved
     // resource (a clone, so the service path still consumes the original). `None` when there is no
     // overlay or no resolved target -- the overlay abstains, leaving the service decision as-is.
     let overlay_decision = match (overlay, &resource) {
-        (Some(ov), Some(res)) => Some(ov.decide(
-            name,
-            action,
-            lookup.unwrap_or(&[]),
-            res.clone(),
-            config_mode,
-        )),
+        (Some(ov), Some(res)) => {
+            Some(ov.decide(name, action, requirements, res.clone(), config_mode))
+        }
         _ => None,
     };
     // dry-run evaluates the REAL governance verdict but writes no audit record: it uses the
@@ -827,8 +930,7 @@ pub(crate) async fn run_tool_call(
         match resource {
             None => Gate::Proceed,
             Some(resource) => {
-                match governance.decide(name, action, lookup.unwrap_or(&[]), resource, config_mode)
-                {
+                match governance.decide(name, action, requirements, resource, config_mode) {
                     crate::governance::ports::Decision::Allow { .. } => Gate::Proceed,
                     crate::governance::ports::Decision::ShadowDeny(_) => Gate::Proceed,
                     crate::governance::ports::Decision::Deny(d) => Gate::Deny { denial: d },
@@ -849,13 +951,13 @@ pub(crate) async fn run_tool_call(
                 audit.sacred_deny(&denial, domain_str.as_deref());
                 let (title, description) =
                     denial_notification("outside the granted policy", &denial.domain);
-                let tab_id = args.get("tabId").and_then(Value::as_i64);
+                let tab_id = args.get("tab").and_then(Value::as_i64);
                 let present = browser.observe_denial(
                     guid,
                     tab_id,
                     crate::governance::attention::DenialSignal {
                         origin: domain_str.clone().or_else(|| Some(denial.domain.clone())),
-                        capabilities: lookup.unwrap_or(&[]).to_vec(),
+                        capabilities: requirements.to_vec(),
                         category: crate::governance::attention::DenialCategory::Policy,
                     },
                 );
@@ -881,13 +983,13 @@ pub(crate) async fn run_tool_call(
             if !dry_run {
                 let (title, description) =
                     denial_notification("outside the granted policy", &denial.domain);
-                let tab_id = args.get("tabId").and_then(Value::as_i64);
+                let tab_id = args.get("tab").and_then(Value::as_i64);
                 let present = browser.observe_denial(
                     guid,
                     tab_id,
                     crate::governance::attention::DenialSignal {
                         origin: domain_str.clone().or_else(|| Some(denial.domain.clone())),
-                        capabilities: lookup.unwrap_or(&[]).to_vec(),
+                        capabilities: requirements.to_vec(),
                         category: crate::governance::attention::DenialCategory::Policy,
                     },
                 );
@@ -915,25 +1017,14 @@ pub(crate) async fn run_tool_call(
     // accepted" -- and drop the audit scope without `complete()` (no step record: nothing ran).
     // The verdict text names the tool and action so the model can read the pre-flight map.
     if dry_run {
-        let mut label = match action {
-            Some(a) => format!(r#"{} ({}) would be accepted"#, descriptor.tool, a),
-            None => format!("{} would be accepted", descriptor.tool),
-        };
-        // ADR-0035 Decision 8 (amended): a dry verdict for a tool with a landing re-check is a
-        // PRE-DISPATCH verdict only -- a live call's post-redirect landing can still be denied.
-        // Saying so keeps the pre-flight map honest instead of over-promising.
-        if descriptor.post_dispatch == directory::PostDispatch::NavigateLanding {
-            label.push_str(" (pre-dispatch verdict; the post-redirect landing is checked live)");
-        }
-        return CallOutcome::Success {
-            result: crate::tool::result::text_content(label),
-        };
+        return dry_run_accepted(descriptor, action);
     }
 
     if cancellation.is_some_and(CancellationToken::is_cancelled) {
         audit.complete();
         return CallOutcome::Cancelled {
             message: "The browser command was cancelled before dispatch.".to_string(),
+            effect: OperationEffect::None,
         };
     }
 
@@ -943,7 +1034,7 @@ pub(crate) async fn run_tool_call(
     // control falls through to dispatch below, which fails fast with the canonical
     // "extension not connected" `ToolError` -- one hop-attributed message, not two to keep in sync.
     let mut waited: Option<Duration> = None;
-    if resource_shape != directory::ResourceShape::RecordingScoped && !browser.is_connected() {
+    if resource_shape != ResourceShape::RecordingScoped && !browser.is_connected() {
         let started = Instant::now();
         let connected = match cancellation {
             Some(cancellation) => tokio::select! {
@@ -961,6 +1052,7 @@ pub(crate) async fn run_tool_call(
             audit.complete();
             return CallOutcome::Cancelled {
                 message: "The browser command was cancelled before dispatch.".to_string(),
+                effect: OperationEffect::None,
             };
         }
         if connected {
@@ -979,7 +1071,19 @@ pub(crate) async fn run_tool_call(
     // above), so by construction this is the ONLY remaining way a Local tool reaches here --
     // `form_fill` (C10) is the first user. Same audit/postprocess/wait-note flow as
     // `ExtensionForward` below, minus the navigate-only landing re-check no Local tool declares.
-    if let directory::Handler::Local(f) = descriptor.handler {
+    if let Handler::Local(f) = descriptor.handler {
+        let local_legacy_args = if descriptor.key.id == OperationId::BrowserFlow {
+            None
+        } else {
+            match descriptor.legacy_arguments(args) {
+                Ok(arguments) => Some(arguments),
+                Err(error) => {
+                    audit.complete();
+                    return CallOutcome::Failure { error };
+                }
+            }
+        };
+        let local_args = local_legacy_args.as_ref().unwrap_or(args);
         let ctx = LocalCtx {
             browser,
             store,
@@ -988,7 +1092,8 @@ pub(crate) async fn run_tool_call(
             governance,
             guid,
             config: &config,
-            args,
+            operation,
+            args: local_args,
             execution: &execution,
             overlay,
             work,
@@ -1028,6 +1133,7 @@ pub(crate) async fn run_tool_call(
         {
             return CallOutcome::Cancelled {
                 message: "Cancellation was observed after local work reached a safe boundary; completed steps remain audited and are not replayed.".to_string(),
+                effect: completed_local_effect(descriptor, &outcome),
             };
         }
         return outcome;
@@ -1037,11 +1143,28 @@ pub(crate) async fn run_tool_call(
         audit.complete();
         return CallOutcome::Cancelled {
             message: "The browser command was cancelled before dispatch.".to_string(),
+            effect: OperationEffect::None,
         };
     }
 
+    let Some(dispatch_tool) = descriptor.legacy_dispatch_tool() else {
+        audit.complete();
+        return CallOutcome::Failure {
+            error: ToolError::invalid_request(format!(
+                "operation {} / {} has no browser mechanism",
+                descriptor.key.id, descriptor.key.intent
+            )),
+        };
+    };
+    let dispatch_args = match descriptor.legacy_arguments(args) {
+        Ok(arguments) => arguments,
+        Err(error) => {
+            audit.complete();
+            return CallOutcome::Failure { error };
+        }
+    };
     let mut outcome = browser
-        .call_with_delivery_outcome(guid, name, args, &execution)
+        .call_with_delivery_outcome(guid, dispatch_tool, &dispatch_args, &execution)
         .await;
     audit.dispatch_finished();
 
@@ -1074,13 +1197,13 @@ pub(crate) async fn run_tool_call(
     // target, per the fall-through comment above); a failed dispatch gets no post-check
     // (nothing landed).
     if navigate_post_check && outcome.is_ok() {
-        if let Some(tab_id) = args.get("tabId").and_then(Value::as_i64) {
+        if let Some(tab_id) = args.get("tab").and_then(Value::as_i64) {
             let (landing, landing_domain) = post_navigate_landing_check(
                 browser,
                 governance,
                 guid,
-                descriptor.tool,
-                lookup.unwrap_or(&[]),
+                descriptor.key.id.as_str(),
+                requirements,
                 tab_id,
                 config_mode,
                 &execution,
@@ -1099,7 +1222,7 @@ pub(crate) async fn run_tool_call(
                         Some(tab_id),
                         crate::governance::attention::DenialSignal {
                             origin: landing_domain.clone().or_else(|| Some(d.domain.clone())),
-                            capabilities: lookup.unwrap_or(&[]).to_vec(),
+                            capabilities: requirements.to_vec(),
                             category: crate::governance::attention::DenialCategory::Policy,
                         },
                     );
@@ -1137,6 +1260,10 @@ pub(crate) async fn run_tool_call(
     audit.complete();
 
     if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        let effect = match &outcome {
+            Ok(result) => descriptor.success_disposition_for(result).effect,
+            Err(_) => OperationEffect::Unknown,
+        };
         return CallOutcome::Cancelled {
             message: if outcome
                 .as_ref()
@@ -1149,6 +1276,7 @@ pub(crate) async fn run_tool_call(
                 "Cancellation arrived after browser dispatch. The atomic operation drained and was audited; Ghostlight did not roll it back or replay it."
                     .to_string()
             },
+            effect,
         };
     }
 
@@ -1193,14 +1321,17 @@ fn release_closed_workspace_tab(
         return;
     };
 
-    let closed = work.operation() == "tab_control"
-        && args.get("action").and_then(Value::as_str) == Some("close")
+    let closed = work.operation_key()
+        == ghostlight_transport::operation::OperationKey::new(
+            OperationId::BrowserTabs,
+            IntentId::TabsClose,
+        )
         && result
             .pointer("/structuredContent/interactionReceipt/observedAfter/tabClosed")
             .and_then(Value::as_bool)
             == Some(true);
     if closed {
-        if let Some(tab_id) = args.get("tabId").and_then(Value::as_i64) {
+        if let Some(tab_id) = args.get("tab").and_then(Value::as_i64) {
             workspaces.release_tab(workspace, tab_id);
         }
     }
@@ -1245,7 +1376,7 @@ struct SacredCheck {
 /// the user, not the agent, moves that tab) -- this is ARGUMENT-driven, independent of
 /// `resource_shape`, because tool arguments are not schema-validated and a never-touch check must
 /// never be gated by a classification that could itself be wrong for a malformed call. STEP C
-/// (the target host) fires iff `resource_shape` is [`directory::ResourceShape::TargetArg`]
+/// (the target host) fires iff `resource_shape` is [`ResourceShape::TargetArg`]
 /// (today: `navigate` only, ADR-0024 Decision 1), even when STEP B could not resolve the tab,
 /// since it is local and needs no extension. STEP B reads the tab's URL through the shared
 /// `tab_url` cell (ADR-0024 Decision 4), the SAME probe the grant path below reuses, rather than
@@ -1253,13 +1384,13 @@ struct SacredCheck {
 async fn sacred_check(
     tab_url: &mut LazyTabUrl<'_>,
     sacred_domains: &[String],
-    resource_shape: directory::ResourceShape,
+    resource_shape: ResourceShape,
     args: &Value,
 ) -> SacredCheck {
     let tab_host = match args
-        .get("tabId")
+        .get("tab")
         .and_then(Value::as_i64)
-        .filter(|_| resource_shape != directory::ResourceShape::RecordingScoped)
+        .filter(|_| resource_shape != ResourceShape::RecordingScoped)
     {
         Some(_) => tab_url
             .get()
@@ -1281,7 +1412,7 @@ async fn sacred_check(
         }
     }
 
-    if resource_shape == directory::ResourceShape::TargetArg {
+    if resource_shape == ResourceShape::TargetArg {
         if let Some(target_host) = args
             .get("url")
             .and_then(Value::as_str)
@@ -1303,7 +1434,7 @@ async fn sacred_check(
 }
 
 /// Resolve the g13 governing resource for one call (section 5's summary table), shape-driven
-/// (ADR-0024 Decision 1's [`directory::ResourceShape`]) instead of a per-tool name match. Only
+/// (ADR-0024 Decision 1's [`ResourceShape`]) instead of a per-tool name match. Only
 /// called once [`Governance::is_governed`] is true. Returns `None` only for an unparseable
 /// `TargetArg` (`navigate`) target: nothing to govern (section 4: "dispatch without pre- or
 /// post-check"). Otherwise `Some((resource, domain))`, where `domain` is the resolved host for
@@ -1313,14 +1444,14 @@ async fn sacred_check(
 /// Decision 4), the SAME probe the sacred check above may already have resolved for this call.
 async fn resolve_governing_resource(
     tab_url: &mut LazyTabUrl<'_>,
-    resource_shape: directory::ResourceShape,
+    resource_shape: ResourceShape,
     args: &Value,
 ) -> Option<(GoverningResource, Option<String>)> {
     match resource_shape {
-        directory::ResourceShape::DomainLess | directory::ResourceShape::RecordingScoped => {
+        ResourceShape::DomainLess | ResourceShape::RecordingScoped => {
             Some((GoverningResource::None, None))
         }
-        directory::ResourceShape::TargetArg => match args.get("url").and_then(Value::as_str) {
+        ResourceShape::TargetArg => match args.get("url").and_then(Value::as_str) {
             // "back"/"forward" and a missing/non-string url argument have no target to check
             // pre-dispatch (point 5 covers the landing for "back"/"forward"; the extension's own
             // handling covers a missing url). The union rule (no host, tool/access still apply)
@@ -1335,8 +1466,8 @@ async fn resolve_governing_resource(
                 None => None,
             },
         },
-        directory::ResourceShape::TabScoped => {
-            if args.get("tabId").and_then(Value::as_i64).is_none() {
+        ResourceShape::TabScoped => {
+            if args.get("tab").and_then(Value::as_i64).is_none() {
                 // Missing/non-integer tabId on a tab-scoped tool: fail closed (constraint 11).
                 return Some((GoverningResource::Indeterminate, None));
             }
@@ -1360,7 +1491,7 @@ async fn resolve_governing_resource(
 /// (`None` for a non-host landing -- never the denial message's `(unknown)` placeholder). `tool`
 /// is the descriptor's own tool name (ADR-0024 Decision 2: no hardcoded `"navigate"` literal in
 /// the governance-core call), supplied by the only caller that reaches this function today
-/// (`navigate`, via [`directory::PostDispatch::NavigateLanding`]). The caller decides what each
+/// (`navigate`, via [`PostDispatch::NavigateLanding`]). The caller decides what each
 /// variant means for the response and the audit record; this function's own side effect is
 /// limited to the best-effort `about:blank` park, and ONLY for an actual [`Decision::Deny`] -- a
 /// [`Decision::ShadowDeny`] landing must leave the browser untouched (shadow mode is a fully
@@ -2145,7 +2276,12 @@ mod tests {
         let browser = Browser::new();
         let work = WorkContext::new(
             None,
-            "navigate",
+            BrowserOperation::new(
+                OperationId::BrowserNavigate,
+                IntentId::NavigateUrl,
+                json!({"tab": 5, "url": "https://example.com"}),
+            ),
+            None,
             Some(crate::governance::ports::ClientInfo {
                 name: "test-client".to_string(),
                 version: "9.9.9".to_string(),
@@ -2180,8 +2316,7 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
-    /// Test 11: a `computer` call with `action: "screenshot"` records that action and the
-    /// `read` capability (ADR-0022 Decision 2: `computer screenshot` requires `read`).
+    /// A legacy `computer screenshot` call records its canonical operation and `read` capability.
     #[tokio::test]
     async fn computer_call_records_action_and_read_capability() {
         let path = temp_audit_path("computer");
@@ -2208,7 +2343,8 @@ mod tests {
 
         let lines = read_lines(&path);
         assert_eq!(lines.len(), 1, "exactly one audit record");
-        assert_eq!(lines[0]["action"], "screenshot");
+        assert_eq!(lines[0]["tool"], "browser.screenshot");
+        assert_eq!(lines[0]["action"], "screenshot.viewport");
         assert_eq!(lines[0]["capability"], "read");
 
         std::fs::remove_file(&path).ok();
@@ -2278,7 +2414,10 @@ mod tests {
         );
         let text = result["content"][0]["text"].as_str().expect("text block");
         assert!(text.starts_with("Paused:"), "{text}");
-        assert!(text.contains("'computer (screenshot)' call"), "{text}");
+        assert!(
+            text.contains("'browser.screenshot (screenshot.viewport)' call"),
+            "{text}"
+        );
 
         let dialog_params =
             json!({ "name": "dialog", "arguments": { "action": "status", "tabId": 5 } });
@@ -2297,7 +2436,7 @@ mod tests {
             .expect("dialog pause text");
         assert!(dialog_text.starts_with("Paused:"), "{dialog_text}");
         assert!(
-            dialog_text.contains("'dialog (status)' call"),
+            dialog_text.contains("'browser.dialog (dialog.status)' call"),
             "{dialog_text}"
         );
 
@@ -2318,7 +2457,7 @@ mod tests {
             .expect("tab pause text");
         assert!(tab_text.starts_with("Paused:"), "{tab_text}");
         assert!(
-            tab_text.contains("'tab_control (focus)' call"),
+            tab_text.contains("'browser.tabs (tabs.focus)' call"),
             "{tab_text}"
         );
 
@@ -2346,7 +2485,10 @@ mod tests {
             .as_str()
             .expect("text block");
         assert!(explain_text.starts_with("Paused:"), "{explain_text}");
-        assert!(explain_text.contains("'explain' call"), "{explain_text}");
+        assert!(
+            explain_text.contains("'browser.context (context.describe)' call"),
+            "{explain_text}"
+        );
 
         browser.set_held(false);
         let resp2 = handle_tools_call(
@@ -3001,8 +3143,8 @@ mod tests {
         let lines = read_lines(&path);
         assert_eq!(lines.len(), 1, "exactly one audit record");
         let rec = &lines[0];
-        assert_eq!(rec["tool"], "explain");
-        assert!(rec["action"].is_null());
+        assert_eq!(rec["tool"], "browser.context");
+        assert_eq!(rec["action"], "context.describe");
         assert_eq!(rec["capability"], "none");
         assert_eq!(rec["decision"], "allow");
         assert!(rec["domain"].is_null());
@@ -3397,6 +3539,11 @@ mod tests {
         let execution = ExecutionContext::local();
         let config = store.current();
         let args = json!({});
+        let operation = BrowserOperation::new(
+            OperationId::BrowserContext,
+            IntentId::ContextDescribe,
+            json!({}),
+        );
         let ctx = LocalCtx {
             browser: &browser,
             store: &store,
@@ -3405,6 +3552,7 @@ mod tests {
             governance: governance.as_ref(),
             guid: "test-guid",
             config: &config,
+            operation: &operation,
             args: &args,
             execution: &execution,
             overlay: None,
@@ -3420,6 +3568,83 @@ mod tests {
         let rendered = render_outcome(Some(json!(1)), outcome);
         let text = serde_json::to_string(&rendered.result.expect("result present")).unwrap();
         assert!(!text.contains("_batch_id"), "{text}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn flow_preflight_does_not_run_or_audit_a_free_local_child() {
+        let path = temp_audit_path("flow-preflight-local-child");
+        let _ = std::fs::remove_file(&path);
+        let recorder = Arc::new(Recorder::to_file(path.clone()));
+        let governance = Arc::new(Governance::all_open(recorder as Arc<dyn AuditSink>));
+        let store =
+            crate::governance::config::reload::ConfigStore::for_test_with_config(Config::minimal());
+        let authority =
+            AuthorityStore::from_existing(&store.current_authority(), Arc::clone(&governance));
+        let browser = Browser::new();
+        let child = BrowserOperation::new(
+            OperationId::WorkflowPlan,
+            IntentId::PlanUpdate,
+            json!({"domains": [], "approach": []}),
+        );
+        let operation = BrowserOperation::new(
+            OperationId::BrowserFlow,
+            IntentId::FlowPreflight,
+            json!({"steps": [child], "on_error": "stop"}),
+        );
+
+        let CallOutcome::Success { result } = run_operation_call(
+            &browser,
+            &store,
+            &authority,
+            "test-guid",
+            &operation,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        else {
+            panic!("flow preflight should complete locally");
+        };
+        let flow: ghostlight_transport::operation::FlowResultData =
+            serde_json::from_value(result["structuredContent"].clone())
+                .expect("canonical flow result");
+        assert_eq!(
+            flow.steps[0].status,
+            ghostlight_transport::operation::FlowStepStatus::WouldAllow
+        );
+        assert_eq!(
+            flow.steps[0].result.parts,
+            vec![ghostlight_transport::operation::ResultPart::Text {
+                text: "workflow.plan (plan.update) would be accepted".into(),
+            }]
+        );
+
+        let lines = read_lines(&path);
+        assert_eq!(lines.len(), 1, "only the root preflight is audited");
+        assert_eq!(lines[0]["tool"], "browser.flow");
+        assert_eq!(lines[0]["action"], "flow.preflight");
+        assert_eq!(lines[0]["dry_run"], true);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn queued_schedule_cancellation_is_typed_as_cancelled_without_effect() {
+        let CallOutcome::Cancelled { message, effect } =
+            schedule_failure_outcome(ScheduleFailure::Cancelled)
+        else {
+            panic!("queued cancellation must remain a typed cancellation");
+        };
+        assert_eq!(
+            message,
+            schedule_failure_message(ScheduleFailure::Cancelled)
+        );
+        assert_eq!(effect, OperationEffect::None);
     }
 
     #[tokio::test]

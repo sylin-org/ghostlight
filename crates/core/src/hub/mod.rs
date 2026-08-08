@@ -19,7 +19,7 @@
 //! `docs/adr/0004-reject-second-session.md`'s amendment note for the cross-reference from the
 //! original single-session decision this multiplexes past.
 
-use crate::browser::{advertise, pattern};
+use crate::browser::pattern;
 use crate::governance::audit::Recorder;
 use crate::governance::config::reload::{ConfigStore, PolicySource};
 use crate::governance::manifest::identity::ManifestIdentity;
@@ -543,7 +543,6 @@ fn spawn_authority_watch(
     tokio::spawn(async move {
         let mut changes = store.subscribe_authority();
         let mut ignored_in_force = changes.borrow().policy.user_manifest_ignored;
-        let canonical = crate::tool::tools::advertised_tools_json();
         while changes.changed().await.is_ok() {
             let inputs = changes.borrow_and_update().clone();
             let outgoing = authority.current();
@@ -569,10 +568,13 @@ fn spawn_authority_watch(
                 _ => recorder.set_policy_seq(None),
             }
 
-            let before = advertise::advertised_tools(&canonical, outgoing.governance.grants());
+            let before =
+                crate::operation::registry::project_availability(&outgoing.governance, None, 0)
+                    .operations;
             browser.scheduler().advance_authority_epoch(inputs.epoch);
             let next = authority.install(&inputs);
-            let after = advertise::advertised_tools(&canonical, next.governance.grants());
+            let after = crate::operation::registry::project_availability(&next.governance, None, 0)
+                .operations;
 
             if policy_changed {
                 next.governance

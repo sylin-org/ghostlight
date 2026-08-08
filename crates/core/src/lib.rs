@@ -12,6 +12,7 @@ pub mod governance;
 pub mod hub;
 pub mod install;
 pub mod messages;
+pub mod operation;
 pub mod origin;
 pub(crate) mod recording;
 pub mod tool;

@@ -20,6 +20,7 @@ use crate::hub::outbound::browser::Browser;
 use crate::hub::scheduling::ExecutionContext;
 use crate::tool::outcome::{delivery_failure_outcome, CallOutcome, LocalCtx, LocalFuture};
 use crate::work::{CancellationToken, WorkContext};
+use ghostlight_transport::operation::OperationEffect;
 use serde_json::{json, Value};
 use std::time::Instant;
 
@@ -114,6 +115,7 @@ async fn run(
     if cancellation.is_some_and(CancellationToken::is_cancelled) {
         return CallOutcome::Cancelled {
             message: "form_fill was cancelled before its first browser step.".to_string(),
+            effect: OperationEffect::None,
         };
     }
     let mut structure_audit = governance.begin_with_client(
@@ -160,6 +162,11 @@ async fn run(
             return CallOutcome::Cancelled {
                 message: "form_fill stopped between fields after cancellation; completed fields remain audited and were not replayed."
                     .to_string(),
+                effect: if filled.is_empty() {
+                    OperationEffect::None
+                } else {
+                    OperationEffect::Committed
+                },
             };
         }
         if held_abort || browser.held_for().is_some() {
@@ -244,6 +251,7 @@ async fn run(
             return CallOutcome::Cancelled {
                 message: "form_fill stopped before submit after cancellation; completed field edits remain audited."
                     .to_string(),
+                effect: OperationEffect::Committed,
             };
         }
         if let Some(idx) = outcome.form_index {

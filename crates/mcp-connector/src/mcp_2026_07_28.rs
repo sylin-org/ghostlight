@@ -12,11 +12,13 @@ use crate::jsonrpc::{
     error_response, notification, success_response, Request, RequestId, INVALID_PARAMS,
     INVALID_REQUEST, METHOD_NOT_FOUND,
 };
+use crate::surface::ghostlight_legacy;
 use ghostlight_transport::bridge::{
-    BridgeError, BridgeErrorKind, CatalogProjection, CatalogTool, ClientPresentation, EdgeMessage,
+    BridgeError, BridgeErrorKind, CatalogProjection, ClientPresentation, EdgeMessage,
     RequestContext, TerminalOutcome, WorkspaceId, WorkspaceUse,
 };
 use ghostlight_transport::instance::Instance;
+use ghostlight_transport::operation::{BrowserResult, OperationEffect};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
@@ -260,7 +262,7 @@ impl Handler {
                 None,
             ));
         }
-        let Some(operation) = params.get("name").and_then(Value::as_str) else {
+        let Some(external_tool) = params.get("name").and_then(Value::as_str) else {
             return Effects::output(error_response(
                 Some(&id),
                 INVALID_PARAMS,
@@ -302,11 +304,37 @@ impl Handler {
                 ));
             }
         };
-        let sequence = match correlation.track(PendingRequest::request(
+        let arguments = Value::Object(arguments);
+        let presentation =
+            match ghostlight_legacy::invocation_presentation(external_tool, &arguments) {
+                Ok(presentation) => presentation,
+                Err(error) => {
+                    return Effects::output(success_response(
+                        &id,
+                        complete_tool_error(None, &error.to_string()),
+                    ));
+                }
+            };
+        let operation = match ghostlight_legacy::decode_call(external_tool, arguments.clone()) {
+            Ok(operation) => operation,
+            Err(error) => {
+                return Effects::output(success_response(
+                    &id,
+                    complete_tool_error(None, &error.to_string()),
+                ));
+            }
+        };
+        let flow_render_hints =
+            ghostlight_legacy::flow_render_hints(external_tool, &arguments, &operation);
+        let sequence = match correlation.track(PendingRequest::tool_request(
             id.clone(),
             PendingKind::CallTool2026 {
                 context_creating: false,
             },
+            presentation.clone(),
+            operation.key(),
+            flow_render_hints,
+            workspace.clone(),
         )) {
             Ok(sequence) => sequence,
             Err(message) => {
@@ -315,8 +343,8 @@ impl Handler {
         };
         Effects::service(EdgeMessage::Start {
             sequence,
-            operation: operation.to_owned(),
-            arguments: Value::Object(arguments),
+            operation,
+            presentation: Some(presentation),
             workspace,
             context,
         })
@@ -607,10 +635,8 @@ fn request_context(request: &Request) -> Result<RequestContext, Value> {
 }
 
 fn list_tools_result(projection: &CatalogProjection) -> Value {
-    let tools = projection
-        .tools
-        .iter()
-        .cloned()
+    let tools = ghostlight_legacy::filtered_declarations(projection)
+        .into_iter()
         .map(project_tool)
         .collect::<Vec<_>>();
     let ttl_ms = if projection.restricted {
@@ -629,7 +655,7 @@ fn list_tools_result(projection: &CatalogProjection) -> Value {
     )
 }
 
-fn project_tool(tool: CatalogTool) -> Value {
+fn project_tool(tool: ghostlight_legacy::RenderedTool) -> Value {
     let mut declaration = tool.declaration.as_object().cloned().unwrap_or_default();
     match tool.workspace_use {
         WorkspaceUse::Independent => {}
@@ -638,21 +664,26 @@ fn project_tool(tool: CatalogTool) -> Value {
             insert_workspace_property(input_schema);
             let output_schema = object_field(&mut declaration, "outputSchema");
             insert_workspace_property(output_schema);
-            let required = output_schema
-                .entry("required")
-                .or_insert_with(|| Value::Array(Vec::new()));
-            if let Some(required) = required.as_array_mut() {
-                if !required.iter().any(|field| field == "workspaceId") {
-                    required.push(Value::String("workspaceId".into()));
-                }
-            }
+            require_schema_property(output_schema, "workspaceId");
         }
         WorkspaceUse::Uses => {
             let input_schema = object_field(&mut declaration, "inputSchema");
             insert_workspace_property(input_schema);
+            require_schema_property(input_schema, "workspaceId");
         }
     }
     Value::Object(declaration)
+}
+
+fn require_schema_property(schema: &mut Map<String, Value>, property: &str) {
+    let required = schema
+        .entry("required")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if let Some(required) = required.as_array_mut() {
+        if !required.iter().any(|field| field == property) {
+            required.push(Value::String(property.to_owned()));
+        }
+    }
 }
 
 fn object_field<'a>(object: &'a mut Map<String, Value>, field: &str) -> &'a mut Map<String, Value> {
@@ -692,7 +723,7 @@ fn render_outcome(pending: PendingRequest, outcome: TerminalOutcome) -> Effects 
     if pending.suppressed {
         return Effects::default();
     }
-    let Some(id) = pending.request_id else {
+    let Some(id) = pending.request_id.clone() else {
         return Effects::default();
     };
     let context_creating = matches!(
@@ -702,15 +733,57 @@ fn render_outcome(pending: PendingRequest, outcome: TerminalOutcome) -> Effects 
         }
     );
     match outcome {
-        TerminalOutcome::Success { result } => Effects::output(success_response(
-            &id,
-            complete_tool_result(
-                result,
-                context_creating
-                    .then_some(pending.service_workspace)
-                    .flatten(),
-            ),
-        )),
+        TerminalOutcome::Success { result } => {
+            if !pending.result_matches_expected_operation(&result) {
+                return Effects::output(error_response(
+                    Some(&id),
+                    OUTCOME_UNKNOWN,
+                    "Ghostlight received a result for a different canonical operation. Do not retry automatically; reconnect the client before continuing.",
+                    Some(json!({"disposition": "outcome_unknown"})),
+                ));
+            }
+            let workspace = match validated_result_workspace(
+                pending.requested_workspace.as_ref(),
+                pending.service_workspace.as_ref(),
+                &result,
+                context_creating,
+            ) {
+                Ok(workspace) => workspace,
+                Err(message) => {
+                    return Effects::output(error_response(
+                        Some(&id),
+                        OUTCOME_UNKNOWN,
+                        message,
+                        Some(json!({"disposition": "outcome_unknown"})),
+                    ));
+                }
+            };
+            let effect = result.effect;
+            match ghostlight_legacy::encode_result(
+                *result,
+                pending.presentation.as_ref(),
+                pending.flow_render_hints.as_ref(),
+            ) {
+                Ok(result) => Effects::output(success_response(
+                    &id,
+                    complete_tool_result(result, workspace),
+                )),
+                Err(error) if effect != OperationEffect::None => Effects::output(error_response(
+                    Some(&id),
+                    OUTCOME_UNKNOWN,
+                    "Ghostlight could not render the canonical result after an effect may have occurred. Do not retry automatically; inspect current browser state first.",
+                    Some(json!({
+                        "disposition": "outcome_unknown",
+                        "effect": effect.as_str(),
+                        "renderError": error.to_string(),
+                    })),
+                )),
+                Err(error) => Effects::output(success_response(
+                    &id,
+                    complete_tool_error(None, &error.to_string()),
+                )),
+            }
+        }
         TerminalOutcome::ToolFailure { result, message } => Effects::output(success_response(
             &id,
             complete_tool_error(Some(result), &message),
@@ -718,10 +791,22 @@ fn render_outcome(pending: PendingRequest, outcome: TerminalOutcome) -> Effects 
         TerminalOutcome::NotDispatched { message }
         | TerminalOutcome::Denied { message, .. }
         | TerminalOutcome::Held { message }
-        | TerminalOutcome::AttentionRequired { message }
-        | TerminalOutcome::Cancelled { message } => {
+        | TerminalOutcome::AttentionRequired { message } => {
             Effects::output(success_response(&id, complete_tool_error(None, &message)))
         }
+        TerminalOutcome::Cancelled {
+            message,
+            effect: OperationEffect::None,
+        } => Effects::output(success_response(&id, complete_tool_error(None, &message))),
+        TerminalOutcome::Cancelled { message, effect } => Effects::output(error_response(
+            Some(&id),
+            OUTCOME_UNKNOWN,
+            format!("{message} Do not retry automatically; inspect current browser state first."),
+            Some(json!({
+                "disposition": "outcome_unknown",
+                "effect": effect.as_str(),
+            })),
+        )),
         TerminalOutcome::OutcomeUnknown { message } => Effects::output(error_response(
             Some(&id),
             OUTCOME_UNKNOWN,
@@ -729,6 +814,37 @@ fn render_outcome(pending: PendingRequest, outcome: TerminalOutcome) -> Effects 
             Some(json!({"disposition": "outcome_unknown"})),
         )),
     }
+}
+
+fn validated_result_workspace(
+    requested: Option<&WorkspaceId>,
+    accepted: Option<&WorkspaceId>,
+    result: &BrowserResult,
+    context_creating: bool,
+) -> Result<Option<WorkspaceId>, String> {
+    if requested != accepted && (!context_creating || requested.is_some()) {
+        return Err(
+            "Ghostlight accepted work for a different workspace than the request. Do not retry automatically; reconnect the client before continuing."
+                .to_string(),
+        );
+    }
+    if result.workspace.as_ref() != accepted {
+        return Err(
+            "Ghostlight received inconsistent workspace facts after the operation. Do not retry automatically; reconnect the client before continuing."
+                .to_string(),
+        );
+    }
+    if context_creating {
+        return result
+            .workspace
+            .clone()
+            .map(Some)
+            .ok_or_else(|| {
+                "Ghostlight did not receive the workspace created for this operation. Do not retry automatically; reconnect the client before continuing."
+                    .to_string()
+            });
+    }
+    Ok(None)
 }
 
 fn render_rejection(pending: PendingRequest, error: BridgeError) -> Effects {
@@ -832,6 +948,10 @@ fn complete_result_with_meta(result: Value, extra_meta: Option<(&str, Value)>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghostlight_transport::bridge::OperationAvailability;
+    use ghostlight_transport::operation::{
+        BrowserResult, BrowserResultStatus, IntentId, OperationEffect, OperationId, OperationKey,
+    };
 
     fn request(id: i64, method: &str, restriction: Option<&str>) -> Request {
         let mut meta = Map::new();
@@ -913,66 +1033,49 @@ mod tests {
     fn tools_list_augments_only_the_workspace_shore_and_sets_private_zero_cache() {
         let projection = CatalogProjection {
             generation: 9,
-            instructions: String::new(),
-            tools: vec![
-                CatalogTool {
-                    declaration: json!({
-                        "name": "status",
-                        "description": "Inspect status.",
-                        "inputSchema": {"type": "object"},
-                        "annotations": {"title": "Status"},
-                        "example": {"call": {}}
-                    }),
-                    workspace_use: WorkspaceUse::Independent,
-                },
-                CatalogTool {
-                    declaration: json!({
-                        "name": "tabs_create_mcp",
-                        "description": "Create context.",
-                        "inputSchema": {"type": "object"},
-                        "annotations": {"title": "Create Context"},
-                        "example": {"call": {}}
-                    }),
+            operations: vec![
+                OperationAvailability {
+                    id: OperationId::BrowserTabs,
+                    intent: IntentId::TabsList,
                     workspace_use: WorkspaceUse::Creates,
                 },
-                CatalogTool {
-                    declaration: json!({
-                        "name": "click",
-                        "description": "Click a coordinate.",
-                        "inputSchema": {"type": "object", "properties": {"x": {"type": "number"}}},
-                        "annotations": {"title": "Click"},
-                        "example": {"call": {"x": 4}}
-                    }),
+                OperationAvailability {
+                    id: OperationId::BrowserInput,
+                    intent: IntentId::InputPointerClick,
                     workspace_use: WorkspaceUse::Uses,
+                },
+                OperationAvailability {
+                    id: OperationId::WorkflowPlan,
+                    intent: IntentId::PlanUpdate,
+                    workspace_use: WorkspaceUse::Independent,
                 },
             ],
             restricted: true,
         };
         let result = list_tools_result(&projection);
-        assert!(result["tools"][0]["inputSchema"]["properties"]
-            .get("workspaceId")
-            .is_none());
         assert_eq!(
-            result["tools"][1]["outputSchema"]["properties"]["workspaceId"]["type"],
+            result["tools"][0]["outputSchema"]["properties"]["workspaceId"]["type"],
+            "string"
+        );
+        assert_eq!(
+            result["tools"][0]["inputSchema"]["properties"]["workspaceId"]["type"],
             "string"
         );
         assert_eq!(
             result["tools"][1]["inputSchema"]["properties"]["workspaceId"]["type"],
             "string"
         );
-        assert_eq!(
-            result["tools"][2]["inputSchema"]["properties"]["workspaceId"]["type"],
-            "string"
-        );
-        for (index, description, title, example) in [
-            (0, "Inspect status.", "Status", json!({"call": {}})),
-            (1, "Create context.", "Create Context", json!({"call": {}})),
-            (2, "Click a coordinate.", "Click", json!({"call": {"x": 4}})),
-        ] {
-            assert_eq!(result["tools"][index]["description"], description);
-            assert_eq!(result["tools"][index]["annotations"]["title"], title);
-            assert_eq!(result["tools"][index]["example"], example);
-        }
+        assert!(result["tools"][1]["inputSchema"]["required"]
+            .as_array()
+            .expect("uses schema required list")
+            .iter()
+            .any(|field| field == "workspaceId"));
+        assert!(result["tools"][2]["inputSchema"]["properties"]
+            .get("workspaceId")
+            .is_none());
+        assert_eq!(result["tools"][0]["name"], "tabs_context_mcp");
+        assert_eq!(result["tools"][1]["name"], "computer");
+        assert_eq!(result["tools"][2]["name"], "update_plan");
         assert_eq!(result["ttlMs"], 0);
         assert_eq!(result["cacheScope"], "private");
         assert_eq!(result["resultType"], "complete");
@@ -982,19 +1085,27 @@ mod tests {
     fn tool_call_removes_workspace_id_before_crossing_the_bridge() {
         let workspace = WorkspaceId::mint();
         let mut call = request(3, "tools/call", None);
-        call.params["name"] = json!("click");
-        call.params["arguments"] = json!({"workspaceId": workspace.as_str(), "x": 4});
+        call.params["name"] = json!("computer");
+        call.params["arguments"] = json!({
+            "workspaceId": workspace.as_str(),
+            "action": "left_click",
+            "tabId": 7,
+            "coordinate": [4, 8]
+        });
         let mut correlation = Correlation::default();
         let effects = Handler::new().handle(&call, &mut correlation);
         let EdgeMessage::Start {
-            arguments,
+            operation,
             workspace: sent_workspace,
             ..
         } = &effects.service[0]
         else {
             panic!("start expected");
         };
-        assert!(arguments.get("workspaceId").is_none());
+        assert!(operation.arguments.get("workspaceId").is_none());
+        assert!(operation.arguments.get("tabId").is_none());
+        assert_eq!(operation.arguments["tab"], 7);
+        assert_eq!(operation.arguments["point"], json!([4, 8]));
         assert_eq!(sent_workspace.as_ref(), Some(&workspace));
     }
 
@@ -1180,15 +1291,29 @@ mod tests {
                 kind: PendingKind::CallTool2026 {
                     context_creating: true,
                 },
-                service_workspace: Some(workspace),
+                service_workspace: Some(workspace.clone()),
+                requested_workspace: None,
+                presentation: None,
+                expected_operation: Some(OperationKey::new(
+                    OperationId::BrowserTabs,
+                    IntentId::TabsList,
+                )),
+                flow_render_hints: None,
                 suppressed: false,
                 delivered: true,
             },
             TerminalOutcome::Success {
-                result: json!({
-                    "content": [],
-                    "structuredContent": {"tabId": 44}
-                }),
+                result: {
+                    let mut result = BrowserResult::new(
+                        OperationId::BrowserTabs,
+                        IntentId::TabsList,
+                        BrowserResultStatus::Ok,
+                        OperationEffect::None,
+                    );
+                    result.workspace = Some(workspace);
+                    result.data = json!({"tabId": 44});
+                    Box::new(result)
+                },
             },
         );
         assert_eq!(
@@ -1196,5 +1321,160 @@ mod tests {
             raw
         );
         assert_eq!(effects.output[0]["result"]["resultType"], "complete");
+    }
+
+    #[test]
+    fn inconsistent_result_workspace_fails_closed_without_leaking_either_handle() {
+        let accepted = WorkspaceId::mint();
+        let returned = WorkspaceId::mint();
+        let accepted_raw = accepted.as_str().to_owned();
+        let returned_raw = returned.as_str().to_owned();
+        let mut result = BrowserResult::new(
+            OperationId::BrowserTabs,
+            IntentId::TabsList,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        );
+        result.workspace = Some(returned);
+        let effects = render_outcome(
+            PendingRequest {
+                request_id: Some(RequestId::Number(9.into())),
+                kind: PendingKind::CallTool2026 {
+                    context_creating: true,
+                },
+                service_workspace: Some(accepted),
+                requested_workspace: None,
+                presentation: None,
+                expected_operation: Some(OperationKey::new(
+                    OperationId::BrowserTabs,
+                    IntentId::TabsList,
+                )),
+                flow_render_hints: None,
+                suppressed: false,
+                delivered: true,
+            },
+            TerminalOutcome::Success {
+                result: Box::new(result),
+            },
+        );
+        assert_eq!(effects.output[0]["error"]["code"], OUTCOME_UNKNOWN);
+        let rendered = effects.output[0].to_string();
+        assert!(!rendered.contains(&accepted_raw));
+        assert!(!rendered.contains(&returned_raw));
+    }
+
+    #[test]
+    fn mismatched_result_operation_fails_closed_before_profile_rendering() {
+        let pending = PendingRequest {
+            request_id: Some(RequestId::Number(11.into())),
+            kind: PendingKind::CallTool2026 {
+                context_creating: false,
+            },
+            service_workspace: None,
+            requested_workspace: None,
+            presentation: None,
+            expected_operation: Some(OperationKey::new(
+                OperationId::BrowserTabs,
+                IntentId::TabsList,
+            )),
+            flow_render_hints: None,
+            suppressed: false,
+            delivered: true,
+        };
+        let result = BrowserResult::new(
+            OperationId::BrowserSnapshot,
+            IntentId::SnapshotCapture,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        );
+        let effects = render_outcome(
+            pending,
+            TerminalOutcome::Success {
+                result: Box::new(result),
+            },
+        );
+        assert_eq!(effects.output[0]["error"]["code"], OUTCOME_UNKNOWN);
+        assert_eq!(
+            effects.output[0]["error"]["data"]["disposition"],
+            "outcome_unknown"
+        );
+    }
+
+    #[test]
+    fn existing_workspace_is_verified_but_not_added_to_a_non_creator_result() {
+        let workspace = WorkspaceId::mint();
+        let raw = workspace.as_str().to_owned();
+        let mut result = BrowserResult::new(
+            OperationId::BrowserSnapshot,
+            IntentId::SnapshotCapture,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        );
+        result.workspace = Some(workspace.clone());
+        result.data = json!({"snapshot": "ok"});
+        let effects = render_outcome(
+            PendingRequest {
+                request_id: Some(RequestId::Number(10.into())),
+                kind: PendingKind::CallTool2026 {
+                    context_creating: false,
+                },
+                service_workspace: Some(workspace.clone()),
+                requested_workspace: Some(workspace),
+                presentation: None,
+                expected_operation: Some(OperationKey::new(
+                    OperationId::BrowserSnapshot,
+                    IntentId::SnapshotCapture,
+                )),
+                flow_render_hints: None,
+                suppressed: false,
+                delivered: true,
+            },
+            TerminalOutcome::Success {
+                result: Box::new(result),
+            },
+        );
+        assert_eq!(effects.output[0]["result"]["resultType"], "complete");
+        assert!(!effects.output[0].to_string().contains(&raw));
+    }
+
+    #[test]
+    fn substituted_non_creator_workspace_fails_closed_without_leaking_handles() {
+        let requested = WorkspaceId::mint();
+        let accepted = WorkspaceId::mint();
+        let requested_raw = requested.as_str().to_owned();
+        let accepted_raw = accepted.as_str().to_owned();
+        let mut result = BrowserResult::new(
+            OperationId::BrowserSnapshot,
+            IntentId::SnapshotCapture,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        );
+        result.workspace = Some(accepted.clone());
+        let effects = render_outcome(
+            PendingRequest {
+                request_id: Some(RequestId::Number(12.into())),
+                kind: PendingKind::CallTool2026 {
+                    context_creating: false,
+                },
+                service_workspace: Some(accepted),
+                requested_workspace: Some(requested),
+                presentation: None,
+                expected_operation: Some(OperationKey::new(
+                    OperationId::BrowserSnapshot,
+                    IntentId::SnapshotCapture,
+                )),
+                flow_render_hints: None,
+                suppressed: false,
+                delivered: true,
+            },
+            TerminalOutcome::Success {
+                result: Box::new(result),
+            },
+        );
+
+        assert_eq!(effects.output[0]["error"]["code"], OUTCOME_UNKNOWN);
+        let rendered = effects.output[0].to_string();
+        assert!(!rendered.contains(&requested_raw));
+        assert!(!rendered.contains(&accepted_raw));
     }
 }
