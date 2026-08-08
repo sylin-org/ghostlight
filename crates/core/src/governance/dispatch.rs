@@ -18,10 +18,10 @@
 //! not nested inside the governed-only state.
 //!
 //! `Governance` holds no browser-domain fn pointer at all: this module lives in the
-//! domain-agnostic governance core, and the concrete action directory is browser-domain
-//! (`browser::directory::requires`, ADR-0022 Decision 2; the a7 arch-test forbids a
-//! `governance -> browser` edge). The transport layer performs the ONE per-call directory lookup
-//! itself and hands the result to [`Governance::begin`]; [`CallAudit`] carries that same result
+//! domain-agnostic governance core, while canonical operation classification is browser-domain
+//! (`operation::registry`, ADR-0101; the architecture test forbids a `governance -> browser`
+//! edge). The operation pipeline performs one descriptor lookup and hands its requirements to
+//! [`Governance::begin`]; [`CallAudit`] carries that same result
 //! forward to both [`Governance::authorize`] (the decision) and the eventual audit record's
 //! `capability` field (ADR-0022 Decision 8) -- there is no second, independent lookup anywhere
 //! in this module.
@@ -193,7 +193,8 @@ impl Governance {
     /// The active manifest's resolved grants (g14, tool advertisement filtering): `None` under
     /// all-open, `Some(&state.grants)` once a manifest is active. Read-only; a static snapshot
     /// captured once at construction, same as everything else `GovernedState` holds -- there is
-    /// no live re-resolution yet (see `browser::advertise`'s module doc).
+    /// no live re-resolution yet. The MCP edge projects this canonical availability into its
+    /// selected surface profile.
     pub fn grants(&self) -> Option<&[Grant]> {
         match &self.mode {
             Mode::AllOpen => None,

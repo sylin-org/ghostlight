@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! All-open golden guard for the A1 module reorg and the A3 governance facade. Neither the
 //! regroup into governance/ browser/ transport/ (A1) nor the introduction of the `Governance`
-//! facade at the dispatch chokepoint (A3) may change anything observable. Invariants, reached
-//! through the NEW module locations:
-//!   1. tools/list byte-stability -- the advertised tool surface is the same 13 tools in
-//!      the same order, and `directory::descriptor` still resolves them.
+//! facade at the dispatch chokepoint (A3) may change anything observable. Invariants:
+//!   1. the edge-owned legacy surface stays byte stable;
 //!   2. facade decide round-trip -- `Governance::all_open()` resolves every call to
 //!      `Decision::Allow { grant_id: None }` without touching any decision port (audit is
 //!      orthogonal to all-open, shared format doc section 4.5, so the facade still carries an
@@ -12,18 +10,21 @@
 //!
 //! Process-boundary redaction coverage lives in the ADR-0056 Lightbox scenario library.
 
-use ghostlight::browser::directory::{descriptor, requires};
 use ghostlight::governance::dispatch::Governance;
 use ghostlight::governance::ports::{
     AuditRecord, AuditSink, Capability, Decision, EffectiveMode, GoverningResource,
 };
-use ghostlight::tool::tools::advertised_tools_json;
+use ghostlight_transport::operation::{IntentId, OperationId, OperationKey};
+use serde_json::Value;
+
+const EDGE_LEGACY_SURFACE: &str =
+    include_str!("../crates/mcp-connector/src/surface/data/ghostlight-legacy-v1.json");
 
 /// The 25 tool names in advertised order (the 13 trained tools plus `narrate`, `wait_for`, `script`,
 /// `form_fill`, `act_on`, `dialog`, `tab_control`, `file_upload` (ADR-0050 Decision 2), `browser_batch` (ADR-0050 Decision 3),
 /// `upload_image` (ADR-0050 Decision 4), `gif_creator` (ADR-0050 Decision 5), and ADR-0022
 /// Decision 7's sanctioned `explain` addition, positioned last), copied from the code-declared
-/// registry (`browser::directory::REGISTRY`), in declared order.
+/// edge-owned frozen profile, in declared order.
 const GOLDEN_TOOL_NAMES: [&str; 25] = [
     "tabs_context_mcp",
     "tabs_create_mcp",
@@ -54,7 +55,8 @@ const GOLDEN_TOOL_NAMES: [&str; 25] = [
 
 #[test]
 fn tools_list_is_byte_stable_through_the_move() {
-    let v = advertised_tools_json();
+    let v: Value = serde_json::from_str(EDGE_LEGACY_SURFACE)
+        .expect("edge-owned ghostlight-legacy/v1 profile must parse");
     let tools = v["tools"].as_array().expect("tools array");
     assert_eq!(
         tools.len(),
@@ -66,12 +68,7 @@ fn tools_list_is_byte_stable_through_the_move() {
             tools[i]["name"], *name,
             "tool #{i} name and order preserved"
         );
-        assert!(descriptor(name).is_some(), "{name} must be a known tool");
     }
-    assert!(
-        descriptor("bogus_tool").is_none(),
-        "unknown tools stay unknown"
-    );
 }
 
 /// A sink that drops every record; enough to construct an all-open facade for this test
@@ -90,19 +87,21 @@ impl AuditSink for NullAuditSink {
 #[test]
 fn facade_decide_is_all_open_after_the_move() {
     let governance = Governance::all_open(std::sync::Arc::new(NullAuditSink));
-    for name in GOLDEN_TOOL_NAMES {
+    for descriptor in ghostlight::operation::registry::descriptors() {
         assert!(
             matches!(
                 governance.decide(
-                    name,
-                    None,
-                    &[],
+                    descriptor.key.id.as_str(),
+                    Some(descriptor.key.intent.as_str()),
+                    descriptor.requires,
                     GoverningResource::None,
                     EffectiveMode::Enforce
                 ),
                 Decision::Allow { grant_id: None }
             ),
-            "{name} must be allowed in the all-open engine"
+            "{} / {} must be allowed in the all-open engine",
+            descriptor.key.id,
+            descriptor.key.intent
         );
     }
 }
@@ -116,8 +115,8 @@ fn file_upload_is_all_open_allowed_and_classifies_write() {
     assert!(
         matches!(
             governance.decide(
-                "file_upload",
-                None,
+                OperationId::BrowserUpload.as_str(),
+                Some(IntentId::UploadClientFiles.as_str()),
                 &[],
                 GoverningResource::None,
                 EffectiveMode::Enforce
@@ -127,7 +126,11 @@ fn file_upload_is_all_open_allowed_and_classifies_write() {
         "file_upload must be allowed in the all-open engine"
     );
     assert_eq!(
-        requires("file_upload", None),
+        ghostlight::operation::registry::descriptor(OperationKey::new(
+            OperationId::BrowserUpload,
+            IntentId::UploadClientFiles,
+        ))
+        .map(|descriptor| descriptor.requires),
         Some(&[Capability::Write][..]),
         "file_upload classifies as a Write capability"
     );

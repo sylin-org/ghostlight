@@ -13,13 +13,22 @@ use crate::tool::outcome::{LocalCtx, LocalFuture};
 use crate::ToolError;
 use ghostlight_transport::bridge::{CatalogProjection, OperationAvailability, WorkspaceUse};
 #[cfg(test)]
-use ghostlight_transport::operation::FlowTermination;
+use ghostlight_transport::operation::{BrowserOperation, FlowTermination};
 use ghostlight_transport::operation::{
-    BrowserOperation, BrowserResultStatus, FlowResultData, FlowStepStatus, FlowTerminationReason,
-    IntentId, OperationEffect, OperationId, OperationKey, RetryDisposition,
+    BrowserResultStatus, FlowResultData, FlowStepStatus, FlowTerminationReason, IntentId,
+    OperationEffect, OperationId, OperationKey, RetryDisposition,
 };
 use serde_json::{json, Value};
 use std::sync::OnceLock;
+
+const CONTEXT_RESULT_SCHEMA: &str = "ghostlight.browser.context/v1";
+const MAX_MANAGED_TIMESTAMP_CHARS: usize = 128;
+const CAPABILITY_SEMANTICS: &[(Capability, &str)] = &[
+    (Capability::Read, "retrieve_observe_only"),
+    (Capability::Action, "page_determined_ui_input"),
+    (Capability::Write, "declared_state_change"),
+    (Capability::Execute, "arbitrary_code"),
+];
 
 /// The resource shape used to resolve governance authority for one operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1641,14 +1650,6 @@ pub fn descriptor(key: OperationKey) -> Option<&'static OperationDescriptor> {
         .find(|descriptor| descriptor.key == key)
 }
 
-/// Temporarily normalize a frozen in-process legacy call into the canonical vocabulary.
-///
-/// Protocol edges own this translation long term. This compatibility entry remains only until
-/// service-local orchestrators stop invoking model-facing tool names.
-pub fn decode_legacy_call(name: &str, arguments: &Value) -> Result<BrowserOperation, ToolError> {
-    crate::operation::legacy::decode_call(name, arguments)
-}
-
 /// Whether a descriptor is reachable under one grant set.
 pub fn reachable(descriptor: &OperationDescriptor, grants: Option<&[Grant]>) -> bool {
     let Some(grants) = grants else {
@@ -2115,7 +2116,11 @@ fn encode_legacy_arguments(key: OperationKey, arguments: &Value) -> Result<Value
             rename(&mut object, "seconds", "duration");
             object.insert("action".into(), json!("wait"));
         }
-        (OperationId::BrowserFlow, _) => return encode_legacy_flow(key, arguments),
+        (OperationId::BrowserFlow, _) => {
+            return Err(ToolError::invalid_request(
+                "browser.flow has no legacy browser mechanism",
+            ));
+        }
         (OperationId::BrowserInput, IntentId::InputPointerDrag) => {
             rename(&mut object, "from", "start_coordinate");
             rename(&mut object, "to", "coordinate");
@@ -2179,87 +2184,6 @@ fn encode_legacy_arguments(key: OperationKey, arguments: &Value) -> Result<Value
         object.insert("clear".into(), json!(true));
     }
     Ok(Value::Object(object))
-}
-
-fn legacy_surface_tool(key: OperationKey) -> Option<&'static str> {
-    match key.id {
-        OperationId::BrowserContext => Some("explain"),
-        OperationId::BrowserTabs => Some(match key.intent {
-            IntentId::TabsList => "tabs_context_mcp",
-            IntentId::TabsNew => "tabs_create_mcp",
-            _ => "tab_control",
-        }),
-        OperationId::BrowserNavigate => Some(if key.intent == IntentId::NavigateReload {
-            "tab_control"
-        } else {
-            "navigate"
-        }),
-        OperationId::BrowserSnapshot => Some("read_page"),
-        OperationId::BrowserRead => Some("get_page_text"),
-        OperationId::BrowserFind => Some("find"),
-        OperationId::BrowserScreenshot | OperationId::BrowserInput => Some("computer"),
-        OperationId::BrowserWait => Some(if key.intent == IntentId::WaitDelay {
-            "computer"
-        } else {
-            "wait_for"
-        }),
-        OperationId::BrowserAct => Some("act_on"),
-        OperationId::BrowserFill => Some(if key.intent == IntentId::FillField {
-            "form_input"
-        } else {
-            "form_fill"
-        }),
-        OperationId::BrowserDialog => Some("dialog"),
-        OperationId::BrowserViewport => Some("resize_window"),
-        OperationId::BrowserUpload => Some(if key.intent == IntentId::UploadClientFiles {
-            "file_upload"
-        } else {
-            "upload_image"
-        }),
-        OperationId::BrowserConsole => Some("read_console_messages"),
-        OperationId::BrowserNetwork => Some("read_network_requests"),
-        OperationId::BrowserEvaluate => Some("javascript_tool"),
-        OperationId::BrowserRecord => Some("gif_creator"),
-        OperationId::BrowserPresent => Some("narrate"),
-        OperationId::WorkflowPlan => Some("update_plan"),
-        _ => None,
-    }
-}
-
-fn encode_legacy_flow(key: OperationKey, arguments: &Value) -> Result<Value, ToolError> {
-    let mut steps = Vec::new();
-    for step in arguments["steps"]
-        .as_array()
-        .expect("canonical flow was validated")
-    {
-        let operation: ghostlight_transport::operation::BrowserOperation =
-            serde_json::from_value(step.clone())
-                .map_err(|error| ToolError::invalid_request(error.to_string()))?;
-        let descriptor = descriptor(operation.key()).ok_or_else(|| {
-            ToolError::invalid_request("canonical flow step uses an unavailable operation")
-        })?;
-        let tool = legacy_surface_tool(operation.key()).ok_or_else(|| {
-            ToolError::invalid_request("canonical flow step has no compatibility executor")
-        })?;
-        steps.push(json!({
-            "tool": tool,
-            "args": descriptor.legacy_arguments(&operation.arguments)?
-        }));
-    }
-    let mut result = json!({
-        "steps": steps,
-        "dry_run": key.intent == IntentId::FlowPreflight
-    });
-    if let Some(on_error) = arguments.get("on_error") {
-        result["onError"] = on_error.clone();
-    }
-    if let Some(tab) = arguments.get("tab") {
-        result["tabId"] = tab.clone();
-    }
-    if let Some(budget) = arguments.get("budget_ms") {
-        result["budget_ms"] = budget.clone();
-    }
-    Ok(result)
 }
 
 fn is_deferred_flow_reference(value: &Value) -> bool {
@@ -2459,21 +2383,93 @@ fn validate_canonical_flow(arguments: &Value) -> Result<(), ToolError> {
 fn explain_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
     Box::pin(async move {
         let _ = ctx;
-        let mut text = crate::browser::directory::explain_text();
-        let paths = crate::governance::paths::GovernancePaths::production();
-        if paths.managed_bootstrap.exists() {
-            if let Some(cache_path) = paths.managed_cache.as_ref() {
-                let sidecar = crate::governance::managed::status::sidecar_path(cache_path);
-                if let Some(status) = crate::governance::managed::status::read_sidecar(&sidecar) {
-                    text.push('\n');
-                    text.push_str(&crate::governance::explain::managed_passport(&status));
-                }
-            }
-        }
         crate::tool::outcome::CallOutcome::Success {
-            result: json!({ "content": [ { "type": "text", "text": text } ] }),
+            result: json!({ "structuredContent": context_result_data() }),
         }
     })
+}
+
+fn context_result_data() -> Value {
+    let capabilities = CAPABILITY_SEMANTICS
+        .iter()
+        .map(|(capability, semantics)| {
+            json!({
+                "id": capability,
+                "semantics": semantics,
+            })
+        })
+        .collect::<Vec<_>>();
+    let operations = descriptors()
+        .iter()
+        .map(|descriptor| {
+            json!({
+                "id": descriptor.key.id,
+                "intent": descriptor.key.intent,
+                "requires": descriptor.requires,
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "schema": CONTEXT_RESULT_SCHEMA,
+        "capabilities": capabilities,
+        "operations": operations,
+        "managedGovernance": managed_governance_context(),
+    })
+}
+
+fn managed_governance_context() -> Option<Value> {
+    let paths = crate::governance::paths::GovernancePaths::production();
+    if !paths.managed_bootstrap.exists() {
+        return None;
+    }
+    let cache_path = paths.managed_cache.as_ref()?;
+    let sidecar = crate::governance::managed::status::sidecar_path(cache_path);
+    let status = crate::governance::managed::status::read_sidecar(&sidecar)?;
+    Some(bounded_managed_governance_context(&status))
+}
+
+fn bounded_managed_governance_context(
+    status: &crate::governance::managed::status::ManagedStatus,
+) -> Value {
+    let freshness = match status.freshness.as_str() {
+        "fresh" => "fresh",
+        "last_known_good" => "last_known_good",
+        _ => "other",
+    };
+    let stale_reason = match status.stale_reason.as_deref() {
+        Some("source_unreachable") => Some("source_unreachable"),
+        Some("update_rejected") => Some("update_rejected"),
+        Some("rollback_refused") => Some("rollback_refused"),
+        _ => None,
+    };
+    let fetched_at =
+        bounded_single_line(&status.fetched_at, MAX_MANAGED_TIMESTAMP_CHARS).unwrap_or("-");
+    let presentation = status.presentation.as_ref().filter(|presentation| {
+        crate::governance::manifest::bundle::validate_presentation(presentation).is_ok()
+    });
+    let organization = presentation.and_then(|value| value.org_name.as_deref());
+    let rationale = presentation.and_then(|value| value.rationale.as_deref());
+    let contact = presentation
+        .and_then(|value| value.contacts.first())
+        .map(|value| value.value.as_str());
+
+    json!({
+        "active": true,
+        "organization": organization,
+        "policySequence": status.seq,
+        "freshness": freshness,
+        "staleReason": stale_reason,
+        "fetchedAt": fetched_at,
+        "rationale": rationale,
+        "contact": contact,
+    })
+}
+
+fn bounded_single_line(value: &str, max_chars: usize) -> Option<&str> {
+    (!value.is_empty()
+        && value.chars().count() <= max_chars
+        && !value.chars().any(char::is_control))
+    .then_some(value)
 }
 
 #[cfg(test)]
@@ -2666,154 +2662,6 @@ mod tests {
                 .expect("deferred fields serialize"),
             json!({"tabId":1,"fields":"$prev.fields","submit":false})
         );
-    }
-
-    fn representative_legacy_arguments(tool: &str, action: Option<&str>) -> Value {
-        match tool {
-            "tabs_context_mcp" => json!({"createIfEmpty": false}),
-            "tabs_create_mcp" | "explain" => json!({}),
-            "navigate" => json!({"tabId": 1, "url": "https://example.com"}),
-            "computer" => match action.expect("computer action") {
-                "left_click" | "right_click" | "double_click" | "triple_click" | "hover"
-                | "scroll_to" => json!({"tabId": 1, "action": action, "coordinate": [1, 2]}),
-                "type" => json!({"tabId": 1, "action": action, "text": "hello"}),
-                "screenshot" => json!({"tabId": 1, "action": action}),
-                "wait" => json!({"tabId": 1, "action": action, "duration": 0.1}),
-                "scroll" => json!({
-                    "tabId": 1, "action": action, "coordinate": [1, 2],
-                    "scroll_direction": "down", "scroll_amount": 1
-                }),
-                "key" => json!({"tabId": 1, "action": action, "text": "Enter"}),
-                "left_click_drag" => json!({
-                    "tabId": 1, "action": action,
-                    "start_coordinate": [1, 2], "coordinate": [3, 4]
-                }),
-                "zoom" => json!({"tabId": 1, "action": action, "region": [0, 0, 10, 10]}),
-                other => panic!("unhandled computer action {other}"),
-            },
-            "find" => json!({"tabId": 1, "query": "Save"}),
-            "form_input" => json!({"tabId": 1, "ref": "ref_1", "value": "x"}),
-            "get_page_text" | "read_page" => json!({"tabId": 1}),
-            "javascript_tool" => {
-                json!({"tabId": 1, "action": "javascript_exec", "text": "1"})
-            }
-            "read_console_messages" | "read_network_requests" => json!({"tabId": 1}),
-            "resize_window" => json!({"tabId": 1, "width": 800, "height": 600}),
-            "update_plan" => json!({"domains": [], "approach": ["inspect"]}),
-            "narrate" => json!({"tabId": 1, "text": "Working"}),
-            "wait_for" => json!({"tabId": 1}),
-            "script" => json!({
-                "steps": [{"tool": "find", "args": {"tabId": 1, "query": "Save"}}]
-            }),
-            "form_fill" => json!({
-                "tabId": 1, "fields": {"Email": "a@example.com"},
-                "submit": action.is_some()
-            }),
-            "act_on" => {
-                let mut args = json!({
-                    "tabId": 1, "action": action, "target": {"ref": "ref_1"}
-                });
-                if action == Some("set_value") {
-                    args["value"] = json!("x");
-                }
-                args
-            }
-            "dialog" => {
-                let mut args = json!({"tabId": 1, "action": action});
-                if action == Some("respond") {
-                    args["text"] = json!("yes");
-                }
-                args
-            }
-            "tab_control" => json!({"tabId": 1, "action": action}),
-            "file_upload" => json!({"tabId": 1, "ref": "ref_1"}),
-            "browser_batch" => json!({
-                "actions": [{"name": "find", "input": {"tabId": 1, "query": "Save"}}]
-            }),
-            "upload_image" => json!({"tabId": 1, "imageId": "img_1", "ref": "ref_1"}),
-            "gif_creator" => {
-                let mut args = json!({"tabId": 1, "action": action});
-                if action == Some("export") {
-                    args["download"] = json!(true);
-                }
-                args
-            }
-            other => panic!("unhandled legacy tool {other}"),
-        }
-    }
-
-    #[test]
-    fn all_52_legacy_variants_decode_to_their_canonical_registry_rows() {
-        let mut count = 0;
-        for tool in crate::browser::directory::REGISTRY {
-            for variant in tool.variants {
-                count += 1;
-                let legacy = representative_legacy_arguments(tool.tool, variant.action);
-                let operation = decode_legacy_call(tool.tool, &legacy).unwrap_or_else(|error| {
-                    panic!(
-                        "{} {:?} failed to decode: {error}",
-                        tool.tool, variant.action
-                    )
-                });
-                assert_eq!(
-                    operation.key(),
-                    OperationKey::new(variant.operation, variant.intent),
-                    "{} {:?} canonical key drifted",
-                    tool.tool,
-                    variant.action
-                );
-                let operation_descriptor = super::descriptor(operation.key())
-                    .expect("every decoded operation has one registry row");
-                operation_descriptor
-                    .validate(&operation.arguments)
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "{} {:?} canonical validation failed: {error}",
-                            tool.tool, variant.action
-                        )
-                    });
-                if tool.tool != "browser_batch" {
-                    let encoded = operation_descriptor
-                        .legacy_arguments(&operation.arguments)
-                        .expect("compatibility serialization");
-                    let decoded = decode_legacy_call(tool.tool, &encoded)
-                        .expect("serialized arguments decode again");
-                    assert_eq!(
-                        decoded, operation,
-                        "{} {:?} round trip",
-                        tool.tool, variant.action
-                    );
-                }
-            }
-        }
-        assert_eq!(count, 52);
-    }
-
-    #[test]
-    fn legacy_ref_computer_actions_converge_on_semantic_act_rows() {
-        let cases = [
-            ("left_click", IntentId::ActClick),
-            ("right_click", IntentId::ActRightClick),
-            ("double_click", IntentId::ActDoubleClick),
-            ("triple_click", IntentId::ActTripleClick),
-            ("hover", IntentId::ActHover),
-            ("scroll_to", IntentId::ActScrollIntoView),
-        ];
-        for (action, intent) in cases {
-            let operation = decode_legacy_call(
-                "computer",
-                &json!({"tabId": 1, "action": action, "ref": "ref_1"}),
-            )
-            .expect("decode ref action");
-            assert_eq!(
-                operation.key(),
-                OperationKey::new(OperationId::BrowserAct, intent)
-            );
-            assert_eq!(
-                operation.arguments,
-                json!({"tab": 1, "target": {"ref": "ref_1"}})
-            );
-        }
     }
 
     #[test]
@@ -3269,6 +3117,104 @@ mod tests {
                 OperationEffect::None,
                 None
             )
+        );
+    }
+
+    #[test]
+    fn context_result_contains_only_canonical_operation_and_capability_facts() {
+        let value = context_result_data();
+        assert_eq!(value["schema"], CONTEXT_RESULT_SCHEMA);
+        assert_eq!(
+            value["capabilities"],
+            json!([
+                {"id":"read","semantics":"retrieve_observe_only"},
+                {"id":"action","semantics":"page_determined_ui_input"},
+                {"id":"write","semantics":"declared_state_change"},
+                {"id":"execute","semantics":"arbitrary_code"},
+            ])
+        );
+        let operations = value["operations"].as_array().expect("operation facts");
+        assert_eq!(operations.len(), descriptors().len());
+        for (fact, descriptor) in operations.iter().zip(descriptors()) {
+            assert_eq!(fact["id"], json!(descriptor.key.id));
+            assert_eq!(fact["intent"], json!(descriptor.key.intent));
+            assert_eq!(fact["requires"], json!(descriptor.requires));
+            assert_eq!(fact.as_object().expect("operation fact").len(), 3);
+        }
+        let serialized = serde_json::to_string(&value).expect("semantic context serializes");
+        for legacy_fragment in [
+            "tabs_context_mcp",
+            "tabs_create_mcp",
+            "computer",
+            "get_page_text",
+            "requires nothing",
+            "Show every action available here",
+        ] {
+            assert!(
+                !serialized.contains(legacy_fragment),
+                "context data leaked legacy surface prose: {legacy_fragment}"
+            );
+        }
+    }
+
+    #[test]
+    fn managed_context_is_bounded_and_preserves_valid_passport_facts() {
+        use crate::governance::managed::status::ManagedStatus;
+        use crate::governance::manifest::bundle::{Contact, Presentation};
+
+        let status = ManagedStatus {
+            v: 1,
+            freshness: "last_known_good".into(),
+            stale_reason: Some("update_rejected".into()),
+            seq: Some(42),
+            fetched_at: "2026-07-10T14:02:00+00:00".into(),
+            source: "ignored source".into(),
+            presentation: Some(Presentation {
+                org_name: Some("Acme Security".into()),
+                rationale: Some("Baseline policy.".into()),
+                contacts: vec![Contact {
+                    kind: "email".into(),
+                    value: "security@example.com".into(),
+                    label: None,
+                }],
+            }),
+            last_error: Some("ignored internal error".into()),
+        };
+        assert_eq!(
+            bounded_managed_governance_context(&status),
+            json!({
+                "active": true,
+                "organization": "Acme Security",
+                "policySequence": 42,
+                "freshness": "last_known_good",
+                "staleReason": "update_rejected",
+                "fetchedAt": "2026-07-10T14:02:00+00:00",
+                "rationale": "Baseline policy.",
+                "contact": "security@example.com",
+            })
+        );
+
+        let mut invalid = status;
+        invalid.freshness = "future_state".into();
+        invalid.stale_reason = Some("future_reason".into());
+        invalid.fetched_at = format!("bad\n{}", "x".repeat(256));
+        invalid.presentation = Some(Presentation {
+            org_name: Some("x".repeat(121)),
+            rationale: None,
+            contacts: Vec::new(),
+        });
+        assert_eq!(
+            bounded_managed_governance_context(&invalid),
+            json!({
+                "active": true,
+                "organization": null,
+                "policySequence": 42,
+                "freshness": "other",
+                "staleReason": null,
+                "fetchedAt": "-",
+                "rationale": null,
+                "contact": null,
+            })
         );
     }
 }

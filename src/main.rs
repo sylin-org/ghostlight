@@ -559,7 +559,7 @@ fn main() -> Result<()> {
                 &manifest,
                 &replay,
                 ghostlight::browser::pattern::is_valid_pattern,
-                ghostlight::browser::directory::requires,
+                ghostlight::operation::audit_compat::requires,
                 ghostlight::browser::polarity::evaluate_host,
             )?;
             print!("{}", outcome.report);

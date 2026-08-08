@@ -948,9 +948,12 @@ fn complete_result_with_meta(result: Value, extra_meta: Option<(&str, Value)>) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ghostlight_transport::bridge::OperationAvailability;
+    use ghostlight_transport::bridge::{
+        DenialSource, OperationAvailability, ServiceMessage, WorkId,
+    };
     use ghostlight_transport::operation::{
         BrowserResult, BrowserResultStatus, IntentId, OperationEffect, OperationId, OperationKey,
+        ResultPart,
     };
 
     fn request(id: i64, method: &str, restriction: Option<&str>) -> Request {
@@ -969,6 +972,223 @@ mod tests {
             method: method.into(),
             params: json!({"_meta": meta}),
         }
+    }
+
+    fn tool_call(id: i64, name: &str, arguments: Value) -> Request {
+        let mut request = request(id, "tools/call", None);
+        request.params["name"] = json!(name);
+        request.params["arguments"] = arguments;
+        request
+    }
+
+    fn complete_tool_call(
+        handler: &mut Handler,
+        correlation: &mut Correlation,
+        request: Request,
+        work_id: WorkId,
+        outcome: impl FnOnce(Option<WorkspaceId>) -> TerminalOutcome,
+    ) -> Effects {
+        let started = handler.handle(&request, correlation);
+        let EdgeMessage::Start {
+            sequence,
+            workspace,
+            ..
+        } = started.service[0].clone()
+        else {
+            panic!("start expected");
+        };
+        let outcome = outcome(workspace.clone());
+        assert!(matches!(
+            correlation.observe(ServiceMessage::Started {
+                sequence,
+                work_id,
+                workspace,
+                context_creating: false,
+            }),
+            crate::bridge::Observation::None
+        ));
+        let crate::bridge::Observation::Resolved(resolution) =
+            correlation.observe(ServiceMessage::Completed { work_id, outcome })
+        else {
+            panic!("completion resolution expected");
+        };
+        handler.on_resolution(resolution)
+    }
+
+    fn fnv1a64(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+    }
+
+    #[test]
+    fn full_legacy_profile_transcript_is_exact_through_the_2026_handler() {
+        let projection = ghostlight_legacy::test_support::full_projection(23);
+        let mut handler = Handler::new();
+        let mut correlation = Correlation::default();
+        let catalog = handler.handle(&request(1, "tools/list", None), &mut correlation);
+        let EdgeMessage::Catalog { sequence, .. } = catalog.service[0].clone() else {
+            panic!("catalog expected");
+        };
+        let crate::bridge::Observation::Resolved(resolution) =
+            correlation.observe(ServiceMessage::Catalog {
+                sequence,
+                projection,
+            })
+        else {
+            panic!("catalog resolution expected");
+        };
+        let listed = handler.on_resolution(resolution);
+        assert_eq!(listed.output[0]["jsonrpc"], "2.0");
+        assert_eq!(listed.output[0]["id"], 1);
+        let tools = listed.output[0]["result"]["tools"]
+            .as_array()
+            .expect("full tools array");
+        assert_eq!(tools.len(), 25);
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool["name"].as_str().expect("name"))
+                .collect::<Vec<_>>(),
+            ghostlight_legacy::declarations()["tools"]
+                .as_array()
+                .expect("frozen tools")
+                .iter()
+                .map(|tool| tool["name"].as_str().expect("name"))
+                .collect::<Vec<_>>()
+        );
+        let encoded_tools = serde_json::to_vec(tools).expect("catalog JSON");
+        assert_eq!(encoded_tools.len(), 77_598);
+        assert_eq!(fnv1a64(&encoded_tools), 0x52da_9080_ec57_f8df);
+        let mut catalog_result = listed.output[0]["result"]
+            .as_object()
+            .expect("catalog result")
+            .clone();
+        catalog_result.remove("tools");
+        assert_eq!(
+            Value::Object(catalog_result),
+            json!({
+                "ttlMs": UNRESTRICTED_CATALOG_TTL_MS,
+                "cacheScope": "private",
+                "resultType": "complete",
+                "_meta": {
+                    "io.modelcontextprotocol/serverInfo": {
+                        "name": Instance::resolve().mcp_server_name(),
+                        "version": env!("CARGO_PKG_VERSION"),
+                    },
+                    "org.sylin/ghostlightCatalogGeneration": 23,
+                },
+            })
+        );
+
+        let explained = complete_tool_call(
+            &mut handler,
+            &mut correlation,
+            tool_call(2, "explain", json!({})),
+            WorkId(20),
+            |workspace| TerminalOutcome::Success {
+                result: Box::new(ghostlight_legacy::test_support::context_result(workspace)),
+            },
+        );
+        assert_eq!(
+            explained.output,
+            vec![json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {
+                    "content": [{
+                        "type": "text",
+                        "text": ghostlight_legacy::test_support::explain_text(),
+                    }],
+                    "resultType": "complete",
+                    "_meta": {
+                        "io.modelcontextprotocol/serverInfo": {
+                            "name": Instance::resolve().mcp_server_name(),
+                            "version": env!("CARGO_PKG_VERSION"),
+                        },
+                    },
+                },
+            })]
+        );
+
+        let workspace = WorkspaceId::mint();
+        let succeeded = complete_tool_call(
+            &mut handler,
+            &mut correlation,
+            tool_call(
+                3,
+                "get_page_text",
+                json!({"workspaceId": workspace.as_str(), "tabId": 7}),
+            ),
+            WorkId(30),
+            |workspace| {
+                let mut result = BrowserResult::new(
+                    OperationId::BrowserRead,
+                    IntentId::ReadText,
+                    BrowserResultStatus::Ok,
+                    OperationEffect::None,
+                );
+                result.workspace = workspace;
+                result.parts.push(ResultPart::Text {
+                    text: "Page text".into(),
+                });
+                result.data = json!({"characters": 9});
+                TerminalOutcome::Success {
+                    result: Box::new(result),
+                }
+            },
+        );
+        assert_eq!(
+            succeeded.output,
+            vec![json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "result": {
+                    "content": [{"type": "text", "text": "Page text"}],
+                    "structuredContent": {"characters": 9},
+                    "resultType": "complete",
+                    "_meta": {
+                        "io.modelcontextprotocol/serverInfo": {
+                            "name": Instance::resolve().mcp_server_name(),
+                            "version": env!("CARGO_PKG_VERSION"),
+                        },
+                    },
+                },
+            })]
+        );
+
+        let denied = complete_tool_call(
+            &mut handler,
+            &mut correlation,
+            tool_call(
+                4,
+                "get_page_text",
+                json!({"workspaceId": workspace.as_str(), "tabId": 7}),
+            ),
+            WorkId(40),
+            |_| TerminalOutcome::Denied {
+                message: "Blocked by test policy.".into(),
+                source: DenialSource::Policy,
+            },
+        );
+        assert_eq!(
+            denied.output,
+            vec![json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "result": {
+                    "content": [{"type": "text", "text": "Blocked by test policy."}],
+                    "isError": true,
+                    "resultType": "complete",
+                    "_meta": {
+                        "io.modelcontextprotocol/serverInfo": {
+                            "name": Instance::resolve().mcp_server_name(),
+                            "version": env!("CARGO_PKG_VERSION"),
+                        },
+                    },
+                },
+            })]
+        );
     }
 
     #[test]

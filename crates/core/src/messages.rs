@@ -138,7 +138,7 @@
 //! rather than denial-specific (today: `"error"` for a sacred-domain denial, `"warn"` for a policy
 //! denial); `ref` is an opaque cross-reference
 //! (today: a denial_id) a viewer can correlate back to
-//! the structured audit record later. First caller: [`crate::tool::pipeline::run_tool_call`], at
+//! the structured audit record later. The canonical operation pipeline emits it at
 //! each of the three points a call is denied.
 //!
 //! ## Extension debug events (ADR-0059)

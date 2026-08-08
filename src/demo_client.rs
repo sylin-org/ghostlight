@@ -431,7 +431,10 @@ mod tests {
 
     #[test]
     fn provenance_contract_negotiates_current_and_legacy_services() {
-        let current = ghostlight::browser::directory::advertised_tools_json();
+        let current: Value = serde_json::from_str(include_str!(
+            "../crates/mcp-connector/src/surface/data/ghostlight-legacy-v1.json"
+        ))
+        .expect("edge-owned legacy profile parses");
         assert_eq!(
             PageProvenanceContract::from_tools_list(&current).unwrap(),
             PageProvenanceContract::Required

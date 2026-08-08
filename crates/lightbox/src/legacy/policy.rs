@@ -11,7 +11,7 @@ use ghostlight_core::browser::pattern;
 use ghostlight_core::governance::config::reload::PolicySource;
 use ghostlight_core::governance::manifest::source;
 use ghostlight_core::governance::paths::GovernancePaths;
-use ghostlight_core::governance::ports::ClientInfo;
+use ghostlight_core::governance::ports::{Capability, ClientInfo};
 use ghostlight_core::hub::outbound::browser::Browser;
 use ghostlight_core::hub::peer::PeerUser;
 use ghostlight_core::hub::ServiceContext;
@@ -19,6 +19,7 @@ use ghostlight_core::tool::outcome::CallOutcome;
 use ghostlight_core::work::{CancellationToken, WorkContext};
 use ghostlight_transport::bridge::WorkspaceUse;
 use ghostlight_transport::observability::DebugSink;
+use ghostlight_transport::operation::{BrowserOperation, IntentId, OperationId};
 use ghostlight_transport::workspace_id::WorkspaceId;
 
 use crate::scenarios::Scenario;
@@ -44,64 +45,18 @@ fn manifest(capabilities: &[&str]) -> Value {
     })
 }
 
-fn read_only_tools() -> Vec<String> {
-    [
-        "tabs_context_mcp",
-        "tabs_create_mcp",
-        "navigate",
-        "computer",
-        "find",
-        "get_page_text",
-        "read_console_messages",
-        "read_network_requests",
-        "read_page",
-        "resize_window",
-        "update_plan",
-        "narrate",
-        "wait_for",
-        "script",
-        "act_on",
-        "dialog",
-        "tab_control",
-        "browser_batch",
-        "gif_creator",
-        "explain",
-    ]
-    .into_iter()
-    .map(str::to_string)
-    .collect()
-}
-
-fn expanded_tools() -> Vec<String> {
-    [
-        "tabs_context_mcp",
-        "tabs_create_mcp",
-        "navigate",
-        "computer",
-        "find",
-        "form_input",
-        "get_page_text",
-        "read_console_messages",
-        "read_network_requests",
-        "read_page",
-        "resize_window",
-        "update_plan",
-        "narrate",
-        "wait_for",
-        "script",
-        "form_fill",
-        "act_on",
-        "dialog",
-        "tab_control",
-        "file_upload",
-        "browser_batch",
-        "upload_image",
-        "gif_creator",
-        "explain",
-    ]
-    .into_iter()
-    .map(str::to_string)
-    .collect()
+fn expected_operations(allowed: &[Capability]) -> Vec<String> {
+    ghostlight_core::operation::registry::descriptors()
+        .iter()
+        .filter(|descriptor| {
+            descriptor.requires.is_empty()
+                || descriptor
+                    .requires
+                    .iter()
+                    .all(|required| allowed.contains(required))
+        })
+        .map(|descriptor| format!("{}/{}", descriptor.key.id, descriptor.key.intent))
+        .collect()
 }
 
 fn build_context(paths: &GovernancePaths) -> anyhow::Result<ServiceContext> {
@@ -145,28 +100,20 @@ impl WorkDriver {
         *self.context.catalog_generation.borrow()
     }
 
-    fn tool_names(&self) -> Vec<String> {
+    fn operation_names(&self) -> Vec<String> {
         let authority = self.context.authority.current();
-        ghostlight_core::browser::advertise::advertised_tools(
-            &ghostlight_core::tool::tools::advertised_tools_json(),
-            authority.governance.grants(),
-        )["tools"]
-            .as_array()
-            .expect("legacy test catalog has tools")
-            .iter()
-            .map(|tool| {
-                tool["name"]
-                    .as_str()
-                    .expect("canonical tool declaration has a name")
-                    .to_string()
-            })
-            .collect()
+        ghostlight_core::tool::catalog::project_catalog(
+            &authority.governance,
+            None,
+            self.generation(),
+        )
+        .operations
+        .iter()
+        .map(|operation| format!("{}/{}", operation.id, operation.intent))
+        .collect()
     }
 
-    async fn call(&self, operation: &str, arguments: &Value) -> CallOutcome {
-        let canonical =
-            ghostlight_core::operation::registry::decode_legacy_call(operation, arguments)
-                .expect("Lightbox legacy call decodes");
+    async fn call(&self, canonical: BrowserOperation) -> CallOutcome {
         let descriptor = ghostlight_core::operation::registry::descriptor(canonical.key())
             .expect("Lightbox call maps to an implemented operation");
         let workspace = match descriptor.workspace_use {
@@ -188,28 +135,27 @@ impl WorkDriver {
             &self.context.workspaces,
             &work,
             &cancellation,
-            work.arguments(),
         )
         .await;
         drop(lease);
         outcome
     }
 
-    async fn poll_tools_until(
+    async fn poll_operations_until(
         &self,
         expected: &[String],
         after_generation: Option<u64>,
     ) -> anyhow::Result<()> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
         loop {
-            let actual = self.tool_names();
+            let actual = self.operation_names();
             let generation = self.generation();
             if actual == expected && after_generation.is_none_or(|previous| generation > previous) {
                 return Ok(());
             }
             ensure!(
                 tokio::time::Instant::now() < deadline,
-                "advertised tools never matched {expected:?} after {after_generation:?}; last generation: {generation}; last projection: {actual:?}"
+                "available operations never matched {expected:?} after {after_generation:?}; last generation: {generation}; last projection: {actual:?}"
             );
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
@@ -254,8 +200,11 @@ fn org_policy_boot() -> anyhow::Result<()> {
         std::fs::write(&paths.org_policy, serde_json::to_vec(&manifest(&["read"]))?)?;
         let context = build_context(&paths)?;
         let driver = WorkDriver::start(context, None)?;
-        let tools = driver.tool_names();
-        ensure!(tools == read_only_tools(), "{tools:?}");
+        let operations = driver.operation_names();
+        ensure!(
+            operations == expected_operations(&[Capability::Read]),
+            "{operations:?}"
+        );
         driver.finish()?;
         Ok(())
     })
@@ -276,7 +225,7 @@ fn org_policy_hot_reload() -> anyhow::Result<()> {
                 version: "1.2.3".to_string(),
             }),
         )?;
-        ensure!(driver.tool_names() == read_only_tools());
+        ensure!(driver.operation_names() == expected_operations(&[Capability::Read]));
         let initial_generation = driver.generation();
 
         std::fs::write(
@@ -284,18 +233,31 @@ fn org_policy_hot_reload() -> anyhow::Result<()> {
             serde_json::to_vec(&manifest(&["read", "action", "write"]))?,
         )?;
         driver
-            .poll_tools_until(&expanded_tools(), Some(initial_generation))
+            .poll_operations_until(
+                &expected_operations(&[
+                    Capability::Read,
+                    Capability::Action,
+                    Capability::Write,
+                ]),
+                Some(initial_generation),
+            )
             .await?;
         let expanded_generation = driver.generation();
-        let _ = driver.call("tabs_create_mcp", &json!({})).await;
+        let _ = driver
+            .call(BrowserOperation::new(
+                OperationId::BrowserTabs,
+                IntentId::TabsNew,
+                json!({}),
+            ))
+            .await;
 
         std::fs::remove_file(&paths.org_policy)?;
-        let all_open: Vec<String> = ghostlight_core::browser::directory::advertised_tool_names()
-            .into_iter()
-            .map(str::to_string)
-            .collect();
+        let all_open = ghostlight_core::operation::registry::descriptors()
+            .iter()
+            .map(|descriptor| format!("{}/{}", descriptor.key.id, descriptor.key.intent))
+            .collect::<Vec<_>>();
         driver
-            .poll_tools_until(&all_open, Some(expanded_generation))
+            .poll_operations_until(&all_open, Some(expanded_generation))
             .await?;
         let all_open_generation = driver.generation();
         ensure!(

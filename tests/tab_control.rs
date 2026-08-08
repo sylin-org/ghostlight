@@ -3,11 +3,12 @@
 
 mod support;
 
+use ghostlight_transport::operation::{BrowserOperation, IntentId, OperationId};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use support::inproc::{by_id, manifest_from_value, Harness};
+use support::inproc::{by_id, manifest_from_value, operation, operation_call, Harness};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -67,10 +68,28 @@ fn tab_response(request: &Value) -> Value {
     })
 }
 
-fn call(id: i64, action: &str) -> Value {
-    json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{
-        "name":"tab_control","arguments":{"tabId":1,"action":action}
-    }})
+fn tab_operation(intent: IntentId) -> BrowserOperation {
+    let id = match intent {
+        IntentId::NavigateReload => OperationId::BrowserNavigate,
+        IntentId::TabsFocus | IntentId::TabsClose => OperationId::BrowserTabs,
+        other => panic!("unexpected test tab intent: {other}"),
+    };
+    operation(id, intent, json!({"tab":1}))
+}
+
+fn call(id: i64, intent: IntentId) -> Value {
+    operation_call(id, tab_operation(intent))
+}
+
+fn flow(id: i64, steps: Vec<BrowserOperation>) -> Value {
+    operation_call(
+        id,
+        operation(
+            OperationId::BrowserFlow,
+            IntentId::FlowExecute,
+            json!({"tab":1,"steps":steps,"on_error":"stop"}),
+        ),
+    )
 }
 
 #[tokio::test]
@@ -85,9 +104,9 @@ async fn focus_reload_and_close_return_receipts_and_content_free_audit_categorie
     let responses = harness
         .drive(&[
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-            call(2, "focus"),
-            call(3, "reload"),
-            call(4, "close"),
+            call(2, IntentId::TabsFocus),
+            call(3, IntentId::NavigateReload),
+            call(4, IntentId::TabsClose),
         ])
         .await;
     for (id, field) in [(2, "tabFocused"), (3, "tabReloaded"), (4, "tabClosed")] {
@@ -168,9 +187,9 @@ async fn focus_needs_no_rawx_but_reload_and_close_require_action() {
     let responses = harness
         .drive(&[
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-            call(2, "focus"),
-            call(3, "reload"),
-            call(4, "close"),
+            call(2, IntentId::TabsFocus),
+            call(3, IntentId::NavigateReload),
+            call(4, IntentId::TabsClose),
         ])
         .await;
     assert_ne!(by_id(&responses, 2)["result"]["isError"], true);
@@ -184,7 +203,7 @@ async fn focus_needs_no_rawx_but_reload_and_close_require_action() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tab_control_composes_through_script_and_browser_batch() {
+async fn tab_control_composes_through_canonical_flows() {
     let harness = Harness::governed(manifest_from_value(&manifest(&["action"], None)));
     let dispatched = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&dispatched);
@@ -200,12 +219,13 @@ async fn tab_control_composes_through_script_and_browser_batch() {
     let script = harness
         .drive(&[
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
-                "name":"script","arguments":{"tabId":1,"steps":[
-                    {"tool":"tab_control","args":{"action":"focus"}},
-                    {"tool":"tab_control","args":{"action":"reload"}}
-                ]}
-            }}),
+            flow(
+                2,
+                vec![
+                    tab_operation(IntentId::TabsFocus),
+                    tab_operation(IntentId::NavigateReload),
+                ],
+            ),
         ])
         .await;
     assert_ne!(by_id(&script, 2)["result"]["isError"], true);
@@ -213,12 +233,13 @@ async fn tab_control_composes_through_script_and_browser_batch() {
     let batch = harness
         .drive(&[
             json!({"jsonrpc":"2.0","id":3,"method":"initialize","params":{}}),
-            json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
-                "name":"browser_batch","arguments":{"actions":[
-                    {"name":"tab_control","input":{"tabId":1,"action":"focus"}},
-                    {"name":"tab_control","input":{"tabId":1,"action":"close"}}
-                ]}
-            }}),
+            flow(
+                4,
+                vec![
+                    tab_operation(IntentId::TabsFocus),
+                    tab_operation(IntentId::TabsClose),
+                ],
+            ),
         ])
         .await;
     assert_ne!(by_id(&batch, 4)["result"]["isError"], true);

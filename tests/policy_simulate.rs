@@ -56,6 +56,38 @@ fn permissive_manifest_yields_zero_would_denies() {
     }
 }
 
+#[test]
+fn canonical_audit_identities_replay_without_the_historical_alias_table() {
+    let path = std::env::temp_dir().join(format!(
+        "ghostlight-policy-simulate-canonical-{}.jsonl",
+        std::process::id()
+    ));
+    std::fs::write(
+        &path,
+        concat!(
+            r#"{"tool":"browser.snapshot","action":"snapshot.capture","domain":"docs.example.com"}"#,
+            "\n",
+            r#"{"tool":"browser.input","action":"input.pointer.click","domain":"docs.example.com"}"#,
+            "\n"
+        ),
+    )
+    .expect("write canonical replay fixture");
+
+    let output = run_simulate(PERMISSIVE, path.to_str().expect("UTF-8 temp path"));
+    std::fs::remove_file(&path).ok();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    assert!(stdout.contains("total actions: 2"), "{stdout}");
+    assert!(stdout.contains("would allow: 2"), "{stdout}");
+    assert!(stdout.contains("not evaluable: 0"), "{stdout}");
+}
+
 /// Item 2 (golden test): restrictive manifest over the fixture. Exact totals arithmetic, exact
 /// group lines (by substring), denial id shape, sort order, and the folded `computer` count.
 #[test]

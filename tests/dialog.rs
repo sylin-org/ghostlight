@@ -3,12 +3,12 @@
 
 mod support;
 
-use ghostlight_transport::operation::{IntentId, OperationId};
+use ghostlight_transport::operation::{BrowserOperation, IntentId, OperationId};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use support::inproc::{by_id, manifest_from_value, Harness};
+use support::inproc::{by_id, manifest_from_value, operation, operation_call, Harness};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -77,14 +77,27 @@ fn dialog_response(request: &Value) -> Value {
     }
 }
 
-fn call(id: i64, action: &str, text: Option<&str>) -> Value {
-    let mut arguments = json!({"tabId":1,"action":action});
+fn dialog_operation(intent: IntentId, text: Option<&str>) -> BrowserOperation {
+    let mut arguments = json!({"tab":1});
     if let Some(text) = text {
         arguments["text"] = json!(text);
     }
-    json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{
-        "name":"dialog","arguments":arguments
-    }})
+    operation(OperationId::BrowserDialog, intent, arguments)
+}
+
+fn call(id: i64, intent: IntentId, text: Option<&str>) -> Value {
+    operation_call(id, dialog_operation(intent, text))
+}
+
+fn flow(id: i64, steps: Vec<BrowserOperation>) -> Value {
+    operation_call(
+        id,
+        operation(
+            OperationId::BrowserFlow,
+            IntentId::FlowExecute,
+            json!({"tab":1,"steps":steps,"on_error":"stop"}),
+        ),
+    )
 }
 
 #[tokio::test]
@@ -100,10 +113,10 @@ async fn status_and_each_resolution_action_are_governed_and_content_minimized_in
     let responses = harness
         .drive(&[
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-            call(2, "status", None),
-            call(3, "accept", None),
-            call(4, "dismiss", None),
-            call(5, "respond", Some("Private reply")),
+            call(2, IntentId::DialogStatus, None),
+            call(3, IntentId::DialogAccept, None),
+            call(4, IntentId::DialogDismiss, None),
+            call(5, IntentId::DialogRespond, Some("Private reply")),
         ])
         .await;
 
@@ -171,8 +184,8 @@ async fn read_only_policy_allows_status_but_denies_resolution_before_dispatch() 
     let responses = harness
         .drive(&[
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-            call(2, "status", None),
-            call(3, "accept", None),
+            call(2, IntentId::DialogStatus, None),
+            call(3, IntentId::DialogAccept, None),
         ])
         .await;
     assert_ne!(by_id(&responses, 2)["result"]["isError"], true);
@@ -184,7 +197,7 @@ async fn read_only_policy_allows_status_but_denies_resolution_before_dispatch() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn dialog_composes_through_script_and_browser_batch() {
+async fn dialog_composes_through_canonical_flows() {
     let harness = Harness::governed(manifest_from_value(&manifest(&["read", "action"], None)));
     let dispatched = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&dispatched);
@@ -200,18 +213,20 @@ async fn dialog_composes_through_script_and_browser_batch() {
     let responses = harness
         .drive(&[
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
-                "name":"script","arguments":{"tabId":1,"steps":[
-                    {"tool":"dialog","args":{"action":"status"}},
-                    {"tool":"dialog","args":{"action":"dismiss"}}
-                ]}
-            }}),
-            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
-                "name":"browser_batch","arguments":{"actions":[
-                    {"name":"dialog","input":{"tabId":1,"action":"status"}},
-                    {"name":"dialog","input":{"tabId":1,"action":"accept"}}
-                ]}
-            }}),
+            flow(
+                2,
+                vec![
+                    dialog_operation(IntentId::DialogStatus, None),
+                    dialog_operation(IntentId::DialogDismiss, None),
+                ],
+            ),
+            flow(
+                3,
+                vec![
+                    dialog_operation(IntentId::DialogStatus, None),
+                    dialog_operation(IntentId::DialogAccept, None),
+                ],
+            ),
         ])
         .await;
     assert_ne!(by_id(&responses, 2)["result"]["isError"], true);

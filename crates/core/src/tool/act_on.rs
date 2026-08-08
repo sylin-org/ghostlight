@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! The `act_on` semantic interaction (ADR-0078 D3): resolve one target, refuse ambiguity, dispatch
-//! one pre-authorized browser mechanism, and optionally observe a postcondition in one MCP call.
+//! The canonical target-bound semantic interaction (ADR-0078 D3): resolve one target, refuse
+//! ambiguity, dispatch one pre-authorized browser mechanism, and optionally observe a
+//! postcondition in one operation.
 //!
 //! The parent pipeline performs the complete RAWX decision before this handler runs. Internal
 //! resolution, cue, action, and wait calls go directly to the browser and receive correlated audit
 //! records; they never trigger a second policy prompt or use page content as authorization input.
 
-use crate::browser::directory;
 use crate::governance::dispatch::Governance;
 use crate::governance::ports::Capability;
 use crate::hub::outbound::browser::Browser;
 use crate::hub::scheduling::ExecutionContext;
+use crate::operation::registry as operation_registry;
 use crate::tool::outcome::{delivery_failure_outcome, CallOutcome, LocalCtx, LocalFuture};
 use crate::work::{CancellationToken, WorkContext};
-use ghostlight_transport::operation::OperationEffect;
+use ghostlight_transport::operation::{IntentId, OperationEffect, OperationId, OperationKey};
 use serde_json::{json, Map, Value};
 
 const ACTIONS: &[&str] = &[
@@ -27,7 +28,7 @@ const ACTIONS: &[&str] = &[
 ];
 const EXPECT_STATES: &[&str] = &["visible", "present", "gone"];
 
-/// Registry entry point. The parent grant decision has completed before this runs.
+/// Canonical registry entry point. The parent grant decision has completed before this runs.
 pub(crate) fn act_on_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
     Box::pin(async move {
         run(
@@ -218,6 +219,26 @@ fn internal_audit(
     audit
 }
 
+fn canonical_requirements(key: OperationKey) -> &'static [Capability] {
+    operation_registry::descriptor(key)
+        .expect("act_on internal operation key must exist")
+        .requires
+}
+
+fn dispatched_operation(action: &str) -> OperationKey {
+    let (id, intent) = match action {
+        "left_click" => (OperationId::BrowserAct, IntentId::ActClick),
+        "right_click" => (OperationId::BrowserAct, IntentId::ActRightClick),
+        "double_click" => (OperationId::BrowserAct, IntentId::ActDoubleClick),
+        "triple_click" => (OperationId::BrowserAct, IntentId::ActTripleClick),
+        "hover" => (OperationId::BrowserAct, IntentId::ActHover),
+        "scroll_to" => (OperationId::BrowserAct, IntentId::ActScrollIntoView),
+        "set_value" => (OperationId::BrowserFill, IntentId::FillField),
+        _ => unreachable!("act_on action was validated"),
+    };
+    OperationKey::new(id, intent)
+}
+
 async fn run(
     browser: &Browser,
     governance: &Governance,
@@ -382,17 +403,15 @@ async fn run(
     }
 
     let action = args["action"].as_str().expect("validated action");
-    let (tool, mut dispatch_args, requirements) = if action == "set_value" {
+    let (tool, mut dispatch_args) = if action == "set_value" {
         (
             "form_input",
             json!({ "tabId": tab_id, "ref": reference, "value": args["value"] }),
-            directory::requires("form_input", None),
         )
     } else {
         (
             "computer",
             json!({ "tabId": tab_id, "ref": reference, "action": action }),
-            directory::requires("computer", Some(action)),
         )
     };
     if let Some(modifiers) = args.get("modifiers") {
@@ -406,7 +425,7 @@ async fn run(
         } else {
             None
         },
-        requirements,
+        Some(canonical_requirements(dispatched_operation(action))),
         &batch_id,
         3,
         work,
@@ -455,7 +474,10 @@ async fn run(
             governance,
             "wait_for",
             None,
-            directory::requires("wait_for", None),
+            Some(canonical_requirements(OperationKey::new(
+                OperationId::BrowserWait,
+                IntentId::WaitUntil,
+            ))),
             &batch_id,
             4,
             work,
@@ -548,6 +570,39 @@ async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn internal_dispatches_use_semantic_operation_keys() {
+        for (action, intent) in [
+            ("left_click", IntentId::ActClick),
+            ("right_click", IntentId::ActRightClick),
+            ("double_click", IntentId::ActDoubleClick),
+            ("triple_click", IntentId::ActTripleClick),
+            ("hover", IntentId::ActHover),
+            ("scroll_to", IntentId::ActScrollIntoView),
+        ] {
+            assert_eq!(
+                dispatched_operation(action),
+                OperationKey::new(OperationId::BrowserAct, intent)
+            );
+        }
+        assert_eq!(
+            dispatched_operation("set_value"),
+            OperationKey::new(OperationId::BrowserFill, IntentId::FillField)
+        );
+        assert_eq!(
+            canonical_requirements(dispatched_operation("left_click")),
+            &[Capability::Action]
+        );
+        assert_eq!(
+            canonical_requirements(dispatched_operation("hover")),
+            &[Capability::Read]
+        );
+        assert_eq!(
+            canonical_requirements(dispatched_operation("set_value")),
+            &[Capability::Write]
+        );
+    }
 
     #[test]
     fn validates_target_value_and_expect_shapes() {

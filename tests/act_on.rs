@@ -7,7 +7,7 @@ use ghostlight_transport::operation::{IntentId, OperationId};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use support::inproc::{by_id, manifest_from_value, Harness};
+use support::inproc::{by_id, manifest_from_value, operation, operation_call, Harness};
 
 fn text_result(text: impl Into<String>) -> Value {
     json!({"content":[{"type":"text","text":text.into()}]})
@@ -38,12 +38,13 @@ fn manifest(audit_path: &Path) -> Value {
     })
 }
 
-fn call(arguments: Value) -> [Value; 2] {
+fn click_call(arguments: Value) -> [Value; 2] {
     [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
-            "name":"act_on","arguments":arguments
-        }}),
+        operation_call(
+            2,
+            operation(OperationId::BrowserAct, IntentId::ActClick, arguments),
+        ),
     ]
 }
 
@@ -96,10 +97,9 @@ async fn unique_semantic_target_acts_waits_and_audits_only_content_free_outcome(
         .await;
 
     let responses = harness
-        .drive(&call(json!({
-            "tabId":1,
+        .drive(&click_call(json!({
+            "tab":1,
             "target":{"name":"Save private draft","role":"button"},
-            "action":"left_click",
             "expect":{"text":"Secret success text","state":"visible","timeout_ms":5000}
         })))
         .await;
@@ -177,8 +177,8 @@ async fn best_rank_tie_returns_candidates_without_cue_or_action() {
         .await;
 
     let responses = harness
-        .drive(&call(json!({
-            "tabId":1,"target":{"name":"Save","role":"button"},"action":"left_click"
+        .drive(&click_call(json!({
+            "tab":1,"target":{"name":"Save","role":"button"}
         })))
         .await;
     let result = &by_id(&responses, 2)["result"];
@@ -243,8 +243,8 @@ async fn open_javascript_dialog_is_returned_as_a_blocker() {
         .await;
 
     let responses = harness
-        .drive(&call(json!({
-            "tabId":1,"target":{"name":"Open dialog","role":"button"},"action":"left_click"
+        .drive(&click_call(json!({
+            "tab":1,"target":{"name":"Open dialog","role":"button"}
         })))
         .await;
     let result = &by_id(&responses, 2)["result"];

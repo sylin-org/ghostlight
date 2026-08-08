@@ -6,24 +6,25 @@ blocking a stage.
 
 ## RESUME HERE
 
-- State: ACTIVE; ADR-0101 authorizes the staged implementation and R1 is complete.
-- Current stage: R2 -- legacy surface profile, ready to start.
-- Next action: remove the remaining model-facing declaration, legacy decoder, and trained-name
-  dependencies from the core while `ghostlight-legacy/v1` remains byte exact at the edge.
+- State: ACTIVE; ADR-0101 authorizes the staged implementation and R2 is complete.
+- Current stage: R3 -- typed mechanism isolation.
+- Next action: introduce the closed physical mechanism vocabulary, compile canonical operations
+  and local semantic sequences to typed mechanism requests, and keep the old extension wire behind
+  one bounded outbound compatibility serializer.
 - Blocking condition: none.
 - Shipping default: current 25-tool surface. `ghostlight-native/v1`, Claude, and Codex profiles are
   candidates only.
-- Last green gate: 2026-08-08 R1 full Rust, extension, formatting, Clippy, build, diff, and ASCII
-  gates passed in `.target-browser-kernel-r1-core`.
+- Last green gate: 2026-08-08 R2 full Rust formatting, Clippy, build, tests, diff, and ASCII gates
+  passed in `.target-browser-kernel-r2-final`.
 
 ## Stage table
 
 | Stage | Status | Closing commit(s) | Release checkpoint | Notes |
 | --- | --- | --- | --- | --- |
 | R0 authority and inventory | COMPLETE | 5439e24c + a2a52ab7 | Current product unchanged | ADR-0101, immutable catalog/guide oracle, green baselines |
-| R1 canonical operation bridge | COMPLETE | (this commit) | Current 25 tools through temporary decoder | Bridge major 2 fails loudly across old/new peers |
-| R2 legacy surface profile | NOT STARTED | -- | `ghostlight-legacy/v1` remains default | Exact declarations and rendering move to edge |
-| R3 typed mechanism isolation | NOT STARTED | -- | Old extension wire only | Core no longer dispatches surface names |
+| R1 canonical operation bridge | COMPLETE | c3c4020d | Current 25 tools through temporary decoder | Bridge major 2 fails loudly across old/new peers |
+| R2 legacy surface profile | COMPLETE | (this commit) | `ghostlight-legacy/v1` remains default | Exact declarations and rendering are edge-owned |
+| R3 typed mechanism isolation | IN PROGRESS | -- | Old extension wire only | Core no longer dispatches surface names |
 | R4 extension mechanism skew | NOT STARTED | -- | Negotiated new wire plus legacy fallback | Prove old/new matrix |
 | R5 native surface and readiness | NOT STARTED | -- | Native explicit opt-in; legacy default | No planned pack is advertised |
 | R6 client/profile selection | NOT STARTED | -- | Exact selection; legacy fallback retained | No identity signal affects authority |
@@ -45,7 +46,7 @@ or dated live record. A prose assertion is not evidence.
 | Inventory and authority | R0 | Accepted ADR ids; hashes and provenance for all captures; exact current catalog/result/RAWX/scheduling/workspace map; bridge and extension-wire baselines | COMPLETE | ADR-0101; Research 21 capture table; `tests/golden/surfaces/ghostlight-legacy-v1*`; current directory plus bridge/extension regression suites; 2026-08-08 baseline gates |
 | Canonical operation kernel | R1 | Typed operation/result/handle/default round trips; exhaustive concrete variant descriptors; no vendor or model-facing name as an execution key | COMPLETE | `crates/transport/src/operation.rs`; `crates/core/src/operation/registry.rs`; 26 operation families, 60 closed intents, and all 52 legacy variants covered by tests |
 | Operation bridge | R1 | Coordinated major cutover; old/new mismatch fails loudly; Start/catalog/result/cancel transcripts; recursive flow carries canonical operations only | COMPLETE | Bridge major 2 unit and integration transcripts in `crates/transport/src/bridge.rs`, both MCP revisions, `tests/hub_isolation.rs`, and `tests/operation_bridge.rs` |
-| Legacy profile | R2 | Byte-exact 25-tool order, identity, schemas, annotations, examples, results, and errors on both MCP revisions; legacy remains releasable | NOT STARTED | -- |
+| Legacy profile | R2 | Byte-exact 25-tool order, identity, schemas, annotations, examples, results, and errors on both MCP revisions; legacy remains releasable | COMPLETE | Edge-owned catalog, guide, explain copy, schema validation, call decoder, and result renderer; exact full-catalog/context/success/denial handler transcripts for both revisions; `surface_profile_fidelity` architecture guard |
 | Mechanisms and extension skew | R3-R4 | Exhaustive operation-to-mechanism and legacy alias maps; negotiated new wire; new/new, new/old, and old/new process evidence | NOT STARTED | -- |
 | Native surface | R5 | Strict twelve-tool core and honest supported packs; output schemas; workspace/addressing; bounded observations; opt-in journey evidence | NOT STARTED | -- |
 | Readiness | R5, R9 | Committed-document watcher; initial and landing authorization ordering; one dispatch-to-readiness deadline; condition/settlement result axes; timeout, unavailable, cancel, redirect, PDF/protected-page, and outcome-unknown tests | NOT STARTED | -- |
@@ -62,7 +63,8 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 | Date | Stage | Commit/tree | Common gates | Focused gates | Live/e2e evidence | Result and notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-08-08 | R0 | 5439e24c + a2a52ab7 | `cargo test --workspace`: pass | `cargo test --locked --test surface_profile_golden`: 2 pass; `node --test tests/extension/*.test.js`: 164 pass; extension `node --check`: pass | Not required for docs/oracle stage | Current 25-tool product and extension wire unchanged |
-| 2026-08-08 | R1 | (this commit) | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | transport 90, core 760, connector 87, architecture 11, operation bridge 3, frozen surface 2, schema fidelity 17, advertisement 3, protocol 4, enforcement 11, and four migrated integration targets 12: all pass | Extension 164/164 and syntax checks for 29 JavaScript files pass; process/e2e not required at R1 | Canonical bridge major 2, typed results, recursive flow, provenance, cancellation, image validation, workspace equality, and exact legacy edge rendering are green |
+| 2026-08-08 | R1 | c3c4020d | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | transport 90, core 760, connector 87, architecture 11, operation bridge 3, frozen surface 2, schema fidelity 17, advertisement 3, protocol 4, enforcement 11, and four migrated integration targets 12: all pass | Extension 164/164 and syntax checks for 29 JavaScript files pass; process/e2e not required at R1 | Canonical bridge major 2, typed results, recursive flow, provenance, cancellation, image validation, workspace equality, and exact legacy edge rendering are green |
+| 2026-08-08 | R2 | (this commit) | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | connector 96, core 739, transport 90, `surface_profile_fidelity` 4, MCP protocol 4, schema fidelity 17, advertisement 3, and enforcement 11: all pass | Extension unchanged; process/e2e not required at R2 | Frozen 25-tool profile and explain copy are edge-owned; both revision handlers prove exact catalog/context/success/denial transcripts; core has no model-facing declaration or legacy call decoder |
 
 ## Stage records
 
@@ -115,17 +117,27 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 
 ### R2 -- legacy surface profile
 
-- Status: NOT STARTED.
-- Edge-owned declaration evidence: --
-- Both-revision catalog evidence: --
-- Result/error rendering evidence: --
-- Core dependency-boundary evidence: --
-- Gate output: --
-- Deviations/blockers: --
+- Status: COMPLETE.
+- Edge-owned declaration evidence: `crates/mcp-connector/src/surface/ghostlight_legacy.rs` and
+  its embedded catalog, guide, and explain assets match the frozen `ghostlight-legacy/v1` goldens.
+- Both-revision catalog evidence: real handler/correlation transcripts in
+  `mcp_2025_11_25.rs` and `mcp_2026_07_28.rs` prove the full ordered catalog through each revision;
+  the transformed 2026 catalog also has a pinned byte length and fingerprint.
+- Result/error rendering evidence: the same handler transcripts prove exact context/explain,
+  ordinary read success, and policy-denial output. Context rendering rejects invalid family/intent
+  pairs, repeated operation facts, repeated capabilities, and noncanonical capability order.
+- Core dependency-boundary evidence: the old browser declaration, advertisement, tools, and
+  decoder modules are deleted. `tests/surface_profile_fidelity.rs` proves core production code has
+  no model-facing catalog/prose/decoder dependency. Historical audit replay remains one bounded
+  canonical-first compatibility table; the old extension serializer is explicitly deferred to R3.
+- Gate output: full workspace formatting, strict Clippy, build, and no-fail-fast tests passed in
+  `.target-browser-kernel-r2-final`; connector 96, core 739, and transport 90 tests passed; diff and
+  ASCII checks passed.
+- Deviations/blockers: none. `ghostlight-legacy/v1` remains the sole automatic default.
 
 ### R3 -- typed mechanism isolation
 
-- Status: NOT STARTED.
+- Status: IN PROGRESS.
 - Mechanism directory and exhaustive map: --
 - Legacy serializer/alias evidence: --
 - Browser behavior parity: --

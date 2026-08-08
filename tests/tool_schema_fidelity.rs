@@ -1,5 +1,4 @@
-//! Regression snapshot for the `tools/list` surface, now code-declared in
-//! `browser::directory::REGISTRY` (ADR-0034 Decision 4: tool declarations in code, not JSON).
+//! Regression snapshot for the edge-owned `ghostlight-legacy/v1` surface.
 //!
 //! Pins the structural invariants: the 13 trained tools plus sanctioned additive tools, in order, each with
 //! a non-empty description and an object inputSchema. The computer tool carries all 13 actions.
@@ -7,8 +6,12 @@
 //! from the description snapshot. This is a regression snapshot (visibility), not a second
 //! declaration source.
 
-use ghostlight::tool::tools::advertised_tools_json;
 use serde_json::{json, Value};
+
+const EDGE_LEGACY_SURFACE: &str =
+    include_str!("../crates/mcp-connector/src/surface/data/ghostlight-legacy-v1.json");
+const EDGE_LEGACY_AGENT_GUIDE: &str =
+    include_str!("../crates/mcp-connector/src/surface/data/ghostlight-legacy-v1-agent-guide.txt");
 
 /// The 13 trained tools, in order. Changing this array is changing the sacred contract.
 const EXPECTED_TRAINED: [&str; 13] = [
@@ -73,7 +76,8 @@ session. Close is always explicit and never affects a user-owned tab or automati
 containing tab group.";
 
 fn tools() -> Vec<Value> {
-    let v = advertised_tools_json();
+    let v: Value = serde_json::from_str(EDGE_LEGACY_SURFACE)
+        .expect("edge-owned ghostlight-legacy/v1 surface must be valid JSON");
     v["tools"]
         .as_array()
         .expect("`tools` must be an array")
@@ -552,20 +556,16 @@ fn descriptions_reference_callable_tab_tool_names() {
 /// the agent's workflow contract at handshake; a missing/empty one breaks the onboarding payload.
 #[test]
 fn agent_guide_is_present_with_all_five_non_empty_fields() {
-    let guide = ghostlight::browser::directory::AGENT_GUIDE;
-    for (key, val) in [
-        ("summary", guide.summary),
-        ("workflow", guide.workflow),
-        ("flow", guide.flow),
-        ("denials", guide.denials),
-        ("cost_notes", guide.cost_notes),
-    ] {
-        assert!(!val.is_empty(), "agentGuide.{key} must be non-empty");
-    }
+    let paragraphs = EDGE_LEGACY_AGENT_GUIDE
+        .trim_end()
+        .split("\n\n")
+        .collect::<Vec<_>>();
+    assert_eq!(paragraphs.len(), 5);
+    assert!(paragraphs.iter().all(|paragraph| !paragraph.is_empty()));
     // The load-bearing workflow rule must be present (this is the fact that, when missing, an
     // untrained model gets wrong on the first call).
     assert!(
-        guide.workflow.contains("tabId"),
+        paragraphs[1].contains("tabId"),
         "agentGuide.workflow must state the tabId-first rule"
     );
 }

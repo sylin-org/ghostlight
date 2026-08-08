@@ -6,9 +6,9 @@
 //! `set_client`/`record_call` live on `Governance`, not on `Recorder` directly (Recorder only
 //! implements the bare `AuditSink::record`).
 
-use ghostlight::browser::directory;
 use ghostlight::governance::dispatch::Governance;
-use ghostlight::governance::ports::AuditSink;
+use ghostlight::governance::ports::{AuditSink, Capability};
+use ghostlight_transport::operation::{IntentId, OperationId, OperationKey};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -17,6 +17,12 @@ fn temp_path(tag: &str) -> std::path::PathBuf {
         "ghostlight-audit-recorder-test-{}-{tag}.jsonl",
         std::process::id()
     ))
+}
+
+fn requires(id: OperationId, intent: IntentId) -> &'static [Capability] {
+    ghostlight::operation::registry::descriptor(OperationKey::new(id, intent))
+        .expect("test operation has a descriptor")
+        .requires
 }
 
 #[test]
@@ -29,9 +35,12 @@ fn a_recorded_call_lands_as_one_wellformed_jsonl_line() {
 
     governance.set_client("claude-code", "2.1.0");
     let mut audit = governance.begin(
-        "computer",
-        Some("left_click"),
-        directory::requires("computer", Some("left_click")),
+        OperationId::BrowserInput.as_str(),
+        Some(IntentId::InputPointerClick.as_str()),
+        Some(requires(
+            OperationId::BrowserInput,
+            IntentId::InputPointerClick,
+        )),
     );
     audit.dispatch_finished();
     audit.complete();
@@ -73,8 +82,8 @@ fn a_recorded_call_lands_as_one_wellformed_jsonl_line() {
         "field order matches the shared format"
     );
 
-    assert_eq!(rec["tool"], "computer");
-    assert_eq!(rec["action"], "left_click");
+    assert_eq!(rec["tool"], "browser.input");
+    assert_eq!(rec["action"], "input.pointer.click");
     assert_eq!(rec["capability"], "action");
     assert_eq!(rec["decision"], "allow");
     // t03 (ADR-0024 Decision 3): the two-phase API owns the clock (dispatch_finished/complete
@@ -100,7 +109,14 @@ fn a_recorded_call_lands_as_one_wellformed_jsonl_line() {
     chrono::DateTime::parse_from_rfc3339(ts).expect("ts parses as rfc3339");
 
     // Append, not truncate: a second call must add a second line.
-    let mut audit2 = governance.begin("navigate", None, directory::requires("navigate", None));
+    let mut audit2 = governance.begin(
+        OperationId::BrowserNavigate.as_str(),
+        Some(IntentId::NavigateUrl.as_str()),
+        Some(requires(
+            OperationId::BrowserNavigate,
+            IntentId::NavigateUrl,
+        )),
+    );
     audit2.dispatch_finished();
     audit2.complete();
     let content = std::fs::read_to_string(&path).expect("audit file exists");
@@ -217,9 +233,12 @@ fn orchestration_keys_serialize_last_in_order() {
     let governance = Governance::all_open(Arc::new(recorder) as Arc<dyn AuditSink>);
 
     let mut audit = governance.begin(
-        "computer",
-        Some("left_click"),
-        directory::requires("computer", Some("left_click")),
+        OperationId::BrowserInput.as_str(),
+        Some(IntentId::InputPointerClick.as_str()),
+        Some(requires(
+            OperationId::BrowserInput,
+            IntentId::InputPointerClick,
+        )),
     );
     audit.dispatch_finished();
     audit.complete();
@@ -247,9 +266,12 @@ fn orchestrated_setters_stamp_fields() {
     let governance = Governance::all_open(Arc::new(recorder) as Arc<dyn AuditSink>);
 
     let mut audit = governance.begin(
-        "computer",
-        Some("left_click"),
-        directory::requires("computer", Some("left_click")),
+        OperationId::BrowserInput.as_str(),
+        Some(IntentId::InputPointerClick.as_str()),
+        Some(requires(
+            OperationId::BrowserInput,
+            IntentId::InputPointerClick,
+        )),
     );
     audit.orchestrated("script", "00000000-0000-4000-8000-000000000001", Some(3));
     audit.mark_dry_run();

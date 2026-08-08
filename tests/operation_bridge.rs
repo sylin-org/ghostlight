@@ -6,8 +6,8 @@ use ghostlight_transport::bridge::{
     ServiceMessage, TerminalOutcome, WorkId, WorkspaceUse, BRIDGE_MAJOR,
 };
 use ghostlight_transport::operation::{
-    BrowserResult, BrowserResultStatus, IntentId, InvocationPresentation, OperationEffect,
-    OperationId, ResultPart,
+    BrowserOperation, BrowserResult, BrowserResultStatus, IntentId, InvocationPresentation,
+    OperationEffect, OperationId, ResultPart,
 };
 use serde_json::{json, Value};
 
@@ -33,24 +33,26 @@ fn assert_no_nested_surface_identity(value: &Value) {
 }
 
 #[test]
-fn recursive_legacy_flow_crosses_the_bridge_as_canonical_operations_only() {
-    let operation = ghostlight::operation::registry::decode_legacy_call(
-        "script",
-        &json!({
-            "tabId": 7,
+fn recursive_canonical_flow_crosses_the_bridge_without_surface_identity() {
+    let operation = BrowserOperation::new(
+        OperationId::BrowserFlow,
+        IntentId::FlowExecute,
+        json!({
+            "tab": 7,
             "steps": [
-                {"tool":"find","args":{"query":"Save"}},
-                {
-                    "tool":"act_on",
-                    "args":{
-                        "target":{"ref":"$prev.results.0.ref"},
-                        "action":"left_click"
-                    }
-                }
+                BrowserOperation::new(
+                    OperationId::BrowserFind,
+                    IntentId::FindQuery,
+                    json!({"tab":7,"query":"Save"}),
+                ),
+                BrowserOperation::new(
+                    OperationId::BrowserAct,
+                    IntentId::ActClick,
+                    json!({"tab":7,"target":{"ref":"$prev.results.0.ref"}}),
+                ),
             ]
         }),
-    )
-    .expect("legacy flow normalizes");
+    );
     assert_eq!(operation.id, OperationId::BrowserFlow);
     assert_eq!(operation.intent, IntentId::FlowExecute);
     assert_no_nested_surface_identity(&operation.arguments);

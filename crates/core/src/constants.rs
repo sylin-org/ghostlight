@@ -40,8 +40,8 @@ pub mod workspace {
 /// Composite tab identifiers (ADR-0058, amended by ADR-0061): a `tabId` that crosses the wire to
 /// the MCP client encodes BOTH the owning browser's service-assigned `slot` and the extension's own
 /// native Chrome tab id, as a single JSON number -- so routing a later call needs no server-side
-/// tabId->browser lookup table, and the trained `"tabId": {"type": "number"}` schema
-/// (`crate::browser::directory`) never changes shape. ADR-0061 replaced the high-bits `browser_pid`
+/// tabId->browser lookup table, while the edge-owned legacy profile keeps the trained
+/// `"tabId": {"type": "number"}` schema unchanged. ADR-0061 replaced the high-bits `browser_pid`
 /// (which degraded to a colliding 0) with a `slot` derived from the extension's persistent UUID; the
 /// arithmetic is unchanged. The extension itself never learns this encoding exists: only
 /// `crate::tool::pipeline` (decoding an inbound composite id to route the call, and encoding an

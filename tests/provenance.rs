@@ -3,8 +3,9 @@
 
 mod support;
 
+use ghostlight_transport::operation::{IntentId, OperationId};
 use serde_json::{json, Value};
-use support::inproc::{by_id, Harness};
+use support::inproc::{by_id, operation, operation_call, Harness};
 
 fn nonce(text: &str) -> &str {
     text.strip_prefix("--- GHOSTLIGHT PAGE CONTENT ")
@@ -16,8 +17,22 @@ fn nonce(text: &str) -> &str {
 fn calls() -> [Value; 3] {
     [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_page","arguments":{"tabId":1}}}),
-        json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_page","arguments":{"tabId":1}}}),
+        operation_call(
+            2,
+            operation(
+                OperationId::BrowserSnapshot,
+                IntentId::SnapshotCapture,
+                json!({"tab":1}),
+            ),
+        ),
+        operation_call(
+            3,
+            operation(
+                OperationId::BrowserSnapshot,
+                IntentId::SnapshotCapture,
+                json!({"tab":1}),
+            ),
+        ),
     ]
 }
 

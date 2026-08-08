@@ -20,10 +20,11 @@
 
 mod support;
 
+use ghostlight_transport::operation::{IntentId, OperationId};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use support::inproc::{by_id, manifest_from_value, text_of, Harness};
+use support::inproc::{by_id, manifest_from_value, operation, operation_call, text_of, Harness};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -75,7 +76,10 @@ fn read_audit_lines(path: &Path) -> Vec<Value> {
 fn denied_call_requests() -> Vec<Value> {
     vec![
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tabs_context_mcp","arguments":{}}}),
+        operation_call(
+            2,
+            operation(OperationId::BrowserTabs, IntentId::TabsList, json!({})),
+        ),
     ]
 }
 

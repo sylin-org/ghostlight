@@ -7,15 +7,16 @@
 //! an in-memory duplex. There is no MCP lifecycle, JSON-RPC parser, stdio, or spawned process here;
 //! exact protocol behavior belongs to the date-named handlers in `crates/mcp-connector`.
 //!
-//! Existing integration tests still supply request-shaped JSON values to [`Harness::drive`] as a
-//! compact test instruction format. `drive` translates only `initialize`, `tools/list`, and
-//! `tools/call`; it is deliberately not a wire implementation.
+//! Integration tests supply request-shaped JSON values to [`Harness::drive`] as a compact test
+//! instruction format. Calls carry a serialized canonical [`BrowserOperation`], and catalog
+//! requests return a canonical service projection. This fixture deliberately does not emulate a
+//! model-facing surface or MCP wire implementation.
 //!
 //! RUNTIME FLAVOR: a test that drives a tool which ORCHESTRATES internal sub-calls -- `script`, and
 //! a non-denied `form_fill` -- must use `#[tokio::test(flavor = "multi_thread", worker_threads =
 //! 2)]`. Those tools re-enter the runtime via `tokio::task::block_in_place` +
 //! `Handle::block_on` (`crates/core/src/tool/script.rs`), which panics on the default current-thread
-//! test runtime; the panic surfaces inside the spawned `tools/call` task, so the only visible
+//! test runtime; the panic surfaces inside the spawned call task, so the only visible
 //! symptom is that [`Harness::drive`] hangs waiting for a result that never comes. Plain
 //! (non-orchestrating) tool calls and denied-before-dispatch cases run fine on the default runtime.
 
@@ -33,7 +34,7 @@ use ghostlight::observability::DebugSink;
 use ghostlight::tool::outcome::CallOutcome;
 use ghostlight::work::{CancellationToken, WorkContext};
 use ghostlight_transport::bridge::WorkspaceUse;
-use ghostlight_transport::operation::BrowserOperation;
+use ghostlight_transport::operation::{BrowserOperation, IntentId, OperationId};
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -96,7 +97,7 @@ impl Harness {
     /// Attach a drivable fake extension to this harness's `Browser`. Every framed `tool_request`
     /// the service dispatches is handed to `responder` (the parsed request `Value`); `responder`'s
     /// return `Value` becomes the `result` of a framed `tool_response` echoed back by the request's
-    /// `id`. Blocks until the `Browser` reports connected. Without this, a `tools/call` reaches
+    /// `id`. Blocks until the `Browser` reports connected. Without this, a canonical call reaches
     /// dispatch and returns the familiar `not connected` execution error -- which is exactly the
     /// signal most enforcement/advertisement wiring tests assert on, so most callers never attach.
     pub async fn attach_fake_extension<F>(&self, responder: F)
@@ -182,22 +183,24 @@ impl Harness {
                     client = request_client(request);
                     json!({})
                 }
-                "tools/list" => self.catalog_result(),
-                "tools/call" => {
+                "operations/list" => self.catalog_result(),
+                "operations/call" => {
                     let params = request
                         .get("params")
-                        .expect("tools/call fixture instruction has params");
-                    let operation = params
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .expect("tools/call fixture instruction has a string name");
-                    let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
+                        .expect("canonical call fixture instruction has params");
+                    let operation = serde_json::from_value::<BrowserOperation>(
+                        params
+                            .get("operation")
+                            .cloned()
+                            .expect("canonical call fixture instruction has an operation"),
+                    )
+                    .expect("canonical call fixture instruction contains a valid wire shape");
                     // This convenience fixture represents a trusted fake-browser inventory. Seed
                     // caller-supplied tab handles explicitly so ordinary tool tests do not need a
                     // synthetic tabs_context_mcp prelude. Workspace-authority tests bypass this
                     // helper and exercise verification-only request admission directly.
                     let mut fixture_tabs = Vec::new();
-                    collect_fixture_tab_ids(&arguments, &mut fixture_tabs);
+                    collect_fixture_tab_ids(&operation.arguments, &mut fixture_tabs);
                     fixture_tabs.sort_unstable();
                     fixture_tabs.dedup();
                     if !fixture_tabs.is_empty() {
@@ -208,7 +211,7 @@ impl Harness {
                             "fixture tab inventory crossed a workspace"
                         );
                     }
-                    self.execute(operation, &arguments, &workspace, &owner, client.clone())
+                    self.execute(operation, &workspace, &owner, client.clone())
                         .await
                 }
                 other => panic!("unsupported neutral fixture instruction: {other}"),
@@ -225,25 +228,21 @@ impl Harness {
 
     fn catalog_result(&self) -> Value {
         let authority = self.ctx.authority.current();
-        ghostlight::browser::advertise::advertised_tools(
-            &ghostlight::tool::tools::advertised_tools_json(),
-            authority.governance.grants(),
-        )
+        serde_json::to_value(ghostlight::tool::catalog::project_catalog(
+            &authority.governance,
+            None,
+            *self.ctx.catalog_generation.borrow(),
+        ))
+        .expect("canonical catalog projection serializes")
     }
 
     async fn execute(
         &self,
-        operation: &str,
-        arguments: &Value,
+        canonical: BrowserOperation,
         workspace: &ghostlight_transport::workspace_id::WorkspaceId,
         owner: &PeerUser,
         client: Option<ClientInfo>,
     ) -> Value {
-        let canonical =
-            match ghostlight::operation::registry::decode_legacy_call(operation, arguments) {
-                Ok(operation) => operation,
-                Err(error) => return error_result(error.to_string()),
-            };
         let descriptor = ghostlight::operation::registry::descriptor(canonical.key())
             .expect("fixture call maps to an implemented operation");
         let workspace = match descriptor.workspace_use {
@@ -265,7 +264,6 @@ impl Harness {
             &self.ctx.workspaces,
             &work,
             &cancellation,
-            work.arguments(),
         )
         .await;
         drop(lease);
@@ -287,7 +285,6 @@ impl Harness {
             &self.ctx.workspaces,
             &work,
             &cancellation,
-            work.arguments(),
         )
         .await;
         render_outcome(outcome)
@@ -297,7 +294,7 @@ impl Harness {
 fn collect_fixture_tab_ids(value: &Value, tab_ids: &mut Vec<i64>) {
     match value {
         Value::Object(object) => {
-            if let Some(tab_id) = object.get("tabId").and_then(Value::as_i64) {
+            if let Some(tab_id) = object.get("tab").and_then(Value::as_i64) {
                 tab_ids.push(tab_id);
             }
             for child in object.values() {
@@ -357,12 +354,26 @@ fn execution_result(status: &str, retry_safe: bool, message: String) -> Value {
     })
 }
 
-/// The `[initialize, tools/call name(arguments)]` request pair every call-driving test opens with
-/// (mirrors `tests/tool_enforcement.rs::init_and_call`).
-pub fn init_and_call(name: &str, arguments: Value) -> Vec<Value> {
+/// One canonical call instruction for [`Harness::drive`].
+pub fn operation_call(id: i64, operation: BrowserOperation) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "operations/call",
+        "params": {"operation": operation},
+    })
+}
+
+/// Construct one canonical operation for an in-process test instruction.
+pub fn operation(id: OperationId, intent: IntentId, arguments: Value) -> BrowserOperation {
+    BrowserOperation::new(id, intent, arguments)
+}
+
+/// The `[initialize, canonical operation]` instruction pair every call-driving test opens with.
+pub fn init_and_call(operation: BrowserOperation) -> Vec<Value> {
     vec![
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":name,"arguments":arguments}}),
+        operation_call(2, operation),
     ]
 }
 

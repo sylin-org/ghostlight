@@ -21,10 +21,13 @@
 
 mod support;
 
+use ghostlight_transport::operation::{BrowserOperation, IntentId, OperationId};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use support::inproc::{by_id, init_and_call, manifest_from_value, text_of, Harness};
+use support::inproc::{
+    by_id, init_and_call, manifest_from_value, operation, operation_call, text_of, Harness,
+};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -85,6 +88,18 @@ const EXAMPLE_FULL_AND_RESEARCH_READ: &str = r#"[
     { "id": "research-read", "hosts": {"allow": ["research.example.org"]}, "allowed": ["read"] }
 ]"#;
 
+fn navigate(url: &str) -> BrowserOperation {
+    operation(
+        OperationId::BrowserNavigate,
+        IntentId::NavigateUrl,
+        json!({"url":url,"tab":1}),
+    )
+}
+
+fn tabs_list() -> BrowserOperation {
+    operation(OperationId::BrowserTabs, IntentId::TabsList, json!({}))
+}
+
 /// Test 1 + test 2 + test 7 (g13 doc "Integration tests"): a permitted call passes policy (it
 /// reaches dispatch and gets the ordinary `not connected` execution error, never `Denied (`); a
 /// denied domain never reaches dispatch and returns `Denied (D-...` naming `no grant covers`;
@@ -97,8 +112,8 @@ async fn permitted_call_passes_and_denied_domain_is_denied_with_matching_audit()
 
     let requests = [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://example.com/","tabId":1}}}),
-        json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://evil.com/","tabId":1}}}),
+        operation_call(2, navigate("https://example.com/")),
+        operation_call(3, navigate("https://evil.com/")),
     ];
     let responses = drive(Some(&manifest), &requests).await;
     assert_eq!(responses.len(), 3, "got {responses:?}");
@@ -165,11 +180,7 @@ async fn denied_capability_names_the_grant_and_the_missing_capability() {
     }]);
     let manifest = manifest_value("case3", grants, &audit_path);
 
-    let responses = drive(
-        Some(&manifest),
-        &init_and_call("tabs_context_mcp", json!({})),
-    )
-    .await;
+    let responses = drive(Some(&manifest), &init_and_call(tabs_list())).await;
     let denied_text = text_of(by_id(&responses, 2));
     assert!(denied_text.starts_with("Denied (D-"), "{denied_text}");
     assert!(denied_text.contains("research-write"), "{denied_text}");
@@ -193,10 +204,7 @@ async fn navigate_is_permitted_on_a_read_only_grant() {
 
     let responses = drive(
         Some(&manifest),
-        &init_and_call(
-            "navigate",
-            json!({"url": "https://research.example.org/", "tabId": 1}),
-        ),
+        &init_and_call(navigate("https://research.example.org/")),
     )
     .await;
     let permitted = by_id(&responses, 2);
@@ -232,7 +240,7 @@ async fn denied_scheme_names_the_scheme() {
 
     let responses = drive(
         Some(&manifest),
-        &init_and_call("navigate", json!({"url": "chrome://settings/", "tabId": 1})),
+        &init_and_call(navigate("chrome://settings/")),
     )
     .await;
     let denied_text = text_of(by_id(&responses, 2));
@@ -252,7 +260,11 @@ async fn fail_closed_when_tab_url_is_unknowable() {
 
     let responses = drive(
         Some(&manifest),
-        &init_and_call("read_page", json!({"tabId": 1})),
+        &init_and_call(operation(
+            OperationId::BrowserSnapshot,
+            IntentId::SnapshotCapture,
+            json!({"tab":1}),
+        )),
     )
     .await;
     let text = text_of(by_id(&responses, 2));
@@ -276,11 +288,7 @@ async fn union_rule_end_to_end() {
         "allowed": ["read", "action", "write"]
     }]);
     let all_manifest = manifest_value("case6-all", all_grants, &all_audit);
-    let responses = drive(
-        Some(&all_manifest),
-        &init_and_call("tabs_context_mcp", json!({})),
-    )
-    .await;
+    let responses = drive(Some(&all_manifest), &init_and_call(tabs_list())).await;
     let allowed_text = text_of(by_id(&responses, 2));
     assert!(
         allowed_text.starts_with("[hop: extension]") && allowed_text.contains("not connected"),
@@ -294,11 +302,7 @@ async fn union_rule_end_to_end() {
         "allowed": ["action", "write"]
     }]);
     let write_manifest = manifest_value("case6-write", write_grants, &write_audit);
-    let responses = drive(
-        Some(&write_manifest),
-        &init_and_call("tabs_context_mcp", json!({})),
-    )
-    .await;
+    let responses = drive(Some(&write_manifest), &init_and_call(tabs_list())).await;
     let denied_text = text_of(by_id(&responses, 2));
     assert!(denied_text.starts_with("Denied (D-"), "{denied_text}");
 
@@ -307,34 +311,30 @@ async fn union_rule_end_to_end() {
     }
 }
 
-/// Test 8: the all-open invariant. With no `--manifest` at all, behavior is byte-identical to
-/// today (22 tools -- the 13 trained tools plus `narrate`, `wait_for`, `script`, `form_fill`, `file_upload`,
-/// `browser_batch`, `upload_image`, `gif_creator`, and the ADR-0022 Decision 7 `explain` addition -- fixture
-/// identity, `not connected` execution error) and no `Denied (` text ever appears (the count itself
-/// derives from `directory::advertised_tool_count()`, so this narration is descriptive, not a pin).
+/// Test 8: with no manifest, every canonical operation is available, the call reaches ordinary
+/// dispatch, and no result is a policy denial.
 #[tokio::test]
 async fn all_open_invariant_no_manifest_means_no_denials() {
     let responses = drive(
         None,
         &[
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-            json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
-            // o04: inputSchema validation now runs before dispatch; navigate needs url + tabId.
-            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://example.com","tabId":1}}}),
+            json!({"jsonrpc":"2.0","id":2,"method":"operations/list","params":{}}),
+            operation_call(3, navigate("https://example.com")),
         ],
     )
     .await;
     assert_eq!(responses.len(), 3, "got {responses:?}");
 
     let list = by_id(&responses, 2);
-    let tools = list["result"]["tools"].as_array().expect("tools array");
+    let operations = list["result"]["operations"]
+        .as_array()
+        .expect("operations array");
     assert_eq!(
-        tools.len(),
-        ghostlight::browser::directory::advertised_tool_count(),
-        "the wire advertises the full REGISTRY surface (see directory::advertised_tool_names)"
+        operations.len(),
+        ghostlight::operation::registry::descriptors().len(),
+        "all-open projects the full canonical operation registry"
     );
-    let fixture = ghostlight::tool::tools::advertised_tools_json();
-    assert_eq!(list["result"], fixture, "byte-identical tools/list");
 
     let call = by_id(&responses, 3);
     let call_text = text_of(call);
@@ -365,8 +365,8 @@ async fn denial_id_is_deterministic_within_and_across_sessions() {
 
     let requests = [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://evil.com/","tabId":1}}}),
-        json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://evil.com/","tabId":1}}}),
+        operation_call(2, navigate("https://evil.com/")),
+        operation_call(3, navigate("https://evil.com/")),
     ];
     let first_run = drive(Some(&manifest), &requests).await;
     let id_a = extract_denial_id(text_of(by_id(&first_run, 2))).to_string();
@@ -396,7 +396,11 @@ async fn requires_empty_call_records_capability_none() {
 
     let responses = drive(
         Some(&manifest),
-        &init_and_call("tabs_create_mcp", json!({})),
+        &init_and_call(operation(
+            OperationId::BrowserTabs,
+            IntentId::TabsNew,
+            json!({}),
+        )),
     )
     .await;
     let resp = by_id(&responses, 2);
@@ -418,18 +422,21 @@ async fn requires_empty_call_records_capability_none() {
     std::fs::remove_file(&audit_path).ok();
 }
 
-/// ADR-0101 closes the operation vocabulary before governance. A legacy call with an unknown
-/// action therefore fails in the compatibility decoder and cannot become an unclassified service
-/// operation. It produces no audit record because no canonical intent was admitted.
+/// ADR-0101 closes and validates canonical arguments before governance. A malformed operation
+/// produces no audit record because no valid intent invocation was admitted.
 #[tokio::test]
-async fn governed_unknown_computer_action_is_rejected_before_governance() {
+async fn governed_malformed_canonical_action_is_rejected_before_governance() {
     let audit_path = temp_path("case-unknown-action-audit");
     let grants: Value = serde_json::from_str(EXAMPLE_FULL_AND_RESEARCH_READ).unwrap();
     let manifest = manifest_value("case-unknown-action", grants, &audit_path);
 
     let responses = drive(
         Some(&manifest),
-        &init_and_call("computer", json!({ "action": "bogus_action", "tabId": 1 })),
+        &init_and_call(operation(
+            OperationId::BrowserInput,
+            IntentId::InputPointerClick,
+            json!({"tab":1}),
+        )),
     )
     .await;
     let resp = by_id(&responses, 2);
@@ -437,14 +444,14 @@ async fn governed_unknown_computer_action_is_rejected_before_governance() {
     let text = text_of(resp);
     assert!(text.starts_with("[hop: invalid-request]"), "{text}");
     assert!(
-        text.contains("Unknown computer action: bogus_action"),
-        "the decoder must name the invalid action: {text}"
+        text.contains("point"),
+        "validation must name the missing point: {text}"
     );
 
     let lines = read_audit_lines(&audit_path);
     assert!(
         lines.is_empty(),
-        "an unrecognized external action never becomes an auditable operation: {lines:?}"
+        "a malformed canonical call never becomes an auditable operation: {lines:?}"
     );
 
     std::fs::remove_file(&audit_path).ok();
@@ -469,10 +476,14 @@ async fn form_fill_denied_upfront_under_write_deny() {
 
     let responses = drive(
         Some(&manifest),
-        &init_and_call(
-            "form_fill",
-            json!({"tabId": 1, "fields": {"Email": "a@b.c"}}),
-        ),
+        &init_and_call(operation(
+            OperationId::BrowserFill,
+            IntentId::FillFields,
+            json!({
+                "tab":1,
+                "fields":[{"target":{"query":"Email"},"value":"a@b.c"}]
+            }),
+        )),
     )
     .await;
     let resp = by_id(&responses, 2);

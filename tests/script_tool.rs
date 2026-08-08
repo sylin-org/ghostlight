@@ -12,13 +12,13 @@
 mod support;
 
 use ghostlight_transport::operation::{
-    BrowserResultStatus, FlowResultData, FlowStepStatus, FlowTerminationReason, IntentId,
-    OperationEffect, OperationId, ResultPart,
+    BrowserOperation, BrowserResultStatus, FlowResultData, FlowStepStatus, FlowTerminationReason,
+    IntentId, OperationEffect, OperationId, ResultPart,
 };
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use support::inproc::{by_id, manifest_from_value, Harness};
+use support::inproc::{by_id, manifest_from_value, operation, operation_call, Harness};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -69,6 +69,17 @@ fn first_text(parts: &[ResultPart]) -> Option<&str> {
     })
 }
 
+fn flow_call(id: i64, intent: IntentId, steps: Vec<BrowserOperation>) -> Value {
+    operation_call(
+        id,
+        operation(
+            OperationId::BrowserFlow,
+            intent,
+            json!({"tab":0,"steps":steps,"on_error":"stop"}),
+        ),
+    )
+}
+
 /// The script tool with two extension-forwarded steps and no extension connected: step 1 (navigate)
 /// fails at execution with an extension hop error; step 2 (find) never runs. The canonical flow
 /// result reports the honest per-step statuses, and the audit log carries exactly the parent flow
@@ -86,13 +97,22 @@ async fn script_reports_step_error_and_not_run_with_correlated_audit() {
 
     let requests = [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"script","arguments":{
-            "tabId": 0,
-            "steps": [
-                {"tool":"navigate","args":{"url":"https://example.com"}},
-                {"tool":"find","args":{"query":"x"}}
-            ]
-        }}}),
+        flow_call(
+            2,
+            IntentId::FlowExecute,
+            vec![
+                operation(
+                    OperationId::BrowserNavigate,
+                    IntentId::NavigateUrl,
+                    json!({"tab":0,"url":"https://example.com"}),
+                ),
+                operation(
+                    OperationId::BrowserFind,
+                    IntentId::FindQuery,
+                    json!({"tab":0,"query":"x"}),
+                ),
+            ],
+        ),
     ];
     let responses = harness.drive(&requests).await;
     let call = by_id(&responses, 2);
@@ -192,14 +212,22 @@ async fn dry_run_verdicts_without_step_records() {
 
     let requests = [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"script","arguments":{
-            "tabId": 0,
-            "dry_run": true,
-            "steps": [
-                {"tool":"find","args":{"query":"x"}},
-                {"tool":"navigate","args":{"url":"https://example.com"}}
-            ]
-        }}}),
+        flow_call(
+            2,
+            IntentId::FlowPreflight,
+            vec![
+                operation(
+                    OperationId::BrowserFind,
+                    IntentId::FindQuery,
+                    json!({"tab":0,"query":"x"}),
+                ),
+                operation(
+                    OperationId::BrowserNavigate,
+                    IntentId::NavigateUrl,
+                    json!({"tab":0,"url":"https://example.com"}),
+                ),
+            ],
+        ),
     ];
     let responses = harness.drive(&requests).await;
     let call = by_id(&responses, 2);

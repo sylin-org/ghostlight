@@ -13,7 +13,7 @@ use ghostlight_transport::operation::{
     ResultPartError, MAX_PAGE_ORIGIN_BYTES,
 };
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 pub(crate) const PROFILE_ID: &str = "ghostlight-legacy";
@@ -21,6 +21,12 @@ pub(crate) const PROFILE_VERSION: u32 = 1;
 
 const DECLARATIONS_JSON: &str = include_str!("data/ghostlight-legacy-v1.json");
 const AGENT_GUIDE: &str = include_str!("data/ghostlight-legacy-v1-agent-guide.txt");
+const EXPLAIN_TEXT: &str = include_str!("data/ghostlight-legacy-v1-explain.txt");
+const CONTEXT_RESULT_SCHEMA: &str = "ghostlight.browser.context/v1";
+const MAX_MANAGED_ORGANIZATION_CHARS: usize = 120;
+const MAX_MANAGED_RATIONALE_CHARS: usize = 400;
+const MAX_MANAGED_CONTACT_CHARS: usize = 256;
+const MAX_MANAGED_TIMESTAMP_CHARS: usize = 128;
 
 /// One profile declaration paired with its protocol-neutral workspace behavior.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +79,7 @@ pub(crate) enum EncodeError {
     FlowRenderHintCount { expected: usize, actual: usize },
     FlowStepIdentityMismatch { step: u32 },
     MalformedFlowData(&'static str),
+    MalformedContextData(&'static str),
     InvalidResultPart(ResultPartError),
     InvalidResultDisposition(BrowserResultValidationError),
 }
@@ -113,6 +120,10 @@ impl std::fmt::Display for EncodeError {
             Self::MalformedFlowData(reason) => write!(
                 formatter,
                 "ghostlight-legacy/v1 cannot faithfully encode canonical flow data: {reason}"
+            ),
+            Self::MalformedContextData(reason) => write!(
+                formatter,
+                "ghostlight-legacy/v1 cannot faithfully encode canonical context data: {reason}"
             ),
             Self::InvalidResultPart(error) => write!(
                 formatter,
@@ -271,6 +282,10 @@ pub(crate) fn encode_result(
     result
         .validate_semantics()
         .map_err(EncodeError::InvalidResultDisposition)?;
+    if result.operation == OperationId::BrowserContext && result.intent == IntentId::ContextDescribe
+    {
+        return encode_context_result(result);
+    }
     if result.operation == OperationId::BrowserFlow {
         return encode_flow_result(result, presentation, flow_hints);
     }
@@ -304,6 +319,338 @@ pub(crate) fn encode_result(
         rendered.insert("isError".into(), Value::Bool(true));
     }
     Ok(Value::Object(rendered))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ManagedContext<'a> {
+    organization: Option<&'a str>,
+    policy_sequence: Option<u64>,
+    freshness: &'a str,
+    stale_reason: Option<&'a str>,
+    fetched_at: &'a str,
+    rationale: Option<&'a str>,
+    contact: Option<&'a str>,
+}
+
+fn encode_context_result(result: BrowserResult) -> Result<Value, EncodeError> {
+    if result.status != BrowserResultStatus::Ok {
+        return Err(EncodeError::UnsupportedStatus(result.status));
+    }
+    if result.effect != OperationEffect::None
+        || result.retry.is_some()
+        || result.readiness.is_some()
+        || result.tab.is_some()
+        || !result.parts.is_empty()
+        || result.provenance.is_some()
+    {
+        return Err(EncodeError::MalformedContextData(
+            "context.describe carries semantic data only",
+        ));
+    }
+
+    let managed = validate_context_data(&result.data)?;
+    let mut text = EXPLAIN_TEXT.lines().collect::<Vec<_>>().join("\n");
+    if let Some(managed) = managed {
+        text.push('\n');
+        text.push_str(&render_managed_passport(managed));
+    }
+    Ok(json!({"content": [{"type": "text", "text": text}]}))
+}
+
+fn validate_context_data(value: &Value) -> Result<Option<ManagedContext<'_>>, EncodeError> {
+    let root = exact_object(
+        value,
+        &["schema", "capabilities", "operations", "managedGovernance"],
+        "context data must be one exact semantic object",
+    )?;
+    if root.get("schema").and_then(Value::as_str) != Some(CONTEXT_RESULT_SCHEMA) {
+        return Err(EncodeError::MalformedContextData(
+            "context data has an unknown schema",
+        ));
+    }
+    if root.get("capabilities")
+        != Some(&json!([
+            {"id":"read","semantics":"retrieve_observe_only"},
+            {"id":"action","semantics":"page_determined_ui_input"},
+            {"id":"write","semantics":"declared_state_change"},
+            {"id":"execute","semantics":"arbitrary_code"},
+        ]))
+    {
+        return Err(EncodeError::MalformedContextData(
+            "context data has invalid capability facts",
+        ));
+    }
+
+    let operations = root
+        .get("operations")
+        .and_then(Value::as_array)
+        .filter(|operations| !operations.is_empty())
+        .ok_or(EncodeError::MalformedContextData(
+            "context data requires canonical operation facts",
+        ))?;
+    let mut seen_operations = HashSet::new();
+    for operation in operations {
+        let operation = exact_object(
+            operation,
+            &["id", "intent", "requires"],
+            "context operation fact has an invalid shape",
+        )?;
+        let id = operation
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(OperationId::parse)
+            .ok_or(EncodeError::MalformedContextData(
+                "context operation fact has an invalid operation id",
+            ))?;
+        let intent = operation
+            .get("intent")
+            .and_then(Value::as_str)
+            .and_then(IntentId::parse)
+            .ok_or(EncodeError::MalformedContextData(
+                "context operation fact has an invalid intent id",
+            ))?;
+        let key = OperationKey::new(id, intent);
+        if !profile_operation_keys().contains(&key) {
+            return Err(EncodeError::MalformedContextData(
+                "context operation fact is not a valid profile operation key",
+            ));
+        }
+        if !seen_operations.insert(key) {
+            return Err(EncodeError::MalformedContextData(
+                "context data repeats an operation key",
+            ));
+        }
+        let requires = operation.get("requires").and_then(Value::as_array).ok_or(
+            EncodeError::MalformedContextData(
+                "context operation fact has invalid capability requirements",
+            ),
+        )?;
+        let mut previous_capability = None;
+        for capability in requires {
+            let rank = match capability.as_str() {
+                Some("read") => 0,
+                Some("action") => 1,
+                Some("write") => 2,
+                Some("execute") => 3,
+                _ => {
+                    return Err(EncodeError::MalformedContextData(
+                        "context operation fact has an unknown capability requirement",
+                    ));
+                }
+            };
+            if previous_capability == Some(rank) {
+                return Err(EncodeError::MalformedContextData(
+                    "context operation fact repeats a capability requirement",
+                ));
+            }
+            if previous_capability.is_some_and(|previous| previous > rank) {
+                return Err(EncodeError::MalformedContextData(
+                    "context operation fact has capability requirements out of canonical order",
+                ));
+            }
+            previous_capability = Some(rank);
+        }
+    }
+
+    match root.get("managedGovernance") {
+        Some(Value::Null) => Ok(None),
+        Some(value) => parse_managed_context(value).map(Some),
+        None => Err(EncodeError::MalformedContextData(
+            "context data omits managed governance state",
+        )),
+    }
+}
+
+fn profile_operation_keys() -> &'static HashSet<OperationKey> {
+    static KEYS: OnceLock<HashSet<OperationKey>> = OnceLock::new();
+    KEYS.get_or_init(|| {
+        declarations()["tools"]
+            .as_array()
+            .expect("the embedded legacy catalog must contain tools")
+            .iter()
+            .flat_map(|tool| {
+                let name = tool["name"]
+                    .as_str()
+                    .expect("every embedded legacy declaration must have a name");
+                tool_keys(name).expect("every embedded legacy declaration must have a mapping")
+            })
+            .collect()
+    })
+}
+
+fn parse_managed_context(value: &Value) -> Result<ManagedContext<'_>, EncodeError> {
+    let managed = exact_object(
+        value,
+        &[
+            "active",
+            "organization",
+            "policySequence",
+            "freshness",
+            "staleReason",
+            "fetchedAt",
+            "rationale",
+            "contact",
+        ],
+        "managed governance fact has an invalid shape",
+    )?;
+    if managed.get("active") != Some(&Value::Bool(true)) {
+        return Err(EncodeError::MalformedContextData(
+            "managed governance fact is not active",
+        ));
+    }
+    let organization = optional_bounded_string(
+        managed.get("organization"),
+        MAX_MANAGED_ORGANIZATION_CHARS,
+        "managed organization is invalid",
+    )?;
+    let policy_sequence = optional_u64(
+        managed.get("policySequence"),
+        "managed policy sequence is invalid",
+    )?;
+    let freshness = managed
+        .get("freshness")
+        .and_then(Value::as_str)
+        .filter(|value| matches!(*value, "fresh" | "last_known_good" | "other"))
+        .ok_or(EncodeError::MalformedContextData(
+            "managed freshness is invalid",
+        ))?;
+    let stale_reason = optional_bounded_string(
+        managed.get("staleReason"),
+        32,
+        "managed stale reason is invalid",
+    )?;
+    if stale_reason.is_some_and(|value| {
+        !matches!(
+            value,
+            "source_unreachable" | "update_rejected" | "rollback_refused"
+        )
+    }) {
+        return Err(EncodeError::MalformedContextData(
+            "managed stale reason is unknown",
+        ));
+    }
+    let fetched_at = required_bounded_string(
+        managed.get("fetchedAt"),
+        MAX_MANAGED_TIMESTAMP_CHARS,
+        "managed fetch timestamp is invalid",
+    )?;
+    let rationale = optional_bounded_string(
+        managed.get("rationale"),
+        MAX_MANAGED_RATIONALE_CHARS,
+        "managed rationale is invalid",
+    )?;
+    let contact = optional_bounded_string(
+        managed.get("contact"),
+        MAX_MANAGED_CONTACT_CHARS,
+        "managed contact is invalid",
+    )?;
+    Ok(ManagedContext {
+        organization,
+        policy_sequence,
+        freshness,
+        stale_reason,
+        fetched_at,
+        rationale,
+        contact,
+    })
+}
+
+fn render_managed_passport(managed: ManagedContext<'_>) -> String {
+    let mut lines = vec!["Managed governance: active.".to_owned()];
+    if let Some(organization) = managed.organization {
+        lines.push(format!("Governed by: {organization}."));
+    }
+    let sequence = managed
+        .policy_sequence
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_owned());
+    let freshness = match (managed.freshness, managed.stale_reason) {
+        ("fresh", _) => format!("fetched {} (current)", managed.fetched_at),
+        ("last_known_good", Some("source_unreachable")) => format!(
+            "enforcing your last verified policy from {} (the policy source is unreachable; you remain protected)",
+            managed.fetched_at
+        ),
+        ("last_known_good", Some("update_rejected")) => format!(
+            "enforcing your last verified policy from {} (a newer update failed verification and was refused)",
+            managed.fetched_at
+        ),
+        ("last_known_good", Some("rollback_refused")) => format!(
+            "enforcing your last verified policy from {} (an older policy was offered and refused)",
+            managed.fetched_at
+        ),
+        _ => format!(
+            "enforcing your last verified policy from {}",
+            managed.fetched_at
+        ),
+    };
+    lines.push(format!("Policy version {sequence}, {freshness}."));
+    if let Some(rationale) = managed.rationale {
+        lines.push(format!("Why: {rationale}"));
+    }
+    lines.push(
+        "Sacred domains remain off-limits to automation under any policy, including this one."
+            .to_owned(),
+    );
+    if let Some(contact) = managed.contact {
+        lines.push(format!(
+            "Questions? Contact {}: {contact}",
+            managed.organization.unwrap_or("your organization")
+        ));
+    }
+    let mut rendered = lines.join("\n");
+    rendered.push('\n');
+    rendered
+}
+
+fn exact_object<'a>(
+    value: &'a Value,
+    fields: &[&str],
+    reason: &'static str,
+) -> Result<&'a Map<String, Value>, EncodeError> {
+    let object = value
+        .as_object()
+        .ok_or(EncodeError::MalformedContextData(reason))?;
+    if object.len() != fields.len() || fields.iter().any(|field| !object.contains_key(*field)) {
+        return Err(EncodeError::MalformedContextData(reason));
+    }
+    Ok(object)
+}
+
+fn optional_bounded_string<'a>(
+    value: Option<&'a Value>,
+    max_chars: usize,
+    reason: &'static str,
+) -> Result<Option<&'a str>, EncodeError> {
+    match value {
+        Some(Value::Null) => Ok(None),
+        Some(Value::String(value))
+            if value.chars().count() <= max_chars && !value.chars().any(char::is_control) =>
+        {
+            Ok(Some(value))
+        }
+        _ => Err(EncodeError::MalformedContextData(reason)),
+    }
+}
+
+fn required_bounded_string<'a>(
+    value: Option<&'a Value>,
+    max_chars: usize,
+    reason: &'static str,
+) -> Result<&'a str, EncodeError> {
+    optional_bounded_string(value, max_chars, reason)?
+        .filter(|value| !value.is_empty())
+        .ok_or(EncodeError::MalformedContextData(reason))
+}
+
+fn optional_u64(value: Option<&Value>, reason: &'static str) -> Result<Option<u64>, EncodeError> {
+    match value {
+        Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .map(Some)
+            .ok_or(EncodeError::MalformedContextData(reason)),
+        None => Err(EncodeError::MalformedContextData(reason)),
+    }
 }
 
 const STEP_TEXT_BUDGET: usize = 2_000;
@@ -1642,9 +1989,112 @@ fn tool_keys(tool: &str) -> Option<Vec<OperationKey>> {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use ghostlight_transport::bridge::{OperationAvailability, WorkspaceId};
+
+    pub(crate) fn full_projection(generation: u64) -> CatalogProjection {
+        let mut seen = HashSet::new();
+        let operations = declarations()["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .flat_map(|tool| tool_keys(tool["name"].as_str().expect("name")).expect("mapping"))
+            .filter(|key| seen.insert(*key))
+            .map(|key| OperationAvailability {
+                id: key.id,
+                intent: key.intent,
+                workspace_use: if matches!(
+                    key.id,
+                    OperationId::WorkflowPlan | OperationId::BrowserContext
+                ) {
+                    WorkspaceUse::Independent
+                } else if matches!(key.intent, IntentId::TabsList | IntentId::TabsNew) {
+                    WorkspaceUse::Creates
+                } else {
+                    WorkspaceUse::Uses
+                },
+            })
+            .collect();
+        CatalogProjection {
+            generation,
+            operations,
+            restricted: false,
+        }
+    }
+
+    pub(crate) fn context_result(workspace: Option<WorkspaceId>) -> BrowserResult {
+        let mut result = BrowserResult::new(
+            OperationId::BrowserContext,
+            IntentId::ContextDescribe,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        );
+        result.workspace = workspace;
+        result.data = json!({
+            "schema": CONTEXT_RESULT_SCHEMA,
+            "capabilities": [
+                {"id":"read","semantics":"retrieve_observe_only"},
+                {"id":"action","semantics":"page_determined_ui_input"},
+                {"id":"write","semantics":"declared_state_change"},
+                {"id":"execute","semantics":"arbitrary_code"},
+            ],
+            "operations": [
+                {"id":"browser.context","intent":"context.describe","requires":[]},
+                {"id":"browser.read","intent":"read.text","requires":["read"]},
+            ],
+            "managedGovernance": null,
+        });
+        result
+    }
+
+    pub(crate) fn explain_text() -> String {
+        EXPLAIN_TEXT.lines().collect::<Vec<_>>().join("\n")
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use ghostlight_transport::bridge::OperationAvailability;
+
+    fn semantic_context_data(managed_governance: Value) -> Value {
+        json!({
+            "schema": CONTEXT_RESULT_SCHEMA,
+            "capabilities": [
+                {"id":"read","semantics":"retrieve_observe_only"},
+                {"id":"action","semantics":"page_determined_ui_input"},
+                {"id":"write","semantics":"declared_state_change"},
+                {"id":"execute","semantics":"arbitrary_code"},
+            ],
+            "operations": [
+                {"id":"browser.context","intent":"context.describe","requires":[]},
+                {"id":"browser.read","intent":"read.text","requires":["read"]},
+            ],
+            "managedGovernance": managed_governance,
+        })
+    }
+
+    fn context_result(managed_governance: Value) -> BrowserResult {
+        let mut result = BrowserResult::new(
+            OperationId::BrowserContext,
+            IntentId::ContextDescribe,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        );
+        result.data = semantic_context_data(managed_governance);
+        result
+    }
+
+    fn legacy_explain_text() -> String {
+        EXPLAIN_TEXT.lines().collect::<Vec<_>>().join("\n")
+    }
+
+    fn fnv1a64(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+    }
 
     #[test]
     fn embedded_assets_match_the_frozen_test_oracles() {
@@ -1658,6 +2108,140 @@ mod tests {
             include_str!("../../../../tests/golden/surfaces/ghostlight-legacy-v1-agent-guide.txt")
         );
         assert_eq!(declarations()["tools"].as_array().expect("tools").len(), 25);
+        let explain = legacy_explain_text();
+        assert_eq!(explain.lines().count(), 54);
+        assert_eq!(explain.len(), 5_383);
+        assert_eq!(fnv1a64(explain.as_bytes()), 0x19ec_4b9e_0cc0_7ef4);
+    }
+
+    #[test]
+    fn context_result_reconstructs_the_frozen_legacy_explain_text_exactly() {
+        let encoded = encode_result(context_result(Value::Null), None, None)
+            .expect("semantic context renders through legacy profile");
+        assert_eq!(
+            encoded,
+            json!({
+                "content": [{"type":"text","text":legacy_explain_text()}]
+            })
+        );
+        let wire = encoded.to_string();
+        assert!(!wire.contains(CONTEXT_RESULT_SCHEMA));
+        assert!(!wire.contains("browser.context"));
+        assert!(!wire.contains("structuredContent"));
+    }
+
+    #[test]
+    fn context_result_reconstructs_the_dynamic_managed_passport_exactly() {
+        let managed = json!({
+            "active": true,
+            "organization": "Acme Security",
+            "policySequence": 42,
+            "freshness": "last_known_good",
+            "staleReason": "update_rejected",
+            "fetchedAt": "2026-07-10T14:02:00+00:00",
+            "rationale": "Baseline policy.",
+            "contact": "security@example.com",
+        });
+        let encoded = encode_result(context_result(managed), None, None)
+            .expect("managed context renders through legacy profile");
+        let expected = format!(
+            "{}\nManaged governance: active.\n\
+             Governed by: Acme Security.\n\
+             Policy version 42, enforcing your last verified policy from \
+             2026-07-10T14:02:00+00:00 (a newer update failed verification and was refused).\n\
+             Why: Baseline policy.\n\
+             Sacred domains remain off-limits to automation under any policy, including this one.\n\
+             Questions? Contact Acme Security: security@example.com\n",
+            legacy_explain_text()
+        );
+        assert_eq!(encoded["content"][0]["text"], expected);
+    }
+
+    #[test]
+    fn context_result_rejects_surface_prose_and_malformed_semantic_facts() {
+        let cases = [
+            json!({
+                "schema": CONTEXT_RESULT_SCHEMA,
+                "capabilities": [],
+                "operations": [{"id":"browser.context","intent":"context.describe","requires":[]}],
+                "managedGovernance": null,
+            }),
+            json!({
+                "schema": CONTEXT_RESULT_SCHEMA,
+                "capabilities": [
+                    {"id":"read","semantics":"retrieve_observe_only"},
+                    {"id":"action","semantics":"page_determined_ui_input"},
+                    {"id":"write","semantics":"declared_state_change"},
+                    {"id":"execute","semantics":"arbitrary_code"},
+                ],
+                "operations": [{
+                    "id":"browser.context",
+                    "intent":"context.describe",
+                    "requires":[],
+                    "description":"legacy prose must stay at the edge"
+                }],
+                "managedGovernance": null,
+            }),
+            semantic_context_data(json!({
+                "active": true,
+                "organization": "x".repeat(MAX_MANAGED_ORGANIZATION_CHARS + 1),
+                "policySequence": null,
+                "freshness": "fresh",
+                "staleReason": null,
+                "fetchedAt": "2026-07-10T14:02:00+00:00",
+                "rationale": null,
+                "contact": null,
+            })),
+        ];
+        for data in cases {
+            let mut result = context_result(Value::Null);
+            result.data = data;
+            assert!(matches!(
+                encode_result(result, None, None),
+                Err(EncodeError::MalformedContextData(_))
+            ));
+        }
+    }
+
+    fn assert_context_data_rejected(data: Value) {
+        let mut result = context_result(Value::Null);
+        result.data = data;
+        assert!(matches!(
+            encode_result(result, None, None),
+            Err(EncodeError::MalformedContextData(_))
+        ));
+    }
+
+    #[test]
+    fn context_result_rejects_an_invalid_family_intent_pair() {
+        let mut data = semantic_context_data(Value::Null);
+        data["operations"][0]["intent"] = json!("act.click");
+        assert_context_data_rejected(data);
+    }
+
+    #[test]
+    fn context_result_rejects_a_duplicate_operation_key() {
+        let mut data = semantic_context_data(Value::Null);
+        let duplicate = data["operations"][0].clone();
+        data["operations"]
+            .as_array_mut()
+            .expect("operations")
+            .push(duplicate);
+        assert_context_data_rejected(data);
+    }
+
+    #[test]
+    fn context_result_rejects_a_duplicate_capability_requirement() {
+        let mut data = semantic_context_data(Value::Null);
+        data["operations"][1]["requires"] = json!(["read", "read"]);
+        assert_context_data_rejected(data);
+    }
+
+    #[test]
+    fn context_result_rejects_capability_requirements_out_of_order() {
+        let mut data = semantic_context_data(Value::Null);
+        data["operations"][1]["requires"] = json!(["write", "read"]);
+        assert_context_data_rejected(data);
     }
 
     #[test]

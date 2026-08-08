@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! inputSchema validation at the `tools/call` entry point (ADR-0031 Decision 4: hard-fail with
-//! corrective errors). The binary previously performed ZERO schema validation -- it extracted
-//! `name` and `arguments` loosely and forwarded the raw arguments blob to the extension, where a
-//! missing `tabId` silently became `None` and surfaced as an extension error with no corrective
-//! content. This module rejects schema violations BEFORE dispatch with a corrective
+//! Protocol-neutral JSON Schema validation for canonical browser operations (ADR-0031 Decision 4:
+//! hard-fail with corrective errors). Model-facing surface validation and normalization belong to
+//! the MCP edge; the service validates the resulting canonical operation again before dispatch.
+//! This module rejects schema violations with a corrective
 //! [`ToolError::invalid_request(...)`](crate::ToolError::invalid_request)`.next_step(...)`, in the
 //! same shape the "Unknown tool" path already uses (`pipeline.rs`).
 //!
 //! The error contract (ADR-0031 Decision 4): "what went wrong" + "what to try next" WHEN the
-//! fixture can produce a suggestion honestly. The suggestion text is GENERATED from the fixture,
-//! never hand-authored per tool:
+//! schema can produce a suggestion honestly. The suggestion text is GENERATED from the supplied
+//! schema and example, never hand-authored per operation:
 //!   - field name + expected type come from `inputSchema`;
 //!   - enum alternatives and scalar bounds come from `inputSchema.properties.<field>`;
-//!   - the example shape comes from the tool's `example.call` field;
+//!   - the example shape comes from the canonical descriptor;
 //!   - the "get a tabId first" hint is one hard-coded conditional (the single piece of logic not
 //!     derived from the fixture; justified because a per-field `suggestion` annotation is
-//!     over-engineering for one field).
+//!     retained only for historical compatibility tests).
 //!
 //! Cases that do NOT attach a suggestion (per the ADR): runtime/state failures, governance denials
 //! (already self-correcting via `Denied (D-xxxxxxxx):` + `explain`), and internal errors. Those do
@@ -25,7 +24,7 @@
 use crate::ToolError;
 use serde_json::Value;
 
-/// The schema and example for one tool, extracted from the fixture once. All validation paths
+/// The schema and example for one operation. All validation paths
 /// draw their corrective suggestion text from these fields, so the validator stores no strings of
 /// its own and cannot drift.
 #[derive(Debug, Clone)]
@@ -35,23 +34,6 @@ pub struct ToolSchema {
     /// The tool's `example.call` object, rendered as the corrective suggestion's shape. `None`
     /// for tools that carry no example (today: only `explain`, which is argument-less).
     pub example_call: Option<Value>,
-}
-
-impl ToolSchema {
-    /// Look up one tool's schema + example from the code-declared registry by tool name.
-    /// Returns `None` for an unknown tool name (the pipeline's pre-existing registry lookup
-    /// already rejects unknown names before this module runs, so this is defense in depth).
-    pub fn for_tool(name: &str) -> Option<Self> {
-        let desc = crate::browser::directory::descriptor(name)?;
-        let input_schema = (desc.input_schema)();
-        let example_call = desc
-            .example
-            .and_then(|ex| serde_json::from_str(ex.call).ok());
-        Some(Self {
-            input_schema,
-            example_call,
-        })
-    }
 }
 
 /// Validate `arguments` against the tool's `inputSchema`. Returns `Ok(())` for a well-formed
@@ -459,7 +441,20 @@ mod tests {
 
     #[test]
     fn non_action_enums_and_scalar_bounds_are_enforced() {
-        let schema = ToolSchema::for_tool("narrate").expect("narrate schema");
+        let schema = ToolSchema {
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "tabId": { "type": "number" },
+                    "text": { "type": "string", "minLength": 1 },
+                    "position": { "type": "string", "enum": ["auto", "top", "bottom"] },
+                    "duration_ms": { "type": "integer", "minimum": 1000, "maximum": 30000 }
+                },
+                "required": ["tabId", "text"],
+                "additionalProperties": false
+            }),
+            example_call: Some(serde_json::json!({ "tabId": 1, "text": "ok" })),
+        };
         for args in [
             serde_json::json!({ "tabId": 1, "text": "", "position": "bottom" }),
             serde_json::json!({ "tabId": 1, "text": "ok", "position": "sideways" }),
@@ -485,7 +480,31 @@ mod tests {
 
     #[test]
     fn dialog_conditional_requires_text_only_for_respond() {
-        let schema = ToolSchema::for_tool("dialog").expect("dialog schema");
+        let schema = ToolSchema {
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "tabId": { "type": "number" },
+                    "action": {
+                        "type": "string",
+                        "enum": ["status", "accept", "dismiss", "respond"]
+                    },
+                    "text": { "type": "string" }
+                },
+                "required": ["tabId", "action"],
+                "additionalProperties": false,
+                "allOf": [{
+                    "if": { "properties": { "action": { "const": "respond" } } },
+                    "then": { "required": ["text"] },
+                    "else": { "not": { "required": ["text"] } }
+                }]
+            }),
+            example_call: Some(serde_json::json!({
+                "tabId": 1,
+                "action": "respond",
+                "text": "Ada"
+            })),
+        };
         assert!(validate_arguments(
             &schema,
             &serde_json::json!({"tabId": 1, "action": "respond", "text": "Ada"})

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! The `form_fill` tool's orchestration (ADR-0036, PINS.md SS13): one Write-class governance
-//! decision at the parent, then a dedicated `formStructure` internal read (C9), the matcher
-//! (`browser::form_match`), and pre-authorized internal fills/submit -- each still individually
-//! audited and correlated by `batch_id` (ADR-0036 Decision 7), symmetric with `script` (ADR-0035).
+//! The canonical multi-field fill orchestration (ADR-0036, PINS.md SS13): one parent governance
+//! decision, then a dedicated `formStructure` internal read (C9), the matcher
+//! (`browser::form_match`), and pre-authorized internal fills/submit. Each internal step remains
+//! individually audited and correlated by `batch_id` (ADR-0036 Decision 7).
 //!
-//! Unlike `script`, `form_fill`'s internals do NOT re-enter [`pipeline::run_tool_call`]: the
+//! Unlike `browser.flow`, `form_fill`'s internals do not re-enter the operation pipeline: the
 //! parent's own governance decision already covers the whole interaction (ADR-0036 Decision 4),
 //! so each internal dispatch goes straight to [`Browser::call`], with its own `CallAudit` scope
 //! stamped `orchestrated("form_fill", batch_id, step)` and attributed to the parent's grant.
@@ -12,20 +12,20 @@
 //! No idempotency wrap (SS8 supersession note, C8/C10): `form_fill` fires once; a re-fire is the
 //! caller's explicit choice.
 
-use crate::browser::directory;
 use crate::browser::form_match::{self, ControlRef, FormStructure};
 use crate::governance::dispatch::Governance;
 use crate::governance::ports::Capability;
 use crate::hub::outbound::browser::Browser;
 use crate::hub::scheduling::ExecutionContext;
+use crate::operation::registry as operation_registry;
 use crate::tool::outcome::{delivery_failure_outcome, CallOutcome, LocalCtx, LocalFuture};
 use crate::work::{CancellationToken, WorkContext};
-use ghostlight_transport::operation::OperationEffect;
+use ghostlight_transport::operation::{IntentId, OperationEffect, OperationId, OperationKey};
 use serde_json::{json, Value};
 use std::time::Instant;
 
-/// The `form_fill` tool's `Handler::Local` entry point (post-grant dispatch position, PINS.md
-/// SS2): the parent's governance decision has already run by the time this is called.
+/// The canonical fill operation's `Handler::Local` entry point (post-grant dispatch position,
+/// PINS.md SS2). The parent's governance decision has already run by the time this is called.
 pub(crate) fn form_fill_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
     Box::pin(async move {
         run(
@@ -83,6 +83,12 @@ fn first_text(result: &Value) -> Option<&str> {
         .first()?
         .get("text")?
         .as_str()
+}
+
+fn canonical_requirements(key: OperationKey) -> &'static [Capability] {
+    operation_registry::descriptor(key)
+        .expect("form_fill internal operation key must exist")
+        .requires
 }
 
 async fn run(
@@ -183,7 +189,10 @@ async fn run(
         let mut fill_audit = governance.begin_with_client(
             "form_input",
             None,
-            directory::requires("form_input", None),
+            Some(canonical_requirements(OperationKey::new(
+                OperationId::BrowserFill,
+                IntentId::FillField,
+            ))),
             work.and_then(WorkContext::client).cloned(),
         );
         fill_audit.orchestrated("form_fill", &batch_id, Some(step));
@@ -261,7 +270,10 @@ async fn run(
                     let mut submit_audit = governance.begin_with_client(
                         "computer",
                         Some("left_click"),
-                        directory::requires("computer", Some("left_click")),
+                        Some(canonical_requirements(OperationKey::new(
+                            OperationId::BrowserAct,
+                            IntentId::ActClick,
+                        ))),
                         work.and_then(WorkContext::client).cloned(),
                     );
                     submit_audit.orchestrated("form_fill", &batch_id, Some(step));
@@ -353,5 +365,28 @@ fn skip_reason(control: &ControlRef) -> Option<&'static str> {
         Some("readonly")
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_audits_use_canonical_operation_requirements() {
+        assert_eq!(
+            canonical_requirements(OperationKey::new(
+                OperationId::BrowserFill,
+                IntentId::FillField,
+            )),
+            &[Capability::Write]
+        );
+        assert_eq!(
+            canonical_requirements(OperationKey::new(
+                OperationId::BrowserAct,
+                IntentId::ActClick,
+            )),
+            &[Capability::Action]
+        );
     }
 }

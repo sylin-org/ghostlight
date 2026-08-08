@@ -1,0 +1,54 @@
+Capabilities: read = retrieve and observe only; action = dispatch UI input whose effect the page decides (this can trigger writes); write = declared state-changing operations; execute = arbitrary code.
+
+tabs_context_mcp: requires read. List the MCP tab group: the ids, URLs, and titles of the tabs this server controls.
+tabs_create_mcp: requires nothing. Open a new empty tab in the MCP tab group; touches no page and no server.
+navigate: requires read. Load a URL in a tab, or go back or forward in its history; a top-level GET.
+computer (left_click): requires action. Left-click at coordinates; commits an activation whose effect the page decides.
+computer (right_click): requires action. Right-click at coordinates; commits an activation.
+computer (type): requires action. Type text into the focused element; commits data to page handlers.
+computer (screenshot): requires read. Capture a screenshot of the visible viewport.
+computer (wait): requires nothing. Pause for a duration; touches no page and no server.
+computer (scroll): requires read. Scroll the viewport; moves the view without committing input to the page.
+computer (key): requires action. Press a key or key combination; commits input to page handlers.
+computer (left_click_drag): requires action. Click and drag between two points; commits pointer input to the page.
+computer (double_click): requires action. Double-click at coordinates; commits an activation.
+computer (triple_click): requires action. Triple-click at coordinates; commits an activation.
+computer (zoom): requires read. Capture a zoomed screenshot of a page region.
+computer (scroll_to): requires read. Scroll an element into view; moves the viewport without committing input.
+computer (hover): requires read. Move the pointer over a point; commits no activation and no data.
+find: requires read. Search the page for elements matching a natural-language description.
+form_input: requires write. Fill or set values in form fields; a declared, state-changing write.
+get_page_text: requires read. Extract the page's readable text content, article-first, without HTML.
+javascript_tool: requires execute. Run arbitrary JavaScript in the page; unbounded, and can bypass the UI entirely.
+read_console_messages: requires read. Read buffered browser console messages from a tab.
+read_network_requests: requires read. Read buffered HTTP network requests observed in a tab.
+read_page: requires read. Read the page as an accessibility tree of elements with reference ids.
+resize_window: requires nothing. Resize the browser window; browser state only, touches no page content.
+update_plan: requires nothing. Echo an informational plan of intended actions; changes no permissions.
+narrate: requires nothing. Show temporary agent commentary in an owned tab; touches no page content and requires no RAWX capability.
+wait_for: requires read. Wait for a condition and page settlement; observes the DOM, touches nothing.
+script: requires nothing. Run up to 20 tool calls sequentially in one request; each step is authorized and audited individually.
+form_fill: requires read. Fill form fields by label in one call; matches keys to controls and fills them.
+form_fill (submit): requires read. Fill form fields by label and click the form's own submit control.
+act_on (left_click): requires action. Resolve one target and click it once.
+act_on (right_click): requires action. Resolve one target and open its context menu.
+act_on (double_click): requires action. Resolve one target and double-click it.
+act_on (hover): requires read. Resolve one target and move the pointer over it.
+act_on (scroll_to): requires read. Resolve one target and scroll it into view.
+act_on (set_value): requires write. Resolve one field and set its value.
+dialog (status): requires read. Inspect whether a JavaScript dialog is blocking the tab.
+dialog (accept): requires action. Explicitly accept the current JavaScript dialog.
+dialog (dismiss): requires action. Explicitly dismiss the current JavaScript dialog.
+dialog (respond): requires action. Explicitly respond to the current JavaScript prompt with text.
+tab_control (focus): requires nothing. Focus one session-owned tab without changing page content.
+tab_control (reload): requires action. Reload one session-owned tab.
+tab_control (close): requires action. Explicitly close one session-owned tab and no containing group.
+file_upload: requires write. Upload files (base64 bytes) to a file input located by read_page or find, via its ref.
+browser_batch: requires nothing. Run a sequence of tool calls in one round trip; each item is name+input, authorized per item.
+upload_image: requires write. Upload a previously captured screenshot to a file input (ref) or drag-drop target (coordinate).
+gif_creator (start_recording): requires read. Start recording browser actions in the tab's group as GIF frames.
+gif_creator (stop_recording): requires nothing. Stop recording; keep the captured frames for export.
+gif_creator (status): requires nothing. Report recording state and deadlines without reading the live page.
+gif_creator (clear): requires nothing. Discard the captured recording frames.
+gif_creator (export): requires read. Encode the frames to a GIF. Client export requires read; page placement by ref or coordinate requires write.
+explain: requires nothing. Show every action available here and the capability each one requires.

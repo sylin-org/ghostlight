@@ -615,7 +615,6 @@ fn spawn_work(
             &ctx.workspaces,
             &work,
             &cancellation,
-            work.arguments(),
         );
         report_work_with_deadline(
             &writer,

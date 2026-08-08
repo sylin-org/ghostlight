@@ -369,12 +369,6 @@ async fn idle_grace_watch(ctx: ServiceContext) -> i32 {
 #[derive(Clone)]
 pub struct ServiceContext {
     pub browser: Browser,
-    /// The capability registry (ADR-0034): the composition root's ordered list of outbound
-    /// capability executors. Aggregates each capability's tool directory + agent guide into the
-    /// single source consumed by `tools/list`, `explain`, enforcement, and the validator. Today
-    /// only the browser capability is registered; the `browser` field above stays for the
-    /// browser-specific dispatch paths (`call`, `tab_url`) the pipeline uses directly.
-    pub capabilities: outbound::Registry,
     pub store: Arc<ConfigStore>,
     pub recorder: Arc<Recorder>,
     /// One service-global, client-neutral authority snapshot slot.
@@ -481,10 +475,6 @@ impl ServiceContext {
             }
         }
 
-        let capabilities = outbound::Registry::new(vec![Arc::new(
-            outbound::browser::BrowserCapability::new(browser.clone()),
-        )]);
-
         let authority = Arc::new(AuthorityStore::new(
             &store.current_authority(),
             recorder.clone() as Arc<dyn AuditSink>,
@@ -511,7 +501,6 @@ impl ServiceContext {
 
         Ok(Self {
             browser,
-            capabilities,
             store,
             recorder,
             authority,

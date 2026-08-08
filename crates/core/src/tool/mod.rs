@@ -14,7 +14,6 @@ pub mod pipeline;
 pub mod provenance;
 pub mod refs;
 pub mod result;
-pub mod tools;
 pub mod update_plan;
 pub mod upload_image;
 pub mod validation;

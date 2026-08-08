@@ -48,7 +48,7 @@
 //! denial) the extension renders without judging; `title` is the
 //! always-shown headline, `description` an optional supporting line; `ref` is an opaque
 //! cross-reference (today: the denial_id) a viewer can correlate back to the structured audit
-//! record. First caller is a denial, fired from [`crate::tool::pipeline::run_tool_call`] at each of
+//! record. First caller is a denial, fired from the canonical operation pipeline at each of
 //! the three points a call is denied -- the ONE place today where governance decides something and the
 //! extension is never otherwise contacted, so nothing on screen shows a block happened without
 //! this. Deliberately general so a future notification need (a policy hot-reload landing, for
@@ -159,8 +159,16 @@ fn attention_required_message() -> String {
         .to_string()
 }
 
-fn hold_action<'a>(tool: &str, args: &'a Value) -> Option<&'a str> {
-    let key = crate::browser::directory::descriptor(tool)?.action_key?;
+/// Recover action copy from the bounded legacy extension alias vocabulary.
+///
+/// This helper exists only while the service still serializes pre-mechanism `tool_request`
+/// frames. It must not grow into a model-facing declaration or an execution lookup.
+fn legacy_extension_hold_action<'a>(tool: &str, args: &'a Value) -> Option<&'a str> {
+    let key = match tool {
+        "computer" | "act_on" | "dialog" | "tab_control" | "gif_creator" => "action",
+        "form_fill" => "submit",
+        _ => return None,
+    };
     match args.get(key) {
         Some(Value::String(action)) => Some(action.as_str()),
         Some(Value::Bool(true)) => Some(key),
@@ -1349,7 +1357,7 @@ impl Browser {
         .unwrap_or(false)
     }
 
-    /// Invoke `tool` with `args` on the extension and await its result.
+    /// Invoke one bounded legacy extension alias with its serialized arguments and await a result.
     ///
     /// `guid` is the browser-wire spelling for the calling work's service-minted WorkspaceId. It is
     /// written verbatim into the additive `tool_request` envelope field for browser-adapter version
@@ -1525,7 +1533,7 @@ impl Browser {
                     execution,
                     kind: BrowserRequestKind::Tool {
                         enforce_safety: true,
-                        hold_action: hold_action(tool, call_args),
+                        hold_action: legacy_extension_hold_action(tool, call_args),
                     },
                 },
             )
@@ -1599,7 +1607,7 @@ impl Browser {
                     execution,
                     kind: BrowserRequestKind::Tool {
                         enforce_safety: false,
-                        hold_action: hold_action(tool, args),
+                        hold_action: legacy_extension_hold_action(tool, args),
                     },
                 },
             )
@@ -3189,45 +3197,6 @@ impl Default for Browser {
     }
 }
 
-/// The browser capability (ADR-0034): the outbound executor for the user's own authenticated
-/// Chromium session. Implements [`super::ICapability`] by exposing the browser's tool directory
-/// and agent guide; holds the [`Browser`] handle that the pipeline dispatches tool-calls through.
-///
-/// Constructed once at startup and registered in the composition root's [`super::Registry`].
-#[derive(Clone)]
-pub struct BrowserCapability {
-    browser: Browser,
-}
-
-impl BrowserCapability {
-    pub fn new(browser: Browser) -> Self {
-        Self { browser }
-    }
-
-    /// The underlying [`Browser`] handle (the pipeline dispatches tool-calls through this).
-    pub fn browser(&self) -> &Browser {
-        &self.browser
-    }
-}
-
-impl super::ICapability for BrowserCapability {
-    fn code(&self) -> &'static str {
-        "browser"
-    }
-
-    fn descriptor(&self) -> &'static str {
-        "Drives the user's own authenticated Chromium session over the extension link."
-    }
-
-    fn directory(&self) -> &'static [crate::browser::directory::ToolDescriptor] {
-        crate::browser::directory::REGISTRY
-    }
-
-    fn agent_guide(&self) -> crate::browser::directory::AgentGuide {
-        crate::browser::directory::AGENT_GUIDE
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3238,6 +3207,28 @@ mod tests {
     const TEST_BROWSER_ID: &str = "test-browser-0001";
     const EXTENSION_TOPOLOGY_FAILURE: &str =
         "[hop: extension] topology failed. Next step: check chrome://extensions and that Chrome is running.";
+
+    #[test]
+    fn legacy_hold_action_is_bounded_to_extension_alias_arguments() {
+        for tool in ["computer", "act_on", "dialog", "tab_control", "gif_creator"] {
+            assert_eq!(
+                legacy_extension_hold_action(tool, &json!({"action":"status"})),
+                Some("status")
+            );
+        }
+        assert_eq!(
+            legacy_extension_hold_action("form_fill", &json!({"submit":true})),
+            Some("submit")
+        );
+        assert_eq!(
+            legacy_extension_hold_action("form_fill", &json!({"submit":false})),
+            None
+        );
+        assert_eq!(
+            legacy_extension_hold_action("navigate", &json!({"action":"status"})),
+            None
+        );
+    }
 
     /// A valid `ROLE_BROWSER` relay hello, framed. The relay's own pid identity is diagnostic-only
     /// since ADR-0061 (the extension owns identity), so the value here is arbitrary.

@@ -2,15 +2,13 @@
 //! The pipeline's structured outcome and the async, context-bearing local-handler shape
 //! (ADR-0035 Decision 6, PINS.md SS1 + SS2).
 //!
-//! Split into its own module rather than folded into `browser::directory` (PINS.md SS2's
-//! sanctioned fallback placement): `directory.rs` declares itself a PURE module with no
-//! dependencies beyond `core`/`std`/`serde_json::Value`, and [`LocalCtx`] must name
+//! Split from the data-only operation registry because [`LocalCtx`] must name
 //! `Browser`/`ConfigStore`/`Governance`/`Config` to give a local handler what it needs to behave
-//! like an ordinary dispatch. Living here instead keeps that purity claim true while still
-//! letting `operation::registry::Handler::Local`'s function-pointer variant name these types.
+//! like an ordinary dispatch. The registry can therefore remain a declarative operation
+//! authority while `operation::registry::Handler::Local` points at these futures.
 //!
 //! [`CallOutcome`] is the pipeline's own honest account of what happened to one tool call,
-//! BEFORE it is rendered into an MCP envelope: `pipeline::run_tool_call` returns this; the exact
+//! BEFORE it is rendered into an MCP envelope: the canonical pipeline returns this; the exact
 //! date-named handlers in `ghostlight-mcp-connector` map the neutral terminal variant into their own
 //! envelopes. Orchestrators (`script`, `form_fill`) consume
 //! `CallOutcome` directly -- it is the only honest way to know whether a step was denied, held,
@@ -140,9 +138,8 @@ pub struct LocalCtx<'a> {
     pub workspaces: Option<&'a crate::hub::workspace::WorkspaceRegistry>,
 }
 
-/// A [`crate::browser::directory::Handler::Local`] handler's return type: a boxed, pinned
-/// future so the pipeline's own async recursion (pipeline -> local handler -> pipeline, e.g.
-/// `script`'s interpreter re-entering `run_tool_call` per step) can be stored behind an
+/// A canonical local operation handler's return type: a boxed, pinned future so the pipeline's
+/// own async recursion (pipeline -> flow handler -> pipeline) can be stored behind an
 /// ordinary `fn` pointer, since Rust has no native `async fn` pointer type.
 pub type LocalFuture<'a> =
     std::pin::Pin<Box<dyn std::future::Future<Output = CallOutcome> + Send + 'a>>;

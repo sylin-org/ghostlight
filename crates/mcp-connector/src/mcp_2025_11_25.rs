@@ -833,9 +833,12 @@ fn response_error(request: &Request, code: i64, message: impl Into<String>) -> E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ghostlight_transport::bridge::{OperationAvailability, ServiceMessage, WorkspaceUse};
+    use ghostlight_transport::bridge::{
+        DenialSource, OperationAvailability, ServiceMessage, WorkId, WorkspaceUse,
+    };
     use ghostlight_transport::operation::{
         BrowserResult, BrowserResultStatus, IntentId, OperationEffect, OperationId, OperationKey,
+        ResultPart,
     };
 
     fn initialize(id: i64) -> Request {
@@ -882,6 +885,185 @@ mod tests {
             catalog: Some(projection()),
             resume_lifecycle: None,
         }
+    }
+
+    fn tool_call(id: i64, name: &str, arguments: Value) -> Request {
+        Request {
+            id: Some(RequestId::Number(id.into())),
+            method: "tools/call".into(),
+            params: json!({"name": name, "arguments": arguments}),
+        }
+    }
+
+    fn complete_tool_call(
+        handler: &mut Handler,
+        correlation: &mut Correlation,
+        request: Request,
+        work_id: WorkId,
+        outcome: impl FnOnce(Option<WorkspaceId>) -> TerminalOutcome,
+    ) -> Effects {
+        let started = handler.handle(&request, correlation);
+        let EdgeMessage::Start {
+            sequence,
+            workspace,
+            ..
+        } = started.service[0].clone()
+        else {
+            panic!("start expected");
+        };
+        let outcome = outcome(workspace.clone());
+        assert!(matches!(
+            correlation.observe(ServiceMessage::Started {
+                sequence,
+                work_id,
+                workspace,
+                context_creating: false,
+            }),
+            crate::bridge::Observation::None
+        ));
+        let crate::bridge::Observation::Resolved(resolution) =
+            correlation.observe(ServiceMessage::Completed { work_id, outcome })
+        else {
+            panic!("completion resolution expected");
+        };
+        handler.on_resolution(resolution, correlation)
+    }
+
+    #[test]
+    fn full_legacy_profile_transcript_is_exact_through_the_2025_handler() {
+        let projection = ghostlight_legacy::test_support::full_projection(17);
+        let workspace = WorkspaceId::mint();
+        let mut correlation = Correlation::default();
+        let (mut handler, opened) = Handler::select(&initialize(1), &mut correlation).unwrap();
+        let EdgeMessage::OpenWorkspace { sequence, .. } = opened.service[0].clone() else {
+            panic!("open workspace expected");
+        };
+        let crate::bridge::Observation::Resolved(resolution) =
+            correlation.observe(ServiceMessage::WorkspaceOpened {
+                sequence,
+                workspace: workspace.clone(),
+            })
+        else {
+            panic!("workspace resolution expected");
+        };
+        let catalog = handler.on_resolution(resolution, &mut correlation);
+        let EdgeMessage::Catalog { sequence, .. } = catalog.service[0].clone() else {
+            panic!("catalog expected");
+        };
+        let crate::bridge::Observation::Resolved(resolution) =
+            correlation.observe(ServiceMessage::Catalog {
+                sequence,
+                projection,
+            })
+        else {
+            panic!("catalog resolution expected");
+        };
+        let initialized = handler.on_resolution(resolution, &mut correlation);
+        assert_eq!(initialized.output[0]["id"], 1);
+        handler.handle(
+            &Request {
+                id: None,
+                method: "notifications/initialized".into(),
+                params: json!({}),
+            },
+            &mut correlation,
+        );
+
+        let listed = handler.handle(
+            &Request {
+                id: Some(RequestId::Number(2.into())),
+                method: "tools/list".into(),
+                params: json!({}),
+            },
+            &mut correlation,
+        );
+        assert_eq!(
+            listed.output,
+            vec![json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {"tools": ghostlight_legacy::declarations()["tools"].clone()},
+            })]
+        );
+
+        let explained = complete_tool_call(
+            &mut handler,
+            &mut correlation,
+            tool_call(3, "explain", json!({})),
+            WorkId(30),
+            |workspace| TerminalOutcome::Success {
+                result: Box::new(ghostlight_legacy::test_support::context_result(workspace)),
+            },
+        );
+        assert_eq!(
+            explained.output,
+            vec![json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "result": {
+                    "content": [{
+                        "type": "text",
+                        "text": ghostlight_legacy::test_support::explain_text(),
+                    }],
+                },
+            })]
+        );
+
+        let succeeded = complete_tool_call(
+            &mut handler,
+            &mut correlation,
+            tool_call(4, "get_page_text", json!({"tabId": 7})),
+            WorkId(40),
+            |workspace| {
+                let mut result = BrowserResult::new(
+                    OperationId::BrowserRead,
+                    IntentId::ReadText,
+                    BrowserResultStatus::Ok,
+                    OperationEffect::None,
+                );
+                result.workspace = workspace;
+                result.parts.push(ResultPart::Text {
+                    text: "Page text".into(),
+                });
+                result.data = json!({"characters": 9});
+                TerminalOutcome::Success {
+                    result: Box::new(result),
+                }
+            },
+        );
+        assert_eq!(
+            succeeded.output,
+            vec![json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "result": {
+                    "content": [{"type": "text", "text": "Page text"}],
+                    "structuredContent": {"characters": 9},
+                },
+            })]
+        );
+
+        let denied = complete_tool_call(
+            &mut handler,
+            &mut correlation,
+            tool_call(5, "get_page_text", json!({"tabId": 7})),
+            WorkId(50),
+            |_| TerminalOutcome::Denied {
+                message: "Blocked by test policy.".into(),
+                source: DenialSource::Policy,
+            },
+        );
+        assert_eq!(
+            denied.output,
+            vec![json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "result": {
+                    "content": [{"type": "text", "text": "Blocked by test policy."}],
+                    "isError": true,
+                },
+            })]
+        );
     }
 
     #[test]

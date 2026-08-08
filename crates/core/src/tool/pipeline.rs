@@ -30,8 +30,6 @@
 //! fixture parse, no resource resolution under all-open, no frames for free actions, shadow
 //! mode observably identical to allow.
 
-#[cfg(test)]
-use crate::browser::directory;
 use crate::browser::pattern::HostOutcome;
 use crate::browser::{pattern, resource, sacred};
 use crate::governance::config::reload::ConfigStore;
@@ -113,12 +111,141 @@ async fn handle_tools_call_scheduled(
         .cloned()
         .unwrap_or(Value::Null);
 
-    let outcome = run_tool_call(
-        browser, store, authority, guid, name, &args, None, false, overlay, None, None, None, None,
+    let operation = match decode_test_surface_call(name, &args) {
+        Ok(operation) => operation,
+        Err(error) => return render_outcome(id, CallOutcome::Failure { error }),
+    };
+    let outcome = run_operation_call(
+        browser, store, authority, guid, &operation, None, false, overlay, None, None, None, None,
         None,
     )
     .await;
     render_outcome(id, outcome)
+}
+
+#[cfg(test)]
+fn decode_test_surface_call(name: &str, arguments: &Value) -> Result<BrowserOperation, ToolError> {
+    let mut object = arguments
+        .as_object()
+        .cloned()
+        .ok_or_else(|| ToolError::invalid_request(format!("{name} arguments must be an object")))?;
+    let tab = object.remove("tabId");
+    if let Some(tab) = tab {
+        object.insert("tab".into(), tab);
+    }
+    let operation = match name {
+        "tabs_context_mcp" => {
+            if let Some(value) = object.remove("createIfEmpty") {
+                object.insert("create_if_empty".into(), value);
+            }
+            BrowserOperation::new(
+                OperationId::BrowserTabs,
+                IntentId::TabsList,
+                Value::Object(object),
+            )
+        }
+        "navigate" => {
+            let history = object.get("url").and_then(Value::as_str);
+            let intent = match history {
+                Some("back") => IntentId::NavigateBack,
+                Some("forward") => IntentId::NavigateForward,
+                _ => IntentId::NavigateUrl,
+            };
+            if intent != IntentId::NavigateUrl {
+                object.remove("url");
+                object.remove("force");
+            }
+            BrowserOperation::new(OperationId::BrowserNavigate, intent, Value::Object(object))
+        }
+        "computer" => {
+            let action = object
+                .remove("action")
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .ok_or_else(|| ToolError::invalid_request("computer requires a string action"))?;
+            match action.as_str() {
+                "screenshot" => BrowserOperation::new(
+                    OperationId::BrowserScreenshot,
+                    IntentId::ScreenshotViewport,
+                    json!({"tab": object.get("tab").cloned().unwrap_or(Value::Null)}),
+                ),
+                "wait" => BrowserOperation::new(
+                    OperationId::BrowserWait,
+                    IntentId::WaitDelay,
+                    json!({
+                        "tab": object.get("tab").cloned().unwrap_or(Value::Null),
+                        "seconds": object.remove("duration").unwrap_or(json!(1)),
+                    }),
+                ),
+                other => {
+                    return Err(ToolError::invalid_request(format!(
+                        "unsupported pipeline test action: {other}"
+                    )))
+                }
+            }
+        }
+        "find" => BrowserOperation::new(
+            OperationId::BrowserFind,
+            IntentId::FindQuery,
+            Value::Object(object),
+        ),
+        "read_page" => {
+            if let Some(value) = object.remove("ref_id") {
+                object.insert("scope_ref".into(), value);
+            }
+            BrowserOperation::new(
+                OperationId::BrowserSnapshot,
+                IntentId::SnapshotCapture,
+                Value::Object(object),
+            )
+        }
+        "javascript_tool" => {
+            object.remove("action");
+            if let Some(value) = object.remove("text") {
+                object.insert("script".into(), value);
+            }
+            BrowserOperation::new(
+                OperationId::BrowserEvaluate,
+                IntentId::EvaluateJavascript,
+                Value::Object(object),
+            )
+        }
+        "dialog" => {
+            let action = object
+                .remove("action")
+                .and_then(|value| value.as_str().map(str::to_owned));
+            if action.as_deref() != Some("status") {
+                return Err(ToolError::invalid_request("unsupported dialog test action"));
+            }
+            BrowserOperation::new(
+                OperationId::BrowserDialog,
+                IntentId::DialogStatus,
+                Value::Object(object),
+            )
+        }
+        "tab_control" => {
+            let action = object
+                .remove("action")
+                .and_then(|value| value.as_str().map(str::to_owned));
+            if action.as_deref() != Some("focus") {
+                return Err(ToolError::invalid_request("unsupported tab test action"));
+            }
+            BrowserOperation::new(
+                OperationId::BrowserTabs,
+                IntentId::TabsFocus,
+                Value::Object(object),
+            )
+        }
+        "explain" => BrowserOperation::new(
+            OperationId::BrowserContext,
+            IntentId::ContextDescribe,
+            Value::Object(object),
+        ),
+        other => {
+            return Err(ToolError::invalid_request(format!("Unknown tool: {other}"))
+                .next_step("call tools/list and use one of the advertised tool names"))
+        }
+    };
+    Ok(operation)
 }
 
 #[cfg(test)]
@@ -444,7 +571,6 @@ pub async fn run_work(
     workspaces: &WorkspaceRegistry,
     work: &WorkContext,
     cancellation: &CancellationToken,
-    _args: &Value,
 ) -> CallOutcome {
     let mut outcome = run_operation_call(
         browser,
@@ -468,77 +594,6 @@ pub async fn run_work(
         *message = with_org_contact_line(std::mem::take(message));
     }
     outcome
-}
-
-#[allow(clippy::too_many_arguments)]
-#[cfg(test)]
-pub(crate) async fn run_tool_call(
-    browser: &Browser,
-    store: &Arc<ConfigStore>,
-    authority: &AuthorityStore,
-    guid: &str,
-    name: &str,
-    args: &Value,
-    orchestration: Option<(&'static str, &str, u32)>,
-    dry_run: bool,
-    overlay: Option<&crate::governance::overlay::SessionOverlay>,
-    inherited_execution: Option<&ExecutionContext>,
-    inherited_authority: Option<&Arc<AuthoritySnapshot>>,
-    work: Option<&WorkContext>,
-    cancellation: Option<&CancellationToken>,
-    workspaces: Option<&WorkspaceRegistry>,
-) -> CallOutcome {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        return CallOutcome::Cancelled {
-            message: "The browser command was cancelled before dispatch.".to_string(),
-            effect: OperationEffect::None,
-        };
-    }
-    // Unknown tool names are rejected before dispatch (and before waiting on the extension
-    // channel at all): this is a client-request problem, not a browser/extension problem, and the
-    // client should learn that instantly regardless of whether an extension is even connected.
-    // The extension keeps its own `Unknown tool: ...` guard as a safety net (defense in depth);
-    // this pre-check just means well-formed clients never round-trip to hit it. Stage 3
-    // (ADR-0024 Decision 1): the registry lookup itself IS the validity check now
-    // (`directory::descriptor`, replacing the transport layer's former per-call fixture
-    // re-parse); a miss still returns the byte-identical "Unknown tool: {name}" result.
-    let Some(_declaration) = directory::descriptor(name) else {
-        let err = ToolError::invalid_request(format!("Unknown tool: {name}"))
-            .next_step("call tools/list and use one of the advertised tool names");
-        return CallOutcome::Failure { error: err };
-    };
-
-    // ADR-0031 Decision 4: hard-fail inputSchema validation BEFORE dispatch, with a corrective
-    // ToolError naming the missing/wrong field and the example shape. `explain` is the one
-    // argument-less tool whose example_call is None -- the validator still runs (it accepts the
-    // empty object) so the contract is uniform. The behavioral tightening: a missing `tabId`
-    // (today: silent None -> extension error) is now an explicit corrective error.
-    if let Some(schema) = crate::tool::validation::ToolSchema::for_tool(name) {
-        if let Err(err) = crate::tool::validation::validate_arguments(&schema, args) {
-            return CallOutcome::Failure { error: err };
-        }
-    }
-
-    let operation = match operation_registry::decode_legacy_call(name, args) {
-        Ok(operation) => operation,
-        Err(error) => return CallOutcome::Failure { error },
-    };
-    run_operation_call(
-        browser,
-        store,
-        authority,
-        guid,
-        &operation,
-        orchestration,
-        dry_run,
-        overlay,
-        inherited_execution,
-        inherited_authority,
-        work,
-        cancellation,
-        workspaces,
-    )
-    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1725,7 +1780,7 @@ mod tests {
         panic!("browser never reported connected");
     }
 
-    /// `Browser::notify` (like `request_group`) is fire-and-forget: `run_tool_call` returns as
+    /// `Browser::notify` (like `request_group`) is fire-and-forget: the operation returns as
     /// soon as the frame is queued, not once the fake extension's reader task has actually
     /// processed it. A test asserting on `seen` right after the last denied call can race that
     /// delivery, so poll for it to settle first (same shape as `wait_connected` above).
@@ -2290,13 +2345,12 @@ mod tests {
         );
         let cancellation = CancellationToken::new();
 
-        let outcome = run_tool_call(
+        let outcome = run_operation_call(
             &browser,
             &store,
             &authority,
             "test-routing-key",
-            "navigate",
-            &json!({ "url": "https://example.com", "tabId": 5 }),
+            work.operation(),
             None,
             false,
             None,
@@ -2987,129 +3041,11 @@ mod tests {
         std::fs::remove_file(&observe_path).ok();
     }
 
-    // --- ADR-0022 Decision 7: the `explain` directory tool ---
-
-    /// The full pinned `explain` response text, transcribed by hand from
-    /// `browser::directory::REGISTRY` in fixture order. This is the ONE place the
-    /// exact output is pinned; `directory::explain_text`'s own unit tests check only its
-    /// structural shape.
-    fn pinned_explain_text() -> String {
-        [
-            "Capabilities: read = retrieve and observe only; action = dispatch UI input whose \
-             effect the page decides (this can trigger writes); write = declared \
-             state-changing operations; execute = arbitrary code.",
-            "",
-            "tabs_context_mcp: requires read. List the MCP tab group: the ids, URLs, and \
-             titles of the tabs this server controls.",
-            "tabs_create_mcp: requires nothing. Open a new empty tab in the MCP tab group; \
-             touches no page and no server.",
-            "navigate: requires read. Load a URL in a tab, or go back or forward in its \
-             history; a top-level GET.",
-            "computer (left_click): requires action. Left-click at coordinates; commits an \
-             activation whose effect the page decides.",
-            "computer (right_click): requires action. Right-click at coordinates; commits an \
-             activation.",
-            "computer (type): requires action. Type text into the focused element; commits \
-             data to page handlers.",
-            "computer (screenshot): requires read. Capture a screenshot of the visible \
-             viewport.",
-            "computer (wait): requires nothing. Pause for a duration; touches no page and no \
-             server.",
-            "computer (scroll): requires read. Scroll the viewport; moves the view without \
-             committing input to the page.",
-            "computer (key): requires action. Press a key or key combination; commits input \
-             to page handlers.",
-            "computer (left_click_drag): requires action. Click and drag between two points; \
-             commits pointer input to the page.",
-            "computer (double_click): requires action. Double-click at coordinates; commits \
-             an activation.",
-            "computer (triple_click): requires action. Triple-click at coordinates; commits \
-             an activation.",
-            "computer (zoom): requires read. Capture a zoomed screenshot of a page region.",
-            "computer (scroll_to): requires read. Scroll an element into view; moves the \
-             viewport without committing input.",
-            "computer (hover): requires read. Move the pointer over a point; commits no \
-             activation and no data.",
-            "find: requires read. Search the page for elements matching a natural-language \
-             description.",
-            "form_input: requires write. Fill or set values in form fields; a declared, \
-             state-changing write.",
-            "get_page_text: requires read. Extract the page's readable text content, \
-             article-first, without HTML.",
-            "javascript_tool: requires execute. Run arbitrary JavaScript in the page; \
-             unbounded, and can bypass the UI entirely.",
-            "read_console_messages: requires read. Read buffered browser console messages \
-             from a tab.",
-            "read_network_requests: requires read. Read buffered HTTP network requests \
-             observed in a tab.",
-            "read_page: requires read. Read the page as an accessibility tree of elements \
-             with reference ids.",
-            "resize_window: requires nothing. Resize the browser window; browser state only, \
-             touches no page content.",
-            "update_plan: requires nothing. Echo an informational plan of intended actions; \
-             changes no permissions.",
-            "narrate: requires nothing. Show temporary agent commentary in an owned tab; \
-             touches no page content and requires no RAWX capability.",
-            "wait_for: requires read. Wait for a condition and page settlement; observes the \
-             DOM, touches nothing.",
-            "script: requires nothing. Run up to 20 tool calls sequentially in one request; \
-             each step is authorized and audited individually.",
-            "form_fill: requires read. Fill form fields by label in one call; matches keys to \
-             controls and fills them.",
-            "form_fill (submit): requires read. Fill form fields by label and click the form's \
-             own submit control.",
-            "act_on (left_click): requires action. Resolve one target and click it once.",
-            "act_on (right_click): requires action. Resolve one target and open its context \
-             menu.",
-            "act_on (double_click): requires action. Resolve one target and double-click it.",
-            "act_on (hover): requires read. Resolve one target and move the pointer over it.",
-            "act_on (scroll_to): requires read. Resolve one target and scroll it into view.",
-            "act_on (set_value): requires write. Resolve one field and set its value.",
-            "dialog (status): requires read. Inspect whether a JavaScript dialog is blocking \
-             the tab.",
-            "dialog (accept): requires action. Explicitly accept the current JavaScript dialog.",
-            "dialog (dismiss): requires action. Explicitly dismiss the current JavaScript dialog.",
-            "dialog (respond): requires action. Explicitly respond to the current JavaScript \
-             prompt with text.",
-            "tab_control (focus): requires nothing. Focus one session-owned tab without changing \
-             page content.",
-            "tab_control (reload): requires action. Reload one session-owned tab.",
-            "tab_control (close): requires action. Explicitly close one session-owned tab and no \
-             containing group.",
-            "file_upload: requires write. Upload files (base64 bytes) to a file input \
-             located by read_page or find, via its ref.",
-            "browser_batch: requires nothing. Run a sequence of tool calls in one round trip; \
-             each item is name+input, authorized per item.",
-            "upload_image: requires write. Upload a previously captured screenshot to a file \
-             input (ref) or drag-drop target (coordinate).",
-            "gif_creator (start_recording): requires read. Start recording browser actions in \
-             the tab's group as GIF frames.",
-            "gif_creator (stop_recording): requires nothing. Stop recording; keep the captured \
-             frames for export.",
-            "gif_creator (status): requires nothing. Report recording state and deadlines \
-             without reading the live page.",
-            "gif_creator (clear): requires nothing. Discard the captured recording frames.",
-            "gif_creator (export): requires read. Encode the frames to a GIF. Client export \
-             requires read; page placement by ref or coordinate requires write.",
-            "explain: requires nothing. Show every action available here and the capability \
-             each one requires.",
-        ]
-        .join("\n")
-    }
-
-    /// `directory::explain_text` and the pinned expectation above must never drift apart: this
-    /// is the tie between the hand-transcribed literal and the real implementation.
-    #[test]
-    fn pinned_explain_text_matches_the_real_directory_formatter() {
-        assert_eq!(directory::explain_text(), pinned_explain_text());
-    }
-
-    /// The `explain` tool (ADR-0022 Decision 7) is handled entirely server-side: with NO
-    /// extension attached at all, the call returns the exact pinned directory text and is
-    /// audited as an ordinary allowed call with `capability: "none"`, `domain: null`, and a
-    /// real (not hardcoded) `duration_ms`.
+    /// Canonical context description is handled entirely server-side: with no extension attached,
+    /// the call returns profile-neutral semantic data and is audited as an ordinary allowed call
+    /// with `capability: "none"`, `domain: null`, and a real duration.
     #[tokio::test]
-    async fn explain_returns_the_pinned_text_and_is_audited_as_allow_none() {
+    async fn context_description_is_semantic_and_audited_as_allow_none() {
         let path = temp_audit_path("explain");
         let _ = std::fs::remove_file(&path);
         let recorder = Arc::new(Recorder::to_file(path.clone()));
@@ -3135,10 +3071,19 @@ mod tests {
         .await;
         let result = resp.result.as_ref().expect("tool result present");
         assert_ne!(result["isError"], true, "explain must never be isError");
-        let text = result["content"][0]["text"]
-            .as_str()
-            .expect("text content block");
-        assert_eq!(text, pinned_explain_text());
+        let context = &result["structuredContent"];
+        assert_eq!(context["schema"], "ghostlight.browser.context/v1");
+        assert_eq!(context["capabilities"].as_array().map(Vec::len), Some(4));
+        assert!(
+            context["operations"]
+                .as_array()
+                .is_some_and(|operations| !operations.is_empty()),
+            "context describes canonical operation facts"
+        );
+        assert!(
+            result.get("content").is_none(),
+            "legacy explain prose belongs to the edge profile"
+        );
 
         let lines = read_lines(&path);
         assert_eq!(lines.len(), 1, "exactly one audit record");
@@ -3157,8 +3102,8 @@ mod tests {
     // --- t04 (ADR-0024 Decision 2): the generic ingest pipeline ---
 
     /// Test 2 (t04): a bogus tool name yields the exact current message and produces NO audit
-    /// record; `explain` (a registry hit with a `Handler::Local`) still answers -- pinning that
-    /// validity now comes from the registry (`directory::descriptor`), not a fixture re-parse.
+    /// record; context description (a registry hit with a local handler) still answers, pinning
+    /// that validity comes from the canonical operation registry.
     #[tokio::test]
     async fn unknown_tool_is_a_registry_miss() {
         let path = temp_audit_path("unknown-tool");
@@ -3211,12 +3156,13 @@ mod tests {
             explain_result["isError"], true,
             "explain is a registry hit and must never error"
         );
-        let explain_text = explain_result["content"][0]["text"]
-            .as_str()
-            .expect("text content block");
+        assert_eq!(
+            explain_result["structuredContent"]["schema"],
+            "ghostlight.browser.context/v1"
+        );
         assert!(
-            explain_text.starts_with("Capabilities: read = "),
-            "{explain_text}"
+            explain_result.get("content").is_none(),
+            "the core returns semantic context, not profile prose"
         );
 
         std::fs::remove_file(&path).ok();
@@ -3349,11 +3295,9 @@ mod tests {
             "a DomainLess resource never probes a tab_url"
         );
 
-        // o04: inputSchema validation now runs before dispatch. A read_page call with no tabId
-        // previously reached governance's fail-closed path (Indeterminate -> "(unknown)" denial);
-        // the validator now catches it earlier with a STRICTLY BETTER corrective error naming
-        // the missing field and where to get a tabId. The governance fail-closed path is now
-        // unreachable for this specific malformed shape -- which is the intended tightening.
+        // Canonical schema validation runs again in the service. The edge owns legacy `tabId`
+        // validation and normalization; this test deliberately omits it so the canonical `tab`
+        // requirement fails before governance or browser dispatch.
         let denied_params = json!({ "name": "read_page", "arguments": {} });
         let denied_resp = handle_tools_call(
             &browser,
@@ -3371,15 +3315,15 @@ mod tests {
             .expect("text content block");
         assert!(
             denied_text.contains("[hop: invalid-request]"),
-            "a missing-tabId read_page now fails at validation, not governance: {denied_text}"
+            "a missing canonical tab fails at validation, not governance: {denied_text}"
         );
         assert!(
-            denied_text.contains("missing required field 'tabId'"),
+            denied_text.contains("missing required field 'tab'"),
             "the corrective error names the missing field: {denied_text}"
         );
         assert!(
-            denied_text.contains("tabs_context_mcp"),
-            "the corrective hint says where to get a tabId: {denied_text}"
+            denied_text.contains("matching the advertised inputSchema"),
+            "the corrective hint points back to the canonical schema: {denied_text}"
         );
     }
 

@@ -94,11 +94,11 @@ async fn denied_for(
     workspace: ghostlight_transport::workspace_id::WorkspaceId,
     tab_id: i64,
 ) -> String {
-    let operation = ghostlight::operation::registry::decode_legacy_call(
-        "read_page",
-        &json!({ "tabId": tab_id }),
-    )
-    .expect("read_page decodes");
+    let operation = BrowserOperation::new(
+        OperationId::BrowserSnapshot,
+        IntentId::SnapshotCapture,
+        json!({ "tab": tab_id }),
+    );
     let work = WorkContext::new(Some(workspace), operation, None, None, None);
     match run_work(
         &ctx.browser,
@@ -107,7 +107,6 @@ async fn denied_for(
         &ctx.workspaces,
         &work,
         &CancellationToken::new(),
-        work.arguments(),
     )
     .await
     {
@@ -231,9 +230,11 @@ async fn already_owned_tab_dispatches_only_the_requested_tool() {
         ctx.workspaces.claim_tab(&workspace, 5),
         ghostlight::hub::workspace::TabClaim::Adopted
     );
-    let operation =
-        ghostlight::operation::registry::decode_legacy_call("read_page", &json!({"tabId": 5}))
-            .expect("read_page decodes");
+    let operation = BrowserOperation::new(
+        OperationId::BrowserSnapshot,
+        IntentId::SnapshotCapture,
+        json!({"tab": 5}),
+    );
     let work = WorkContext::new(Some(workspace), operation, None, None, None);
 
     let outcome = run_work(
@@ -243,7 +244,6 @@ async fn already_owned_tab_dispatches_only_the_requested_tool() {
         &ctx.workspaces,
         &work,
         &CancellationToken::new(),
-        work.arguments(),
     )
     .await;
 

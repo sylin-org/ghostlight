@@ -13,6 +13,17 @@ use serde_json::{json, Value};
 use crate::scenarios::Scenario;
 use crate::support::{self, ChildGuard, TempRoot};
 
+const LEGACY_SURFACE: &str =
+    include_str!("../../../mcp-connector/src/surface/data/ghostlight-legacy-v1.json");
+
+fn legacy_tool_count() -> usize {
+    serde_json::from_str::<Value>(LEGACY_SURFACE).expect("edge-owned legacy profile parses")
+        ["tools"]
+        .as_array()
+        .expect("edge-owned legacy profile has tools")
+        .len()
+}
+
 pub(super) fn registry() -> Vec<Scenario> {
     vec![
         (
@@ -121,10 +132,7 @@ fn initialize(edge: &mut McpEdge) -> anyhow::Result<()> {
     edge.send(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}))?;
     let tools = edge.receive(Duration::from_secs(10))?;
     ensure!(tools["id"] == 2);
-    ensure!(
-        tools["result"]["tools"].as_array().map(Vec::len)
-            == Some(ghostlight_core::browser::directory::advertised_tool_count())
-    );
+    ensure!(tools["result"]["tools"].as_array().map(Vec::len) == Some(legacy_tool_count()));
     Ok(())
 }
 
@@ -264,10 +272,7 @@ fn mcp_2026_exact_transcript() -> anyhow::Result<()> {
     ensure!(tools["result"]["resultType"] == "complete");
     ensure!(tools["result"]["cacheScope"] == "private");
     ensure!(tools["result"]["ttlMs"].is_u64());
-    ensure!(
-        tools["result"]["tools"].as_array().map(Vec::len)
-            == Some(ghostlight_core::browser::directory::advertised_tool_count())
-    );
+    ensure!(tools["result"]["tools"].as_array().map(Vec::len) == Some(legacy_tool_count()));
     ensure!(tools["result"]["tools"][0]["outputSchema"]["properties"]["workspaceId"].is_object());
 
     let mut listen_params = params_2026();

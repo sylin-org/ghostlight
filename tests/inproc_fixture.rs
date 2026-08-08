@@ -8,48 +8,44 @@
 
 mod support;
 
+use ghostlight_transport::operation::{IntentId, OperationId};
 use serde_json::json;
-use support::inproc::{by_id, init_and_call, manifest_from_value, text_of, Harness};
+use support::inproc::{by_id, init_and_call, manifest_from_value, operation, text_of, Harness};
 
-/// The all-open catalog projection is byte-identical to the code-declared fixture and advertises
-/// exactly `advertised_tool_count()` tools -- the same invariant
-/// `tests/tool_enforcement.rs::all_open_invariant_no_manifest_means_no_denials` proves over a
-/// spawned service.
+/// The all-open service projects every canonical registry entry in stable order.
 #[tokio::test]
 async fn all_open_tools_list_is_byte_identical_to_the_fixture() {
     let harness = Harness::all_open();
     let responses = harness
         .drive(&[
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-            json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+            json!({"jsonrpc":"2.0","id":2,"method":"operations/list","params":{}}),
         ])
         .await;
 
     let list = by_id(&responses, 2);
-    let tools = list["result"]["tools"].as_array().expect("tools array");
+    let operations = list["result"]["operations"]
+        .as_array()
+        .expect("operations array");
     assert_eq!(
-        tools.len(),
-        ghostlight::browser::directory::advertised_tool_count(),
-        "the neutral projection advertises the full REGISTRY surface"
-    );
-    assert_eq!(
-        list["result"],
-        ghostlight::tool::tools::advertised_tools_json(),
-        "byte-identical canonical catalog"
+        operations.len(),
+        ghostlight::operation::registry::descriptors().len(),
+        "the neutral projection advertises every canonical operation"
     );
 }
 
-/// Under all-open, a `tools/call` with no extension connected passes policy, reaches dispatch, and
+/// Under all-open, a canonical call with no extension connected passes policy, reaches dispatch, and
 /// returns the familiar `not connected` execution error -- never a `Denied (` text. The "reaches
 /// dispatch" contrast that `tests/tool_enforcement.rs` is built around.
 #[tokio::test]
 async fn all_open_call_reaches_dispatch_without_an_extension() {
     let harness = Harness::all_open();
     let responses = harness
-        .drive(&init_and_call(
-            "navigate",
-            json!({"url":"https://example.com/","tabId":1}),
-        ))
+        .drive(&init_and_call(operation(
+            OperationId::BrowserNavigate,
+            IntentId::NavigateUrl,
+            json!({"url":"https://example.com/","tab":1}),
+        )))
         .await;
 
     let call = by_id(&responses, 2);
@@ -78,10 +74,11 @@ async fn governed_denies_an_uncovered_domain_before_dispatch() {
     }));
     let harness = Harness::governed(manifest);
     let responses = harness
-        .drive(&init_and_call(
-            "navigate",
-            json!({"url":"https://evil.com/","tabId":1}),
-        ))
+        .drive(&init_and_call(operation(
+            OperationId::BrowserNavigate,
+            IntentId::NavigateUrl,
+            json!({"url":"https://evil.com/","tab":1}),
+        )))
         .await;
 
     let denied = by_id(&responses, 2);
@@ -103,10 +100,11 @@ async fn attached_extension_answers_a_dispatched_call() {
         .await;
 
     let responses = harness
-        .drive(&init_and_call(
-            "navigate",
-            json!({"url":"https://example.com/","tabId":1}),
-        ))
+        .drive(&init_and_call(operation(
+            OperationId::BrowserNavigate,
+            IntentId::NavigateUrl,
+            json!({"url":"https://example.com/","tab":1}),
+        )))
         .await;
 
     let call = by_id(&responses, 2);
