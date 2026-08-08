@@ -6,6 +6,7 @@
 
 mod fake_browser;
 mod legacy;
+mod mechanism_wire;
 mod scenarios;
 mod support;
 

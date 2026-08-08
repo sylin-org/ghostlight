@@ -3,17 +3,18 @@
 //
 // Policy-free CDP executor + native-messaging endpoint + tab-group manager. It holds MECHANISM
 // only; all governance (domains, tool classification, audit) lives in the Rust binary. It receives
-// { id, type: "tool_request", tool, args } and replies { id, type: "tool_response", result } or
-// { id, type: "tool_error", error, hop?, detail? }. `hop` (only ever "cdp" or "page") and `detail`
-// are optional and are mechanism tags (which layer threw), never policy; an absent `hop` means the
-// binary attributes the failure to the extension itself. Chrome frames native messages (4-byte LE)
-// for us via the Port.
+// either the negotiated { id, type: "mechanism_request", mechanism, input } frame or a covered
+// legacy { id, type: "tool_request", tool, args } frame. Both reply with
+// { id, type: "tool_response", result } or { id, type: "tool_error", error, hop?, detail? }.
+// `hop` (only ever "cdp" or "page") and `detail` are optional mechanism tags (which layer threw),
+// never policy; an absent `hop` means the binary attributes the failure to the extension itself.
+// Chrome frames native messages (4-byte LE) for us via the Port.
 //
 // Tab-URL query (g13): { id, type: "tab_url_request", tabId } gets
 // { id, type: "tab_url_response", result: { url } }, reporting chrome.tabs.get(tabId).url (or
 // null) with no matching or interpretation -- the binary's grant enforcement decides.
 //
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/input-events.js", "lib/drag-session.js", "lib/workspace.js", "lib/tab-effects.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/find-visual.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/input-events.js", "lib/drag-session.js", "lib/workspace.js", "lib/tab-effects.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/find-visual.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js", "lib/mechanism-wire.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
@@ -284,7 +285,12 @@ async function connect() {
         type: "browser_hello",
         browserId,
         browserGeneration,
-        features: ["chunkedHostMessagesV1", "surfaceExecutorV1"],
+        adapterVersion: chrome.runtime.getManifest().version,
+        features: [
+          "chunkedHostMessagesV1",
+          "surfaceExecutorV1",
+          self.GhostlightMechanismWire.MECHANISM_REQUEST_V1,
+        ],
         executorGeneration: EXECUTOR_GENERATION,
       });
     } catch { /* port gone */ }
@@ -299,6 +305,23 @@ async function connect() {
           );
         });
         return;
+      }
+      // ADR-0101 R4: both covered request grammars enter the same physical dispatcher. The typed
+      // frame is reduced to the existing handler vocabulary without learning any operation,
+      // policy, profile, or client identity. Unknown mechanisms and malformed canonical inputs
+      // fail on this exact connection; additive envelope/input fields remain available to the
+      // existing tolerant handlers under ADR-0065.
+      if (msg && msg.id) {
+        try {
+          const normalized = self.GhostlightMechanismWire.normalizeIncomingRequest(msg);
+          if (normalized) msg = normalized;
+        } catch (error) {
+          fail(
+            self.GhostlightExecutionResponse.createResponseScope(msg.id, connectedPort),
+            hopError("extension", (error && error.message) || String(error))
+          );
+          return;
+        }
       }
       if (msg && msg.type === "tool_request" && msg.id) {
         if (sessionKilled) {

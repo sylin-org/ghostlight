@@ -8,4 +8,5 @@
 pub mod browser;
 pub mod diagnostics;
 mod legacy_mechanism;
+mod mechanism_wire;
 mod workspace;

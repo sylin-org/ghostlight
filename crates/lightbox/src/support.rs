@@ -264,8 +264,29 @@ pub fn wait_extension_disconnected(log_dir: &Path, within: Duration) -> anyhow::
     .map(|_| ())
 }
 
-/// Send the browser-role hello and persistent extension identity used by fake-extension scenarios.
+/// Send the browser-role hello and a legacy extension identity with no optional wire features.
 pub async fn send_extension_attach_frames<W>(writer: &mut W) -> anyhow::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    send_extension_attach_frames_inner(writer, None).await
+}
+
+/// Send the browser-role hello and persistent extension identity with exact advertised features.
+pub async fn send_extension_attach_frames_with_features<W>(
+    writer: &mut W,
+    features: &[&str],
+) -> anyhow::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    send_extension_attach_frames_inner(writer, Some(features)).await
+}
+
+async fn send_extension_attach_frames_inner<W>(
+    writer: &mut W,
+    features: Option<&[&str]>,
+) -> anyhow::Result<()>
 where
     W: tokio::io::AsyncWrite + Unpin,
 {
@@ -277,11 +298,14 @@ where
         }),
     );
     ghostlight_transport::host::write_message(writer, &hello).await?;
-    let identity = serde_json::to_vec(&serde_json::json!({
+    let mut identity = serde_json::json!({
         "type": ghostlight_transport::handshake::EXTENSION_IDENTITY_TYPE,
         ghostlight_transport::handshake::BROWSER_ID_FIELD: format!("lightbox-{}", std::process::id()),
-    }))?;
-    ghostlight_transport::host::write_message(writer, &identity).await?;
+    });
+    if let Some(features) = features {
+        identity["features"] = serde_json::json!(features);
+    }
+    ghostlight_transport::host::write_message(writer, &serde_json::to_vec(&identity)?).await?;
     Ok(())
 }
 
@@ -294,6 +318,27 @@ where
         "id": request["id"],
         "type": "tab_url_response",
         "result": { "url": format!("https://tab-{}.example.com/", request["tabId"]) },
+    });
+    ghostlight_transport::host::write_message(writer, &serde_json::to_vec(&reply)?).await?;
+    Ok(())
+}
+
+/// Answer a typed `tab.url_query` with the existing response envelope.
+pub async fn answer_mechanism_tab_url<W>(
+    writer: &mut W,
+    request: &serde_json::Value,
+) -> anyhow::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let tab = request
+        .pointer("/input/tab")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| anyhow::anyhow!("typed tab.url_query carried no numeric input.tab"))?;
+    let reply = serde_json::json!({
+        "id": request["id"],
+        "type": "tab_url_response",
+        "result": { "url": format!("https://tab-{tab}.example.com/") },
     });
     ghostlight_transport::host::write_message(writer, &serde_json::to_vec(&reply)?).await?;
     Ok(())
@@ -316,6 +361,8 @@ where
         let value: serde_json::Value = serde_json::from_slice(&bytes)?;
         if value["type"] == "tab_url_request" {
             answer_tab_url(writer, &value).await?;
+        } else if value["type"] == "mechanism_request" && value["mechanism"] == "tab.url_query" {
+            answer_mechanism_tab_url(writer, &value).await?;
         } else if value["type"] == expected_type {
             return Ok(value);
         } else {

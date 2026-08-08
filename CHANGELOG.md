@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Canonical browser-operation kernel (ADR-0101).** Versioned MCP surfaces now translate into
+  protocol-neutral operation and result types before governance, scheduling, execution, and audit.
+  The frozen `ghostlight-legacy/v1` profile remains the automatic default.
+- **Negotiated semantic extension requests.** A browser session advertising exact
+  `mechanismRequestV1` receives typed physical mechanism ids and canonical inputs. Requests are
+  bound to the advertising connection generation, including tab URL and chunked requests.
+
+### Changed
+
+- **Chrome adapter source v0.8.1.** The policy-free extension accepts both the negotiated semantic
+  request grammar and the covered 0.8 legacy request grammar. Services fall back to the bounded
+  legacy serializer for adapters that do not advertise the feature. Public adapter status remains
+  0.8.0 until a separate adapter release.
+
 ## [0.8.0]
 
 The v0.8.0 candidate makes the MCP edge explicitly protocol-versioned, leaves the service kernel

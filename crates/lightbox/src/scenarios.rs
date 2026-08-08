@@ -49,6 +49,7 @@ pub fn registry() -> Vec<Scenario> {
         ("license-expiry-continuity", license_expiry_continuity),
     ];
     scenarios.extend(crate::legacy::registry());
+    scenarios.extend(crate::mechanism_wire::registry());
     scenarios
 }
 

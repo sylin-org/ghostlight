@@ -6,16 +6,19 @@
 //! [`Browser::attach`] takes any async duplex stream -- a real IPC connection in production, an
 //! in-memory pipe in tests -- so the correlation logic is verifiable without a browser.
 //!
-//! Wire protocol (see also [`crate::messages`]): the service sends
-//! `{ "id", "type": "tool_request", "tool", "args" }`; the extension replies with
+//! Wire protocol (see also [`crate::messages`]): a browser session advertising
+//! `mechanismRequestV1` receives `{ "id", "type": "mechanism_request", "mechanism", "input" }`;
+//! a covered older session receives `{ "id", "type": "tool_request", "tool", "args" }` through
+//! the bounded compatibility serializer. The extension replies with
 //! `{ "id", "type": "tool_response", "result" }` or
 //! `{ "id", "type": "tool_error", "error", "hop"?, "detail"?, "code"? }`. A `tool_error` is mapped to a
 //! hop-attributed [`ToolError`] (see [`ToolError::from_extension_wire`]); `detail`, if present, is
 //! logged with `tracing::debug!` and never reaches the tool result. Recognized id-less browser
 //! events are handled here without entering MCP lifecycle.
 //!
-//! Tab-URL query (g13, [`Browser::tab_url`]): the service sends
-//! `{ "id", "type": "tab_url_request", "tabId" }`; the extension replies with
+//! Tab-URL query (g13, [`Browser::tab_url`]): a negotiated session receives the same semantic
+//! mechanism envelope with `mechanism: "tab.url_query"`; a covered older session receives
+//! `{ "id", "type": "tab_url_request", "tabId" }`. The extension replies with
 //! `{ "id", "type": "tab_url_response", "result": { "url" } }`. This routes through the same
 //! `pending` map and generic reply path as a tool call (any non-`tool_error` reply already
 //! becomes `Ok(result)`); mechanism only, feeding the dispatch chokepoint's grant enforcement --
@@ -58,6 +61,8 @@ use super::diagnostics::Diagnostic;
 use super::legacy_mechanism;
 #[cfg(test)]
 use super::legacy_mechanism::TAB_DELTA_V1;
+use super::mechanism_wire;
+use super::mechanism_wire::MECHANISM_REQUEST_V1;
 use super::workspace::WorkspaceBindings;
 use crate::browser::mechanism::{
     BrowserAuxiliaryPurpose, BrowserControl, BrowserControlId, BrowserEvent, BrowserEventId,
@@ -574,6 +579,11 @@ fn chunk_transport_not_negotiated() -> ToolError {
         .next_step("update or reload the Ghostlight extension, then retry")
 }
 
+fn browser_session_replaced_before_dispatch() -> ToolError {
+    ToolError::extension("Browser extension reconnected before request dispatch")
+        .next_step("retry the call; no browser request was sent")
+}
+
 fn command_id_from_wire(value: &Value) -> Option<u64> {
     value
         .as_u64()
@@ -749,7 +759,24 @@ struct BrowserSession {
     ordinary_slots: Arc<Semaphore>,
     generation: u64,
     chunked_host_messages_v1: bool,
+    mechanism_request_v1: bool,
     executor_generation: Option<String>,
+}
+
+/// Wire facts captured from one exact browser-session generation before request serialization.
+///
+/// A prepared request may cross async scheduling before final admission. The enqueue boundary
+/// compares this binding with the live session so a reconnect can never receive the prior
+/// generation's selected grammar.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct BrowserSessionBinding {
+    generation: u64,
+    mechanism_request_v1: bool,
+}
+
+struct PreparedBrowserRequest {
+    frames: Vec<Zeroizing<Vec<u8>>>,
+    binding: BrowserSessionBinding,
 }
 
 /// A cloneable handle the persistent service uses to call tools on the extension.
@@ -1572,27 +1599,22 @@ impl Browser {
         let result = async {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
             let workspace_group_title = uses_workspace.then(|| self.workspace_group_title(guid));
-            let payload = legacy_mechanism::serialize_tool_request(
-                &id,
-                guid,
-                call_request,
-                &execution_wire(execution),
-                workspace_group_title.as_deref(),
-            )
-            .map(Zeroizing::new)
-            .map_err(|error| DeliveryFailure {
-                error,
-                outcome_unknown: false,
-            })?;
-            let frames = self
-                .outbound_frames(target, &id, &payload)
+            let prepared = self
+                .prepare_tool_request(
+                    target,
+                    &id,
+                    guid,
+                    call_request,
+                    &execution_wire(execution),
+                    workspace_group_title.as_deref(),
+                )
                 .map_err(|error| DeliveryFailure {
                     error,
                     outcome_unknown: false,
                 })?;
             self.send_and_await_delivery(
                 id,
-                frames,
+                prepared,
                 target,
                 AwaitRequest {
                     debug_label: request.id().as_str(),
@@ -1658,14 +1680,15 @@ impl Browser {
         let uses_workspace = metadata.uses_workspace(request);
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
         let workspace_group_title = uses_workspace.then(|| self.workspace_group_title(guid));
-        let payload = match legacy_mechanism::serialize_tool_request(
+        let prepared = match self.prepare_tool_request(
+            target,
             &id,
             guid,
             request,
             &execution_wire(execution),
             workspace_group_title.as_deref(),
         ) {
-            Ok(payload) => Zeroizing::new(payload),
+            Ok(prepared) => prepared,
             Err(err) => {
                 self.debug.tool_begin(&id, request.id().as_str());
                 self.debug.tool_end(&id, false, &err.to_string());
@@ -1675,16 +1698,10 @@ impl Browser {
                 });
             }
         };
-        let frames = self
-            .outbound_frames(target, &id, &payload)
-            .map_err(|error| DeliveryFailure {
-                error,
-                outcome_unknown: false,
-            })?;
         let mut result = self
             .send_and_await_delivery(
                 id,
-                frames,
+                prepared,
                 target,
                 AwaitRequest {
                     debug_label: request.id().as_str(),
@@ -1701,11 +1718,100 @@ impl Browser {
         Ok(result)
     }
 
+    fn prepare_tool_request(
+        &self,
+        target: u32,
+        request_id: &str,
+        guid: &str,
+        request: &MechanismRequest,
+        execution: &Value,
+        workspace_group_title: Option<&str>,
+    ) -> std::result::Result<PreparedBrowserRequest, ToolError> {
+        let (binding, supports_chunks) = self.browser_session_wire_facts(target)?;
+        let payload = if binding.mechanism_request_v1 {
+            mechanism_wire::serialize_tool_request(
+                request_id,
+                guid,
+                request,
+                legacy_mechanism::TAB_DELTA_V1,
+                execution,
+                workspace_group_title,
+            )
+        } else {
+            legacy_mechanism::serialize_tool_request(
+                request_id,
+                guid,
+                request,
+                execution,
+                workspace_group_title,
+            )
+        }
+        .map(Zeroizing::new)?;
+        let frames = Self::encode_outbound_frames(request_id, &payload, supports_chunks)?;
+        Ok(PreparedBrowserRequest { frames, binding })
+    }
+
+    fn prepare_tab_url_request(
+        &self,
+        target: u32,
+        request_id: &str,
+        request: &MechanismRequest,
+        execution: &Value,
+    ) -> std::result::Result<PreparedBrowserRequest, ToolError> {
+        let (binding, supports_chunks) = self.browser_session_wire_facts(target)?;
+        let payload = if binding.mechanism_request_v1 {
+            mechanism_wire::serialize_tab_url_request(request_id, request, execution)
+        } else {
+            legacy_mechanism::serialize_tab_url_request(request_id, request, execution)
+        }
+        .map(Zeroizing::new)?;
+        let frames = Self::encode_outbound_frames(request_id, &payload, supports_chunks)?;
+        Ok(PreparedBrowserRequest { frames, binding })
+    }
+
+    fn browser_session_wire_facts(
+        &self,
+        target: u32,
+    ) -> std::result::Result<(BrowserSessionBinding, bool), ToolError> {
+        let sessions = self.sessions.lock().unwrap();
+        let any_connected = !sessions.is_empty();
+        let Some(session) = sessions.get(&target) else {
+            return Err(if any_connected {
+                ToolError::extension("The browser that owns this tab is no longer connected")
+                    .next_step(TAB_OWNER_GONE_NEXT_STEP)
+            } else {
+                ToolError::extension("Browser extension not connected")
+            });
+        };
+        Ok((
+            BrowserSessionBinding {
+                generation: session.generation,
+                mechanism_request_v1: session.mechanism_request_v1,
+            },
+            session.chunked_host_messages_v1,
+        ))
+    }
+
+    #[cfg(test)]
     fn outbound_frames(
         &self,
         target: u32,
         request_id: &str,
         payload: &[u8],
+    ) -> std::result::Result<Vec<Zeroizing<Vec<u8>>>, ToolError> {
+        let supports_chunks = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&target)
+            .is_some_and(|session| session.chunked_host_messages_v1);
+        Self::encode_outbound_frames(request_id, payload, supports_chunks)
+    }
+
+    fn encode_outbound_frames(
+        request_id: &str,
+        payload: &[u8],
+        supports_chunks: bool,
     ) -> std::result::Result<Vec<Zeroizing<Vec<u8>>>, ToolError> {
         if payload.len() <= CHROME_OUTBOUND_PAYLOAD_LIMIT {
             return host::encode(payload)
@@ -1719,12 +1825,6 @@ impl Browser {
                 MAX_CHUNKED_REQUEST_BYTES
             )));
         }
-        let supports_chunks = self
-            .sessions
-            .lock()
-            .unwrap()
-            .get(&target)
-            .is_some_and(|session| session.chunked_host_messages_v1);
         if !supports_chunks {
             return Err(chunk_transport_not_negotiated());
         }
@@ -2310,26 +2410,20 @@ impl Browser {
             json!({ "tab": native_tab }),
         )
         .expect("tab URL query must be declared by its auxiliary plan");
-        let framed = match legacy_mechanism::serialize_tab_url_request(
-            &id,
-            &mechanism,
-            &execution_wire(execution),
-        )
-        .map_err(|error| error.to_string())
-        .and_then(|bytes| host::encode(&bytes).map_err(|error| error.to_string()))
-        {
-            Ok(framed) => framed,
-            Err(e) => {
-                let err = ToolError::binary(format!("failed to encode the tab url request: {e}"));
-                self.debug.tool_begin(&id, mechanism.id().as_str());
-                self.debug.tool_end(&id, false, &err.to_string());
-                return Err(err);
-            }
-        };
+        let prepared =
+            match self.prepare_tab_url_request(target, &id, &mechanism, &execution_wire(execution))
+            {
+                Ok(prepared) => prepared,
+                Err(err) => {
+                    self.debug.tool_begin(&id, mechanism.id().as_str());
+                    self.debug.tool_end(&id, false, &err.to_string());
+                    return Err(err);
+                }
+            };
         let result = self
             .send_and_await(
                 id,
-                vec![Zeroizing::new(framed)],
+                prepared,
                 target,
                 AwaitRequest {
                     debug_label: mechanism.id().as_str(),
@@ -2600,20 +2694,21 @@ impl Browser {
     }
 
     /// Shared send-and-await core behind [`Browser::call`] and [`Browser::tab_url`] (g13):
-    /// register the pending reply slot, enqueue the already-framed bytes on `target`'s browser connection if
-    /// still attached (fail fast otherwise), and await the correlated reply up to the supplied
-    /// request deadline. Each caller frames its own request first, since their encode-failure
-    /// messages differ. `target` is resolved (ADR-0058) before this is called; a `target` that
+    /// register the pending reply slot, verify the prepared grammar still belongs to `target`'s
+    /// exact browser-session generation, enqueue its already-framed bytes if still attached, and
+    /// await the correlated reply up to the supplied request deadline. Each caller prepares its
+    /// own request first because its reply class and encode failures differ. `target` is resolved
+    /// (ADR-0058) before this is called; a `target` that
     /// named a specific browser (via a decoded tabId) but is no longer attached gets a more
     /// specific message than the generic "not connected" the zero-browsers case gets.
     async fn send_and_await(
         &self,
         id: String,
-        frames: Vec<Zeroizing<Vec<u8>>>,
+        prepared: PreparedBrowserRequest,
         target: u32,
         request: AwaitRequest<'_>,
     ) -> std::result::Result<Value, ToolError> {
-        self.send_and_await_delivery(id, frames, target, request)
+        self.send_and_await_delivery(id, prepared, target, request)
             .await
             .map_err(|failure| failure.error)
     }
@@ -2621,10 +2716,11 @@ impl Browser {
     async fn send_and_await_delivery(
         &self,
         id: String,
-        frames: Vec<Zeroizing<Vec<u8>>>,
+        prepared: PreparedBrowserRequest,
         target: u32,
         request: AwaitRequest<'_>,
     ) -> std::result::Result<Value, DeliveryFailure> {
+        let PreparedBrowserRequest { frames, binding } = prepared;
         // ADR-0079 D3: hold the same attention lock through the actual frame enqueue. An opening
         // transition must either happen before this check (and refuse the request) or after these
         // bytes entered the already-dispatched set. There is no stale-check gap.
@@ -2679,6 +2775,17 @@ impl Browser {
                     outcome_unknown: false,
                 });
             };
+            if session.generation != binding.generation
+                || session.mechanism_request_v1 != binding.mechanism_request_v1
+            {
+                let error = browser_session_replaced_before_dispatch();
+                self.debug.tool_begin(&id, request.debug_label);
+                self.debug.tool_end(&id, false, &error.to_string());
+                return Err(DeliveryFailure {
+                    error,
+                    outcome_unknown: false,
+                });
+            }
             if frames.len() > 1 && !session.chunked_host_messages_v1 {
                 let error = chunk_transport_not_negotiated();
                 self.debug.tool_begin(&id, request.debug_label);
@@ -2948,6 +3055,7 @@ impl Browser {
                 .any(|feature| feature.as_str() == Some(expected))
         };
         let chunked_host_messages_v1 = has_feature(CHUNKED_HOST_MESSAGES_V1);
+        let mechanism_request_v1 = has_feature(MECHANISM_REQUEST_V1);
         let surface_executor_v1 = has_feature(SURFACE_EXECUTOR_V1);
         let executor_generation = surface_executor_v1.then(|| {
             identity_value
@@ -3020,6 +3128,7 @@ impl Browser {
                     ordinary_slots,
                     generation,
                     chunked_host_messages_v1,
+                    mechanism_request_v1,
                     executor_generation,
                 },
             );
@@ -3881,6 +3990,15 @@ mod tests {
         .unwrap()
     }
 
+    fn feature_identity_frame(browser_id: &str, features: &[&str]) -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "type": "browser_hello",
+            "browserId": browser_id,
+            "features": features,
+        }))
+        .unwrap()
+    }
+
     fn executor_identity_frame(browser_id: &str, executor_generation: Option<&str>) -> Vec<u8> {
         let mut identity = json!({
             "type": "browser_hello",
@@ -4036,6 +4154,7 @@ mod tests {
                 ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
                 generation: target_generation,
                 chunked_host_messages_v1: false,
+                mechanism_request_v1: false,
                 executor_generation: executor_generation.map(str::to_string),
             },
         );
@@ -4085,6 +4204,22 @@ mod tests {
             },
         );
         receiver
+    }
+
+    fn prepared_for_live_session(
+        browser: &Browser,
+        target: u32,
+        frames: Vec<Zeroizing<Vec<u8>>>,
+    ) -> PreparedBrowserRequest {
+        let sessions = browser.sessions.lock().unwrap();
+        let session = sessions.get(&target).expect("test browser session");
+        PreparedBrowserRequest {
+            frames,
+            binding: BrowserSessionBinding {
+                generation: session.generation,
+                mechanism_request_v1: session.mechanism_request_v1,
+            },
+        }
     }
 
     #[tokio::test]
@@ -5018,7 +5153,7 @@ mod tests {
         let failure = browser
             .send_and_await_delivery(
                 "uncertain-id".into(),
-                vec![frame],
+                prepared_for_live_session(&browser, slot, vec![frame]),
                 slot,
                 AwaitRequest {
                     debug_label: "upload_image_exec",
@@ -5047,13 +5182,18 @@ mod tests {
                 ordinary_slots: Arc::new(Semaphore::new(0)),
                 generation: 1,
                 chunked_host_messages_v1: false,
+                mechanism_request_v1: false,
                 executor_generation: None,
             },
         );
         let failure = browser
             .send_and_await_delivery(
                 "queue-full".to_string(),
-                vec![Zeroizing::new(host::encode(b"{}").unwrap())],
+                prepared_for_live_session(
+                    &browser,
+                    1,
+                    vec![Zeroizing::new(host::encode(b"{}").unwrap())],
+                ),
                 1,
                 AwaitRequest {
                     debug_label: "navigate",
@@ -5088,13 +5228,18 @@ mod tests {
                 ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
                 generation: 2,
                 chunked_host_messages_v1: false,
+                mechanism_request_v1: false,
                 executor_generation: None,
             },
         );
         let failure = browser
             .send_and_await_delivery(
                 "replaced-chunks".to_string(),
-                vec![Zeroizing::new(vec![1]), Zeroizing::new(vec![2])],
+                prepared_for_live_session(
+                    &browser,
+                    1,
+                    vec![Zeroizing::new(vec![1]), Zeroizing::new(vec![2])],
+                ),
                 1,
                 AwaitRequest {
                     debug_label: "upload_image_exec",
@@ -5145,9 +5290,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn nested_mechanisms_recheck_hold_and_attention_at_the_final_enqueue() {
+    async fn semantic_mechanisms_recheck_hold_and_attention_at_the_final_enqueue() {
         let browser = Browser::new();
-        let (mut extension, _) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
+        let (mut extension, _) = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            feature_identity_frame(TEST_BROWSER_ID, &[MECHANISM_REQUEST_V1]),
+        )
+        .await;
         let request = MechanismRequest::test_only(
             MechanismId::WaitDelay,
             json!({
@@ -5323,6 +5473,7 @@ mod tests {
                 ordinary_slots: Arc::new(Semaphore::new(0)),
                 generation: 1,
                 chunked_host_messages_v1: false,
+                mechanism_request_v1: false,
                 executor_generation: None,
             },
         );
@@ -5371,6 +5522,7 @@ mod tests {
                 ordinary_slots: Arc::new(Semaphore::new(0)),
                 generation: 1,
                 chunked_host_messages_v1: false,
+                mechanism_request_v1: false,
                 executor_generation: None,
             },
         );
@@ -5451,6 +5603,7 @@ mod tests {
                 ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
                 generation: 1,
                 chunked_host_messages_v1: false,
+                mechanism_request_v1: false,
                 executor_generation: None,
             },
         );
@@ -5562,6 +5715,7 @@ mod tests {
                 ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
                 generation: 1,
                 chunked_host_messages_v1: false,
+                mechanism_request_v1: false,
                 executor_generation: None,
             },
         );
@@ -5581,6 +5735,7 @@ mod tests {
                 ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
                 generation: 1,
                 chunked_host_messages_v1: true,
+                mechanism_request_v1: false,
                 executor_generation: None,
             },
         );
@@ -6047,6 +6202,413 @@ mod tests {
         assert!(
             browser.slot_of("test-browser-0001").is_none(),
             "no slot is minted for a rejected handshake"
+        );
+    }
+
+    #[tokio::test]
+    async fn exact_mechanism_request_feature_selects_the_semantic_wire() {
+        let browser = Browser::new();
+        let (mut extension, slot) = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            feature_identity_frame(TEST_BROWSER_ID, &[MECHANISM_REQUEST_V1]),
+        )
+        .await;
+        let caller = browser.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .call(
+                    "semantic-workspace",
+                    "navigate",
+                    &json!({
+                        "tabId": crate::constants::tab_id::encode(slot, 9),
+                        "url": "https://example.com"
+                    }),
+                )
+                .await
+        });
+
+        let request = host::read_message(&mut extension).await.unwrap().unwrap();
+        let request: Value = serde_json::from_slice(&request).unwrap();
+        assert_eq!(request["type"], "mechanism_request");
+        assert_eq!(request["mechanism"], "navigate.url");
+        assert_eq!(
+            request["input"],
+            json!({"tab":9,"url":"https://example.com"})
+        );
+        assert_eq!(request["guid"], "semantic-workspace");
+        assert_eq!(request["resultFeatures"], json!([TAB_DELTA_V1]));
+        assert_eq!(request["execution"], json!({"class":"safety_protocol"}));
+        assert!(request.get("tool").is_none());
+        assert!(request.get("args").is_none());
+        assert!(request.get("workspace").is_none());
+
+        host::write_message(
+            &mut extension,
+            &serde_json::to_vec(&json!({
+                "id": request["id"],
+                "type": "tool_response",
+                "result": {"ok":true}
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(call.await.unwrap().unwrap(), json!({"ok":true}));
+    }
+
+    #[tokio::test]
+    async fn absent_unknown_and_near_match_features_select_legacy_fallback() {
+        async fn assert_legacy(features: &[&str], browser_id: &str) {
+            let browser = Browser::new();
+            let (mut extension, _) = attach_fake_extension_with_identity(
+                &browser,
+                browser_id,
+                feature_identity_frame(browser_id, features),
+            )
+            .await;
+            let caller = browser.clone();
+            let call = tokio::spawn(async move {
+                caller
+                    .call(
+                        "legacy-workspace",
+                        "navigate",
+                        &json!({"url":"https://example.com"}),
+                    )
+                    .await
+            });
+            let request = host::read_message(&mut extension).await.unwrap().unwrap();
+            let request: Value = serde_json::from_slice(&request).unwrap();
+            assert_eq!(request["type"], "tool_request", "{features:?}");
+            assert_eq!(request["tool"], "navigate", "{features:?}");
+            assert!(request.get("mechanism").is_none(), "{features:?}");
+            host::write_message(
+                &mut extension,
+                &serde_json::to_vec(&json!({
+                    "id": request["id"],
+                    "type": "tool_response",
+                    "result": {"ok":true}
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(call.await.unwrap().unwrap(), json!({"ok":true}));
+        }
+
+        assert_legacy(&[], "legacy-no-feature").await;
+        assert_legacy(
+            &[
+                "mechanismRequestV1Beta",
+                "mechanismrequestv1",
+                "futureMechanismRequestV9",
+            ],
+            "legacy-unknown-feature",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn replacement_identity_does_not_inherit_the_prior_sessions_feature() {
+        let browser = Browser::new();
+        let (mut old_extension, old_slot) = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            feature_identity_frame(TEST_BROWSER_ID, &[MECHANISM_REQUEST_V1]),
+        )
+        .await;
+        let (mut replacement, replacement_slot) = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            feature_identity_frame(TEST_BROWSER_ID, &[]),
+        )
+        .await;
+        assert_eq!(old_slot, replacement_slot);
+        assert!(!browser.sessions.lock().unwrap()[&replacement_slot].mechanism_request_v1);
+
+        let caller = browser.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .call(
+                    "replacement-workspace",
+                    "navigate",
+                    &json!({"url":"https://example.com"}),
+                )
+                .await
+        });
+        let request = host::read_message(&mut replacement).await.unwrap().unwrap();
+        let request: Value = serde_json::from_slice(&request).unwrap();
+        assert_eq!(request["type"], "tool_request");
+        assert!(
+            !matches!(
+                tokio::time::timeout(
+                    Duration::from_millis(20),
+                    host::read_message(&mut old_extension)
+                )
+                .await,
+                Ok(Ok(Some(_)))
+            ),
+            "the replaced generation must receive no request"
+        );
+        host::write_message(
+            &mut replacement,
+            &serde_json::to_vec(&json!({
+                "id": request["id"],
+                "type": "tool_response",
+                "result": {"ok":true}
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(call.await.unwrap().unwrap(), json!({"ok":true}));
+    }
+
+    #[tokio::test]
+    async fn prepared_grammar_cannot_cross_a_replacement_session_generation() {
+        for (old_semantic, replacement_semantic) in [(true, false), (false, true)] {
+            let browser = Browser::new();
+            let (old_sender, mut old_receiver) = mpsc::unbounded_channel();
+            browser.sessions.lock().unwrap().insert(
+                1,
+                BrowserSession {
+                    sender: old_sender,
+                    ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
+                    generation: 1,
+                    chunked_host_messages_v1: false,
+                    mechanism_request_v1: old_semantic,
+                    executor_generation: None,
+                },
+            );
+            let request = MechanismRequest::test_only(
+                MechanismId::NavigateUrl,
+                json!({"url":"https://example.com"}),
+            );
+            let prepared = browser
+                .prepare_tool_request(
+                    1,
+                    "generation-bound",
+                    "workspace",
+                    &request,
+                    &json!({"class":"safety_protocol"}),
+                    None,
+                )
+                .unwrap();
+            assert_eq!(prepared.binding.mechanism_request_v1, old_semantic);
+
+            let (replacement_sender, mut replacement_receiver) = mpsc::unbounded_channel();
+            browser.sessions.lock().unwrap().insert(
+                1,
+                BrowserSession {
+                    sender: replacement_sender,
+                    ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
+                    generation: 2,
+                    chunked_host_messages_v1: false,
+                    mechanism_request_v1: replacement_semantic,
+                    executor_generation: None,
+                },
+            );
+            let execution = ExecutionContext::safety_protocol();
+            let failure = browser
+                .send_and_await_delivery(
+                    "generation-bound".into(),
+                    prepared,
+                    1,
+                    AwaitRequest {
+                        debug_label: "navigate.url",
+                        timeout: Duration::from_millis(10),
+                        attention_guid: None,
+                        execution: &execution,
+                        creator_inventory: false,
+                        kind: BrowserRequestKind::Tool,
+                        admission: FinalAdmission::strict(),
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(!failure.outcome_unknown);
+            assert!(failure
+                .error
+                .to_string()
+                .contains("reconnected before request dispatch"));
+            assert!(!browser
+                .pending
+                .lock()
+                .unwrap()
+                .contains_key("generation-bound"));
+            assert!(old_receiver.try_recv().is_err());
+            assert!(matches!(
+                replacement_receiver.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn semantic_tab_url_query_retains_its_distinct_reply_class() {
+        let browser = Browser::new();
+        let (mut extension, slot) = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            feature_identity_frame(TEST_BROWSER_ID, &[MECHANISM_REQUEST_V1]),
+        )
+        .await;
+        let tab = crate::constants::tab_id::encode(slot, 17);
+        let caller = browser.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .tab_url(
+                    "semantic-url-workspace",
+                    tab,
+                    &ExecutionContext::safety_protocol(),
+                )
+                .await
+        });
+
+        let request = host::read_message(&mut extension).await.unwrap().unwrap();
+        let request: Value = serde_json::from_slice(&request).unwrap();
+        assert_eq!(request["type"], "mechanism_request");
+        assert_eq!(request["mechanism"], "tab.url_query");
+        assert_eq!(request["input"], json!({"tab":17}));
+        assert_eq!(request["execution"], json!({"class":"safety_protocol"}));
+        assert_eq!(request.as_object().unwrap().len(), 5);
+
+        host::write_message(
+            &mut extension,
+            &serde_json::to_vec(&json!({
+                "id": request["id"],
+                "type": "tool_response",
+                "result": {"url":"https://wrong.example"}
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        sleep(Duration::from_millis(20)).await;
+        assert!(!call.is_finished());
+
+        host::write_message(
+            &mut extension,
+            &serde_json::to_vec(&json!({
+                "id": request["id"],
+                "type": "tab_url_response",
+                "result": {"url":"https://example.com"}
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            call.await.unwrap().unwrap(),
+            Some("https://example.com".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_large_request_requires_and_reuses_the_same_sessions_chunk_feature() {
+        let browser = Browser::new();
+        let (mut extension, slot) = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            feature_identity_frame(
+                TEST_BROWSER_ID,
+                &[MECHANISM_REQUEST_V1, CHUNKED_HOST_MESSAGES_V1],
+            ),
+        )
+        .await;
+        let script_len = CHROME_OUTBOUND_PAYLOAD_LIMIT + 2048;
+        let request = MechanismRequest::test_only(
+            MechanismId::PageEvaluate,
+            json!({
+                "tab": crate::constants::tab_id::encode(slot, 23),
+                "script": "x".repeat(script_len)
+            }),
+        );
+        let caller = browser.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .execute_mechanism(
+                    "semantic-large-workspace",
+                    &request,
+                    &ExecutionContext::safety_protocol(),
+                )
+                .await
+        });
+
+        let mut chunks = Vec::new();
+        let first = host::read_message(&mut extension).await.unwrap().unwrap();
+        let first: Value = serde_json::from_slice(&first).unwrap();
+        let count = first["count"].as_u64().unwrap() as usize;
+        chunks.push(first);
+        for _ in 1..count {
+            let chunk = host::read_message(&mut extension).await.unwrap().unwrap();
+            chunks.push(serde_json::from_slice::<Value>(&chunk).unwrap());
+        }
+        let request_id = chunks[0]["requestId"].as_str().unwrap().to_string();
+        let mut rebuilt = Vec::new();
+        for (index, chunk) in chunks.iter().enumerate() {
+            assert_eq!(chunk["type"], "wire_chunk");
+            assert_eq!(chunk["index"], index);
+            assert_eq!(chunk["requestId"], request_id);
+            rebuilt.extend(crate::b64::decode(chunk["data"].as_str().unwrap()).unwrap());
+        }
+        let semantic: Value = serde_json::from_slice(&rebuilt).unwrap();
+        assert_eq!(semantic["id"], request_id);
+        assert_eq!(semantic["type"], "mechanism_request");
+        assert_eq!(semantic["mechanism"], "page.evaluate");
+        assert_eq!(semantic["input"]["tab"], 23);
+        assert_eq!(
+            semantic["input"]["script"].as_str().unwrap().len(),
+            script_len
+        );
+
+        host::write_message(
+            &mut extension,
+            &serde_json::to_vec(&json!({
+                "id": request_id,
+                "type": "tool_response",
+                "result": {"ok":true}
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(call.await.unwrap().unwrap(), json!({"ok":true}));
+    }
+
+    #[tokio::test]
+    async fn semantic_feature_without_chunk_feature_refuses_large_request_before_enqueue() {
+        let browser = Browser::new();
+        let (mut extension, slot) = attach_fake_extension_with_identity(
+            &browser,
+            TEST_BROWSER_ID,
+            feature_identity_frame(TEST_BROWSER_ID, &[MECHANISM_REQUEST_V1]),
+        )
+        .await;
+        let request = MechanismRequest::test_only(
+            MechanismId::PageEvaluate,
+            json!({
+                "tab": crate::constants::tab_id::encode(slot, 23),
+                "script": "x".repeat(CHROME_OUTBOUND_PAYLOAD_LIMIT + 2048)
+            }),
+        );
+        let error = browser
+            .execute_mechanism(
+                "semantic-large-workspace",
+                &request,
+                &ExecutionContext::safety_protocol(),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("too old"));
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(20),
+                host::read_message(&mut extension)
+            )
+            .await
+            .is_err(),
+            "a request refused before enqueue must emit no browser frame"
         );
     }
 
@@ -6525,6 +7087,7 @@ mod tests {
                 ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
                 generation: 8,
                 chunked_host_messages_v1: false,
+                mechanism_request_v1: false,
                 executor_generation: None,
             },
         );

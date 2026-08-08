@@ -45,8 +45,8 @@ when they disagree**, and update it when you land something that changes the pic
   and the 30-day checkpoint is due 2026-09-06 06:00:52 UTC. Project-authored distribution is
   recorded separately from user reception. No telemetry, tracking, or phone-home path was added.
 
-- **Vendor-paired tool-surface discovery is complete and the first two ADR-0101 implementation
-  checkpoints are now releasable.** Research 21 preserves
+- **Vendor-paired tool-surface discovery is complete and ADR-0101 implementation has reached the
+  native-profile stage.** Research 21 preserves
   a complete 22-tool Claude
   Cowork / Claude-in-Chrome declaration capture, a filtered Codex desktop registry, the sanitized
   22-interface and 136-member Codex Chrome runtime schema, and exact Playwright MCP v0.0.79
@@ -55,16 +55,21 @@ when they disagree**, and update it when you land something that changes the pic
   kernel, one-to-one Ghostlight-native profile, stateful surface sessions, readiness/result
   contracts, classifier, capability packs, migration order, and evaluation gates. ADR-0101
   separates edge-owned versioned surfaces, canonical service operations, and policy-free browser
-  mechanisms. The `docs/tasks/browser-kernel/` batch completed R0 through R2: bridge major 2 now carries
+  mechanisms. The `docs/tasks/browser-kernel/` batch completed R0 through R4: bridge major 2 now carries
   typed operations, availability, results, cancellation effects, handles, provenance, and
   recursive flow without MCP declarations or nested external tool names. The edge reconstructs
   the frozen 25-tool `ghostlight-legacy/v1` contract exactly, while one canonical registry owns
   validation, RAWX, resource, scheduling, execution, and audit identity. The legacy declaration,
   schemas, guide, explain copy, decoder, and renderer now live only at the MCP edge. Exact real
   handler transcripts cover both MCP revisions, and the old core declaration/decoder modules are
-  deleted. Full Rust formatting, strict Clippy, build, tests, diff, and ASCII gates pass. R3 is
-  isolating typed physical browser mechanisms behind the still-unchanged legacy extension wire.
-  The shipping product surface and extension wire remain unchanged.
+  deleted. The service now dispatches only typed physical mechanisms. Exact
+  `mechanismRequestV1` negotiation binds the semantic wire to one browser-session generation and
+  falls back to the bounded old-extension serializer when absent. The source Chrome adapter is
+  0.8.1 and dual-reads both covered grammars; the public adapter remains 0.8.0, and both cover the
+  service 0.8 block. Full Rust formatting, strict Clippy, build, tests, extension tests, all three
+  mixed-version scenarios, diff, and ASCII gates pass. R5 is defining a strict opt-in native
+  surface and truthful readiness. The shipping `ghostlight-legacy/v1` product surface remains
+  unchanged.
 
 ## Pre-release record (superseded by the 2026-08-07 state above)
 

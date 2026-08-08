@@ -6,16 +6,16 @@ blocking a stage.
 
 ## RESUME HERE
 
-- State: ACTIVE; ADR-0101 authorizes the staged implementation and R3 is complete.
-- Current stage: R4 -- extension mechanism skew.
-- Next action: add a negotiated `mechanismRequestV1` extension wire, retain the bounded legacy
-  serializer as the old-extension fallback, and prove the new/new, new/old, and old/new matrix.
+- State: ACTIVE; ADR-0101 authorizes the staged implementation and R4 is complete.
+- Current stage: R5 -- native surface and readiness.
+- Next action: define the strict native profile and its supported packs, then make navigation
+  readiness truthful without changing the default `ghostlight-legacy/v1` profile.
 - Blocking condition: none.
 - Shipping default: current 25-tool surface. `ghostlight-native/v1`, Claude, and Codex profiles are
   candidates only.
-- Last green gate: 2026-08-08 R3 full Rust formatting, strict Clippy, build, no-fail-fast tests,
-  extension tests and syntax checks, package tests, diff, and ASCII gates passed in
-  `.target-browser-kernel-r2-final`.
+- Last green gate: 2026-08-08 R4 Rust formatting, focused core and cross-language mechanism tests,
+  extension tests and syntax checks, Lightbox package tests, and all three skew scenarios passed.
+  The final full-workspace gate is recorded below.
 
 ## Stage table
 
@@ -24,9 +24,9 @@ blocking a stage.
 | R0 authority and inventory | COMPLETE | 5439e24c + a2a52ab7 | Current product unchanged | ADR-0101, immutable catalog/guide oracle, green baselines |
 | R1 canonical operation bridge | COMPLETE | c3c4020d | Current 25 tools through temporary decoder | Bridge major 2 fails loudly across old/new peers |
 | R2 legacy surface profile | COMPLETE | 641b332f | `ghostlight-legacy/v1` remains default | Exact declarations and rendering are edge-owned |
-| R3 typed mechanism isolation | COMPLETE | (this commit) | Old extension wire only | Core dispatches typed mechanisms; one bounded adapter owns old aliases |
-| R4 extension mechanism skew | IN PROGRESS | -- | Negotiated new wire plus legacy fallback | Prove old/new matrix |
-| R5 native surface and readiness | NOT STARTED | -- | Native explicit opt-in; legacy default | No planned pack is advertised |
+| R3 typed mechanism isolation | COMPLETE | fe55aceb | Old extension wire only | Core dispatches typed mechanisms; one bounded adapter owns old aliases |
+| R4 extension mechanism skew | COMPLETE | (this commit) | Negotiated new wire plus legacy fallback | All three skew paths pass |
+| R5 native surface and readiness | IN PROGRESS | -- | Native explicit opt-in; legacy default | No planned pack is advertised |
 | R6 client/profile selection | NOT STARTED | -- | Exact selection; legacy fallback retained | No identity signal affects authority |
 | R7 Claude flat adapter | NOT STARTED | -- | Versioned opt-in supported surface | All 22 captured tools dispositioned |
 | R8 Codex runtime adapter | NOT STARTED | -- | Versioned opt-in trusted module | All 136 members dispositioned |
@@ -47,7 +47,7 @@ or dated live record. A prose assertion is not evidence.
 | Canonical operation kernel | R1 | Typed operation/result/handle/default round trips; exhaustive concrete variant descriptors; no vendor or model-facing name as an execution key | COMPLETE | `crates/transport/src/operation.rs`; `crates/core/src/operation/registry.rs`; 26 operation families, 60 closed intents, and all 52 legacy variants covered by tests |
 | Operation bridge | R1 | Coordinated major cutover; old/new mismatch fails loudly; Start/catalog/result/cancel transcripts; recursive flow carries canonical operations only | COMPLETE | Bridge major 2 unit and integration transcripts in `crates/transport/src/bridge.rs`, both MCP revisions, `tests/hub_isolation.rs`, and `tests/operation_bridge.rs` |
 | Legacy profile | R2 | Byte-exact 25-tool order, identity, schemas, annotations, examples, results, and errors on both MCP revisions; legacy remains releasable | COMPLETE | Edge-owned catalog, guide, explain copy, schema validation, call decoder, and result renderer; exact full-catalog/context/success/denial handler transcripts for both revisions; `surface_profile_fidelity` architecture guard |
-| Mechanisms and extension skew | R3-R4 | Exhaustive operation-to-mechanism and legacy alias maps; negotiated new wire; new/new, new/old, and old/new process evidence | IN PROGRESS | R3 closes 57-operation planning, typed mechanisms/controls/events, the sole legacy-wire adapter, final-admission and exact-wire tests, and architecture guards; R4 negotiation and mixed-version process evidence remain |
+| Mechanisms and extension skew | R3-R4 | Exhaustive operation-to-mechanism and legacy alias maps; negotiated new wire; new/new, new/old, and old/new process evidence | COMPLETE | R3 closes 57-operation planning, typed mechanisms/controls/events, the sole legacy-wire adapter, final-admission and exact-wire tests, and architecture guards. R4 adds exact `mechanismRequestV1` negotiation, ordered cross-language equality for all 43 mechanism ids, session-generation binding, and three named Lightbox skew scenarios |
 | Native surface | R5 | Strict twelve-tool core and honest supported packs; output schemas; workspace/addressing; bounded observations; opt-in journey evidence | NOT STARTED | -- |
 | Readiness | R5, R9 | Committed-document watcher; initial and landing authorization ordering; one dispatch-to-readiness deadline; condition/settlement result axes; timeout, unavailable, cancel, redirect, PDF/protected-page, and outcome-unknown tests | NOT STARTED | -- |
 | Client/profile selection | R6 | Exact precedence and version/fingerprint tests; sessionful and request-stateless state isolation; concurrent-profile and restriction tests; no authority/routing effect | NOT STARTED | -- |
@@ -65,7 +65,8 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 | 2026-08-08 | R0 | 5439e24c + a2a52ab7 | `cargo test --workspace`: pass | `cargo test --locked --test surface_profile_golden`: 2 pass; `node --test tests/extension/*.test.js`: 164 pass; extension `node --check`: pass | Not required for docs/oracle stage | Current 25-tool product and extension wire unchanged |
 | 2026-08-08 | R1 | c3c4020d | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | transport 90, core 760, connector 87, architecture 11, operation bridge 3, frozen surface 2, schema fidelity 17, advertisement 3, protocol 4, enforcement 11, and four migrated integration targets 12: all pass | Extension 164/164 and syntax checks for 29 JavaScript files pass; process/e2e not required at R1 | Canonical bridge major 2, typed results, recursive flow, provenance, cancellation, image validation, workspace equality, and exact legacy edge rendering are green |
 | 2026-08-08 | R2 | 641b332f | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | connector 96, core 739, transport 90, `surface_profile_fidelity` 4, MCP protocol 4, schema fidelity 17, advertisement 3, and enforcement 11: all pass | Extension unchanged; process/e2e not required at R2 | Frozen 25-tool profile and explain copy are edge-owned; both revision handlers prove exact catalog/context/success/denial transcripts; core has no model-facing declaration or legacy call decoder |
-| 2026-08-08 | R3 | (this commit) | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | core 810, architecture 16, mechanism mapping 9, enforcement 11, and script 2: all pass | Extension 164/164, syntax checks for every extension JavaScript file, and MCPB package tests 5/5 pass; process/e2e not required at R3 | All 57 canonical operations have closed physical plans; typed final admission, reply classes, recording FIFO/cancellation, semantic result truth, and exact old-wire compatibility are green; three independent P0/P1 audits are clean |
+| 2026-08-08 | R3 | fe55aceb | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | core 810, architecture 16, mechanism mapping 9, enforcement 11, and script 2: all pass | Extension 164/164, syntax checks for every extension JavaScript file, and MCPB package tests 5/5 pass; process/e2e not required at R3 | All 57 canonical operations have closed physical plans; typed final admission, reply classes, recording FIFO/cancellation, semantic result truth, and exact old-wire compatibility are green; three independent P0/P1 audits are clean |
+| 2026-08-08 | R4 | (this commit) | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | core 821, architecture 16, mechanism mapping 10, Lightbox package 5, and extension 177: all pass | `mechanism_wire_new_new`, `mechanism_wire_new_service_old_extension`, and `mechanism_wire_old_service_new_extension`: pass on the settled tree | Exact feature negotiation, legacy fallback, reconnect isolation, semantic tab URL/chunk behavior, source adapter 0.8.1 compatibility, and the mixed-version matrix are green; independent P0/P1 audit is clean |
 
 ## Stage records
 
@@ -164,18 +165,32 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 
 ### R4 -- extension mechanism skew
 
-- Status: IN PROGRESS.
-- Negotiated feature and compatibility range: --
-- New service/new extension: --
-- New service/old extension: --
-- Old service/new extension: --
-- Unknown-feature and reconnect evidence: --
-- Gate output: --
-- Deviations/blockers: --
+- Status: COMPLETE.
+- Negotiated feature and compatibility range: exact case-sensitive `mechanismRequestV1` selects
+  `{id,type:"mechanism_request",mechanism,input,...}` for one browser-session generation. Source
+  adapter 0.8.1 and adapter 0.8.0 both declare service block 0.8; the public adapter remains 0.8.0.
+- New service/new extension: Lightbox `mechanism_wire_new_new` crosses the real service, MCP edge,
+  browser IPC, and fake-extension boundary and observes canonical `workspace.tabs.inspect` with no
+  legacy alias fields.
+- New service/old extension: Lightbox `mechanism_wire_new_service_old_extension` omits the feature
+  and observes the exact covered `tabs_context_mcp` request through the bounded serializer.
+- Old service/new extension: Lightbox `mechanism_wire_old_service_new_extension` executes the
+  exported extension dual reader under Node and proves an old `tool_request` passes through by
+  identity. This is honest source-adapter evidence, not a claim that an archival binary ran.
+- Unknown-feature and reconnect evidence: core tests prove absent, unknown, case-changed, and
+  near-match features select legacy; a replacement connection inherits no feature; prepared
+  requests cannot cross either grammar transition; semantic tab URL retains its reply class; and
+  large requests retain the exact session's chunk capability. A semantic-wire hold/attention test
+  proves final admission still emits no frame.
+- Gate output: core 821/821, architecture 16/16, cross-language mechanism mapping 10/10, Lightbox
+  package 5/5, extension 177/177, changed JavaScript syntax, all three named skew scenarios,
+  formatting, strict Clippy, workspace build/tests, diff, and ASCII checks pass.
+- Deviations/blockers: no blocker. If an archival old service binary becomes available, the
+  old-service/new-extension Node proof can be strengthened to a full process scenario.
 
 ### R5 -- native surface and readiness
 
-- Status: NOT STARTED.
+- Status: IN PROGRESS.
 - Native declaration and pack evidence: --
 - Workspace/addressing evidence: --
 - Navigation/readiness state-machine evidence: --

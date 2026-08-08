@@ -19,6 +19,7 @@ const FROZEN_GUIDE: &str = include_str!("golden/surfaces/ghostlight-legacy-v1-ag
 const HISTORICAL_AUDIT_ALIAS_MODULE: &str = "crates/core/src/operation/audit_compat.rs";
 const R3_EXTENSION_ALIAS_MODULE: &str = "crates/core/src/hub/outbound/legacy_mechanism.rs";
 const R3_EXTENSION_ALIAS_CONSUMER: &str = "crates/core/src/hub/outbound/browser.rs";
+const R4_EXTENSION_MECHANISM_MODULE: &str = "crates/core/src/hub/outbound/mechanism_wire.rs";
 
 fn repo_path(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
@@ -153,6 +154,20 @@ fn remaining_compatibility_seams_are_precisely_bounded() {
     }
     assert!(serializer.contains("use MechanismId::*"));
 
+    let mechanism_wire = read_repo_file(R4_EXTENSION_MECHANISM_MODULE);
+    assert!(mechanism_wire.contains("MECHANISM_REQUEST_V1"));
+    assert!(mechanism_wire.contains("\"mechanism_request\""));
+    for legacy_alias in [
+        "\"tool_request\"",
+        "\"tab_url_request\"",
+        "\"tabs_context_mcp\"",
+    ] {
+        assert!(
+            !mechanism_wire.contains(legacy_alias),
+            "semantic extension wire regained legacy alias {legacy_alias}"
+        );
+    }
+
     let mut files = Vec::new();
     collect_rust_files(&repo_path("crates/core/src"), &mut files);
     for file in files {
@@ -180,8 +195,10 @@ fn remaining_compatibility_seams_are_precisely_bounded() {
         if source.contains("serialize_tool_request") || source.contains("serialize_tab_url_request")
         {
             assert!(
-                relative == R3_EXTENSION_ALIAS_MODULE || relative == R3_EXTENSION_ALIAS_CONSUMER,
-                "extension alias serialization escaped its R3 seam: {relative}"
+                relative == R3_EXTENSION_ALIAS_MODULE
+                    || relative == R3_EXTENSION_ALIAS_CONSUMER
+                    || relative == R4_EXTENSION_MECHANISM_MODULE,
+                "extension request serialization escaped its bounded modules: {relative}"
             );
         }
     }

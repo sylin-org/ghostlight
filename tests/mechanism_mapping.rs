@@ -9,6 +9,8 @@ use ghostlight_core::operation::registry::{descriptors, Handler};
 use ghostlight_transport::operation::{IntentId, OperationId, OperationKey};
 use serde_json::json;
 use std::collections::HashSet;
+use std::fs;
+use std::path::Path;
 
 #[test]
 fn all_57_operations_have_one_explicit_physical_planning_class() {
@@ -369,6 +371,37 @@ fn physical_ids_are_unique_and_never_reuse_surface_or_operation_names() {
         ]
         .contains(&id.as_str()));
     }
+}
+
+#[test]
+fn rust_and_extension_mechanism_vocabularies_are_exactly_equal() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("extension")
+        .join("lib")
+        .join("mechanism-wire.js");
+    let source = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let list = source
+        .split_once("const MECHANISM_IDS = Object.freeze([")
+        .expect("extension mechanism list start")
+        .1
+        .split_once("]);")
+        .expect("extension mechanism list end")
+        .0;
+    let extension = list
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix('"')
+                .and_then(|line| line.strip_suffix("\","))
+        })
+        .collect::<Vec<_>>();
+    let rust = MechanismId::ALL
+        .iter()
+        .map(|id| id.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(extension, rust);
 }
 
 #[test]
