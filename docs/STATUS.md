@@ -55,9 +55,9 @@ when they disagree**, and update it when you land something that changes the pic
   kernel, one-to-one Ghostlight-native profile, stateful surface sessions, readiness/result
   contracts, classifier, capability packs, migration order, and evaluation gates. ADR-0101
   separates edge-owned versioned surfaces, canonical service operations, and policy-free browser
-  mechanisms. The `docs/tasks/browser-kernel/` batch is in R0, freezing the current catalog and
-  wire oracles before production migration. The current product surface and extension wire are
-  still unchanged.
+  mechanisms. The `docs/tasks/browser-kernel/` batch completed R0 with frozen catalog and wire
+  oracles plus green Rust and extension baselines; R1 is introducing the canonical bridge
+  contract. The current product surface and extension wire are still unchanged.
 
 ## Pre-release record (superseded by the 2026-08-07 state above)
 

@@ -7,10 +7,10 @@ blocking a stage.
 ## RESUME HERE
 
 - State: ACTIVE; ADR-0101 authorizes the staged implementation.
-- Current stage: R0 -- authority and inventory.
-- Next action: freeze the current catalog, result, bridge, extension-wire, readiness, and
-  external-capture oracles listed in `BOOTSTRAP.md`.
-- Blocking condition: none. R1 starts only after the R0 oracle and baseline gates are recorded.
+- Current stage: R1 -- canonical operation bridge.
+- Next action: introduce the closed operation/result DTOs and migrate bridge major 2 while the
+  frozen legacy surface remains the external oracle.
+- Blocking condition: none.
 - Shipping default: current 25-tool surface. `ghostlight-native/v1`, Claude, and Codex profiles are
   candidates only.
 - Last green gate: not yet run for this batch.
@@ -19,8 +19,8 @@ blocking a stage.
 
 | Stage | Status | Closing commit(s) | Release checkpoint | Notes |
 | --- | --- | --- | --- | --- |
-| R0 authority and inventory | IN PROGRESS | -- | Current product unchanged | ADR-0101 accepted; immutable-oracle gate in progress |
-| R1 canonical operation bridge | NOT STARTED | -- | Current 25 tools through temporary decoder | Bridge-major cutover must fail loudly |
+| R0 authority and inventory | COMPLETE | 5439e24c + pending oracle commit | Current product unchanged | ADR-0101, immutable catalog/guide oracle, green baselines |
+| R1 canonical operation bridge | IN PROGRESS | -- | Current 25 tools through temporary decoder | Bridge-major cutover must fail loudly |
 | R2 legacy surface profile | NOT STARTED | -- | `ghostlight-legacy/v1` remains default | Exact declarations and rendering move to edge |
 | R3 typed mechanism isolation | NOT STARTED | -- | Old extension wire only | Core no longer dispatches surface names |
 | R4 extension mechanism skew | NOT STARTED | -- | Negotiated new wire plus legacy fallback | Prove old/new matrix |
@@ -41,7 +41,7 @@ or dated live record. A prose assertion is not evidence.
 
 | Area | Owning stage(s) | Required completion evidence | Status | Evidence |
 | --- | --- | --- | --- | --- |
-| Inventory and authority | R0 | Accepted ADR ids; hashes and provenance for all captures; exact current catalog/result/RAWX/scheduling/workspace map; bridge and extension-wire baselines | NOT STARTED | -- |
+| Inventory and authority | R0 | Accepted ADR ids; hashes and provenance for all captures; exact current catalog/result/RAWX/scheduling/workspace map; bridge and extension-wire baselines | COMPLETE | ADR-0101; Research 21 capture table; `tests/golden/surfaces/ghostlight-legacy-v1*`; current directory plus bridge/extension regression suites; 2026-08-08 baseline gates |
 | Canonical operation kernel | R1 | Typed operation/result/handle/default round trips; exhaustive concrete variant descriptors; no vendor or model-facing name as an execution key | NOT STARTED | -- |
 | Operation bridge | R1 | Coordinated major cutover; old/new mismatch fails loudly; Start/catalog/result/cancel transcripts; recursive flow carries canonical operations only | NOT STARTED | -- |
 | Legacy profile | R2 | Byte-exact 25-tool order, identity, schemas, annotations, examples, results, and errors on both MCP revisions; legacy remains releasable | NOT STARTED | -- |
@@ -60,26 +60,34 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 
 | Date | Stage | Commit/tree | Common gates | Focused gates | Live/e2e evidence | Result and notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| -- | -- | -- | -- | -- | -- | No batch gates recorded yet |
+| 2026-08-08 | R0 | 5439e24c + legacy-oracle working tree | `cargo test --workspace`: pass | `cargo test --locked --test surface_profile_golden`: 2 pass; `node --test tests/extension/*.test.js`: 164 pass; extension `node --check`: pass | Not required for docs/oracle stage | Current 25-tool product and extension wire unchanged |
 
 ## Stage records
 
 ### R0 -- authority and inventory
 
-- Status: IN PROGRESS.
+- Status: COMPLETE.
 - Accepted ADR authority: ADR-0101.
 - Capture hashes and evidence classes: `docs/research/21-client-tool-surface-discovery-2026-08.md`
   and its tracked `docs/research/tool-surfaces/` artifacts.
-- Current 25-tool inventory fixture: --
-- Bridge-major-1 transcript fixture: --
-- Extension legacy-wire fixture: --
-- Readiness and recovery baseline: --
-- Baseline gate output: --
+- Current 25-tool inventory fixture:
+  `tests/golden/surfaces/ghostlight-legacy-v1.json` SHA-256
+  `4e68638b0a85ef5dc5dacbf0420091fd5eebb4968d2b764ab4b1c9a78a8e5293`; exact guide SHA-256
+  `cb35c48350599625016ddede5737580dce164a756961aa3406ba02623ffc4223`.
+- Bridge-major-1 transcript fixture: exact serde/wire assertions in
+  `crates/transport/src/bridge.rs` at commit 5439e24c and MCP transcript coverage in
+  `tests/mcp_protocol.rs`.
+- Extension legacy-wire fixture: `tests/extension/execution-response.test.js`,
+  `surface-executor.test.js`, and `wire-chunks.test.js` at commit 5439e24c.
+- Readiness and recovery baseline: `extension/lib/settle.js`,
+  `tests/extension/settle.test.js`, and current navigation tests at commit 5439e24c.
+- Baseline gate output: `cargo test --workspace` passed; extension 164/164 passed; all extension
+  JavaScript parsed; focused surface golden passed 2/2.
 - Deviations/blockers: none.
 
 ### R1 -- canonical operation bridge
 
-- Status: NOT STARTED.
+- Status: IN PROGRESS.
 - Operation/result DTO evidence: --
 - Descriptor and variant coverage: --
 - Bridge-major and mismatch evidence: --
