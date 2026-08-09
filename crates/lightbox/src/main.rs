@@ -5,7 +5,8 @@
 //! dirs and a real localhost endpoint -- never a fixed admin location, never the deployed service.
 
 mod fake_browser;
-mod legacy;
+mod ghostlight_surface;
+mod kernel;
 mod mechanism_wire;
 mod scenarios;
 mod support;

@@ -30,11 +30,32 @@ Collaboration and process -- this file is their canonical home:
   trust, version, or correctness need. Preserve product capability and safety, not incidental
   compatibility. A break-and-rebuild is welcome when it produces a smaller, clearer, better
   system (ADR-0096).
-- **Keep tool identity stable and guidance current.** Tool names, parameters, types, enums, and
-  ordering are compatibility contracts. Descriptions, examples, annotations, and additive response
-  guidance should improve when they can make purpose, side effects, recovery, or tool choice
-  clearer. External grades are diagnostics, never permission to reshape a trained signature
-  (ADR-0094/0100).
+- **Ghostlight 1.0 is a clean-slate orchestrator-owned product.** Tag `v0.8.0` is the working
+  prototype baseline; the current 0.9 tree is an experiment to archive. Version 1.0 is implemented
+  from its accepted bill of intent, not by transplanting prototype code, compatibility paths, or
+  tests. The service owns one model-facing language and all use-case state machines. MCP and browser
+  connectors remain generic shores (ADR-0103).
+- **The 1.0 service is a domain-driven modular monolith.** Bounded product contexts live in one
+  deployable service. One application executor owns each client unit of work; workspace,
+  governance, browser effects, and completion are explicit chokepoints. Contexts communicate
+  meaningful completed state changes through a small typed in-process event vocabulary. Direct
+  calls remain the default inside one invariant boundary; no generic event bus, workflow engine,
+  CQRS split, event store, or microservice topology is introduced without a demonstrated need
+  (ADR-0103).
+- **Tests and ceremonies must earn their cost.** Protect each distinct contract, safety invariant,
+  failure branch, or real user journey once at the narrowest meaningful seam. Do not use test count,
+  exhaustive matrices, repeated cross-layer proof, ledgers, checkpoints, or approval rounds as
+  progress proxies. Routine changes get focused tests, formatting, and linting; broad and live gates
+  belong at integration and release milestones (ADR-0103).
+- **Ghostlight truth reaches every client through the Ghostlight contract.** MCP revisions may differ
+  in lifecycle and protocol envelope, but they expose the same operation, governance, execution,
+  readiness, uncertainty, and recovery facts. Client identity never selects semantics or
+  authority ([governance language](governance-language.md)).
+- **Make browser tools omission-tolerant and recovery-aware.** Require only intent or authority
+  facts that cannot be inferred safely. Materialize stable defaults, keep model-facing schemas
+  flat and typo-closed, and return bounded service-authored next-step options when they are useful.
+  Permissive omission never means guessing among tabs, targets, effects, credentials, or user
+  intent.
 - **The browser product stays in the local user's context.** Ghostlight is for visible work in the
   user's existing authenticated Chromium profile. Headless, isolated-profile, cloud, and remote
   browser execution are product exclusions, not missing parity work.
@@ -120,6 +141,15 @@ file does not restate them -- follow AGENTS.md.
   a workspace. A passively adopted browser child becomes service-authoritative only when a later
   creator inventory confirms it. The extension's managed-tab gate remains defense-in-depth for
   those owned tabs and still keeps guessed user tabs out (ADR-0066/0096/0099).
+- **A client use case owns its state and terminal result.** The 0.9 experiment proved that a
+  primitive's creation or mechanism receipt cannot substitute for completing the requested job.
+  In 1.0 the orchestrator retains provisional resources, authority, cancellation, compensation,
+  and uncertainty until one typed terminal result exists. Handle binding and serialization never
+  infer semantic success from raw JSON, prose, or mutable workspace state (ADR-0103).
+- **Version the browser primitive port as one explicit contract.** Do not add a feature bit for each
+  orchestrated use case. Product features composed from existing primitives change only the
+  service. A genuinely new Chrome capability changes the primitive catalog and adapter contract;
+  incompatible 0.8 and 1.0 peers fail loudly without grammar fallback (ADR-0103).
 - **Distribution is automated and credential-gated** in `scripts/release.ps1`; the MCP registry
   publish is DNS-authed on the sylin.org apex; canonical URLs are `sylin.org` (the github.io site
   is retired, redirect-stubbed). Off-tree/secret change history is in `local/AUDIT-LOG.md`.
@@ -171,6 +201,10 @@ file does not restate them -- follow AGENTS.md.
 | How to work here: conventions, boundaries, architecture | [AGENTS.md](../AGENTS.md) (start here) |
 | Current state: version, in-flight work, owed items | [docs/STATUS.md](STATUS.md) |
 | Decisions (one per file), authoritative and immutable | [docs/adr/](adr/README.md) |
+| Working canonical browser language summary | [docs/ubiquitous-language-summary.md](ubiquitous-language-summary.md) |
+| Exact working browser names, schemas, defaults, and result language | [docs/ubiquitous-language.md](ubiquitous-language.md) |
+| Working canonical governance quick reference | [docs/governance-language-summary.md](governance-language-summary.md) |
+| Working canonical governance, settings, decision, audit, and recovery language | [docs/governance-language.md](governance-language.md) |
 | Deep design rationale (superseded by ADRs where they differ) | [docs/SPEC.md](SPEC.md) |
 | Build / run / deploy on a dev machine | [docs/DEV-LOOP.md](DEV-LOOP.md) |
 | Directory submission facts, ready copy, and external gates | [docs/business/DIRECTORY-SUBMISSIONS.md](business/DIRECTORY-SUBMISSIONS.md) |

@@ -1,14 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Pure conversion from the current internal success shape to canonical browser results.
+//! Operation-owned reduction from private browser evidence to closed Ghostlight results.
 //!
-//! The browser adapter and legacy local handlers currently return an MCP-like object containing
-//! `content`, optional `structuredContent`, and optional `isError`. This module consumes that
-//! temporary internal shape at the operation boundary. Protocol wrappers, vendor envelopes, and
-//! unknown fields are rejected rather than retained in canonical data.
+//! The policy-free adapter returns a private mechanism envelope containing `content`, optional
+//! `structuredContent`, and optional `isError`. This module consumes it exactly once inside the
+//! admitted operation. Protocol wrappers and unknown fields are rejected rather than retained in
+//! the service result.
 
 use super::registry::SuccessDisposition;
+use crate::tool::outcome::{
+    ExecutionDisposition, NativeTabFact, OperationCompletion, OperationExecution,
+    OperationTopology, ResolvedTargets,
+};
 use ghostlight_transport::operation::{
-    BrowserResult, OperationKey, PageProvenance, ResultPart, MAX_PAGE_ORIGIN_BYTES,
+    BrowserConnectionStatus, BrowserResult, BrowserResultStatus, CanonicalCursor, CaptureScope,
+    DialogKind, DialogResolution, FilledFieldResult, FlowResultData, GovernanceModeStatus,
+    Operation, OperationEffect, OperationKind, OperationResult, PageProvenance, PolicySourceStatus,
+    ResultPart, SkippedFieldResult, StatusAuthority, StatusLimits, TargetAction, TargetFact,
+    MAX_PAGE_ORIGIN_BYTES,
 };
 use ghostlight_transport::workspace_id::WorkspaceId;
 use serde_json::{Map, Value};
@@ -19,7 +27,7 @@ pub enum ResultConversionError {
     /// The current success boundary requires an object result.
     #[error("successful browser result must be an object")]
     RootNotObject,
-    /// A top-level field is not part of the temporary internal success contract.
+    /// A top-level field is not part of the private mechanism success contract.
     #[error("successful browser result contains unsupported top-level field: {field}")]
     UnsupportedTopLevelField {
         /// Unsupported field name. Its value is never retained or rendered.
@@ -31,6 +39,20 @@ pub enum ResultConversionError {
     /// The optional error marker was not a boolean.
     #[error("successful browser result isError must be a boolean")]
     ErrorMarkerNotBoolean,
+    /// The temporary grouped execution identity has no canonical surface operation.
+    #[error("successful execution result has no canonical operation identity")]
+    UnmappedOperation,
+    /// Successful browser evidence omitted a fact required by the operation result.
+    #[error("successful {operation} result omitted required fact: {fact}")]
+    MissingResultFact {
+        /// Exact canonical operation.
+        operation: OperationKind,
+        /// Stable name of the missing fact.
+        fact: &'static str,
+    },
+    /// A sequence exceeded the fixed aggregate image count or byte budget.
+    #[error("canonical sequence media exceeds the aggregate result budget")]
+    SequenceMediaLimit,
     /// One content item was not an object.
     #[error("successful browser result content block {index} must be an object")]
     ContentBlockNotObject {
@@ -78,6 +100,14 @@ pub enum ResultConversionError {
     },
 }
 
+/// Adapter evidence parsed at the operation boundary before typed result construction.
+pub struct CanonicalizedMechanism {
+    /// Canonical terminal envelope without its operation-owned result.
+    pub result: BrowserResult,
+    /// Private structured mechanism evidence consumed by exactly one operation reducer.
+    pub evidence: Value,
+}
+
 /// Convert one current internal successful result into the canonical result vocabulary.
 ///
 /// Accepted top-level fields are `content`, `structuredContent`, and `isError`. Text blocks and
@@ -88,11 +118,11 @@ pub enum ResultConversionError {
 /// content shapes return [`ResultConversionError`] instead of crossing the bridge through a
 /// fallback payload.
 pub fn canonicalize_success(
-    key: OperationKey,
+    operation: OperationKind,
     disposition: SuccessDisposition,
     workspace: Option<WorkspaceId>,
     value: Value,
-) -> Result<BrowserResult, ResultConversionError> {
+) -> Result<CanonicalizedMechanism, ResultConversionError> {
     let mut object = value
         .as_object()
         .cloned()
@@ -112,24 +142,684 @@ pub fn canonicalize_success(
     }
     let parts = parse_content(object.remove("content"))?;
     let mut data = object.remove("structuredContent").unwrap_or(Value::Null);
-    let provenance = lift_legacy_provenance(&mut data, &parts)?;
+    let provenance = take_mechanism_provenance(&mut data, &parts)?;
 
-    let mut result = BrowserResult::new(key.id, key.intent, disposition.status, disposition.effect);
-    result.retry = disposition.retry;
+    let mut result = BrowserResult::new(operation, disposition.status, disposition.effect);
+    if let Some(repeat) = disposition.retry {
+        result.repeat = repeat;
+    }
     result.workspace = workspace;
     result.parts = parts;
-    result.data = data;
     result.provenance = provenance;
-    Ok(result)
+    Ok(CanonicalizedMechanism {
+        result,
+        evidence: data,
+    })
+}
+
+/// Convert one internal success and project its adapter-shaped data into the canonical result
+/// payload owned by the admitted operation.
+pub fn canonicalize_operation_success(
+    operation: &Operation,
+    disposition: SuccessDisposition,
+    workspace: Option<WorkspaceId>,
+    value: Value,
+) -> Result<CanonicalizedMechanism, ResultConversionError> {
+    let mut canonical = canonicalize_success(operation.kind(), disposition, workspace, value)?;
+    canonical.result.operation = operation.kind();
+    Ok(canonical)
+}
+
+/// Consume private adapter evidence into one operation-owned typed completion.
+///
+/// This is the action pipeline's result reducer. After it returns, adapter JSON is gone. The
+/// completion chokepoint receives only the typed result and typed browser-topology facts needed
+/// to bind opaque workspace handles.
+pub fn build_operation_completion(
+    operation: &Operation,
+    workspace: Option<WorkspaceId>,
+    execution: OperationExecution,
+) -> Result<OperationCompletion, ResultConversionError> {
+    let disposition = match execution.disposition {
+        ExecutionDisposition::DescriptorDefault => {
+            crate::operation::registry::descriptor(operation.kind()).success_disposition(&execution)
+        }
+        ExecutionDisposition::Override(disposition) => disposition,
+    };
+    let operation_tab = execution.operation_tab;
+    let readiness = execution.navigation.readiness.clone();
+    let final_navigation_url = execution.navigation.final_url.clone();
+    let (target, from_target, to_target) = match &execution.targets {
+        ResolvedTargets::None => (None, None, None),
+        ResolvedTargets::One(target) => (Some(target.clone()), None, None),
+        ResolvedTargets::Drag { from, to } => (None, Some(from.clone()), Some(to.clone())),
+    };
+    let canonical =
+        canonicalize_operation_success(operation, disposition, workspace, execution.into_value())?;
+    let evidence = canonical.evidence;
+    let mut result = canonical.result;
+    result.readiness = readiness;
+    result
+        .parts
+        .extend(sequence_media_parts(operation, &evidence)?);
+    if matches!(
+        result.status,
+        BrowserResultStatus::Ok | BrowserResultStatus::Partial | BrowserResultStatus::NotMet
+    ) {
+        result.result = Some(reduce_operation_result(
+            operation,
+            &result,
+            &evidence,
+            target.as_ref(),
+            from_target.as_ref(),
+            to_target.as_ref(),
+        )?);
+    }
+    Ok(OperationCompletion {
+        result,
+        topology: operation_topology(&evidence, operation_tab, final_navigation_url),
+    })
+}
+
+/// Reduce private mechanism evidence into the closed result owned by this operation.
+fn reduce_operation_result(
+    operation: &Operation,
+    result: &BrowserResult,
+    evidence: &Value,
+    target: Option<&Value>,
+    from_target: Option<&Value>,
+    to_target: Option<&Value>,
+) -> Result<OperationResult, ResultConversionError> {
+    reduce_operation_payload(operation, result, evidence, target, from_target, to_target)
+}
+
+const MAX_SEQUENCE_MEDIA_BYTES: usize = 16 * 1024 * 1024;
+
+fn operation_topology(
+    evidence: &Value,
+    affected_tab: Option<i64>,
+    final_navigation_url: Option<String>,
+) -> OperationTopology {
+    let candidates = [
+        "",
+        "/page",
+        "/interactionReceipt/page",
+        "/interactionReceipt/observedAfter",
+    ]
+    .into_iter()
+    .filter_map(|pointer| {
+        let value = if pointer.is_empty() {
+            evidence
+        } else {
+            evidence.pointer(pointer)?
+        };
+        native_tab_fact(value)
+    })
+    .collect();
+    let inventory = ["/tabs", "/tabDelta/opened"]
+        .into_iter()
+        .filter_map(|pointer| evidence.pointer(pointer).and_then(Value::as_array))
+        .flatten()
+        .filter_map(native_tab_fact)
+        .take(ghostlight_transport::operation::MAX_RESULT_TABS)
+        .collect();
+    let mut closed_tabs = evidence
+        .pointer("/tabDelta/closed")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_i64)
+        .collect::<Vec<_>>();
+    if evidence
+        .pointer("/interactionReceipt/observedAfter/tabClosed")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        if let Some(tab) = affected_tab {
+            if !closed_tabs.contains(&tab) {
+                closed_tabs.push(tab);
+            }
+        }
+    }
+    OperationTopology {
+        affected_tab,
+        candidates,
+        inventory,
+        closed_tabs,
+        final_navigation_url,
+    }
+}
+
+fn native_tab_fact(value: &Value) -> Option<NativeTabFact> {
+    let object = value.as_object()?;
+    Some(NativeTabFact {
+        tab_id: object.get("tabId")?.as_i64()?,
+        url: bounded_fact(
+            object.get("url"),
+            ghostlight_transport::operation::MAX_RESULT_TAB_URL_BYTES,
+        ),
+        title: bounded_fact(
+            object.get("title"),
+            ghostlight_transport::operation::MAX_RESULT_TAB_TITLE_BYTES,
+        ),
+        redacted: object
+            .get("redacted")
+            .and_then(Value::as_str)
+            .and_then(ghostlight_transport::operation::TabFactRedaction::parse),
+    })
+}
+
+fn bounded_fact(value: Option<&Value>, max_bytes: usize) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|value| {
+            !value.is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control)
+        })
+        .map(str::to_owned)
+}
+
+fn sequence_media_parts(
+    operation: &Operation,
+    evidence: &Value,
+) -> Result<Vec<ResultPart>, ResultConversionError> {
+    if !matches!(operation, Operation::BrowserRunSequence(_)) {
+        return Ok(Vec::new());
+    }
+    let flow = serde_json::from_value::<FlowResultData>(evidence.clone())
+        .map_err(|_| missing(operation, "steps"))?;
+    let media = flow
+        .steps
+        .into_iter()
+        .flat_map(|step| step.result.parts)
+        .filter(|part| matches!(part, ResultPart::Image { .. }))
+        .collect::<Vec<_>>();
+    let bytes = media
+        .iter()
+        .map(|part| match part {
+            ResultPart::Image { data, mime_type } => data.len() + mime_type.len(),
+            ResultPart::Text { .. } => 0,
+        })
+        .sum::<usize>();
+    if media.len() > ghostlight_transport::operation::MAX_OPERATION_SEQUENCE_MEDIA_PARTS
+        || bytes > MAX_SEQUENCE_MEDIA_BYTES
+    {
+        return Err(ResultConversionError::SequenceMediaLimit);
+    }
+    Ok(media)
+}
+
+fn reduce_operation_payload(
+    operation: &Operation,
+    result: &BrowserResult,
+    evidence: &Value,
+    target: Option<&Value>,
+    from_target: Option<&Value>,
+    to_target: Option<&Value>,
+) -> Result<OperationResult, ResultConversionError> {
+    let observed = |field: &str| {
+        evidence
+            .pointer(&format!("/interactionReceipt/observedAfter/{field}"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    let committed = result.effect == OperationEffect::Committed
+        && matches!(
+            result.status,
+            BrowserResultStatus::Ok | BrowserResultStatus::Partial | BrowserResultStatus::NotMet
+        );
+
+    if !matches!(
+        result.status,
+        BrowserResultStatus::Ok | BrowserResultStatus::Partial | BrowserResultStatus::NotMet
+    ) {
+        return Err(missing(operation, "successful terminal result"));
+    }
+    if matches!(operation, Operation::BrowserRunSequence(_)) {
+        return serde_json::from_value::<FlowResultData>(evidence.clone())
+            .map(OperationResult::BrowserRunSequence)
+            .map_err(|_| missing(operation, "steps"));
+    }
+
+    let operation_result = match operation {
+        Operation::BrowserGetStatus(_) => {
+            let operations = crate::operation::registry::descriptors()
+                .iter()
+                .map(|descriptor| descriptor.operation)
+                .collect::<Vec<_>>();
+            OperationResult::BrowserGetStatus {
+                browser: if evidence
+                    .get("browserConnected")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    BrowserConnectionStatus::Connected
+                } else {
+                    BrowserConnectionStatus::Disconnected
+                },
+                authority: StatusAuthority {
+                    policy_source: evidence
+                        .pointer("/authority/policySource")
+                        .and_then(Value::as_str)
+                        .and_then(PolicySourceStatus::parse)
+                        .unwrap_or(PolicySourceStatus::None),
+                    mode: evidence
+                        .pointer("/authority/mode")
+                        .and_then(Value::as_str)
+                        .and_then(GovernanceModeStatus::parse)
+                        .unwrap_or(GovernanceModeStatus::Open),
+                },
+                operations,
+                packs: Vec::new(),
+                limits: StatusLimits {
+                    max_sequence_steps: 10,
+                    max_tabs: 64,
+                    max_read_chars: 50_000,
+                },
+            }
+        }
+        Operation::BrowserOpenTab(arguments) => {
+            let created = evidence
+                .get("created")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| missing(operation, "created"))?;
+            OperationResult::BrowserOpenTab {
+                created,
+                navigated: arguments
+                    .url
+                    .as_ref()
+                    .and_then(|_| evidence.get("navigated").and_then(Value::as_bool)),
+            }
+        }
+        Operation::BrowserListTabs(_) => OperationResult::BrowserListTabs {
+            count: u32::try_from(
+                evidence
+                    .get("tabs")
+                    .and_then(Value::as_array)
+                    .map_or(result.tabs.len(), Vec::len),
+            )
+            .unwrap_or(u32::MAX),
+        },
+        Operation::BrowserFocusTab(_) => OperationResult::BrowserFocusTab {
+            focused: observed("tabFocused"),
+        },
+        Operation::BrowserCloseTab(_) => OperationResult::BrowserCloseTab {
+            closed: observed("tabClosed"),
+        },
+        Operation::BrowserNavigate(_) => OperationResult::BrowserNavigate {
+            landed: committed && result.readiness.is_some(),
+        },
+        Operation::BrowserGoBack(_) => OperationResult::BrowserGoBack {
+            moved: committed && result.status != BrowserResultStatus::NotMet,
+        },
+        Operation::BrowserGoForward(_) => OperationResult::BrowserGoForward {
+            moved: committed && result.status != BrowserResultStatus::NotMet,
+        },
+        Operation::BrowserReloadPage(_) => OperationResult::BrowserReloadPage {
+            reloaded: observed("tabReloaded") || committed,
+        },
+        Operation::BrowserInspectPage(_) => {
+            let values = evidence
+                .get("targets")
+                .or_else(|| evidence.get("results"))
+                .and_then(Value::as_array)
+                .ok_or_else(|| missing(operation, "targets"))?;
+            let targets = values
+                .iter()
+                .take(100)
+                .filter_map(target_fact)
+                .collect::<Vec<_>>();
+            OperationResult::BrowserInspectPage {
+                targets,
+                more: evidence
+                    .get("more")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(values.len() > 100),
+                cursor: evidence
+                    .get("cursor")
+                    .and_then(Value::as_str)
+                    .and_then(CanonicalCursor::parse),
+            }
+        }
+        Operation::BrowserReadPage(arguments) => {
+            let text = first_text_part(result).ok_or_else(|| missing(operation, "text"))?;
+            let bounded = text
+                .chars()
+                .take(arguments.max_chars as usize)
+                .collect::<String>();
+            OperationResult::BrowserReadPage {
+                text: bounded,
+                more: text.chars().count() > arguments.max_chars as usize,
+                cursor: evidence
+                    .get("cursor")
+                    .and_then(Value::as_str)
+                    .and_then(CanonicalCursor::parse),
+            }
+        }
+        Operation::BrowserTakeScreenshot(_) => {
+            let capture = evidence
+                .get("capture")
+                .and_then(Value::as_object)
+                .ok_or_else(|| missing(operation, "capture"))?;
+            let width = capture
+                .get("width")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| missing(operation, "capture.width"))?;
+            let height = capture
+                .get("height")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| missing(operation, "capture.height"))?;
+            let scope = capture
+                .get("scope")
+                .and_then(Value::as_str)
+                .ok_or_else(|| missing(operation, "capture.scope"))?;
+            let scope =
+                CaptureScope::parse(scope).ok_or_else(|| missing(operation, "capture.scope"))?;
+            OperationResult::BrowserTakeScreenshot {
+                frame: format!("f_{}", uuid::Uuid::new_v4().simple()),
+                width: u32::try_from(width).map_err(|_| missing(operation, "capture.width"))?,
+                height: u32::try_from(height).map_err(|_| missing(operation, "capture.height"))?,
+                scope,
+                target: match scope {
+                    CaptureScope::Viewport => None,
+                    CaptureScope::Target => Some(canonical_target(operation, target, "target")?),
+                },
+            }
+        }
+        Operation::BrowserClick(_) => OperationResult::BrowserClick {
+            target: canonical_target(operation, target, "target")?,
+            clicked: committed,
+            page_changed: page_changed(evidence),
+        },
+        Operation::BrowserHover(_) => OperationResult::BrowserHover {
+            target: canonical_target(operation, target, "target")?,
+            hovered: committed,
+            page_changed: page_changed(evidence),
+        },
+        Operation::BrowserScrollToTarget(_) => OperationResult::BrowserScrollToTarget {
+            target: canonical_target(operation, target, "target")?,
+            visible: committed,
+            moved: committed,
+            page_changed: page_changed(evidence),
+        },
+        Operation::BrowserScrollPage(arguments) => OperationResult::BrowserScrollPage {
+            direction: arguments.direction,
+            amount: arguments.amount,
+            moved: evidence
+                .pointer("/scroll/moved")
+                .and_then(Value::as_bool)
+                .unwrap_or(committed),
+            page_changed: page_changed(evidence),
+        },
+        Operation::BrowserPressKey(arguments) => OperationResult::BrowserPressKey {
+            key: arguments.key,
+            target: canonical_target(operation, target, "target")?,
+            pressed: committed,
+            page_changed: page_changed(evidence),
+        },
+        Operation::BrowserPressEscape(_) => OperationResult::BrowserPressEscape {
+            pressed: committed,
+            page_changed: page_changed(evidence),
+        },
+        Operation::BrowserDrag(_) => OperationResult::BrowserDrag {
+            from: canonical_target(operation, from_target, "from")?,
+            to: canonical_target(operation, to_target, "to")?,
+            dragged: committed,
+            page_changed: page_changed(evidence),
+        },
+        Operation::BrowserFillForm(arguments) => {
+            let filled = evidence
+                .get("filled")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|field| {
+                    let name = field
+                        .get("label")
+                        .or_else(|| field.get("field"))
+                        .and_then(Value::as_str)?;
+                    Some(FilledFieldResult {
+                        field: name.to_owned(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            let skipped = evidence
+                .get("skipped")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|field| {
+                    let name = field
+                        .get("label")
+                        .or_else(|| field.get("field"))
+                        .and_then(Value::as_str)?;
+                    let code = field
+                        .get("kind")
+                        .or_else(|| field.get("reason"))
+                        .and_then(Value::as_str)
+                        .map(problem_token)
+                        .unwrap_or_else(|| "not_filled".to_owned());
+                    Some(SkippedFieldResult {
+                        field: name.to_owned(),
+                        code,
+                    })
+                })
+                .collect::<Vec<_>>();
+            OperationResult::BrowserFillForm {
+                filled,
+                skipped,
+                submitted: evidence
+                    .get("submitted")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                submit_target: arguments.submit_target.as_ref().and_then(|_| {
+                    evidence
+                        .get("submit_ref")
+                        .and_then(Value::as_str)
+                        .map(ref_only_target)
+                }),
+            }
+        }
+        Operation::BrowserWaitFor(arguments) => OperationResult::BrowserWaitFor {
+            condition: arguments.condition.clone(),
+            state: arguments.state,
+            met: result.status != BrowserResultStatus::NotMet
+                && evidence
+                    .get("found")
+                    .or_else(|| evidence.get("met"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
+            elapsed_ms: u32::try_from(
+                evidence
+                    .get("elapsed_ms")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(arguments.timeout_ms as u64)
+                    .min(30_000),
+            )
+            .expect("elapsed time is clamped to u32"),
+        },
+        Operation::BrowserRunSequence(_) => unreachable!("sequence results return above"),
+        Operation::BrowserGetDialog(_) => {
+            let open = evidence
+                .get("open")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| missing(operation, "open"))?;
+            OperationResult::BrowserGetDialog {
+                open,
+                kind: open.then(|| dialog_kind(evidence.get("type").and_then(Value::as_str))),
+                message: open.then(|| {
+                    evidence
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .chars()
+                        .take(2000)
+                        .collect()
+                }),
+                actions: if open {
+                    vec![
+                        DialogResolution::Accept,
+                        DialogResolution::Dismiss,
+                        DialogResolution::Respond,
+                    ]
+                } else {
+                    Vec::new()
+                },
+            }
+        }
+        Operation::BrowserHandleDialog(arguments) => OperationResult::BrowserHandleDialog {
+            action: arguments.action,
+            resolved: evidence
+                .get("resolved")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
+    };
+    Ok(operation_result)
+}
+
+fn missing(operation: &Operation, fact: &'static str) -> ResultConversionError {
+    ResultConversionError::MissingResultFact {
+        operation: operation.kind(),
+        fact,
+    }
+}
+
+fn first_text_part(result: &BrowserResult) -> Option<&str> {
+    result.parts.iter().find_map(|part| match part {
+        ResultPart::Text { text } => Some(text.as_str()),
+        ResultPart::Image { .. } => None,
+    })
+}
+
+fn canonical_target(
+    operation: &Operation,
+    value: Option<&Value>,
+    field: &'static str,
+) -> Result<TargetFact, ResultConversionError> {
+    value
+        .and_then(target_fact)
+        .ok_or_else(|| missing(operation, field))
+}
+
+fn target_fact(value: &Value) -> Option<TargetFact> {
+    let object = value.as_object()?;
+    let reference = object.get("ref")?.as_str()?;
+    let mut projected = Vec::new();
+    if let Some(actions) = object
+        .get("mechanicalActions")
+        .or_else(|| object.get("actions"))
+        .and_then(Value::as_array)
+    {
+        for action in actions.iter().filter_map(Value::as_str) {
+            let action = match action {
+                "left_click" | "right_click" | "double_click" | "triple_click" | "click" => {
+                    TargetAction::Click
+                }
+                "hover" => TargetAction::Hover,
+                "scroll_to" => TargetAction::ScrollTo,
+                "set_value" | "fill" => TargetAction::Fill,
+                "drag" => TargetAction::Drag,
+                "press_key" => TargetAction::PressKey,
+                _ => continue,
+            };
+            if !projected.contains(&action) {
+                projected.push(action);
+            }
+        }
+    }
+    Some(TargetFact {
+        r#ref: canonical_ref(reference),
+        role: object
+            .get("role")
+            .and_then(Value::as_str)
+            .map(|value| value.chars().take(64).collect()),
+        name: object
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|value| value.chars().take(500).collect()),
+        visible: object.get("visible").and_then(Value::as_bool),
+        enabled: object.get("enabled").and_then(Value::as_bool),
+        actions: projected,
+    })
+}
+
+fn canonical_ref(reference: &str) -> String {
+    reference
+        .strip_prefix("ref_")
+        .map_or_else(|| reference.to_owned(), |suffix| format!("r_{suffix}"))
+}
+
+fn ref_only_target(reference: &str) -> TargetFact {
+    TargetFact {
+        r#ref: canonical_ref(reference),
+        role: None,
+        name: None,
+        visible: None,
+        enabled: None,
+        actions: Vec::new(),
+    }
+}
+
+fn page_changed(evidence: &Value) -> bool {
+    let observed = evidence
+        .pointer("/interactionReceipt/observedAfter")
+        .and_then(Value::as_object);
+    observed.is_some_and(|observed| {
+        observed
+            .get("mutations")
+            .and_then(Value::as_u64)
+            .is_some_and(|value| value > 0)
+            || [
+                "renderAdvanced",
+                "urlChanged",
+                "titleChanged",
+                "alertOrStatus",
+            ]
+            .iter()
+            .any(|field| observed.contains_key(*field))
+            || observed
+                .get("changedElements")
+                .and_then(Value::as_array)
+                .is_some_and(|value| !value.is_empty())
+    })
+}
+
+fn problem_token(value: &str) -> String {
+    let mut token = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    while token.contains("__") {
+        token = token.replace("__", "_");
+    }
+    token.trim_matches('_').chars().take(64).collect::<String>()
+}
+
+fn dialog_kind(value: Option<&str>) -> DialogKind {
+    match value {
+        Some("alert") => DialogKind::Alert,
+        Some("confirm") => DialogKind::Confirm,
+        Some("prompt") => DialogKind::Prompt,
+        Some("beforeunload") => DialogKind::BeforeUnload,
+        _ => DialogKind::Unknown,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LegacyProvenancePlacement {
+enum MechanismProvenancePlacement {
     Root,
     InteractionReceipt,
 }
 
-impl LegacyProvenancePlacement {
+impl MechanismProvenancePlacement {
     const fn location(self) -> &'static str {
         match self {
             Self::Root => "structuredContent.provenance",
@@ -139,13 +829,12 @@ impl LegacyProvenancePlacement {
 
     const fn data_pointer(self) -> &'static str {
         match self {
-            Self::Root => "/data",
-            Self::InteractionReceipt => "/data/interactionReceipt",
+            Self::Root | Self::InteractionReceipt => "/result",
         }
     }
 }
 
-fn lift_legacy_provenance(
+fn take_mechanism_provenance(
     data: &mut Value,
     parts: &[ResultPart],
 ) -> Result<Option<PageProvenance>, ResultConversionError> {
@@ -162,22 +851,22 @@ fn lift_legacy_provenance(
     }
     if root_marker && root.contains_key("interactionReceipt") {
         return Err(ResultConversionError::MalformedProvenanceMarker {
-            location: LegacyProvenancePlacement::Root.location(),
+            location: MechanismProvenancePlacement::Root.location(),
             reason: "root marker cannot accompany interactionReceipt",
         });
     }
     let placement = match (root_marker, receipt_marker) {
         (false, false) => return Ok(None),
         (true, true) => unreachable!("conflicting markers were rejected above"),
-        (true, false) => LegacyProvenancePlacement::Root,
-        (false, true) => LegacyProvenancePlacement::InteractionReceipt,
+        (true, false) => MechanismProvenancePlacement::Root,
+        (false, true) => MechanismProvenancePlacement::InteractionReceipt,
     };
 
     let marker = match placement {
-        LegacyProvenancePlacement::Root => data
+        MechanismProvenancePlacement::Root => data
             .as_object_mut()
             .and_then(|root| root.remove("provenance")),
-        LegacyProvenancePlacement::InteractionReceipt => data
+        MechanismProvenancePlacement::InteractionReceipt => data
             .get_mut("interactionReceipt")
             .and_then(Value::as_object_mut)
             .and_then(|receipt| receipt.remove("provenance")),
@@ -392,448 +1081,4 @@ fn parse_source_image(block: &Map<String, Value>) -> Option<(&str, &str)> {
         return None;
     }
     Some((data, mime_type))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ghostlight_transport::operation::{
-        BrowserResultStatus, IntentId, OperationEffect, OperationId, RetryDisposition,
-    };
-    use serde_json::json;
-
-    const KEY: OperationKey = OperationKey::new(OperationId::BrowserAct, IntentId::ActClick);
-    const OK_COMMITTED: SuccessDisposition =
-        SuccessDisposition::new(BrowserResultStatus::Ok, OperationEffect::Committed, None);
-    const OK_NONE: SuccessDisposition =
-        SuccessDisposition::new(BrowserResultStatus::Ok, OperationEffect::None, None);
-
-    #[test]
-    fn text_and_direct_image_convert_without_protocol_wrappers() {
-        let workspace = WorkspaceId::mint();
-        let result = canonicalize_success(
-            KEY,
-            OK_COMMITTED,
-            Some(workspace.clone()),
-            json!({
-                "content": [
-                    {"type": "text", "text": "clicked"},
-                    {"type": "image", "data": "aW1hZ2U=", "mimeType": "image/jpeg"}
-                ],
-                "structuredContent": {"receipt": {"action": "click"}}
-            }),
-        )
-        .expect("supported result converts");
-
-        assert_eq!(result.operation, OperationId::BrowserAct);
-        assert_eq!(result.intent, IntentId::ActClick);
-        assert_eq!(result.status, BrowserResultStatus::Ok);
-        assert_eq!(result.effect, OperationEffect::Committed);
-        assert_eq!(result.workspace.as_ref(), Some(&workspace));
-        assert_eq!(
-            result.parts,
-            vec![
-                ResultPart::Text {
-                    text: "clicked".into()
-                },
-                ResultPart::Image {
-                    data: "aW1hZ2U=".into(),
-                    mime_type: "image/jpeg".into()
-                }
-            ]
-        );
-        assert_eq!(result.data, json!({"receipt": {"action": "click"}}));
-
-        let wire = serde_json::to_value(result).expect("canonical result serializes");
-        assert!(wire.get("content").is_none());
-        assert!(wire.get("structuredContent").is_none());
-        assert!(wire.get("isError").is_none());
-        assert!(wire.get("legacy_payload").is_none());
-    }
-
-    #[test]
-    fn source_base64_images_accept_one_explicit_media_type_location() {
-        for block in [
-            json!({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "data": "R0lGODlh",
-                    "media_type": "image/gif"
-                }
-            }),
-            json!({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "data": "R0lGODlh",
-                    "mimeType": "image/gif"
-                }
-            }),
-            json!({
-                "type": "image",
-                "mimeType": "image/gif",
-                "source": {"type": "base64", "data": "R0lGODlh"}
-            }),
-        ] {
-            let result = canonicalize_success(KEY, OK_COMMITTED, None, json!({"content": [block]}))
-                .expect("supported source image converts");
-            assert_eq!(
-                result.parts,
-                vec![ResultPart::Image {
-                    data: "R0lGODlh".into(),
-                    mime_type: "image/gif".into()
-                }]
-            );
-        }
-    }
-
-    #[test]
-    fn direct_and_source_images_reject_invalid_base64_or_media_types() {
-        for block in [
-            json!({"type": "image", "data": "AAAA=", "mimeType": "image/png"}),
-            json!({"type": "image", "data": "AAAA", "mimeType": "image/*"}),
-            json!({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "data": "AA=",
-                    "media_type": "image/png"
-                }
-            }),
-            json!({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "data": "AAAA",
-                    "media_type": "text/plain"
-                }
-            }),
-        ] {
-            assert_eq!(
-                canonicalize_success(KEY, OK_NONE, None, json!({"content": [block]})),
-                Err(ResultConversionError::InvalidImageBlock { index: 0 })
-            );
-        }
-    }
-
-    #[test]
-    fn explicit_disposition_controls_error_marked_success() {
-        let result = canonicalize_success(
-            KEY,
-            SuccessDisposition::new(
-                BrowserResultStatus::Blocked,
-                OperationEffect::None,
-                Some(RetryDisposition::AfterStateChange),
-            ),
-            None,
-            json!({
-                "isError": true,
-                "content": [{"type": "text", "text": "some fields changed before failure"}]
-            }),
-        )
-        .expect("partial result converts");
-
-        assert_eq!(result.status, BrowserResultStatus::Blocked);
-        assert_eq!(result.effect, OperationEffect::None);
-        assert_eq!(result.retry, Some(RetryDisposition::AfterStateChange));
-        assert_eq!(
-            result.parts,
-            vec![ResultPart::Text {
-                text: "some fields changed before failure".into()
-            }]
-        );
-        assert!(serde_json::to_value(result)
-            .expect("canonical result serializes")
-            .get("isError")
-            .is_none());
-    }
-
-    #[test]
-    fn absent_content_and_structured_data_are_valid_empty_success() {
-        let result = canonicalize_success(
-            KEY,
-            OK_NONE,
-            None,
-            json!({"structuredContent": {"available": true}}),
-        )
-        .expect("structured-only success converts");
-        assert!(result.parts.is_empty());
-        assert_eq!(result.data, json!({"available": true}));
-
-        let empty =
-            canonicalize_success(KEY, OK_NONE, None, json!({})).expect("empty success converts");
-        assert!(empty.parts.is_empty());
-        assert!(empty.data.is_null());
-    }
-
-    #[test]
-    fn protocol_wrappers_and_unknown_payloads_fail_instead_of_crossing() {
-        for (value, field) in [
-            (json!({"content": [], "jsonrpc": "2.0"}), "jsonrpc"),
-            (
-                json!({"content": [], "resultType": "complete"}),
-                "resultType",
-            ),
-            (
-                json!({"content": [], "legacy_payload": {}}),
-                "legacy_payload",
-            ),
-            (json!({"content": [], "vendor": {"raw": true}}), "vendor"),
-        ] {
-            assert_eq!(
-                canonicalize_success(KEY, OK_NONE, None, value),
-                Err(ResultConversionError::UnsupportedTopLevelField {
-                    field: field.into()
-                })
-            );
-        }
-    }
-
-    #[test]
-    fn malformed_or_unsupported_blocks_fail_honestly() {
-        let cases = [
-            json!({"content": "not-an-array"}),
-            json!({"content": ["not-an-object"]}),
-            json!({"content": [{"text": "missing type"}]}),
-            json!({"content": [{"type": "audio", "data": "AAAA"}]}),
-            json!({"content": [{"type": "text", "text": 7}]}),
-            json!({"content": [{"type": "text", "text": "ok", "extra": true}]}),
-            json!({"content": [{"type": "image", "data": "AAAA"}]}),
-            json!({
-                "content": [{
-                    "type": "image",
-                    "source": {"type": "url", "data": "AAAA", "media_type": "image/png"}
-                }]
-            }),
-            json!({
-                "content": [{
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "data": "AAAA",
-                        "media_type": "image/png",
-                        "extra": true
-                    }
-                }]
-            }),
-            json!({
-                "content": [{
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "data": "AAAA",
-                        "media_type": "image/png"
-                    },
-                    "extra": true
-                }]
-            }),
-        ];
-
-        for value in cases {
-            assert!(canonicalize_success(KEY, OK_NONE, None, value).is_err());
-        }
-    }
-
-    #[test]
-    fn malformed_error_marker_is_rejected() {
-        assert_eq!(
-            canonicalize_success(
-                KEY,
-                OK_NONE,
-                None,
-                json!({"isError": "true", "content": []})
-            ),
-            Err(ResultConversionError::ErrorMarkerNotBoolean)
-        );
-    }
-
-    #[test]
-    fn root_legacy_provenance_is_lifted_without_changing_boundary_text() {
-        let boundary = "--- GHOSTLIGHT PAGE CONTENT 00112233445566778899aabb origin=https://example.com UNTRUSTED ---\nPrivate page text\n--- END GHOSTLIGHT PAGE CONTENT 00112233445566778899aabb ---";
-        let result = canonicalize_success(
-            KEY,
-            OK_NONE,
-            None,
-            json!({
-                "content": [{"type": "text", "text": boundary}],
-                "structuredContent": {
-                    "url": "https://example.com/private",
-                    "provenance": {
-                        "pageSourced": true,
-                        "untrusted": true,
-                        "topOrigin": "https://example.com",
-                        "sessionNonce": "00112233445566778899aabb"
-                    }
-                }
-            }),
-        )
-        .expect("root provenance lifts");
-
-        assert_eq!(
-            result.parts,
-            vec![ResultPart::Text {
-                text: boundary.into()
-            }]
-        );
-        assert_eq!(result.data, json!({"url": "https://example.com/private"}));
-        let provenance = result.provenance.expect("canonical provenance");
-        assert_eq!(
-            provenance.untrusted_fields(),
-            &["/data".to_owned(), "/parts/0/text".to_owned()]
-        );
-        assert_eq!(provenance.top_origin(), Some("https://example.com"));
-        assert_eq!(provenance.session_nonce(), Some("00112233445566778899aabb"));
-        assert_eq!(provenance.frame_origin(), None);
-    }
-
-    #[test]
-    fn receipt_legacy_provenance_is_lifted_with_frame_origin() {
-        let result = canonicalize_success(
-            KEY,
-            OK_COMMITTED,
-            None,
-            json!({
-                "content": [{"type": "text", "text": "receipt boundary remains byte exact"}],
-                "structuredContent": {
-                    "interactionReceipt": {
-                        "action": "left_click",
-                        "target": {"frameOrigin": "https://frame.example"},
-                        "provenance": {
-                            "pageSourced": true,
-                            "untrusted": true,
-                            "topOrigin": "https://example.com",
-                            "frameOrigin": "https://frame.example",
-                            "sessionNonce": "00112233445566778899aabbccddeeff"
-                        }
-                    },
-                    "serviceFact": "retained"
-                }
-            }),
-        )
-        .expect("receipt provenance lifts");
-
-        assert_eq!(
-            result.data,
-            json!({
-                "interactionReceipt": {
-                    "action": "left_click",
-                    "target": {"frameOrigin": "https://frame.example"}
-                },
-                "serviceFact": "retained"
-            })
-        );
-        let provenance = result.provenance.expect("canonical provenance");
-        assert_eq!(
-            provenance.untrusted_fields(),
-            &[
-                "/data/interactionReceipt".to_owned(),
-                "/parts/0/text".to_owned()
-            ]
-        );
-        assert_eq!(provenance.frame_origin(), Some("https://frame.example"));
-    }
-
-    #[test]
-    fn malformed_or_conflicting_legacy_provenance_fails_closed() {
-        let marker = json!({
-            "pageSourced": true,
-            "untrusted": true,
-            "topOrigin": "https://example.com",
-            "sessionNonce": "00112233445566778899aabb"
-        });
-        let conflicting = json!({
-            "structuredContent": {
-                "provenance": marker.clone(),
-                "interactionReceipt": {"provenance": marker.clone()}
-            }
-        });
-        assert_eq!(
-            canonicalize_success(KEY, OK_NONE, None, conflicting),
-            Err(ResultConversionError::ConflictingProvenanceMarkers)
-        );
-        assert!(matches!(
-            canonicalize_success(
-                KEY,
-                OK_NONE,
-                None,
-                json!({
-                    "structuredContent": {
-                        "provenance": marker.clone(),
-                        "interactionReceipt": {"action": "left_click"}
-                    }
-                })
-            ),
-            Err(ResultConversionError::MalformedProvenanceMarker { .. })
-        ));
-
-        for invalid in [
-            json!("not-an-object"),
-            json!({
-                "pageSourced": false,
-                "untrusted": true,
-                "topOrigin": "https://example.com",
-                "sessionNonce": "00112233445566778899aabb"
-            }),
-            json!({
-                "pageSourced": true,
-                "untrusted": true,
-                "topOrigin": "https://example.com",
-                "sessionNonce": "00112233"
-            }),
-            json!({
-                "pageSourced": true,
-                "untrusted": true,
-                "topOrigin": "https://example.com",
-                "frameOrigin": "x".repeat(MAX_PAGE_ORIGIN_BYTES + 1),
-                "sessionNonce": "00112233445566778899aabb"
-            }),
-            json!({
-                "pageSourced": true,
-                "untrusted": true,
-                "topOrigin": "https://example.com",
-                "sessionNonce": "00112233445566778899aabb",
-                "unexpected": true
-            }),
-        ] {
-            assert!(matches!(
-                canonicalize_success(
-                    KEY,
-                    OK_NONE,
-                    None,
-                    json!({"structuredContent": {"provenance": invalid}})
-                ),
-                Err(ResultConversionError::MalformedProvenanceMarker { .. })
-            ));
-        }
-    }
-
-    #[test]
-    fn data_without_a_reserved_marker_is_unchanged() {
-        let boundary_like_text = "--- GHOSTLIGHT PAGE CONTENT page-controlled text ---";
-        let result = canonicalize_success(
-            KEY,
-            OK_NONE,
-            None,
-            json!({
-                "content": [{"type": "text", "text": boundary_like_text}],
-                "structuredContent": {
-                    "receipt": {"provenanceLabel": "page-controlled"}
-                }
-            }),
-        )
-        .expect("marker-free result remains valid");
-
-        assert_eq!(
-            result.parts,
-            vec![ResultPart::Text {
-                text: boundary_like_text.into()
-            }]
-        );
-        assert_eq!(
-            result.data,
-            json!({"receipt": {"provenanceLabel": "page-controlled"}})
-        );
-        assert!(result.provenance.is_none());
-    }
 }

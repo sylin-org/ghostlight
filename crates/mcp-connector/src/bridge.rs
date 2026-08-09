@@ -10,7 +10,7 @@ use ghostlight_transport::bridge::{
     self as wire, BridgeError, BridgeSequence, CatalogProjection, EdgeMessage, ServiceMessage,
     TerminalOutcome, WorkId, WorkspaceId, BRIDGE_MAJOR,
 };
-use ghostlight_transport::operation::{BrowserResult, InvocationPresentation, OperationKey};
+use ghostlight_transport::operation::{BrowserResult, OperationKind};
 use ghostlight_transport::{ipc, supervisor};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -79,26 +79,6 @@ pub enum PendingKind {
     ReleaseWorkspace2025,
 }
 
-/// Edge-only labels needed to reconstruct one legacy flow result.
-///
-/// The canonical operation and result carry only semantic operation identities. These original
-/// nested surface labels remain in the request correlation table and never cross the service
-/// bridge or participate in routing, authority, scheduling, or audit.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct FlowRenderHints {
-    /// Original labels bound to their decoded canonical identities in declared order.
-    pub(crate) steps: Vec<FlowStepRenderHint>,
-}
-
-/// One edge-only legacy label bound to the operation decoded from the same nested call.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct FlowStepRenderHint {
-    /// Original nested external tool label.
-    pub(crate) label: String,
-    /// Canonical identity that the matching result entry must carry.
-    pub(crate) expected_operation: OperationKey,
-}
-
 /// Correlation retained while one bridge operation is unresolved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingRequest {
@@ -110,17 +90,10 @@ pub struct PendingRequest {
     pub service_workspace: Option<WorkspaceId>,
     /// Workspace placed on the immutable matching Start request.
     pub requested_workspace: Option<WorkspaceId>,
-    /// Edge-local surface invocation used to render the matching profile result.
-    ///
-    /// This is presentation state only. It is never used for routing, authority, scheduling, or
-    /// service operation lookup.
-    pub presentation: Option<InvocationPresentation>,
     /// Canonical identity sent in the matching start request.
     ///
     /// A terminal success must carry this same identity before any profile renderer runs.
-    pub expected_operation: Option<OperationKey>,
-    /// Edge-only nested labels for a legacy flow renderer.
-    pub(crate) flow_render_hints: Option<FlowRenderHints>,
+    pub expected_operation: Option<OperationKind>,
     /// Whether the client cancelled and no response may be written.
     pub suppressed: bool,
     /// Whether the complete request frame was flushed to the service.
@@ -135,9 +108,7 @@ impl PendingRequest {
             kind,
             service_workspace: None,
             requested_workspace: None,
-            presentation: None,
             expected_operation: None,
-            flow_render_hints: None,
             suppressed: false,
             delivered: false,
         }
@@ -147,9 +118,7 @@ impl PendingRequest {
     pub fn tool_request(
         request_id: RequestId,
         kind: PendingKind,
-        presentation: InvocationPresentation,
-        expected_operation: OperationKey,
-        flow_render_hints: Option<FlowRenderHints>,
+        expected_operation: OperationKind,
         requested_workspace: Option<WorkspaceId>,
     ) -> Self {
         Self {
@@ -157,9 +126,7 @@ impl PendingRequest {
             kind,
             service_workspace: None,
             requested_workspace,
-            presentation: Some(presentation),
             expected_operation: Some(expected_operation),
-            flow_render_hints,
             suppressed: false,
             delivered: false,
         }
@@ -172,9 +139,7 @@ impl PendingRequest {
             kind: PendingKind::ReleaseWorkspace2025,
             service_workspace: None,
             requested_workspace: None,
-            presentation: None,
             expected_operation: None,
-            flow_render_hints: None,
             suppressed: false,
             delivered: false,
         }
@@ -187,9 +152,7 @@ impl PendingRequest {
             kind,
             service_workspace: None,
             requested_workspace: None,
-            presentation: None,
             expected_operation: None,
-            flow_render_hints: None,
             suppressed: false,
             delivered: false,
         }
@@ -197,7 +160,7 @@ impl PendingRequest {
 
     /// Return whether a successful service result matches the operation sent for this request.
     pub fn result_matches_expected_operation(&self, result: &BrowserResult) -> bool {
-        self.expected_operation == Some(OperationKey::new(result.operation, result.intent))
+        self.expected_operation == Some(result.operation)
     }
 }
 
@@ -759,8 +722,8 @@ mod tests {
     use super::*;
     use ghostlight_transport::bridge::RequestContext;
     use ghostlight_transport::operation::{
-        BrowserOperation, BrowserResult, BrowserResultStatus, IntentId, OperationEffect,
-        OperationId,
+        BrowserResult, BrowserResultStatus, NavigateArguments, Operation, OperationEffect,
+        OperationKind,
     };
 
     fn request_id(value: i64) -> RequestId {
@@ -775,18 +738,16 @@ mod tests {
         }
     }
 
-    fn navigate_operation(arguments: Value) -> BrowserOperation {
-        BrowserOperation::new(
-            OperationId::BrowserNavigate,
-            IntentId::NavigateUrl,
-            arguments,
-        )
+    fn navigate_operation(arguments: Value) -> Operation {
+        Operation::BrowserNavigate(NavigateArguments {
+            url: arguments["url"].as_str().expect("test URL").to_string(),
+            tab: None,
+        })
     }
 
     fn empty_result() -> BrowserResult {
         BrowserResult::new(
-            OperationId::BrowserContext,
-            IntentId::ContextDescribe,
+            OperationKind::BrowserGetStatus,
             BrowserResultStatus::Ok,
             OperationEffect::None,
         )
@@ -890,7 +851,6 @@ mod tests {
                 message: EdgeMessage::Start {
                     sequence: BridgeSequence(1),
                     operation: navigate_operation(serde_json::json!({ "url": "x".repeat(4096) })),
-                    presentation: None,
                     workspace: None,
                     context: RequestContext::default(),
                 },
@@ -942,7 +902,7 @@ mod tests {
         assert!(matches!(
             correlation.observe(ServiceMessage::Completed {
                 work_id: WorkId(9),
-                outcome: TerminalOutcome::Success {
+                outcome: TerminalOutcome {
                     result: Box::new(empty_result())
                 },
             }),
@@ -972,7 +932,7 @@ mod tests {
         let Observation::Resolved(Resolution::Completed { pending, .. }) =
             correlation.observe(ServiceMessage::Completed {
                 work_id: WorkId(12),
-                outcome: TerminalOutcome::Success {
+                outcome: TerminalOutcome {
                     result: Box::new(empty_result()),
                 },
             })

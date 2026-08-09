@@ -301,7 +301,7 @@ mod tests {
     fn signal(origin: &str, category: DenialCategory) -> DenialSignal {
         DenialSignal {
             origin: Some(origin.to_string()),
-            capabilities: vec![Capability::Action],
+            capabilities: vec![Capability::Interact],
             category,
         }
     }

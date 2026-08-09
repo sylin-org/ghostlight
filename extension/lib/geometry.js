@@ -35,7 +35,26 @@ function rescaleCtxCoord(c, x, y) {
   return [Math.round((c.offX || 0) + (x * rw) / c.shotW), Math.round((c.offY || 0) + (y * rh) / c.shotH)];
 }
 
-const GhostlightGeometry = { targetDims, zoomScale, rescaleCtxCoord };
+// Clamp one canonical [x0, y0, x1, y1] region to the live CSS viewport. A null result means the
+// requested rectangle has no capturable pixels after clamping and must not produce an image.
+function clampRegionToViewport(region, vpW, vpH) {
+  if (!Array.isArray(region) || region.length !== 4 ||
+      !region.every((value) => Number.isFinite(value)) ||
+      !Number.isFinite(vpW) || !Number.isFinite(vpH) || vpW <= 0 || vpH <= 0 ||
+      !(region[2] > region[0]) || !(region[3] > region[1])) return null;
+  const x0 = Math.min(Math.max(region[0], 0), vpW);
+  const y0 = Math.min(Math.max(region[1], 0), vpH);
+  const x1 = Math.min(Math.max(region[2], 0), vpW);
+  const y1 = Math.min(Math.max(region[3], 0), vpH);
+  const w = x1 - x0, h = y1 - y0;
+  if (w < 1 || h < 1) return null;
+  return {
+    x0, y0, x1, y1, w, h,
+    clamped: x0 !== region[0] || y0 !== region[1] || x1 !== region[2] || y1 !== region[3],
+  };
+}
+
+const GhostlightGeometry = { targetDims, zoomScale, rescaleCtxCoord, clampRegionToViewport };
 if (typeof module !== "undefined" && module.exports) {
   module.exports = GhostlightGeometry;
 } else {

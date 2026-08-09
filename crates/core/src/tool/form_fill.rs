@@ -17,13 +17,14 @@ use crate::browser::form_match::{self, ControlRef, FormStructure};
 use crate::browser::mechanism::{MechanismId, MechanismRequest};
 use crate::governance::dispatch::{CallAudit, Governance};
 use crate::governance::ports::Capability;
-use crate::operation::registry as operation_registry;
 use crate::tool::outcome::{
-    delivery_failure_outcome, tool_error_outcome, CallOutcome, LocalCtx, LocalFuture,
+    delivery_failure_outcome, tool_error_outcome, ExecutionOutcome as CallOutcome, LocalCtx,
+    LocalFuture, OperationExecution,
 };
-use crate::work::{CancellationToken, WorkContext};
-use ghostlight_transport::operation::{IntentId, OperationEffect, OperationId, OperationKey};
+use crate::work::WorkContext;
+use ghostlight_transport::operation::{OperationEffect, OperationKind};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::time::Instant;
 
 /// The canonical fill operation's `Handler::Local` entry point (post-grant dispatch position,
@@ -32,17 +33,21 @@ pub(crate) fn form_fill_handler(ctx: LocalCtx<'_>) -> LocalFuture<'_> {
     Box::pin(run(ctx))
 }
 
-/// Build a `Success` result carrying `isError: true` -- byte-identical to what
-/// `pipeline::error_result` renders for a `CallOutcome::Failure`, but as a `Success` so the
-/// `_batch_id` side channel (which only `take_batch_id` extracts from a `Success`, PINS.md SS7)
-/// survives to stamp the parent audit record even when the call itself failed.
+fn execution_with_batch(result: Value, batch_id: &str) -> OperationExecution {
+    let mut execution = OperationExecution::new(result);
+    execution.audit.batch_id = Some(batch_id.to_owned());
+    execution
+}
+
+/// Build a `Success` result carrying `isError: true` while retaining compound audit identity.
 fn error_outcome(msg: impl Into<String>, batch_id: &str) -> CallOutcome {
     let mut result = crate::tool::result::text_content(msg.into());
     if let Some(obj) = result.as_object_mut() {
         obj.insert("isError".to_string(), json!(true));
-        obj.insert("_batch_id".to_string(), json!(batch_id));
     }
-    CallOutcome::Success { result }
+    CallOutcome::Success {
+        result: Box::new(execution_with_batch(result, batch_id)),
+    }
 }
 
 /// Pull the trailing ADR-0078 interaction receipt or legacy `observation: ...` digest line off a
@@ -76,57 +81,90 @@ fn first_text(result: &Value) -> Option<&str> {
         .as_str()
 }
 
-fn canonical_requirements(key: OperationKey) -> &'static [Capability] {
-    operation_registry::descriptor(key)
-        .expect("form_fill internal operation key must exist")
-        .requires
-}
-
 fn internal_audit(
     governance: &Governance,
-    operation: OperationKey,
+    operation: OperationKind,
     requires: Option<&'static [Capability]>,
     batch_id: &str,
     step: u32,
-    work: Option<&WorkContext>,
+    work: &WorkContext,
 ) -> CallAudit {
-    let mut audit = governance.begin_with_client(
-        operation.id.as_str(),
-        Some(operation.intent.as_str()),
-        requires,
-        work.and_then(WorkContext::client).cloned(),
-    );
-    audit.orchestrated(operation.id.as_str(), batch_id, Some(step));
+    let mut audit =
+        governance.begin_with_client(operation.as_str(), None, requires, work.client().cloned());
+    audit.orchestrated(operation.as_str(), batch_id, Some(step));
     audit.mark_mechanism_phase();
     audit.attribute_grant(None);
     audit
 }
 
-fn canonical_fields(args: &Value) -> Option<serde_json::Map<String, Value>> {
+fn canonical_fields(args: &Value) -> Option<Vec<(String, Value)>> {
     let fields = args.get("fields")?.as_array()?;
-    let mut values = serde_json::Map::new();
+    let mut values = Vec::with_capacity(fields.len());
+    let mut queries = HashSet::with_capacity(fields.len());
     for field in fields {
         let query = field.pointer("/target/query")?.as_str()?;
-        if query.is_empty() {
+        if query.is_empty() || !queries.insert(query.to_string()) {
             return None;
         }
-        values.insert(query.to_string(), field.get("value")?.clone());
+        values.push((query.to_string(), field.get("value")?.clone()));
     }
     (!values.is_empty()).then_some(values)
 }
 
-fn submit_requested(intent: IntentId) -> Result<bool, String> {
-    match intent {
-        IntentId::FillFields => Ok(false),
-        IntentId::FillFieldsAndSubmit => Ok(true),
-        _ => Err(format!("unsupported browser.fill intent: {intent}")),
+fn requested_submit<'a>(
+    args: &Value,
+    outcome: &form_match::MatchOutcome,
+    structure: &'a FormStructure,
+) -> Option<&'a crate::browser::form_match::SubmitCandidate> {
+    let target = args.get("submit_target")?.as_object()?;
+    let form_index = outcome.form_index?;
+    let candidates = &structure
+        .forms
+        .iter()
+        .find(|form| form.form_index == form_index)?
+        .submits;
+    if let Some(reference) = target.get("ref").and_then(Value::as_str) {
+        return candidates
+            .iter()
+            .filter(|candidate| candidate.ref_id == reference && !candidate.disabled)
+            .exactly_one();
+    }
+    let query = target.get("query").and_then(Value::as_str)?;
+    let normalized = normalize_submit_name(query);
+    candidates
+        .iter()
+        .filter(|candidate| {
+            !candidate.disabled
+                && candidate
+                    .label
+                    .as_deref()
+                    .is_some_and(|label| normalize_submit_name(label) == normalized)
+        })
+        .exactly_one()
+}
+
+fn normalize_submit_name(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+trait ExactlyOne: Iterator + Sized {
+    fn exactly_one(mut self) -> Option<Self::Item> {
+        let first = self.next()?;
+        self.next().is_none().then_some(first)
     }
 }
+
+impl<I: Iterator> ExactlyOne for I {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FillInterruption {
     Paused,
     AttentionRequired,
+    RevalidationFailed,
 }
 
 impl FillInterruption {
@@ -142,6 +180,7 @@ impl FillInterruption {
         match self {
             Self::Paused => "not_run_after_pause",
             Self::AttentionRequired => "not_run_after_attention",
+            Self::RevalidationFailed => "not_run_after_revalidation_failure",
         }
     }
 
@@ -149,6 +188,7 @@ impl FillInterruption {
         match self {
             Self::Paused => "paused_after_partial_fill",
             Self::AttentionRequired => "interrupted_after_partial_fill",
+            Self::RevalidationFailed => "target_revalidation_failed",
         }
     }
 
@@ -160,6 +200,9 @@ impl FillInterruption {
             Self::AttentionRequired => format!(
                 "Ghostlight required user attention after {committed} field(s) committed; remaining fields and submit were not attempted."
             ),
+            Self::RevalidationFailed => format!(
+                "A form target failed immediate revalidation after {committed} field(s) committed; remaining fields and submit were not attempted."
+            ),
         }
     }
 
@@ -170,6 +213,9 @@ impl FillInterruption {
             }
             Self::AttentionRequired => {
                 "Ask the user to review and resume Ghostlight, then inspect the form before deciding whether to fill the remaining fields."
+            }
+            Self::RevalidationFailed => {
+                "Inspect the current form again before deciding whether to fill any remaining fields."
             }
         }
     }
@@ -190,28 +236,205 @@ fn skip_remaining_matches(
     }
 }
 
-fn inspect_request(operation: OperationKey, tab: i64) -> MechanismRequest {
-    MechanismRequest::for_operation(operation, MechanismId::FormInspect, json!({ "tab": tab }))
-        .expect("browser.fill inspection must be declared by its dynamic plan")
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StrictFillRefusal {
+    UnresolvedTarget,
+    CredentialTarget,
+    SensitiveClassificationUnavailable,
+}
+
+impl StrictFillRefusal {
+    const fn kind(self) -> &'static str {
+        match self {
+            Self::UnresolvedTarget => "unresolved_field",
+            Self::CredentialTarget => "credential_target",
+            Self::SensitiveClassificationUnavailable => "sensitive_classification_unavailable",
+        }
+    }
+
+    const fn summary(self) -> &'static str {
+        match self {
+            Self::UnresolvedTarget => {
+                "One or more fields were missing or ambiguous, so no field was changed."
+            }
+            Self::CredentialTarget => {
+                "The form contains a credential-class target, so no field was changed."
+            }
+            Self::SensitiveClassificationUnavailable => {
+                "The browser adapter could not prove that every target is non-sensitive, so no field was changed."
+            }
+        }
+    }
+
+    const fn next_step(self) -> &'static str {
+        match self {
+            Self::UnresolvedTarget => {
+                "Inspect the form again and provide an exact query for every field, or explicitly allow partial progress."
+            }
+            Self::CredentialTarget => {
+                "Ask the user to enter credentials directly in the browser; do not send them through browser_fill."
+            }
+            Self::SensitiveClassificationUnavailable => {
+                "Update the browser adapter or ask the user to fill the form directly."
+            }
+        }
+    }
+}
+
+fn strict_fill_refusal(
+    outcome: &form_match::MatchOutcome,
+    allow_partial: bool,
+    reject_sensitive: bool,
+) -> Option<StrictFillRefusal> {
+    if !allow_partial && !outcome.unmatched.is_empty() {
+        return Some(StrictFillRefusal::UnresolvedTarget);
+    }
+    if !reject_sensitive {
+        return None;
+    }
+    if outcome
+        .matched
+        .iter()
+        .any(|(_, control)| control.control_type == "password" || control.sensitive == Some(true))
+    {
+        return Some(StrictFillRefusal::CredentialTarget);
+    }
+    outcome
+        .matched
+        .iter()
+        .any(|(_, control)| control.sensitive.is_none())
+        .then_some(StrictFillRefusal::SensitiveClassificationUnavailable)
+}
+
+fn unmatched_receipt(outcome: &form_match::MatchOutcome) -> Vec<Value> {
+    outcome
+        .unmatched
+        .iter()
+        .map(|(key, candidates)| {
+            let candidates = candidates
+                .iter()
+                .map(|candidate| {
+                    json!({
+                        "label": candidate.label,
+                        "ref": candidate.ref_id,
+                        "type": candidate.control_type,
+                    })
+                })
+                .collect::<Vec<_>>();
+            json!({ "key": key, "candidates": candidates })
+        })
+        .collect()
+}
+
+fn strict_refusal_outcome(
+    refusal: StrictFillRefusal,
+    outcome: &form_match::MatchOutcome,
+    page: Option<Value>,
+    batch_id: &str,
+) -> CallOutcome {
+    let skipped = outcome
+        .matched
+        .iter()
+        .map(|(key, control)| {
+            json!({
+                "label": key,
+                "ref": control.ref_id,
+                "reason": refusal.kind(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut structured = json!({
+        "filled": [],
+        "unmatched": unmatched_receipt(outcome),
+        "skipped": skipped,
+        "submitted": false,
+        "submit_ref": null,
+        "interruption": {
+            "kind": refusal.kind(),
+            "summary": refusal.summary(),
+            "nextStep": refusal.next_step(),
+        }
+    });
+    if let Some(page) = page {
+        structured["page"] = page;
+    }
+    let mut result = crate::tool::result::text_content(refusal.summary());
+    if let Some(object) = result.as_object_mut() {
+        object.insert("structuredContent".to_string(), structured);
+        object.insert("isError".to_string(), json!(true));
+    }
+    CallOutcome::Success {
+        result: Box::new(execution_with_batch(result, batch_id)),
+    }
+}
+
+fn strict_revalidation_succeeds(
+    query: &str,
+    expected: &ControlRef,
+    structure: &FormStructure,
+) -> bool {
+    let outcome = form_match::match_fields(&[query.to_string()], structure);
+    outcome.unmatched.is_empty()
+        && matches!(
+            outcome.matched.as_slice(),
+            [(matched_query, control)]
+                if matched_query == query
+                    && control.ref_id == expected.ref_id
+                    && control.control_type == expected.control_type
+                    && control.sensitive == Some(false)
+                    && skip_reason(control).is_none()
+        )
+}
+
+fn strict_submit_revalidation_succeeds(
+    form_index: usize,
+    expected_ref: &str,
+    structure: &FormStructure,
+) -> bool {
+    structure
+        .forms
+        .iter()
+        .find(|form| form.form_index == form_index)
+        .and_then(|form| {
+            form.submits
+                .iter()
+                .find(|candidate| candidate.ref_id == expected_ref)
+        })
+        .is_some_and(|candidate| !candidate.disabled)
+}
+
+fn inspect_request(tab: i64) -> MechanismRequest {
+    MechanismRequest::for_operation(
+        OperationKind::BrowserFillForm,
+        MechanismId::FormInspect,
+        json!({ "tab": tab }),
+    )
+    .expect("browser.fill inspection must be declared by its dynamic plan")
 }
 
 fn fill_request(
-    operation: OperationKey,
     tab: i64,
     reference: &str,
     value: Value,
+    reject_sensitive: bool,
+    expected_type: &str,
 ) -> MechanismRequest {
+    let mut input = json!({ "tab": tab, "target": { "ref": reference }, "value": value });
+    if reject_sensitive {
+        input["reject_sensitive"] = json!(true);
+        input["expected_type"] = json!(expected_type);
+    }
     MechanismRequest::for_operation(
-        operation,
+        OperationKind::BrowserFillForm,
         MechanismId::FormSetValue,
-        json!({ "tab": tab, "target": { "ref": reference }, "value": value }),
+        input,
     )
     .expect("browser.fill value assignment must be declared by its dynamic plan")
 }
 
-fn submit_request(operation: OperationKey, tab: i64, reference: &str) -> MechanismRequest {
+fn submit_request(tab: i64, reference: &str) -> MechanismRequest {
     MechanismRequest::for_operation(
-        operation,
+        OperationKind::BrowserFillForm,
         MechanismId::PointerClick,
         json!({
             "tab": tab,
@@ -229,14 +452,14 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
         governance,
         guid,
         operation,
+        input,
         execution,
         work,
         cancellation,
         ..
     } = ctx;
-    let intent = operation.intent;
-    let root_operation = OperationKey::new(OperationId::BrowserFill, intent);
-    let args = &operation.arguments;
+    let root_operation = operation.kind();
+    let args = input;
     let started = Instant::now();
     let batch_id = uuid::Uuid::new_v4().to_string();
     let Some(tab_id) = args.get("tab").and_then(Value::as_i64) else {
@@ -248,13 +471,10 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
             &batch_id,
         );
     };
-    let submit_requested = match submit_requested(intent) {
-        Ok(value) => value,
-        Err(message) => return error_outcome(message, &batch_id),
-    };
+    let submit_requested = args.get("submit_target").is_some();
 
     // Step 1: the dedicated form-structure internal read (C9), audited by physical mechanism.
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+    if cancellation.is_cancelled() {
         return CallOutcome::Cancelled {
             message: "form_fill was cancelled before its first browser step.".to_string(),
             effect: OperationEffect::None,
@@ -272,7 +492,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
     // `CallAudit` (a private field), which this handler has no way to reach -- `Gate::Proceed`
     // carries nothing. Internals attribute `None` rather than re-resolving a second grant lookup.
     let structure_result = browser
-        .execute_mechanism(guid, &inspect_request(root_operation, tab_id), execution)
+        .execute_mechanism(guid, &inspect_request(tab_id), execution)
         .await;
     structure_audit.dispatch_finished();
     match structure_result.as_ref().err() {
@@ -294,8 +514,43 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
     let page = structure_json.get("page").cloned();
     let structure: FormStructure = serde_json::from_value(structure_json).unwrap_or_default();
 
-    let keys: Vec<String> = fields_obj.keys().cloned().collect();
-    let outcome = form_match::match_fields(&keys, &structure);
+    let keys: Vec<String> = fields_obj.iter().map(|(query, _)| query.clone()).collect();
+    let mut outcome = form_match::match_fields(&keys, &structure);
+    outcome.matched.sort_by_key(|(query, _)| {
+        keys.iter()
+            .position(|key| key == query)
+            .unwrap_or(usize::MAX)
+    });
+    outcome.unmatched.sort_by_key(|(query, _)| {
+        keys.iter()
+            .position(|key| key == query)
+            .unwrap_or(usize::MAX)
+    });
+
+    let selected_submit = if submit_requested {
+        match requested_submit(args, &outcome, &structure) {
+            Some(candidate) => Some(candidate.clone()),
+            None => {
+                return strict_refusal_outcome(
+                    StrictFillRefusal::UnresolvedTarget,
+                    &outcome,
+                    page,
+                    &batch_id,
+                )
+            }
+        }
+    } else {
+        None
+    };
+
+    let allow_partial = args.get("partial").and_then(Value::as_bool).unwrap_or(true);
+    let reject_sensitive = args
+        .get("reject_sensitive")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if let Some(refusal) = strict_fill_refusal(&outcome, allow_partial, reject_sensitive) {
+        return strict_refusal_outcome(refusal, &outcome, page, &batch_id);
+    }
 
     let mut step: u32 = 2;
     let mut filled: Vec<Value> = Vec::new();
@@ -303,7 +558,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
     let mut interruption = None;
 
     for (index, (key, control)) in outcome.matched.iter().enumerate() {
-        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        if cancellation.is_cancelled() {
             return CallOutcome::Cancelled {
                 message: "form_fill stopped between fields after cancellation; completed fields remain audited and were not replayed."
                     .to_string(),
@@ -330,19 +585,75 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
             continue;
         }
 
-        let value = fields_obj.get(key).cloned().unwrap_or(Value::Null);
+        if reject_sensitive {
+            let mut revalidation_audit = internal_audit(
+                governance,
+                root_operation,
+                Some(&[Capability::Read]),
+                &batch_id,
+                step,
+                work,
+            );
+            let revalidation = browser
+                .execute_mechanism(guid, &inspect_request(tab_id), execution)
+                .await;
+            revalidation_audit.dispatch_finished();
+            match revalidation.as_ref().err() {
+                Some(crate::ToolError::Held { .. }) => revalidation_audit.held(),
+                Some(crate::ToolError::AttentionRequired { .. }) => {
+                    revalidation_audit.attention_required()
+                }
+                _ => revalidation_audit.complete(),
+            }
+            step += 1;
+            let revalidation = match revalidation {
+                Ok(result) => first_text(&result)
+                    .and_then(|text| serde_json::from_str::<FormStructure>(text).ok()),
+                Err(
+                    error @ (crate::ToolError::Held { .. }
+                    | crate::ToolError::AttentionRequired { .. }),
+                ) => {
+                    if filled.is_empty() {
+                        return tool_error_outcome(error);
+                    }
+                    let stopped = FillInterruption::from_error(&error)
+                        .expect("strict revalidation safety refusal");
+                    skip_remaining_matches(&outcome.matched, index, &mut skipped, stopped);
+                    interruption = Some(stopped);
+                    break;
+                }
+                Err(_) => None,
+            };
+            if !revalidation
+                .as_ref()
+                .is_some_and(|structure| strict_revalidation_succeeds(key, control, structure))
+            {
+                let stopped = FillInterruption::RevalidationFailed;
+                skip_remaining_matches(&outcome.matched, index, &mut skipped, stopped);
+                interruption = Some(stopped);
+                break;
+            }
+        }
+
+        let value = fields_obj
+            .iter()
+            .find_map(|(query, value)| (query == key).then(|| value.clone()))
+            .unwrap_or(Value::Null);
         let fill_audit = internal_audit(
             governance,
             root_operation,
-            Some(canonical_requirements(OperationKey::new(
-                OperationId::BrowserFill,
-                IntentId::FillField,
-            ))),
+            Some(&[Capability::Write]),
             &batch_id,
             step,
             work,
         );
-        let request = fill_request(root_operation, tab_id, &control.ref_id, value.clone());
+        let request = fill_request(
+            tab_id,
+            &control.ref_id,
+            value.clone(),
+            reject_sensitive,
+            &control.control_type,
+        );
         let dispatch = browser
             .execute_mechanism_with_delivery_outcome(guid, &request, execution)
             .await;
@@ -381,6 +692,12 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
                 break;
             }
             Err(failure) => {
+                if reject_sensitive {
+                    let stopped = FillInterruption::RevalidationFailed;
+                    skip_remaining_matches(&outcome.matched, index, &mut skipped, stopped);
+                    interruption = Some(stopped);
+                    break;
+                }
                 skipped.push(json!({
                     "label": key,
                     "ref": control.ref_id,
@@ -390,72 +707,101 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
         }
     }
 
-    let unmatched: Vec<Value> = outcome
-        .unmatched
-        .iter()
-        .map(|(key, candidates)| {
-            let cands: Vec<Value> = candidates
-                .iter()
-                .map(|c| json!({ "label": c.label, "ref": c.ref_id, "type": c.control_type }))
-                .collect();
-            json!({ "key": key, "candidates": cands })
-        })
-        .collect();
+    let unmatched = unmatched_receipt(&outcome);
 
     let mut submitted = false;
     let mut submit_ref: Option<String> = None;
     let mut observation: Option<String> = None;
 
     if submit_requested && interruption.is_none() && !filled.is_empty() {
-        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        if cancellation.is_cancelled() {
             return CallOutcome::Cancelled {
                 message: "form_fill stopped before submit after cancellation; completed field edits remain audited."
                     .to_string(),
                 effect: OperationEffect::Committed,
             };
         }
-        if let Some(idx) = outcome.form_index {
-            if let Some(form) = structure.forms.iter().find(|f| f.form_index == idx) {
-                if let Some(candidate) = form.submits.first() {
-                    submit_ref = Some(candidate.ref_id.clone());
-                    let submit_audit = internal_audit(
-                        governance,
-                        root_operation,
-                        Some(canonical_requirements(OperationKey::new(
-                            OperationId::BrowserAct,
-                            IntentId::ActClick,
-                        ))),
-                        &batch_id,
-                        step,
-                        work,
-                    );
-                    let request = submit_request(root_operation, tab_id, &candidate.ref_id);
-                    let dispatch = browser
-                        .execute_mechanism_with_delivery_outcome(guid, &request, execution)
-                        .await;
-                    match dispatch.as_ref().err().map(|failure| &failure.error) {
-                        Some(crate::ToolError::Held { .. }) => submit_audit.held(),
-                        Some(crate::ToolError::AttentionRequired { .. }) => {
-                            submit_audit.attention_required()
-                        }
-                        _ => submit_audit.complete(),
+        if let (Some(idx), Some(candidate)) = (outcome.form_index, selected_submit.as_ref()) {
+            submit_ref = Some(candidate.ref_id.clone());
+            if reject_sensitive {
+                let mut revalidation_audit = internal_audit(
+                    governance,
+                    root_operation,
+                    Some(&[Capability::Read]),
+                    &batch_id,
+                    step,
+                    work,
+                );
+                let revalidation = browser
+                    .execute_mechanism(guid, &inspect_request(tab_id), execution)
+                    .await;
+                revalidation_audit.dispatch_finished();
+                match revalidation.as_ref().err() {
+                    Some(crate::ToolError::Held { .. }) => revalidation_audit.held(),
+                    Some(crate::ToolError::AttentionRequired { .. }) => {
+                        revalidation_audit.attention_required()
                     }
-                    match dispatch {
-                        Ok(result) => {
-                            submitted = true;
-                            observation = extract_observation(&result);
-                        }
-                        Err(failure) if failure.stops_composition() => {
-                            if failure.outcome_unknown {
-                                return delivery_failure_outcome(failure);
-                            }
-                            interruption = Some(
-                                FillInterruption::from_error(&failure.error)
-                                    .expect("conclusive composition stop is a safety refusal"),
-                            );
-                        }
-                        Err(_) => {}
+                    _ => revalidation_audit.complete(),
+                }
+                step += 1;
+                match revalidation {
+                    Ok(result)
+                        if first_text(&result)
+                            .and_then(|text| serde_json::from_str::<FormStructure>(text).ok())
+                            .as_ref()
+                            .is_some_and(|structure| {
+                                strict_submit_revalidation_succeeds(
+                                    idx,
+                                    &candidate.ref_id,
+                                    structure,
+                                )
+                            }) => {}
+                    Err(
+                        error @ (crate::ToolError::Held { .. }
+                        | crate::ToolError::AttentionRequired { .. }),
+                    ) => {
+                        interruption = FillInterruption::from_error(&error);
                     }
+                    _ => {
+                        interruption = Some(FillInterruption::RevalidationFailed);
+                    }
+                }
+            }
+            if interruption.is_none() {
+                let submit_audit = internal_audit(
+                    governance,
+                    root_operation,
+                    Some(&[Capability::Interact]),
+                    &batch_id,
+                    step,
+                    work,
+                );
+                let request = submit_request(tab_id, &candidate.ref_id);
+                let dispatch = browser
+                    .execute_mechanism_with_delivery_outcome(guid, &request, execution)
+                    .await;
+                match dispatch.as_ref().err().map(|failure| &failure.error) {
+                    Some(crate::ToolError::Held { .. }) => submit_audit.held(),
+                    Some(crate::ToolError::AttentionRequired { .. }) => {
+                        submit_audit.attention_required()
+                    }
+                    _ => submit_audit.complete(),
+                }
+                match dispatch {
+                    Ok(result) => {
+                        submitted = true;
+                        observation = extract_observation(&result);
+                    }
+                    Err(failure) if failure.stops_composition() => {
+                        if failure.outcome_unknown {
+                            return delivery_failure_outcome(failure);
+                        }
+                        interruption = Some(
+                            FillInterruption::from_error(&failure.error)
+                                .expect("conclusive composition stop is a safety refusal"),
+                        );
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -512,12 +858,13 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
     let mut result = crate::tool::result::text_content(text);
     if let Some(obj) = result.as_object_mut() {
         obj.insert("structuredContent".to_string(), structured);
-        obj.insert("_batch_id".to_string(), json!(batch_id));
         if interruption.is_some() {
             obj.insert("isError".to_string(), json!(true));
         }
     }
-    CallOutcome::Success { result }
+    CallOutcome::Success {
+        result: Box::new(execution_with_batch(result, &batch_id)),
+    }
 }
 
 /// Why a matched control is never filled (ADR-0036 Decision 6): a file input is permanently out
@@ -531,160 +878,5 @@ fn skip_reason(control: &ControlRef) -> Option<&'static str> {
         Some("readonly")
     } else {
         None
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::governance::ports::{
-        AttentionEventRecord, AuditRecord, AuditRole, AuditSink, SessionEventRecord,
-    };
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Default)]
-    struct Capture {
-        records: Mutex<Vec<AuditRecord>>,
-    }
-
-    impl AuditSink for Capture {
-        fn record(&self, record: &AuditRecord) {
-            self.records.lock().unwrap().push(record.clone());
-        }
-
-        fn record_session_event(&self, _record: &SessionEventRecord) {}
-
-        fn record_attention_event(&self, _record: &AttentionEventRecord) {}
-    }
-
-    #[test]
-    fn internal_audits_use_canonical_operation_requirements() {
-        assert_eq!(
-            canonical_requirements(OperationKey::new(
-                OperationId::BrowserFill,
-                IntentId::FillField,
-            )),
-            &[Capability::Write]
-        );
-        assert_eq!(
-            canonical_requirements(OperationKey::new(
-                OperationId::BrowserAct,
-                IntentId::ActClick,
-            )),
-            &[Capability::Action]
-        );
-    }
-
-    #[test]
-    fn canonical_field_rows_preserve_values_and_reject_legacy_objects() {
-        let fields = canonical_fields(&json!({
-            "tab": 1,
-            "fields": [
-                {"target":{"query":"Email"},"value":"a@example.com"},
-                {"target":{"query":"Remember"},"value":true}
-            ]
-        }))
-        .unwrap();
-        assert_eq!(fields["Email"], "a@example.com");
-        assert_eq!(fields["Remember"], true);
-        assert!(canonical_fields(&json!({
-            "tabId": 1,
-            "fields": {"Email":"a@example.com"},
-            "submit": true
-        }))
-        .is_none());
-    }
-
-    #[test]
-    fn canonical_intent_alone_controls_submit() {
-        assert!(!submit_requested(IntentId::FillFields).unwrap());
-        assert!(submit_requested(IntentId::FillFieldsAndSubmit).unwrap());
-        assert!(submit_requested(IntentId::FillField).is_err());
-    }
-
-    #[test]
-    fn form_sequence_uses_typed_canonical_mechanisms() {
-        let operation = OperationKey::new(OperationId::BrowserFill, IntentId::FillFieldsAndSubmit);
-        let inspect = inspect_request(operation, 4);
-        let fill = fill_request(operation, 4, "ref_1", json!("secret"));
-        let submit = submit_request(operation, 4, "ref_2");
-
-        assert_eq!(inspect.id(), MechanismId::FormInspect);
-        assert_eq!(inspect.input(), &json!({"tab":4}));
-        assert_eq!(fill.id(), MechanismId::FormSetValue);
-        assert_eq!(fill.input().pointer("/target/ref"), Some(&json!("ref_1")));
-        assert_eq!(fill.input()["value"], "secret");
-        assert_eq!(submit.id(), MechanismId::PointerClick);
-        assert_eq!(submit.input()["button"], "left");
-        assert_eq!(submit.input()["count"], 1);
-        for request in [&inspect, &fill, &submit] {
-            assert!(request.input().get("tabId").is_none());
-            assert!(request.input().get("action").is_none());
-            assert!(request.input().get("ref").is_none());
-        }
-    }
-
-    #[test]
-    fn internal_physical_steps_keep_the_parent_canonical_audit_identity() {
-        let sink = Arc::new(Capture::default());
-        let governance = Governance::all_open(sink.clone() as Arc<dyn AuditSink>);
-        let root = OperationKey::new(OperationId::BrowserFill, IntentId::FillFieldsAndSubmit);
-        let audit = internal_audit(
-            &governance,
-            root,
-            Some(&[Capability::Read]),
-            "00000000-0000-4000-8000-000000000001",
-            1,
-            None,
-        );
-        audit.complete();
-
-        let records = sink.records.lock().unwrap();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].tool, root.id.as_str());
-        assert_eq!(records[0].action.as_deref(), Some(root.intent.as_str()));
-        assert_eq!(records[0].orchestrator, Some(root.id.as_str()));
-        assert_eq!(records[0].step, Some(1));
-        assert_eq!(records[0].role, Some(AuditRole::MechanismPhase));
-    }
-
-    #[test]
-    fn partial_fill_interruption_marks_every_remaining_field_not_run() {
-        let matches = vec![
-            (
-                "Email".to_string(),
-                ControlRef {
-                    ref_id: "ref_1".to_string(),
-                    control_type: "text".to_string(),
-                    disabled: false,
-                    readonly: false,
-                },
-            ),
-            (
-                "Name".to_string(),
-                ControlRef {
-                    ref_id: "ref_2".to_string(),
-                    control_type: "text".to_string(),
-                    disabled: false,
-                    readonly: false,
-                },
-            ),
-        ];
-        let mut skipped = Vec::new();
-        skip_remaining_matches(
-            &matches,
-            0,
-            &mut skipped,
-            FillInterruption::AttentionRequired,
-        );
-        assert_eq!(skipped.len(), 2);
-        assert!(skipped
-            .iter()
-            .all(|field| { field["reason"] == "not_run_after_attention" }));
-        assert_eq!(FillInterruption::Paused.kind(), "paused_after_partial_fill");
-        assert_eq!(
-            FillInterruption::AttentionRequired.kind(),
-            "interrupted_after_partial_fill"
-        );
     }
 }

@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Protocol-neutral tool catalog, execution pipeline, and local compositions.
+//! Ghostlight operation execution, results, and local compositions.
 //!
 //! Wire lifecycle and response envelopes live in `ghostlight-mcp-connector`. This module consumes only
 //! normalized product operations and returns semantic outcomes.
 
 pub mod act_on;
-pub mod catalog;
+pub(crate) mod drag;
 pub mod flow;
 pub mod form_fill;
-pub mod gif_creator;
+pub(crate) mod navigation_readiness;
 pub mod outcome;
+pub(crate) mod page_read;
 pub mod pipeline;
 pub mod provenance;
-pub mod refs;
 pub mod result;
-pub mod update_plan;
-pub mod upload_image;
-pub mod validation;
+pub(crate) mod tab_navigation;
+pub(crate) mod target_screenshot;
+pub(crate) mod wait;

@@ -203,13 +203,13 @@ fn grants_block(grants: &[Grant], mode: EffectiveMode) -> String {
 }
 
 /// The fixed capability -> agent-facing phrase table (ADR-0022 Decision 1), rendered in this
-/// exact order regardless of the manifest's authored order in `allowed`. The `action` phrase
-/// carries the ADR's mandated warning inline: `action` is not a weaker `write`; it can cause
+/// exact order regardless of the manifest's authored order in `allowed`. The `interact` phrase
+/// carries the ADR's mandated warning inline: `interact` is not a weaker `write`; it can cause
 /// one.
 const CAPABILITY_PHRASES: &[(Capability, &str)] = &[
     (Capability::Read, "read pages"),
     (
-        Capability::Action,
+        Capability::Interact,
         "operate page controls (clicks and typing; this can trigger writes)",
     ),
     (Capability::Write, "submit forms and structured writes"),
@@ -357,7 +357,7 @@ fn collect_manifest_warnings(grants: &[Grant]) -> Vec<String> {
         let acts_without_reading = grant.allowed.iter().any(|c| {
             matches!(
                 c,
-                Capability::Action | Capability::Write | Capability::Execute
+                Capability::Interact | Capability::Write | Capability::Execute
             )
         }) && !grant.allowed.contains(&Capability::Read);
         if acts_without_reading {
@@ -628,7 +628,7 @@ mod tests {
             "Allowed on example.com: read pages."
         );
         assert_eq!(
-            grant_line(&sample_grant("g", &[Capability::Action])),
+            grant_line(&sample_grant("g", &[Capability::Interact])),
             "Allowed on example.com: operate page controls (clicks and typing; this can \
              trigger writes)."
         );
@@ -645,7 +645,7 @@ mod tests {
                 "g",
                 &[
                     Capability::Read,
-                    Capability::Action,
+                    Capability::Interact,
                     Capability::Write,
                     Capability::Execute
                 ]
@@ -689,10 +689,10 @@ mod tests {
     #[test]
     fn acting_without_read_lint_fires_for_action_write_or_execute_without_read() {
         for caps in [
-            vec![Capability::Action],
+            vec![Capability::Interact],
             vec![Capability::Write],
             vec![Capability::Execute],
-            vec![Capability::Action, Capability::Write],
+            vec![Capability::Interact, Capability::Write],
         ] {
             let g = sample_grant("w", &caps);
             let warnings = collect_manifest_warnings(std::slice::from_ref(&g));

@@ -1,8 +1,10 @@
 # Configuring governance
 
-Ghostlight starts wide open. With no policy in place, your agent can use every tool on every site
-you are logged into, and nothing is recorded. That default is deliberate: governance is an overlay
-you reach for when you have a reason, not a tax you pay to get started.
+Ghostlight starts wide open. With no policy in place, policy does not limit available operations or
+sites; protected hosts, user controls, ownership, and browser availability still apply. That access
+default is deliberate: governance is an overlay you reach for when you have a reason, not a tax you
+pay to get started. Audit is configured separately; the current product default records calls to a
+local file even when no policy is active.
 
 This guide is the mechanics of that overlay: how a policy is shaped, why it is shaped that way, and
 how to put one into force. For the ten-minute personal setup see [solo-developer.md](solo-developer.md);
@@ -87,9 +89,9 @@ The fields:
   a decision is always attributable to the exact policy that made it.
 - **`mode`** is optional and covered below.
 - **`identity`** is optional and descriptive. `resolved_by` and `principal` are free strings that
-  say who this policy is about. They label the audit trail; they are not an authentication check.
-  Ghostlight governs an already-authenticated browser session, so identity here is for evidence, not
-  for login.
+  say who this policy is about. They are not an authentication check or authority. The current
+  audit encoder does not propagate these authored labels, so do not rely on them as evidence. This
+  field needs a deliberate root fix or deprecation before product copy can promise more.
 - **`grants`** is the heart of it, below.
 - **`config`** carries configuration keys, covered under layering.
 
@@ -178,10 +180,14 @@ you it is locked, rather than pretending to succeed. Locking only happens when t
 through the machine org-policy file, not when they ride in a manifest you supplied yourself, so you
 cannot accidentally lock a key against yourself.
 
-To see the whole resolved picture, `ghostlight config list` shows every key, its effective value,
-which layer won, and whether it is locked. For the authoritative catalog of keys and their meanings,
-run `ghostlight config docs` (generated from the binary, so it is never out of date); for the JSON
+For ordinary local layers, `ghostlight config list` shows every key, its effective value, which
+layer won, and whether it is locked. For the authoritative catalog of keys and their meanings, run
+`ghostlight config docs` (generated from the binary, so it is never out of date); for the JSON
 Schema of the user config file, `ghostlight config schema`.
+
+That CLI view is not yet complete for managed-policy required and recommended settings. On a
+managed installation, do not treat `config list`, `get`, `set`, or `preset` as sole evidence of the
+runtime value or lock until the managed-settings visibility root fix lands.
 
 ## Putting a policy into force
 
@@ -313,10 +319,16 @@ its voice but never spoof or crowd out what Ghostlight has to tell the user.
 
 You do not write a manifest from a blank page. The tooling gives you a loop:
 
-1. **Start from a template.** `ghostlight policy init --template developer-unrestricted --out
-   policy.json` writes an embedded example. The three templates are `enterprise-healthcare`,
-   `developer-unrestricted`, and `qa-staging`; the [examples/](../../examples/) directory has more
-   to copy.
+1. **Start from a scoped template.** `ghostlight policy init --template qa-staging --out
+   policy.json` writes an embedded example. The three current templates are
+   `enterprise-healthcare`, `developer-unrestricted`, and `qa-staging`; the
+   [examples/](../../examples/) directory has more to copy.
+
+   Do not use `developer-unrestricted` as an unrestricted starting point in the current release.
+   Its empty grant list is enforced as no capability coverage, so the name is misleading. Start
+   without a policy for unrestricted personal work, or choose a scoped template and inspect it
+   with `ghostlight policy explain` before deployment. The template needs a root fix before it can
+   be recommended again.
 2. **Read it back in plain language.** `ghostlight policy explain policy.json` renders exactly what
    the file permits and denies, in sentences, before anything runs. If the prose does not match your
    intent, the JSON will not either.
@@ -337,8 +349,9 @@ afford.
 
 ## Evidence
 
-Every call, permitted or denied or shadow-denied, produces one JSON-Lines audit record: identity,
-tool, capability, host, decision, grant id, denial id, duration, and the manifest hash in force.
+Every call, permitted or denied or shadow-denied, produces one JSON-Lines audit record with the
+current tool/action vocabulary, capability summary, host, decision, grant id, denial id, duration,
+and manifest hash in force. Authored manifest `identity` labels are not currently present.
 Under managed policy each tool-call record additionally carries `policy_seq`, the org-signed publish
 sequence in force, so a decision is attributable not only to a manifest hash but to the exact
 published version your fleet was running. For streaming it to a SIEM, see

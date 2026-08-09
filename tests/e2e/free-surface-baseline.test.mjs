@@ -36,8 +36,8 @@ test("baseline mode is opt-in and reports both candidate baselines", () => {
   assert.match(runner, /mode: "free-surface-baseline"/);
   assert.match(runner, /candidateA:/);
   assert.match(runner, /candidateB:/);
-  assert.match(runner, /currentShape: "computer screenshot plus read_page"/);
-  assert.match(runner, /currentShape: "numeric composite tab ids"/);
+  assert.match(runner, /currentShape: "browser_take_screenshot plus browser_read_page"/);
+  assert.match(runner, /currentShape: "opaque Ghostlight tab handles"/);
 });
 
 test("blocking Linux smoke executes the mechanical baseline", () => {

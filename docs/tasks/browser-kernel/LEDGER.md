@@ -1,21 +1,19 @@
 # Browser operation kernel: LEDGER
 
-Durable progress for the canonical browser-operation, native surface, and compatibility-adapter
-batch. Update this file before starting a stage, after every material finding, and when closing or
-blocking a stage.
+Durable progress for the Ghostlight operation-kernel rebuild. The original R0-R10 profile plan is
+retained below as history; ADR-0102 replaced it with one Ghostlight surface and one operation path.
 
 ## RESUME HERE
 
-- State: ACTIVE; ADR-0101 authorizes the staged implementation and R4 is complete.
-- Current stage: R5 -- native surface and readiness.
-- Next action: define the strict native profile and its supported packs, then make navigation
-  readiness truthful without changing the default `ghostlight-legacy/v1` profile.
-- Blocking condition: none.
-- Shipping default: current 25-tool surface. `ghostlight-native/v1`, Claude, and Codex profiles are
-  candidates only.
-- Last green gate: 2026-08-08 R4 Rust formatting, focused core and cross-language mechanism tests,
-  extension tests and syntax checks, Lightbox package tests, and all three skew scenarios passed.
-  The final full-workspace gate is recorded below.
+- State: SUPERSEDED by ADR-0103. Preserve this ledger as evidence for the 0.9 architecture
+  experiment; do not continue its R10 cutover.
+- Current stage: closed without release.
+- Next action: capture the 0.9 experiment, then write the Ghostlight 1.0 bill of intent.
+- Blocking condition: none. The product direction changed by owner decision.
+- Shipping contract: public `v0.8.0` remains stable while 1.0 is rebuilt cleanly.
+- Last green gate: 2026-08-09 workspace tests including 631 core tests, strict workspace Clippy,
+  209 extension tests,
+  extension syntax checks, and all 36 real-process Lightbox scenarios passed.
 
 ## Stage table
 
@@ -26,12 +24,12 @@ blocking a stage.
 | R2 legacy surface profile | COMPLETE | 641b332f | `ghostlight-legacy/v1` remains default | Exact declarations and rendering are edge-owned |
 | R3 typed mechanism isolation | COMPLETE | fe55aceb | Old extension wire only | Core dispatches typed mechanisms; one bounded adapter owns old aliases |
 | R4 extension mechanism skew | COMPLETE | (this commit) | Negotiated new wire plus legacy fallback | All three skew paths pass |
-| R5 native surface and readiness | IN PROGRESS | -- | Native explicit opt-in; legacy default | No planned pack is advertised |
-| R6 client/profile selection | NOT STARTED | -- | Exact selection; legacy fallback retained | No identity signal affects authority |
-| R7 Claude flat adapter | NOT STARTED | -- | Versioned opt-in supported surface | All 22 captured tools dispositioned |
-| R8 Codex runtime adapter | NOT STARTED | -- | Versioned opt-in trusted module | All 136 members dispositioned |
-| R9 governance and audit equivalence | NOT STARTED | -- | All candidates remain opt-in | Cross-profile adversarial proof |
-| R10 e2e, evaluation, and cutover | NOT STARTED | -- | Accepted shipping default | Owner decision follows evidence |
+| R5 one Ghostlight surface, readiness, and action-kernel rebuild | COMPLETE | current worktree | Exact 24-tool Ghostlight contract | ADR-0102 replaced the profile plan |
+| R6 client/profile selection | COMPLETE | current worktree | No selector exists | Superseded: one surface makes selection unnecessary |
+| R7 Claude adapter | COMPLETE | current worktree | No dialect exists | Superseded: all clients call Ghostlight directly |
+| R8 Codex adapter | COMPLETE | current worktree | No dialect exists | Superseded: all clients call Ghostlight directly |
+| R9 governance and audit equivalence | COMPLETE | current worktree | One operation path | Governance and audit see Ghostlight operations only |
+| R10 e2e and cutover | IN PROGRESS | current worktree | Ghostlight is unconditional | Automated 36/36 Lightbox pass; one local extension reload and successful live atomic-open journey remain |
 
 Allowed status values are `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, and `COMPLETE`. At most one
 stage may be `IN PROGRESS`.
@@ -44,17 +42,15 @@ or dated live record. A prose assertion is not evidence.
 | Area | Owning stage(s) | Required completion evidence | Status | Evidence |
 | --- | --- | --- | --- | --- |
 | Inventory and authority | R0 | Accepted ADR ids; hashes and provenance for all captures; exact current catalog/result/RAWX/scheduling/workspace map; bridge and extension-wire baselines | COMPLETE | ADR-0101; Research 21 capture table; `tests/golden/surfaces/ghostlight-legacy-v1*`; current directory plus bridge/extension regression suites; 2026-08-08 baseline gates |
-| Canonical operation kernel | R1 | Typed operation/result/handle/default round trips; exhaustive concrete variant descriptors; no vendor or model-facing name as an execution key | COMPLETE | `crates/transport/src/operation.rs`; `crates/core/src/operation/registry.rs`; 26 operation families, 60 closed intents, and all 52 legacy variants covered by tests |
+| Ghostlight operation kernel | R1, R5 | Typed operation/result/handle/default round trips; exhaustive descriptors; no second execution identity | COMPLETE | `crates/transport/src/operation.rs`; `crates/core/src/operation/registry.rs`; exact 24-operation enum and registry |
 | Operation bridge | R1 | Coordinated major cutover; old/new mismatch fails loudly; Start/catalog/result/cancel transcripts; recursive flow carries canonical operations only | COMPLETE | Bridge major 2 unit and integration transcripts in `crates/transport/src/bridge.rs`, both MCP revisions, `tests/hub_isolation.rs`, and `tests/operation_bridge.rs` |
-| Legacy profile | R2 | Byte-exact 25-tool order, identity, schemas, annotations, examples, results, and errors on both MCP revisions; legacy remains releasable | COMPLETE | Edge-owned catalog, guide, explain copy, schema validation, call decoder, and result renderer; exact full-catalog/context/success/denial handler transcripts for both revisions; `surface_profile_fidelity` architecture guard |
+| Inherited profile removal | R2, R5 | No second catalog, decoder, renderer, selector, guide, or goldens remain | COMPLETE | Deleted inherited surface files and tests; `ghostlight_surface_fidelity` proves the sole catalog |
 | Mechanisms and extension skew | R3-R4 | Exhaustive operation-to-mechanism and legacy alias maps; negotiated new wire; new/new, new/old, and old/new process evidence | COMPLETE | R3 closes 57-operation planning, typed mechanisms/controls/events, the sole legacy-wire adapter, final-admission and exact-wire tests, and architecture guards. R4 adds exact `mechanismRequestV1` negotiation, ordered cross-language equality for all 43 mechanism ids, session-generation binding, and three named Lightbox skew scenarios |
-| Native surface | R5 | Strict twelve-tool core and honest supported packs; output schemas; workspace/addressing; bounded observations; opt-in journey evidence | NOT STARTED | -- |
-| Readiness | R5, R9 | Committed-document watcher; initial and landing authorization ordering; one dispatch-to-readiness deadline; condition/settlement result axes; timeout, unavailable, cancel, redirect, PDF/protected-page, and outcome-unknown tests | NOT STARTED | -- |
-| Client/profile selection | R6 | Exact precedence and version/fingerprint tests; sessionful and request-stateless state isolation; concurrent-profile and restriction tests; no authority/routing effect | NOT STARTED | -- |
-| Claude adapter | R7 | Exact capture provenance; all 22 tools mapped, omitted, or rejected honestly; declaration fidelity; journey, denial, result, and audit equivalence | NOT STARTED | -- |
-| Codex adapter | R8 | Frozen module and documentation fingerprint; complete 136-member ledger; proxy generations; locator and terminal-call tests; prohibited paths absent; live read-only bootstrap and journey | NOT STARTED | -- |
-| Governance and audit | R1-R9 | Same RAWX/resource/scheduler/authority outcomes for every external variant; all-open parity; payload-free audit; surface provenance; flow source correlation; denial/hold/cancel/unknown twins | NOT STARTED | -- |
-| End-to-end and release | R10 | Common gates, Lightbox, extension skew, package gates, real-extension smoke, visible Windows/Linux journeys, multi-model evaluation, and accepted default/fallback disposition | NOT STARTED | -- |
+| Ghostlight surface | R5 | Exact 24 declarations, input/output schemas, defaults, decoder, renderer, workspace addressing, and concise recovery | COMPLETE | `surface/data/ghostlight-v1*`; `ghostlight.rs`; `ghostlight_surface_fidelity`; both MCP revision handlers |
+| Readiness | R5, R9 | Committed-document watcher; landing authorization; one deadline; ready/timeout/unavailable/unknown truth | COMPLETE | `navigation_readiness`; `readiness_contract`; extension readiness suite; Lightbox readiness journey |
+| Surface selection removal | R6-R8 | One unconditional catalog with no client classifier or vendor dialect | COMPLETE | `surface/mod.rs`; architecture and advertisement tests |
+| Governance and audit | R1-R9 | One RAWX/resource/scheduler/authority outcome per Ghostlight operation; all-open parity; payload-free audit; hold/cancel/unknown truth | COMPLETE | exhaustive registry, policy, audit, workspace, and Lightbox gates |
+| End-to-end and cutover | R10 | Common gates, extension gates, real-process Lightbox, and local live activation | IN PROGRESS | Full workspace green, extension 209/209, and Lightbox 36/36; deployed old-worker skew fails safely with actionable recovery; successful local atomic-open journey awaits one extension reload |
 
 ## Gate log
 
@@ -67,6 +63,7 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 | 2026-08-08 | R2 | 641b332f | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | connector 96, core 739, transport 90, `surface_profile_fidelity` 4, MCP protocol 4, schema fidelity 17, advertisement 3, and enforcement 11: all pass | Extension unchanged; process/e2e not required at R2 | Frozen 25-tool profile and explain copy are edge-owned; both revision handlers prove exact catalog/context/success/denial transcripts; core has no model-facing declaration or legacy call decoder |
 | 2026-08-08 | R3 | fe55aceb | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | core 810, architecture 16, mechanism mapping 9, enforcement 11, and script 2: all pass | Extension 164/164, syntax checks for every extension JavaScript file, and MCPB package tests 5/5 pass; process/e2e not required at R3 | All 57 canonical operations have closed physical plans; typed final admission, reply classes, recording FIFO/cancellation, semantic result truth, and exact old-wire compatibility are green; three independent P0/P1 audits are clean |
 | 2026-08-08 | R4 | (this commit) | `cargo fmt --all -- --check`, strict workspace Clippy, workspace build, and full no-fail-fast workspace tests: pass | core 821, architecture 16, mechanism mapping 10, Lightbox package 5, and extension 177: all pass | `mechanism_wire_new_new`, `mechanism_wire_new_service_old_extension`, and `mechanism_wire_old_service_new_extension`: pass on the settled tree | Exact feature negotiation, legacy fallback, reconnect isolation, semantic tab URL/chunk behavior, source adapter 0.8.1 compatibility, and the mixed-version matrix are green; independent P0/P1 audit is clean |
+| 2026-08-09 | R5-R10 | current worktree | full workspace and strict workspace Clippy pass; core 631/631 | Ghostlight surface, mechanism mapping, readiness, workspace addressing including concurrent creators and atomic open, architecture including the non-inferential completion guard, and extension 209/209 pass | Lightbox 36/36; guarded local deployment healthy; old loaded adapter live probe rejects atomic open before dispatch and suggests reloading the extension; earlier simultaneous Wikipedia Tree and Fractal canopy creators returned distinct exact handles and both cleanup closes committed | ADR-0102 is implemented: one 24-tool Ghostlight surface, typed operation-owned execution and results, one non-inferential completion chokepoint, exact generation-bound adapter capabilities, no inherited or vendor dialect, and retired service clutter removed |
 
 ## Stage records
 
@@ -188,77 +185,27 @@ Append one row whenever a stage closes or a blocking rerun changes the evidence.
 - Deviations/blockers: no blocker. If an archival old service binary becomes available, the
   old-service/new-extension Node proof can be strengthened to a full process scenario.
 
-### R5 -- native surface and readiness
+### R5-R10 -- one-surface rebuild and close
 
-- Status: IN PROGRESS.
-- Native declaration and pack evidence: --
-- Workspace/addressing evidence: --
-- Navigation/readiness state-machine evidence: --
-- Bounded result/provenance evidence: --
-- Native opt-in journeys: --
-- Legacy-default regression: --
-- Gate output: --
-- Deviations/blockers: --
-
-### R6 -- client/profile selection
-
-- Status: NOT STARTED.
-- Selection precedence and exact matcher evidence: --
-- Sessionful state evidence: --
-- Request-stateless isolation evidence: --
-- Concurrent profile/restriction evidence: --
-- Authority/routing non-interference evidence: --
-- Gate output: --
-- Deviations/blockers: --
-
-### R7 -- Claude flat adapter
-
-- Status: NOT STARTED.
-- Profile id and supported declaration set: --
-- 22-tool disposition ledger: --
-- Canonical mapping and schema normalization: --
-- Journey/result/audit evidence: --
-- Unsupported capability evidence: --
-- Gate output: --
-- Deviations/blockers: --
-
-### R8 -- Codex runtime adapter
-
-- Status: NOT STARTED.
-- Plugin/module identity and trust boundary: --
-- 136-member disposition ledger: --
-- Proxy, locator, generation, reset, and cancellation evidence: --
-- Dynamic documentation and capability-filter evidence: --
-- Prohibited capability negative tests: --
-- Live read-only bootstrap and journey: --
-- Gate output: --
-- Deviations/blockers: --
-
-### R9 -- governance and audit equivalence
-
-- Status: NOT STARTED.
-- RAWX/resource/scheduling equivalence matrix: --
-- Restriction, sacred, hold, panic, attention, and denial evidence: --
-- Cancellation and outcome-unknown evidence: --
-- Audit payload minimization and surface correlation: --
-- Flow in-band provenance: --
-- All-open parity: --
-- Gate output: --
-- Deviations/blockers: --
-
-### R10 -- e2e, evaluation, and cutover
-
-- Status: NOT STARTED.
-- Full common/extension/package gates: --
-- Lightbox and mixed-version extension matrix: --
-- Real-extension smoke: --
-- Visible Windows evidence: --
-- Visible Linux evidence: --
-- Native vs legacy model-journey measurements: --
-- Claude and Codex model-journey measurements: --
-- Accepted shipping default/fallback decision: --
-- Release/docs/compatibility synchronization: --
-- Deviations/blockers: --
+- Status: R5-R9 COMPLETE; R10 IN PROGRESS pending local extension activation proof.
+- Product language: accepted `docs/ubiquitous-language.md` and its quick reference.
+- Governance language: accepted `docs/governance-language.md` and its quick reference.
+- Authority: ADR-0102 replaces ADR-0101's profile rollout with one Ghostlight surface.
+- Operation domain: exact 24-operation enum, argument types, defaults, results, and exhaustive
+  registry. Grouped families and intents are gone.
+- Action path: one bridge call, one workspace resolver, one scheduler/admission chokepoint, one
+  handler dispatch, and one private mechanism port. Each operation constructs its own closed result
+  from typed execution facts. Sequence children re-enter the same executor, and completion only
+  binds opaque handles and serializes.
+- Surface: one ordered declaration set, decoder, result renderer, guide, and both-revision MCP
+  lifecycle. The inherited surface and vendor selectors are deleted.
+- Governance: policy, protected-host, restriction, hold, end-session, attention, landing,
+  readiness, audit, and uncertainty truth remain service-owned and share the same operation path.
+- Cleanup: recording, GIF, demo, upload-image, update-plan, raw catalog/ref/validation modules,
+  and their obsolete tests are removed from the service.
+- Evidence: workspace tests including core 631/631 and strict Clippy pass; extension 209/209 plus
+  syntax checks pass;
+  Lightbox 36/36 real-process scenarios pass.
 
 ## Decision and deviation log
 
@@ -269,13 +216,13 @@ its effect on later stages.
 | # | Date | Stage | Finding or deviation | Authority and disposition |
 | --- | --- | --- | --- | --- |
 | 1 | 2026-08-08 | R0 | The primer is proposed research, so production work has no authority yet. | R0 blocks before code until the owner accepts the required ADR or ADR set. |
+| 2 | 2026-08-09 | R5 | Vendor-profile compatibility added complexity without a measured benefit. | Owner accepted ADR-0102: one Ghostlight surface, no inherited or vendor dialect. |
 
 ## External and owner gates
 
 - Accepting or amending ADRs is an owner decision.
-- Changing the automatic default away from the current 25-tool profile is an owner decision after
-  R10 evidence.
-- Installing or distributing a Codex plugin/runtime integration requires explicit owner approval.
+- The 24-tool Ghostlight contract is unconditional in this worktree. A future dialect requires a
+  new ADR and measured journey evidence.
 - Chrome Web Store submission, package publication, tags, release assets, website deployment,
   external comments, and directory updates remain draft-then-confirm actions.
 - Machine-local install and visible-browser facts belong in `local/MACHINE-STATE.md` or

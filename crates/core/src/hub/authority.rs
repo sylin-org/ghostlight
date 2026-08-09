@@ -46,23 +46,6 @@ impl AuthorityStore {
         }
     }
 
-    /// Build a fixed authority store around an already constructed governance facade.
-    ///
-    /// This preserves the long-standing in-process test seam while production service work uses
-    /// [`Self::new`] and [`Self::install`] for reloadable authority.
-    #[cfg(test)]
-    pub(crate) fn from_existing(inputs: &AuthorityInputs, governance: Arc<Governance>) -> Self {
-        Self {
-            snapshot: Mutex::new(Arc::new(AuthoritySnapshot {
-                config: inputs.config.clone(),
-                governance,
-                policy: inputs.policy.clone(),
-                epoch: inputs.epoch,
-            })),
-            recorder: Arc::new(crate::governance::ports::NullSink),
-        }
-    }
-
     /// Clone the complete current snapshot under one short lock.
     pub fn current(&self) -> Arc<AuthoritySnapshot> {
         self.snapshot

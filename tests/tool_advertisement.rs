@@ -38,27 +38,22 @@ async fn read_only_manifest_advertises_everything_except_write_and_execute_tools
         .expect("operations array");
     assert!(operations
         .iter()
-        .any(|entry| entry["intent"] == "snapshot.capture"));
-    assert!(operations.iter().any(|entry| entry["intent"] == "tabs.new"));
+        .any(|entry| entry["operation"] == "browser_inspect_page"));
     assert!(!operations
         .iter()
-        .any(|entry| entry["intent"] == "fill.field"));
+        .any(|entry| entry["operation"] == "browser_open_tab"));
     assert!(!operations
         .iter()
-        .any(|entry| entry["intent"] == "evaluate.javascript"));
+        .any(|entry| entry["operation"] == "browser_fill_form"));
+    assert!(!operations
+        .iter()
+        .any(|entry| entry["operation"] == "browser_run_javascript_unsafe"));
     for entry in operations {
-        let id = ghostlight_transport::operation::OperationId::parse(
-            entry["id"].as_str().expect("operation id"),
+        let operation = ghostlight_transport::operation::OperationKind::parse(
+            entry["operation"].as_str().expect("canonical operation"),
         )
-        .expect("known operation id");
-        let intent = ghostlight_transport::operation::IntentId::parse(
-            entry["intent"].as_str().expect("intent id"),
-        )
-        .expect("known intent id");
-        let descriptor = ghostlight::operation::registry::descriptor(
-            ghostlight_transport::operation::OperationKey::new(id, intent),
-        )
-        .expect("projected operation has a descriptor");
+        .expect("known canonical operation");
+        let descriptor = ghostlight::operation::registry::descriptor(operation);
         assert!(
             descriptor.requires.is_empty()
                 || descriptor
@@ -96,36 +91,21 @@ async fn empty_grants_manifest_advertises_exactly_the_requires_empty_set() {
         .count();
     assert_eq!(operations.len(), expected);
     for entry in operations {
-        let id = ghostlight_transport::operation::OperationId::parse(
-            entry["id"].as_str().expect("operation id"),
+        let operation = ghostlight_transport::operation::OperationKind::parse(
+            entry["operation"].as_str().expect("canonical operation"),
         )
-        .expect("known operation id");
-        let intent = ghostlight_transport::operation::IntentId::parse(
-            entry["intent"].as_str().expect("intent id"),
-        )
-        .expect("known intent id");
-        assert!(ghostlight::operation::registry::descriptor(
-            ghostlight_transport::operation::OperationKey::new(id, intent),
-        )
-        .expect("projected operation has a descriptor")
-        .requires
-        .is_empty());
+        .expect("known canonical operation");
+        assert!(ghostlight::operation::registry::descriptor(operation)
+            .requires
+            .is_empty());
     }
 }
 
-/// C11 (ADR-0038 Decision 5, PINS.md SS16): the composed guide text -- the exact surface that
-/// reaches `initialize.instructions` -- carries the `Cost notes:` paragraph verbatim, and no test
-/// under `tests/` pinned the instructions/guide content before this one (grep `instructions`
-/// found nothing relevant), so this is the new test the task file names. Pure (never spawned or
-/// in-process), unchanged by the P4.2 migration.
+/// The model guide teaches the shortest high-value path and avoids ritual preflight calls.
 #[test]
-fn instructions_carry_cost_notes() {
-    let text = include_str!(
-        "../crates/mcp-connector/src/surface/data/ghostlight-legacy-v1-agent-guide.txt"
-    );
-    assert!(text.contains("Cost notes:"), "{text}");
-    assert!(
-        text.contains("get_page_text can return tens of thousands of tokens"),
-        "{text}"
-    );
+fn instructions_are_delight_first() {
+    let text =
+        include_str!("../crates/mcp-connector/src/surface/data/ghostlight-v1-agent-guide.txt");
+    assert!(text.contains("Start with the user's job"), "{text}");
+    assert!(text.contains("you do not need a status check"), "{text}");
 }

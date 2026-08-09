@@ -73,7 +73,7 @@ async function forgetWorkspaceWindow(chrome, windowId) {
 
 // Select an initial Chrome window. Once a workspace has live tabs, their live placement supersedes
 // this bootstrap choice.
-async function resolveWorkspaceWindow(chrome) {
+async function resolveWorkspaceWindow(chrome, initialUrl) {
   try {
     const last = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
     if (eligibleNormalWindow(last)) return { window: last, created: false };
@@ -100,7 +100,9 @@ async function resolveWorkspaceWindow(chrome) {
     throw new Error("Several normal browser windows exist, but Chrome reported no most-recently-focused window");
   }
 
-  const created = await chrome.windows.create({ focused: true, type: "normal" });
+  const createOptions = { focused: true, type: "normal" };
+  if (typeof initialUrl === "string" && initialUrl) createOptions.url = initialUrl;
+  const created = await chrome.windows.create(createOptions);
   if (!eligibleNormalWindow(created)) {
     throw new Error("Chrome could not create an eligible normal window for Ghostlight");
   }
@@ -219,7 +221,7 @@ async function preferredNamedGroup(chrome, index, windowId, title) {
 
 // Find where a new workspace tab belongs without moving any existing tab. Live workspace tabs win
 // over focus; focus is only the bootstrap when the workspace has no live browser artifacts.
-async function resolveWorkspacePlacement(chrome, index, key, title) {
+async function resolveWorkspacePlacement(chrome, index, key, title, initialUrl) {
   const tabs = await liveWorkspaceTabs(chrome, index, key);
   const group = await liveWorkspaceGroup(chrome, index, key, tabs);
   if (group) {
@@ -233,7 +235,7 @@ async function resolveWorkspacePlacement(chrome, index, key, title) {
     return { tabs, group: named, windowId, createdWindow: false, initialTab: null };
   }
 
-  const resolved = await resolveWorkspaceWindow(chrome);
+  const resolved = await resolveWorkspaceWindow(chrome, initialUrl);
   const windowId = resolved.window.id;
   const named = await preferredNamedGroup(chrome, index, windowId, title);
   const initialTab = resolved.created && resolved.window.tabs && resolved.window.tabs[0]

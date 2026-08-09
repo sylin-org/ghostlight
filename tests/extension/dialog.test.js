@@ -69,6 +69,11 @@ test("worker observes and resolves dialogs without automatic acceptance", () => 
   );
   assert.match(source, /msg\.type === "narration_clear"[^]*dialogStore\.remove\(msg\.tabId\)/);
   assert.match(source, /async function killSession\(\)[^]*dialogStore\.clear\(\)/);
+  assert.match(
+    source,
+    /a\.require_resolution === true\) out\.structuredContent\.resolution_not_met = true/,
+    "strict native resolution reports a normal not-met receipt when no dialog is open",
+  );
 });
 
 test("an open dialog blocks ref scroll before page-dependent preparation", async () => {

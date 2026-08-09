@@ -1,6 +1,6 @@
 [package]
 name = "ghostlight-core"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 description = "Ghostlight core: governance, tools, browser protocol, hub composition, and the installer (ADR-0046)."
 publish = false
@@ -28,9 +28,7 @@ url = "2"
 # gif_creator pipeline (ADR-0053 D5): pure-Rust JPEG decode, the image-rs NeuQuant quantizer, and
 # the image-rs GIF encoder (weezl LZW -- the reference implementation; a hand-rolled LZW carried a
 # latent width-timing bug at the 4096-code reset that only a strict third-party decoder exposed).
-jpeg-decoder = { version = "0.3", default-features = false }
 color_quant = "2.0"
-gif = { version = "0.14", default-features = false, features = ["std"] }
 # Captured browser pixels are ephemeral sensitive data. Zero owned frame buffers when their last
 # in-process owner is released (ADR-0073 D4); this is best-effort process hygiene, not an OS-level
 # no-swap/no-crash-dump claim.

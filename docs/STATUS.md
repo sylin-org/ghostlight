@@ -1,11 +1,37 @@
 # STATUS -- where the project stands
 
-Last updated: 2026-08-08. This file is a point-in-time snapshot maintained by whoever
+Last updated: 2026-08-09. This file is a point-in-time snapshot maintained by whoever
 finishes significant work. It exists so a fresh agent (or human) can orient without any
 prior session context. **Trust the tree, `git log`, and the batch LEDGERs over this file
 when they disagree**, and update it when you land something that changes the picture.
 
 ## Now
+
+### Resume here -- Ghostlight 1.0 clean implementation
+
+- The owner accepted ADR-0103 and authorized full autonomous implementation of Ghostlight 1.0.
+  The first action is to preserve the complete dirty 0.9 experiment on a local archival ref before
+  changing branches, deleting files, or creating the clean 1.0 workspace. Do not reset, stash, or
+  partially copy this worktree before that capture is verified.
+- Archival and implementation are separate sessions. After capture, create the clean 1.0
+  branch/worktree and end the archival session. The fresh implementation session starts from
+  ADR-0103 and the owner's clean brief only. It does not read this historical STATUS, MEMORY,
+  SPEC, old ADRs, old UL/governance drafts, old code, or old tests for design guidance.
+- Do not refactor, transplant, or retain the 0.8/0.9 product pipeline, compatibility code, vendor
+  dialects, aliases, or inherited test mass. Historical material may be consulted later only to
+  answer one narrow, recorded question about externally observed behavior.
+- Write the four small authority documents in `docs/1.0/`: `INTENT.md`, `LANGUAGE.md`,
+  `ARCHITECTURE.md`, and `ACCEPTANCE.md`. Then implement without stopping at another planning phase.
+- The service is a domain-driven modular monolith and the sole product mutation point. One
+  application executor owns every MCP client unit of work. MCP and browser bridges stay generic
+  and stable; the browser adapter exposes policy-free primitives and presentation only.
+- Tests and process must earn their cost. Use focused proof at the narrowest meaningful seam and
+  the smallest set of real-browser journeys that covers distinct behavior. Run broad gates at
+  integration and release readiness, not after every edit.
+- Completion means the clean implementation is built, tested, installed through the documented
+  local deploy process, and exercised through the live MCP client and visible browser. Fix defects
+  found by that live use. Do not publish, push, merge, tag, or submit a store release without the
+  owner's separate approval.
 
 - **Ghostlight v0.8.0 is released.** PR #80 merged to `main` as
   `993135b048b60622157266b53b21f1719c9df4b3`, the immutable `v0.8.0` tag points there, and
@@ -45,31 +71,50 @@ when they disagree**, and update it when you land something that changes the pic
   and the 30-day checkpoint is due 2026-09-06 06:00:52 UTC. Project-authored distribution is
   recorded separately from user reception. No telemetry, tracking, or phone-home path was added.
 
-- **Vendor-paired tool-surface discovery is complete and ADR-0101 implementation has reached the
-  native-profile stage.** Research 21 preserves
-  a complete 22-tool Claude
-  Cowork / Claude-in-Chrome declaration capture, a filtered Codex desktop registry, the sanitized
-  22-interface and 136-member Codex Chrome runtime schema, and exact Playwright MCP v0.0.79
-  default and optional declarations. Gemini in Chrome remains capability-only because Google
-  publishes no model-visible dictionary. Research 22 proposes the typed semantic-operation
-  kernel, one-to-one Ghostlight-native profile, stateful surface sessions, readiness/result
-  contracts, classifier, capability packs, migration order, and evaluation gates. ADR-0101
-  separates edge-owned versioned surfaces, canonical service operations, and policy-free browser
-  mechanisms. The `docs/tasks/browser-kernel/` batch completed R0 through R4: bridge major 2 now carries
-  typed operations, availability, results, cancellation effects, handles, provenance, and
-  recursive flow without MCP declarations or nested external tool names. The edge reconstructs
-  the frozen 25-tool `ghostlight-legacy/v1` contract exactly, while one canonical registry owns
-  validation, RAWX, resource, scheduling, execution, and audit identity. The legacy declaration,
-  schemas, guide, explain copy, decoder, and renderer now live only at the MCP edge. Exact real
-  handler transcripts cover both MCP revisions, and the old core declaration/decoder modules are
-  deleted. The service now dispatches only typed physical mechanisms. Exact
-  `mechanismRequestV1` negotiation binds the semantic wire to one browser-session generation and
-  falls back to the bounded old-extension serializer when absent. The source Chrome adapter is
-  0.8.1 and dual-reads both covered grammars; the public adapter remains 0.8.0, and both cover the
-  service 0.8 block. Full Rust formatting, strict Clippy, build, tests, extension tests, all three
-  mixed-version scenarios, diff, and ASCII gates pass. R5 is defining a strict opt-in native
-  surface and truthful readiness. The shipping `ghostlight-legacy/v1` product surface remains
-  unchanged.
+- **ADR-0103 resets Ghostlight 1.0 around a clean-slate orchestrator and stable bridges.** Public
+  `v0.8.0` at commit `993135b048b60622157266b53b21f1719c9df4b3` is the immutable working
+  prototype and remains the stable product while 1.0 is built. The current 0.9 worktree must be
+  captured as an architecture experiment before reset; it is not an intermediate release.
+  Version 1.0 begins with four short authority documents under `docs/1.0/`, then a new vertical
+  open-page, read-page, and close-tab journey. The service will be a domain-driven modular monolith:
+  one application executor and unit of work, explicit workspace/governance/browser/completion
+  chokepoints, and a small typed in-process domain-event vocabulary. MCP and browser connectors
+  will become generic stable shores. No generic event framework, 0.8 runtime fallback, old tool
+  aliases, compatibility serializer, inherited test suite, or unearned process ceremony enters 1.0.
+
+- **The ADR-0102 one-surface action-kernel work is superseded experimental evidence.**
+  Ghostlight exposes exactly 24 model-facing tools with the accepted names, descriptions, flat
+  schemas, defaults, typed results, and recovery guidance in the ubiquitous-language primer.
+  The inherited 25-tool surface, grouped execution families, vendor-profile scaffolding, dormant
+  service operations, and obsolete compatibility tests are removed. The service now has one
+  closed `Operation` domain, one exhaustive 24-row registry, one admission/execution chokepoint,
+  and one private browser-mechanism port. Sequence children re-enter the same operation path.
+  Governance, fair scheduling, hold/end-session controls, opaque workspace ownership, readiness,
+  audit, and the policy-free extension boundary remain intact. Both MCP revisions expose the same
+  Ghostlight contract; client identity does not select a dialect. The source adapter is 0.9.0 and
+  its compatibility block is service 0.9; the public 0.8.0 release and adapter are unchanged.
+  Operation execution now owns typed execution facts and constructs one closed result before the
+  completion chokepoint; no private JSON marker channel, late projector, or mutable-current-tab
+  reconstruction remains. Concurrent creators retain their own exact browser-issued tab identity,
+  while shared inventory is ownership evidence only. Opening a URL in a new tab is one physical
+  transaction with its observer armed before Chrome creates the tab; no blank intermediate is
+  exposed. That mechanism has its own exact, generation-bound `atomicTabOpenV1` adapter feature, so
+  an older loaded worker fails before serialization instead of hanging on an unknown mechanism.
+  Its automated evidence is green: full workspace tests including 631 core tests, strict workspace
+  Clippy, 209 extension tests,
+  JavaScript syntax checks, and all 36 real-process Lightbox scenarios. It is not a public release
+  candidate; publishing and `dev -> main` remain owner decisions. The
+  guarded local 0.9 deployment is healthy. A clean call against the still-loaded older
+  extension rejects atomic open before dispatch with `effect:none`, `repeat:safe`, and one exact
+  `reconnect_browser` suggestion; it creates no tab. After the extension reload, a real
+  `browser_open_tab({url})` call created an `about:blank` tab and returned
+  `partial` / `effect:committed` with only `created:true`. That client-visible failure is the
+  concrete boundary evidence behind ADR-0103. An earlier real Chrome concurrency test had passed:
+  two
+  simultaneous Wikipedia tab
+  creations returned distinct operation-scoped handles bound to the requested Tree and Fractal
+  canopy pages, both exact handles read the correct page, inventory retained both, and cleanup
+  closed only those test tabs.
 
 ## Pre-release record (superseded by the 2026-08-07 state above)
 

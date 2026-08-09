@@ -76,32 +76,29 @@ pub fn user_manifest_ignored_transitioned(previously_ignored: bool, now_ignored:
 /// One capability primitive of the ADR-0022 Decision 1 taxonomy. Capabilities categorize
 /// an operation by EPISTEMIC STATUS -- what the governor can PROVE about it -- never by
 /// its (unknowable) downstream effect. `Read` is provably retrieval/observation only;
-/// `Action` dispatches UI input whose effect is page-determined and unknowable; `Write`
-/// is a declared mutation; `Execute` is unbounded arbitrary code. `Action` is NOT a
+/// `Interact` dispatches UI input whose effect is page-determined and unknowable; `Write`
+/// is a declared mutation; `Execute` is unbounded arbitrary code. `Interact` is NOT a
 /// weaker `Write`: it encompasses the ability to CAUSE writes (a click can submit a
 /// form). `Execute` is never implied by any other capability. Capabilities are
-/// independent primitives, not ordered tiers. Wire/file names are lowercase: `"read"`,
-/// `"action"`, `"write"`, `"execute"`. Consumed by grants ([`crate::governance::manifest::
+/// independent primitives, not ordered tiers. Canonical names are lowercase: `"read"`,
+/// `"interact"`, `"write"`, `"execute"`. Schema-3 input still accepts `"action"` and
+/// normalizes it here. Consumed by grants ([`crate::governance::manifest::
 /// document::Grant::allowed`]), enforcement ([`DecisionRequest::requires`]), and the audit
 /// `capability` field ([`AuditRecord::capability`], ADR-0022 Decision 8).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
     Read,
-    Action,
+    Interact,
     Write,
     Execute,
 }
 
 impl Capability {
-    /// The wire/file vocabulary (ADR-0022 Decision 1): exactly `"read"`, `"action"`,
-    /// `"write"`, or `"execute"`. Matches the `#[serde(rename_all = "lowercase")]`
-    /// form, provided directly so callers do not round-trip through `serde_json` for
-    /// the bare string.
+    /// The canonical vocabulary: exactly `"read"`, `"interact"`, `"write"`, or `"execute"`.
     pub fn as_str(&self) -> &'static str {
         match self {
             Capability::Read => "read",
-            Capability::Action => "action",
+            Capability::Interact => "interact",
             Capability::Write => "write",
             Capability::Execute => "execute",
         }
@@ -112,11 +109,31 @@ impl Capability {
     pub fn from_name(name: &str) -> Option<Capability> {
         match name {
             "read" => Some(Capability::Read),
-            "action" => Some(Capability::Action),
+            "interact" | "action" => Some(Capability::Interact),
             "write" => Some(Capability::Write),
             "execute" => Some(Capability::Execute),
             _ => None,
         }
+    }
+}
+
+impl Serialize for Capability {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Capability {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::from_name(&value)
+            .ok_or_else(|| serde::de::Error::custom(format_args!("unknown capability: {value}")))
     }
 }
 
@@ -233,12 +250,9 @@ pub struct AuditRecord {
     pub tool: String,
     /// Canonical concrete intent id. Historical records may contain a surface action or `None`.
     pub action: Option<String>,
-    /// The action's directory requirement rendered as one string (ADR-0022 Decision 8):
-    /// the required set's single element's wire name for a singleton set, "none" for an
-    /// empty set and for a directory miss. Exactly one of "read", "action", "write",
-    /// "execute", "none". Replaces the rw field of shared format doc section 6.1, which
-    /// ADR-0022 supersedes.
-    pub capability: &'static str,
+    /// Complete ordered capability set used for this decision. Empty means the operation was
+    /// capability-free or classification did not complete before an early runtime stop.
+    pub required_capabilities: Vec<&'static str>,
     /// Parser-normalized host of the current tab at decision time; always `None` until the
     /// enforcement task introduces current-tab tracking.
     pub domain: Option<String>,
@@ -491,7 +505,7 @@ mod tests {
                 allow: vec!["example.com".to_string()],
                 deny: Vec::new(),
             },
-            allowed: vec![Capability::Read, Capability::Action, Capability::Write],
+            allowed: vec![Capability::Read, Capability::Interact, Capability::Write],
             description: None,
             mode: None,
         }
@@ -524,7 +538,7 @@ mod tests {
                 EffectiveMode::Observe,
             ),
             sample_request(
-                vec![Capability::Action],
+                vec![Capability::Interact],
                 GoverningResource::Resource("example.com".to_string()),
                 EffectiveMode::Enforce,
             ),
@@ -532,7 +546,7 @@ mod tests {
                 grants: vec![sample_grant("g1")],
                 tool: "computer".to_string(),
                 action: Some("left_click".to_string()),
-                requires: vec![Capability::Action],
+                requires: vec![Capability::Interact],
                 resource: GoverningResource::AlwaysAllow,
                 manifest_mode: None,
                 config_mode: EffectiveMode::Enforce,
@@ -554,7 +568,7 @@ mod tests {
             client: None,
             tool: tool.to_string(),
             action: None,
-            capability: "none",
+            required_capabilities: Vec::new(),
             domain: None,
             decision: "allow",
             grant_id: None,
@@ -698,7 +712,7 @@ mod tests {
                 "client",
                 "tool",
                 "action",
-                "capability",
+                "required_capabilities",
                 "domain",
                 "decision",
                 "grant_id",
@@ -831,7 +845,7 @@ mod tests {
     fn capability_wire_names_round_trip() {
         let pairs = [
             (Capability::Read, "read"),
-            (Capability::Action, "action"),
+            (Capability::Interact, "interact"),
             (Capability::Write, "write"),
             (Capability::Execute, "execute"),
         ];
@@ -845,6 +859,10 @@ mod tests {
             assert_eq!(cap.as_str(), name);
             assert_eq!(Capability::from_name(name), Some(cap));
         }
+        assert_eq!(
+            serde_json::from_str::<Capability>("\"action\"").unwrap(),
+            Capability::Interact
+        );
     }
 
     #[test]
@@ -861,7 +879,7 @@ mod tests {
             &[],
             &[
                 Capability::Read,
-                Capability::Action,
+                Capability::Interact,
                 Capability::Write,
                 Capability::Execute
             ]
@@ -869,20 +887,20 @@ mod tests {
         assert!(capability_subset(&[Capability::Read], &[Capability::Read]));
         assert!(!capability_subset(
             &[Capability::Read],
-            &[Capability::Action, Capability::Write]
+            &[Capability::Interact, Capability::Write]
         ));
         assert!(!capability_subset(
             &[Capability::Execute],
-            &[Capability::Read, Capability::Action, Capability::Write]
+            &[Capability::Read, Capability::Interact, Capability::Write]
         ));
         assert!(!capability_subset(&[Capability::Execute], &[]));
         assert!(capability_subset(
-            &[Capability::Action, Capability::Write],
-            &[Capability::Read, Capability::Action, Capability::Write]
+            &[Capability::Interact, Capability::Write],
+            &[Capability::Read, Capability::Interact, Capability::Write]
         ));
         assert!(!capability_subset(
-            &[Capability::Action, Capability::Write],
-            &[Capability::Action]
+            &[Capability::Interact, Capability::Write],
+            &[Capability::Interact]
         ));
         assert!(capability_subset(
             &[Capability::Read, Capability::Read],

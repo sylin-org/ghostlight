@@ -56,10 +56,11 @@ Contribution terms follow the open-core boundary (ADR-0027 Decision 5):
   governance PR is merged; if you want to contribute there, open a Discussion first and
   we will sort the paperwork.
 
-Practical expectations for PRs: `cargo fmt --check`, `cargo clippy --all-targets -- -D
-warnings`, and `cargo test` green; ASCII source (escapes for anything else); match the
-surrounding code's style; and one logical change per PR. For anything larger than a
-small fix, open a Discussion or Issue first so nobody builds the wrong thing.
+Practical expectations for PRs: formatted code, warning-free touched targets, focused tests for the
+changed contract, ASCII source (escapes for anything else), and one coherent change. Run full gates
+when the PR crosses an integration or release boundary. A Discussion, Issue, or ADR is needed only
+when the change alters durable architecture, trust, or a public contract; ordinary implementation
+needs no advance ceremony.
 
 ### The dev loop: seeing your changes live
 

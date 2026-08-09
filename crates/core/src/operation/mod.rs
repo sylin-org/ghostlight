@@ -5,6 +5,6 @@
 //! entered. The registry is the single authority for validation, RAWX classification, workspace
 //! use, resource resolution, scheduling, dispatch, result provenance, and success disposition.
 
-pub mod audit_compat;
+pub(crate) mod preparation;
 pub mod registry;
 pub mod result;

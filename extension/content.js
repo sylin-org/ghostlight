@@ -37,7 +37,10 @@
     const wr = refToEl[ref];
     if (!wr) return null;
     const el = wr.deref();
-    if (!el) { delete refToEl[ref]; return null; } // serial kept for stale-ref diagnosis below
+    if (!el || !el.isConnected) {
+      delete refToEl[ref];
+      return null;
+    } // serial kept for stale-ref diagnosis below
     return el;
   }
   // ADR-0037 D4 / PINS.md SS11: when a ref no longer resolves because the page re-rendered since
@@ -164,15 +167,16 @@
   // Gate on the input type and on the sensitive `autocomplete` tokens the platform defines for
   // credentials, one-time codes, and payment data (the platform's own signal that a field is a
   // secret -- a structural fact, not content inspection).
-  const SENSITIVE_AUTOCOMPLETE = [
-    "current-password", "new-password", "one-time-code",
-    "cc-number", "cc-csc", "cc-exp", "cc-exp-month", "cc-exp-year",
-  ];
   function sensitive(el) {
-    const t = (el.getAttribute("type") || "").toLowerCase();
-    if (t === "password" || t === "hidden") return true;
-    const ac = (el.getAttribute("autocomplete") || "").toLowerCase();
-    return SENSITIVE_AUTOCOMPLETE.some((s) => ac.indexOf(s) !== -1);
+    return self.GhostlightSensitive.isSensitiveField({
+      type: el.getAttribute("type"),
+      autocomplete: el.getAttribute("autocomplete"),
+      label: typeof controlLabel === "function" ? controlLabel(el) : null,
+      ariaLabel: el.getAttribute("aria-label"),
+      placeholder: el.getAttribute("placeholder"),
+      name: el.getAttribute("name"),
+      id: el.getAttribute("id"),
+    });
   }
 
   // ADR-0087: observe the actual trusted keydown target, not document.activeElement before the
@@ -295,7 +299,7 @@
     if (visible(el)) actions.push("hover", "scroll_to");
     const enabled = !el.disabled && el.getAttribute("aria-disabled") !== "true";
     if (enabled && interactive(el)) {
-      actions.push("left_click", "right_click", "double_click");
+      actions.push("left_click", "right_click", "double_click", "press_key");
       const tag = el.tagName.toLowerCase();
       if (["input", "textarea", "select"].includes(tag) || el.isContentEditable) {
         actions.push("set_value");
@@ -569,13 +573,15 @@
       .replace(/\n{3,}/g, "\n\n")
       .trim();
   }
-  function pageText(maxCharsArg) {
+  function pageText(maxCharsArg, ref) {
     const maxChars = typeof maxCharsArg === "number" && Number.isFinite(maxCharsArg) && maxCharsArg >= 1
       ? Math.floor(maxCharsArg)
       : 50000;
-    let bestEl = null, bestText = "", bestSel = "body";
+    let bestEl = ref ? deref(ref) : null, bestText = "", bestSel = ref ? `target ${ref}` : "body";
+    if (ref && !bestEl) return staleRefMessage(ref) || `Target ${ref} was not found.`;
+    if (bestEl) bestText = bestEl.innerText || bestEl.textContent || "";
     const seen = new Set();
-    for (const sel of PAGE_TEXT_SELECTORS) {
+    for (const sel of (ref ? [] : PAGE_TEXT_SELECTORS)) {
       for (const el of document.querySelectorAll(sel)) {
         if (seen.has(el)) continue;
         seen.add(el);
@@ -583,7 +589,7 @@
         if (t.length > bestText.length) { bestEl = el; bestText = t; bestSel = sel; }
       }
     }
-    if (!bestEl || bestText.length === 0) {
+    if (!ref && (!bestEl || bestText.length === 0)) {
       bestSel = "body";
       bestText = (document.body && document.body.innerText) || "";
     }
@@ -722,6 +728,14 @@
     return { results, more };
   }
 
+  function inspectTargets() {
+    const candidates = actionableCandidates();
+    return {
+      results: candidates.slice(0, 100).map(publicCandidate),
+      more: candidates.length > 100,
+    };
+  }
+
   function resolveActionable(target) {
     const page = {
       url: location.href,
@@ -735,6 +749,11 @@
         return { error: staleRefMessage(target.ref) || `Element ${target.ref} not found or was garbage-collected.`, page };
       }
       const summary = publicCandidate(elementSummary(el));
+      const input = innerInput(el) || el;
+      const inputTag = input.tagName && input.tagName.toLowerCase();
+      if (["input", "textarea", "select"].includes(inputTag) || input.isContentEditable) {
+        summary.sensitive = sensitive(input);
+      }
       const top = document.elementFromPoint(summary.x, summary.y);
       const covered = !!(top && top !== el && !el.contains(top) && !top.contains(el));
       return { target: summary, candidates: [], ambiguous: false, covered, page };
@@ -765,6 +784,11 @@
     }
     const summary = publicCandidate(best[0]);
     const el = deref(summary.ref);
+    const input = (el && innerInput(el)) || el;
+    const inputTag = input && input.tagName && input.tagName.toLowerCase();
+    if (input && (["input", "textarea", "select"].includes(inputTag) || input.isContentEditable)) {
+      summary.sensitive = sensitive(input);
+    }
     const top = document.elementFromPoint(summary.x, summary.y);
     const covered = !!(el && top && top !== el && !el.contains(top) && !top.contains(el));
     return { target: summary, candidates: [], ambiguous: false, covered, page };
@@ -816,14 +840,27 @@
       if (fx && typeof fx.imageDrop === "function") fx.imageDrop(target, x, y);
     } catch (e) { /* effects are decorative; image dispatch never fails on them */ }
   }
-  function setFormValue(ref, value) {
+  function setFormValue(ref, value, rejectSensitive, expectedType) {
     const el = deref(ref);
     if (!el) {
       const stale = staleRefMessage(ref);
       return { error: stale || `Element ${ref} not found or was garbage-collected.` };
     }
-    el.scrollIntoView({ block: "center", behavior: "instant" });
     const target = innerInput(el) || el;
+    if (rejectSensitive === true) {
+      const tag = target.tagName && target.tagName.toLowerCase();
+      const settable = ["input", "textarea", "select"].includes(tag) || target.isContentEditable;
+      if (!el.isConnected || !target.isConnected || !settable || target.disabled || target.readOnly) {
+        return { error: "the field is no longer an eligible connected form target" };
+      }
+      if (expectedType && controlType(target) !== expectedType) {
+        return { error: "the field type changed after form inspection" };
+      }
+      if (sensitive(target)) {
+        return { error: "credential-class fields cannot be filled through this browser profile" };
+      }
+    }
+    el.scrollIntoView({ block: "center", behavior: "instant" });
     const tag = target.tagName.toLowerCase();
     const type = (target.type || "").toLowerCase();
     if (tag === "select") {
@@ -853,6 +890,21 @@
     target.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
     fieldFx(target);
     return { success: true, value: target.value };
+  }
+
+  function focusTarget(ref) {
+    const el = deref(ref);
+    if (!el || !el.isConnected) return { error: "the target is stale or disconnected" };
+    const target = innerInput(el) || el;
+    if (!target.isConnected || typeof target.focus !== "function") {
+      return { error: "the target cannot receive keyboard focus" };
+    }
+    target.scrollIntoView({ block: "center", behavior: "instant" });
+    target.focus({ preventScroll: true });
+    if (document.activeElement !== target && !target.contains(document.activeElement)) {
+      return { error: "the target did not accept keyboard focus" };
+    }
+    return { success: true };
   }
 
   // file_upload (ADR-0050 Decision 2): decode the base64 `files` into File objects and assign them
@@ -1178,6 +1230,7 @@
       ariaLabel: el.getAttribute("aria-label") || null,
       disabled: !!el.disabled,
       readonly: !!el.readOnly,
+      sensitive: sensitive(el),
     };
   }
 
@@ -1211,7 +1264,12 @@
         const kind = submitKind(el);
         if (kind) {
           seen.add(el);
-          submits.push({ ref: refFor(el), label: accessibleName(el) || null, kind });
+          submits.push({
+            ref: refFor(el),
+            label: accessibleName(el) || null,
+            kind,
+            disabled: !!el.disabled,
+          });
         }
       }
       forms.push({ formIndex: fi, controls, submits });
@@ -1241,11 +1299,13 @@
         }
         return true;
       }
-      case "pageText": sendResponse({ result: pageText(msg.max_chars) }); return true;
+      case "pageText": sendResponse({ result: pageText(msg.max_chars, msg.ref) }); return true;
       case "find": sendResponse({ result: find(msg.query, msg.present === true) }); return true;
+      case "inspectTargets": sendResponse({ result: inspectTargets() }); return true;
       case "resolveActionable": sendResponse({ result: resolveActionable(msg.target || {}) }); return true;
       case "pageMeta": sendResponse({ result: currentPageMeta() }); return true;
-      case "setFormValue": sendResponse({ result: setFormValue(msg.ref, msg.value) }); return true;
+      case "setFormValue": sendResponse({ result: setFormValue(msg.ref, msg.value, msg.rejectSensitive, msg.expectedType) }); return true;
+      case "focusTarget": sendResponse({ result: focusTarget(msg.ref) }); return true;
       case "setFiles": sendResponse({ result: setFiles(msg.ref, msg.files) }); return true;
       case "setImage": sendResponse({ result: setImage(msg.ref, msg.coordinate, msg.data, msg.filename, msg.mimeType) }); return true;
       case "refCoordinates": sendResponse({ result: refCoordinates(msg.ref) }); return true;

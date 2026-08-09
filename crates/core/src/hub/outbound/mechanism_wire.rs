@@ -3,7 +3,7 @@
 //!
 //! The browser identity advertises [`MECHANISM_REQUEST_V1`] when it accepts this envelope. The
 //! service binds that fact to one exact browser-session generation before choosing this serializer;
-//! covered older sessions continue through `legacy_mechanism` instead.
+//! covered older sessions continue through `adapter_wire_v0` instead.
 
 use crate::browser::mechanism::{MechanismId, MechanismRequest};
 use crate::ToolError;
@@ -11,6 +11,12 @@ use serde_json::{Map, Value};
 
 /// Exact browser-identity feature that enables semantic mechanism request envelopes.
 pub(super) const MECHANISM_REQUEST_V1: &str = "mechanismRequestV1";
+/// Exact browser-identity feature that enables the one-deadline navigation transaction.
+pub(super) const NAVIGATION_READINESS_V1: &str = "navigationReadinessV1";
+/// Exact browser-identity feature that enables one-step observed tab creation at a URL.
+pub(super) const ATOMIC_TAB_OPEN_V1: &str = "atomicTabOpenV1";
+/// Exact browser-identity feature that proves value mutations enforce sensitive-target rejection.
+pub(super) const STRICT_SENSITIVE_WRITES_V1: &str = "strictSensitiveWritesV1";
 
 /// Serialize one ordinary request/reply mechanism to the semantic envelope.
 pub(super) fn serialize_tool_request(
@@ -20,6 +26,7 @@ pub(super) fn serialize_tool_request(
     result_feature: &str,
     execution: &Value,
     workspace_group_title: Option<&str>,
+    navigation_readiness_v1: bool,
 ) -> Result<Vec<u8>, ToolError> {
     if request.id() == MechanismId::TabUrlQuery {
         return Err(ToolError::binary(
@@ -28,6 +35,22 @@ pub(super) fn serialize_tool_request(
     }
 
     let mut envelope = base_envelope(request_id, request)?;
+    if !navigation_readiness_v1
+        && matches!(
+            request.id(),
+            MechanismId::WorkspaceTabOpen
+                | MechanismId::NavigateUrl
+                | MechanismId::NavigateBack
+                | MechanismId::NavigateForward
+                | MechanismId::NavigateReload
+        )
+    {
+        envelope
+            .get_mut("input")
+            .and_then(Value::as_object_mut)
+            .expect("mechanism input was validated as an object")
+            .remove("readiness");
+    }
     envelope.insert("guid".into(), Value::String(guid.to_owned()));
     envelope.insert(
         "resultFeatures".into(),
@@ -113,6 +136,7 @@ mod tests {
             "tabDeltaV1",
             &json!({"class":"scheduled"}),
             Some("Ghostlight - Example"),
+            true,
         )
         .unwrap();
         assert_eq!(
@@ -142,8 +166,16 @@ mod tests {
             let bytes = if *id == MechanismId::TabUrlQuery {
                 serialize_tab_url_request("1", &request, &json!({})).unwrap()
             } else {
-                serialize_tool_request("1", "workspace", &request, "tabDeltaV1", &json!({}), None)
-                    .unwrap()
+                serialize_tool_request(
+                    "1",
+                    "workspace",
+                    &request,
+                    "tabDeltaV1",
+                    &json!({}),
+                    None,
+                    true,
+                )
+                .unwrap()
             };
             let value: Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(value["type"], "mechanism_request", "{id}");
@@ -155,11 +187,41 @@ mod tests {
     #[test]
     fn ordinary_and_auxiliary_classes_fail_closed_when_crossed() {
         let tab_url = request(MechanismId::TabUrlQuery, json!({"tab":4}));
-        assert!(
-            serialize_tool_request("1", "workspace", &tab_url, "tabDeltaV1", &json!({}), None)
-                .is_err()
-        );
+        assert!(serialize_tool_request(
+            "1",
+            "workspace",
+            &tab_url,
+            "tabDeltaV1",
+            &json!({}),
+            None,
+            true,
+        )
+        .is_err());
         let navigate = request(MechanismId::NavigateUrl, json!({}));
         assert!(serialize_tab_url_request("1", &navigate, &json!({})).is_err());
+    }
+
+    #[test]
+    fn covered_typed_adapter_does_not_receive_readiness_input() {
+        let request = request(
+            MechanismId::NavigateUrl,
+            json!({
+                "tab": 9,
+                "url": "https://example.com",
+                "readiness": {"settle":true,"timeout_ms":10000,"min_ms":0}
+            }),
+        );
+        let bytes = serialize_tool_request(
+            "1",
+            "workspace",
+            &request,
+            "tabDeltaV1",
+            &json!({}),
+            None,
+            false,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(value.pointer("/input/readiness").is_none());
     }
 }

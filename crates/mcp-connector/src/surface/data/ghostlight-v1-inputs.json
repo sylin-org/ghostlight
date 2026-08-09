@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "tab": {
+      "type": "string",
+      "pattern": "^t_[A-Za-z0-9_-]{4,128}$",
+      "description": "Opaque Ghostlight-owned tab handle."
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "description": "Fresh target ref or concise accessible description that must resolve uniquely."
+    },
+    "cursor": {
+      "type": "string",
+      "pattern": "^c_[A-Za-z0-9_-]{8,256}$",
+      "description": "Opaque continuation cursor returned by the same observation tool."
+    },
+    "modifiers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["alt", "control", "meta", "shift"]
+      },
+      "maxItems": 4,
+      "uniqueItems": true,
+      "default": []
+    }
+  },
+  "tools": {
+    "browser_get_status": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_open_tab": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Optional initial HTTP or HTTPS URL."
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_list_tabs": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_focus_tab": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"}
+      },
+      "required": ["tab"],
+      "additionalProperties": false
+    },
+    "browser_close_tab": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"}
+      },
+      "required": ["tab"],
+      "additionalProperties": false
+    },
+    "browser_navigate": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "HTTP or HTTPS destination."
+        }
+      },
+      "required": ["url"],
+      "additionalProperties": false
+    },
+    "browser_go_back": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"}
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_go_forward": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"}
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_reload_page": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"}
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_inspect_page": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Accessible-name or visible-text search."
+        },
+        "target": {"$ref": "#/$defs/target"},
+        "include": {
+          "type": "string",
+          "enum": ["interactive", "all"],
+          "default": "interactive"
+        },
+        "cursor": {"$ref": "#/$defs/cursor"}
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_read_page": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "target": {"$ref": "#/$defs/target"},
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50000,
+          "default": 20000
+        },
+        "cursor": {"$ref": "#/$defs/cursor"}
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_take_screenshot": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "target": {"$ref": "#/$defs/target"}
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_click": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "target": {"$ref": "#/$defs/target"},
+        "button": {
+          "type": "string",
+          "enum": ["left", "right", "middle"],
+          "default": "left"
+        },
+        "clicks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3,
+          "default": 1
+        },
+        "modifiers": {"$ref": "#/$defs/modifiers"}
+      },
+      "required": ["target"],
+      "additionalProperties": false
+    },
+    "browser_hover": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "target": {"$ref": "#/$defs/target"}
+      },
+      "required": ["target"],
+      "additionalProperties": false
+    },
+    "browser_scroll_to_target": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "target": {"$ref": "#/$defs/target"}
+      },
+      "required": ["target"],
+      "additionalProperties": false
+    },
+    "browser_scroll_page": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "direction": {
+          "type": "string",
+          "enum": ["up", "down"]
+        },
+        "amount": {
+          "type": "string",
+          "enum": ["small", "page"],
+          "default": "page"
+        }
+      },
+      "required": ["direction"],
+      "additionalProperties": false
+    },
+    "browser_press_key": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "key": {
+          "type": "string",
+          "enum": [
+            "Enter",
+            "Space",
+            "Tab",
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "Home",
+            "End",
+            "PageUp",
+            "PageDown",
+            "Backspace",
+            "Delete"
+          ]
+        },
+        "target": {"$ref": "#/$defs/target"},
+        "modifiers": {"$ref": "#/$defs/modifiers"}
+      },
+      "required": ["key", "target"],
+      "additionalProperties": false
+    },
+    "browser_press_escape": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"}
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_drag": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "from": {"$ref": "#/$defs/target"},
+        "to": {"$ref": "#/$defs/target"}
+      },
+      "required": ["from", "to"],
+      "additionalProperties": false
+    },
+    "browser_fill_form": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "properties": {
+              "field": {"$ref": "#/$defs/target"},
+              "value": {
+                "type": ["string", "number", "boolean"],
+                "maxLength": 20000
+              }
+            },
+            "required": ["field", "value"],
+            "additionalProperties": false
+          }
+        },
+        "submit_target": {"$ref": "#/$defs/target"}
+      },
+      "required": ["fields"],
+      "additionalProperties": false
+    },
+    "browser_wait_for": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "condition": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Fresh target ref, accessible description, or visible text to observe."
+        },
+        "state": {
+          "type": "string",
+          "enum": ["visible", "present", "gone"],
+          "default": "visible"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000,
+          "default": 10000
+        }
+      },
+      "required": ["condition"],
+      "additionalProperties": false
+    },
+    "browser_run_sequence": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "steps": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "properties": {
+              "tool": {
+                "type": "string",
+                "enum": [
+                  "browser_navigate",
+                  "browser_go_back",
+                  "browser_go_forward",
+                  "browser_reload_page",
+                  "browser_inspect_page",
+                  "browser_read_page",
+                  "browser_take_screenshot",
+                  "browser_click",
+                  "browser_hover",
+                  "browser_scroll_to_target",
+                  "browser_scroll_page",
+                  "browser_press_key",
+                  "browser_press_escape",
+                  "browser_drag",
+                  "browser_fill_form",
+                  "browser_wait_for",
+                  "browser_get_dialog",
+                  "browser_handle_dialog"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "default": {},
+                "description": "Arguments validated against the exact schema of the named child tool."
+              }
+            },
+            "required": ["tool"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["steps"],
+      "additionalProperties": false
+    },
+    "browser_get_dialog": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"}
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "browser_handle_dialog": {
+      "type": "object",
+      "properties": {
+        "tab": {"$ref": "#/$defs/tab"},
+        "action": {
+          "type": "string",
+          "enum": ["accept", "dismiss", "respond"]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    }
+  }
+}

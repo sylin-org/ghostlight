@@ -39,6 +39,7 @@ use std::time::Duration;
 pub use ghostlight_transport::{antisquat, handshake, supervisor};
 pub mod authority;
 pub mod bridge;
+pub(crate) mod completion;
 pub mod endpoint;
 pub mod inbound;
 pub mod manage;
@@ -537,10 +538,6 @@ fn spawn_authority_watch(
             let outgoing = authority.current();
             let policy_changed =
                 manifest_identity_of(&outgoing.policy) != manifest_identity_of(&inputs.policy);
-
-            if policy_changed {
-                browser.erase_all_recordings(crate::recording::StopReason::PolicyChanged);
-            }
 
             match inputs.policy.origin {
                 Some(crate::governance::manifest::source::ManifestOrigin::Managed) => {

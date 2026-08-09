@@ -28,7 +28,7 @@ Total wall-clock budget for one script tool call, in milliseconds.
 
 ## `content.security.secrets.redact`
 
-Redact values of secret fields (password/OTP/payment) in read_page output.
+Redact values of secret fields (password/OTP/payment) in browser_read_page output.
 
 - Type: bool
 - Constraints: none
@@ -99,16 +99,6 @@ Default enforcement mode when the active manifest does not set one: observe reco
 ## `inbound.pipe.enabled`
 
 Whether the owner-only local bridge/control listener binds.
-
-- Type: bool
-- Constraints: none
-- Default (fully_open): true
-- Default (safe, = built-in Minimal): true
-- Default (restricted): true
-
-## `outbound.browser.enabled`
-
-Whether the outbound.browser executor participates.
 
 - Type: bool
 - Constraints: none

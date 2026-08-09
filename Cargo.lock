@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -525,6 +525,7 @@ dependencies = [
  "dirs",
  "ghostlight-core",
  "ghostlight-transport",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",
@@ -534,7 +535,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-browser-connector"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ghostlight-transport",
  "tokio",
@@ -543,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-core"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -552,8 +553,6 @@ dependencies = [
  "ed25519-dalek",
  "fips204",
  "ghostlight-transport",
- "gif",
- "jpeg-decoder",
  "libc",
  "rustls",
  "rustls-pemfile",
@@ -575,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-lightbox"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -587,9 +586,10 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-mcp-connector"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ghostlight-transport",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",
@@ -597,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-transport"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "dirs",
  "getrandom 0.4.3",
@@ -610,17 +610,9 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "gif"
-version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee8cfcc411d9adbbaba82fb72661cc1bcca13e8bba98b364e62b2dba8f960159"
-dependencies = [
- "weezl",
 ]
 
 [[package]]
@@ -811,12 +803,6 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
 ]
-
-[[package]]
-name = "jpeg-decoder"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
 
 [[package]]
 name = "js-sys"
@@ -1583,12 +1569,6 @@ checksum = "bf85cb06032201fa7c6f829d7db5a7e5aa45bcc0655327713065f6f0576731bf"
 dependencies = [
  "rustls-pki-types",
 ]
-
-[[package]]
-name = "weezl"
-version = "0.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
 name = "windows-core"

@@ -7,8 +7,6 @@
 //! real example files on disk, the one thing inline unit tests cannot do without reaching
 //! outside the crate.
 
-mod support;
-
 use ghostlight::browser::pattern;
 use ghostlight::governance::manifest::document::parse_manifest;
 

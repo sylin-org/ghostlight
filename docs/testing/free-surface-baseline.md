@@ -24,16 +24,16 @@ extension, Chromium, and a local fixture server. Its JSON report contains:
 - Ghostlight version, platform, and measurement time;
 - three visual-semantic journeys;
 - current observation calls, text characters, base64 image characters, and elapsed time;
-- current numeric owned-tab ids and their character count; and
+- current opaque Ghostlight tab handles and their character count; and
 - explicit limits on what the measurement proves.
 
 The blocking Linux `e2e-smoke` CI job runs this mode after the ordinary browser smoke. A passing
 job proves the mechanical baseline still works across the real process and extension boundary. It
 does not replace the visible-browser or repeated model-behavior gates below.
 
-Candidate A's mechanical baseline is deliberately `computer screenshot` plus `read_page`: two
-complementary observations. Candidate B records the current composite ids and `tabs_context_mcp`
-payload. The report is a lower-level payload baseline. It does not simulate model judgment.
+Candidate A's current measurement is `browser_take_screenshot` plus `browser_read_page`: two
+complementary observations. Candidate B records opaque handles from `browser_list_tabs`. The
+report is a lower-level payload baseline. It does not simulate model judgment.
 
 The first manual Codex/Windows result is recorded in research 18. It validates the fixture and the
 current two-observation shape. It is not a substitute for this automated run.

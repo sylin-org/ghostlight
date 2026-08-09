@@ -286,7 +286,15 @@ mod tests {
             client: None,
             tool: tool.to_string(),
             action: action.map(str::to_string),
-            capability,
+            required_capabilities: if capability == "none" {
+                Vec::new()
+            } else {
+                vec![if capability == "action" {
+                    "interact"
+                } else {
+                    capability
+                }]
+            },
             domain: None,
             decision: "allow",
             grant_id: None,
@@ -310,7 +318,7 @@ mod tests {
         let record = sample_record("navigate", None, "read");
         assert_eq!(
             serde_json::to_string(&record).unwrap(),
-            r#"{"event_id":"00000000-0000-4000-8000-000000000000","ts":"2026-07-02T00:00:00.000Z","identity":null,"client":null,"tool":"navigate","action":null,"capability":"read","domain":null,"decision":"allow","grant_id":null,"denial_id":null,"duration_ms":0,"manifest":null,"held":false,"attention_required":false,"orchestrator":null,"batch_id":null,"step":null,"dry_run":false}"#
+            r#"{"event_id":"00000000-0000-4000-8000-000000000000","ts":"2026-07-02T00:00:00.000Z","identity":null,"client":null,"tool":"navigate","action":null,"required_capabilities":["read"],"domain":null,"decision":"allow","grant_id":null,"denial_id":null,"duration_ms":0,"manifest":null,"held":false,"attention_required":false,"orchestrator":null,"batch_id":null,"step":null,"dry_run":false}"#
         );
     }
 

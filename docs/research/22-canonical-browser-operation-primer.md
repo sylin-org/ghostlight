@@ -3,6 +3,12 @@
 **Date:** 2026-08-08
 **Status:** Proposed research primer. Not an ADR and not implementation authorization.
 
+**Design-reset note:** This report remains historical research input, but its one-to-one native
+tool projection and vendor-paired vocabulary are no longer the current product-language proposal.
+The owner directed a clean-slate model-delight pass over jobs, names, descriptions, schemas,
+defaults, results, and recovery. See [the ubiquitous language](../ubiquitous-language.md).
+ADR-0101 remains production authority until a new ADR or marked amendment accepts that work.
+
 ## Recommendation
 
 Build one typed Ghostlight browser-operation kernel and make the Ghostlight-native surface a

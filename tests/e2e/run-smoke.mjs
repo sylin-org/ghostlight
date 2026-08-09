@@ -191,25 +191,31 @@ function toolResultText(response, label) {
   return content[0].text;
 }
 
-function extractRef(text, accessibleName) {
-  const re = new RegExp(`"${accessibleName}"\\s*\\[(ref_\\d+)\\]`);
-  const m = re.exec(text);
-  if (!m) {
-    throw new Error(
-      `could not find a ref for accessible name "${accessibleName}" in read_page output; ` +
-        `dumping the output verbatim for diagnosis:\n${text}`
-    );
+function structuredResult(response, label) {
+  toolResultText(response, label);
+  const structured = response && response.result && response.result.structuredContent;
+  if (!structured || typeof structured !== "object") {
+    throw new Error(`${label}: result has no structuredContent`);
   }
-  return m[1];
+  return structured;
 }
 
-function createdTabId(response, label) {
-  const text = toolResultText(response, label);
-  const match = /Created tab (\d+)\./.exec(text);
-  if (!match) {
-    throw new Error(`could not parse a tab id from ${label} output: ${text}`);
+function createdTabHandle(response, label) {
+  const structured = structuredResult(response, label);
+  const handle = structured.tab && structured.tab.id;
+  if (typeof handle !== "string" || !handle.startsWith("t_")) {
+    throw new Error(`could not read an opaque tab handle from ${label}`);
   }
-  return Number(match[1]);
+  return handle;
+}
+
+function pageText(response, label) {
+  const structured = structuredResult(response, label);
+  const text = structured.result && structured.result.text;
+  if (typeof text !== "string") {
+    throw new Error(`${label}: result has no page text`);
+  }
+  return text;
 }
 
 function imageCharacters(response, label) {
@@ -236,7 +242,7 @@ async function checkedToolCall(rpc, name, argumentsValue, label = name) {
   return { response, text, elapsedMs: Date.now() - started };
 }
 
-// Research 18 baseline only. This measures the current two-observation shape and numeric tab-id
+// Research 18 baseline only. This measures the current two-observation shape and opaque tab-handle
 // payload before either candidate exists. It deliberately does not simulate model judgment or
 // claim that deterministic call arithmetic is a user study.
 async function runFreeSurfaceBaseline(rpc, baseUrl, firstTabId, version) {
@@ -250,26 +256,27 @@ async function runFreeSurfaceBaseline(rpc, baseUrl, firstTabId, version) {
   for (const journey of visualJourneys) {
     const navigate = await checkedToolCall(
       rpc,
-      "navigate",
-      { tabId: firstTabId, url: fixtureUrl(baseUrl, { journey: journey.query }) },
-      `navigate (${journey.id})`
+      "browser_navigate",
+      { tab: firstTabId, url: fixtureUrl(baseUrl, { journey: journey.query }) },
+      `browser_navigate (${journey.id})`
     );
     const screenshot = await checkedToolCall(
       rpc,
-      "computer",
-      { tabId: firstTabId, action: "screenshot" },
-      `computer screenshot (${journey.id})`
+      "browser_take_screenshot",
+      { tab: firstTabId },
+      `browser_take_screenshot (${journey.id})`
     );
     const observation = await checkedToolCall(
       rpc,
-      "read_page",
-      { tabId: firstTabId },
-      `read_page (${journey.id})`
+      "browser_read_page",
+      { tab: firstTabId },
+      `browser_read_page (${journey.id})`
     );
-    if (!observation.text.includes(journey.expected)) {
+    const observedText = pageText(observation.response, `browser_read_page (${journey.id})`);
+    if (!observedText.includes(journey.expected)) {
       throw new Error(
-        `${journey.id}: read_page did not contain ${JSON.stringify(journey.expected)}:\n` +
-          observation.text
+        `${journey.id}: browser_read_page did not contain ${JSON.stringify(journey.expected)}:\n` +
+          observedText
       );
     }
     visualResults.push({
@@ -277,7 +284,7 @@ async function runFreeSurfaceBaseline(rpc, baseUrl, firstTabId, version) {
       setupCalls: 1,
       observationCalls: 2,
       setupTextCharacters: navigate.text.length,
-      observationTextCharacters: screenshot.text.length + observation.text.length,
+      observationTextCharacters: screenshot.text.length + observedText.length,
       imageBase64Characters: imageCharacters(screenshot.response, journey.id),
       elapsedMs: navigate.elapsedMs + screenshot.elapsedMs + observation.elapsedMs,
     });
@@ -288,35 +295,35 @@ async function runFreeSurfaceBaseline(rpc, baseUrl, firstTabId, version) {
   for (let index = 1; index < products.length; index += 1) {
     const created = await checkedToolCall(
       rpc,
-      "tabs_create_mcp",
+      "browser_open_tab",
       {},
-      `tabs_create_mcp (${products[index]})`
+      `browser_open_tab (${products[index]})`
     );
-    productTabs.push(createdTabId(created.response, `tabs_create_mcp (${products[index]})`));
+    productTabs.push(createdTabHandle(created.response, `browser_open_tab (${products[index]})`));
   }
   for (let index = 0; index < products.length; index += 1) {
     await checkedToolCall(
       rpc,
-      "navigate",
+      "browser_navigate",
       {
-        tabId: productTabs[index],
+        tab: productTabs[index],
         url: fixtureUrl(baseUrl, { journey: "product", product: products[index] }),
       },
-      `navigate (product-${products[index]})`
+      `browser_navigate (product-${products[index]})`
     );
   }
-  const context = await checkedToolCall(rpc, "tabs_context_mcp", {}, "tabs_context_mcp");
+  const context = await checkedToolCall(rpc, "browser_list_tabs", {}, "browser_list_tabs");
   const tabs =
     context.response &&
     context.response.result &&
     context.response.result.structuredContent &&
     context.response.result.structuredContent.tabs;
   if (!Array.isArray(tabs)) {
-    throw new Error(`tabs_context_mcp returned no structured tab list: ${context.text}`);
+    throw new Error(`browser_list_tabs returned no structured tab list: ${context.text}`);
   }
   const measuredIds = tabs
-    .map((tab) => tab && tab.tabId)
-    .filter((tabId) => Number.isSafeInteger(tabId));
+    .map((tab) => tab && tab.id)
+    .filter((tab) => typeof tab === "string" && tab.startsWith("t_"));
 
   return {
     schema: 1,
@@ -325,15 +332,15 @@ async function runFreeSurfaceBaseline(rpc, baseUrl, firstTabId, version) {
     platform: process.platform,
     measuredAt: new Date().toISOString(),
     candidateA: {
-      currentShape: "computer screenshot plus read_page",
+      currentShape: "browser_take_screenshot plus browser_read_page",
       journeys: visualResults,
     },
     candidateB: {
-      currentShape: "numeric composite tab ids",
+      currentShape: "opaque Ghostlight tab handles",
       setupCalls: 5,
       contextCalls: 1,
       ownedTabsObserved: measuredIds.length,
-      tabIds: measuredIds,
+      tabHandles: measuredIds,
       tabReferenceCharacters: measuredIds.reduce(
         (total, tabId) => total + String(tabId).length,
         0
@@ -508,89 +515,91 @@ async function runLive(binaryPath, endpoint) {
 
     const list = await rpc.call("tools/list", {});
     const names = (list.result && list.result.tools ? list.result.tools : []).map((t) => t.name);
-    const requiredTools = ["navigate", "read_page", "computer", "form_input"];
-    if (FREE_SURFACE_BASELINE) requiredTools.push("tabs_context_mcp", "tabs_create_mcp");
+    const requiredTools = [
+      "browser_open_tab",
+      "browser_list_tabs",
+      "browser_navigate",
+      "browser_inspect_page",
+      "browser_read_page",
+      "browser_take_screenshot",
+      "browser_click",
+      "browser_fill_form",
+    ];
     for (const required of requiredTools) {
       if (!names.includes(required)) {
         throw new Error(`tools/list missing "${required}"; got: ${names.join(", ")}`);
       }
     }
 
-    // Bootstrap a tab: a fresh profile has no Ghostlight tab group yet, and navigate() (via
-    // effectiveTabId) requires one to already exist -- it does not create tabs itself.
+    // Bootstrap a separate controlled tab for this journey.
     const created = await rpc.call("tools/call", {
-      name: "tabs_create_mcp",
+      name: "browser_open_tab",
       arguments: {},
     });
-    const tabId = createdTabId(created, "tabs_create_mcp");
+    const tab = createdTabHandle(created, "browser_open_tab");
 
     if (FREE_SURFACE_BASELINE) {
       const version =
         init.result && init.result.serverInfo && init.result.serverInfo.version;
-      const report = await runFreeSurfaceBaseline(rpc, fixtureUrl, tabId, version);
+      const report = await runFreeSurfaceBaseline(rpc, fixtureUrl, tab, version);
       await cleanup();
       console.log(JSON.stringify(report, null, 2));
       process.exit(0);
     }
 
     await rpc.call("tools/call", {
-      name: "navigate",
-      arguments: { url: fixtureUrl, tabId },
+      name: "browser_navigate",
+      arguments: { url: fixtureUrl, tab },
     });
 
-    const rp1Response = await rpc.call("tools/call", {
-      name: "read_page",
-      arguments: { tabId },
+    const inspectResponse = await rpc.call("tools/call", {
+      name: "browser_inspect_page",
+      arguments: { tab },
     });
-    const rp1 = toolResultText(rp1Response, "read_page (before click)");
-    if (!rp1.includes("Ghostlight smoke fixture")) {
-      throw new Error(`read_page did not contain the expected fixture heading:\n${rp1}`);
+    const targets = structuredResult(inspectResponse, "browser_inspect_page").result.targets;
+    if (!Array.isArray(targets) || !targets.some((target) => target.name === "Click me")) {
+      throw new Error(`browser_inspect_page did not return the expected button target`);
     }
-    const inputRef = extractRef(rp1, "Name input");
-    const buttonRef = extractRef(rp1, "Click me");
 
-    // The marker is a bare <p>, so it has neither a role nor an accessible name and read_page
-    // (a structural/interactive tree) never surfaces it by design; get_page_text is the tool
-    // for plain text, so it verifies the mutation the click below is meant to produce.
     const pt1Response = await rpc.call("tools/call", {
-      name: "get_page_text",
-      arguments: { tabId },
+      name: "browser_read_page",
+      arguments: { tab },
     });
-    const pt1 = toolResultText(pt1Response, "get_page_text (before click)");
+    const pt1 = pageText(pt1Response, "browser_read_page (before click)");
     if (!pt1.includes("marker-before-click")) {
-      throw new Error(`get_page_text did not contain the expected marker text:\n${pt1}`);
+      throw new Error(`browser_read_page did not contain the expected marker text:\n${pt1}`);
     }
 
     const shotResponse = await rpc.call("tools/call", {
-      name: "computer",
-      arguments: { action: "screenshot", tabId },
+      name: "browser_take_screenshot",
+      arguments: { tab },
     });
     const shotContent = shotResponse.result && shotResponse.result.content;
     const image =
       Array.isArray(shotContent) && shotContent.find((c) => c.type === "image");
     if (!image || !image.data) {
       throw new Error(
-        `computer screenshot did not return an image content item: ${JSON.stringify(shotResponse)}`
+        `browser_take_screenshot did not return an image content item: ${JSON.stringify(shotResponse)}`
       );
     }
 
     await rpc.call("tools/call", {
-      name: "form_input",
-      arguments: { ref: inputRef, value: "ghost", tabId },
+      name: "browser_fill_form",
+      arguments: { tab, fields: [{ field: "Name input", value: "ghost" }] },
     });
 
     await rpc.call("tools/call", {
-      name: "computer",
-      arguments: { action: "left_click", ref: buttonRef, tabId },
+      name: "browser_click",
+      arguments: { tab, target: "Click me" },
     });
 
     const pt2Response = await rpc.call("tools/call", {
-      name: "get_page_text",
-      arguments: { tabId },
+      name: "browser_read_page",
+      arguments: { tab },
     });
-    const pt2 = toolResultText(pt2Response, "get_page_text (after click)");
+    const pt2 = pageText(pt2Response, "browser_read_page (after click)");
     if (!pt2.includes("marker-after-click")) {
-      throw new Error(`get_page_text after the click did not show marker-after-click:\n${pt2}`);
+      throw new Error(`browser_read_page after the click did not show marker-after-click:\n${pt2}`);
     }
 
     await cleanup();

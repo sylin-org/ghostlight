@@ -1,6 +1,6 @@
 # ADR-0101: Adaptive tool surfaces over canonical operations and browser mechanisms
 
-- Status: Accepted
+- Status: Superseded in part by ADR-0102
 - Date: 2026-08-08
 - Amends: ADR-0094 Decisions 1 and 2, and ADR-0096 Decisions 3, 4, and its
   adversarial-minimality result

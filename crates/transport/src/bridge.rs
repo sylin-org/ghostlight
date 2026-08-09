@@ -7,18 +7,15 @@
 //! appear here.
 
 use crate::host;
-use crate::operation::{
-    BrowserOperation, BrowserResult, IntentId, InvocationPresentation, OperationEffect, OperationId,
-};
+use crate::operation::{BrowserResult, Operation, OperationKind};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 pub use crate::workspace_id::WorkspaceId;
 
 /// The only bridge major understood by this build.
-pub const BRIDGE_MAJOR: u32 = 2;
+pub const BRIDGE_MAJOR: u32 = 3;
 
 /// Payload size above which bridge writes yield between bounded chunks.
 pub const BRIDGE_WRITE_YIELD_THRESHOLD: usize = 64 * 1024;
@@ -83,10 +80,8 @@ pub enum WorkspaceUse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationAvailability {
-    /// Canonical operation family.
-    pub id: OperationId,
-    /// Concrete semantic intent available within the family.
-    pub intent: IntentId,
+    /// Exact canonical operation.
+    pub operation: OperationKind,
     /// The operation's relationship to workspace state.
     pub workspace_use: WorkspaceUse,
 }
@@ -144,59 +139,15 @@ pub enum DenialSource {
     Sacred,
 }
 
-/// The service's semantic account of an accepted unit of work.
+/// The service's canonical account of an accepted unit of work.
 ///
-/// The edge converts this outcome into the selected protocol revision's result envelope. No
-/// variant is itself a JSON-RPC response.
+/// Every accepted call, including denials, holds, cancellations, and uncertain effects, crosses
+/// the owner bridge as the same typed result. The MCP edge only validates identity and renders
+/// that result; it never reconstructs outcome semantics from transport variants or prose.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TerminalOutcome {
-    /// The operation completed and produced its canonical product result.
-    Success {
-        /// Canonical result produced by the operation pipeline.
-        result: Box<BrowserResult>,
-    },
-    /// Tool execution failed conclusively.
-    ToolFailure {
-        /// Structured failure value when one is available.
-        result: Value,
-        /// Human-readable failure explanation.
-        message: String,
-    },
-    /// Queue admission failed before browser dispatch, so retry may be safe.
-    NotDispatched {
-        /// Human-readable admission failure.
-        message: String,
-    },
-    /// Dispatch may have occurred but no conclusive terminal acknowledgement exists.
-    OutcomeUnknown {
-        /// Human-readable uncertainty explanation.
-        message: String,
-    },
-    /// Governance or the sacred-domain boundary denied the operation before dispatch.
-    Denied {
-        /// Human-readable denial explanation.
-        message: String,
-        /// Boundary that produced the denial.
-        source: DenialSource,
-    },
-    /// The take-the-wheel hold prevented dispatch.
-    Held {
-        /// Whether the hold crossed the service-owned long-pause threshold.
-        prolonged: bool,
-    },
-    /// The workspace denial circuit requires user attention before more work can run.
-    AttentionRequired {
-        /// Human-readable attention request.
-        message: String,
-    },
-    /// Cooperative cancellation retired the work without a normal result.
-    Cancelled {
-        /// Truthful cancellation disposition, including uncertainty when an effect may have run.
-        message: String,
-        /// Proven physical-effect disposition at the cancellation boundary.
-        effect: OperationEffect,
-    },
+pub struct TerminalOutcome {
+    /// Canonical result produced by the operation pipeline.
+    pub result: Box<BrowserResult>,
 }
 
 /// Messages sent from the MCP edge to the persistent service.
@@ -240,10 +191,7 @@ pub enum EdgeMessage {
         /// Correlates the subsequent `started` or `rejected` response.
         sequence: BridgeSequence,
         /// Canonical operation and arguments without protocol lifecycle metadata.
-        operation: BrowserOperation,
-        /// Bounded external call facts used only for corrective copy and audit presentation.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        presentation: Option<InvocationPresentation>,
+        operation: Operation,
         /// Existing workspace, when the operation uses one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<WorkspaceId>,
@@ -401,7 +349,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operation::{BrowserResultStatus, OperationEffect, ResultPart};
+    use crate::operation::{
+        BrowserResultStatus, ClickArguments, ClickButton, OperationEffect, OperationKind,
+        OperationTarget, ResultPart,
+    };
     use std::io;
     use std::pin::Pin;
     use std::task::{Context, Poll};
@@ -417,14 +368,19 @@ mod tests {
         }
     }
 
-    fn click_operation(arguments: Value) -> BrowserOperation {
-        BrowserOperation::new(OperationId::BrowserAct, IntentId::ActClick, arguments)
+    fn click_operation(target: &str) -> Operation {
+        Operation::BrowserClick(ClickArguments {
+            target: OperationTarget::parse(target).expect("valid target"),
+            tab: None,
+            button: ClickButton::Left,
+            clicks: 1,
+            modifiers: Vec::new(),
+        })
     }
 
     fn successful_click_result() -> BrowserResult {
         let mut result = BrowserResult::new(
-            OperationId::BrowserAct,
-            IntentId::ActClick,
+            OperationKind::BrowserClick,
             BrowserResultStatus::Ok,
             OperationEffect::Committed,
         );
@@ -438,16 +394,7 @@ mod tests {
     async fn edge_message_round_trips_through_framing() {
         let message = EdgeMessage::Start {
             sequence: BridgeSequence(7),
-            operation: click_operation(serde_json::json!({"coordinate": [10, 20]})),
-            presentation: Some(
-                InvocationPresentation::new(
-                    "ghostlight-legacy",
-                    1,
-                    "computer",
-                    Some("left_click".into()),
-                )
-                .expect("valid presentation"),
-            ),
+            operation: click_operation("Submit"),
             workspace: Some(WorkspaceId::mint()),
             context: request_context(),
         };
@@ -472,7 +419,7 @@ mod tests {
     async fn service_message_round_trips_through_framing() {
         let message = ServiceMessage::Completed {
             work_id: WorkId(9),
-            outcome: TerminalOutcome::Success {
+            outcome: TerminalOutcome {
                 result: Box::new(successful_click_result()),
             },
         };
@@ -491,23 +438,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn held_terminal_outcome_is_semantic_and_framing_stable() {
-        for prolonged in [false, true] {
+    async fn held_terminal_outcome_is_one_canonical_result() {
+        for message in [
+            "The user is controlling the browser.",
+            "The user has controlled the browser for more than two minutes.",
+        ] {
+            let mut result = BrowserResult::new(
+                OperationKind::BrowserClick,
+                BrowserResultStatus::Held,
+                OperationEffect::None,
+            );
+            result.problem.as_mut().expect("held problem").message = message.into();
             let message = ServiceMessage::Completed {
                 work_id: WorkId(10),
-                outcome: TerminalOutcome::Held { prolonged },
+                outcome: TerminalOutcome {
+                    result: Box::new(result),
+                },
             };
-            assert_eq!(
-                serde_json::to_value(&message).expect("held outcome serializes"),
-                serde_json::json!({
-                    "type": "completed",
-                    "work_id": 10,
-                    "outcome": {
-                        "type": "held",
-                        "prolonged": prolonged,
-                    }
-                })
-            );
+            let encoded = serde_json::to_value(&message).expect("held outcome serializes");
+            assert_eq!(encoded["outcome"]["result"]["status"], "held");
+            assert_eq!(encoded["outcome"]["result"]["effect"], "none");
 
             let mut framed = Vec::new();
             write_service_message(&mut framed, &message)
@@ -527,8 +477,7 @@ mod tests {
     fn tagged_wire_shape_is_exact_and_protocol_neutral() {
         let value = serde_json::to_value(EdgeMessage::Start {
             sequence: BridgeSequence(12),
-            operation: click_operation(serde_json::json!({"x": 1})),
-            presentation: None,
+            operation: click_operation("Save"),
             workspace: None,
             context: RequestContext::default(),
         })
@@ -540,9 +489,12 @@ mod tests {
                 "type": "start",
                 "sequence": 12,
                 "operation": {
-                    "id": "browser.act",
-                    "intent": "act.click",
-                    "arguments": {"x": 1}
+                    "operation": "browser_click",
+                    "arguments": {
+                        "target": "Save",
+                        "button": "left",
+                        "clicks": 1
+                    }
                 },
                 "context": {}
             })
@@ -558,13 +510,11 @@ mod tests {
             generation: 4,
             operations: vec![
                 OperationAvailability {
-                    id: OperationId::BrowserTabs,
-                    intent: IntentId::TabsList,
+                    operation: OperationKind::BrowserListTabs,
                     workspace_use: WorkspaceUse::Creates,
                 },
                 OperationAvailability {
-                    id: OperationId::BrowserAct,
-                    intent: IntentId::ActClick,
+                    operation: OperationKind::BrowserClick,
                     workspace_use: WorkspaceUse::Uses,
                 },
             ],
@@ -578,13 +528,11 @@ mod tests {
                 "generation": 4,
                 "operations": [
                     {
-                        "id": "browser.tabs",
-                        "intent": "tabs.list",
+                        "operation": "browser_list_tabs",
                         "workspaceUse": "creates"
                     },
                     {
-                        "id": "browser.act",
-                        "intent": "act.click",
+                        "operation": "browser_click",
                         "workspaceUse": "uses"
                     }
                 ],
@@ -615,7 +563,7 @@ mod tests {
         result.parts = vec![ResultPart::Text { text }];
         let message = ServiceMessage::Completed {
             work_id: WorkId(3),
-            outcome: TerminalOutcome::Success {
+            outcome: TerminalOutcome {
                 result: Box::new(result),
             },
         };

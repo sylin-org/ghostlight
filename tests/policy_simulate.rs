@@ -47,9 +47,9 @@ fn permissive_manifest_yields_zero_would_denies() {
     assert!(!stdout.contains("would-deny groups"), "{stdout}");
 
     for line in [
-        "line 11: unknown tool: teleport",
-        "line 12: unknown action: fly",
-        "line 13: computer action missing",
+        "line 11: missing field: required_capabilities",
+        "line 12: unknown capability: future",
+        "line 13: missing field: required_capabilities",
         "line 14: malformed json",
     ] {
         assert!(stdout.contains(line), "missing {line:?} in:\n{stdout}");
@@ -65,9 +65,9 @@ fn canonical_audit_identities_replay_without_the_historical_alias_table() {
     std::fs::write(
         &path,
         concat!(
-            r#"{"tool":"browser.snapshot","action":"snapshot.capture","domain":"docs.example.com"}"#,
+            r#"{"tool":"browser_inspect_page","domain":"docs.example.com","required_capabilities":["read"]}"#,
             "\n",
-            r#"{"tool":"browser.input","action":"input.pointer.click","domain":"docs.example.com"}"#,
+            r#"{"tool":"browser_click","domain":"docs.example.com","required_capabilities":["interact"]}"#,
             "\n"
         ),
     )
@@ -108,9 +108,11 @@ fn restrictive_manifest_golden() {
     assert_eq!(4 + 5 + 4, 13, "totals arithmetic must hold");
 
     let expected_groups = [
-        "count=1 grant=- domain=unknown.example tool=read_page rule=unmatched_domain",
-        "count=3 grant=docs-read domain=docs.example.com tool=computer rule=capability",
-        "count=1 grant=forms-noscript domain=forms.example.net tool=javascript_tool rule=capability",
+        "count=1 grant=- domain=unknown.example tool=browser_read_page rule=unmatched_domain",
+        "count=1 grant=docs-read domain=docs.example.com tool=browser_click rule=capability",
+        "count=1 grant=docs-read domain=docs.example.com tool=browser_fill_form rule=capability",
+        "count=1 grant=docs-read domain=docs.example.com tool=browser_navigate rule=capability",
+        "count=1 grant=docs-read domain=docs.example.com tool=browser_press_key rule=capability",
     ];
     for group in expected_groups {
         assert!(
@@ -146,9 +148,9 @@ fn restrictive_manifest_golden() {
     );
 
     for line in [
-        "line 11: unknown tool: teleport",
-        "line 12: unknown action: fly",
-        "line 13: computer action missing",
+        "line 11: missing field: required_capabilities",
+        "line 12: unknown capability: future",
+        "line 13: missing field: required_capabilities",
         "line 14: malformed json",
     ] {
         assert!(stdout.contains(line), "missing {line:?} in:\n{stdout}");

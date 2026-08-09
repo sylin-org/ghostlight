@@ -10,12 +10,12 @@
 use crate::browser::mechanism::{MechanismId, MechanismRequest};
 use crate::governance::dispatch::Governance;
 use crate::governance::ports::Capability;
-use crate::operation::registry as operation_registry;
 use crate::tool::outcome::{
-    delivery_failure_outcome, tool_error_outcome, CallOutcome, LocalCtx, LocalFuture,
+    delivery_failure_outcome, tool_error_outcome, ExecutionAuditFacts,
+    ExecutionOutcome as CallOutcome, LocalCtx, LocalFuture, OperationExecution, ResolvedTargets,
 };
-use crate::work::{CancellationToken, WorkContext};
-use ghostlight_transport::operation::{IntentId, OperationEffect, OperationId, OperationKey};
+use crate::work::WorkContext;
+use ghostlight_transport::operation::{OperationEffect, OperationKind};
 use serde_json::{json, Map, Value};
 
 const EXPECT_STATES: &[&str] = &["visible", "present", "gone"];
@@ -33,9 +33,7 @@ fn invalid(message: impl Into<String>) -> CallOutcome {
     }
 }
 
-fn validate(intent: IntentId, args: &Value) -> Result<(), String> {
-    let profile = action_profile(intent)
-        .ok_or_else(|| format!("unsupported browser.act intent: {intent}"))?;
+fn validate(profile: ActionProfile, args: &Value) -> Result<(), String> {
     if args.get("tab").and_then(Value::as_i64).is_none() {
         return Err("act_on requires a numeric tabId".to_string());
     }
@@ -78,6 +76,14 @@ fn validate(intent: IntentId, args: &Value) -> Result<(), String> {
     }
     if profile.mechanism != MechanismId::FormSetValue && has_value {
         return Err("value is valid only for set_value".to_string());
+    }
+    if profile.mechanism == MechanismId::KeyPress
+        && args
+            .get("key")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+    {
+        return Err("key is required for browser_press_key".to_string());
     }
     if let Some(expect) = args.get("expect") {
         let object = expect
@@ -130,12 +136,21 @@ fn first_text(result: &Value) -> Option<&str> {
         .as_str()
 }
 
-fn stamp(result: &mut Value, batch_id: &str, assurance: &str, outcome: &str) {
-    if let Some(object) = result.as_object_mut() {
-        object.insert("_batch_id".to_string(), json!(batch_id));
-        object.insert("_target_assurance".to_string(), json!(assurance));
-        object.insert("_outcome_category".to_string(), json!(outcome));
-    }
+fn operation_execution(
+    result: Value,
+    batch_id: &str,
+    assurance: &str,
+    outcome: &str,
+    target: Option<Value>,
+) -> OperationExecution {
+    let mut execution = OperationExecution::new(result);
+    execution.audit = ExecutionAuditFacts {
+        batch_id: Some(batch_id.to_owned()),
+        target_assurance: Some(assurance.to_owned()),
+        outcome_category: Some(outcome.to_owned()),
+    };
+    execution.targets = target.map_or(ResolvedTargets::None, ResolvedTargets::One);
+    execution
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -226,6 +241,12 @@ fn recovery_result(
     let next = match kind {
         "ambiguous_target" => "Use a ref from candidates or add an exact role/name.",
         "covered_target" => "Dismiss or move the covering element, then retry the same target.",
+        "credential_target" => {
+            "Ask the user to enter credentials directly in the browser; do not send them through browser_act."
+        }
+        "sensitive_classification_unavailable" => {
+            "Update the browser adapter or ask the user to enter the value directly."
+        }
         "frame_unsupported" => {
             "Interact with the top document or wait for a separately governed frame capability."
         }
@@ -249,76 +270,77 @@ fn recovery_result(
             json!({ "interactionReceipt": receipt, "candidates": candidates }),
         );
     }
-    stamp(&mut result, batch_id, assurance, "blocked");
-    CallOutcome::Success { result }
+    CallOutcome::Success {
+        result: Box::new(operation_execution(
+            result, batch_id, assurance, "blocked", None,
+        )),
+    }
 }
 
 fn internal_audit(
     governance: &Governance,
-    operation: OperationKey,
+    operation: OperationKind,
     requires: Option<&'static [Capability]>,
     batch_id: &str,
     step: u32,
-    work: Option<&WorkContext>,
+    work: &WorkContext,
 ) -> crate::governance::dispatch::CallAudit {
-    let mut audit = governance.begin_with_client(
-        operation.id.as_str(),
-        Some(operation.intent.as_str()),
-        requires,
-        work.and_then(WorkContext::client).cloned(),
-    );
-    audit.orchestrated(operation.id.as_str(), batch_id, Some(step));
+    let mut audit =
+        governance.begin_with_client(operation.as_str(), None, requires, work.client().cloned());
+    audit.orchestrated(operation.as_str(), batch_id, Some(step));
     audit.mark_mechanism_phase();
     audit.attribute_grant(None);
     audit
-}
-
-fn canonical_requirements(key: OperationKey) -> &'static [Capability] {
-    operation_registry::descriptor(key)
-        .expect("act_on internal operation key must exist")
-        .requires
 }
 
 #[derive(Clone, Copy)]
 struct ActionProfile {
     mechanism: MechanismId,
     cue_kind: &'static str,
-    operation: OperationKey,
+    kind: OperationKind,
     button: Option<&'static str>,
     count: Option<u64>,
 }
 
-fn action_profile(intent: IntentId) -> Option<ActionProfile> {
-    let click = |cue_kind, button, count, intent| ActionProfile {
+fn action_profile(kind: OperationKind, args: &Value) -> Option<ActionProfile> {
+    let click = |cue_kind, button, count| ActionProfile {
         mechanism: MechanismId::PointerClick,
         cue_kind,
-        operation: OperationKey::new(OperationId::BrowserAct, intent),
+        kind: OperationKind::BrowserClick,
         button: Some(button),
         count: Some(count),
     };
-    Some(match intent {
-        IntentId::ActClick => click("click", "left", 1, intent),
-        IntentId::ActRightClick => click("right_click", "right", 1, intent),
-        IntentId::ActDoubleClick => click("double_click", "left", 2, intent),
-        IntentId::ActTripleClick => click("triple_click", "left", 3, intent),
-        IntentId::ActHover => ActionProfile {
+    Some(match kind {
+        OperationKind::BrowserClick => {
+            let button = match args.get("button").and_then(Value::as_str) {
+                Some("right") => "right",
+                Some("middle") => "middle",
+                _ => "left",
+            };
+            click(
+                "click",
+                button,
+                args.get("clicks").and_then(Value::as_u64).unwrap_or(1),
+            )
+        }
+        OperationKind::BrowserHover => ActionProfile {
             mechanism: MechanismId::PointerHover,
             cue_kind: "hover",
-            operation: OperationKey::new(OperationId::BrowserAct, intent),
+            kind: OperationKind::BrowserHover,
             button: None,
             count: None,
         },
-        IntentId::ActScrollIntoView => ActionProfile {
+        OperationKind::BrowserScrollToTarget => ActionProfile {
             mechanism: MechanismId::ScrollTargetIntoView,
             cue_kind: "scroll_into_view",
-            operation: OperationKey::new(OperationId::BrowserAct, intent),
+            kind: OperationKind::BrowserScrollToTarget,
             button: None,
             count: None,
         },
-        IntentId::ActSetValue => ActionProfile {
-            mechanism: MechanismId::FormSetValue,
-            cue_kind: "set_value",
-            operation: OperationKey::new(OperationId::BrowserFill, IntentId::FillField),
+        OperationKind::BrowserPressKey => ActionProfile {
+            mechanism: MechanismId::KeyPress,
+            cue_kind: "press_key",
+            kind: OperationKind::BrowserPressKey,
             button: None,
             count: None,
         },
@@ -327,7 +349,6 @@ fn action_profile(intent: IntentId) -> Option<ActionProfile> {
 }
 
 fn action_request(
-    operation: OperationKey,
     profile: ActionProfile,
     tab: i64,
     reference: &str,
@@ -337,16 +358,26 @@ fn action_request(
     if let Some(button) = profile.button {
         input["button"] = json!(button);
     }
+    if let Some(button) = args.get("button").and_then(Value::as_str) {
+        input["button"] = json!(button);
+    }
     if let Some(count) = profile.count {
         input["count"] = json!(count);
     }
     if profile.mechanism == MechanismId::FormSetValue {
         input["value"] = args["value"].clone();
+        if args.get("reject_sensitive").and_then(Value::as_bool) == Some(true) {
+            input["reject_sensitive"] = json!(true);
+        }
+    }
+    if profile.mechanism == MechanismId::KeyPress {
+        input["key"] = args["key"].clone();
+        input["repeat"] = json!(1);
     }
     if let Some(modifiers) = args.get("modifiers") {
         input["modifiers"] = modifiers.clone();
     }
-    MechanismRequest::for_operation(operation, profile.mechanism, input)
+    MechanismRequest::for_operation(profile.kind, profile.mechanism, input)
         .expect("browser.act mechanism must be declared by its dynamic plan")
 }
 
@@ -356,18 +387,21 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
         governance,
         guid,
         operation,
+        input,
         execution,
         work,
         cancellation,
         ..
     } = ctx;
-    let intent = operation.intent;
-    let args = &operation.arguments;
-    if let Err(message) = validate(intent, args) {
+    let kind = operation.kind();
+    let args = input;
+    let Some(profile) = action_profile(kind, args) else {
+        return invalid(format!("unsupported target interaction: {}", kind.as_str()));
+    };
+    if let Err(message) = validate(profile, args) {
         return invalid(message);
     }
-    let profile = action_profile(intent).expect("validated browser.act intent");
-    let root_operation = OperationKey::new(OperationId::BrowserAct, intent);
+    let root_operation = kind;
     let batch_id = uuid::Uuid::new_v4().to_string();
     let tab_id = args["tab"].as_i64().expect("validated tab");
     let target = args["target"].clone();
@@ -376,7 +410,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
     } else {
         "semantic"
     };
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+    if cancellation.is_cancelled() {
         return CallOutcome::Cancelled {
             message: "act_on was cancelled before target resolution.".to_string(),
             effect: OperationEffect::None,
@@ -395,7 +429,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
         .execute_mechanism(
             guid,
             &MechanismRequest::for_operation(
-                root_operation,
+                profile.kind,
                 MechanismId::ElementResolve,
                 json!({ "tab": tab_id, "target": target }),
             )
@@ -480,11 +514,44 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
             false,
         );
     };
+    if profile.mechanism == MechanismId::FormSetValue
+        && args.get("reject_sensitive").and_then(Value::as_bool) == Some(true)
+    {
+        let sensitive = resolved_target
+            .get("sensitive")
+            .and_then(Value::as_bool)
+            .or_else(|| {
+                (resolved_target.get("secret").and_then(Value::as_bool) == Some(true))
+                    .then_some(true)
+            });
+        if sensitive != Some(false) {
+            let (kind, message) = if sensitive == Some(true) {
+                (
+                    "credential_target",
+                    "The resolved field is credential-class, so no value was sent to the page.",
+                )
+            } else {
+                (
+                    "sensitive_classification_unavailable",
+                    "The browser adapter could not prove that the resolved field is non-sensitive, so no value was sent to the page.",
+                )
+            };
+            return recovery_result(
+                message.to_string(),
+                &batch_id,
+                assurance,
+                page,
+                kind,
+                Vec::new(),
+                false,
+            );
+        }
+    }
     let Some(reference) = resolved_target.get("ref").and_then(Value::as_str) else {
         return invalid("resolved target did not carry a ref");
     };
 
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+    if cancellation.is_cancelled() {
         return CallOutcome::Cancelled {
             message: "act_on stopped after target resolution and before the action; resolved state was not reused."
                 .to_string(),
@@ -497,7 +564,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
         .execute_mechanism(
             guid,
             &MechanismRequest::for_operation(
-                root_operation,
+                profile.kind,
                 MechanismId::TargetCue,
                 json!({
                     "tab": tab_id,
@@ -525,7 +592,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
         return tool_error_outcome(error);
     }
 
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+    if cancellation.is_cancelled() {
         return CallOutcome::Cancelled {
             message: "act_on stopped after its presentation cue and before the browser action."
                 .to_string(),
@@ -533,11 +600,11 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
         };
     }
 
-    let request = action_request(root_operation, profile, tab_id, reference, args);
+    let request = action_request(profile, tab_id, reference, args);
     let mut action_audit = internal_audit(
         governance,
         root_operation,
-        Some(canonical_requirements(profile.operation)),
+        Some(crate::operation::registry::descriptor(profile.kind).requires),
         &batch_id,
         3,
         work,
@@ -553,6 +620,23 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
     }
     let mut result = match dispatched {
         Ok(result) => result,
+        Err(failure)
+            if profile.mechanism == MechanismId::FormSetValue
+                && args.get("reject_sensitive").and_then(Value::as_bool) == Some(true)
+                && !failure.outcome_unknown
+                && !failure.stops_composition() =>
+        {
+            return recovery_result(
+                "The resolved field failed immediate non-sensitive target revalidation, so no value was sent to the page."
+                    .to_string(),
+                &batch_id,
+                assurance,
+                page,
+                "sensitive_classification_unavailable",
+                Vec::new(),
+                false,
+            );
+        }
         Err(failure) => return delivery_failure_outcome(failure),
     };
 
@@ -562,7 +646,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
         .unwrap_or(0);
     let expect = args.get("expect").and_then(Value::as_object);
     if expect.is_some() || mutations > 0 {
-        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        if cancellation.is_cancelled() {
             return CallOutcome::Cancelled {
                 message: "act_on cancellation arrived after the atomic action; the action completed and was audited, and no postcondition wait was started."
                     .to_string(),
@@ -585,10 +669,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
         let mut wait_audit = internal_audit(
             governance,
             root_operation,
-            Some(canonical_requirements(OperationKey::new(
-                OperationId::BrowserWait,
-                IntentId::WaitUntil,
-            ))),
+            Some(&[Capability::Read]),
             &batch_id,
             4,
             work,
@@ -597,7 +678,7 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
             .execute_mechanism(
                 guid,
                 &MechanismRequest::for_operation(
-                    root_operation,
+                    profile.kind,
                     MechanismId::WaitUntil,
                     Value::Object(wait_args),
                 )
@@ -644,8 +725,15 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
                 let refusal = PostActionRefusal::from_error(&error)
                     .expect("guard proved a post-action safety refusal");
                 append_post_action_refusal(&mut result, refusal, expect.is_some());
-                stamp(&mut result, &batch_id, assurance, refusal.category());
-                return CallOutcome::Success { result };
+                return CallOutcome::Success {
+                    result: Box::new(operation_execution(
+                        result,
+                        &batch_id,
+                        assurance,
+                        refusal.category(),
+                        Some(resolved_target.clone()),
+                    )),
+                };
             }
             Err(error) if expect.is_some() => {
                 if let Some(blockers) = result
@@ -673,8 +761,15 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
                 if let Some(object) = result.as_object_mut() {
                     object.insert("isError".to_string(), json!(true));
                 }
-                stamp(&mut result, &batch_id, assurance, "expect_timeout");
-                return CallOutcome::Success { result };
+                return CallOutcome::Success {
+                    result: Box::new(operation_execution(
+                        result,
+                        &batch_id,
+                        assurance,
+                        "expect_timeout",
+                        Some(resolved_target.clone()),
+                    )),
+                };
             }
             Err(_) => {
                 // Settlement is opportunistic. The receipt already truthfully reports the first
@@ -694,273 +789,13 @@ async fn run(ctx: LocalCtx<'_>) -> CallOutcome {
     } else {
         "unchanged"
     };
-    stamp(&mut result, &batch_id, assurance, category);
-    CallOutcome::Success { result }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::governance::ports::{
-        AttentionEventRecord, AuditRecord, AuditRole, AuditSink, SessionEventRecord,
-    };
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Default)]
-    struct Capture {
-        records: Mutex<Vec<AuditRecord>>,
-    }
-
-    impl AuditSink for Capture {
-        fn record(&self, record: &AuditRecord) {
-            self.records.lock().unwrap().push(record.clone());
-        }
-
-        fn record_session_event(&self, _record: &SessionEventRecord) {}
-
-        fn record_attention_event(&self, _record: &AttentionEventRecord) {}
-    }
-
-    #[test]
-    fn internal_dispatches_use_semantic_operation_keys() {
-        for intent in [
-            IntentId::ActClick,
-            IntentId::ActRightClick,
-            IntentId::ActDoubleClick,
-            IntentId::ActTripleClick,
-            IntentId::ActHover,
-            IntentId::ActScrollIntoView,
-        ] {
-            assert_eq!(
-                action_profile(intent).unwrap().operation,
-                OperationKey::new(OperationId::BrowserAct, intent)
-            );
-        }
-        assert_eq!(
-            action_profile(IntentId::ActSetValue).unwrap().operation,
-            OperationKey::new(OperationId::BrowserFill, IntentId::FillField)
-        );
-        assert_eq!(
-            canonical_requirements(action_profile(IntentId::ActClick).unwrap().operation),
-            &[Capability::Action]
-        );
-        assert_eq!(
-            canonical_requirements(action_profile(IntentId::ActHover).unwrap().operation),
-            &[Capability::Read]
-        );
-        assert_eq!(
-            canonical_requirements(action_profile(IntentId::ActSetValue).unwrap().operation),
-            &[Capability::Write]
-        );
-    }
-
-    #[test]
-    fn internal_physical_steps_are_marked_without_changing_canonical_identity() {
-        let sink = Arc::new(Capture::default());
-        let governance = Governance::all_open(sink.clone() as Arc<dyn AuditSink>);
-        let root = OperationKey::new(OperationId::BrowserAct, IntentId::ActClick);
-        let audit = internal_audit(
-            &governance,
-            root,
-            Some(&[Capability::Read]),
-            "00000000-0000-4000-8000-000000000001",
-            1,
-            None,
-        );
-        audit.complete();
-
-        let records = sink.records.lock().unwrap();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].tool, root.id.as_str());
-        assert_eq!(records[0].action.as_deref(), Some(root.intent.as_str()));
-        assert_eq!(records[0].orchestrator, Some(root.id.as_str()));
-        assert_eq!(records[0].step, Some(1));
-        assert_eq!(records[0].role, Some(AuditRole::MechanismPhase));
-    }
-
-    #[test]
-    fn validates_target_value_and_expect_shapes() {
-        assert!(validate(
-            IntentId::ActClick,
-            &json!({
-                "tab": 1,
-                "target": { "name": "Save", "role": "button" },
-                "expect": { "text": "Saved", "state": "visible", "timeout_ms": 5000 }
-            })
-        )
-        .is_ok());
-        assert!(validate(
-            IntentId::ActClick,
-            &json!({
-                "tab": 1,
-                "target": { "ref": "ref_1", "query": "Save" }
-            })
-        )
-        .unwrap_err()
-        .contains("exactly one"));
-        assert!(validate(
-            IntentId::ActSetValue,
-            &json!({
-                "tab": 1, "target": { "ref": "ref_1" }
-            })
-        )
-        .unwrap_err()
-        .contains("value is required"));
-        assert!(validate(
-            IntentId::ActClick,
-            &json!({
-                "tab": 1,
-                "target": { "name": "Save" },
-                "expect": { "text": "A", "selector": "#a" }
-            })
-        )
-        .unwrap_err()
-        .contains("exactly one"));
-        assert!(validate(
-            IntentId::ActSetValue,
-            &json!({
-                "tab": 1, "target": { "ref": "ref_1" }, "value": true
-            })
-        )
-        .unwrap_err()
-        .contains("must be a string"));
-        assert!(validate(
-            IntentId::ActClick,
-            &json!({
-                "tab": 1, "target": { "name": "Save", "role": 7 }
-            })
-        )
-        .unwrap_err()
-        .contains("role must be a string"));
-        assert!(validate(
-            IntentId::ActClick,
-            &json!({
-                "tab": 1,
-                "target": { "name": "Save" },
-                "expect": { "text": "A", "timeout_ms": 30001 }
-            })
-        )
-        .unwrap_err()
-        .contains("0 through 30000"));
-    }
-
-    #[test]
-    fn canonical_intent_builds_typed_effect_requests() {
-        for (intent, mechanism, button, count) in [
-            (
-                IntentId::ActClick,
-                MechanismId::PointerClick,
-                Some("left"),
-                Some(1),
-            ),
-            (
-                IntentId::ActRightClick,
-                MechanismId::PointerClick,
-                Some("right"),
-                Some(1),
-            ),
-            (
-                IntentId::ActDoubleClick,
-                MechanismId::PointerClick,
-                Some("left"),
-                Some(2),
-            ),
-            (
-                IntentId::ActTripleClick,
-                MechanismId::PointerClick,
-                Some("left"),
-                Some(3),
-            ),
-            (IntentId::ActHover, MechanismId::PointerHover, None, None),
-            (
-                IntentId::ActScrollIntoView,
-                MechanismId::ScrollTargetIntoView,
-                None,
-                None,
-            ),
-        ] {
-            let profile = action_profile(intent).unwrap();
-            let request = action_request(
-                OperationKey::new(OperationId::BrowserAct, intent),
-                profile,
-                7,
-                "ref_1",
-                &json!({"modifiers":"SHIFT"}),
-            );
-            assert_eq!(request.id(), mechanism);
-            assert_eq!(request.input()["tab"], 7);
-            assert_eq!(
-                request.input().pointer("/target/ref"),
-                Some(&json!("ref_1"))
-            );
-            assert_eq!(
-                request.input().get("button").and_then(Value::as_str),
-                button
-            );
-            assert_eq!(request.input().get("count").and_then(Value::as_u64), count);
-            assert!(request.input().get("action").is_none());
-            assert!(request.input().get("tabId").is_none());
-        }
-
-        let request = action_request(
-            OperationKey::new(OperationId::BrowserAct, IntentId::ActSetValue),
-            action_profile(IntentId::ActSetValue).unwrap(),
-            7,
-            "ref_2",
-            &json!({"value":"hello"}),
-        );
-        assert_eq!(request.id(), MechanismId::FormSetValue);
-        assert_eq!(request.input()["value"], "hello");
-    }
-
-    #[test]
-    fn legacy_only_arguments_cannot_drive_the_canonical_handler() {
-        let error = validate(
-            IntentId::ActClick,
-            &json!({
-                "tabId": 1,
-                "target": {"ref":"ref_1"},
-                "action": "left_click"
-            }),
-        )
-        .unwrap_err();
-        assert!(error.contains("numeric tabId"));
-    }
-
-    #[test]
-    fn post_action_safety_refusals_have_distinct_committed_receipts() {
-        for (refusal, expected_kind, expected_copy) in [
-            (
-                PostActionRefusal::Paused,
-                "postcondition_paused",
-                "observation paused",
-            ),
-            (
-                PostActionRefusal::Interrupted,
-                "postcondition_interrupted",
-                "observation was interrupted",
-            ),
-        ] {
-            let mut result = json!({
-                "content": [{"type":"text","text":"interaction receipt: action committed"}],
-                "structuredContent": {
-                    "interactionReceipt": {
-                        "observedAfter": {},
-                        "blockers": []
-                    }
-                }
-            });
-            append_post_action_refusal(&mut result, refusal, true);
-            assert_eq!(result["isError"], true);
-            assert_eq!(
-                result.pointer("/structuredContent/interactionReceipt/blockers/0/kind"),
-                Some(&json!(expected_kind))
-            );
-            assert!(result["content"][0]["text"]
-                .as_str()
-                .unwrap()
-                .contains(expected_copy));
-            assert_ne!(expected_kind, "expect_timeout");
-        }
+    CallOutcome::Success {
+        result: Box::new(operation_execution(
+            result,
+            &batch_id,
+            assurance,
+            category,
+            Some(resolved_target.clone()),
+        )),
     }
 }

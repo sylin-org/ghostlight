@@ -8,7 +8,7 @@
 //! exact protocol behavior belongs to the date-named handlers in `crates/mcp-connector`.
 //!
 //! Integration tests supply request-shaped JSON values to [`Harness::drive`] as a compact test
-//! instruction format. Calls carry a serialized canonical [`BrowserOperation`], and catalog
+//! instruction format. Calls carry a serialized Ghostlight [`Operation`], and catalog
 //! requests return a canonical service projection. This fixture deliberately does not emulate a
 //! model-facing surface or MCP wire implementation.
 //!
@@ -34,9 +34,12 @@ use ghostlight::observability::DebugSink;
 use ghostlight::tool::outcome::CallOutcome;
 use ghostlight::work::{CancellationToken, WorkContext};
 use ghostlight_transport::bridge::WorkspaceUse;
-use ghostlight_transport::operation::{BrowserOperation, IntentId, OperationId};
+use ghostlight_transport::operation::Operation;
 use serde_json::{json, Value};
 use std::time::Duration;
+
+/// Current source adapter feature required by strict native value-mutation fixtures.
+const STRICT_SENSITIVE_WRITES_V1: &str = "strictSensitiveWritesV1";
 
 /// Parse a JSON `Value` into a validated schema-3 [`Manifest`], the way a `--manifest file://`
 /// source would, so a governed [`Harness`] can be built from the exact manifest shape the
@@ -104,6 +107,17 @@ impl Harness {
     where
         F: Fn(&Value) -> Value + Send + 'static,
     {
+        self.attach_fake_extension_result(move |request| Ok(responder(request)))
+            .await;
+    }
+
+    /// Attach a fake extension that can return either a normal result or a correlated
+    /// `tool_error`. This is reserved for final-admission and pre-effect page-rejection tests;
+    /// ordinary fixture callers should use [`Self::attach_fake_extension`].
+    pub async fn attach_fake_extension_result<F>(&self, responder: F)
+    where
+        F: Fn(&Value) -> Result<Value, String> + Send + 'static,
+    {
         let (browser_side, mut ext_side) = tokio::io::duplex(64 * 1024);
         let attached = self.ctx.browser.clone();
         tokio::spawn(async move {
@@ -122,6 +136,7 @@ impl Harness {
             let identity = serde_json::to_vec(&json!({
                 "type": ghostlight_transport::handshake::EXTENSION_IDENTITY_TYPE,
                 ghostlight_transport::handshake::BROWSER_ID_FIELD: "inproc-fixture",
+                "features": [STRICT_SENSITIVE_WRITES_V1],
             }))
             .unwrap();
             if host::write_message(&mut ext_side, &identity).await.is_err() {
@@ -132,16 +147,17 @@ impl Harness {
                     Ok(v) => v,
                     Err(_) => break,
                 };
-                let response_type = if v["type"] == "tab_url_request" {
-                    "tab_url_response"
-                } else {
-                    "tool_response"
+                let reply = match responder(&v) {
+                    Ok(result) => {
+                        let response_type = if v["type"] == "tab_url_request" {
+                            "tab_url_response"
+                        } else {
+                            "tool_response"
+                        };
+                        json!({"id":v["id"],"type":response_type,"result":result})
+                    }
+                    Err(error) => json!({"id":v["id"],"type":"tool_error","error":error}),
                 };
-                let reply = json!({
-                    "id": v["id"],
-                    "type": response_type,
-                    "result": responder(&v),
-                });
                 if host::write_message(&mut ext_side, &serde_json::to_vec(&reply).unwrap())
                     .await
                     .is_err()
@@ -193,29 +209,13 @@ impl Harness {
                     let params = request
                         .get("params")
                         .expect("canonical call fixture instruction has params");
-                    let operation = serde_json::from_value::<BrowserOperation>(
+                    let operation = serde_json::from_value::<Operation>(
                         params
                             .get("operation")
                             .cloned()
                             .expect("canonical call fixture instruction has an operation"),
                     )
                     .expect("canonical call fixture instruction contains a valid wire shape");
-                    // This convenience fixture represents a trusted fake-browser inventory. Seed
-                    // caller-supplied tab handles explicitly so ordinary tool tests do not need a
-                    // synthetic tabs_context_mcp prelude. Workspace-authority tests bypass this
-                    // helper and exercise verification-only request admission directly.
-                    let mut fixture_tabs = Vec::new();
-                    collect_fixture_tab_ids(&operation.arguments, &mut fixture_tabs);
-                    fixture_tabs.sort_unstable();
-                    fixture_tabs.dedup();
-                    if !fixture_tabs.is_empty() {
-                        let claim = self.ctx.workspaces.claim_tabs(&workspace, &fixture_tabs);
-                        assert_ne!(
-                            claim,
-                            ghostlight::hub::workspace::TabClaim::Refused,
-                            "fixture tab inventory crossed a workspace"
-                        );
-                    }
                     self.execute(operation, &workspace, &owner, client.clone())
                         .await
                 }
@@ -233,7 +233,7 @@ impl Harness {
 
     fn catalog_result(&self) -> Value {
         let authority = self.ctx.authority.current();
-        serde_json::to_value(ghostlight::tool::catalog::project_catalog(
+        serde_json::to_value(ghostlight::operation::registry::project_availability(
             &authority.governance,
             None,
             *self.ctx.catalog_generation.borrow(),
@@ -243,13 +243,12 @@ impl Harness {
 
     async fn execute(
         &self,
-        canonical: BrowserOperation,
+        operation: Operation,
         workspace: &ghostlight_transport::workspace_id::WorkspaceId,
         owner: &PeerUser,
         client: Option<ClientInfo>,
     ) -> Value {
-        let descriptor = ghostlight::operation::registry::descriptor(canonical.key())
-            .expect("fixture call maps to an implemented operation");
+        let descriptor = ghostlight::operation::registry::descriptor(operation.kind());
         let workspace = match descriptor.workspace_use {
             WorkspaceUse::Independent => None,
             _ => Some(workspace.clone()),
@@ -260,7 +259,7 @@ impl Harness {
                 .lease(workspace, owner)
                 .expect("lease the fixture workspace")
         });
-        let work = WorkContext::new(workspace, canonical, None, client, None);
+        let work = WorkContext::new(workspace, operation, client, None);
         let cancellation = CancellationToken::new();
         let outcome = ghostlight::tool::pipeline::run_work(
             &self.ctx.browser,
@@ -280,8 +279,8 @@ impl Harness {
     /// This seam is intentionally narrow: callers use it to prove that an invalid canonical pair
     /// fails before workspace or browser dispatch. Ordinary fixture calls must continue through
     /// [`Harness::drive`], which mints and verifies a real workspace.
-    pub async fn execute_unscoped_canonical(&self, operation: BrowserOperation) -> Value {
-        let work = WorkContext::new(None, operation, None, None, None);
+    pub async fn execute_unscoped(&self, operation: Operation) -> Value {
+        let work = WorkContext::new(None, operation, None, None);
         let cancellation = CancellationToken::new();
         let outcome = ghostlight::tool::pipeline::run_work(
             &self.ctx.browser,
@@ -296,25 +295,6 @@ impl Harness {
     }
 }
 
-fn collect_fixture_tab_ids(value: &Value, tab_ids: &mut Vec<i64>) {
-    match value {
-        Value::Object(object) => {
-            if let Some(tab_id) = object.get("tab").and_then(Value::as_i64) {
-                tab_ids.push(tab_id);
-            }
-            for child in object.values() {
-                collect_fixture_tab_ids(child, tab_ids);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_fixture_tab_ids(item, tab_ids);
-            }
-        }
-        _ => {}
-    }
-}
-
 fn request_client(request: &Value) -> Option<ClientInfo> {
     let client = request.pointer("/params/clientInfo")?;
     Some(ClientInfo {
@@ -325,7 +305,9 @@ fn request_client(request: &Value) -> Option<ClientInfo> {
 
 fn render_outcome(outcome: CallOutcome) -> Value {
     match outcome {
-        CallOutcome::Success { result } => result,
+        CallOutcome::Success { result } => {
+            serde_json::to_value(*result).expect("typed operation result serializes")
+        }
         CallOutcome::Failure { error } => error_result(error.to_string()),
         CallOutcome::NotDispatched { message } => execution_result("not_dispatched", true, message),
         CallOutcome::OutcomeUnknown { message } => {
@@ -364,7 +346,7 @@ fn execution_result(status: &str, retry_safe: bool, message: String) -> Value {
 }
 
 /// One canonical call instruction for [`Harness::drive`].
-pub fn operation_call(id: i64, operation: BrowserOperation) -> Value {
+pub fn operation_call(id: i64, operation: Operation) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -373,13 +355,8 @@ pub fn operation_call(id: i64, operation: BrowserOperation) -> Value {
     })
 }
 
-/// Construct one canonical operation for an in-process test instruction.
-pub fn operation(id: OperationId, intent: IntentId, arguments: Value) -> BrowserOperation {
-    BrowserOperation::new(id, intent, arguments)
-}
-
 /// The `[initialize, canonical operation]` instruction pair every call-driving test opens with.
-pub fn init_and_call(operation: BrowserOperation) -> Vec<Value> {
+pub fn init_and_call(operation: Operation) -> Vec<Value> {
     vec![
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
         operation_call(2, operation),

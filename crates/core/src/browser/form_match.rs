@@ -39,6 +39,10 @@ pub struct Control {
     pub aria_label: Option<String>,
     pub disabled: bool,
     pub readonly: bool,
+    /// The adapter's structural credential classification. `None` means the covered adapter did
+    /// not provide the fact, so Ghostlight must fail closed before mutation.
+    #[serde(default)]
+    pub sensitive: Option<bool>,
 }
 
 /// One submit candidate (PINS.md SS12): a button/input the content script judged submit-like.
@@ -48,6 +52,8 @@ pub struct SubmitCandidate {
     pub ref_id: String,
     pub label: Option<String>,
     pub kind: String,
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 /// One `<form>`'s controls and submit candidates, in document order (PINS.md SS12).
@@ -83,6 +89,7 @@ pub struct ControlRef {
     pub control_type: String,
     pub disabled: bool,
     pub readonly: bool,
+    pub sensitive: Option<bool>,
 }
 
 /// The outcome of [`match_fields`]: matched keys (each paired with the control it resolved to),
@@ -180,6 +187,7 @@ fn control_ref(c: &Control) -> ControlRef {
         control_type: c.control_type.clone(),
         disabled: c.disabled,
         readonly: c.readonly,
+        sensitive: c.sensitive,
     }
 }
 
@@ -321,6 +329,7 @@ mod tests {
             aria_label: None,
             disabled: false,
             readonly: false,
+            sensitive: Some(false),
         }
     }
 

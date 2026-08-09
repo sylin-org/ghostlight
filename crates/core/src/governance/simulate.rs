@@ -22,9 +22,8 @@
 //! (a candidate manifest simulation must be reproducible in CI, where no local
 //! `content.security.sacred_domains` exists), so rule `sacred` can never appear in a report.
 //!
-//! Old (`rw`-era) audit files remain replayable: this module never trusted the recorded `rw`
-//! (or, before that, `decision`/`grant_id`) value; it always re-derives the bound capability
-//! requirement set from `requires_fn` and replays the action fresh.
+//! Replay consumes the canonical audit record's complete `required_capabilities` set. Historical
+//! audit dialects are not product inputs after ADR-0102; they fail closed as not evaluable.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -67,15 +66,14 @@ pub struct SimulateOutcome {
 /// Load the candidate manifest and the replay file, run the simulation, and render the report.
 /// `replay_path_display` is the path exactly as given on the command line (the report echoes
 /// it verbatim, per Required behavior section 5). `domain_pattern_valid` is the manifest
-/// loader's real host-pattern checker; `requires_fn`/`evaluate_host` are the same function
-/// pointers live enforcement injects into [`check_call`] -- all three the "known integration
+/// loader's real host-pattern checker; `evaluate_host` is the same function
+/// pointer live enforcement injects into [`check_call`] -- both use the "known integration
 /// point" shape used everywhere else in `governance/`, so this domain-agnostic core module
 /// never names `browser::`/`transport::` directly (the a7 arch-test).
 pub fn run_simulate(
     manifest_path: &Path,
     replay_path: &Path,
     domain_pattern_valid: fn(&str) -> bool,
-    requires_fn: fn(&str, Option<&str>) -> Option<&'static [Capability]>,
     evaluate_host: fn(&str, &[String], &[String]) -> HostRuleOutcome,
 ) -> Result<SimulateOutcome, SimulateError> {
     let manifest_text =
@@ -95,12 +93,7 @@ pub fn run_simulate(
             source: e,
         })?;
 
-    let report = simulate_lines(
-        &manifest,
-        numbered_lines(&replay_text),
-        requires_fn,
-        evaluate_host,
-    );
+    let report = simulate_lines(&manifest, numbered_lines(&replay_text), evaluate_host);
     let would_deny = report.would_deny;
     let text = render_report(&manifest, &replay_path.display().to_string(), &report);
     Ok(SimulateOutcome {
@@ -139,7 +132,6 @@ struct Report {
 fn simulate_lines<'a>(
     manifest: &Manifest,
     lines: impl Iterator<Item = (usize, &'a str)>,
-    requires_fn: fn(&str, Option<&str>) -> Option<&'static [Capability]>,
     evaluate_host: fn(&str, &[String], &[String]) -> HostRuleOutcome,
 ) -> Report {
     let mut would_allow = 0u64;
@@ -152,7 +144,7 @@ fn simulate_lines<'a>(
         if line.trim().is_empty() {
             continue;
         }
-        match evaluate_line(manifest, line, requires_fn, evaluate_host) {
+        match evaluate_line(manifest, line, evaluate_host) {
             LineOutcome::Skip => {}
             LineOutcome::Allow => would_allow += 1,
             LineOutcome::Deny {
@@ -202,17 +194,15 @@ enum LineOutcome {
     NotEvaluable(String),
 }
 
-/// Evaluate one non-empty replay line per the Required behavior section 4 bucket table, in
-/// the exact order specified there. The recorded `capability`/`decision`/`grant_id`/
-/// `denial_id` (or, on an old rw-era line, `rw`) and every other field besides the optional
-/// `role` plus `tool`/`action`/`domain` are read by nobody. A recognized `mechanism_phase` is
+/// Evaluate one canonical audit line. Decision, grant, and denial fields are deliberately
+/// recomputed, while the recorded complete capability set is replayed as semantic input. A
+/// recognized `mechanism_phase` is
 /// correlated physical evidence under an already-recorded semantic decision, so it is skipped.
 /// An absent role remains replayable, including a true `browser.flow` child. Malformed or unknown
 /// roles fail closed into the not-evaluable bucket.
 fn evaluate_line(
     manifest: &Manifest,
     line: &str,
-    requires_fn: fn(&str, Option<&str>) -> Option<&'static [Capability]>,
     evaluate_host: fn(&str, &[String], &[String]) -> HostRuleOutcome,
 ) -> LineOutcome {
     let value: serde_json::Value = match serde_json::from_str(line) {
@@ -247,21 +237,22 @@ fn evaluate_line(
         Some(_) => return LineOutcome::NotEvaluable("missing field: domain".to_string()),
     };
 
-    let action: Option<String> = match obj.get("action") {
-        None | Some(serde_json::Value::Null) => None,
-        Some(serde_json::Value::String(s)) => Some(s.clone()),
-        Some(_) => return LineOutcome::NotEvaluable("missing field: action".to_string()),
+    let Some(required_capabilities) = obj.get("required_capabilities").and_then(|v| v.as_array())
+    else {
+        return LineOutcome::NotEvaluable("missing field: required_capabilities".to_string());
     };
-
-    let Some(requires) = requires_fn(tool, action.as_deref()) else {
-        return LineOutcome::NotEvaluable(if tool != "computer" {
-            format!("unknown tool: {tool}")
-        } else if let Some(a) = &action {
-            format!("unknown action: {a}")
-        } else {
-            "computer action missing".to_string()
-        });
-    };
+    let mut requires = Vec::with_capacity(required_capabilities.len());
+    for value in required_capabilities {
+        let Some(name) = value.as_str() else {
+            return LineOutcome::NotEvaluable("malformed field: required_capabilities".to_string());
+        };
+        let Some(capability) = Capability::from_name(name) else {
+            return LineOutcome::NotEvaluable(format!("unknown capability: {name}"));
+        };
+        if !requires.contains(&capability) {
+            requires.push(capability);
+        }
+    }
 
     let resource = match &domain {
         Some(host) => GoverningResource::Resource(host.clone()),
@@ -273,8 +264,8 @@ fn evaluate_line(
     let decision = check_call(
         &manifest.grants,
         tool,
-        action.as_deref(),
-        requires,
+        None,
+        &requires,
         &resource,
         &manifest.hash,
         evaluate_host,
@@ -341,19 +332,6 @@ mod tests {
     use super::*;
     use crate::governance::manifest::document::{Grant, HostRules};
 
-    fn stub_requires(tool: &str, action: Option<&str>) -> Option<&'static [Capability]> {
-        match (tool, action) {
-            ("computer", Some("screenshot")) => Some(&[Capability::Read]),
-            ("computer", Some("left_click")) => Some(&[Capability::Action]),
-            ("read_page", None) => Some(&[Capability::Read]),
-            ("browser.snapshot", Some("snapshot.capture")) => Some(&[Capability::Read]),
-            ("navigate", None) => Some(&[Capability::Read]),
-            ("javascript_tool", None) => Some(&[Capability::Execute]),
-            ("update_plan", None) => Some(&[]),
-            _ => None,
-        }
-    }
-
     fn stub_evaluate_host(host: &str, allow: &[String], deny: &[String]) -> HostRuleOutcome {
         fn matches(pattern: &str, host: &str) -> bool {
             pattern == "*"
@@ -400,12 +378,7 @@ mod tests {
     fn run(manifest: &Manifest, lines: &[&str]) -> Report {
         let numbered: Vec<(usize, &str)> =
             lines.iter().enumerate().map(|(i, l)| (i + 1, *l)).collect();
-        simulate_lines(
-            manifest,
-            numbered.into_iter(),
-            stub_requires,
-            stub_evaluate_host,
-        )
+        simulate_lines(manifest, numbered.into_iter(), stub_evaluate_host)
     }
 
     #[test]
@@ -431,7 +404,7 @@ mod tests {
             &m,
             &[
                 r#"{"role":"mechanism_phase"}"#,
-                r#"{"tool":"browser.snapshot","action":"snapshot.capture","domain":"example.com","orchestrator":"browser.flow","batch_id":"00000000-0000-4000-8000-000000000001","step":1}"#,
+                r#"{"tool":"browser_inspect_page","domain":"example.com","required_capabilities":["read"],"orchestrator":"browser_run_sequence","batch_id":"00000000-0000-4000-8000-000000000001","step":1}"#,
             ],
         );
         assert_eq!(r.would_allow, 1);
@@ -514,53 +487,46 @@ mod tests {
     }
 
     #[test]
-    fn bucket_table_action_wrong_type() {
+    fn bucket_table_capabilities_wrong_type() {
         let m = sample_manifest(vec![]);
-        let r = run(&m, &[r#"{"tool":"computer","domain":null,"action":42}"#]);
+        let r = run(
+            &m,
+            &[r#"{"tool":"browser_read_page","domain":null,"required_capabilities":"read"}"#],
+        );
         assert_eq!(
             r.not_evaluable_lines,
-            vec![(1, "missing field: action".to_string())]
+            vec![(1, "missing field: required_capabilities".to_string())]
         );
     }
 
     #[test]
-    fn bucket_table_unknown_tool() {
+    fn bucket_table_unknown_capability() {
         let m = sample_manifest(vec![]);
-        let r = run(&m, &[r#"{"tool":"teleport","domain":null}"#]);
-        assert_eq!(
-            r.not_evaluable_lines,
-            vec![(1, "unknown tool: teleport".to_string())]
+        let r = run(
+            &m,
+            &[r#"{"tool":"browser_read_page","domain":null,"required_capabilities":["future"]}"#],
         );
-    }
-
-    #[test]
-    fn bucket_table_computer_action_missing() {
-        let m = sample_manifest(vec![]);
-        let r = run(&m, &[r#"{"tool":"computer","domain":null,"action":null}"#]);
         assert_eq!(
             r.not_evaluable_lines,
-            vec![(1, "computer action missing".to_string())]
-        );
-    }
-
-    #[test]
-    fn bucket_table_computer_unknown_action() {
-        let m = sample_manifest(vec![]);
-        let r = run(&m, &[r#"{"tool":"computer","domain":null,"action":"fly"}"#]);
-        assert_eq!(
-            r.not_evaluable_lines,
-            vec![(1, "unknown action: fly".to_string())]
+            vec![(1, "unknown capability: future".to_string())]
         );
     }
 
     #[test]
     fn bucket_table_evaluable_allow_and_deny() {
         let m = sample_manifest(vec![grant("g", &["example.com"], &[Capability::Read])]);
-        let allow = run(&m, &[r#"{"tool":"read_page","domain":"example.com"}"#]);
+        let allow = run(
+            &m,
+            &[
+                r#"{"tool":"browser_read_page","domain":"example.com","required_capabilities":["read"]}"#,
+            ],
+        );
         assert_eq!(allow.would_allow, 1);
         let deny = run(
             &m,
-            &[r#"{"tool":"javascript_tool","domain":"example.com"}"#],
+            &[
+                r#"{"tool":"browser_fill_form","domain":"example.com","required_capabilities":["write"]}"#,
+            ],
         );
         assert_eq!(deny.would_deny, 1);
     }
@@ -571,8 +537,8 @@ mod tests {
         let r = run(
             &m,
             &[
-                r#"{"tool":"read_page","domain":"example.com"}"#,
-                r#"{"tool":"navigate","domain":"example.com"}"#,
+                r#"{"tool":"browser_read_page","domain":"example.com","required_capabilities":["read"]}"#,
+                r#"{"tool":"browser_navigate","domain":"example.com","required_capabilities":["interact"]}"#,
                 "not json",
             ],
         );
@@ -585,8 +551,8 @@ mod tests {
         let r = run(
             &m,
             &[
-                r#"{"tool":"javascript_tool","domain":"example.com"}"#,
-                r#"{"tool":"javascript_tool","domain":null}"#,
+                r#"{"tool":"browser_fill_form","domain":"example.com","required_capabilities":["write"]}"#,
+                r#"{"tool":"browser_fill_form","domain":null,"required_capabilities":["write"]}"#,
             ],
         );
         // "-" (no grant / no domain) sorts before "example.com"/"g" lexicographically.
@@ -606,20 +572,20 @@ mod tests {
             &["docs.example.com"],
             &[Capability::Read],
         )]);
-        let line = r#"{"tool":"javascript_tool","domain":"docs.example.com"}"#;
+        let line = r#"{"tool":"browser_fill_form","domain":"docs.example.com","required_capabilities":["write"]}"#;
 
         let report = run(&m, &[line]);
         let ((grant, domain, tool, rule), info) = report.groups.iter().next().expect("one group");
         assert_eq!(grant, "docs-read");
         assert_eq!(domain, "docs.example.com");
-        assert_eq!(tool, "javascript_tool");
+        assert_eq!(tool, "browser_fill_form");
         assert_eq!(rule, "capability");
 
         let direct = check_call(
             &m.grants,
-            "javascript_tool",
+            "browser_fill_form",
             None,
-            &[Capability::Execute],
+            &[Capability::Write],
             &GoverningResource::Resource("docs.example.com".to_string()),
             &m.hash,
             stub_evaluate_host,

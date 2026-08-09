@@ -8,6 +8,9 @@ const path = require("node:path");
 const {
   MECHANISM_IDS,
   MECHANISM_REQUEST_V1,
+  NAVIGATION_READINESS_V1,
+  ATOMIC_TAB_OPEN_V1,
+  STRICT_SENSITIVE_WRITES_V1,
   normalizeIncomingRequest,
   translateMechanismRequest,
 } = require("../../extension/lib/mechanism-wire.js");
@@ -20,12 +23,15 @@ const EXPECTED_TOOLS = {
   "workspace.tabs.inspect": "tabs_context_mcp",
   "workspace.tabs.ensure": "tabs_context_mcp",
   "workspace.tab.create": "tabs_create_mcp",
+  "workspace.tab.open": "tabs_open_mcp",
   "tab.focus": "tab_control",
   "tab.close": "tab_control",
-  "navigate.url": "navigate",
-  "navigate.back": "navigate",
-  "navigate.forward": "navigate",
-  "navigate.reload": "tab_control",
+  "navigate.url": "navigate_readiness_start",
+  "navigate.back": "navigate_readiness_start",
+  "navigate.forward": "navigate_readiness_start",
+  "navigate.reload": "navigate_readiness_start",
+  "navigation.await_readiness": "navigation_readiness_await",
+  "navigation.verify_document": "navigation_readiness_verify",
   "page.snapshot": "read_page",
   "page.read_text": "get_page_text",
   "page.find": "find",
@@ -73,10 +79,13 @@ function frame(mechanism, input = {}) {
   };
 }
 
-test("the closed adapter vocabulary exhaustively covers all 43 mechanism ids", () => {
+test("the closed adapter vocabulary exhaustively covers all 46 mechanism ids", () => {
   assert.equal(MECHANISM_REQUEST_V1, "mechanismRequestV1");
-  assert.equal(MECHANISM_IDS.length, 43);
-  assert.equal(Object.keys(EXPECTED_TOOLS).length, 42);
+  assert.equal(NAVIGATION_READINESS_V1, "navigationReadinessV1");
+  assert.equal(ATOMIC_TAB_OPEN_V1, "atomicTabOpenV1");
+  assert.equal(STRICT_SENSITIVE_WRITES_V1, "strictSensitiveWritesV1");
+  assert.equal(MECHANISM_IDS.length, 46);
+  assert.equal(Object.keys(EXPECTED_TOOLS).length, 45);
 
   for (const mechanism of MECHANISM_IDS) {
     const input = mechanism === "target.cue"
@@ -85,7 +94,9 @@ test("the closed adapter vocabulary exhaustively covers all 43 mechanism ids", (
         ? { button: "left", count: 1 }
         : mechanism === "tab.url_query"
           ? { tab: 4 }
-          : {};
+          : mechanism.startsWith("navigate.")
+            ? { readiness: {} }
+            : {};
     const normalized = translateMechanismRequest(frame(mechanism, input));
     if (mechanism === "tab.url_query") {
       assert.equal(normalized.type, "tab_url_request", mechanism);
@@ -107,6 +118,7 @@ test("typed envelopes preserve execution and additive metadata while normalizing
     input: {
       tab: 9,
       url: "https://example.com/",
+      readiness: { settle: true, timeout_ms: 10000, min_ms: 0 },
       future_input: { mode: "additive" },
     },
     guid: "workspace-7",
@@ -125,9 +137,10 @@ test("typed envelopes preserve execution and additive metadata while normalizing
     execution: { class: "scheduled", commandId: "command-7" },
     workspace: { groupTitle: "Ghostlight - Example" },
     futureEnvelope: { retained: true },
-    tool: "navigate",
+    tool: "navigate_readiness_start",
     args: {
       url: "https://example.com/",
+      readiness: { settle: true, timeout_ms: 10000, min_ms: 0 },
       future_input: { mode: "additive" },
       tabId: 9,
     },
@@ -136,8 +149,25 @@ test("typed envelopes preserve execution and additive metadata while normalizing
   assert.deepEqual(original.input, {
     tab: 9,
     url: "https://example.com/",
+    readiness: { settle: true, timeout_ms: 10000, min_ms: 0 },
     future_input: { mode: "additive" },
   });
+});
+
+test("typed navigation without explicit readiness preserves the R4 adapter path", () => {
+  for (const [mechanism, input, tool, expectedArgs] of [
+    ["navigate.url", { tab: 1, url: "https://example.com/" }, "navigate", {
+      tabId: 1,
+      url: "https://example.com/",
+    }],
+    ["navigate.back", { tab: 1 }, "navigate", { tabId: 1, url: "back" }],
+    ["navigate.forward", { tab: 1 }, "navigate", { tabId: 1, url: "forward" }],
+    ["navigate.reload", { tab: 1 }, "tab_control", { tabId: 1, action: "reload" }],
+  ]) {
+    const normalized = translateMechanismRequest(frame(mechanism, input));
+    assert.equal(normalized.tool, tool, mechanism);
+    assert.deepEqual(normalized.args, expectedArgs, mechanism);
+  }
 });
 
 test("legacy tool_request remains unchanged through the exported dual reader", () => {
@@ -186,7 +216,7 @@ test("action-bearing mechanisms select the exact covered handler action", () => 
   const cases = [
     ["tab.focus", {}, "focus"],
     ["tab.close", {}, "close"],
-    ["navigate.reload", {}, "reload"],
+    ["navigate.reload", { readiness: {} }, "reload"],
     ["screenshot.viewport", {}, "screenshot"],
     ["screenshot.region", {}, "zoom"],
     ["pointer.hover", {}, "hover"],
@@ -236,6 +266,24 @@ test("canonical field families retain exact presence while reaching legacy handl
     ["workspace.tabs.ensure", {}, { createIfEmpty: true }],
     ["workspace.tabs.ensure", { create_if_empty: false }, { createIfEmpty: true }],
     ["navigate.back", { tab: 1 }, { tabId: 1, url: "back" }],
+    ["navigation.await_readiness", {
+      tab: 1,
+      navigation_token: "n_1",
+      document_handle: "d_1",
+    }, {
+      tabId: 1,
+      navigation_token: "n_1",
+      document_handle: "d_1",
+    }],
+    ["navigation.verify_document", {
+      tab: 1,
+      navigation_token: "n_1",
+      document_handle: "d_1",
+    }, {
+      tabId: 1,
+      navigation_token: "n_1",
+      document_handle: "d_1",
+    }],
     ["page.snapshot", { tab: 1, scope_ref: "ref_1" }, { tabId: 1, ref_id: "ref_1" }],
     ["pointer.drag", { tab: 1, from: [1, 2], to: [3, 4] }, {
       tabId: 1,
@@ -260,6 +308,19 @@ test("canonical field families retain exact presence while reaching legacy handl
       tabId: 1,
       value: "x",
       ref: "ref_3",
+    }],
+    ["form.set_value", {
+      tab: 1,
+      target: { ref: "ref_4" },
+      value: "x",
+      reject_sensitive: true,
+      expected_type: "text",
+    }, {
+      tabId: 1,
+      value: "x",
+      reject_sensitive: true,
+      expected_type: "text",
+      ref: "ref_4",
     }],
     ["wait.delay", { tab: 1, seconds: 2 }, { tabId: 1, duration: 2, action: "wait" }],
     ["upload.image", { tab: 1, point: [7, 8], mime_type: "image/png" }, {
@@ -388,6 +449,9 @@ test("service worker advertises runtime adapter identity and normalizes before d
   assert.match(worker, /"lib\/mechanism-wire\.js"/);
   assert.match(worker, /adapterVersion: chrome\.runtime\.getManifest\(\)\.version/);
   assert.match(worker, /self\.GhostlightMechanismWire\.MECHANISM_REQUEST_V1/);
+  assert.match(worker, /self\.GhostlightMechanismWire\.NAVIGATION_READINESS_V1/);
+  assert.match(worker, /self\.GhostlightMechanismWire\.ATOMIC_TAB_OPEN_V1/);
+  assert.match(worker, /self\.GhostlightMechanismWire\.STRICT_SENSITIVE_WRITES_V1/);
   const normalize = worker.indexOf("normalizeIncomingRequest(msg)");
   const dispatch = worker.indexOf('if (msg && msg.type === "tool_request"');
   const tabUrl = worker.indexOf('if (msg && msg.type === "tab_url_request"');
@@ -395,7 +459,7 @@ test("service worker advertises runtime adapter identity and normalizes before d
   assert.match(worker.slice(normalize, dispatch), /\bfail\(/);
 });
 
-test("adapter 0.8.1 declares the unchanged 0.8 service compatibility block", () => {
+test("the shipped adapter declares its matching service compatibility block", () => {
   const manifest = JSON.parse(fs.readFileSync(
     path.join(__dirname, "../../extension/manifest.json"),
     "utf8"
@@ -404,9 +468,9 @@ test("adapter 0.8.1 declares the unchanged 0.8 service compatibility block", () 
     path.join(__dirname, "../../compatibility.json"),
     "utf8"
   ));
-  assert.equal(manifest.version, "0.8.1");
+  assert.equal(manifest.version, "0.9.0");
   assert.deepEqual(
     compatibility.chromeAdapters.find((entry) => entry.adapterVersion === manifest.version),
-    { adapterVersion: "0.8.1", serviceVersionBlock: "0.8" }
+    { adapterVersion: "0.9.0", serviceVersionBlock: "0.9" }
   );
 });

@@ -24,10 +24,6 @@ use clap::{Args, Parser, Subcommand};
 use ghostlight::hub::manage::doctor::DoctorOptions;
 use ghostlight::install::{InstallOptions, Selection, UninstallOptions};
 
-mod demo;
-mod demo_brief;
-mod demo_client;
-
 /// Ghostlight -- the user's own authenticated browser, for AI agents.
 #[derive(Debug, Parser)]
 #[command(
@@ -79,46 +75,8 @@ enum Command {
     Policy(PolicyArgs),
     /// Run the persistent Ghostlight Hub service (owns the browser link; multiplexes clients).
     Service,
-    /// Drive the scripted Sylin Card Foundry story (sylin.org/ghostlight/demo/foundry).
-    Demo(DemoArgs),
-    /// Drive the short launch-brief story for a README hero recording.
-    DemoBrief(DemoBriefArgs),
     /// Show or install a Ghostlight license (state never affects behavior; ADR-0028).
     License(LicenseArgs),
-}
-
-#[derive(Debug, Args)]
-struct DemoArgs {
-    /// The demo stage base URL. Defaults to the live site; override for a local `eleventy --serve`
-    /// (e.g. http://localhost:8080/ghostlight/demo).
-    #[arg(long, default_value = "https://sylin.org/ghostlight/demo")]
-    base_url: String,
-    /// Seconds to pause after each visible step so you can watch it happen. Default 3.
-    #[arg(long, default_value_t = 3.0)]
-    pause: f64,
-    /// Seconds to wait right after the demo tab opens, so you can resize and position the
-    /// browser window before the tour starts. Default 10.
-    #[arg(long, default_value_t = 10.0)]
-    setup_pause: f64,
-    /// Seconds to breathe between the Foundry's inspection, revision, and release phases. Default 5.
-    #[arg(long, default_value_t = 5.0)]
-    section_pause: f64,
-}
-
-#[derive(Debug, Args)]
-struct DemoBriefArgs {
-    /// The public demo base URL. Override for a local website preview.
-    #[arg(long, default_value = "https://sylin.org/ghostlight/demo")]
-    base_url: String,
-    /// Seconds between the visible field, selection, and submit steps. Default 0.25.
-    #[arg(long, default_value_t = 0.25)]
-    pause: f64,
-    /// Seconds to hold the loaded stage before the story begins. Default 2.
-    #[arg(long, default_value_t = 2.0)]
-    setup_pause: f64,
-    /// Seconds to hold the completed brief before exiting. Default 3.
-    #[arg(long, default_value_t = 3.0)]
-    success_pause: f64,
 }
 
 #[derive(Debug, Args)]
@@ -559,7 +517,6 @@ fn main() -> Result<()> {
                 &manifest,
                 &replay,
                 ghostlight::browser::pattern::is_valid_pattern,
-                ghostlight::operation::audit_compat::requires,
                 ghostlight::browser::polarity::evaluate_host,
             )?;
             print!("{}", outcome.report);
@@ -627,28 +584,6 @@ fn main() -> Result<()> {
             keep_warm,
             ..
         } => ghostlight::hub::run_service(manifest, debug_flag || debug_env, keep_warm)?,
-        Cli {
-            command: Some(Command::Demo(args)),
-            ..
-        } => demo::run(
-            &args.base_url,
-            demo::Pacing {
-                step_secs: args.pause,
-                setup_secs: args.setup_pause,
-                section_secs: args.section_pause,
-            },
-        )?,
-        Cli {
-            command: Some(Command::DemoBrief(args)),
-            ..
-        } => demo_brief::run(
-            &args.base_url,
-            demo_brief::Pacing {
-                step_secs: args.pause,
-                setup_secs: args.setup_pause,
-                success_secs: args.success_pause,
-            },
-        )?,
         Cli {
             command: Some(Command::License(args)),
             ..

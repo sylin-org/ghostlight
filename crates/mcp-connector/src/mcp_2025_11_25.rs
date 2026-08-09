@@ -11,7 +11,7 @@ use crate::jsonrpc::{
     error_response, notification, success_response, Request, RequestId, INVALID_PARAMS,
     INVALID_REQUEST, METHOD_NOT_FOUND,
 };
-use crate::surface::ghostlight_legacy;
+use crate::surface::{self, ghostlight, McpRevision};
 use ghostlight_transport::bridge::{
     BridgeError, BridgeErrorKind, CatalogProjection, ClientPresentation, EdgeMessage,
     RequestContext, TerminalOutcome, WorkspaceId,
@@ -470,7 +470,11 @@ impl Handler {
                 ));
             }
         };
-        let operation = match ghostlight_legacy::decode_call(external_tool, arguments.clone()) {
+        let operation = match surface::decode_call(
+            McpRevision::Mcp2025_11_25,
+            external_tool,
+            arguments.clone(),
+        ) {
             Ok(operation) => operation,
             Err(error) => {
                 return Effects::output(success_response(
@@ -479,19 +483,6 @@ impl Handler {
                 ));
             }
         };
-        let presentation =
-            match ghostlight_legacy::invocation_presentation(external_tool, &arguments, &operation)
-            {
-                Ok(presentation) => presentation,
-                Err(error) => {
-                    return Effects::output(success_response(
-                        &id,
-                        tool_error_result(None, &error.to_string()),
-                    ));
-                }
-            };
-        let flow_render_hints =
-            ghostlight_legacy::flow_render_hints(external_tool, &arguments, &operation);
         let Some(workspace) = self.workspace.clone() else {
             return Effects::output(error_response(
                 Some(&id),
@@ -503,9 +494,7 @@ impl Handler {
         let sequence = match correlation.track(PendingRequest::tool_request(
             id.clone(),
             PendingKind::CallTool2025,
-            presentation.clone(),
-            operation.key(),
-            flow_render_hints,
+            operation.kind(),
             Some(workspace.clone()),
         )) {
             Ok(sequence) => sequence,
@@ -516,7 +505,6 @@ impl Handler {
         Effects::service(EdgeMessage::Start {
             sequence,
             operation,
-            presentation: Some(presentation),
             workspace: Some(workspace),
             context: self.context.clone(),
         })
@@ -649,18 +637,16 @@ fn initialize_result(_projection: &CatalogProjection) -> Value {
         },
         "instructions": format!(
             "{} {}",
-            ghostlight_legacy::agent_guide(),
+            surface::agent_guide(),
             crate::TRANSPORT_CLOSED_RECOVERY_INSTRUCTIONS
         ),
     })
 }
 
 fn list_tools_result(projection: &CatalogProjection) -> Value {
+    let tools = ghostlight::filtered_declarations(McpRevision::Mcp2025_11_25, projection);
     json!({
-        "tools": ghostlight_legacy::filtered_declarations(projection)
-            .iter()
-            .map(|tool| tool.declaration.clone())
-            .collect::<Vec<_>>()
+        "tools": tools
     })
 }
 
@@ -686,87 +672,39 @@ fn render_outcome(pending: PendingRequest, outcome: TerminalOutcome) -> Effects 
     let Some(id) = pending.request_id.clone() else {
         return Effects::default();
     };
-    match outcome {
-        TerminalOutcome::Success { result } => {
-            if !pending.result_matches_expected_operation(&result) {
-                return Effects::output(error_response(
-                    Some(&id),
-                    OUTCOME_UNKNOWN,
-                    "Ghostlight received a result for a different canonical operation. Do not retry automatically; reconnect the client before continuing.",
-                    Some(json!({"disposition": "outcome_unknown"})),
-                ));
-            }
-            if let Err(message) = validated_result_workspace_2025(&pending, &result) {
-                return Effects::output(error_response(
-                    Some(&id),
-                    OUTCOME_UNKNOWN,
-                    message,
-                    Some(json!({"disposition": "outcome_unknown"})),
-                ));
-            }
-            let effect = result.effect;
-            match ghostlight_legacy::encode_result(
-                *result,
-                pending.presentation.as_ref(),
-                pending.flow_render_hints.as_ref(),
-            ) {
-                Ok(result) => Effects::output(success_response(&id, without_result_type(result))),
-                Err(error) if effect != OperationEffect::None => Effects::output(error_response(
-                    Some(&id),
-                    OUTCOME_UNKNOWN,
-                    "Ghostlight could not render the canonical result after an effect may have occurred. Do not retry automatically; inspect current browser state first.",
-                    Some(json!({
-                        "disposition": "outcome_unknown",
-                        "effect": effect.as_str(),
-                        "renderError": error.to_string(),
-                    })),
-                )),
-                Err(error) => Effects::output(success_response(
-                    &id,
-                    tool_error_result(None, &error.to_string()),
-                )),
-            }
-        }
-        TerminalOutcome::ToolFailure { result, message } => Effects::output(success_response(
-            &id,
-            tool_error_result(Some(result), &message),
-        )),
-        TerminalOutcome::NotDispatched { message }
-        | TerminalOutcome::Denied { message, .. }
-        | TerminalOutcome::AttentionRequired { message } => {
-            Effects::output(success_response(&id, tool_error_result(None, &message)))
-        }
-        TerminalOutcome::Held { prolonged } => match ghostlight_legacy::encode_held(
-            prolonged,
-            pending.presentation.as_ref(),
-            pending.expected_operation,
-        ) {
-            Ok(message) => {
-                Effects::output(success_response(&id, tool_error_result(None, &message)))
-            }
-            Err(_) => Effects::output(success_response(
-                &id,
-                tool_error_result(None, &ghostlight_legacy::encode_held_fallback(prolonged)),
-            )),
-        },
-        TerminalOutcome::Cancelled {
-            message,
-            effect: OperationEffect::None,
-        } => Effects::output(success_response(&id, tool_error_result(None, &message))),
-        TerminalOutcome::Cancelled { message, effect } => Effects::output(error_response(
+    let result = outcome.result;
+    if !pending.result_matches_expected_operation(&result) {
+        return Effects::output(error_response(
             Some(&id),
             OUTCOME_UNKNOWN,
-            format!("{message} Do not retry automatically; inspect current browser state first."),
-            Some(json!({
-                "disposition": "outcome_unknown",
-                "effect": effect.as_str(),
-            })),
-        )),
-        TerminalOutcome::OutcomeUnknown { message } => Effects::output(error_response(
+            "Ghostlight received a result for a different canonical operation. Do not retry automatically; reconnect the client before continuing.",
+            Some(json!({"disposition": "outcome_unknown"})),
+        ));
+    }
+    if let Err(message) = validated_result_workspace_2025(&pending, &result) {
+        return Effects::output(error_response(
             Some(&id),
             OUTCOME_UNKNOWN,
             message,
             Some(json!({"disposition": "outcome_unknown"})),
+        ));
+    }
+    let effect = result.effect;
+    match surface::encode_result(surface::McpRevision::Mcp2025_11_25, *result) {
+        Ok(result) => Effects::output(success_response(&id, without_result_type(result))),
+        Err(error) if effect != OperationEffect::None => Effects::output(error_response(
+            Some(&id),
+            OUTCOME_UNKNOWN,
+            "Ghostlight could not render the canonical result after an effect may have occurred. Do not retry automatically; inspect current browser state first.",
+            Some(json!({
+                "disposition": "outcome_unknown",
+                "effect": effect.as_str(),
+                "renderError": error.to_string(),
+            })),
+        )),
+        Err(error) => Effects::output(success_response(
+            &id,
+            tool_error_result(None, &error.to_string()),
         )),
     }
 }
@@ -796,9 +734,23 @@ fn render_rejection(pending: PendingRequest, error: BridgeError) -> Effects {
     if pending.suppressed {
         return Effects::default();
     }
-    let Some(id) = pending.request_id else {
+    let Some(id) = pending.request_id.clone() else {
         return Effects::default();
     };
+    if pending.kind == PendingKind::CallTool2025 {
+        let rendered = surface::encode_rejection(
+            surface::McpRevision::Mcp2025_11_25,
+            &error,
+            pending.expected_operation,
+            pending.requested_workspace.as_ref(),
+        );
+        return match rendered {
+            Ok(result) => Effects::output(success_response(&id, without_result_type(result))),
+            Err(message) => {
+                Effects::output(success_response(&id, tool_error_result(None, &message)))
+            }
+        };
+    }
     let code = match error.kind {
         BridgeErrorKind::InvalidRequest
         | BridgeErrorKind::InvalidWorkspace
@@ -841,765 +793,4 @@ fn response_error(request: &Request, code: i64, message: impl Into<String>) -> E
     request.id.as_ref().map_or_else(Effects::default, |id| {
         Effects::output(error_response(Some(id), code, message, None))
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ghostlight_transport::bridge::{
-        DenialSource, OperationAvailability, ServiceMessage, WorkId, WorkspaceUse,
-    };
-    use ghostlight_transport::operation::{
-        BrowserResult, BrowserResultStatus, IntentId, InvocationPresentation, OperationEffect,
-        OperationId, OperationKey, ResultPart,
-    };
-
-    fn initialize(id: i64) -> Request {
-        Request {
-            id: Some(RequestId::Number(id.into())),
-            method: "initialize".into(),
-            params: json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "test-client", "version": "1.0"}
-            }),
-        }
-    }
-
-    fn projection() -> CatalogProjection {
-        CatalogProjection {
-            generation: 1,
-            operations: vec![OperationAvailability {
-                id: OperationId::BrowserTabs,
-                intent: IntentId::TabsList,
-                workspace_use: WorkspaceUse::Creates,
-            }],
-            restricted: false,
-        }
-    }
-
-    fn empty_result() -> BrowserResult {
-        BrowserResult::new(
-            OperationId::BrowserTabs,
-            IntentId::TabsList,
-            BrowserResultStatus::Ok,
-            OperationEffect::None,
-        )
-    }
-
-    fn operational_handler() -> Handler {
-        Handler {
-            lifecycle: Lifecycle::Operational,
-            context: RequestContext {
-                client: None,
-                restriction: None,
-            },
-            workspace: Some(WorkspaceId::mint()),
-            catalog: Some(projection()),
-            resume_lifecycle: None,
-        }
-    }
-
-    fn tool_call(id: i64, name: &str, arguments: Value) -> Request {
-        Request {
-            id: Some(RequestId::Number(id.into())),
-            method: "tools/call".into(),
-            params: json!({"name": name, "arguments": arguments}),
-        }
-    }
-
-    fn complete_tool_call(
-        handler: &mut Handler,
-        correlation: &mut Correlation,
-        request: Request,
-        work_id: WorkId,
-        outcome: impl FnOnce(Option<WorkspaceId>) -> TerminalOutcome,
-    ) -> Effects {
-        let started = handler.handle(&request, correlation);
-        let EdgeMessage::Start {
-            sequence,
-            workspace,
-            ..
-        } = started.service[0].clone()
-        else {
-            panic!("start expected");
-        };
-        let outcome = outcome(workspace.clone());
-        assert!(matches!(
-            correlation.observe(ServiceMessage::Started {
-                sequence,
-                work_id,
-                workspace,
-                context_creating: false,
-            }),
-            crate::bridge::Observation::None
-        ));
-        let crate::bridge::Observation::Resolved(resolution) =
-            correlation.observe(ServiceMessage::Completed { work_id, outcome })
-        else {
-            panic!("completion resolution expected");
-        };
-        handler.on_resolution(resolution, correlation)
-    }
-
-    #[test]
-    fn full_legacy_profile_transcript_is_exact_through_the_2025_handler() {
-        let projection = ghostlight_legacy::test_support::full_projection(17);
-        let workspace = WorkspaceId::mint();
-        let mut correlation = Correlation::default();
-        let (mut handler, opened) = Handler::select(&initialize(1), &mut correlation).unwrap();
-        let EdgeMessage::OpenWorkspace { sequence, .. } = opened.service[0].clone() else {
-            panic!("open workspace expected");
-        };
-        let crate::bridge::Observation::Resolved(resolution) =
-            correlation.observe(ServiceMessage::WorkspaceOpened {
-                sequence,
-                workspace: workspace.clone(),
-            })
-        else {
-            panic!("workspace resolution expected");
-        };
-        let catalog = handler.on_resolution(resolution, &mut correlation);
-        let EdgeMessage::Catalog { sequence, .. } = catalog.service[0].clone() else {
-            panic!("catalog expected");
-        };
-        let crate::bridge::Observation::Resolved(resolution) =
-            correlation.observe(ServiceMessage::Catalog {
-                sequence,
-                projection,
-            })
-        else {
-            panic!("catalog resolution expected");
-        };
-        let initialized = handler.on_resolution(resolution, &mut correlation);
-        assert_eq!(initialized.output[0]["id"], 1);
-        handler.handle(
-            &Request {
-                id: None,
-                method: "notifications/initialized".into(),
-                params: json!({}),
-            },
-            &mut correlation,
-        );
-
-        let listed = handler.handle(
-            &Request {
-                id: Some(RequestId::Number(2.into())),
-                method: "tools/list".into(),
-                params: json!({}),
-            },
-            &mut correlation,
-        );
-        assert_eq!(
-            listed.output,
-            vec![json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "result": {"tools": ghostlight_legacy::declarations()["tools"].clone()},
-            })]
-        );
-
-        let explained = complete_tool_call(
-            &mut handler,
-            &mut correlation,
-            tool_call(3, "explain", json!({})),
-            WorkId(30),
-            |workspace| TerminalOutcome::Success {
-                result: Box::new(ghostlight_legacy::test_support::context_result(workspace)),
-            },
-        );
-        assert_eq!(
-            explained.output,
-            vec![json!({
-                "jsonrpc": "2.0",
-                "id": 3,
-                "result": {
-                    "content": [{
-                        "type": "text",
-                        "text": ghostlight_legacy::test_support::explain_text(),
-                    }],
-                },
-            })]
-        );
-
-        let succeeded = complete_tool_call(
-            &mut handler,
-            &mut correlation,
-            tool_call(4, "get_page_text", json!({"tabId": 7})),
-            WorkId(40),
-            |workspace| {
-                let mut result = BrowserResult::new(
-                    OperationId::BrowserRead,
-                    IntentId::ReadText,
-                    BrowserResultStatus::Ok,
-                    OperationEffect::None,
-                );
-                result.workspace = workspace;
-                result.parts.push(ResultPart::Text {
-                    text: "Page text".into(),
-                });
-                result.data = json!({"characters": 9});
-                TerminalOutcome::Success {
-                    result: Box::new(result),
-                }
-            },
-        );
-        assert_eq!(
-            succeeded.output,
-            vec![json!({
-                "jsonrpc": "2.0",
-                "id": 4,
-                "result": {
-                    "content": [{"type": "text", "text": "Page text"}],
-                    "structuredContent": {"characters": 9},
-                },
-            })]
-        );
-
-        let denied = complete_tool_call(
-            &mut handler,
-            &mut correlation,
-            tool_call(5, "get_page_text", json!({"tabId": 7})),
-            WorkId(50),
-            |_| TerminalOutcome::Denied {
-                message: "Blocked by test policy.".into(),
-                source: DenialSource::Policy,
-            },
-        );
-        assert_eq!(
-            denied.output,
-            vec![json!({
-                "jsonrpc": "2.0",
-                "id": 5,
-                "result": {
-                    "content": [{"type": "text", "text": "Blocked by test policy."}],
-                    "isError": true,
-                },
-            })]
-        );
-    }
-
-    #[test]
-    fn strict_initialize_opens_workspace_then_catalog_then_waits_for_initialized() {
-        let mut correlation = Correlation::default();
-        let (mut handler, first) = Handler::select(&initialize(1), &mut correlation).unwrap();
-        let EdgeMessage::OpenWorkspace { sequence, .. } = &first.service[0] else {
-            panic!("open workspace expected");
-        };
-        let opened = correlation.observe(ServiceMessage::WorkspaceOpened {
-            sequence: *sequence,
-            workspace: WorkspaceId::mint(),
-        });
-        let crate::bridge::Observation::Resolved(resolution) = opened else {
-            panic!("resolution expected");
-        };
-        let catalog = handler.on_resolution(resolution, &mut correlation);
-        let EdgeMessage::Catalog { sequence, .. } = &catalog.service[0] else {
-            panic!("catalog expected");
-        };
-        let projected = correlation.observe(ServiceMessage::Catalog {
-            sequence: *sequence,
-            projection: projection(),
-        });
-        let crate::bridge::Observation::Resolved(resolution) = projected else {
-            panic!("resolution expected");
-        };
-        let initialized = handler.on_resolution(resolution, &mut correlation);
-        assert_eq!(
-            initialized.output[0]["result"]["protocolVersion"],
-            PROTOCOL_VERSION
-        );
-        assert_eq!(
-            initialized.output[0]["result"]["capabilities"],
-            json!({"tools": {"listChanged": true}})
-        );
-        assert!(initialized.output[0]["result"].get("resultType").is_none());
-
-        let before_notification = handler.handle(
-            &Request {
-                id: Some(RequestId::Number(2.into())),
-                method: "tools/list".into(),
-                params: json!({}),
-            },
-            &mut correlation,
-        );
-        assert_eq!(
-            before_notification.output[0]["error"]["code"],
-            LIFECYCLE_ERROR
-        );
-
-        handler.handle(
-            &Request {
-                id: None,
-                method: "notifications/initialized".into(),
-                params: json!({}),
-            },
-            &mut correlation,
-        );
-        let listed = handler.handle(
-            &Request {
-                id: Some(RequestId::Number(3.into())),
-                method: "tools/list".into(),
-                params: json!({}),
-            },
-            &mut correlation,
-        );
-        assert_eq!(
-            listed.output[0]["result"]["tools"][0],
-            ghostlight_legacy::declarations()["tools"][0],
-            "the 2025 tools/list shore must preserve the canonical declaration exactly"
-        );
-        assert!(listed.output[0]["result"].get("resultType").is_none());
-    }
-
-    #[test]
-    fn initialize_appends_exact_transport_closed_recovery_instructions() {
-        let result = initialize_result(&projection());
-        assert_eq!(
-            result["instructions"],
-            format!(
-                "{} {}",
-                ghostlight_legacy::agent_guide(),
-                crate::TRANSPORT_CLOSED_RECOVERY_INSTRUCTIONS
-            )
-        );
-    }
-
-    #[test]
-    fn ping_is_the_only_pre_operational_request_exception() {
-        let mut correlation = Correlation::default();
-        let (mut handler, _) = Handler::select(&initialize(1), &mut correlation).unwrap();
-        let ping = handler.handle(
-            &Request {
-                id: Some(RequestId::String("p".into())),
-                method: "ping".into(),
-                params: json!({}),
-            },
-            &mut correlation,
-        );
-        assert_eq!(ping.output[0]["result"], json!({}));
-    }
-
-    #[test]
-    fn held_outcomes_render_the_exact_external_label_for_both_hold_boundaries() {
-        let cases = [
-            (
-                40,
-                "computer",
-                "left_click",
-                OperationKey::new(OperationId::BrowserInput, IntentId::InputPointerClick),
-                false,
-                "'computer (left_click)' call",
-            ),
-            (
-                41,
-                "computer",
-                "left_click",
-                OperationKey::new(OperationId::BrowserInput, IntentId::InputPointerClick),
-                true,
-                "'computer (left_click)' call",
-            ),
-            (
-                42,
-                "form_fill",
-                "submit",
-                OperationKey::new(OperationId::BrowserFill, IntentId::FillFieldsAndSubmit),
-                true,
-                "'form_fill (submit)' call",
-            ),
-        ];
-        for (request_id, tool, action, expected, prolonged, expected_label) in cases {
-            let presentation = InvocationPresentation::new(
-                ghostlight_legacy::PROFILE_ID,
-                ghostlight_legacy::PROFILE_VERSION,
-                tool,
-                Some(action.into()),
-            )
-            .expect("valid legacy presentation");
-            let effects = render_outcome(
-                PendingRequest::tool_request(
-                    RequestId::Number(request_id.into()),
-                    PendingKind::CallTool2025,
-                    presentation,
-                    expected,
-                    None,
-                    None,
-                ),
-                TerminalOutcome::Held { prolonged },
-            );
-
-            let result = &effects.output[0]["result"];
-            let text = result["content"][0]["text"].as_str().expect("hold text");
-            assert!(text.contains(expected_label), "{text}");
-            assert!(!text.contains("browser.input"), "{text}");
-            assert!(!text.contains("pointer.click"), "{text}");
-            assert_eq!(text.contains("more than 2 minutes"), prolonged);
-            assert_eq!(result["isError"], true);
-            assert!(result.get("resultType").is_none());
-        }
-
-        let fallback = render_outcome(
-            PendingRequest {
-                request_id: Some(RequestId::Number(43.into())),
-                kind: PendingKind::CallTool2025,
-                service_workspace: None,
-                requested_workspace: None,
-                presentation: None,
-                expected_operation: Some(OperationKey::new(
-                    OperationId::BrowserInput,
-                    IntentId::InputPointerClick,
-                )),
-                flow_render_hints: None,
-                suppressed: false,
-                delivered: true,
-            },
-            TerminalOutcome::Held { prolonged: false },
-        );
-        assert!(fallback.output[0].get("error").is_none());
-        assert!(fallback.output[0]["result"]["content"][0]["text"]
-            .as_str()
-            .expect("fallback")
-            .contains("'browser tool' call"));
-    }
-
-    #[test]
-    fn cancellation_suppresses_the_terminal_response() {
-        let pending = PendingRequest {
-            request_id: Some(RequestId::Number(4.into())),
-            kind: PendingKind::CallTool2025,
-            service_workspace: None,
-            requested_workspace: None,
-            presentation: None,
-            expected_operation: Some(OperationKey::new(
-                OperationId::BrowserTabs,
-                IntentId::TabsList,
-            )),
-            flow_render_hints: None,
-            suppressed: true,
-            delivered: true,
-        };
-        let effects = render_outcome(
-            pending,
-            TerminalOutcome::Success {
-                result: Box::new(empty_result()),
-            },
-        );
-        assert!(effects.output.is_empty());
-    }
-
-    #[test]
-    fn mismatched_result_operation_fails_closed_before_profile_rendering() {
-        let pending = PendingRequest {
-            request_id: Some(RequestId::Number(5.into())),
-            kind: PendingKind::CallTool2025,
-            service_workspace: None,
-            requested_workspace: None,
-            presentation: None,
-            expected_operation: Some(OperationKey::new(
-                OperationId::BrowserTabs,
-                IntentId::TabsList,
-            )),
-            flow_render_hints: None,
-            suppressed: false,
-            delivered: true,
-        };
-        let result = BrowserResult::new(
-            OperationId::BrowserSnapshot,
-            IntentId::SnapshotCapture,
-            BrowserResultStatus::Ok,
-            OperationEffect::None,
-        );
-        let effects = render_outcome(
-            pending,
-            TerminalOutcome::Success {
-                result: Box::new(result),
-            },
-        );
-        assert_eq!(effects.output[0]["error"]["code"], OUTCOME_UNKNOWN);
-        assert_eq!(
-            effects.output[0]["error"]["data"]["disposition"],
-            "outcome_unknown"
-        );
-    }
-
-    #[test]
-    fn result_workspace_must_match_requested_and_started_workspace() {
-        let requested = WorkspaceId::mint();
-        let substituted = WorkspaceId::mint();
-        let requested_raw = requested.as_str().to_owned();
-        let substituted_raw = substituted.as_str().to_owned();
-        let mut result = BrowserResult::new(
-            OperationId::BrowserTabs,
-            IntentId::TabsList,
-            BrowserResultStatus::Ok,
-            OperationEffect::None,
-        );
-        result.workspace = Some(substituted.clone());
-        let effects = render_outcome(
-            PendingRequest {
-                request_id: Some(RequestId::Number(6.into())),
-                kind: PendingKind::CallTool2025,
-                service_workspace: Some(substituted),
-                requested_workspace: Some(requested),
-                presentation: None,
-                expected_operation: Some(OperationKey::new(
-                    OperationId::BrowserTabs,
-                    IntentId::TabsList,
-                )),
-                flow_render_hints: None,
-                suppressed: false,
-                delivered: true,
-            },
-            TerminalOutcome::Success {
-                result: Box::new(result),
-            },
-        );
-
-        assert_eq!(effects.output[0]["error"]["code"], OUTCOME_UNKNOWN);
-        let rendered = effects.output[0].to_string();
-        assert!(!rendered.contains(&requested_raw));
-        assert!(!rendered.contains(&substituted_raw));
-    }
-
-    #[test]
-    fn cancellation_covers_the_full_multistage_initialize_attempt() {
-        let mut correlation = Correlation::default();
-        let (mut handler, first) = Handler::select(&initialize(1), &mut correlation).unwrap();
-        let EdgeMessage::OpenWorkspace { sequence, .. } = first.service[0].clone() else {
-            panic!("open workspace expected");
-        };
-        handler.handle(
-            &Request {
-                id: None,
-                method: "notifications/cancelled".into(),
-                params: json!({"requestId": 1}),
-            },
-            &mut correlation,
-        );
-
-        let opened = correlation.observe(ServiceMessage::WorkspaceOpened {
-            sequence,
-            workspace: WorkspaceId::mint(),
-        });
-        let crate::bridge::Observation::Resolved(opened) = opened else {
-            panic!("workspace resolution expected");
-        };
-        let cancelled_before_catalog = handler.on_resolution(opened, &mut correlation);
-        assert!(cancelled_before_catalog.output.is_empty());
-        assert!(cancelled_before_catalog.service.is_empty());
-        assert_eq!(handler.lifecycle, Lifecycle::InitializationFailed);
-
-        let retry = handler.handle(&initialize(2), &mut correlation);
-        assert!(matches!(
-            retry.service.first(),
-            Some(EdgeMessage::OpenWorkspace { .. })
-        ));
-    }
-
-    #[test]
-    fn cancellation_during_initialize_catalog_does_not_emit_initialize_result() {
-        let mut correlation = Correlation::default();
-        let (mut handler, first) = Handler::select(&initialize(1), &mut correlation).unwrap();
-        let EdgeMessage::OpenWorkspace { sequence, .. } = first.service[0].clone() else {
-            panic!("open workspace expected");
-        };
-        let opened = correlation.observe(ServiceMessage::WorkspaceOpened {
-            sequence,
-            workspace: WorkspaceId::mint(),
-        });
-        let crate::bridge::Observation::Resolved(opened) = opened else {
-            panic!("workspace resolution expected");
-        };
-        let catalog = handler.on_resolution(opened, &mut correlation);
-        let EdgeMessage::Catalog { sequence, .. } = catalog.service[0].clone() else {
-            panic!("catalog expected");
-        };
-
-        handler.handle(
-            &Request {
-                id: None,
-                method: "notifications/cancelled".into(),
-                params: json!({"requestId": 1}),
-            },
-            &mut correlation,
-        );
-        let resolved = correlation.observe(ServiceMessage::Catalog {
-            sequence,
-            projection: projection(),
-        });
-        let crate::bridge::Observation::Resolved(resolved) = resolved else {
-            panic!("catalog resolution expected");
-        };
-        let cancelled = handler.on_resolution(resolved, &mut correlation);
-        assert!(cancelled.output.is_empty());
-        assert!(cancelled.service.is_empty());
-        assert_eq!(handler.lifecycle, Lifecycle::InitializationFailed);
-    }
-
-    #[test]
-    fn id_bearing_cancellation_errors_without_cancelling() {
-        let mut correlation = Correlation::default();
-        let active_id = RequestId::Number(4.into());
-        correlation
-            .track(PendingRequest::request(
-                active_id.clone(),
-                PendingKind::CallTool2025,
-            ))
-            .unwrap();
-        let effects = operational_handler().handle(
-            &Request {
-                id: Some(RequestId::Number(5.into())),
-                method: "notifications/cancelled".into(),
-                params: json!({"requestId": 4}),
-            },
-            &mut correlation,
-        );
-
-        assert_eq!(effects.output[0]["error"]["code"], INVALID_REQUEST);
-        assert!(effects.service.is_empty());
-        assert!(correlation.contains_request(&active_id));
-    }
-
-    #[test]
-    fn tools_list_rejects_every_cursor_because_none_are_issued() {
-        let effects = operational_handler().handle(
-            &Request {
-                id: Some(RequestId::Number(6.into())),
-                method: "tools/list".into(),
-                params: json!({"cursor": "not-issued"}),
-            },
-            &mut Correlation::default(),
-        );
-
-        assert_eq!(effects.output[0]["error"]["code"], INVALID_PARAMS);
-        assert!(effects.service.is_empty());
-    }
-
-    #[test]
-    fn unsupported_task_augmentation_is_ignored_and_call_starts_normally() {
-        let mut handler = operational_handler();
-        let expected_workspace = handler.workspace.clone();
-        let effects = handler.handle(
-            &Request {
-                id: Some(RequestId::Number(7.into())),
-                method: "tools/call".into(),
-                params: json!({
-                    "name": "computer",
-                    "arguments": {"action":"left_click","tabId":7,"coordinate": [4, 8]},
-                    "task": {"ttl": 60_000}
-                }),
-            },
-            &mut Correlation::default(),
-        );
-
-        let EdgeMessage::Start {
-            operation,
-            workspace,
-            ..
-        } = &effects.service[0]
-        else {
-            panic!("start expected");
-        };
-        assert_eq!(operation.id, OperationId::BrowserInput);
-        assert_eq!(operation.intent, IntentId::InputPointerClick);
-        assert_eq!(workspace, &expected_workspace);
-        assert_eq!(operation.arguments["point"], json!([4, 8]));
-    }
-
-    #[test]
-    fn reconnect_reuses_or_replaces_workspace_then_refreshes_catalog() {
-        let (_, context) = parse_initialize(&initialize(1)).unwrap();
-        let retained = WorkspaceId::mint();
-        let replacement = WorkspaceId::mint();
-        let mut handler = Handler {
-            lifecycle: Lifecycle::Operational,
-            context,
-            workspace: Some(retained.clone()),
-            catalog: Some(projection()),
-            resume_lifecycle: None,
-        };
-        let mut correlation = Correlation::default();
-
-        handler.bridge_disconnected();
-        let reopened = handler.bridge_connected(&mut correlation);
-        let EdgeMessage::OpenWorkspace {
-            sequence,
-            workspace,
-            ..
-        } = &reopened.service[0]
-        else {
-            panic!("workspace reopen expected");
-        };
-        assert_eq!(workspace.as_ref(), Some(&retained));
-        let resolved = correlation.observe(ServiceMessage::WorkspaceOpened {
-            sequence: *sequence,
-            workspace: replacement.clone(),
-        });
-        let crate::bridge::Observation::Resolved(resolved) = resolved else {
-            panic!("reopen resolution expected");
-        };
-        let refresh = handler.on_resolution(resolved, &mut correlation);
-        let EdgeMessage::Catalog { sequence, .. } = &refresh.service[0] else {
-            panic!("catalog refresh expected");
-        };
-        let resolved = correlation.observe(ServiceMessage::Catalog {
-            sequence: *sequence,
-            projection: projection(),
-        });
-        let crate::bridge::Observation::Resolved(resolved) = resolved else {
-            panic!("catalog resolution expected");
-        };
-        let notification = handler.on_resolution(resolved, &mut correlation);
-
-        assert_eq!(handler.workspace.as_ref(), Some(&replacement));
-        assert_eq!(handler.lifecycle, Lifecycle::Operational);
-        assert_eq!(
-            notification.output[0]["method"],
-            "notifications/tools/list_changed"
-        );
-    }
-
-    #[test]
-    fn initialization_retry_reattaches_or_replaces_a_retained_workspace_first() {
-        let (_, context) = parse_initialize(&initialize(1)).unwrap();
-        let retained = WorkspaceId::mint();
-        let replacement = WorkspaceId::mint();
-        let mut handler = Handler {
-            lifecycle: Lifecycle::InitializationFailed,
-            context,
-            workspace: Some(retained.clone()),
-            catalog: None,
-            resume_lifecycle: None,
-        };
-        let mut correlation = Correlation::default();
-
-        let retry = handler.handle(&initialize(2), &mut correlation);
-        let EdgeMessage::OpenWorkspace {
-            sequence,
-            workspace,
-            ..
-        } = &retry.service[0]
-        else {
-            panic!("workspace reopen expected");
-        };
-        assert_eq!(workspace.as_ref(), Some(&retained));
-
-        let resolution = correlation.observe(ServiceMessage::WorkspaceOpened {
-            sequence: *sequence,
-            workspace: replacement.clone(),
-        });
-        let crate::bridge::Observation::Resolved(resolution) = resolution else {
-            panic!("workspace resolution expected");
-        };
-        let catalog = handler.on_resolution(resolution, &mut correlation);
-        let EdgeMessage::Catalog {
-            workspace: projected,
-            ..
-        } = &catalog.service[0]
-        else {
-            panic!("catalog request expected");
-        };
-        assert_eq!(projected.as_ref(), Some(&replacement));
-        assert_eq!(handler.lifecycle, Lifecycle::LoadingInitializeCatalog);
-    }
 }

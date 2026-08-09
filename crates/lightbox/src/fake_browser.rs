@@ -153,6 +153,7 @@ async fn send<W: tokio::io::AsyncWrite + Unpin>(
 /// `Browser::encode_tab_ids_in_value`'s walk over both).
 fn canned_tab_context(native_tab_id: i64) -> Value {
     let structured = json!({
+        "tabId": native_tab_id,
         "mcpGroupId": 1,
         "tabs": [{ "tabId": native_tab_id, "title": "New Tab", "url": "chrome://newtab/" }],
     });

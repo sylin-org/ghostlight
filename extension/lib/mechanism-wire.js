@@ -8,6 +8,9 @@
 "use strict";
 
 const MECHANISM_REQUEST_V1 = "mechanismRequestV1";
+const NAVIGATION_READINESS_V1 = "navigationReadinessV1";
+const ATOMIC_TAB_OPEN_V1 = "atomicTabOpenV1";
+const STRICT_SENSITIVE_WRITES_V1 = "strictSensitiveWritesV1";
 const MECHANISM_REQUEST = "mechanism_request";
 const TOOL_REQUEST = "tool_request";
 const TAB_URL_REQUEST = "tab_url_request";
@@ -16,12 +19,15 @@ const MECHANISM_IDS = Object.freeze([
   "workspace.tabs.inspect",
   "workspace.tabs.ensure",
   "workspace.tab.create",
+  "workspace.tab.open",
   "tab.focus",
   "tab.close",
   "navigate.url",
   "navigate.back",
   "navigate.forward",
   "navigate.reload",
+  "navigation.await_readiness",
+  "navigation.verify_document",
   "page.snapshot",
   "page.read_text",
   "page.find",
@@ -199,16 +205,40 @@ function mechanismTool(mechanism, args) {
       args.createIfEmpty = true;
       return "tabs_context_mcp";
     case "workspace.tab.create": return "tabs_create_mcp";
+    case "workspace.tab.open": return "tabs_open_mcp";
     case "tab.focus": return action(args, "focus", "tab_control");
     case "tab.close": return action(args, "close", "tab_control");
-    case "navigate.url": return "navigate";
-    case "navigate.back": return fixedField(args, "url", "back", "navigate");
-    case "navigate.forward": return fixedField(args, "url", "forward", "navigate");
-    case "navigate.reload": return action(args, "reload", "tab_control");
+    case "navigate.url":
+      return own(args, "readiness") ? "navigate_readiness_start" : "navigate";
+    case "navigate.back":
+      return fixedField(
+        args,
+        "url",
+        "back",
+        own(args, "readiness") ? "navigate_readiness_start" : "navigate"
+      );
+    case "navigate.forward":
+      return fixedField(
+        args,
+        "url",
+        "forward",
+        own(args, "readiness") ? "navigate_readiness_start" : "navigate"
+      );
+    case "navigate.reload":
+      return action(
+        args,
+        "reload",
+        own(args, "readiness") ? "navigate_readiness_start" : "tab_control"
+      );
+    case "navigation.await_readiness": return "navigation_readiness_await";
+    case "navigation.verify_document": return "navigation_readiness_verify";
     case "page.snapshot":
       rename(args, "scope_ref", "ref_id");
       return "read_page";
-    case "page.read_text": return "get_page_text";
+    case "page.read_text":
+      flattenTargetReference(args);
+      rename(args, "ref", "ref_id");
+      return "get_page_text";
     case "page.find": return "find";
     case "screenshot.viewport": return action(args, "screenshot", "computer");
     case "screenshot.region": return action(args, "zoom", "computer");
@@ -225,6 +255,7 @@ function mechanismTool(mechanism, args) {
       return action(args, "left_click_drag", "computer");
     case "text.type": return action(args, "type", "computer");
     case "key.press":
+      flattenTargetReference(args);
       rename(args, "key", "text");
       return action(args, "key", "computer");
     case "wheel.scroll":
@@ -328,6 +359,9 @@ function normalizeIncomingRequest(message) {
 const GhostlightMechanismWire = Object.freeze({
   MECHANISM_IDS,
   MECHANISM_REQUEST_V1,
+  NAVIGATION_READINESS_V1,
+  ATOMIC_TAB_OPEN_V1,
+  STRICT_SENSITIVE_WRITES_V1,
   normalizeIncomingRequest,
   translateMechanismRequest,
 });

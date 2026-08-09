@@ -1,0 +1,153 @@
+{
+  "tools": [
+    {
+      "name": "browser_get_status",
+      "description": "Diagnose a browser connection or workspace problem. Ordinary browser work does not need a status check.",
+      "inputSchema": {"type":"object","properties":{},"additionalProperties":false},
+      "annotations": {"title":"Diagnose Ghostlight","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+    },
+    {
+      "name": "browser_open_tab",
+      "description": "Open a separate new tab, blank or at a URL. Use browser_navigate to reuse the current tab.",
+      "inputSchema": {"type":"object","properties":{"url":{"type":"string","minLength":1,"maxLength":4096,"description":"Optional URL to open."}},"additionalProperties":false},
+      "annotations": {"title":"Open Browser Tab","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_list_tabs",
+      "description": "List tabs controlled by this Ghostlight workspace. It never creates, closes, or claims a tab.",
+      "inputSchema": {"type":"object","properties":{},"additionalProperties":false},
+      "annotations": {"title":"List Browser Tabs","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}
+    },
+    {
+      "name": "browser_focus_tab",
+      "description": "Make one controlled tab current for later Ghostlight calls and show it to the user.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"}},"required":["tab"],"additionalProperties":false},
+      "annotations": {"title":"Focus Browser Tab","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}
+    },
+    {
+      "name": "browser_close_tab",
+      "description": "Close one controlled tab. Ghostlight never guesses which tab to close.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"}},"required":["tab"],"additionalProperties":false},
+      "annotations": {"title":"Close Browser Tab","readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_navigate",
+      "description": "Load a URL in the current or named tab and wait briefly for the page to become usable. If no tab exists, Ghostlight creates the first one.",
+      "inputSchema": {"type":"object","properties":{"url":{"type":"string","minLength":1,"maxLength":4096},"tab":{"$ref":"#/$defs/tab"}},"required":["url"],"additionalProperties":false},
+      "annotations": {"title":"Navigate Browser","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_go_back",
+      "description": "Go back in the current or named tab, then wait briefly for the page to become usable.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"}},"additionalProperties":false},
+      "annotations": {"title":"Go Back","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_go_forward",
+      "description": "Go forward in the current or named tab, then wait briefly for the page to become usable.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"}},"additionalProperties":false},
+      "annotations": {"title":"Go Forward","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_reload_page",
+      "description": "Reload the current or named page and wait briefly for it to become usable.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"}},"additionalProperties":false},
+      "annotations": {"title":"Reload Browser Page","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_inspect_page",
+      "description": "Find page controls and return fresh targets for interaction. Use query to narrow the result or target to inspect one subtree; use browser_read_page for prose.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"},"query":{"type":"string","minLength":1,"maxLength":1000},"target":{"$ref":"#/$defs/target"},"include":{"type":"string","enum":["interactive","all"],"default":"interactive"}},"additionalProperties":false},
+      "annotations": {"title":"Inspect Browser Page","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}
+    },
+    {
+      "name": "browser_read_page",
+      "description": "Read useful text from the page or one exact target. Use browser_inspect_page when you need controls or action targets.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"},"target":{"$ref":"#/$defs/target"},"max_chars":{"type":"integer","minimum":1,"maximum":50000,"default":20000}},"additionalProperties":false},
+      "annotations": {"title":"Read Browser Page","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}
+    },
+    {
+      "name": "browser_take_screenshot",
+      "description": "Capture the visible page or one exact target as an image. Use browser_inspect_page for reliable actions.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"},"target":{"$ref":"#/$defs/target"}},"additionalProperties":false},
+      "annotations": {"title":"Take Browser Screenshot","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}
+    },
+    {
+      "name": "browser_click",
+      "description": "Click one exact target. Ambiguous, stale, hidden, or ineligible targets are not clicked.",
+      "inputSchema": {"type":"object","properties":{"target":{"$ref":"#/$defs/target"},"tab":{"$ref":"#/$defs/tab"},"button":{"type":"string","enum":["left","right","middle"],"default":"left"},"clicks":{"type":"integer","minimum":1,"maximum":3,"default":1},"modifiers":{"$ref":"#/$defs/modifiers"}},"required":["target"],"additionalProperties":false},
+      "annotations": {"title":"Click Browser Target","readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_hover",
+      "description": "Hover over one exact target without clicking it.",
+      "inputSchema": {"type":"object","properties":{"target":{"$ref":"#/$defs/target"},"tab":{"$ref":"#/$defs/tab"}},"required":["target"],"additionalProperties":false},
+      "annotations": {"title":"Hover Browser Target","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}
+    },
+    {
+      "name": "browser_scroll_to_target",
+      "description": "Reveal one exact target by scrolling it into view. Click, fill, hover, and drag already reveal their own targets when safe.",
+      "inputSchema": {"type":"object","properties":{"target":{"$ref":"#/$defs/target"},"tab":{"$ref":"#/$defs/tab"}},"required":["target"],"additionalProperties":false},
+      "annotations": {"title":"Scroll to Browser Target","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}
+    },
+    {
+      "name": "browser_scroll_page",
+      "description": "Scroll up or down by a small step or one page. Use browser_scroll_to_target when you know what you want to reveal.",
+      "inputSchema": {"type":"object","properties":{"direction":{"type":"string","enum":["up","down"]},"amount":{"type":"string","enum":["small","page"],"default":"page"},"tab":{"$ref":"#/$defs/tab"}},"required":["direction"],"additionalProperties":false},
+      "annotations": {"title":"Scroll Browser Page","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_press_key",
+      "description": "Press one named non-printable key on one exact target. Use browser_press_escape when no target is needed.",
+      "inputSchema": {"type":"object","properties":{"key":{"type":"string","enum":["Enter","Tab","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End","PageUp","PageDown","Backspace","Delete","Space"]},"target":{"$ref":"#/$defs/target"},"tab":{"$ref":"#/$defs/tab"},"modifiers":{"$ref":"#/$defs/modifiers"}},"required":["key","target"],"additionalProperties":false},
+      "annotations": {"title":"Press Browser Key","readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_press_escape",
+      "description": "Press Escape in the current or named tab. Use it to close transient UI, not to resolve JavaScript dialogs.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"}},"additionalProperties":false},
+      "annotations": {"title":"Press Escape","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_drag",
+      "description": "Drag one exact source target to one exact destination target.",
+      "inputSchema": {"type":"object","properties":{"from":{"$ref":"#/$defs/target"},"to":{"$ref":"#/$defs/target"},"tab":{"$ref":"#/$defs/tab"}},"required":["from","to"],"additionalProperties":false},
+      "annotations": {"title":"Drag Browser Target","readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_fill_form",
+      "description": "Fill one or more form fields. To submit afterward, set submit_target to the exact submit control. Credential fields require user handoff.",
+      "inputSchema": {"type":"object","properties":{"fields":{"type":"array","minItems":1,"maxItems":20,"items":{"type":"object","properties":{"field":{"$ref":"#/$defs/target"},"value":{"type":["string","number","boolean","null"]}},"required":["field","value"],"additionalProperties":false}},"submit_target":{"$ref":"#/$defs/target"},"tab":{"$ref":"#/$defs/tab"}},"required":["fields"],"additionalProperties":false},
+      "annotations": {"title":"Fill Browser Form","readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_wait_for",
+      "description": "Wait up to 10 seconds for one target or text condition. State is visible, present, or gone and defaults to visible; ordinary actions already settle automatically.",
+      "inputSchema": {"type":"object","properties":{"condition":{"type":"string","minLength":1,"maxLength":2000},"state":{"type":"string","enum":["visible","present","gone"],"default":"visible"},"timeout_ms":{"type":"integer","minimum":1,"maximum":30000,"default":10000},"tab":{"$ref":"#/$defs/tab"}},"required":["condition"],"additionalProperties":false},
+      "annotations": {"title":"Wait for Browser Condition","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}
+    },
+    {
+      "name": "browser_run_sequence",
+      "description": "Run 2 to 10 page calls on one tab when every child argument is already known. Steps stop at the first non-success and completed effects are not undone.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"},"steps":{"type":"array","minItems":2,"maxItems":10,"items":{"type":"object","properties":{"tool":{"type":"string","enum":["browser_navigate","browser_go_back","browser_go_forward","browser_reload_page","browser_inspect_page","browser_read_page","browser_take_screenshot","browser_click","browser_hover","browser_scroll_to_target","browser_scroll_page","browser_press_key","browser_press_escape","browser_drag","browser_fill_form","browser_wait_for","browser_get_dialog","browser_handle_dialog"]},"arguments":{"type":"object","default":{}}},"required":["tool"],"additionalProperties":false}}},"required":["steps"],"additionalProperties":false},
+      "annotations": {"title":"Run Browser Sequence","readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}
+    },
+    {
+      "name": "browser_get_dialog",
+      "description": "Inspect the current browser alert, confirmation, or prompt without changing it. An absent dialog is a normal result.",
+      "inputSchema": {"type":"object","properties":{"tab":{"$ref":"#/$defs/tab"}},"additionalProperties":false},
+      "annotations": {"title":"Inspect Browser Dialog","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}
+    },
+    {
+      "name": "browser_handle_dialog",
+      "description": "Accept, dismiss, or answer the current browser alert, confirmation, or prompt. The action is always explicit.",
+      "inputSchema": {"type":"object","properties":{"action":{"type":"string","enum":["accept","dismiss","respond"]},"text":{"type":"string","maxLength":2000},"tab":{"$ref":"#/$defs/tab"}},"required":["action"],"additionalProperties":false},
+      "annotations": {"title":"Resolve Browser Dialog","readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}
+    }
+  ],
+  "$defs": {
+    "tab":{"type":"string","minLength":10,"maxLength":130,"description":"Opaque controlled-tab handle returned by Ghostlight."},
+    "target":{"type":"string","minLength":1,"maxLength":1000,"description":"A fresh Ghostlight target ref or a unique accessible description."},
+    "modifiers":{"type":"array","items":{"type":"string","enum":["Alt","Control","Meta","Shift"]},"maxItems":4,"default":[]}
+  }
+}

@@ -168,7 +168,7 @@ mod tests {
         overlay.decide(
             "navigate",
             None,
-            &[Capability::Action],
+            &[Capability::Interact],
             GoverningResource::Resource(host.to_string()),
             EffectiveMode::Enforce,
         )

@@ -34,7 +34,7 @@
           "default": 120000
         },
         "content.security.secrets.redact": {
-          "description": "Redact values of secret fields (password/OTP/payment) in read_page output.",
+          "description": "Redact values of secret fields (password/OTP/payment) in browser_read_page output.",
           "type": "boolean",
           "default": true
         },
@@ -84,11 +84,6 @@
         },
         "inbound.pipe.enabled": {
           "description": "Whether the owner-only local bridge/control listener binds.",
-          "type": "boolean",
-          "default": true
-        },
-        "outbound.browser.enabled": {
-          "description": "Whether the outbound.browser executor participates.",
           "type": "boolean",
           "default": true
         },

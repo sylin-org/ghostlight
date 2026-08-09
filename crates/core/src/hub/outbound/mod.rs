@@ -5,8 +5,8 @@
 //! executors own only physical delivery and backend state. Model-facing declarations and
 //! translations stay at the MCP edge under ADR-0101.
 
+mod adapter_wire_v0;
 pub mod browser;
 pub mod diagnostics;
-mod legacy_mechanism;
 mod mechanism_wire;
 mod workspace;

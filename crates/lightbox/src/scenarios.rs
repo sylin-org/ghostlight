@@ -48,8 +48,9 @@ pub fn registry() -> Vec<Scenario> {
         ("passport-freshness", passport_freshness),
         ("license-expiry-continuity", license_expiry_continuity),
     ];
-    scenarios.extend(crate::legacy::registry());
+    scenarios.extend(crate::kernel::registry());
     scenarios.extend(crate::mechanism_wire::registry());
+    scenarios.extend(crate::ghostlight_surface::registry());
     scenarios
 }
 

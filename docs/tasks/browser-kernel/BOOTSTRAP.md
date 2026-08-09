@@ -1,20 +1,19 @@
 # Browser operation kernel: BOOTSTRAP
 
-Execution batch for the proposed canonical browser-operation kernel, native Ghostlight surface,
-and evidence-bounded compatibility adapters. This batch is intentionally staged so every prefix
-can ship without exposing a stub, weakening governance, or breaking the current 25-tool catalog.
-
-The research primer is design input, not implementation authority. Stage R0 must land the
-accepted ADR or ADR set before production work begins.
+Historical bootstrap for the browser-operation batch. ADR-0102 superseded the profile rollout and
+is now implemented in the current worktree: one 24-tool Ghostlight surface, one typed operation
+domain, one governance/scheduling path, and one private mechanism port. Use `LEDGER.md` for the
+close evidence. The R0-R10 instructions below remain only as implementation history.
 
 ## Start here
 
 1. Read `AGENTS.md`, `docs/MEMORY.md`, and `docs/STATUS.md`.
 2. Read every accepted ADR named by the active stage, especially ADR-0034, ADR-0037, ADR-0038,
    ADR-0042, ADR-0050, ADR-0069, ADR-0078, ADR-0080, ADR-0093, ADR-0094, ADR-0096, and ADR-0099.
-3. Read `docs/research/21-client-tool-surface-discovery-2026-08.md`,
+3. Read `docs/ubiquitous-language.md`, then read
+   `docs/research/21-client-tool-surface-discovery-2026-08.md`,
    `docs/research/22-canonical-browser-operation-primer.md`, and the exact capture artifacts under
-   `docs/research/tool-surfaces/`.
+   `docs/research/tool-surfaces/` as evidence and history.
 4. Read this file and `LEDGER.md`. Resume only from `RESUME HERE`.
 5. Re-read the live files named by the active stage. Paths and line numbers in research are hints;
    the live tree and accepted ADRs are authoritative.
@@ -26,9 +25,13 @@ Conflicts resolve in this order:
 1. The live tree and accepted ADRs.
 2. The ADR or ADR set accepted in R0 for the canonical operation, surface-profile, readiness,
    bridge-major, mechanism-wire, and adapter trust boundaries.
-3. Exact captured declarations and behavior observations, each kept in its evidence class.
-4. The canonical primer as proposed design rationale.
-5. This bootstrap and the ledger.
+3. `docs/ubiquitous-language.md` as the current working product-language proposal.
+4. Exact captured declarations and behavior observations, each kept in its evidence class.
+5. The research primers as historical rationale.
+6. This bootstrap and the ledger.
+
+Captured vendor language can prove that a job or failure mode exists. It cannot override the
+working native name, grouping, description, or schema merely because a vendor exposed it first.
 
 Stop if R0 cannot establish accepted authority for a production change. Do not implement a
 research recommendation merely because this batch describes its likely sequence.

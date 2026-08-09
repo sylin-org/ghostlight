@@ -462,7 +462,7 @@ mod tests {
         let all_grant = vec![grant(
             "a",
             &["example.com"],
-            &[Capability::Read, Capability::Action, Capability::Write],
+            &[Capability::Read, Capability::Interact, Capability::Write],
         )];
 
         match check(
@@ -499,7 +499,7 @@ mod tests {
             check(
                 &all_grant,
                 "computer",
-                &[Capability::Action],
+                &[Capability::Interact],
                 &host("example.com")
             ),
             Decision::Allow { .. }
@@ -599,7 +599,7 @@ mod tests {
         let grants = vec![grant(
             "g",
             &["example.com"],
-            &[Capability::Read, Capability::Action, Capability::Write],
+            &[Capability::Read, Capability::Interact, Capability::Write],
         )];
         for scheme in ["chrome", "file", "javascript"] {
             match check(
@@ -628,7 +628,7 @@ mod tests {
         let grants = vec![grant(
             "g",
             &["example.com"],
-            &[Capability::Read, Capability::Action, Capability::Write],
+            &[Capability::Read, Capability::Interact, Capability::Write],
         )];
         match check(
             &grants,
@@ -806,7 +806,7 @@ mod tests {
         let all_grant = vec![grant(
             "a",
             &["example.com"],
-            &[Capability::Read, Capability::Action, Capability::Write],
+            &[Capability::Read, Capability::Interact, Capability::Write],
         )];
         let observe = check_with_mode(
             &all_grant,

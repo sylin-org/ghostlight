@@ -113,12 +113,12 @@ impl ExpectedRequest {
         match self {
             Self::Mechanism => {
                 ensure!(
-                    request["mechanism"] == "workspace.tabs.inspect",
+                    request["mechanism"] == "workspace.tab.create",
                     "new extension received the wrong mechanism: {request}"
                 );
                 ensure!(
                     request["input"] == json!({}),
-                    "canonical workspace.tabs.inspect input changed: {request}"
+                    "canonical workspace.tab.create input changed: {request}"
                 );
                 ensure!(
                     request.get("tool").is_none() && request.get("args").is_none(),
@@ -127,12 +127,12 @@ impl ExpectedRequest {
             }
             Self::LegacyTool => {
                 ensure!(
-                    request["tool"] == "tabs_context_mcp",
+                    request["tool"] == "tabs_create_mcp",
                     "old extension received the wrong legacy alias: {request}"
                 );
                 ensure!(
                     request["args"] == json!({}),
-                    "legacy tabs_context_mcp args changed: {request}"
+                    "legacy tabs_create_mcp args changed: {request}"
                 );
                 ensure!(
                     request.get("mechanism").is_none() && request.get("input").is_none(),
@@ -205,19 +205,17 @@ fn run_service_extension_skew(
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
-            "params": { "name": "tabs_context_mcp", "arguments": {} },
+            "params": { "name": "browser_open_tab", "arguments": {} },
         }),
     )?;
     let response = read_line(&mut reader)?;
     ensure!(
         response["id"] == 2 && response["result"]["isError"] != true,
-        "tabs_context_mcp failed through skew path: {response}"
+        "browser_open_tab failed through skew path: {response}"
     );
-    let tab_id = support::creator_tab_id(&response)?;
-    let (slot, native_tab) = ghostlight_core::constants::tab_id::decode(tab_id);
     ensure!(
-        slot != 0 && native_tab == 1,
-        "wrong encoded tab id: {tab_id}"
+        support::creator_tab_handle(&response)?.starts_with("t_"),
+        "creator did not return an opaque Ghostlight tab: {response}"
     );
     extension
         .join()

@@ -17,7 +17,7 @@ Settings locked by the organization (users cannot change these):
   - audit.enabled = true (Record one audit line per tool call (the flight recorder).)
   - audit.destination = "file" (Where audit records are written.)
 Org-recommended defaults (users may change these):
-  - content.security.secrets.redact = true (Redact values of secret fields (password/OTP/payment) in read_page output.)
+  - content.security.secrets.redact = true (Redact values of secret fields (password/OTP/payment) in browser_read_page output.)
 All other settings keep their user, preset, or built-in values.
 If a user loads this file themselves instead of the organization installing it as the org policy file, the locked entries above become user-level defaults and nothing is locked.
 

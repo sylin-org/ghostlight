@@ -210,8 +210,9 @@ impl ToolError {
     pub fn page(message: impl Into<String>) -> Self {
         Self::Page {
             message: message.into(),
-            next_step: "take a screenshot or call read_page to re-locate the element, then retry"
-                .into(),
+            next_step:
+                "call browser_inspect_page to refresh the target, then decide whether to retry"
+                    .into(),
         }
     }
 
@@ -351,7 +352,7 @@ mod tool_error_tests {
         let err = ToolError::page("Element ref_5 not found");
         assert_eq!(
             err.to_string(),
-            "[hop: page] Element ref_5 not found. Next step: take a screenshot or call read_page to re-locate the element, then retry."
+            "[hop: page] Element ref_5 not found. Next step: call browser_inspect_page to refresh the target, then decide whether to retry."
         );
     }
 

@@ -214,21 +214,26 @@ fn tool_browser_dispatches_use_typed_mechanisms() {
     );
 }
 
-/// ADR-0101 R3: response-dependent semantic handlers may emit only mechanisms and controls
-/// declared by their canonical operation's closed dynamic plan. Browser-wide instrumentation
+/// Response-dependent operation handlers may emit only mechanisms declared by their operation's
+/// closed dynamic plan. Browser-wide instrumentation
 /// has separate authority and therefore is not part of this handler-only guard.
 #[test]
 fn dynamic_handlers_enforce_their_canonical_physical_plans() {
     for relative in [
         "crates/core/src/tool/act_on.rs",
+        "crates/core/src/tool/drag.rs",
         "crates/core/src/tool/form_fill.rs",
-        "crates/core/src/tool/upload_image.rs",
-        "crates/core/src/tool/gif_creator.rs",
+        "crates/core/src/tool/page_read.rs",
+        "crates/core/src/tool/tab_navigation.rs",
+        "crates/core/src/tool/target_screenshot.rs",
+        "crates/core/src/tool/wait.rs",
     ] {
         let source = read_repo_file(relative);
         let production = production_source(&source);
         assert!(
-            production.contains("for_operation("),
+            production.contains("for_operation(")
+                || (relative.ends_with("tab_navigation.rs")
+                    && production.contains("compile_navigation_transaction(")),
             "dynamic handler does not bind physical work to its operation plan: {relative}"
         );
         for escape in [
@@ -329,7 +334,7 @@ fn auxiliary_physical_authority_has_only_the_declared_callers() {
 /// as typed ids. Their old adapter spellings belong to the bounded compatibility serializer.
 #[test]
 fn browser_control_and_event_aliases_are_adapter_only() {
-    let adapter = read_repo_file("crates/core/src/hub/outbound/legacy_mechanism.rs");
+    let adapter = read_repo_file("crates/core/src/hub/outbound/adapter_wire_v0.rs");
     let browser = read_repo_file("crates/core/src/hub/outbound/browser.rs");
     let production = production_source(&browser);
     assert!(production.contains("route_reply"));
@@ -462,6 +467,58 @@ fn service_execution_is_protocol_revision_agnostic() {
     );
 }
 
+/// ADR-0102: browser evidence is reduced inside the operation executor. The completion shore can
+/// bind owned handles, but cannot see adapter JSON or recreate result meaning.
+#[test]
+fn operation_completion_is_typed_and_non_inferential() {
+    let outcome = read_repo_file("crates/core/src/tool/outcome.rs");
+    let reducer = read_repo_file("crates/core/src/operation/result.rs");
+    let completion = read_repo_file("crates/core/src/hub/completion.rs");
+    let bridge = read_repo_file("crates/core/src/hub/bridge.rs");
+    let transport = read_repo_file("crates/transport/src/operation.rs");
+
+    assert!(outcome.contains("pub struct OperationExecution"));
+    assert!(outcome.contains("pub disposition: ExecutionDisposition"));
+    assert!(outcome.contains("pub navigation: NavigationCompletion"));
+    assert!(outcome.contains("pub audit: ExecutionAuditFacts"));
+    assert!(outcome.contains("pub targets: ResolvedTargets"));
+    assert!(!outcome.contains("OperationReceipt"));
+
+    assert!(reducer.contains("fn reduce_operation_payload("));
+    assert!(!reducer.contains("project_operation_result"));
+    assert!(!reducer.contains("project_operation_data"));
+    assert!(reducer.contains("OperationResult::BrowserGetStatus"));
+    assert!(reducer.contains("OperationResult::BrowserHandleDialog"));
+
+    assert!(!completion.contains("serde_json"));
+    assert!(!completion.contains("canonicalize"));
+    assert!(!completion.contains("reduce_operation"));
+    assert!(!bridge.contains("canonicalize_operation_success"));
+    assert!(!transport.contains("pub data: Value"));
+}
+
+/// ADR-0102: a sequence child enters the same public operation executor as a direct call. It may
+/// not call a private raw executor or perform its own completion/projection pass.
+#[test]
+fn sequence_children_share_the_direct_operation_executor() {
+    let flow = read_repo_file("crates/core/src/tool/flow.rs");
+    let production = production_source(&flow);
+    assert!(production.contains("use crate::tool::pipeline::run_work;"));
+    assert!(production.contains("run_work("));
+    for forbidden in [
+        "run_work_execution(",
+        "build_operation_completion(",
+        "bind_operation_completion(",
+        "canonicalize_operation_success(",
+        "project_operation_result(",
+    ] {
+        assert!(
+            !production.contains(forbidden),
+            "sequence regained a second completion path through {forbidden}"
+        );
+    }
+}
+
 /// ADR-0096: process identity is diagnostic only, never application authority or routing state.
 #[test]
 fn work_and_workspace_routing_do_not_name_pid() {
@@ -507,6 +564,39 @@ fn shipped_executable_topology_is_exact() {
     assert!(repo_path("crates/mcp-connector/src/main.rs").is_file());
     assert!(repo_path("crates/browser-connector/src/main.rs").is_file());
     assert!(!repo_path("crates/core/src/mcp").exists());
+}
+
+/// Operation-scoped evidence belongs to the typed receipt, never hidden in adapter JSON.
+#[test]
+fn operation_completion_has_no_private_json_marker_channel() {
+    let mut files = Vec::new();
+    collect_rust_files(&repo_path("crates/core/src"), &mut files);
+    let forbidden = [
+        "\"_operation_tab\"",
+        "\"_batch_id\"",
+        "\"_target_assurance\"",
+        "\"_outcome_category\"",
+        "\"_canonical_readiness\"",
+        "\"_navigation_landing_denied\"",
+        "\"_navigation_committed_partial\"",
+        "\"_composed_effect\"",
+        "\"_target_blocked\"",
+        "\"_canonicalTarget\"",
+        "\"_canonicalFrom\"",
+        "\"_canonicalTo\"",
+        "\"_canonicalNavigationFinalUrl\"",
+    ];
+    for path in files {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        for marker in forbidden {
+            assert!(
+                !source.contains(marker),
+                "private operation marker {marker} returned in {}",
+                path.display()
+            );
+        }
+    }
 }
 
 #[test]

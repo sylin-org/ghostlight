@@ -57,16 +57,18 @@
 //! this. Deliberately general so a future notification need (a policy hot-reload landing, for
 //! example) is a new `class`/`icon` value at an existing call site, not a new message type.
 
-use super::diagnostics::Diagnostic;
-use super::legacy_mechanism;
+use super::adapter_wire_v0;
 #[cfg(test)]
-use super::legacy_mechanism::TAB_DELTA_V1;
+use super::adapter_wire_v0::TAB_DELTA_V1;
+use super::diagnostics::Diagnostic;
 use super::mechanism_wire;
-use super::mechanism_wire::MECHANISM_REQUEST_V1;
+use super::mechanism_wire::{
+    ATOMIC_TAB_OPEN_V1, MECHANISM_REQUEST_V1, NAVIGATION_READINESS_V1, STRICT_SENSITIVE_WRITES_V1,
+};
 use super::workspace::WorkspaceBindings;
 use crate::browser::mechanism::{
-    BrowserAuxiliaryPurpose, BrowserControl, BrowserControlId, BrowserEvent, BrowserEventId,
-    FinalAdmission, MechanismId, MechanismRequest, RecordingEndReason,
+    BrowserAuxiliaryPurpose, BrowserControl, BrowserControlId, FinalAdmission, MechanismId,
+    MechanismRequest,
 };
 use crate::governance::dispatch::HOLD_HINT_AFTER;
 use crate::hub::scheduling::{
@@ -74,18 +76,15 @@ use crate::hub::scheduling::{
     ScheduleFailure, ScheduleKey,
 };
 use crate::hub::workspace::WorkspaceRegistry;
-use crate::operation::registry::{OperationDescriptor, SchedulingScope};
+use crate::operation::registry::{Scheduling, SchedulingScope};
 use crate::ToolError;
 use ghostlight_transport::bridge::WorkspaceUse;
 use ghostlight_transport::host;
 use ghostlight_transport::observability::DebugSink;
-use ghostlight_transport::operation::OperationKey;
-#[cfg(test)]
-use ghostlight_transport::operation::{IntentId, OperationId};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -130,8 +129,6 @@ const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 /// service pipeline alive for 180 seconds covers that queue lifetime plus the original execution
 /// budget while still bounding pending memory, audit scopes, and workspace leases.
 const DELIVERY_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(180);
-/// Browser final-frame barriers are deliberately much shorter than an ordinary tool timeout.
-const RECORDING_BARRIER_TIMEOUT: Duration = Duration::from_secs(5);
 /// Conservative payload ceiling below Chrome's 1 MiB host-to-extension native-message limit.
 const CHROME_OUTBOUND_PAYLOAD_LIMIT: usize = 900 * 1024;
 /// Raw bytes carried by one base64 wire chunk; its JSON envelope remains below the limit above.
@@ -209,8 +206,8 @@ enum ExpectedReplyClass {
 }
 
 impl ExpectedReplyClass {
-    fn accepts(self, kind: legacy_mechanism::CorrelatedReplyKind) -> bool {
-        use legacy_mechanism::CorrelatedReplyKind;
+    fn accepts(self, kind: adapter_wire_v0::CorrelatedReplyKind) -> bool {
+        use adapter_wire_v0::CorrelatedReplyKind;
 
         matches!(
             (self, kind),
@@ -268,22 +265,6 @@ struct WorkspaceAdoption {
 }
 
 type Pending = Arc<Mutex<HashMap<String, PendingEntry>>>;
-
-/// A screenshot cached per workspace for later `upload_image` reference (ADR-0050 Decision 4). Holds
-/// the base64 bytes and media type exactly as the extension's screenshot-producing result
-/// carried them, so `upload_image` can forward them to a file input or drag-drop target.
-#[derive(Clone)]
-pub(crate) struct CachedImage {
-    pub(crate) base64: String,
-    pub(crate) media_type: String,
-}
-
-/// Per-workspace bounded screenshot cache (ADR-0050 D4): each workspace's last
-/// [`SCREENSHOT_CACHE_BOUND`] screenshots, newest last, keyed by minted `img_...` id.
-type ScreenshotCache = Arc<Mutex<HashMap<String, VecDeque<(String, CachedImage)>>>>;
-
-/// The per-guid screenshot-cache bound (ADR-0050 D4): pushing a 9th screenshot evicts the oldest.
-const SCREENSHOT_CACHE_BOUND: usize = 8;
 
 /// The outcome of [`Browser::attach`]: whether this connection became the active browser link or was
 /// rejected because one is already attached.
@@ -380,9 +361,6 @@ enum WorkspaceRouting {
 struct MechanismMetadata {
     workspace: WorkspaceRouting,
     creator_inventory: bool,
-    recording_internal: bool,
-    cache_image_result: bool,
-    annotate_recording: bool,
 }
 
 impl MechanismMetadata {
@@ -390,19 +368,15 @@ impl MechanismMetadata {
         use MechanismId::*;
 
         match id {
-            WorkspaceTabsInspect | WorkspaceTabsEnsure | WorkspaceTabCreate => Self {
-                workspace: WorkspaceRouting::Always,
-                creator_inventory: true,
-                recording_internal: false,
-                cache_image_result: false,
-                annotate_recording: false,
-            },
+            WorkspaceTabsInspect | WorkspaceTabsEnsure | WorkspaceTabCreate | WorkspaceTabOpen => {
+                Self {
+                    workspace: WorkspaceRouting::Always,
+                    creator_inventory: true,
+                }
+            }
             NavigateUrl | NavigateBack | NavigateForward => Self {
                 workspace: WorkspaceRouting::WhenUnaddressed,
                 creator_inventory: false,
-                recording_internal: false,
-                cache_image_result: false,
-                annotate_recording: true,
             },
             ScreenshotViewport
             | ScreenshotRegion
@@ -417,27 +391,27 @@ impl MechanismMetadata {
             | WaitDelay => Self {
                 workspace: WorkspaceRouting::Never,
                 creator_inventory: false,
-                recording_internal: false,
-                cache_image_result: true,
-                annotate_recording: true,
             },
-            UploadImage | RecordingStart | RecordingStop | PointsRescale => Self {
+            TabFocus
+            | TabClose
+            | NavigateReload
+            | PageSnapshot
+            | PageReadText
+            | PageFind
+            | ElementResolve
+            | TargetCue
+            | FormInspect
+            | FormSetValue
+            | WaitUntil
+            | DialogInspect
+            | DialogAccept
+            | DialogDismiss
+            | DialogRespond
+            | TabUrlQuery
+            | NavigationAwaitReadiness
+            | NavigationVerifyDocument => Self {
                 workspace: WorkspaceRouting::Never,
                 creator_inventory: false,
-                recording_internal: true,
-                cache_image_result: false,
-                annotate_recording: false,
-            },
-            TabFocus | TabClose | NavigateReload | PageSnapshot | PageReadText | PageFind
-            | ElementResolve | TargetCue | FormInspect | FormSetValue | WaitUntil
-            | DialogInspect | DialogAccept | DialogDismiss | DialogRespond | ViewportResize
-            | UploadFiles | ConsoleRead | NetworkRead | PageEvaluate | NarrationShow
-            | TabUrlQuery => Self {
-                workspace: WorkspaceRouting::Never,
-                creator_inventory: false,
-                recording_internal: false,
-                cache_image_result: false,
-                annotate_recording: false,
             },
         }
     }
@@ -724,23 +698,6 @@ fn encode_created_tab_prose(text: &str, target: u32) -> Option<String> {
 
 /// Parse the extension's points-rescale reply: a text content block holding
 /// `{"points": [[x, y], ...]}`. None on any shape mismatch (the caller keeps raw coordinates).
-fn parse_rescaled_points(reply: &Value) -> Option<Vec<(f64, f64)>> {
-    let text = reply
-        .get("content")?
-        .as_array()?
-        .first()?
-        .get("text")?
-        .as_str()?;
-    let parsed: Value = serde_json::from_str(text).ok()?;
-    let points = parsed.get("points")?.as_array()?;
-    let mut out = Vec::with_capacity(points.len());
-    for p in points {
-        let pair = p.as_array()?;
-        out.push((pair.first()?.as_f64()?, pair.get(1)?.as_f64()?));
-    }
-    Some(out)
-}
-
 /// One attached browser's live send half plus enough identity to detect a stale self-removal
 /// race (ADR-0058): `generation` is this [`Browser::attach`] call's own monotonic id, so a
 /// reader loop that is about to remove its connection on disconnect can tell whether a LATER
@@ -760,6 +717,9 @@ struct BrowserSession {
     generation: u64,
     chunked_host_messages_v1: bool,
     mechanism_request_v1: bool,
+    navigation_readiness_v1: bool,
+    atomic_tab_open_v1: bool,
+    strict_sensitive_writes_v1: bool,
     executor_generation: Option<String>,
 }
 
@@ -772,6 +732,9 @@ struct BrowserSession {
 struct BrowserSessionBinding {
     generation: u64,
     mechanism_request_v1: bool,
+    navigation_readiness_v1: bool,
+    atomic_tab_open_v1: bool,
+    strict_sensitive_writes_v1: bool,
 }
 
 struct PreparedBrowserRequest {
@@ -828,10 +791,6 @@ pub struct Browser {
     /// Monotonic id source for `kill_hooks` entries (ADR-0030 Decision 7), so a
     /// [`KillHookHandle`] can remove exactly its own registration.
     next_hook_id: Arc<AtomicU64>,
-    /// Per-workspace screenshot cache (ADR-0050 Decision 4): a screenshot result is cached
-    /// here under a minted `img_...` id so `upload_image` can later place it into a file input or a
-    /// drag-drop target. Bounded per guid ([`SCREENSHOT_CACHE_BOUND`]), evicting the oldest.
-    screenshot_cache: ScreenshotCache,
     /// Stable human-facing label for each live workspace. It is never an extension routing key:
     /// browser state is keyed only by the workspace handle carried in the compatibility `guid`
     /// field. Entries are removed when the workspace retires.
@@ -839,10 +798,6 @@ pub struct Browser {
     /// Per-workspace browser-profile routing for unaddressed topology calls. Chrome-native
     /// windows and groups remain entirely browser-shore state.
     workspace_bindings: WorkspaceBindings,
-    /// Workspace/surface/generation-scoped, memory-only GIF recordings (ADR-0073/0096).
-    recordings: Arc<crate::recording::RecordingCoordinator>,
-    /// Starts the one process-local deadline and health-lease supervisor lazily.
-    recording_supervisor_started: Arc<AtomicBool>,
     /// Per-workspace denial attention circuits (ADR-0079/0096). The same lock is held through the
     /// final extension-frame enqueue, so an opening transition cannot race a stale admission.
     attention_sessions: AttentionSessions,
@@ -877,11 +832,8 @@ impl Browser {
             safety: Arc::new(Mutex::new(SafetyState::default())),
             kill_hooks: Arc::new(Mutex::new(Vec::new())),
             next_hook_id: Arc::new(AtomicU64::new(1)),
-            screenshot_cache: Arc::new(Mutex::new(HashMap::new())),
             workspace_labels: Arc::new(Mutex::new(HashMap::new())),
             workspace_bindings: WorkspaceBindings::default(),
-            recordings: Arc::new(crate::recording::RecordingCoordinator::new()),
-            recording_supervisor_started: Arc::new(AtomicBool::new(false)),
             attention_sessions: Arc::new(Mutex::new(HashMap::new())),
             scheduler: CommandScheduler::default(),
             workspace_registry: Arc::new(OnceLock::new()),
@@ -903,43 +855,35 @@ impl Browser {
         &self.scheduler
     }
 
-    /// Resolve and acquire the descriptor-declared execution context for one call.
-    pub async fn acquire_execution(
+    /// Acquire the scheduler resource declared by the Ghostlight operation contract.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn acquire_operation(
         &self,
-        descriptor: &OperationDescriptor,
+        scheduling: Scheduling,
+        workspace_use: WorkspaceUse,
         guid: &str,
         args: &Value,
         authority_epoch: u64,
         inherited: Option<&ExecutionContext>,
+        cancellation: Option<&crate::work::CancellationToken>,
     ) -> Result<ExecutionContext, ScheduleFailure> {
-        self.acquire_execution_inner(descriptor, guid, args, authority_epoch, inherited, None)
-            .await
-    }
-
-    /// Resolve and acquire descriptor-declared execution with exact queued-work cancellation.
-    pub async fn acquire_execution_cancellable(
-        &self,
-        descriptor: &OperationDescriptor,
-        guid: &str,
-        args: &Value,
-        authority_epoch: u64,
-        inherited: Option<&ExecutionContext>,
-        cancellation: &crate::work::CancellationToken,
-    ) -> Result<ExecutionContext, ScheduleFailure> {
-        self.acquire_execution_inner(
-            descriptor,
+        self.acquire_declared_execution(
+            scheduling,
+            workspace_use,
             guid,
             args,
             authority_epoch,
             inherited,
-            Some(cancellation),
+            cancellation,
         )
         .await
     }
 
-    async fn acquire_execution_inner(
+    #[allow(clippy::too_many_arguments)]
+    async fn acquire_declared_execution(
         &self,
-        descriptor: &OperationDescriptor,
+        scheduling: Scheduling,
+        workspace_use: WorkspaceUse,
         guid: &str,
         args: &Value,
         authority_epoch: u64,
@@ -948,7 +892,7 @@ impl Browser {
     ) -> Result<ExecutionContext, ScheduleFailure> {
         let producer = ProducerId::new(guid);
         let composite_tab = args.get("tab").and_then(Value::as_i64);
-        match descriptor.scheduling.scope {
+        match scheduling.scope {
             SchedulingScope::Presentation => Ok(ExecutionContext::presentation()),
             SchedulingScope::Local => Ok(ExecutionContext::local()),
             // Compositions acquire at each concrete sub-step. Single-surface compositions pass
@@ -965,9 +909,7 @@ impl Browser {
                 .await
             }
             SchedulingScope::WorkspaceTopology => {
-                let slot = if descriptor.workspace_use == WorkspaceUse::Creates
-                    && composite_tab.is_none()
-                {
+                let slot = if workspace_use == WorkspaceUse::Creates && composite_tab.is_none() {
                     // Before first selection, all concurrent topology calls from this client use
                     // the slot-zero bootstrap queue. This prevents two browser profiles from
                     // racing to establish different first-workspace pins. Dispatch resolves the
@@ -1008,40 +950,7 @@ impl Browser {
     }
 
     /// Acquire a concrete surface for a descriptor-preflighted composition.
-    pub(crate) async fn acquire_composition_surface(
-        &self,
-        guid: &str,
-        composite_tab: i64,
-        authority_epoch: u64,
-    ) -> Result<ExecutionContext, ScheduleFailure> {
-        self.acquire_surface_for(
-            ProducerId::new(guid),
-            Some(composite_tab),
-            authority_epoch,
-            None,
-            None,
-        )
-        .await
-    }
-
     /// Acquire a retained composition surface with exact queued-work cancellation.
-    pub(crate) async fn acquire_composition_surface_cancellable(
-        &self,
-        guid: &str,
-        composite_tab: i64,
-        authority_epoch: u64,
-        cancellation: &crate::work::CancellationToken,
-    ) -> Result<ExecutionContext, ScheduleFailure> {
-        self.acquire_surface_for(
-            ProducerId::new(guid),
-            Some(composite_tab),
-            authority_epoch,
-            None,
-            Some(cancellation),
-        )
-        .await
-    }
-
     async fn acquire_scheduled(
         &self,
         key: ScheduleKey,
@@ -1121,10 +1030,8 @@ impl Browser {
 
     /// Clear every browser-side cache and presentation object owned by a retired workspace.
     pub fn cleanup_workspace(&self, workspace: &str, owned_tabs: &[i64]) {
-        self.erase_session_recordings(workspace);
         self.clear_attention_session(workspace);
         self.clear_narrations(owned_tabs);
-        self.screenshot_cache.lock().unwrap().remove(workspace);
         self.workspace_labels.lock().unwrap().remove(workspace);
         self.workspace_bindings.remove(workspace);
     }
@@ -1239,14 +1146,6 @@ impl Browser {
             safety.held_since = Some(Instant::now());
             drop(safety);
             self.scheduler.retire_all(RetirementReason::Hold);
-            for ticket in self
-                .recordings
-                .interrupt_all(crate::recording::StopReason::UserHold)
-            {
-                if let Err(error) = self.send_recording_cancel(&ticket) {
-                    tracing::warn!(error = %error, "failed to enqueue takeover recording cancel");
-                }
-            }
             tracing::info!("user hold engaged");
         } else if !held && was_held {
             safety.held_since = None;
@@ -1264,14 +1163,6 @@ impl Browser {
             safety.held_since = Some(Instant::now());
             drop(safety);
             self.scheduler.retire_all(RetirementReason::Hold);
-            for ticket in self
-                .recordings
-                .interrupt_all(crate::recording::StopReason::UserHold)
-            {
-                if let Err(error) = self.send_recording_cancel(&ticket) {
-                    tracing::warn!(error = %error, "failed to enqueue takeover recording cancel");
-                }
-            }
             tracing::info!("user hold engaged");
         } else {
             safety.held_since = None;
@@ -1518,30 +1409,12 @@ impl Browser {
             None => request,
         };
 
-        let activity_surface = native_tab.map(|native_tab| crate::recording::SurfaceId {
-            slot: target,
-            native_tab,
-        });
-        let activity_admitted = activity_surface.is_some_and(|surface| {
-            !metadata.recording_internal && self.recordings.begin_activity(guid, surface)
-        });
-
-        // While this tab records (ADR-0053 D4), note the action BEFORE it runs so
-        // the screencast frame its paint produces is the frame that carries its ring/label.
-        self.note_gif_action(guid, call_request, metadata, target, execution)
-            .await;
         let result = self
             .raw_execute_mechanism(guid, call_request, target, execution)
             .await;
-        if activity_admitted {
-            self.recordings.finish_activity(
-                guid,
-                activity_surface.expect("admitted activity has a surface"),
-            );
-        }
         let result = result?;
         let result = self.encode_tab_ids(result, target);
-        Ok(self.cache_and_inject_screenshot(guid, metadata.cache_image_result, result))
+        Ok(result)
     }
 
     /// Execute a side-effecting physical mechanism while preserving outcome uncertainty.
@@ -1586,16 +1459,6 @@ impl Browser {
             None => request,
         };
 
-        let activity_surface = native_tab.map(|native_tab| crate::recording::SurfaceId {
-            slot: target,
-            native_tab,
-        });
-        let activity_admitted = activity_surface.is_some_and(|surface| {
-            !metadata.recording_internal && self.recordings.begin_activity(guid, surface)
-        });
-        self.note_gif_action(guid, call_request, metadata, target, execution)
-            .await;
-
         let result = async {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
             let workspace_group_title = uses_workspace.then(|| self.workspace_group_title(guid));
@@ -1629,20 +1492,14 @@ impl Browser {
             .await
         }
         .await;
-        if activity_admitted {
-            self.recordings.finish_activity(
-                guid,
-                activity_surface.expect("admitted activity has a surface"),
-            );
-        }
         let mut result = result?;
         self.capture_workspace_result(guid, uses_workspace, target, &mut result);
         let result = self.encode_tab_ids(result, target);
-        Ok(self.cache_and_inject_screenshot(guid, metadata.cache_image_result, result))
+        Ok(result)
     }
 
-    /// The bare envelope + dispatch of [`Browser::execute_mechanism`], shared with internal sends that must not
-    /// re-enter the gif action-noting or screenshot-cache layers. `target` is the already-resolved
+    /// The bare envelope + dispatch of [`Browser::execute_mechanism`], shared with internal sends.
+    /// `target` is the already-resolved
     /// slot (ADR-0058/0061) this specific request is sent to.
     async fn raw_execute_mechanism(
         &self,
@@ -1728,17 +1585,73 @@ impl Browser {
         workspace_group_title: Option<&str>,
     ) -> std::result::Result<PreparedBrowserRequest, ToolError> {
         let (binding, supports_chunks) = self.browser_session_wire_facts(target)?;
+        if request
+            .input()
+            .get("reject_sensitive")
+            .and_then(Value::as_bool)
+            == Some(true)
+            && !binding.strict_sensitive_writes_v1
+        {
+            return Err(ToolError::CapabilityNotReady {
+                capability: "strict sensitive writes".into(),
+                message: "the connected browser adapter does not support strict sensitive writes"
+                    .into(),
+                next_step: "update the Ghostlight extension before entering values".into(),
+            });
+        }
+        if request.id() == MechanismId::WorkspaceTabOpen && !binding.atomic_tab_open_v1 {
+            return Err(ToolError::CapabilityNotReady {
+                capability: "atomic tab opening".into(),
+                message:
+                    "the connected browser adapter cannot open and observe a URL as one transaction"
+                        .into(),
+                next_step:
+                    "reload or update the Ghostlight extension before opening a URL in a new tab"
+                        .into(),
+            });
+        }
+        if matches!(
+            request.id(),
+            MechanismId::WorkspaceTabOpen
+                | MechanismId::NavigateUrl
+                | MechanismId::NavigateBack
+                | MechanismId::NavigateForward
+                | MechanismId::NavigateReload
+        ) && request.canonical_navigation_proof_required()
+            && !binding.navigation_readiness_v1
+        {
+            return Err(ToolError::CapabilityNotReady {
+                capability: "navigation readiness".into(),
+                message:
+                    "the connected browser adapter cannot prove canonical navigation readiness"
+                        .into(),
+                next_step: "update the Ghostlight extension before navigating".into(),
+            });
+        }
         let payload = if binding.mechanism_request_v1 {
+            if matches!(
+                request.id(),
+                MechanismId::NavigationAwaitReadiness | MechanismId::NavigationVerifyDocument
+            ) && !binding.navigation_readiness_v1
+            {
+                return Err(ToolError::CapabilityNotReady {
+                    capability: "navigation readiness".into(),
+                    message: "the connected browser adapter does not support navigation readiness"
+                        .into(),
+                    next_step: "update the Ghostlight extension before navigating".into(),
+                });
+            }
             mechanism_wire::serialize_tool_request(
                 request_id,
                 guid,
                 request,
-                legacy_mechanism::TAB_DELTA_V1,
+                adapter_wire_v0::TAB_DELTA_V1,
                 execution,
                 workspace_group_title,
+                binding.navigation_readiness_v1,
             )
         } else {
-            legacy_mechanism::serialize_tool_request(
+            adapter_wire_v0::serialize_tool_request(
                 request_id,
                 guid,
                 request,
@@ -1762,7 +1675,7 @@ impl Browser {
         let payload = if binding.mechanism_request_v1 {
             mechanism_wire::serialize_tab_url_request(request_id, request, execution)
         } else {
-            legacy_mechanism::serialize_tab_url_request(request_id, request, execution)
+            adapter_wire_v0::serialize_tab_url_request(request_id, request, execution)
         }
         .map(Zeroizing::new)?;
         let frames = Self::encode_outbound_frames(request_id, &payload, supports_chunks)?;
@@ -1787,6 +1700,9 @@ impl Browser {
             BrowserSessionBinding {
                 generation: session.generation,
                 mechanism_request_v1: session.mechanism_request_v1,
+                navigation_readiness_v1: session.navigation_readiness_v1,
+                atomic_tab_open_v1: session.atomic_tab_open_v1,
+                strict_sensitive_writes_v1: session.strict_sensitive_writes_v1,
             },
             session.chunked_host_messages_v1,
         ))
@@ -1860,425 +1776,6 @@ impl Browser {
         Ok(frames)
     }
 
-    /// The memory-only recording coordinator (ADR-0073), for local orchestration and cleanup.
-    pub(crate) fn recordings(&self) -> &crate::recording::RecordingCoordinator {
-        &self.recordings
-    }
-
-    /// Start the process-local recording deadline and lease supervisor exactly once.
-    pub(crate) fn ensure_recording_supervisor(&self) {
-        if self
-            .recording_supervisor_started
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return;
-        }
-        if tokio::runtime::Handle::try_current().is_err() {
-            self.recording_supervisor_started
-                .store(false, Ordering::SeqCst);
-            return;
-        }
-        let browser = self.clone();
-        tokio::spawn(async move {
-            let mut deadlines = tokio::time::interval(Duration::from_secs(1));
-            let mut last_renewal = Instant::now()
-                .checked_sub(crate::recording::HEALTH_RENEW_INTERVAL)
-                .unwrap_or_else(Instant::now);
-            loop {
-                deadlines.tick().await;
-                for due in browser.recordings.poll_deadlines() {
-                    let worker = browser.clone();
-                    tokio::spawn(async move {
-                        worker.finalize_due_recording(due).await;
-                    });
-                }
-                if last_renewal.elapsed() >= crate::recording::HEALTH_RENEW_INTERVAL {
-                    for target in browser.recordings.lease_targets() {
-                        browser.send_recording_renewal(&target);
-                    }
-                    last_renewal = Instant::now();
-                }
-            }
-        });
-    }
-
-    async fn finalize_due_recording(&self, due: crate::recording::DueFinalization) {
-        let request = MechanismRequest::for_auxiliary(
-            BrowserAuxiliaryPurpose::RecordingSupervisor,
-            MechanismId::RecordingStop,
-            json!({
-                "tab": due.ticket.surface.native_tab,
-                "recording_id": due.ticket.id.as_str(),
-                "generation": due.ticket.generation,
-            }),
-        )
-        .expect("recording supervisor stop must be declared by its auxiliary plan");
-        let success = self
-            .raw_execute_mechanism_with_timeout(
-                &due.owner,
-                &request,
-                due.ticket.surface.slot,
-                RECORDING_BARRIER_TIMEOUT,
-                &ExecutionContext::safety_protocol(),
-            )
-            .await
-            .is_ok();
-        self.recordings
-            .finish_finalizing(&due.ticket, success, due.reason);
-    }
-
-    /// Stop one exact capture generation within its workspace-routed browser state.
-    pub(crate) async fn stop_recording_capture(
-        &self,
-        operation: OperationKey,
-        guid: &str,
-        ticket: &crate::recording::RecordingTicket,
-        execution: &ExecutionContext,
-    ) -> std::result::Result<Value, DeliveryFailure> {
-        let request = MechanismRequest::for_operation(
-            operation,
-            MechanismId::RecordingStop,
-            json!({
-                "tab": ticket.surface.native_tab,
-                "recording_id": ticket.id.as_str(),
-                "generation": ticket.generation,
-            }),
-        )
-        .map_err(|error| DeliveryFailure {
-            error,
-            outcome_unknown: false,
-        })?;
-        self.raw_execute_mechanism_with_delivery_timeout(
-            guid,
-            &request,
-            ticket.surface.slot,
-            RECORDING_BARRIER_TIMEOUT,
-            execution,
-        )
-        .await
-    }
-
-    /// Stop one exact capture generation without awaiting a reply, used after immediate erasure.
-    pub(crate) fn cancel_recording_capture(
-        &self,
-        operation: OperationKey,
-        ticket: &crate::recording::RecordingTicket,
-    ) -> std::result::Result<(), ToolError> {
-        let control = BrowserControl::for_operation_cleanup(
-            operation,
-            BrowserControlId::RecordingCancel,
-            json!({
-                "tab": ticket.surface.native_tab,
-                "recording_id": ticket.id.as_str(),
-                "generation": ticket.generation,
-            }),
-        )
-        .expect("recording cleanup must be declared by its supervisor plan");
-        self.send_control(ticket.surface.slot, &control, None)
-    }
-
-    /// Atomically admit and erase one operation-owned recording, then stop its browser relay.
-    ///
-    /// The safety and attention locks remain held from the final checks through both the
-    /// memory-state transition and the one-way control enqueue. A takeover, panic, or attention
-    /// transition therefore either wins before any clear effect or follows a committed clear;
-    /// it can never produce a false held/no-effect result after memory was already erased.
-    pub(crate) fn clear_recording_capture(
-        &self,
-        operation: OperationKey,
-        guid: &str,
-        surface: crate::recording::SurfaceId,
-        execution: &ExecutionContext,
-    ) -> std::result::Result<bool, ToolError> {
-        let resource = ScheduleKey::Surface(BrowserSurface {
-            browser_slot: surface.slot,
-            native_tab: surface.native_tab,
-        });
-        if !execution.authorizes(&resource) {
-            return Err(ToolError::binary(
-                "recording clear lacks the admitted surface execution context",
-            ));
-        }
-
-        let ticket = self.recordings.ticket(guid, surface);
-        let framed = ticket
-            .as_ref()
-            .map(|ticket| {
-                BrowserControl::for_operation(
-                    operation,
-                    BrowserControlId::RecordingCancel,
-                    json!({
-                        "tab": ticket.surface.native_tab,
-                        "recording_id": ticket.id.as_str(),
-                        "generation": ticket.generation,
-                    }),
-                )
-                .and_then(|control| {
-                    legacy_mechanism::serialize_control(&control)
-                        .map_err(|_| ToolError::binary("failed to serialize recording clear"))
-                })
-                .and_then(|bytes| {
-                    host::encode(&bytes)
-                        .map_err(|_| ToolError::binary("failed to frame recording clear"))
-                })
-            })
-            .transpose()?;
-
-        let safety = self.safety.lock().unwrap();
-        if safety.killed {
-            return Err(kill_error());
-        }
-        if let Some(since) = safety.held_since {
-            return Err(ToolError::held(since.elapsed() >= HOLD_HINT_AFTER));
-        }
-        let attention = self.attention_sessions.lock().unwrap();
-        if attention
-            .get(guid)
-            .is_some_and(|session| session.circuit.paused().is_some())
-        {
-            return Err(ToolError::attention_required(attention_required_message()));
-        }
-
-        let Some(ticket) = ticket else {
-            return Ok(false);
-        };
-        let framed = framed.expect("a recording ticket always has a framed cancel control");
-        if let Err(error) =
-            self.enqueue_control_frame(surface.slot, BrowserControlId::RecordingCancel, framed)
-        {
-            // A missing/closed native session already revokes the browser-side relay. Clear must
-            // remain available offline (ADR-0073 D7), while local encoding/admission failures
-            // still fail before erasure.
-            if !matches!(error, ToolError::Extension { .. }) {
-                return Err(error);
-            }
-        }
-        Ok(self
-            .recordings
-            .clear_ticket(guid, &ticket, crate::recording::StopReason::Cleared))
-    }
-
-    fn send_recording_renewal(&self, target: &crate::recording::LeaseTarget) {
-        let control = BrowserControl::for_auxiliary(
-            BrowserAuxiliaryPurpose::RecordingHealth,
-            BrowserControlId::RecordingLeaseRenew,
-            json!({
-                "tab": target.ticket.surface.native_tab,
-                "recording_id": target.ticket.id.as_str(),
-                "generation": target.ticket.generation,
-                "lease_ms": crate::recording::HEALTH_LEASE.as_millis() as u64,
-            }),
-        )
-        .expect("recording lease renewal must be declared by its auxiliary plan");
-        let _ = self.send_control(target.ticket.surface.slot, &control, Some(&target.owner));
-    }
-
-    fn send_recording_cancel(
-        &self,
-        ticket: &crate::recording::RecordingTicket,
-    ) -> std::result::Result<(), ToolError> {
-        self.send_recording_cancel_identity(ticket.surface, ticket.id.as_str(), ticket.generation)
-    }
-
-    fn send_recording_cancel_identity(
-        &self,
-        surface: crate::recording::SurfaceId,
-        recording_id: &str,
-        generation: u64,
-    ) -> std::result::Result<(), ToolError> {
-        let control = BrowserControl::for_auxiliary(
-            BrowserAuxiliaryPurpose::RecordingSupervisor,
-            BrowserControlId::RecordingCancel,
-            json!({
-                "tab": surface.native_tab,
-                "recording_id": recording_id,
-                "generation": generation,
-            }),
-        )
-        .expect("recording teardown must be declared by its auxiliary plan");
-        self.send_control(surface.slot, &control, None)
-    }
-
-    /// Erase all captured content owned by one workspace and stop matching extension relays.
-    pub(crate) fn erase_session_recordings(&self, guid: &str) {
-        for ticket in self
-            .recordings
-            .end_session(guid, crate::recording::StopReason::SessionEnded)
-        {
-            if let Err(error) = self.send_recording_cancel(&ticket) {
-                tracing::warn!(error = %error, "failed to enqueue recording session cleanup");
-            }
-        }
-    }
-
-    /// Erase all captured content after a global invalidation such as policy reload or panic.
-    pub(crate) fn erase_all_recordings(&self, reason: crate::recording::StopReason) {
-        for ticket in self.recordings.end_all(reason) {
-            if let Err(error) = self.send_recording_cancel(&ticket) {
-                tracing::warn!(error = %error, "failed to enqueue global recording cleanup");
-            }
-        }
-    }
-
-    /// Resolve a model-facing composite tab id into the browser slot + native tab surface used by
-    /// recording identity. Slot-zero legacy ids follow the same live-focus fallback as dispatch.
-    pub(crate) fn recording_surface(
-        &self,
-        composite_tab: i64,
-    ) -> Option<crate::recording::SurfaceId> {
-        let (slot, native) = self.resolve_target(Some(composite_tab));
-        Some(crate::recording::SurfaceId {
-            slot: slot?,
-            native_tab: native?,
-        })
-    }
-
-    /// While a mechanism's tab is actively recording, describe the action for overlay tagging
-    /// (ADR-0052 D4 semantics, service-side per ADR-0053 D4). Model-space coordinates rescale to
-    /// CSS viewport px by asking the extension (a typed internal mechanism over its live
-    /// ScreenshotContext -- the mechanism data stays where Chrome produces it; querying beats
-    /// mirroring). Best-effort: on any failure the raw coordinates stand (identical in the common
-    /// unzoomed case).
-    async fn note_gif_action(
-        &self,
-        guid: &str,
-        request: &MechanismRequest,
-        metadata: MechanismMetadata,
-        target: u32,
-        execution: &ExecutionContext,
-    ) {
-        if !metadata.annotate_recording {
-            return;
-        }
-        // `input` here is already the native (post-rewrite) form. The routed slot completes the
-        // surface identity, preventing equal native ids in two browsers from colliding.
-        let Some(tab) = request.input().get("tab").and_then(Value::as_i64) else {
-            return;
-        };
-        let surface = crate::recording::SurfaceId {
-            slot: target,
-            native_tab: tab,
-        };
-        if !self.recordings.is_active(guid, surface) {
-            return;
-        }
-        let Some(mut meta) = crate::gif::describe_action(request.id(), request.input()) else {
-            return;
-        };
-        meta.ts_ms = chrono::Utc::now().timestamp_millis();
-        let mut points: Vec<Value> = Vec::new();
-        if let Some((x, y)) = meta.coordinate {
-            points.push(json!([x, y]));
-        }
-        if let Some((x, y)) = meta.start_coordinate {
-            points.push(json!([x, y]));
-        }
-        if !points.is_empty() {
-            let rescale_request = MechanismRequest::for_auxiliary(
-                BrowserAuxiliaryPurpose::RecordingInstrumentation,
-                MechanismId::PointsRescale,
-                json!({ "tab": tab, "points": points }),
-            )
-            .expect("recording coordinate rescale must be declared by its auxiliary plan");
-            if let Ok(reply) = self
-                .raw_execute_mechanism(guid, &rescale_request, target, execution)
-                .await
-            {
-                if let Some(rescaled) = parse_rescaled_points(&reply) {
-                    let mut it = rescaled.into_iter();
-                    if meta.coordinate.is_some() {
-                        meta.coordinate = it.next();
-                    }
-                    if meta.start_coordinate.is_some() {
-                        meta.start_coordinate = it.next();
-                    }
-                }
-            }
-        }
-        self.recordings.note_action(guid, surface, meta);
-    }
-
-    /// One unsolicited recording frame from the extension's screencast relay (ADR-0053 D2):
-    /// hand the base64 JPEG to the recording store (which drops it unless the tab is actively
-    /// recording).
-    fn handle_recording_frame(&self, slot: u32, event: &BrowserEvent) {
-        let Some(tab) = event.input.get("tab").and_then(Value::as_i64) else {
-            return;
-        };
-        let Some(data) = event.input.get("data").and_then(Value::as_str) else {
-            return;
-        };
-        let Some(recording_id) = event.input.get("recording_id").and_then(Value::as_str) else {
-            return;
-        };
-        let Some(generation) = event.input.get("generation").and_then(Value::as_u64) else {
-            return;
-        };
-        let Some(sequence) = event.input.get("sequence").and_then(Value::as_u64) else {
-            return;
-        };
-        let ts = event
-            .input
-            .get("ts")
-            .and_then(Value::as_i64)
-            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
-        let device_width = event.input.get("device_width").and_then(Value::as_f64);
-        let final_frame = event.input.get("final_frame").and_then(Value::as_bool) == Some(true);
-        let surface = crate::recording::SurfaceId {
-            slot,
-            native_tab: tab,
-        };
-        if self.recordings.on_frame(
-            surface,
-            recording_id,
-            generation,
-            sequence,
-            data,
-            ts,
-            device_width,
-            final_frame,
-        ) == crate::recording::FrameAdmission::RejectAndCancel
-        {
-            if let Err(error) =
-                self.send_recording_cancel_identity(surface, recording_id, generation)
-            {
-                tracing::warn!(error = %error, "failed to enqueue rejected recording-frame cancel");
-            }
-        }
-    }
-
-    fn handle_recording_ended(&self, slot: u32, event: &BrowserEvent) {
-        let (Some(tab), Some(recording_id), Some(generation), Some(reason)) = (
-            event.input.get("tab").and_then(Value::as_i64),
-            event.input.get("recording_id").and_then(Value::as_str),
-            event.input.get("generation").and_then(Value::as_u64),
-            event
-                .input
-                .get("reason")
-                .and_then(Value::as_str)
-                .and_then(RecordingEndReason::parse),
-        ) else {
-            return;
-        };
-        let reason = match reason {
-            RecordingEndReason::HardTimeout => crate::recording::StopReason::HardTimeout,
-            RecordingEndReason::BrowserDetached => {
-                crate::recording::StopReason::BrowserDisconnected
-            }
-            RecordingEndReason::LeaseExpired => crate::recording::StopReason::LeaseExpired,
-        };
-        self.recordings.interrupt_identity(
-            crate::recording::SurfaceId {
-                slot,
-                native_tab: tab,
-            },
-            recording_id,
-            generation,
-            reason,
-        );
-    }
-
     /// Re-encode every native tabId the extension reported in `result` back to composite form
     /// (ADR-0058), using the browser this call was actually routed to. See
     /// [`encode_tab_ids_in_value`] for the walk itself; this is just the `Browser::call` hook.
@@ -2286,83 +1783,6 @@ impl Browser {
         encode_tab_delta_ids(&mut result, target);
         encode_tab_ids_in_value(&mut result, target);
         result
-    }
-
-    /// ADR-0050 Decision 4 -- the ONE sanctioned additive change to a trained tool's OUTPUT: after a
-    /// Cache an image result from a screenshot-producing compatibility mechanism and append its
-    /// minted image id. Other mechanisms and image-less results pass through unchanged.
-    fn cache_and_inject_screenshot(
-        &self,
-        guid: &str,
-        cache_image_result: bool,
-        mut result: Value,
-    ) -> Value {
-        if !cache_image_result {
-            return result;
-        }
-        let image = result
-            .get("content")
-            .and_then(Value::as_array)
-            .and_then(|blocks| {
-                blocks
-                    .iter()
-                    .find(|b| b.get("type").and_then(Value::as_str) == Some("image"))
-            });
-        let Some(image) = image else {
-            return result;
-        };
-        let Some(base64) = image
-            .get("data")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-        else {
-            return result;
-        };
-        let media_type = image
-            .get("mimeType")
-            .and_then(Value::as_str)
-            .unwrap_or("image/jpeg")
-            .to_string();
-        let image_id = self.cache_screenshot(guid, base64, media_type);
-        if let Some(content) = result.get_mut("content").and_then(Value::as_array_mut) {
-            content.push(json!({
-                "type": "text",
-                "text": format!(
-                    "[imageId: {image_id}] Reference this id with upload_image to place this \
-                     screenshot into a file input or drag-drop target."
-                ),
-            }));
-        }
-        result
-    }
-
-    /// Cache a screenshot for `guid` and return its minted `img_...` imageId (ADR-0050 D4). Bounds
-    /// the guid's deque to the last [`SCREENSHOT_CACHE_BOUND`] entries -- pushing a 9th evicts the
-    /// oldest.
-    pub(crate) fn cache_screenshot(
-        &self,
-        guid: &str,
-        base64: String,
-        media_type: String,
-    ) -> String {
-        let image_id = format!("img_{}", uuid::Uuid::new_v4().simple());
-        let mut cache = self.screenshot_cache.lock().unwrap();
-        let deque = cache.entry(guid.to_string()).or_default();
-        deque.push_back((image_id.clone(), CachedImage { base64, media_type }));
-        while deque.len() > SCREENSHOT_CACHE_BOUND {
-            deque.pop_front();
-        }
-        image_id
-    }
-
-    /// Resolve a previously cached screenshot for `guid` by imageId (ADR-0050 D4), or None on a miss.
-    pub(crate) fn resolve_cached_image(&self, guid: &str, image_id: &str) -> Option<CachedImage> {
-        let cache = self.screenshot_cache.lock().unwrap();
-        cache
-            .get(guid)?
-            .iter()
-            .find(|(id, _)| id == image_id)
-            .map(|(_, img)| img.clone())
     }
 
     /// Query the current URL of tab `tab_id` from the extension (g13): mechanism only, reporting
@@ -2596,7 +2016,7 @@ impl Browser {
         control: &BrowserControl,
         attention_guid: Option<&str>,
     ) -> std::result::Result<(), ToolError> {
-        let Ok(bytes) = legacy_mechanism::serialize_control(control) else {
+        let Ok(bytes) = adapter_wire_v0::serialize_control(control) else {
             return Err(ToolError::binary("failed to serialize browser control"));
         };
         let Ok(framed) = host::encode(&bytes) else {
@@ -2630,7 +2050,7 @@ impl Browser {
         }) {
             return Err(ToolError::attention_required(attention_required_message()));
         }
-        self.enqueue_control_frame(target, control.id(), framed)
+        self.enqueue_control_frame(target, framed)
     }
 
     /// Enqueue one typed one-way control and report whether it actually entered a live writer.
@@ -2642,7 +2062,6 @@ impl Browser {
     fn enqueue_control_frame(
         &self,
         target: u32,
-        id: BrowserControlId,
         framed: Vec<u8>,
     ) -> std::result::Result<(), ToolError> {
         let sessions = self.sessions.lock().unwrap();
@@ -2655,40 +2074,26 @@ impl Browser {
                 ToolError::extension("Browser extension not connected")
             });
         };
-        let bytes = Zeroizing::new(framed);
-        if id == BrowserControlId::RecordingCancel {
-            session
-                .sender
-                .send(BrowserWriterFrame {
-                    bytes,
-                    _ordinary_permit: None,
-                })
-                .map_err(|_| {
-                    ToolError::extension("Browser extension disconnected before recording cleanup")
-                        .next_step("the browser-side health lease will stop stale capture")
-                })?;
-        } else {
-            let permit = session
-                .ordinary_slots
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| {
-                    ToolError::ipc(
-                        "Browser writer queue is full before the one-way control could be queued",
-                    )
-                })?;
-            session
-                .sender
-                .send(BrowserWriterFrame {
-                    bytes,
-                    _ordinary_permit: Some(permit),
-                })
-                .map_err(|_| {
-                    ToolError::extension(
-                        "Browser extension disconnected before the one-way control could be queued",
-                    )
-                })?;
-        }
+        let permit = session
+            .ordinary_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                ToolError::ipc(
+                    "Browser writer queue is full before the one-way control could be queued",
+                )
+            })?;
+        session
+            .sender
+            .send(BrowserWriterFrame {
+                bytes: Zeroizing::new(framed),
+                _ordinary_permit: Some(permit),
+            })
+            .map_err(|_| {
+                ToolError::extension(
+                    "Browser extension disconnected before the one-way control could be queued",
+                )
+            })?;
         self.debug.frame_out();
         Ok(())
     }
@@ -2777,6 +2182,9 @@ impl Browser {
             };
             if session.generation != binding.generation
                 || session.mechanism_request_v1 != binding.mechanism_request_v1
+                || session.navigation_readiness_v1 != binding.navigation_readiness_v1
+                || session.atomic_tab_open_v1 != binding.atomic_tab_open_v1
+                || session.strict_sensitive_writes_v1 != binding.strict_sensitive_writes_v1
             {
                 let error = browser_session_replaced_before_dispatch();
                 self.debug.tool_begin(&id, request.debug_label);
@@ -3056,6 +2464,10 @@ impl Browser {
         };
         let chunked_host_messages_v1 = has_feature(CHUNKED_HOST_MESSAGES_V1);
         let mechanism_request_v1 = has_feature(MECHANISM_REQUEST_V1);
+        let navigation_readiness_v1 = mechanism_request_v1 && has_feature(NAVIGATION_READINESS_V1);
+        let atomic_tab_open_v1 =
+            mechanism_request_v1 && navigation_readiness_v1 && has_feature(ATOMIC_TAB_OPEN_V1);
+        let strict_sensitive_writes_v1 = has_feature(STRICT_SENSITIVE_WRITES_V1);
         let surface_executor_v1 = has_feature(SURFACE_EXECUTOR_V1);
         let executor_generation = surface_executor_v1.then(|| {
             identity_value
@@ -3114,8 +2526,6 @@ impl Browser {
                     |entry| entry.target_slot == slot,
                 );
                 self.scheduler.destroy_browser(slot);
-                self.recordings
-                    .interrupt_slot(slot, crate::recording::StopReason::BrowserDisconnected);
                 if let Some(registry) = self.workspace_registry.get() {
                     registry.purge_browser_slot(slot);
                 }
@@ -3129,6 +2539,9 @@ impl Browser {
                     generation,
                     chunked_host_messages_v1,
                     mechanism_request_v1,
+                    navigation_readiness_v1,
+                    atomic_tab_open_v1,
+                    strict_sensitive_writes_v1,
                     executor_generation,
                 },
             );
@@ -3202,8 +2615,6 @@ impl Browser {
                 )
             };
             if removed_live && !slot_still_connected {
-                self.recordings
-                    .interrupt_slot(slot, crate::recording::StopReason::BrowserDisconnected);
                 // A native-port loss or worker restart is not proof that the browser effect ended.
                 // Retire waiters, but retain active/quarantined surfaces until an exact terminal
                 // ack, a tab-destroy event, or a changed browser-process generation proves
@@ -3282,12 +2693,12 @@ impl Browser {
             .get(&slot)
             .is_some_and(|session| session.generation == generation);
 
-        let inbound_kind = legacy_mechanism::parse_inbound_kind(&reply);
+        let inbound_kind = adapter_wire_v0::parse_inbound_kind(&reply);
 
         // ADR-0080: acceptance is diagnostic only. It must never consume the pending response
         // slot. A terminal acknowledgement is likewise out of band: it exists to reconcile the
         // exact surface after a caller timeout made the outcome unknown.
-        if inbound_kind == Some(legacy_mechanism::InboundKind::ToolAccepted) {
+        if inbound_kind == Some(adapter_wire_v0::InboundKind::ToolAccepted) {
             return;
         }
 
@@ -3295,18 +2706,18 @@ impl Browser {
             || matches!(
                 inbound_kind,
                 Some(
-                    legacy_mechanism::InboundKind::HoldGet
-                        | legacy_mechanism::InboundKind::HoldSet
-                        | legacy_mechanism::InboundKind::HoldToggle
-                        | legacy_mechanism::InboundKind::AttentionGet
-                        | legacy_mechanism::InboundKind::AttentionAction
+                    adapter_wire_v0::InboundKind::HoldGet
+                        | adapter_wire_v0::InboundKind::HoldSet
+                        | adapter_wire_v0::InboundKind::HoldToggle
+                        | adapter_wire_v0::InboundKind::AttentionGet
+                        | adapter_wire_v0::InboundKind::AttentionAction
                 )
             );
         if stateful_or_uncorrelated && !sender_is_live {
             return;
         }
 
-        if inbound_kind == Some(legacy_mechanism::InboundKind::ToolTerminal) {
+        if inbound_kind == Some(adapter_wire_v0::InboundKind::ToolTerminal) {
             let Some(id) = reply.get("id").and_then(Value::as_str) else {
                 return;
             };
@@ -3351,7 +2762,7 @@ impl Browser {
         }
 
         if reply.get("id").is_none()
-            && inbound_kind == Some(legacy_mechanism::InboundKind::SurfaceDestroyed)
+            && inbound_kind == Some(adapter_wire_v0::InboundKind::SurfaceDestroyed)
         {
             if let Some(native_tab) = reply.get("tabId").and_then(Value::as_i64) {
                 self.scheduler.destroy_surface(BrowserSurface {
@@ -3363,14 +2774,14 @@ impl Browser {
         }
 
         if reply.get("id").is_none()
-            && inbound_kind == Some(legacy_mechanism::InboundKind::SessionKilled)
+            && inbound_kind == Some(adapter_wire_v0::InboundKind::SessionKilled)
         {
             self.handle_session_killed();
             return;
         }
 
         if reply.get("id").is_none()
-            && inbound_kind == Some(legacy_mechanism::InboundKind::FocusChanged)
+            && inbound_kind == Some(adapter_wire_v0::InboundKind::FocusChanged)
         {
             self.note_focus(slot);
             return;
@@ -3381,7 +2792,7 @@ impl Browser {
         // on. Appended into the SAME structured ring `ipc_note` already writes to, so one file
         // shows the extension's view interleaved with the service's own, by arrival order.
         if reply.get("id").is_none()
-            && inbound_kind == Some(legacy_mechanism::InboundKind::DebugEvent)
+            && inbound_kind == Some(adapter_wire_v0::InboundKind::DebugEvent)
         {
             let event = reply.get("event").and_then(Value::as_str).unwrap_or("?");
             let detail = reply.get("detail").cloned().unwrap_or(Value::Null);
@@ -3396,32 +2807,14 @@ impl Browser {
             return;
         }
 
-        match legacy_mechanism::parse_event(&reply) {
-            Ok(Some(event)) => {
-                match event.id {
-                    BrowserEventId::RecordingFrame => self.handle_recording_frame(slot, &event),
-                    BrowserEventId::RecordingEnded => self.handle_recording_ended(slot, &event),
-                }
-                return;
-            }
-            Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    "dropping malformed covered browser event"
-                );
-                return;
-            }
-            Ok(None) => {}
-        }
-
         if let (Some(id), Some(kind)) = (
             reply.get("id").and_then(Value::as_str),
             inbound_kind.filter(|kind| {
                 matches!(
                     *kind,
-                    legacy_mechanism::InboundKind::HoldGet
-                        | legacy_mechanism::InboundKind::HoldSet
-                        | legacy_mechanism::InboundKind::HoldToggle
+                    adapter_wire_v0::InboundKind::HoldGet
+                        | adapter_wire_v0::InboundKind::HoldSet
+                        | adapter_wire_v0::InboundKind::HoldToggle
                 )
             }),
         ) {
@@ -3434,8 +2827,8 @@ impl Browser {
             inbound_kind.filter(|kind| {
                 matches!(
                     *kind,
-                    legacy_mechanism::InboundKind::AttentionGet
-                        | legacy_mechanism::InboundKind::AttentionAction
+                    adapter_wire_v0::InboundKind::AttentionGet
+                        | adapter_wire_v0::InboundKind::AttentionAction
                 )
             }),
         ) {
@@ -3446,8 +2839,7 @@ impl Browser {
         let Some(id) = reply.get("id").and_then(Value::as_str) else {
             return; // an event/heartbeat, not a tool reply
         };
-        let Some(reply_kind) = inbound_kind.and_then(legacy_mechanism::correlated_reply_kind)
-        else {
+        let Some(reply_kind) = inbound_kind.and_then(adapter_wire_v0::correlated_reply_kind) else {
             return;
         };
         let entry = {
@@ -3480,7 +2872,7 @@ impl Browser {
                 .expect("validated pending entry remains under the same lock")
         };
         let mut result = match reply_kind {
-            legacy_mechanism::CorrelatedReplyKind::ToolError => {
+            adapter_wire_v0::CorrelatedReplyKind::ToolError => {
                 let message = reply
                     .get("error")
                     .and_then(Value::as_str)
@@ -3500,8 +2892,8 @@ impl Browser {
                     outcome_unknown: false,
                 })
             }
-            legacy_mechanism::CorrelatedReplyKind::ToolResponse
-            | legacy_mechanism::CorrelatedReplyKind::TabUrlResponse => {
+            adapter_wire_v0::CorrelatedReplyKind::ToolResponse
+            | adapter_wire_v0::CorrelatedReplyKind::TabUrlResponse => {
                 Ok(reply.get("result").cloned().unwrap_or(Value::Null))
             }
         };
@@ -3555,13 +2947,13 @@ impl Browser {
         &self,
         slot: u32,
         id: &str,
-        kind: legacy_mechanism::InboundKind,
+        kind: adapter_wire_v0::InboundKind,
         request: &Value,
     ) {
         let outcome = match kind {
-            legacy_mechanism::InboundKind::HoldGet => Ok(self.held_for().is_some()),
-            legacy_mechanism::InboundKind::HoldToggle => Ok(self.toggle_held()),
-            legacy_mechanism::InboundKind::HoldSet => {
+            adapter_wire_v0::InboundKind::HoldGet => Ok(self.held_for().is_some()),
+            adapter_wire_v0::InboundKind::HoldToggle => Ok(self.toggle_held()),
+            adapter_wire_v0::InboundKind::HoldSet => {
                 match request.get("held").and_then(Value::as_bool) {
                     Some(held) => Ok(self.set_held(held)),
                     None => Err("set_hold requires a boolean 'held'"),
@@ -3570,8 +2962,8 @@ impl Browser {
             _ => unreachable!("route_reply passes only typed hold requests"),
         };
         let reply = match outcome {
-            Ok(held) => legacy_mechanism::ServiceReply::HoldState { id, held },
-            Err(error) => legacy_mechanism::ServiceReply::HoldError { id, error },
+            Ok(held) => adapter_wire_v0::ServiceReply::HoldState { id, held },
+            Err(error) => adapter_wire_v0::ServiceReply::HoldError { id, error },
         };
         self.send_service_reply(slot, &reply);
     }
@@ -3580,14 +2972,14 @@ impl Browser {
         &self,
         slot: u32,
         id: &str,
-        kind: legacy_mechanism::InboundKind,
+        kind: adapter_wire_v0::InboundKind,
         request: &Value,
     ) {
         let result = match kind {
-            legacy_mechanism::InboundKind::AttentionGet => {
+            adapter_wire_v0::InboundKind::AttentionGet => {
                 Ok((self.attention_state_value(slot), false))
             }
-            legacy_mechanism::InboundKind::AttentionAction => {
+            adapter_wire_v0::InboundKind::AttentionAction => {
                 let guid = request.get("guid").and_then(Value::as_str);
                 let disposition = request
                     .get("disposition")
@@ -3608,12 +3000,12 @@ impl Browser {
                 state["endSession"] = json!(end_session);
                 self.send_service_reply(
                     slot,
-                    &legacy_mechanism::ServiceReply::AttentionState { id, result: &state },
+                    &adapter_wire_v0::ServiceReply::AttentionState { id, result: &state },
                 );
             }
             Err(error) => self.send_service_reply(
                 slot,
-                &legacy_mechanism::ServiceReply::AttentionError { id, error },
+                &adapter_wire_v0::ServiceReply::AttentionError { id, error },
             ),
         }
     }
@@ -3676,8 +3068,8 @@ impl Browser {
         json!({ "sessions": paused })
     }
 
-    fn send_service_reply(&self, slot: u32, reply: &legacy_mechanism::ServiceReply<'_>) {
-        let Ok(bytes) = legacy_mechanism::serialize_service_reply(reply) else {
+    fn send_service_reply(&self, slot: u32, reply: &adapter_wire_v0::ServiceReply<'_>) {
+        let Ok(bytes) = adapter_wire_v0::serialize_service_reply(reply) else {
             tracing::warn!("failed to serialize a browser control reply");
             return;
         };
@@ -3703,7 +3095,6 @@ impl Browser {
             safety.killed = true;
         }
         self.scheduler.retire_all(RetirementReason::Panic);
-        self.erase_all_recordings(crate::recording::StopReason::Panic);
         self.fail_pending_where(&kill_error(), |_| true);
         for (_, hook) in self.kill_hooks.lock().unwrap().iter() {
             hook();
@@ -3790,25 +3181,6 @@ fn legacy_test_mechanism(tool: &str, args: &Value) -> MechanismRequest {
             MechanismId::PageSnapshot
         }
         "find" => MechanismId::PageFind,
-        "javascript_tool" => {
-            input.remove("action");
-            if let Some(script) = input.remove("text") {
-                input.insert("script".into(), script);
-            }
-            MechanismId::PageEvaluate
-        }
-        "upload_image_exec" => {
-            if let Some(reference) = input.remove("ref") {
-                input.insert("target".into(), json!({ "ref": reference }));
-            }
-            if let Some(point) = input.remove("coordinate") {
-                input.insert("point".into(), point);
-            }
-            if let Some(media_type) = input.remove("mimeType") {
-                input.insert("mime_type".into(), media_type);
-            }
-            MechanismId::UploadImage
-        }
         "form_input" => {
             if let Some(reference) = input.remove("ref") {
                 input.insert("target".into(), json!({ "ref": reference }));
@@ -3903,53 +3275,9 @@ mod tests {
                 MechanismId::WorkspaceTabsInspect,
                 MechanismId::WorkspaceTabsEnsure,
                 MechanismId::WorkspaceTabCreate,
+                MechanismId::WorkspaceTabOpen,
             ]
         );
-        assert_eq!(
-            ids_with(|metadata| metadata.recording_internal),
-            vec![
-                MechanismId::UploadImage,
-                MechanismId::RecordingStart,
-                MechanismId::RecordingStop,
-                MechanismId::PointsRescale,
-            ]
-        );
-        assert_eq!(
-            ids_with(|metadata| metadata.cache_image_result),
-            vec![
-                MechanismId::ScreenshotViewport,
-                MechanismId::ScreenshotRegion,
-                MechanismId::PointerClick,
-                MechanismId::PointerHover,
-                MechanismId::PointerDrag,
-                MechanismId::TextType,
-                MechanismId::KeyPress,
-                MechanismId::WheelScroll,
-                MechanismId::ScrollTargetIntoView,
-                MechanismId::ScrollViewportToOffset,
-                MechanismId::WaitDelay,
-            ]
-        );
-        assert_eq!(
-            ids_with(|metadata| metadata.annotate_recording),
-            vec![
-                MechanismId::NavigateUrl,
-                MechanismId::NavigateBack,
-                MechanismId::NavigateForward,
-                MechanismId::ScreenshotViewport,
-                MechanismId::ScreenshotRegion,
-                MechanismId::PointerClick,
-                MechanismId::PointerHover,
-                MechanismId::PointerDrag,
-                MechanismId::TextType,
-                MechanismId::KeyPress,
-                MechanismId::WheelScroll,
-                MechanismId::ScrollTargetIntoView,
-                MechanismId::ScrollViewportToOffset,
-                MechanismId::WaitDelay,
-            ]
-        );
-
         let inventory = MechanismRequest::test_only(MechanismId::WorkspaceTabsInspect, json!({}));
         assert!(MechanismMetadata::for_id(inventory.id()).uses_workspace(&inventory));
         let unaddressed = MechanismRequest::test_only(
@@ -4116,13 +3444,13 @@ mod tests {
         });
 
         let navigate = crate::browser::mechanism::compile_operation(
-            OperationKey::new(OperationId::BrowserNavigate, IntentId::NavigateUrl),
-            &json!({ "url": "https://example.com/" }),
+            ghostlight_transport::operation::OperationKind::BrowserNavigate,
+            &json!({ "tab": 1, "url": "https://example.com/" }),
         )
         .unwrap()
         .unwrap();
         let find = crate::browser::mechanism::compile_operation(
-            OperationKey::new(OperationId::BrowserFind, IntentId::FindQuery),
+            ghostlight_transport::operation::OperationKind::BrowserInspectPage,
             &json!({ "query": "example" }),
         )
         .unwrap()
@@ -4155,6 +3483,9 @@ mod tests {
                 generation: target_generation,
                 chunked_host_messages_v1: false,
                 mechanism_request_v1: false,
+                navigation_readiness_v1: false,
+                atomic_tab_open_v1: false,
+                strict_sensitive_writes_v1: false,
                 executor_generation: executor_generation.map(str::to_string),
             },
         );
@@ -4218,6 +3549,9 @@ mod tests {
             binding: BrowserSessionBinding {
                 generation: session.generation,
                 mechanism_request_v1: session.mechanism_request_v1,
+                navigation_readiness_v1: session.navigation_readiness_v1,
+                atomic_tab_open_v1: session.atomic_tab_open_v1,
+                strict_sensitive_writes_v1: session.strict_sensitive_writes_v1,
             },
         }
     }
@@ -4423,14 +3757,18 @@ mod tests {
     async fn workspace_bootstrap_schedules_globally_then_on_the_bound_browser_profile() {
         let browser = Browser::new();
         let descriptor = crate::operation::registry::descriptor(
-            ghostlight_transport::operation::OperationKey::new(
-                ghostlight_transport::operation::OperationId::BrowserTabs,
-                ghostlight_transport::operation::IntentId::TabsNew,
-            ),
-        )
-        .unwrap();
+            ghostlight_transport::operation::OperationKind::BrowserOpenTab,
+        );
         let bootstrap = browser
-            .acquire_execution(descriptor, "guid", &json!({}), 0, None)
+            .acquire_operation(
+                descriptor.scheduling,
+                descriptor.workspace_use,
+                "guid",
+                &json!({}),
+                0,
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert!(matches!(
@@ -4444,7 +3782,15 @@ mod tests {
 
         browser.workspace_bindings.bind("guid", 7);
         let pinned = browser
-            .acquire_execution(descriptor, "guid", &json!({}), 0, None)
+            .acquire_operation(
+                descriptor.scheduling,
+                descriptor.workspace_use,
+                "guid",
+                &json!({}),
+                0,
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert!(matches!(
@@ -5081,7 +4427,7 @@ mod tests {
         });
 
         let err = browser
-            .call("test-guid", "javascript_tool", &json!({}))
+            .call("test-guid", "find", &json!({"query":"x"}))
             .await
             .unwrap_err();
         let text = err.to_string();
@@ -5133,8 +4479,8 @@ mod tests {
         let failure = browser
             .call_with_delivery_outcome(
                 "test-guid",
-                "upload_image_exec",
-                &json!({}),
+                "computer",
+                &json!({"action":"left_click","coordinate":[1,1]}),
                 &ExecutionContext::safety_protocol(),
             )
             .await
@@ -5156,7 +4502,7 @@ mod tests {
                 prepared_for_live_session(&browser, slot, vec![frame]),
                 slot,
                 AwaitRequest {
-                    debug_label: "upload_image_exec",
+                    debug_label: "pointer.click",
                     timeout: Duration::from_millis(10),
                     attention_guid: None,
                     execution: &execution,
@@ -5183,6 +4529,9 @@ mod tests {
                 generation: 1,
                 chunked_host_messages_v1: false,
                 mechanism_request_v1: false,
+                navigation_readiness_v1: false,
+                atomic_tab_open_v1: false,
+                strict_sensitive_writes_v1: false,
                 executor_generation: None,
             },
         );
@@ -5229,6 +4578,9 @@ mod tests {
                 generation: 2,
                 chunked_host_messages_v1: false,
                 mechanism_request_v1: false,
+                navigation_readiness_v1: false,
+                atomic_tab_open_v1: false,
+                strict_sensitive_writes_v1: false,
                 executor_generation: None,
             },
         );
@@ -5358,341 +4710,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn operation_owned_recording_stop_and_clear_obey_final_takeover_admission() {
-        let browser = Browser::new();
-        let (mut extension, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
-        let surface = crate::recording::SurfaceId {
-            slot,
-            native_tab: 17,
-        };
-        let ticket = browser
-            .recordings()
-            .begin_start("recording-workspace", surface)
-            .expect("test recording starts");
-        browser.set_held(true);
-        let cancel = host::read_message(&mut extension).await.unwrap().unwrap();
-        let cancel: Value = serde_json::from_slice(&cancel).unwrap();
-        assert_eq!(cancel["type"], "gif_capture_cancel");
-        let execution = ExecutionContext::safety_protocol();
-
-        let stopped = browser
-            .stop_recording_capture(
-                OperationKey::new(OperationId::BrowserRecord, IntentId::RecordStop),
-                "recording-workspace",
-                &ticket,
-                &execution,
-            )
-            .await
-            .expect_err("operation-owned stop must observe takeover");
-        assert!(matches!(stopped.error, ToolError::Held { .. }));
-        assert!(!stopped.outcome_unknown);
-
-        let cleared = browser
-            .clear_recording_capture(
-                OperationKey::new(OperationId::BrowserRecord, IntentId::RecordClear),
-                "recording-workspace",
-                surface,
-                &execution,
-            )
-            .expect_err("operation-owned clear must observe takeover");
-        assert!(matches!(cleared, ToolError::Held { .. }));
-        assert_ne!(
-            browser
-                .recordings()
-                .status("recording-workspace", surface)
-                .map(|summary| summary.state),
-            Some(crate::recording::RecordingState::Erased)
-        );
-        assert!(tokio::time::timeout(
-            Duration::from_millis(20),
-            host::read_message(&mut extension)
-        )
-        .await
-        .is_err());
-    }
-
-    #[tokio::test]
-    async fn takeover_immediately_cancels_each_active_recording_generation_once() {
-        let browser = Browser::new();
-        let (mut extension, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
-        let ticket = browser
-            .recordings()
-            .begin_start(
-                "recording-workspace",
-                crate::recording::SurfaceId {
-                    slot,
-                    native_tab: 17,
-                },
-            )
-            .expect("test recording starts");
-
-        browser.set_held(true);
-        let frame = host::read_message(&mut extension).await.unwrap().unwrap();
-        let message: Value = serde_json::from_slice(&frame).unwrap();
-        assert_eq!(message["type"], "gif_capture_cancel");
-        assert_eq!(message["recordingId"], ticket.id.as_str());
-        assert_eq!(message["generation"], ticket.generation);
-
-        browser.set_held(true);
-        assert!(tokio::time::timeout(
-            Duration::from_millis(20),
-            host::read_message(&mut extension)
-        )
-        .await
-        .is_err());
-    }
-
-    #[test]
-    fn takeover_cancel_bypasses_capacity_without_overtaking_queued_recording_start() {
-        let browser = Browser::new();
-        let (sender, mut writer_rx) = mpsc::unbounded_channel();
-        let queued_start = host::encode(
-            &legacy_mechanism::serialize_tool_request(
-                "queued-start",
-                "saturated-takeover",
-                &MechanismRequest::test_only(
-                    MechanismId::RecordingStart,
-                    json!({"tab":17,"recording_id":"queued","generation":1}),
-                ),
-                &json!({"class":"safety_protocol"}),
-                None,
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        sender
-            .send(BrowserWriterFrame {
-                bytes: Zeroizing::new(queued_start),
-                _ordinary_permit: None,
-            })
-            .unwrap();
-        browser.sessions.lock().unwrap().insert(
-            1,
-            BrowserSession {
-                sender,
-                ordinary_slots: Arc::new(Semaphore::new(0)),
-                generation: 1,
-                chunked_host_messages_v1: false,
-                mechanism_request_v1: false,
-                executor_generation: None,
-            },
-        );
-        let ticket = browser
-            .recordings()
-            .begin_start(
-                "saturated-takeover",
-                crate::recording::SurfaceId {
-                    slot: 1,
-                    native_tab: 17,
-                },
-            )
-            .unwrap();
-
-        assert!(browser.set_held(true));
-        let first = writer_rx
-            .try_recv()
-            .expect("already-queued recording start remains first");
-        let first_message: Value = serde_json::from_slice(&first.bytes[4..]).unwrap();
-        assert_eq!(first_message["type"], "tool_request");
-        assert_eq!(first_message["tool"], "gif_capture_start");
-        let framed = writer_rx
-            .try_recv()
-            .expect("critical cancellation bypasses ordinary capacity");
-        let payload = &framed.bytes[4..];
-        let message: Value = serde_json::from_slice(payload).unwrap();
-        assert_eq!(message["type"], "gif_capture_cancel");
-        assert_eq!(message["recordingId"], ticket.id.as_str());
-        assert_eq!(message["generation"], ticket.generation);
-    }
-
-    #[test]
-    fn record_clear_requires_a_queued_exact_generation_cancel_before_erasure() {
-        let browser = Browser::new();
-        let (sender, mut writer_rx) = mpsc::unbounded_channel();
-        sender
-            .send(BrowserWriterFrame {
-                bytes: Zeroizing::new(vec![0x7f]),
-                _ordinary_permit: None,
-            })
-            .expect("ordinary writer already has one queued frame");
-        browser.sessions.lock().unwrap().insert(
-            1,
-            BrowserSession {
-                sender,
-                ordinary_slots: Arc::new(Semaphore::new(0)),
-                generation: 1,
-                chunked_host_messages_v1: false,
-                mechanism_request_v1: false,
-                executor_generation: None,
-            },
-        );
-        let surface = crate::recording::SurfaceId {
-            slot: 1,
-            native_tab: 17,
-        };
-        let ticket = browser
-            .recordings()
-            .begin_start("saturated-clear", surface)
-            .unwrap();
-
-        assert!(browser
-            .clear_recording_capture(
-                OperationKey::new(OperationId::BrowserRecord, IntentId::RecordClear),
-                "saturated-clear",
-                surface,
-                &ExecutionContext::safety_protocol(),
-            )
-            .unwrap());
-        assert_eq!(writer_rx.try_recv().unwrap().bytes.as_slice(), &[0x7f]);
-        let framed = writer_rx
-            .try_recv()
-            .expect("clear cancellation bypasses ordinary saturation");
-        let message: Value = serde_json::from_slice(&framed.bytes[4..]).unwrap();
-        assert_eq!(message["type"], "gif_capture_cancel");
-        assert_eq!(message["recordingId"], ticket.id.as_str());
-        assert_eq!(message["generation"], ticket.generation);
-        assert_eq!(
-            browser
-                .recordings()
-                .status("saturated-clear", surface)
-                .unwrap()
-                .state,
-            crate::recording::RecordingState::Erased
-        );
-    }
-
-    #[test]
-    fn record_clear_erases_state_when_disconnect_already_revoked_the_relay() {
-        let browser = Browser::new();
-        let surface = crate::recording::SurfaceId {
-            slot: 1,
-            native_tab: 17,
-        };
-        browser
-            .recordings()
-            .begin_start("missing-clear", surface)
-            .unwrap();
-
-        assert!(browser
-            .clear_recording_capture(
-                OperationKey::new(OperationId::BrowserRecord, IntentId::RecordClear),
-                "missing-clear",
-                surface,
-                &ExecutionContext::safety_protocol(),
-            )
-            .unwrap());
-        assert_eq!(
-            browser
-                .recordings()
-                .status("missing-clear", surface)
-                .unwrap()
-                .state,
-            crate::recording::RecordingState::Erased
-        );
-    }
-
-    #[test]
-    fn record_clear_erases_state_when_the_published_writer_is_already_closed() {
-        let browser = Browser::new();
-        let (sender, receiver) = mpsc::unbounded_channel();
-        drop(receiver);
-        browser.sessions.lock().unwrap().insert(
-            1,
-            BrowserSession {
-                sender,
-                ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
-                generation: 1,
-                chunked_host_messages_v1: false,
-                mechanism_request_v1: false,
-                executor_generation: None,
-            },
-        );
-        let surface = crate::recording::SurfaceId {
-            slot: 1,
-            native_tab: 17,
-        };
-        browser
-            .recordings()
-            .begin_start("closed-clear", surface)
-            .unwrap();
-
-        assert!(browser
-            .clear_recording_capture(
-                OperationKey::new(OperationId::BrowserRecord, IntentId::RecordClear),
-                "closed-clear",
-                surface,
-                &ExecutionContext::safety_protocol(),
-            )
-            .unwrap());
-        assert_eq!(
-            browser
-                .recordings()
-                .status("closed-clear", surface)
-                .unwrap()
-                .state,
-            crate::recording::RecordingState::Erased
-        );
-    }
-
-    #[tokio::test]
-    async fn one_way_controls_retain_their_closed_final_admission_posture() {
-        let browser = Browser::new();
-        let (mut extension, slot) = attach_fake_extension_as(&browser, TEST_BROWSER_ID).await;
-        let tab = crate::constants::tab_id::encode(slot, 17);
-
-        browser.set_held(true);
-        browser.notify(Some(tab), "warn", None, "blocked", None, None);
-        assert!(tokio::time::timeout(
-            Duration::from_millis(20),
-            host::read_message(&mut extension)
-        )
-        .await
-        .is_err());
-
-        let renewal = BrowserControl::for_auxiliary(
-            BrowserAuxiliaryPurpose::RecordingHealth,
-            BrowserControlId::RecordingLeaseRenew,
-            json!({
-                "tab":17,
-                "recording_id":"rec_test",
-                "generation":1,
-                "lease_ms":1000
-            }),
-        )
-        .unwrap();
-        assert!(matches!(
-            browser.send_control(slot, &renewal, Some("held-recording")),
-            Err(ToolError::Held { .. })
-        ));
-
-        let cleanup = BrowserControl::for_operation_cleanup(
-            OperationKey::new(OperationId::BrowserRecord, IntentId::RecordStart),
-            BrowserControlId::RecordingCancel,
-            json!({"tab":17,"recording_id":"rec_test","generation":1}),
-        )
-        .unwrap();
-        browser
-            .send_control(slot, &cleanup, None)
-            .expect("recording teardown has an explicit takeover exemption");
-        let frame = host::read_message(&mut extension).await.unwrap().unwrap();
-        let message: Value = serde_json::from_slice(&frame).unwrap();
-        assert_eq!(message["type"], "gif_capture_cancel");
-
-        browser.set_held(false);
-        browser.register_attention_session("attention-overlay", |_| {});
-        for _ in 0..3 {
-            browser.observe_denial("attention-overlay", Some(tab), policy_denial("example.com"));
-        }
-        let frame = host::read_message(&mut extension).await.unwrap().unwrap();
-        let message: Value = serde_json::from_slice(&frame).unwrap();
-        assert_eq!(message["type"], "attention_required");
-
-        browser.handle_session_killed();
-        let blocked = browser.send_control(slot, &cleanup, None).unwrap_err();
-        assert!(blocked.to_string().contains("ended the browser session"));
-    }
-
-    #[tokio::test]
     async fn call_without_a_connection_fails_fast() {
         let browser = Browser::new();
         let err = browser
@@ -5716,6 +4733,9 @@ mod tests {
                 generation: 1,
                 chunked_host_messages_v1: false,
                 mechanism_request_v1: false,
+                navigation_readiness_v1: false,
+                atomic_tab_open_v1: false,
+                strict_sensitive_writes_v1: false,
                 executor_generation: None,
             },
         );
@@ -5736,6 +4756,9 @@ mod tests {
                 generation: 1,
                 chunked_host_messages_v1: true,
                 mechanism_request_v1: false,
+                navigation_readiness_v1: false,
+                atomic_tab_open_v1: false,
+                strict_sensitive_writes_v1: false,
                 executor_generation: None,
             },
         );
@@ -6036,20 +5059,6 @@ mod tests {
             registry.claim_tab(&workspace, tab_id),
             crate::hub::workspace::TabClaim::Adopted
         );
-        let surface = crate::recording::SurfaceId {
-            slot,
-            native_tab: 17,
-        };
-        let ticket = browser
-            .recordings
-            .begin_start(workspace.as_str(), surface)
-            .unwrap();
-        browser
-            .recordings
-            .commit_start(&ticket, Some(1280.0))
-            .unwrap();
-        assert!(browser.recordings.is_active(workspace.as_str(), surface));
-
         let (_second, same_slot) =
             attach_fake_extension_with_generation(&browser, TEST_BROWSER_ID, "process-b").await;
         assert_eq!(same_slot, slot);
@@ -6057,7 +5066,6 @@ mod tests {
         assert!(failure.outcome_unknown);
         assert!(failure.error.to_string().contains("restarted"));
         assert!(registry.owned_tabs(&workspace).is_empty());
-        assert!(!browser.recordings.is_active(workspace.as_str(), surface));
     }
 
     #[tokio::test]
@@ -6308,6 +5316,249 @@ mod tests {
         .await;
     }
 
+    fn strict_set_value_request(tab: i64) -> MechanismRequest {
+        MechanismRequest::test_only(
+            MechanismId::FormSetValue,
+            json!({
+                "tab": tab,
+                "target": {"ref":"field-1"},
+                "value": "sensitive-test-value",
+                "reject_sensitive": true,
+                "expected_type": "text"
+            }),
+        )
+    }
+
+    async fn assert_strict_write_rejected_without_frame(features: &[&str], browser_id: &str) {
+        let browser = Browser::new();
+        let (mut extension, slot) = attach_fake_extension_with_identity(
+            &browser,
+            browser_id,
+            feature_identity_frame(browser_id, features),
+        )
+        .await;
+        let request = strict_set_value_request(crate::constants::tab_id::encode(slot, 9));
+        let failure = browser
+            .execute_mechanism_with_delivery_outcome(
+                "strict-write-workspace",
+                &request,
+                &ExecutionContext::safety_protocol(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(!failure.outcome_unknown, "{features:?}");
+        assert!(
+            failure
+                .error
+                .to_string()
+                .contains("does not support strict sensitive writes"),
+            "{features:?}: {}",
+            failure.error
+        );
+        assert!(!failure.error.to_string().contains("sensitive-test-value"));
+        assert!(
+            !matches!(
+                tokio::time::timeout(
+                    Duration::from_millis(20),
+                    host::read_message(&mut extension)
+                )
+                .await,
+                Ok(Ok(Some(_)))
+            ),
+            "a strict value frame reached an adapter with features {features:?}"
+        );
+    }
+
+    async fn assert_atomic_open_rejected_without_frame(features: &[&str], browser_id: &str) {
+        let browser = Browser::new();
+        let (mut extension, _) = attach_fake_extension_with_identity(
+            &browser,
+            browser_id,
+            feature_identity_frame(browser_id, features),
+        )
+        .await;
+        let mut request = crate::browser::mechanism::compile_operation(
+            ghostlight_transport::operation::OperationKind::BrowserOpenTab,
+            &json!({
+                "url":"https://example.com/",
+                "readiness":{"settle":true,"timeout_ms":10000,"min_ms":0}
+            }),
+        )
+        .unwrap()
+        .expect("URL open compiles to one physical transaction");
+        request.require_canonical_navigation_proof();
+        let failure = browser
+            .execute_mechanism_with_delivery_outcome(
+                "atomic-open-workspace",
+                &request,
+                &ExecutionContext::safety_protocol(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(!failure.outcome_unknown, "{features:?}");
+        assert!(
+            failure
+                .error
+                .to_string()
+                .contains("cannot open and observe a URL as one transaction"),
+            "{features:?}: {}",
+            failure.error
+        );
+        assert!(
+            !matches!(
+                tokio::time::timeout(
+                    Duration::from_millis(20),
+                    host::read_message(&mut extension)
+                )
+                .await,
+                Ok(Ok(Some(_)))
+            ),
+            "an atomic open frame reached an adapter without the exact capability: {features:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn atomic_open_requires_its_exact_capability_before_any_frame() {
+        assert_atomic_open_rejected_without_frame(&[], "open-no-feature").await;
+        assert_atomic_open_rejected_without_frame(&["mechanismRequestV1"], "open-mechanism-only")
+            .await;
+        assert_atomic_open_rejected_without_frame(
+            &[MECHANISM_REQUEST_V1, NAVIGATION_READINESS_V1],
+            "open-readiness-only",
+        )
+        .await;
+        assert_atomic_open_rejected_without_frame(
+            &[
+                MECHANISM_REQUEST_V1,
+                NAVIGATION_READINESS_V1,
+                "atomicTabOpenV1Beta",
+            ],
+            "open-atomic-near-match",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn old_adapters_and_near_match_features_receive_no_strict_value_frame() {
+        assert_strict_write_rejected_without_frame(&[], "strict-adapter-080").await;
+        assert_strict_write_rejected_without_frame(&[MECHANISM_REQUEST_V1], "strict-adapter-081")
+            .await;
+        assert_strict_write_rejected_without_frame(
+            &["strictSensitiveWritesV1Beta"],
+            "strict-near-match-legacy",
+        )
+        .await;
+        assert_strict_write_rejected_without_frame(
+            &[MECHANISM_REQUEST_V1, "strictsensitivewritesv1"],
+            "strict-near-match-semantic",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn exact_strict_write_feature_allows_both_request_grammars() {
+        for (browser_id, features, expected_type) in [
+            (
+                "strict-exact-legacy",
+                vec![STRICT_SENSITIVE_WRITES_V1],
+                "tool_request",
+            ),
+            (
+                "strict-exact-semantic",
+                vec![MECHANISM_REQUEST_V1, STRICT_SENSITIVE_WRITES_V1],
+                "mechanism_request",
+            ),
+        ] {
+            let browser = Browser::new();
+            let (mut extension, slot) = attach_fake_extension_with_identity(
+                &browser,
+                browser_id,
+                feature_identity_frame(browser_id, &features),
+            )
+            .await;
+            let request = strict_set_value_request(crate::constants::tab_id::encode(slot, 9));
+            let caller = browser.clone();
+            let call = tokio::spawn(async move {
+                caller
+                    .execute_mechanism(
+                        "strict-write-workspace",
+                        &request,
+                        &ExecutionContext::safety_protocol(),
+                    )
+                    .await
+            });
+            let frame = host::read_message(&mut extension).await.unwrap().unwrap();
+            let frame: Value = serde_json::from_slice(&frame).unwrap();
+            assert_eq!(frame["type"], expected_type, "{features:?}");
+            let input = if expected_type == "mechanism_request" {
+                &frame["input"]
+            } else {
+                &frame["args"]
+            };
+            assert_eq!(input["reject_sensitive"], true, "{features:?}");
+            assert_eq!(input["value"], "sensitive-test-value", "{features:?}");
+            host::write_message(
+                &mut extension,
+                &serde_json::to_vec(&json!({
+                    "id": frame["id"],
+                    "type": "tool_response",
+                    "result": {"ok":true}
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(call.await.unwrap().unwrap(), json!({"ok":true}));
+        }
+    }
+
+    #[tokio::test]
+    async fn replacement_identity_does_not_inherit_strict_write_feature() {
+        let browser = Browser::new();
+        let (mut old_extension, old_slot) = attach_fake_extension_with_identity(
+            &browser,
+            "strict-reconnect",
+            feature_identity_frame(
+                "strict-reconnect",
+                &[MECHANISM_REQUEST_V1, STRICT_SENSITIVE_WRITES_V1],
+            ),
+        )
+        .await;
+        let (mut replacement, replacement_slot) = attach_fake_extension_with_identity(
+            &browser,
+            "strict-reconnect",
+            feature_identity_frame("strict-reconnect", &[MECHANISM_REQUEST_V1]),
+        )
+        .await;
+        assert_eq!(old_slot, replacement_slot);
+        assert!(!browser.sessions.lock().unwrap()[&replacement_slot].strict_sensitive_writes_v1);
+
+        let request =
+            strict_set_value_request(crate::constants::tab_id::encode(replacement_slot, 9));
+        let failure = browser
+            .execute_mechanism_with_delivery_outcome(
+                "strict-reconnect-workspace",
+                &request,
+                &ExecutionContext::safety_protocol(),
+            )
+            .await
+            .unwrap_err();
+        assert!(!failure.outcome_unknown);
+        assert!(failure
+            .error
+            .to_string()
+            .contains("does not support strict sensitive writes"));
+        for extension in [&mut old_extension, &mut replacement] {
+            assert!(!matches!(
+                tokio::time::timeout(Duration::from_millis(20), host::read_message(extension))
+                    .await,
+                Ok(Ok(Some(_)))
+            ));
+        }
+    }
+
     #[tokio::test]
     async fn replacement_identity_does_not_inherit_the_prior_sessions_feature() {
         let browser = Browser::new();
@@ -6377,6 +5628,9 @@ mod tests {
                     generation: 1,
                     chunked_host_messages_v1: false,
                     mechanism_request_v1: old_semantic,
+                    navigation_readiness_v1: false,
+                    atomic_tab_open_v1: false,
+                    strict_sensitive_writes_v1: false,
                     executor_generation: None,
                 },
             );
@@ -6405,6 +5659,9 @@ mod tests {
                     generation: 2,
                     chunked_host_messages_v1: false,
                     mechanism_request_v1: replacement_semantic,
+                    navigation_readiness_v1: false,
+                    atomic_tab_open_v1: false,
+                    strict_sensitive_writes_v1: false,
                     executor_generation: None,
                 },
             );
@@ -6442,6 +5699,167 @@ mod tests {
                 Err(mpsc::error::TryRecvError::Empty)
             ));
         }
+    }
+
+    #[tokio::test]
+    async fn prepared_strict_write_cannot_cross_a_session_feature_change() {
+        for mechanism_request_v1 in [false, true] {
+            let browser = Browser::new();
+            let (old_sender, mut old_receiver) = mpsc::unbounded_channel();
+            browser.sessions.lock().unwrap().insert(
+                1,
+                BrowserSession {
+                    sender: old_sender,
+                    ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
+                    generation: 1,
+                    chunked_host_messages_v1: false,
+                    mechanism_request_v1,
+                    navigation_readiness_v1: false,
+                    atomic_tab_open_v1: false,
+                    strict_sensitive_writes_v1: true,
+                    executor_generation: None,
+                },
+            );
+            let request = strict_set_value_request(9);
+            let prepared = browser
+                .prepare_tool_request(
+                    1,
+                    "strict-feature-bound",
+                    "workspace",
+                    &request,
+                    &json!({"class":"safety_protocol"}),
+                    None,
+                )
+                .unwrap();
+            assert!(prepared.binding.strict_sensitive_writes_v1);
+
+            let (replacement_sender, mut replacement_receiver) = mpsc::unbounded_channel();
+            browser.sessions.lock().unwrap().insert(
+                1,
+                BrowserSession {
+                    sender: replacement_sender,
+                    ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
+                    generation: 1,
+                    chunked_host_messages_v1: false,
+                    mechanism_request_v1,
+                    navigation_readiness_v1: false,
+                    atomic_tab_open_v1: false,
+                    strict_sensitive_writes_v1: false,
+                    executor_generation: None,
+                },
+            );
+            let execution = ExecutionContext::safety_protocol();
+            let failure = browser
+                .send_and_await_delivery(
+                    "strict-feature-bound".into(),
+                    prepared,
+                    1,
+                    AwaitRequest {
+                        debug_label: "form.set_value",
+                        timeout: Duration::from_millis(10),
+                        attention_guid: None,
+                        execution: &execution,
+                        creator_inventory: false,
+                        kind: BrowserRequestKind::Tool,
+                        admission: FinalAdmission::strict(),
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(!failure.outcome_unknown);
+            assert!(failure
+                .error
+                .to_string()
+                .contains("reconnected before request dispatch"));
+            assert!(old_receiver.try_recv().is_err());
+            assert!(matches!(
+                replacement_receiver.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn prepared_atomic_open_cannot_cross_a_session_feature_change() {
+        let browser = Browser::new();
+        let (old_sender, mut old_receiver) = mpsc::unbounded_channel();
+        browser.sessions.lock().unwrap().insert(
+            1,
+            BrowserSession {
+                sender: old_sender,
+                ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
+                generation: 1,
+                chunked_host_messages_v1: false,
+                mechanism_request_v1: true,
+                navigation_readiness_v1: true,
+                atomic_tab_open_v1: true,
+                strict_sensitive_writes_v1: false,
+                executor_generation: None,
+            },
+        );
+        let mut request = MechanismRequest::test_only(
+            MechanismId::WorkspaceTabOpen,
+            json!({
+                "url":"https://example.com/",
+                "readiness":{"settle":true,"timeout_ms":10000,"min_ms":0}
+            }),
+        );
+        request.require_canonical_navigation_proof();
+        let prepared = browser
+            .prepare_tool_request(
+                1,
+                "atomic-feature-bound",
+                "workspace",
+                &request,
+                &json!({"class":"safety_protocol"}),
+                None,
+            )
+            .unwrap();
+        assert!(prepared.binding.atomic_tab_open_v1);
+
+        let (replacement_sender, mut replacement_receiver) = mpsc::unbounded_channel();
+        browser.sessions.lock().unwrap().insert(
+            1,
+            BrowserSession {
+                sender: replacement_sender,
+                ordinary_slots: Arc::new(Semaphore::new(BROWSER_WRITER_QUEUE_CAPACITY)),
+                generation: 1,
+                chunked_host_messages_v1: false,
+                mechanism_request_v1: true,
+                navigation_readiness_v1: true,
+                atomic_tab_open_v1: false,
+                strict_sensitive_writes_v1: false,
+                executor_generation: None,
+            },
+        );
+        let execution = ExecutionContext::safety_protocol();
+        let failure = browser
+            .send_and_await_delivery(
+                "atomic-feature-bound".into(),
+                prepared,
+                1,
+                AwaitRequest {
+                    debug_label: "workspace.tab.open",
+                    timeout: Duration::from_millis(10),
+                    attention_guid: None,
+                    execution: &execution,
+                    creator_inventory: true,
+                    kind: BrowserRequestKind::Tool,
+                    admission: FinalAdmission::strict(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(!failure.outcome_unknown);
+        assert!(failure
+            .error
+            .to_string()
+            .contains("reconnected before request dispatch"));
+        assert!(old_receiver.try_recv().is_err());
+        assert!(matches!(
+            replacement_receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
     }
 
     #[tokio::test]
@@ -6516,12 +5934,12 @@ mod tests {
             ),
         )
         .await;
-        let script_len = CHROME_OUTBOUND_PAYLOAD_LIMIT + 2048;
+        let query_len = CHROME_OUTBOUND_PAYLOAD_LIMIT + 2048;
         let request = MechanismRequest::test_only(
-            MechanismId::PageEvaluate,
+            MechanismId::PageFind,
             json!({
                 "tab": crate::constants::tab_id::encode(slot, 23),
-                "script": "x".repeat(script_len)
+                "query": "x".repeat(query_len)
             }),
         );
         let caller = browser.clone();
@@ -6555,11 +5973,11 @@ mod tests {
         let semantic: Value = serde_json::from_slice(&rebuilt).unwrap();
         assert_eq!(semantic["id"], request_id);
         assert_eq!(semantic["type"], "mechanism_request");
-        assert_eq!(semantic["mechanism"], "page.evaluate");
+        assert_eq!(semantic["mechanism"], "page.find");
         assert_eq!(semantic["input"]["tab"], 23);
         assert_eq!(
-            semantic["input"]["script"].as_str().unwrap().len(),
-            script_len
+            semantic["input"]["query"].as_str().unwrap().len(),
+            query_len
         );
 
         host::write_message(
@@ -6586,10 +6004,10 @@ mod tests {
         )
         .await;
         let request = MechanismRequest::test_only(
-            MechanismId::PageEvaluate,
+            MechanismId::PageFind,
             json!({
                 "tab": crate::constants::tab_id::encode(slot, 23),
-                "script": "x".repeat(CHROME_OUTBOUND_PAYLOAD_LIMIT + 2048)
+                "query": "x".repeat(CHROME_OUTBOUND_PAYLOAD_LIMIT + 2048)
             }),
         );
         let error = browser
@@ -7088,6 +6506,9 @@ mod tests {
                 generation: 8,
                 chunked_host_messages_v1: false,
                 mechanism_request_v1: false,
+                navigation_readiness_v1: false,
+                atomic_tab_open_v1: false,
+                strict_sensitive_writes_v1: false,
                 executor_generation: None,
             },
         );
@@ -7148,83 +6569,6 @@ mod tests {
     /// 1st), and `cache_and_inject_screenshot` appends exactly one imageId text block to a
     /// `computer` screenshot result while passing every other result through unchanged. (Named with
     /// a snake_case tail rather than the prompt's `imageId` to satisfy `-D warnings`.)
-    #[test]
-    fn screenshot_cache_round_trips_and_injects_image_id() {
-        let browser = Browser::new();
-
-        // Cache + resolve round trip.
-        let id = browser.cache_screenshot("g1", "AAAA".to_string(), "image/jpeg".to_string());
-        assert!(id.starts_with("img_"), "minted id is img_-prefixed: {id}");
-        let got = browser
-            .resolve_cached_image("g1", &id)
-            .expect("cached image resolves");
-        assert_eq!(got.base64, "AAAA");
-        assert_eq!(got.media_type, "image/jpeg");
-
-        // Unknown id, and a different guid, both miss.
-        assert!(browser.resolve_cached_image("g1", "img_nope").is_none());
-        assert!(browser.resolve_cached_image("other", &id).is_none());
-
-        // Bound N=8: after a 9th insert into one guid, the first id is evicted.
-        let first = browser.cache_screenshot("g2", "0".to_string(), "image/jpeg".to_string());
-        for i in 1..8 {
-            browser.cache_screenshot("g2", i.to_string(), "image/jpeg".to_string());
-        }
-        assert!(
-            browser.resolve_cached_image("g2", &first).is_some(),
-            "the 8th entry keeps the first cached"
-        );
-        let ninth = browser.cache_screenshot("g2", "9".to_string(), "image/jpeg".to_string());
-        assert!(
-            browser.resolve_cached_image("g2", &first).is_none(),
-            "the 9th insert evicts the 1st"
-        );
-        assert!(
-            browser.resolve_cached_image("g2", &ninth).is_some(),
-            "the newest entry stays"
-        );
-
-        // Injection: a screenshot-producing result gains exactly one trailing imageId text block;
-        // the leading text and the image block are preserved, and the id resolves in g3's cache.
-        let result = json!({
-            "content": [
-                { "type": "text", "text": "screenshot taken" },
-                { "type": "image", "data": "BBBB", "mimeType": "image/png" }
-            ]
-        });
-        let injected = browser.cache_and_inject_screenshot("g3", true, result);
-        let content = injected["content"].as_array().unwrap();
-        assert_eq!(content.len(), 3, "exactly one trailing text block appended");
-        assert_eq!(content[1]["type"], "image", "the image block is preserved");
-        let text = content[2]["text"].as_str().unwrap();
-        assert!(
-            text.starts_with("[imageId: img_"),
-            "the trailing block names the minted imageId: {text}"
-        );
-        let injected_id = text
-            .strip_prefix("[imageId: ")
-            .and_then(|s| s.split(']').next())
-            .unwrap();
-        let cached = browser
-            .resolve_cached_image("g3", injected_id)
-            .expect("the injected id resolves in the cache");
-        assert_eq!(cached.base64, "BBBB");
-        assert_eq!(cached.media_type, "image/png");
-
-        // A non-image mechanism result, and an image-capable result with no image, pass through
-        // byte-unchanged.
-        let navigate = json!({"content":[{"type":"text","text":"ok"}]});
-        assert_eq!(
-            browser.cache_and_inject_screenshot("g3", false, navigate.clone()),
-            navigate
-        );
-        let click = json!({"content":[{"type":"text","text":"clicked"}]});
-        assert_eq!(
-            browser.cache_and_inject_screenshot("g3", true, click.clone()),
-            click
-        );
-    }
-
     /// ADR-0058/0061: the `Created tab {native}.` prose the extension prepends is rewritten to the
     /// SAME composite structuredContent carries, so a consumer reading the human text routes by the
     /// encoded id (not the raw native one, which only works by the slot-0 focus fallback and
@@ -7300,7 +6644,7 @@ mod tests {
     fn policy_denial(origin: &str) -> crate::governance::attention::DenialSignal {
         crate::governance::attention::DenialSignal {
             origin: Some(origin.to_string()),
-            capabilities: vec![crate::governance::ports::Capability::Action],
+            capabilities: vec![crate::governance::ports::Capability::Interact],
             category: crate::governance::attention::DenialCategory::Policy,
         }
     }

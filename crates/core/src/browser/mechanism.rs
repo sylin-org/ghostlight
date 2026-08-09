@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Policy-free physical browser mechanisms below canonical product operations.
+//! Policy-free physical browser mechanisms below Ghostlight operations.
 //!
-//! [`OperationKey`] remains the service's validation, governance, scheduling, and audit identity.
-//! A [`MechanismId`] names only a concrete browser-side capability. Surface names and legacy
-//! extension aliases never enter this module. The outbound browser adapter may serialize a
-//! [`MechanismRequest`] to a covered older extension wire, but that compatibility spelling is not
-//! a mechanism identity.
+//! [`OperationKind`] remains the service's validation, governance, scheduling, and audit identity.
+//! A [`MechanismId`] names only a concrete browser-side capability. Public tool names and adapter
+//! wire aliases never enter this module.
 
 use crate::ToolError;
-use ghostlight_transport::operation::{IntentId, OperationId, OperationKey};
+use ghostlight_transport::operation::OperationKind;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Map, Value};
 
@@ -76,12 +74,15 @@ stable_mechanism_ids! {
     WorkspaceTabsInspect => "workspace.tabs.inspect",
     WorkspaceTabsEnsure => "workspace.tabs.ensure",
     WorkspaceTabCreate => "workspace.tab.create",
+    WorkspaceTabOpen => "workspace.tab.open",
     TabFocus => "tab.focus",
     TabClose => "tab.close",
     NavigateUrl => "navigate.url",
     NavigateBack => "navigate.back",
     NavigateForward => "navigate.forward",
     NavigateReload => "navigate.reload",
+    NavigationAwaitReadiness => "navigation.await_readiness",
+    NavigationVerifyDocument => "navigation.verify_document",
     PageSnapshot => "page.snapshot",
     PageReadText => "page.read_text",
     PageFind => "page.find",
@@ -105,16 +106,6 @@ stable_mechanism_ids! {
     DialogAccept => "dialog.accept",
     DialogDismiss => "dialog.dismiss",
     DialogRespond => "dialog.respond",
-    ViewportResize => "viewport.resize",
-    UploadFiles => "upload.files",
-    UploadImage => "upload.image",
-    ConsoleRead => "console.read",
-    NetworkRead => "network.read",
-    PageEvaluate => "page.evaluate",
-    RecordingStart => "recording.start",
-    RecordingStop => "recording.stop",
-    PointsRescale => "points.rescale",
-    NarrationShow => "narration.show",
     TabUrlQuery => "tab.url_query",
 }
 
@@ -179,110 +170,10 @@ macro_rules! stable_control_ids {
 
 stable_control_ids! {
     /// Closed service-to-browser vocabulary for physical work that has no reply.
-    RecordingLeaseRenew => "recording.lease_renew",
-    RecordingCancel => "recording.cancel",
     NarrationClear => "narration.clear",
     NotificationShow => "notification.show",
     AttentionRequired => "attention.required",
     AttentionResolved => "attention.resolved",
-}
-
-macro_rules! stable_event_ids {
-    ($(#[$enum_meta:meta])* $($variant:ident => $wire:literal,)+) => {
-        $(#[$enum_meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub enum BrowserEventId {
-            $($variant,)+
-        }
-
-        impl BrowserEventId {
-            /// Every unsolicited physical browser event id in stable wire order.
-            pub const ALL: &'static [Self] = &[$(Self::$variant,)+];
-
-            /// Return the stable physical-event spelling.
-            pub const fn as_str(self) -> &'static str {
-                match self {
-                    $(Self::$variant => $wire,)+
-                }
-            }
-
-            /// Parse one exact stable physical-event spelling.
-            pub fn parse(value: &str) -> Option<Self> {
-                match value {
-                    $($wire => Some(Self::$variant),)+
-                    _ => None,
-                }
-            }
-        }
-
-        impl Serialize for BrowserEventId {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-            {
-                serializer.serialize_str(self.as_str())
-            }
-        }
-
-        impl<'de> Deserialize<'de> for BrowserEventId {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                let value = String::deserialize(deserializer)?;
-                Self::parse(&value).ok_or_else(|| {
-                    serde::de::Error::custom(format_args!(
-                        "unknown unsolicited browser event: {value}"
-                    ))
-                })
-            }
-        }
-
-        impl std::fmt::Display for BrowserEventId {
-            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str(self.as_str())
-            }
-        }
-    };
-}
-
-stable_event_ids! {
-    /// Closed browser-to-service vocabulary for unsolicited physical events consumed by core.
-    RecordingFrame => "recording.frame",
-    RecordingEnded => "recording.ended",
-}
-
-/// Why the browser-side recording relay ended without a correlated stop reply.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RecordingEndReason {
-    /// The absolute browser-side capture deadline elapsed.
-    HardTimeout,
-    /// The tab or debugger attachment disappeared.
-    BrowserDetached,
-    /// The service health lease expired.
-    LeaseExpired,
-}
-
-impl RecordingEndReason {
-    /// Return the stable semantic reason spelling.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::HardTimeout => "hard_timeout",
-            Self::BrowserDetached => "browser_detached",
-            Self::LeaseExpired => "lease_expired",
-        }
-    }
-
-    /// Parse one exact stable semantic reason spelling.
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "hard_timeout" => Some(Self::HardTimeout),
-            "browser_detached" => Some(Self::BrowserDetached),
-            "lease_expired" => Some(Self::LeaseExpired),
-            _ => None,
-        }
-    }
 }
 
 /// One policy-free service-to-browser control that expects no reply.
@@ -317,16 +208,6 @@ impl BrowserControl {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn test_only(id: BrowserControlId, input: Value) -> Self {
-        debug_assert!(input.is_object());
-        Self {
-            id,
-            input,
-            authority: MechanismAuthority::Test,
-        }
-    }
-
     /// Return the closed physical control identity.
     pub const fn id(&self) -> BrowserControlId {
         self.id
@@ -347,66 +228,6 @@ impl BrowserControl {
         }
     }
 
-    /// Construct a one-way control emitted by one response-dependent canonical operation.
-    ///
-    /// Cross-cutting browser supervision uses [`Self::for_auxiliary`]. Semantic handlers use this
-    /// constructor so a new control cannot silently escape that operation's declared physical
-    /// plan.
-    pub fn for_operation(
-        operation: OperationKey,
-        id: BrowserControlId,
-        input: Value,
-    ) -> Result<Self, ToolError> {
-        let Some(plan) = dynamic_operation_plan(operation) else {
-            return Err(ToolError::invalid_request(format!(
-                "operation {} / {} has no dynamic browser-control plan",
-                operation.id, operation.intent
-            )));
-        };
-        if !plan.allowed_controls.contains(&id) {
-            return Err(ToolError::invalid_request(format!(
-                "browser control {id} is not allowed for operation {} / {}",
-                operation.id, operation.intent
-            )));
-        }
-        Self::new(id, input, MechanismAuthority::Operation)
-    }
-
-    /// Construct an operation-declared recording teardown with supervisor admission posture.
-    ///
-    /// This is the one bounded exception for an uncertain recording start: the canonical
-    /// operation must explicitly allow `recording.cancel`, but cleanup may still run after a
-    /// takeover or attention transition to prevent an orphaned capture relay. Panic remains an
-    /// unconditional outbound refusal.
-    pub(crate) fn for_operation_cleanup(
-        operation: OperationKey,
-        id: BrowserControlId,
-        input: Value,
-    ) -> Result<Self, ToolError> {
-        if id != BrowserControlId::RecordingCancel {
-            return Err(ToolError::invalid_request(
-                "only recording.cancel has an operation-owned cleanup posture",
-            ));
-        }
-        let Some(plan) = dynamic_operation_plan(operation) else {
-            return Err(ToolError::invalid_request(format!(
-                "operation {} / {} has no dynamic browser-control plan",
-                operation.id, operation.intent
-            )));
-        };
-        if !plan.allowed_controls.contains(&id) {
-            return Err(ToolError::invalid_request(format!(
-                "browser control {id} is not allowed for operation {} / {}",
-                operation.id, operation.intent
-            )));
-        }
-        Self::new(
-            id,
-            input,
-            MechanismAuthority::Auxiliary(BrowserAuxiliaryPurpose::RecordingSupervisor),
-        )
-    }
-
     /// Construct a one-way control owned by one closed cross-cutting browser purpose.
     pub(crate) fn for_auxiliary(
         purpose: BrowserAuxiliaryPurpose,
@@ -424,35 +245,6 @@ impl BrowserControl {
     }
 }
 
-/// One unsolicited policy-free browser event with canonical physical data.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct BrowserEvent {
-    /// Closed physical event identity.
-    pub id: BrowserEventId,
-    /// Event-specific canonical data.
-    pub input: Value,
-}
-
-impl BrowserEvent {
-    /// Construct one unsolicited browser event.
-    pub fn new(id: BrowserEventId, input: Value) -> Result<Self, ToolError> {
-        if !input.is_object() {
-            return Err(ToolError::invalid_request(format!(
-                "browser event {} input must be an object",
-                id.as_str()
-            )));
-        }
-        Ok(Self { id, input })
-    }
-
-    /// Construct an infallible event from a statically object-shaped value.
-    pub(crate) fn object(id: BrowserEventId, input: Value) -> Self {
-        debug_assert!(input.is_object());
-        Self { id, input }
-    }
-}
-
 /// One physical browser request with mechanism-specific canonical input.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -464,6 +256,8 @@ pub struct MechanismRequest {
     /// Runtime dispatch authority retained through tab rewriting and legacy serialization.
     #[serde(skip)]
     authority: MechanismAuthority,
+    #[serde(skip)]
+    canonical_navigation_proof_required: bool,
 }
 
 /// Where one typed physical request obtained authority to reach the browser.
@@ -499,16 +293,9 @@ impl FinalAdmission {
                 check_hold: true,
                 check_attention: false,
             },
-            // Deadline/lease teardown is privacy-preserving browser supervision rather than a
-            // user-requested effect. It may stop capture during takeover or attention, but the
-            // process-wide panic check remains unconditional in the outbound chokepoint.
-            BrowserAuxiliaryPurpose::RecordingSupervisor => Self {
-                check_hold: false,
-                check_attention: false,
-            },
-            BrowserAuxiliaryPurpose::RecordingHealth
-            | BrowserAuxiliaryPurpose::RecordingInstrumentation
-            | BrowserAuxiliaryPurpose::TabUrlProbe => Self::STRICT,
+            BrowserAuxiliaryPurpose::TabUrlProbe | BrowserAuxiliaryPurpose::NavigationReadiness => {
+                Self::STRICT
+            }
             // Presentation is non-authoritative and cannot borrow one workspace's attention
             // state. Attention overlays must also be able to announce the circuit that just
             // opened. Both still obey takeover and the unconditional panic check.
@@ -553,6 +340,7 @@ impl MechanismRequest {
             id,
             input,
             authority,
+            canonical_navigation_proof_required: false,
         })
     }
 
@@ -562,6 +350,7 @@ impl MechanismRequest {
             id,
             input,
             authority,
+            canonical_navigation_proof_required: false,
         }
     }
 
@@ -578,6 +367,16 @@ impl MechanismRequest {
     /// Return the canonical mechanism input.
     pub fn input(&self) -> &Value {
         &self.input
+    }
+
+    /// Require the exact negotiated committed-document protocol for a canonical navigation.
+    pub(crate) fn require_canonical_navigation_proof(&mut self) {
+        self.canonical_navigation_proof_required = true;
+    }
+
+    /// Whether this request belongs to the canonical navigation result contract.
+    pub(crate) const fn canonical_navigation_proof_required(&self) -> bool {
+        self.canonical_navigation_proof_required
     }
 
     /// Return the final safety checks carried by this request's closed authority source.
@@ -605,20 +404,20 @@ impl MechanismRequest {
     /// through [`compile_operation`], while browser-wide instrumentation remains an explicit
     /// cross-cutting mechanism below any semantic handler.
     pub fn for_operation(
-        operation: OperationKey,
+        operation: OperationKind,
         id: MechanismId,
         input: Value,
     ) -> Result<Self, ToolError> {
         let Some(plan) = dynamic_operation_plan(operation) else {
             return Err(ToolError::invalid_request(format!(
-                "operation {} / {} has no dynamic browser-mechanism plan",
-                operation.id, operation.intent
+                "operation {} has no dynamic browser-mechanism plan",
+                operation.as_str()
             )));
         };
         if !plan.allowed_mechanisms.contains(&id) {
             return Err(ToolError::invalid_request(format!(
-                "browser mechanism {id} is not allowed for operation {} / {}",
-                operation.id, operation.intent
+                "browser mechanism {id} is not allowed for operation {}",
+                operation.as_str()
             )));
         }
         Self::new(id, input, MechanismAuthority::Operation)
@@ -670,14 +469,10 @@ impl DynamicOperationPlan {
 pub enum BrowserAuxiliaryPurpose {
     /// Best-effort parking after a committed landing fails the post-landing policy check.
     SafetyPark,
-    /// Deadline and teardown work owned by the recording supervisor.
-    RecordingSupervisor,
-    /// Periodic capture-health renewal, which must stop at every user safety boundary.
-    RecordingHealth,
-    /// Coordinate normalization injected only while annotating an active recording.
-    RecordingInstrumentation,
     /// Read-only URL resolution used by governance before a canonical operation dispatch.
     TabUrlProbe,
+    /// Exact-document readiness observation after one canonical navigation dispatch.
+    NavigationReadiness,
     /// Non-authoritative narration cleanup and user notification rendering.
     Presentation,
     /// Attention overlay state rendered after the service has made its control-plane decision.
@@ -688,10 +483,8 @@ impl BrowserAuxiliaryPurpose {
     /// Every auxiliary purpose in stable audit/test order.
     pub const ALL: &'static [Self] = &[
         Self::SafetyPark,
-        Self::RecordingSupervisor,
-        Self::RecordingHealth,
-        Self::RecordingInstrumentation,
         Self::TabUrlProbe,
+        Self::NavigationReadiness,
         Self::Presentation,
         Self::AttentionPresentation,
     ];
@@ -700,10 +493,8 @@ impl BrowserAuxiliaryPurpose {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SafetyPark => "safety_park",
-            Self::RecordingSupervisor => "recording_supervisor",
-            Self::RecordingHealth => "recording_health",
-            Self::RecordingInstrumentation => "recording_instrumentation",
             Self::TabUrlProbe => "tab_url_probe",
+            Self::NavigationReadiness => "navigation_readiness",
             Self::Presentation => "presentation",
             Self::AttentionPresentation => "attention_presentation",
         }
@@ -730,20 +521,12 @@ pub const fn auxiliary_plan(purpose: BrowserAuxiliaryPurpose) -> AuxiliaryBrowse
             allowed_mechanisms: &[M::NavigateUrl],
             allowed_controls: &[],
         },
-        P::RecordingSupervisor => AuxiliaryBrowserPlan {
-            allowed_mechanisms: &[M::RecordingStop],
-            allowed_controls: &[C::RecordingCancel],
-        },
-        P::RecordingHealth => AuxiliaryBrowserPlan {
-            allowed_mechanisms: &[],
-            allowed_controls: &[C::RecordingLeaseRenew],
-        },
-        P::RecordingInstrumentation => AuxiliaryBrowserPlan {
-            allowed_mechanisms: &[M::PointsRescale],
-            allowed_controls: &[],
-        },
         P::TabUrlProbe => AuxiliaryBrowserPlan {
             allowed_mechanisms: &[M::TabUrlQuery],
+            allowed_controls: &[],
+        },
+        P::NavigationReadiness => AuxiliaryBrowserPlan {
+            allowed_mechanisms: &[M::NavigationAwaitReadiness, M::NavigationVerifyDocument],
             allowed_controls: &[],
         },
         P::Presentation => AuxiliaryBrowserPlan {
@@ -771,73 +554,58 @@ pub enum OperationMechanismPlan {
 }
 
 /// Return the physical planning class for one implemented canonical operation.
-pub fn operation_plan(key: OperationKey) -> Option<OperationMechanismPlan> {
-    use IntentId::*;
-    use OperationId::*;
+pub fn operation_plan(operation: OperationKind) -> OperationMechanismPlan {
+    use OperationKind as O;
 
-    if let Some(plan) = dynamic_operation_plan(key) {
-        return Some(OperationMechanismPlan::Dynamic(plan));
+    if let Some(plan) = dynamic_operation_plan(operation) {
+        return OperationMechanismPlan::Dynamic(plan);
     }
 
-    let plan = match (key.id, key.intent) {
-        (BrowserTabs, TabsList | TabsNew | TabsFocus | TabsClose)
-        | (BrowserNavigate, NavigateUrl | NavigateBack | NavigateForward | NavigateReload)
-        | (BrowserSnapshot, SnapshotCapture)
-        | (BrowserRead, ReadText)
-        | (BrowserFind, FindQuery)
-        | (BrowserScreenshot, ScreenshotViewport | ScreenshotRegion)
-        | (BrowserFill, FillField)
-        | (BrowserWait, WaitDelay | WaitUntil)
-        | (BrowserDialog, DialogStatus | DialogAccept | DialogDismiss | DialogRespond)
-        | (
-            BrowserInput,
-            InputPointerClick
-            | InputPointerRightClick
-            | InputPointerDoubleClick
-            | InputPointerTripleClick
-            | InputPointerHover
-            | InputPointerDrag
-            | InputTypeText
-            | InputPressKey
-            | InputWheel
-            | InputScrollToOffset,
-        )
-        | (BrowserViewport, ViewportResizeWindow)
-        | (BrowserUpload, UploadClientFiles)
-        | (BrowserConsole, ConsoleRead | ConsoleReadAndClear)
-        | (BrowserNetwork, NetworkRead | NetworkReadAndClear)
-        | (BrowserEvaluate, EvaluateJavascript)
-        | (BrowserPresent, PresentNarrate) => OperationMechanismPlan::Direct,
-
-        (BrowserFlow, FlowExecute | FlowPreflight) => OperationMechanismPlan::Composition,
-        (WorkflowPlan, PlanUpdate)
-        | (BrowserContext, ContextDescribe)
-        | (BrowserRecord, RecordStatus) => OperationMechanismPlan::Local,
-        _ => return None,
-    };
-    Some(plan)
+    match operation {
+        O::BrowserGetStatus => OperationMechanismPlan::Local,
+        O::BrowserRunSequence => OperationMechanismPlan::Composition,
+        O::BrowserOpenTab => OperationMechanismPlan::Direct,
+        O::BrowserNavigate => OperationMechanismPlan::Composition,
+        O::BrowserListTabs
+        | O::BrowserFocusTab
+        | O::BrowserCloseTab
+        | O::BrowserGoBack
+        | O::BrowserGoForward
+        | O::BrowserReloadPage
+        | O::BrowserInspectPage
+        | O::BrowserScrollPage
+        | O::BrowserPressEscape
+        | O::BrowserGetDialog
+        | O::BrowserHandleDialog => OperationMechanismPlan::Direct,
+        O::BrowserReadPage
+        | O::BrowserTakeScreenshot
+        | O::BrowserClick
+        | O::BrowserHover
+        | O::BrowserScrollToTarget
+        | O::BrowserPressKey
+        | O::BrowserDrag
+        | O::BrowserFillForm
+        | O::BrowserWaitFor => unreachable!("dynamic plans returned above"),
+    }
 }
 
 /// Return the exact physical authority of one response-dependent canonical operation.
-pub fn dynamic_operation_plan(key: OperationKey) -> Option<DynamicOperationPlan> {
-    use BrowserControlId as C;
-    use IntentId::*;
+pub fn dynamic_operation_plan(operation: OperationKind) -> Option<DynamicOperationPlan> {
     use MechanismId as M;
-    use OperationId::*;
+    use OperationKind as O;
 
-    let plan = match (key.id, key.intent) {
-        (BrowserAct, ActClick | ActRightClick | ActDoubleClick | ActTripleClick) => {
-            DynamicOperationPlan::new(
-                &[
-                    M::ElementResolve,
-                    M::TargetCue,
-                    M::PointerClick,
-                    M::WaitUntil,
-                ],
-                &[],
-            )
-        }
-        (BrowserAct, ActHover) => DynamicOperationPlan::new(
+    let plan = match operation {
+        O::BrowserWaitFor => DynamicOperationPlan::new(&[M::WaitUntil], &[]),
+        O::BrowserClick => DynamicOperationPlan::new(
+            &[
+                M::ElementResolve,
+                M::TargetCue,
+                M::PointerClick,
+                M::WaitUntil,
+            ],
+            &[],
+        ),
+        O::BrowserHover => DynamicOperationPlan::new(
             &[
                 M::ElementResolve,
                 M::TargetCue,
@@ -846,7 +614,7 @@ pub fn dynamic_operation_plan(key: OperationKey) -> Option<DynamicOperationPlan>
             ],
             &[],
         ),
-        (BrowserAct, ActScrollIntoView) => DynamicOperationPlan::new(
+        O::BrowserScrollToTarget => DynamicOperationPlan::new(
             &[
                 M::ElementResolve,
                 M::TargetCue,
@@ -855,33 +623,33 @@ pub fn dynamic_operation_plan(key: OperationKey) -> Option<DynamicOperationPlan>
             ],
             &[],
         ),
-        (BrowserAct, ActSetValue) => DynamicOperationPlan::new(
+        O::BrowserPressKey => DynamicOperationPlan::new(
+            &[M::ElementResolve, M::TargetCue, M::KeyPress, M::WaitUntil],
+            &[],
+        ),
+        O::BrowserDrag => DynamicOperationPlan::new(
             &[
                 M::ElementResolve,
                 M::TargetCue,
-                M::FormSetValue,
+                M::PointerDrag,
                 M::WaitUntil,
             ],
             &[],
         ),
-        (BrowserFill, FillFields) => {
-            DynamicOperationPlan::new(&[M::FormInspect, M::FormSetValue], &[])
-        }
-        (BrowserFill, FillFieldsAndSubmit) => {
+        O::BrowserTakeScreenshot => DynamicOperationPlan::new(
+            &[
+                M::ElementResolve,
+                M::ScreenshotRegion,
+                M::ScreenshotViewport,
+            ],
+            &[],
+        ),
+        O::BrowserReadPage => DynamicOperationPlan::new(&[M::ElementResolve, M::PageReadText], &[]),
+        O::BrowserFillForm => {
             DynamicOperationPlan::new(&[M::FormInspect, M::FormSetValue, M::PointerClick], &[])
         }
-        (BrowserUpload, UploadCapturedArtifact) => {
-            DynamicOperationPlan::new(&[M::UploadImage], &[])
-        }
-        (BrowserRecord, RecordStart) => {
-            DynamicOperationPlan::new(&[M::RecordingStart], &[C::RecordingCancel])
-        }
-        (BrowserRecord, RecordStop) => {
-            DynamicOperationPlan::new(&[M::RecordingStop], &[C::RecordingCancel])
-        }
-        (BrowserRecord, RecordClear) => DynamicOperationPlan::new(&[], &[C::RecordingCancel]),
-        (BrowserRecord, RecordExport) => {
-            DynamicOperationPlan::new(&[M::RecordingStop, M::UploadImage], &[C::RecordingCancel])
+        O::BrowserNavigate => {
+            DynamicOperationPlan::new(&[M::WorkspaceTabOpen, M::NavigateUrl], &[])
         }
         _ => return None,
     };
@@ -893,16 +661,15 @@ pub fn dynamic_operation_plan(key: OperationKey) -> Option<DynamicOperationPlan>
 /// Dynamic, composition, and local operations return `Ok(None)`. An unimplemented family/intent
 /// pair fails closed rather than being guessed from similar names.
 pub fn compile_operation(
-    key: OperationKey,
+    operation: OperationKind,
     arguments: &Value,
 ) -> Result<Option<MechanismRequest>, ToolError> {
-    let Some(plan) = operation_plan(key) else {
-        return Err(ToolError::invalid_request(format!(
-            "operation {} / {} has no physical mechanism plan",
-            key.id, key.intent
-        )));
-    };
-    if plan != OperationMechanismPlan::Direct {
+    let plan = operation_plan(operation);
+    let compound_direct = matches!(
+        operation,
+        OperationKind::BrowserNavigate if arguments.get("tab").is_some()
+    );
+    if plan != OperationMechanismPlan::Direct && !compound_direct {
         return Ok(None);
     }
 
@@ -910,7 +677,7 @@ pub fn compile_operation(
         .as_object()
         .cloned()
         .ok_or_else(|| ToolError::invalid_request("canonical arguments must be an object"))?;
-    let id = direct_mechanism(key, &mut input)?;
+    let id = direct_mechanism(operation, &mut input)?;
     Ok(Some(MechanismRequest::object(
         id,
         Value::Object(input),
@@ -918,15 +685,49 @@ pub fn compile_operation(
     )))
 }
 
+/// Compile one URL navigation transaction for either an existing tab or the first tab in a
+/// workspace. A zero-state navigation is one physical `workspace.tab.open` transaction, so the
+/// browser never exposes an intermediate blank page.
+pub(crate) fn compile_navigation_transaction(
+    arguments: &Value,
+) -> Result<MechanismRequest, ToolError> {
+    let mut input = arguments
+        .as_object()
+        .cloned()
+        .ok_or_else(|| ToolError::invalid_request("canonical arguments must be an object"))?;
+    ensure_navigation_readiness(&mut input);
+    let mechanism = if input.get("tab").is_some() {
+        MechanismId::NavigateUrl
+    } else {
+        MechanismId::WorkspaceTabOpen
+    };
+    MechanismRequest::for_operation(
+        OperationKind::BrowserNavigate,
+        mechanism,
+        Value::Object(input),
+    )
+}
+
 fn direct_mechanism(
-    key: OperationKey,
+    operation: OperationKind,
     input: &mut Map<String, Value>,
 ) -> Result<MechanismId, ToolError> {
-    use IntentId::*;
-    use OperationId::*;
+    use OperationKind as O;
 
-    let id = match (key.id, key.intent) {
-        (BrowserTabs, TabsList) => match input.get("create_if_empty") {
+    let id = match operation {
+        O::BrowserOpenTab => {
+            if input.get("url").is_some() {
+                ensure_navigation_readiness(input);
+                MechanismId::WorkspaceTabOpen
+            } else {
+                MechanismId::WorkspaceTabCreate
+            }
+        }
+        O::BrowserNavigate => {
+            ensure_navigation_readiness(input);
+            MechanismId::NavigateUrl
+        }
+        O::BrowserListTabs => match input.get("create_if_empty") {
             None | Some(Value::Bool(false)) => MechanismId::WorkspaceTabsInspect,
             Some(Value::Bool(true)) => {
                 input.remove("create_if_empty");
@@ -938,283 +739,46 @@ fn direct_mechanism(
                 ));
             }
         },
-        (BrowserTabs, TabsNew) => MechanismId::WorkspaceTabCreate,
-        (BrowserTabs, TabsFocus) => MechanismId::TabFocus,
-        (BrowserTabs, TabsClose) => MechanismId::TabClose,
-        (BrowserNavigate, NavigateUrl) => MechanismId::NavigateUrl,
-        (BrowserNavigate, NavigateBack) => MechanismId::NavigateBack,
-        (BrowserNavigate, NavigateForward) => MechanismId::NavigateForward,
-        (BrowserNavigate, NavigateReload) => MechanismId::NavigateReload,
-        (BrowserSnapshot, SnapshotCapture) => MechanismId::PageSnapshot,
-        (BrowserRead, ReadText) => MechanismId::PageReadText,
-        (BrowserFind, FindQuery) => MechanismId::PageFind,
-        (BrowserScreenshot, ScreenshotViewport) => MechanismId::ScreenshotViewport,
-        (BrowserScreenshot, ScreenshotRegion) => MechanismId::ScreenshotRegion,
-        (BrowserFill, FillField) => MechanismId::FormSetValue,
-        (BrowserWait, WaitDelay) => MechanismId::WaitDelay,
-        (BrowserWait, WaitUntil) => MechanismId::WaitUntil,
-        (BrowserDialog, DialogStatus) => MechanismId::DialogInspect,
-        (BrowserDialog, DialogAccept) => MechanismId::DialogAccept,
-        (BrowserDialog, DialogDismiss) => MechanismId::DialogDismiss,
-        (BrowserDialog, DialogRespond) => MechanismId::DialogRespond,
-        (BrowserInput, InputPointerClick) => pointer_click(input, "left", 1),
-        (BrowserInput, InputPointerRightClick) => pointer_click(input, "right", 1),
-        (BrowserInput, InputPointerDoubleClick) => pointer_click(input, "left", 2),
-        (BrowserInput, InputPointerTripleClick) => pointer_click(input, "left", 3),
-        (BrowserInput, InputPointerHover) => MechanismId::PointerHover,
-        (BrowserInput, InputPointerDrag) => MechanismId::PointerDrag,
-        (BrowserInput, InputTypeText) => MechanismId::TextType,
-        (BrowserInput, InputPressKey) => MechanismId::KeyPress,
-        (BrowserInput, InputWheel) => MechanismId::WheelScroll,
-        (BrowserInput, InputScrollToOffset) => MechanismId::ScrollViewportToOffset,
-        (BrowserViewport, ViewportResizeWindow) => MechanismId::ViewportResize,
-        (BrowserUpload, UploadClientFiles) => MechanismId::UploadFiles,
-        (BrowserConsole, ConsoleRead) => MechanismId::ConsoleRead,
-        (BrowserConsole, ConsoleReadAndClear) => {
-            input.insert("clear".into(), Value::Bool(true));
-            MechanismId::ConsoleRead
+        O::BrowserFocusTab => MechanismId::TabFocus,
+        O::BrowserCloseTab => MechanismId::TabClose,
+        O::BrowserGoBack => {
+            ensure_navigation_readiness(input);
+            MechanismId::NavigateBack
         }
-        (BrowserNetwork, NetworkRead) => MechanismId::NetworkRead,
-        (BrowserNetwork, NetworkReadAndClear) => {
-            input.insert("clear".into(), Value::Bool(true));
-            MechanismId::NetworkRead
+        O::BrowserGoForward => {
+            ensure_navigation_readiness(input);
+            MechanismId::NavigateForward
         }
-        (BrowserEvaluate, EvaluateJavascript) => MechanismId::PageEvaluate,
-        (BrowserPresent, PresentNarrate) => MechanismId::NarrationShow,
+        O::BrowserReloadPage => {
+            ensure_navigation_readiness(input);
+            MechanismId::NavigateReload
+        }
+        O::BrowserInspectPage if input.get("query").is_some() => MechanismId::PageFind,
+        O::BrowserInspectPage => MechanismId::PageSnapshot,
+        O::BrowserScrollPage => MechanismId::WheelScroll,
+        O::BrowserPressEscape => MechanismId::KeyPress,
+        O::BrowserGetDialog => MechanismId::DialogInspect,
+        O::BrowserHandleDialog => match input.get("action").and_then(Value::as_str) {
+            Some("dismiss") => MechanismId::DialogDismiss,
+            Some("respond") => MechanismId::DialogRespond,
+            _ => MechanismId::DialogAccept,
+        },
         _ => {
             return Err(ToolError::invalid_request(format!(
-                "direct operation {} / {} has no physical mechanism",
-                key.id, key.intent
+                "operation {} requires its semantic handler",
+                operation.as_str()
             )));
         }
     };
     Ok(id)
 }
 
-fn pointer_click(input: &mut Map<String, Value>, button: &'static str, count: u64) -> MechanismId {
-    input.insert("button".into(), json!(button));
-    input.insert("count".into(), json!(count));
-    MechanismId::PointerClick
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-
-    #[test]
-    fn mechanism_ids_are_unique_stable_and_fail_closed() {
-        let mut seen = HashSet::new();
-        for id in MechanismId::ALL {
-            assert!(seen.insert(id.as_str()));
-            assert_eq!(MechanismId::parse(id.as_str()), Some(*id));
-            let wire = serde_json::to_string(id).expect("serialize");
-            assert_eq!(serde_json::from_str::<MechanismId>(&wire).unwrap(), *id);
-        }
-        assert!(MechanismId::parse("computer").is_none());
-        assert!(serde_json::from_str::<MechanismId>("\"computer\"").is_err());
-    }
-
-    #[test]
-    fn control_ids_are_unique_stable_and_fail_closed() {
-        let mut seen = HashSet::new();
-        for id in BrowserControlId::ALL {
-            assert!(seen.insert(id.as_str()));
-            assert_eq!(BrowserControlId::parse(id.as_str()), Some(*id));
-            let wire = serde_json::to_string(id).expect("serialize");
-            assert_eq!(
-                serde_json::from_str::<BrowserControlId>(&wire).unwrap(),
-                *id
-            );
-            let control = BrowserControl::test_only(*id, json!({}));
-            assert_eq!(
-                serde_json::to_value(&control).unwrap(),
-                json!({"id": id.as_str(), "input": {}})
-            );
-        }
-        assert!(BrowserControlId::parse("gif_capture_cancel").is_none());
-        assert!(serde_json::from_str::<BrowserControlId>("\"gif_capture_cancel\"").is_err());
-        assert!(BrowserControl::new(
-            BrowserControlId::NarrationClear,
-            json!([]),
-            MechanismAuthority::Test,
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn event_ids_and_recording_reasons_are_closed_and_round_trip() {
-        let mut seen = HashSet::new();
-        for id in BrowserEventId::ALL {
-            assert!(seen.insert(id.as_str()));
-            assert_eq!(BrowserEventId::parse(id.as_str()), Some(*id));
-            let wire = serde_json::to_string(id).expect("serialize");
-            assert_eq!(serde_json::from_str::<BrowserEventId>(&wire).unwrap(), *id);
-            let event = BrowserEvent::new(*id, json!({})).unwrap();
-            let round_trip: BrowserEvent =
-                serde_json::from_value(serde_json::to_value(&event).unwrap()).unwrap();
-            assert_eq!(round_trip, event);
-        }
-        assert!(BrowserEventId::parse("gif_frame").is_none());
-        assert!(serde_json::from_str::<BrowserEventId>("\"gif_frame\"").is_err());
-        assert!(BrowserEvent::new(BrowserEventId::RecordingFrame, Value::Null).is_err());
-
-        for reason in [
-            RecordingEndReason::HardTimeout,
-            RecordingEndReason::BrowserDetached,
-            RecordingEndReason::LeaseExpired,
-        ] {
-            assert_eq!(RecordingEndReason::parse(reason.as_str()), Some(reason));
-            let wire = serde_json::to_string(&reason).unwrap();
-            assert_eq!(
-                serde_json::from_str::<RecordingEndReason>(&wire).unwrap(),
-                reason
-            );
-        }
-        assert!(RecordingEndReason::parse("invented").is_none());
-        assert!(serde_json::from_str::<RecordingEndReason>("\"invented\"").is_err());
-    }
-
-    #[test]
-    fn request_authority_retains_the_exact_final_admission_policy() {
-        let operation = MechanismRequest::test_only(MechanismId::WaitDelay, json!({}));
-        assert!(operation.final_admission().checks_hold());
-        assert!(operation.final_admission().checks_attention());
-
-        for (purpose, hold, attention) in [
-            (BrowserAuxiliaryPurpose::SafetyPark, true, false),
-            (BrowserAuxiliaryPurpose::RecordingSupervisor, false, false),
-            (
-                BrowserAuxiliaryPurpose::RecordingInstrumentation,
-                true,
-                true,
-            ),
-            (BrowserAuxiliaryPurpose::TabUrlProbe, true, true),
-        ] {
-            let id = auxiliary_plan(purpose).allowed_mechanisms[0];
-            let request = MechanismRequest::for_auxiliary(purpose, id, json!({})).unwrap();
-            assert_eq!(request.final_admission().checks_hold(), hold);
-            assert_eq!(request.final_admission().checks_attention(), attention);
-        }
-
-        let renewal = BrowserControl::for_auxiliary(
-            BrowserAuxiliaryPurpose::RecordingHealth,
-            BrowserControlId::RecordingLeaseRenew,
-            json!({}),
-        )
-        .unwrap();
-        assert!(renewal.final_admission().checks_hold());
-        assert!(renewal.final_admission().checks_attention());
-
-        assert_eq!(
-            serde_json::to_value(&operation).unwrap(),
-            json!({"id":"wait.delay","input":{}}),
-            "runtime authority never crosses the browser compatibility wire"
-        );
-
-        for intent in [
-            IntentId::RecordStart,
-            IntentId::RecordStop,
-            IntentId::RecordClear,
-            IntentId::RecordExport,
-        ] {
-            let cleanup = BrowserControl::for_operation_cleanup(
-                OperationKey::new(OperationId::BrowserRecord, intent),
-                BrowserControlId::RecordingCancel,
-                json!({}),
-            )
-            .expect("recording operation declares cleanup");
-            assert!(!cleanup.final_admission().checks_hold());
-            assert!(!cleanup.final_admission().checks_attention());
-        }
-        assert!(BrowserControl::for_operation_cleanup(
-            OperationKey::new(OperationId::BrowserAct, IntentId::ActClick),
-            BrowserControlId::RecordingCancel,
-            json!({}),
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn pointer_variants_compile_to_one_typed_mechanism() {
-        for (intent, button, count) in [
-            (IntentId::InputPointerClick, "left", 1),
-            (IntentId::InputPointerRightClick, "right", 1),
-            (IntentId::InputPointerDoubleClick, "left", 2),
-            (IntentId::InputPointerTripleClick, "left", 3),
-        ] {
-            let request = compile_operation(
-                OperationKey::new(OperationId::BrowserInput, intent),
-                &json!({"tab":1,"point":[10,20]}),
-            )
-            .unwrap()
-            .unwrap();
-            assert_eq!(request.id, MechanismId::PointerClick);
-            assert_eq!(request.input["button"], button);
-            assert_eq!(request.input["count"], count);
-            assert!(request.input.get("action").is_none());
-        }
-    }
-
-    #[test]
-    fn presence_sensitive_legacy_inputs_survive_canonical_compilation() {
-        let tabs = OperationKey::new(OperationId::BrowserTabs, IntentId::TabsList);
-        let absent = compile_operation(tabs, &json!({})).unwrap().unwrap();
-        assert_eq!(absent.id, MechanismId::WorkspaceTabsInspect);
-        assert!(absent.input.get("create_if_empty").is_none());
-        let explicit_false = compile_operation(tabs, &json!({"create_if_empty":false}))
-            .unwrap()
-            .unwrap();
-        assert_eq!(explicit_false.id, MechanismId::WorkspaceTabsInspect);
-        assert_eq!(explicit_false.input["create_if_empty"], false);
-        let explicit_true = compile_operation(tabs, &json!({"create_if_empty":true}))
-            .unwrap()
-            .unwrap();
-        assert_eq!(explicit_true.id, MechanismId::WorkspaceTabsEnsure);
-        assert!(explicit_true.input.get("create_if_empty").is_none());
-
-        for (id, plain, clear) in [
-            (
-                OperationId::BrowserConsole,
-                IntentId::ConsoleRead,
-                IntentId::ConsoleReadAndClear,
-            ),
-            (
-                OperationId::BrowserNetwork,
-                IntentId::NetworkRead,
-                IntentId::NetworkReadAndClear,
-            ),
-        ] {
-            let plain = compile_operation(OperationKey::new(id, plain), &json!({}))
-                .unwrap()
-                .unwrap();
-            assert!(plain.input.get("clear").is_none());
-            let clear = compile_operation(OperationKey::new(id, clear), &json!({}))
-                .unwrap()
-                .unwrap();
-            assert_eq!(clear.input["clear"], true);
-        }
-    }
-
-    #[test]
-    fn local_and_composition_operations_never_get_placeholder_mechanisms() {
-        for key in [
-            OperationKey::new(OperationId::BrowserAct, IntentId::ActClick),
-            OperationKey::new(OperationId::BrowserFill, IntentId::FillFields),
-            OperationKey::new(OperationId::BrowserFlow, IntentId::FlowExecute),
-            OperationKey::new(OperationId::WorkflowPlan, IntentId::PlanUpdate),
-            OperationKey::new(OperationId::BrowserContext, IntentId::ContextDescribe),
-        ] {
-            assert_eq!(compile_operation(key, &json!({})).unwrap(), None);
-        }
-    }
-
-    #[test]
-    fn unsupported_family_intent_pairs_fail_closed() {
-        assert!(compile_operation(
-            OperationKey::new(OperationId::BrowserContext, IntentId::ActClick),
-            &json!({})
-        )
-        .is_err());
-    }
+fn ensure_navigation_readiness(input: &mut Map<String, Value>) {
+    input.entry("readiness").or_insert_with(|| {
+        json!({
+            "settle": true,
+            "timeout_ms": 10_000,
+            "min_ms": 0,
+        })
+    });
 }

@@ -384,18 +384,13 @@ pub const GOVERNANCE_MODE: &str = "governance.mode";
 /// local service ingress closed too.
 pub const INBOUND_PIPE_ENABLED: &str = "inbound.pipe.enabled";
 
-/// `outbound.browser.enabled` -- whether the outbound.browser executor participates. Reserved
-/// for symmetry and future deployments that disable the browser capability entirely.
-pub const OUTBOUND_BROWSER_ENABLED: &str = "outbound.browser.enabled";
-
 /// `manage.web.enabled` -- whether the management-plane HTTP UI binds. An org-mandatory `false`
 /// takes the management UI off-line without affecting tool ingestion.
 pub const MANAGE_WEB_ENABLED: &str = "manage.web.enabled";
 
 /// The static registry of every governance key: the single source of truth for names,
 /// descriptions, constraints, and per-preset defaults (shared format doc section 3.4). The
-/// `restricted` preset equals `safe` for every stage-2 key by design; it is registered now so
-/// the preset name is stable.
+/// Historical preset spellings still normalize here until the settings-file migration lands.
 pub const KEYS: &[KeyDef] = &[
     KeyDef {
         key: ENGINE_CONNECTION_FIRST_CALL_WAIT_MS,
@@ -421,7 +416,7 @@ pub const KEYS: &[KeyDef] = &[
     },
     KeyDef {
         key: CONTENT_SECURITY_SECRETS_REDACT,
-        description: "Redact values of secret fields (password/OTP/payment) in read_page output.",
+        description: "Redact values of secret fields (password/OTP/payment) in browser_read_page output.",
         constraint: KeyConstraint::None,
         default_fully_open: KeyValue::Bool(false),
         default_safe: KeyValue::Bool(true),
@@ -482,14 +477,6 @@ pub const KEYS: &[KeyDef] = &[
     KeyDef {
         key: INBOUND_PIPE_ENABLED,
         description: "Whether the owner-only local bridge/control listener binds.",
-        constraint: KeyConstraint::None,
-        default_fully_open: KeyValue::Bool(true),
-        default_safe: KeyValue::Bool(true),
-        default_restricted: KeyValue::Bool(true),
-    },
-    KeyDef {
-        key: OUTBOUND_BROWSER_ENABLED,
-        description: "Whether the outbound.browser executor participates.",
         constraint: KeyConstraint::None,
         default_fully_open: KeyValue::Bool(true),
         default_safe: KeyValue::Bool(true),
@@ -1093,14 +1080,9 @@ mod tests {
     #[test]
     fn runtime_zone_enable_keys_default_true_in_every_preset() {
         // ADR-0030 Decision 5: "OPEN MEANS OPEN" -- each runtime zone resolves to its built-in
-        // default, never to an implicit code gate. The owner-only local ingress, browser executor,
-        // and management plane are enabled in every preset; an org-mandatory layer disables one.
-        //
-        for key in [
-            INBOUND_PIPE_ENABLED,
-            OUTBOUND_BROWSER_ENABLED,
-            MANAGE_WEB_ENABLED,
-        ] {
+        // default, never to an implicit code gate. The owner-only local ingress and management
+        // plane are enabled in every preset; an org-mandatory layer disables one.
+        for key in [INBOUND_PIPE_ENABLED, MANAGE_WEB_ENABLED] {
             for preset in [Preset::FullyOpen, Preset::Safe, Preset::Restricted] {
                 let k = key_def(key).expect("registered key");
                 match k.default_for(preset) {

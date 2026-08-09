@@ -6,7 +6,7 @@
 //! tracing; designed as a pure function of [`LayerInputs`] so a later re-resolve (hot-reload,
 //! task A5) can re-run it on a fresh snapshot.
 
-use super::{ConfigValue, KeyDef, Preset, KEYS};
+use super::{ConfigValue, KeyDef, Preset, CONTENT_SECURITY_SACRED_DOMAINS, KEYS};
 
 /// Which layer a resolved value came from (shared format section 2.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +85,9 @@ pub fn resolve(layers: &LayerInputs) -> Resolution {
 }
 
 fn resolve_one(def: &KeyDef, layers: &LayerInputs) -> Resolved {
+    if def.key == CONTENT_SECURITY_SACRED_DOMAINS {
+        return resolve_protected_hosts(def, layers);
+    }
     if let Some(v) = layers.org_mandatory.get(def.key) {
         return Resolved {
             value: v.clone(),
@@ -119,6 +122,41 @@ fn resolve_one(def: &KeyDef, layers: &LayerInputs) -> Resolved {
         value: default.to_json(),
         source: Source::Builtin,
         locked: false,
+    }
+}
+
+fn resolve_protected_hosts(def: &KeyDef, layers: &LayerInputs) -> Resolved {
+    let builtin: ConfigValue = def.default_for(Preset::Safe).into();
+    let candidates = [
+        (Source::OrgMandatory, layers.org_mandatory.get(def.key)),
+        (Source::User, layers.user.get(def.key)),
+        (Source::OrgRecommended, layers.org_recommended.get(def.key)),
+        (Source::Preset, layers.preset.get(def.key)),
+        (Source::Builtin, Some(&builtin.to_json())),
+    ];
+    let mut values = Vec::<String>::new();
+    let mut source = Source::Builtin;
+    let mut selected_source = false;
+    for (candidate_source, candidate) in candidates {
+        let Some(entries) = candidate.and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        if !selected_source && !entries.is_empty() {
+            source = candidate_source;
+            selected_source = true;
+        }
+        for entry in entries.iter().filter_map(serde_json::Value::as_str) {
+            if !values.iter().any(|existing| existing == entry) {
+                values.push(entry.to_owned());
+            }
+        }
+    }
+    Resolved {
+        value: serde_json::Value::Array(
+            values.into_iter().map(serde_json::Value::String).collect(),
+        ),
+        source,
+        locked: layers.org_mandatory.contains_key(def.key),
     }
 }
 
@@ -189,6 +227,39 @@ mod tests {
         inputs.preset.clear();
         let r = resolve(&inputs);
         assert_eq!(r.get(key).unwrap().source, Source::Builtin);
+    }
+
+    #[test]
+    fn protected_hosts_union_across_every_layer_without_duplicates() {
+        let key = super::super::CONTENT_SECURITY_SACRED_DOMAINS;
+        let inputs = LayerInputs {
+            org_mandatory: serde_json::Map::from_iter([(
+                key.into(),
+                json!(["admin.example", "shared.example"]),
+            )]),
+            user: serde_json::Map::from_iter([(
+                key.into(),
+                json!(["personal.example", "shared.example"]),
+            )]),
+            org_recommended: serde_json::Map::from_iter([(
+                key.into(),
+                json!(["recommended.example"]),
+            )]),
+            preset: serde_json::Map::from_iter([(key.into(), json!([]))]),
+        };
+        let resolved = resolve(&inputs);
+        let protected = resolved.get(key).expect("protected hosts resolve");
+        assert_eq!(protected.source, Source::OrgMandatory);
+        assert!(protected.locked);
+        assert_eq!(
+            protected.value,
+            json!([
+                "admin.example",
+                "shared.example",
+                "personal.example",
+                "recommended.example"
+            ])
+        );
     }
 
     #[test]

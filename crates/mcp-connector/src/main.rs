@@ -44,6 +44,13 @@ impl Default for Machine {
 }
 
 impl Machine {
+    fn new() -> Self {
+        Self {
+            handler: SelectedHandler::Unselected,
+            correlation: Correlation::default(),
+        }
+    }
+
     fn on_request(&mut self, request: Request) -> Effects {
         if request.method == "initialize" && request.id.is_none() {
             return Effects::default();
@@ -63,7 +70,8 @@ impl Machine {
                             "MCP 2026-07-28 has no initialize lifecycle",
                         );
                     }
-                    return match mcp_2025_11_25::Handler::select(&request, &mut self.correlation) {
+                    let selected = mcp_2025_11_25::Handler::select(&request, &mut self.correlation);
+                    return match selected {
                         Ok((handler, effects)) => {
                             self.handler = SelectedHandler::Mcp2025(handler);
                             effects
@@ -271,7 +279,7 @@ async fn serve<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    let mut machine = Machine::default();
+    let mut machine = Machine::new();
     loop {
         tokio::select! {
             line = lines.next_line() => {
@@ -507,11 +515,11 @@ mod tests {
     fn ambiguous_start_write_is_outcome_unknown_and_never_retry_safe() {
         let mut machine = Machine::default();
         let mut call = request_2026(12, "tools/call");
-        call.params["name"] = json!("computer");
+        call.params["name"] = json!("browser_click");
         call.params["arguments"] = json!({
-            "action": "left_click",
-            "tabId": 7,
-            "coordinate": [10, 20]
+            "workspace": ghostlight_transport::workspace_id::WorkspaceId::mint().as_str(),
+            "tab": "t_test_click",
+            "target": "ref_test_click"
         });
         let start = machine.on_request(call);
         let ghostlight_transport::bridge::EdgeMessage::Start { sequence, .. } =

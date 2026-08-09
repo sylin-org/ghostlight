@@ -246,7 +246,7 @@ impl Governance {
         &self,
         tool: &str,
         action: Option<&str>,
-        requires: Option<&'static [Capability]>,
+        requires: Option<&[Capability]>,
     ) -> CallAudit {
         self.begin_with_client(tool, action, requires, self.current_client())
     }
@@ -260,7 +260,7 @@ impl Governance {
         &self,
         tool: &str,
         action: Option<&str>,
-        requires: Option<&'static [Capability]>,
+        requires: Option<&[Capability]>,
         client: Option<ClientInfo>,
     ) -> CallAudit {
         CallAudit {
@@ -268,11 +268,13 @@ impl Governance {
             client,
             tool: tool.to_string(),
             action: action.map(str::to_string),
-            requires,
+            requires: requires.map(<[Capability]>::to_vec),
             started: Instant::now(),
             domain: None,
             grant_id: None,
             shadow: None,
+            landing_shadow_seen: false,
+            landing_shadow_domain: None,
             duration_ms: None,
             orchestrator: None,
             batch_id: None,
@@ -320,7 +322,7 @@ impl Governance {
             Mode::Governed(state) => state,
         };
 
-        let Some(reqs) = audit.requires else {
+        let Some(ref reqs) = audit.requires else {
             let denial = crate::governance::enforcement::unknown_action_denial(
                 &audit.tool,
                 audit.action.as_deref(),
@@ -543,11 +545,13 @@ pub struct CallAudit {
     client: Option<ClientInfo>,
     tool: String,
     action: Option<String>,
-    requires: Option<&'static [Capability]>,
+    requires: Option<Vec<Capability>>,
     started: Instant,
     domain: Option<String>,
     grant_id: Option<String>,
     shadow: Option<Denial>,
+    landing_shadow_seen: bool,
+    landing_shadow_domain: Option<String>,
     duration_ms: Option<u64>,
     orchestrator: Option<&'static str>,
     batch_id: Option<String>,
@@ -669,12 +673,15 @@ impl CallAudit {
     }
 
     /// Amend the scope's attribution after a successful navigate landing re-check (g13/g15,
-    /// point 5): overwrites `grant_id`/`domain` with the landing's own resolution and clears any
-    /// shadow denial captured pre-dispatch (an on-grant landing is a real allow, not a shadow).
+    /// point 5): overwrites `grant_id`/`domain` with the landing's own resolution. The first
+    /// allowed landing clears a shadow denial captured only by the pre-dispatch check, but a
+    /// later allowed redirect must not erase an earlier committed landing's shadow denial.
     pub fn landing_allow(&mut self, grant_id: Option<String>, domain: Option<String>) {
         self.grant_id = grant_id;
         self.domain = domain;
-        self.shadow = None;
+        if !self.landing_shadow_seen {
+            self.shadow = None;
+        }
     }
 
     /// Amend the scope after a navigate landing re-check that resolves to a SHADOW deny (g15):
@@ -688,8 +695,10 @@ impl CallAudit {
     /// pre-dispatch) must still be recorded as a `shadow_deny` -- reusing `landing_allow` would
     /// silently clear that shadow state and misrecord it as a plain `allow`.
     pub fn landing_shadow_deny(&mut self, denial: Denial, domain: Option<String>) {
-        self.domain = domain;
+        self.domain = domain.clone();
+        self.landing_shadow_domain = domain;
         self.shadow = Some(denial);
+        self.landing_shadow_seen = true;
     }
 
     /// Record the navigate point-5 post-landing denial (g13, shared format doc section 6.1):
@@ -720,7 +729,11 @@ impl CallAudit {
     /// dispatch at all). Terminal: consumes the scope.
     pub fn complete(self) {
         let duration_ms = self.duration();
-        let domain = self.domain.clone();
+        let domain = if self.landing_shadow_seen {
+            self.landing_shadow_domain.clone()
+        } else {
+            self.domain.clone()
+        };
         let (decision, grant_id, denial_id) = match &self.shadow {
             Some(denial) => (
                 "shadow_deny",
@@ -784,11 +797,13 @@ impl CallAudit {
         held: bool,
         attention_required: bool,
     ) -> AuditRecord {
-        let capability = self
+        let required_capabilities = self
             .requires
-            .and_then(|r| r.first())
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
             .map(Capability::as_str)
-            .unwrap_or("none");
+            .collect();
         AuditRecord {
             event_id: uuid::Uuid::new_v4().to_string(),
             ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -796,7 +811,7 @@ impl CallAudit {
             client: self.client.clone(),
             tool: self.tool.clone(),
             action: self.action.clone(),
-            capability,
+            required_capabilities,
             domain: domain.map(str::to_string),
             decision,
             grant_id,
@@ -822,15 +837,13 @@ mod tests {
     use crate::governance::ports::NoopPdp;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// A stand-in for the browser plugin's real action directory: `computer`/`screenshot` and
-    /// `read_page` require `read`; `computer`/`left_click` requires `action`; `tabs_create_mcp`
-    /// requires nothing (ADR-0022 `requires: []`); everything else misses.
+    /// A small stand-in for the Ghostlight operation registry used by these governance unit tests.
     fn sample_requires(tool: &str, action: Option<&str>) -> Option<&'static [Capability]> {
         match (tool, action) {
-            ("computer", Some("screenshot")) => Some(&[Capability::Read]),
-            ("computer", Some("left_click")) => Some(&[Capability::Action]),
-            ("read_page", None) => Some(&[Capability::Read]),
-            ("tabs_create_mcp", None) => Some(&[]),
+            ("browser_take_screenshot", None) => Some(&[Capability::Read]),
+            ("browser_click", None) => Some(&[Capability::Interact]),
+            ("browser_read_page", None) => Some(&[Capability::Read]),
+            ("browser_get_status", None) => Some(&[]),
             _ => None,
         }
     }
@@ -957,7 +970,7 @@ mod tests {
         let rec = sink.last();
         assert_eq!(rec.domain.as_deref(), Some("www.mybank.com"));
         assert_eq!(rec.decision, "allow");
-        assert_eq!(rec.capability, "none");
+        assert!(rec.required_capabilities.is_empty());
         assert_eq!(rec.grant_id, None);
         assert!(!rec.held);
         assert!(!rec.attention_required);
@@ -976,7 +989,7 @@ mod tests {
                 "client",
                 "tool",
                 "action",
-                "capability",
+                "required_capabilities",
                 "domain",
                 "decision",
                 "grant_id",
@@ -1046,7 +1059,7 @@ mod tests {
                 );
                 let rec = enforce_sink.last();
                 assert_eq!(rec.decision, "deny");
-                assert_eq!(rec.capability, "none");
+                assert!(rec.required_capabilities.is_empty());
                 assert_eq!(rec.duration_ms, 0);
                 rec.denial_id.expect("denial id present")
             }
@@ -1110,7 +1123,7 @@ mod tests {
         let rec = sink.last();
         assert_eq!(rec.decision, "allow");
         assert_eq!(rec.grant_id, None);
-        assert_eq!(rec.capability, "none");
+        assert!(rec.required_capabilities.is_empty());
     }
 
     /// Test 4: transcribed from the pre-ADR-0024 `record_deny_writes_a_zero_duration_deny_record`
@@ -1128,7 +1141,11 @@ mod tests {
             message: "Denied (D-af6633ec): www.mybank.com is on the user's never-touch list."
                 .to_string(),
         };
-        let audit = g.begin("read_page", None, sample_requires("read_page", None));
+        let audit = g.begin(
+            "browser_read_page",
+            None,
+            sample_requires("browser_read_page", None),
+        );
         audit.sacred_deny(&denial, Some("www.mybank.com"));
         let rec = sink.last();
         assert_eq!(rec.decision, "deny");
@@ -1136,13 +1153,13 @@ mod tests {
         assert_eq!(rec.grant_id, None);
         assert_eq!(rec.duration_ms, 0);
         assert_eq!(rec.domain.as_deref(), Some("www.mybank.com"));
-        assert_eq!(rec.capability, "read");
+        assert_eq!(rec.required_capabilities, vec!["read"]);
         assert!(!rec.held);
 
         let held_audit = g.begin(
-            "computer",
-            Some("screenshot"),
-            sample_requires("computer", Some("screenshot")),
+            "browser_take_screenshot",
+            None,
+            sample_requires("browser_take_screenshot", None),
         );
         held_audit.held();
         let rec = sink.last();
@@ -1152,8 +1169,8 @@ mod tests {
         assert_eq!(rec.domain, None);
         assert_eq!(rec.grant_id, None);
         assert_eq!(rec.denial_id, None);
-        assert_eq!(rec.capability, "read");
-        assert_eq!(rec.action.as_deref(), Some("screenshot"));
+        assert_eq!(rec.required_capabilities, vec!["read"]);
+        assert_eq!(rec.action, None);
     }
 
     /// Test 5: `landing_allow` overwrites attribution, then `complete` reflects the amendment;
@@ -1203,6 +1220,34 @@ mod tests {
             "a landing deny carries the real elapsed duration, not the pre-dispatch 0: {}",
             rec2.duration_ms
         );
+    }
+
+    #[test]
+    fn later_allowed_redirect_does_not_erase_an_earlier_landing_shadow_deny() {
+        let sink = Arc::new(CapturingAuditSink::default());
+        let governance = Governance::all_open(sink.clone());
+        let mut audit = governance.begin("browser.navigate", Some("navigate.url"), None);
+        audit.dispatch_finished();
+        audit.landing_shadow_deny(
+            Denial {
+                rule: "unmatched_domain".to_string(),
+                grant_id: None,
+                denial_id: "D-shadow-redirect".to_string(),
+                domain: "blocked.example".to_string(),
+                message: "shadow denial".to_string(),
+            },
+            Some("blocked.example".to_string()),
+        );
+        audit.landing_allow(
+            Some("g-final".to_string()),
+            Some("allowed.example".to_string()),
+        );
+        audit.complete();
+
+        let record = sink.last();
+        assert_eq!(record.decision, "shadow_deny");
+        assert_eq!(record.denial_id.as_deref(), Some("D-shadow-redirect"));
+        assert_eq!(record.domain.as_deref(), Some("blocked.example"));
     }
 
     /// Test 6: structural (ADR-0024 Decision 3) -- `Governance` no longer holds a `requires` fn
@@ -1344,7 +1389,7 @@ mod tests {
             count: 3,
             signal: DenialSignal {
                 origin: Some("example.com".to_string()),
-                capabilities: vec![Capability::Action, Capability::Write],
+                capabilities: vec![Capability::Interact, Capability::Write],
                 category: DenialCategory::Policy,
             },
         }));
@@ -1353,7 +1398,7 @@ mod tests {
         assert_eq!(rec.event, "attention_opened");
         assert_eq!(rec.client.as_ref().unwrap().name, "cline");
         assert_eq!(rec.category, "policy");
-        assert_eq!(rec.capability, "action+write");
+        assert_eq!(rec.capability, "interact+write");
         assert_eq!(rec.domain.as_deref(), Some("example.com"));
         assert_eq!(rec.threshold, Some("matching"));
         assert_eq!(rec.count, Some(3));
@@ -1441,7 +1486,7 @@ mod tests {
                 allow: vec!["example.com".to_string()],
                 deny: Vec::new(),
             },
-            allowed: vec![Capability::Read, Capability::Action, Capability::Write],
+            allowed: vec![Capability::Read, Capability::Interact, Capability::Write],
             description: None,
             mode: None,
         }

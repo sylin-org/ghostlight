@@ -14,7 +14,7 @@
 // { id, type: "tab_url_response", result: { url } }, reporting chrome.tabs.get(tabId).url (or
 // null) with no matching or interpretation -- the binary's grant enforcement decides.
 //
-importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/input-events.js", "lib/drag-session.js", "lib/workspace.js", "lib/tab-effects.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/find-visual.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js", "lib/mechanism-wire.js");
+importScripts("lib/constants.js", "lib/geometry.js", "lib/keys.js", "lib/input-events.js", "lib/drag-session.js", "lib/workspace.js", "lib/tab-effects.js", "lib/debug.js", "lib/identity.js", "lib/presentation-broker.js", "lib/action-signature.js", "lib/find-visual.js", "lib/dialog.js", "lib/tab-control.js", "lib/wire-chunks.js", "lib/surface-executor.js", "lib/execution-response.js", "lib/navigation-readiness.js", "lib/mechanism-wire.js");
 
 // gif_creator capture relay (ADR-0053 D2): the BINARY owns recording state, frames, and the GIF
 // pipeline; this worker only drives the Chrome APIs -- start/stop the tab's screencast, ack every
@@ -192,6 +192,9 @@ const workspaceTopology = new Map();
 // an exact managed opener while a service-opted-in request is in flight. The service remains the
 // authority that accepts or refuses the reported native ids before any model sees them.
 const tabEffectJournal = self.GhostlightTabEffects.createTabEffectJournal();
+// ADR-0101: one policy-free, memory-only navigation transaction per tab. The service owns every
+// landing decision; this coordinator reports only exact browser commits and bounded readiness.
+const navigationReadiness = self.GhostlightNavigationReadiness.createNavigationReadiness();
 // ADR-0066 D5: the set of tabIds this extension has placed in a managed group. A tab the user
 // drags OUT of the group (detached, or moved to another window -- both ungroup it in Chrome) stays
 // drivable because it is still one of OUR tabs, while a tab we never managed (the user's own,
@@ -290,6 +293,9 @@ async function connect() {
           "chunkedHostMessagesV1",
           "surfaceExecutorV1",
           self.GhostlightMechanismWire.MECHANISM_REQUEST_V1,
+          self.GhostlightMechanismWire.NAVIGATION_READINESS_V1,
+          self.GhostlightMechanismWire.ATOMIC_TAB_OPEN_V1,
+          self.GhostlightMechanismWire.STRICT_SENSITIVE_WRITES_V1,
         ],
         executorGeneration: EXECUTOR_GENERATION,
       });
@@ -761,6 +767,7 @@ async function killSession() {
   }
 
   stopAllGifCasts();
+  navigationReadiness.clear();
   await sweepDetachAll();
 
   presentationBroker.clearPrefix("narration", { type: "AGENT_NARRATION_CLEAR" });
@@ -935,7 +942,7 @@ async function ensureAttached(tabId) {
 // records a per-tab ScreenshotContext. Model coordinates (read off that downscaled image) are then
 // rescaled back to CSS viewport pixels before Input dispatch. ref-derived coordinates are already
 // CSS px and are NOT rescaled.
-const { targetDims, zoomScale, rescaleCtxCoord } = self.GhostlightGeometry;
+const { targetDims, zoomScale, rescaleCtxCoord, clampRegionToViewport } = self.GhostlightGeometry;
 
 async function probeViewport(tabId) {
   const r = await cdp(tabId, "Runtime.evaluate", {
@@ -1077,6 +1084,7 @@ async function enableDomain(tabId, domain) {
 // Remove every transient mechanism record for one tab. Idempotent so explicit `tab_control.close`
 // and Chrome's onRemoved event can both call it without widening the close to a group or window.
 function clearTabState(tabId) {
+  navigationReadiness.destroyTab(tabId);
   dragCoordinator.cancel(tabId);
   const drag = activeDragOperations.get(tabId);
   if (drag) drag.cancelled = true;
@@ -1136,6 +1144,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   } catch { /* port gone */ }
 });
 chrome.debugger.onDetach.addListener((src) => {
+  navigationReadiness.watcherUnavailable(src.tabId);
   const cast = gifCast.get(src.tabId);
   if (cast) stopGifCast(src.tabId, cast, "browser_detached");
   attached.delete(src.tabId);
@@ -1226,6 +1235,14 @@ function exceptionText(details, fallbackUrl) {
 }
 chrome.debugger.onEvent.addListener((src, method, params) => {
   const tabId = src.tabId;
+  if (method === "Page.frameNavigated") {
+    navigationReadiness.frameNavigated(tabId, params && params.frame);
+    return;
+  }
+  if (method === "Page.navigatedWithinDocument") {
+    navigationReadiness.navigatedWithinDocument(tabId, params);
+    return;
+  }
   if (method === "Input.dragIntercepted") {
     dragCoordinator.intercepted(tabId, params && params.data);
     return;
@@ -1344,13 +1361,15 @@ function requestedGroupTitle(workspaceRequest) {
   return typeof title === "string" && title ? title : GROUP_TITLE;
 }
 
-async function createTabAtPlacement(workspaceId, placement, title) {
+async function createTabAtPlacement(workspaceId, placement, title, initialUrl) {
   let tab;
   if (placement.createdWindow && placement.initialTab && !placement.group) {
     tab = placement.initialTab;
   } else {
     try {
-      tab = await chrome.tabs.create({ active: true, windowId: placement.windowId });
+      const createOptions = { active: true, windowId: placement.windowId };
+      if (typeof initialUrl === "string" && initialUrl) createOptions.url = initialUrl;
+      tab = await chrome.tabs.create(createOptions);
     } catch (error) {
       throw new WorkspaceWindowGoneError((error && error.message) || String(error));
     }
@@ -1376,15 +1395,27 @@ async function createTabAtPlacement(workspaceId, placement, title) {
 
 // Resolve live browser placement and create one tab without moving existing tabs. A destination
 // window may disappear before tabs.create; retry that pre-mutation race once against fresh state.
-async function createTabInSessionGroup(workspaceId, workspaceRequest) {
+async function createTabInSessionGroup(workspaceId, workspaceRequest, initialUrl) {
   const title = requestedGroupTitle(workspaceRequest);
-  const first = await resolveWorkspacePlacement(chrome, workspaceTopology, workspaceId, title);
+  const first = await resolveWorkspacePlacement(
+    chrome,
+    workspaceTopology,
+    workspaceId,
+    title,
+    initialUrl
+  );
   try {
-    return await createTabAtPlacement(workspaceId, first, title);
+    return await createTabAtPlacement(workspaceId, first, title, initialUrl);
   } catch (error) {
     if (!(error instanceof WorkspaceWindowGoneError)) throw error;
-    const second = await resolveWorkspacePlacement(chrome, workspaceTopology, workspaceId, title);
-    return createTabAtPlacement(workspaceId, second, title);
+    const second = await resolveWorkspacePlacement(
+      chrome,
+      workspaceTopology,
+      workspaceId,
+      title,
+      initialUrl
+    );
+    return createTabAtPlacement(workspaceId, second, title, initialUrl);
   }
 }
 
@@ -1744,11 +1775,11 @@ async function zoomScreenshot(tabId, region) {
   // zoomed screenshot composes correctly (chained zooms).
   const [rx0, ry0] = rescaleCoord(tabId, region[0], region[1]);
   const [rx1, ry1] = rescaleCoord(tabId, region[2], region[3]);
-  const x0 = Math.min(Math.max(rx0, 0), vpW), y0 = Math.min(Math.max(ry0, 0), vpH);
-  const x1 = Math.min(Math.max(rx1, 0), vpW), y1 = Math.min(Math.max(ry1, 0), vpH);
-  const clamped = x0 !== rx0 || y0 !== ry0 || x1 !== rx1 || y1 !== ry1;
-  const w = x1 - x0, h = y1 - y0;
-  if (w < 1 || h < 1) return { error: "zoom region is empty or entirely outside the visible viewport." };
+  const clipped = clampRegionToViewport([rx0, ry0, rx1, ry1], vpW, vpH);
+  if (!clipped) {
+    throw hopError("page", "zoom region is empty or entirely outside the visible viewport");
+  }
+  const { x0, y0, x1, y1, w, h, clamped } = clipped;
   const s = zoomScale(w, h);
   await presentationBroker.publishCapture(tabId, { type: "HIDE_FOR_TOOL_USE" });
   await sleep(CAPTURE_SETTLE_MS);
@@ -2206,7 +2237,14 @@ async function computer(a) {
       const shot = await screenshot(tabId);
       screenshotFx(tabId); // shutter flash + viewfinder, AFTER the capture (never in the image)
       confirmActionSignature(tabId, self.GhostlightActionSignature.KINDS.SCREENSHOT);
-      return textImage(shot.note ? caption + " " + shot.note : caption, shot.base64);
+      const result = textImage(shot.note ? caption + " " + shot.note : caption, shot.base64);
+      const context = screenshotCtx.get(tabId);
+      if (context) {
+        result.structuredContent = {
+          capture: { width: context.shotW, height: context.shotH, scope: "viewport" },
+        };
+      }
+      return result;
     }
     case "zoom": {
       const r = a.region;
@@ -2215,9 +2253,15 @@ async function computer(a) {
       if (!(r[2] > r[0]) || !(r[3] > r[1]))
         return text("zoom region is empty: x1 must be greater than x0 and y1 must be greater than y0.");
       const z = await zoomScreenshot(tabId, r);
-      if (z.error) return text(z.error);
       zoomFrameCue(tabId, z.x0, z.y0, z.x1, z.y1); // magnifier frame on the region, AFTER the capture
-      return textImage(`Zoom region (${z.x0}, ${z.y0}) -> (${z.x1}, ${z.y1}) captured (jpeg${z.clamped ? "; clamped to the visible viewport" : ""}).`, z.base64);
+      const result = textImage(`Zoom region (${z.x0}, ${z.y0}) -> (${z.x1}, ${z.y1}) captured (jpeg${z.clamped ? "; clamped to the visible viewport" : ""}).`, z.base64);
+      const context = screenshotCtx.get(tabId);
+      if (context) {
+        result.structuredContent = {
+          capture: { width: context.shotW, height: context.shotH, scope: "target" },
+        };
+      }
+      return result;
     }
     case "wait": {
       const s = Math.min(a.duration || 1, 30);
@@ -2276,6 +2320,13 @@ async function computer(a) {
       if (!a.text) return text("text is required for key.");
       return withObservation(tabId, { action: "key", targetAssurance: "none" }, async () => {
         await ensureAttached(tabId);
+        if (a.ref) {
+          const focused = await content(tabId, { type: "focusTarget", ref: a.ref });
+          const focusResult = focused && focused.result;
+          if (!focusResult || focusResult.error || focusResult.success !== true) {
+            throw hopError("page", (focusResult && focusResult.error) || "the target could not be focused");
+          }
+        }
         const repeat = Math.min(a.repeat || 1, 100);
         const combos = a.text.split(" ").filter(Boolean);
         const observationToken = await beginKeyCueObservation(tabId, combos.length * repeat);
@@ -2432,6 +2483,126 @@ async function pageMeta(tabId) {
   return meta;
 }
 
+function navigationDispatchPlan(a) {
+  if (a.action === "reload") return { kind: "reload" };
+  if (a.url === "back") return { kind: "back" };
+  if (a.url === "forward") return { kind: "forward" };
+  let url = a.url;
+  if (!/^https?:\/\//i.test(url) && !/^(about|chrome|edge|brave):/i.test(url)) {
+    url = "https://" + url.replace(/^[a-z]{1,6}:\/+/i, "");
+  }
+  try { new URL(url); } catch { return { error: `Invalid URL: "${a.url}".` }; }
+  return { kind: "url", url };
+}
+
+function webNavigationFrame(details) {
+  let securityOrigin = "";
+  try { securityOrigin = new URL(details.url).origin; } catch { /* coordinator rejects URL */ }
+  return {
+    id: "top",
+    loaderId: typeof details.documentId === "string" ? details.documentId : "",
+    url: details.url,
+    securityOrigin,
+    mimeType: "",
+  };
+}
+
+// Arm a browser-global commit observer before tab creation. Chrome assigns the tab id only after
+// the physical create call, so events are held briefly by native tab id and then fed into the
+// ordinary bounded navigation coordinator. No policy or landing decision lives here.
+function createOpenNavigationObserver() {
+  const pending = new Map();
+  let boundTabId = null;
+  let closed = false;
+  const record = (details) => {
+    if (closed || !details || details.frameId !== 0 || !Number.isSafeInteger(details.tabId)) return;
+    if (boundTabId === details.tabId) {
+      navigationReadiness.frameNavigated(details.tabId, webNavigationFrame(details));
+      return;
+    }
+    const events = pending.get(details.tabId) || [];
+    if (events.length < 17) events.push(details);
+    pending.set(details.tabId, events);
+    if (pending.size > 64) pending.delete(pending.keys().next().value);
+  };
+  chrome.webNavigation.onCommitted.addListener(record);
+  return {
+    bind(tabId) {
+      boundTabId = tabId;
+      const events = pending.get(tabId) || [];
+      pending.clear();
+      for (const event of events) {
+        navigationReadiness.frameNavigated(tabId, webNavigationFrame(event));
+      }
+      return events.length;
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      chrome.webNavigation.onCommitted.removeListener(record);
+      pending.clear();
+    },
+  };
+}
+
+async function runNavigationPlan(tabId, plan) {
+  if (plan.kind === "back") return chrome.tabs.goBack(tabId);
+  if (plan.kind === "forward") return chrome.tabs.goForward(tabId);
+  if (plan.kind === "reload") return chrome.tabs.reload(tabId);
+  return chrome.tabs.update(tabId, { url: plan.url });
+}
+
+async function navigationFrameSnapshot(tabId, verifyTarget) {
+  const tree = await cdp(tabId, "Page.getFrameTree");
+  const frame = tree && tree.frameTree && tree.frameTree.frame;
+  if (!frame) throw hopError("cdp", "Page.getFrameTree returned no top-level frame");
+  if (!verifyTarget) return { frame };
+  const target = await cdp(tabId, "Target.getTargetInfo");
+  const targetUrl = target && target.targetInfo && target.targetInfo.url;
+  if (typeof targetUrl !== "string") {
+    throw hopError("cdp", "Target.getTargetInfo returned no target URL");
+  }
+  return { frame, target_url: targetUrl };
+}
+
+async function legacyNavigateResult(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  const result = text(`Navigated to ${tab.url}${tab.status !== "complete" ? " (still loading)" : ""}.`);
+  result.structuredContent = { tabId, url: tab.url, title: tab.title || "" };
+  return result;
+}
+
+function legacyTabControlResult(action, tabId) {
+  const labels = {
+    focus: "Tab focus observed.",
+    reload: "Tab reload observed.",
+    close: "Tab close observed.",
+  };
+  const result = text(labels[action]);
+  result.structuredContent = {
+    interactionReceipt: self.GhostlightTabControl.makeReceipt(action, { tabId }),
+  };
+  return result;
+}
+
+function navigationResult(result, evidence) {
+  return self.GhostlightNavigationReadiness.attachNavigation(result, evidence);
+}
+
+async function committedNavigationResult(tabId, evidence) {
+  try {
+    return await legacyNavigateResult(tabId);
+  } catch {
+    const result = text("Navigation dispatch completed, but browser tab metadata was unavailable.");
+    result.structuredContent = { tabId };
+    if (evidence && typeof evidence.url === "string") {
+      result.structuredContent.url = evidence.url;
+      result.structuredContent.title = "";
+    }
+    return result;
+  }
+}
+
 const handlers = {
   // `key` is the opaque WorkspaceId. `workspaceRequest` carries only the presentation title;
   // Chrome-native placement is derived here from the workspace's live tabs and groups.
@@ -2456,8 +2627,58 @@ const handlers = {
     await persistSessionState();
     const r = tabContext(await liveWorkspaceTabs(chrome, workspaceTopology, key), gid);
     r.content[0].text = `Created tab ${tab.id}.\n` + r.content[0].text;
-    r.structuredContent = { tabId: tab.id, tabs: r.structuredContent.tabs };
+    r.structuredContent = { tabId: tab.id, tabs: r.structuredContent.tabs, created: true };
     return r;
+  },
+  async tabs_open_mcp(a, key, workspaceRequest) {
+    if (typeof key !== "string" || !key) {
+      throw hopError("extension", "workspace.tab.open requires a workspace identity");
+    }
+    const plan = navigationDispatchPlan(a);
+    if (plan.error || plan.kind !== "url") {
+      throw hopError("navigation", plan.error || "workspace.tab.open requires a URL");
+    }
+    const observer = createOpenNavigationObserver();
+    const dispatchedAt = performance.now();
+    let created;
+    try {
+      created = await createTabInSessionGroup(key, workspaceRequest, plan.url);
+    } catch (error) {
+      observer.close();
+      throw error;
+    }
+    const { tab, gid } = created;
+    const armed = navigationReadiness.arm(tab.id, a.readiness, null);
+    navigationReadiness.markDispatched(armed.navigation_token, dispatchedAt);
+    const observedCommits = observer.bind(tab.id);
+    try {
+      await ensureAttached(tab.id);
+      await enableDomain(tab.id, "Page");
+      if (observedCommits === 0) {
+        const snapshot = await navigationFrameSnapshot(tab.id, false);
+        navigationReadiness.frameNavigated(tab.id, snapshot.frame);
+      }
+    } catch {
+      navigationReadiness.watcherUnavailable(tab.id);
+    }
+    let evidence;
+    try {
+      evidence = await navigationReadiness.waitForCommit(armed.navigation_token);
+    } finally {
+      observer.close();
+    }
+    await persistSessionState();
+    const result = tabContext(await liveWorkspaceTabs(chrome, workspaceTopology, key), gid);
+    result.content[0].text = `Opened ${plan.url} in a new controlled tab.\n` + result.content[0].text;
+    result.structuredContent = {
+      tabId: tab.id,
+      tabs: result.structuredContent.tabs,
+      created: true,
+    };
+    if (evidence && typeof evidence.document_handle === "string") {
+      result.structuredContent.navigated = true;
+    }
+    return navigationResult(result, evidence);
   },
   async navigate(a, key, workspaceRequest) {
     const tabId = await navigateTabId(a.tabId, key, workspaceRequest);
@@ -2474,11 +2695,68 @@ const handlers = {
       await chrome.tabs.update(tabId, { url });
     }
     await waitForLoad(tabId);
-    const tab = await chrome.tabs.get(tabId);
-    navigatePill(tabId, tab.url); // destination pill on the freshly loaded page
-    const r = text(`Navigated to ${tab.url}${tab.status !== "complete" ? " (still loading)" : ""}.`);
-    r.structuredContent = { tabId, url: tab.url, title: tab.title || "" };
-    return r;
+    const result = await legacyNavigateResult(tabId);
+    navigatePill(tabId, result.structuredContent.url); // destination pill on the freshly loaded page
+    return result;
+  },
+  async navigate_readiness_start(a, key, workspaceRequest) {
+    const plan = navigationDispatchPlan(a);
+    if (plan.error) throw hopError("navigation", plan.error);
+    const tabId = plan.kind === "reload"
+      ? await effectiveTabId(a.tabId)
+      : await navigateTabId(a.tabId, key, workspaceRequest);
+    await ensureAttached(tabId);
+    await enableDomain(tabId, "Page");
+    const initial = await navigationFrameSnapshot(tabId, false);
+    const armed = navigationReadiness.arm(tabId, a.readiness, initial.frame);
+    navigationReadiness.markDispatched(armed.navigation_token);
+    try {
+      await runNavigationPlan(tabId, plan);
+    } catch (error) {
+      navigationReadiness.abandon(armed.navigation_token, "dispatch_failed");
+      throw error;
+    }
+    const evidence = await navigationReadiness.waitForCommit(armed.navigation_token);
+    const result = plan.kind === "reload"
+      ? legacyTabControlResult("reload", tabId)
+      : await committedNavigationResult(tabId, evidence);
+    return navigationResult(result, evidence);
+  },
+  async navigation_readiness_await(a) {
+    const tabId = await effectiveTabId(a.tabId);
+    const evidence = await navigationReadiness.awaitReadiness({
+      tab: tabId,
+      navigation_token: a.navigation_token,
+      document_handle: a.document_handle,
+    }, async (spec) => {
+      const response = await content(tabId, {
+        type: "waitFor",
+        spec: {
+          selector: null,
+          text: null,
+          state: "settled",
+          settle: true,
+          timeout_ms: spec.timeout_ms,
+          min_ms: spec.min_ms,
+        },
+      });
+      return response && response.result;
+    });
+    return navigationResult(text(`Navigation readiness observed: ${evidence.state}.`), evidence);
+  },
+  async navigation_readiness_verify(a) {
+    const tabId = await effectiveTabId(a.tabId);
+    let current = null;
+    try {
+      current = await navigationFrameSnapshot(tabId, true);
+    } catch { /* a committed protected document can be exact but unobservable */ }
+    const evidence = navigationReadiness.verify({
+      tab: tabId,
+      navigation_token: a.navigation_token,
+      document_handle: a.document_handle,
+    }, current);
+    if (evidence.state === "same" && evidence.url) navigatePill(tabId, evidence.url);
+    return navigationResult(text(`Navigation document verification: ${evidence.state}.`), evidence);
   },
   async dialog(a) {
     const tabId = await effectiveTabId(a.tabId);
@@ -2498,6 +2776,7 @@ const handlers = {
     if (!open) {
       const out = text("No JavaScript dialog is currently open; nothing was resolved.");
       out.structuredContent = { open: false, resolved: false, page: await pageMeta(tabId) };
+      if (a.require_resolution === true) out.structuredContent.resolution_not_met = true;
       return out;
     }
     const params = self.GhostlightDialog.resolutionCommand(a.action, a.text);
@@ -2515,7 +2794,6 @@ const handlers = {
   },
   async tab_control(a) {
     const tabId = await effectiveTabId(a.tabId);
-    const page = { tabId };
     if (a.action === "focus") {
       const tab = await chrome.tabs.get(tabId);
       await chrome.windows.update(tab.windowId, { focused: true });
@@ -2529,16 +2807,7 @@ const handlers = {
     } else {
       throw hopError("extension", `unsupported tab_control action: ${a.action}`);
     }
-    const labels = {
-      focus: "Tab focus observed.",
-      reload: "Tab reload observed.",
-      close: "Tab close observed.",
-    };
-    const out = text(labels[a.action]);
-    out.structuredContent = {
-      interactionReceipt: self.GhostlightTabControl.makeReceipt(a.action, page),
-    };
-    return out;
+    return legacyTabControlResult(a.action, tabId);
   },
   async computer(a) {
     const out = await computer(a);
@@ -2551,6 +2820,12 @@ const handlers = {
     const r = await content(tabId, { type: "accessibilityTree", options: a });
     const out = text((r && r.result) || "Could not read the page.");
     out.structuredContent = { page: await pageMeta(tabId) };
+    if (a.canonical_targets === true) {
+      const targets = await content(tabId, { type: "inspectTargets" });
+      const inspected = (targets && targets.result) || { results: [], more: false };
+      out.structuredContent.targets = inspected.results || [];
+      out.structuredContent.more = !!inspected.more;
+    }
     if (a.ref_id) {
       const target = await content(tabId, { type: "elementSummary", ref: a.ref_id });
       if (target && target.result && !target.result.error) out.structuredContent.target = target.result;
@@ -2560,7 +2835,7 @@ const handlers = {
   async get_page_text(a) {
     const tabId = await effectiveTabId(a.tabId);
     readScan(tabId);
-    const r = await content(tabId, { type: "pageText", max_chars: a.max_chars });
+    const r = await content(tabId, { type: "pageText", max_chars: a.max_chars, ref: a.ref_id });
     const out = text((r && r.result) || "Could not extract page text.");
     out.structuredContent = { page: await pageMeta(tabId) };
     return out;
@@ -2598,7 +2873,13 @@ const handlers = {
   async form_input(a) {
     const tabId = await effectiveTabId(a.tabId);
     return withObservation(tabId, { action: "set_value", ref: a.ref, targetAssurance: "ref" }, async () => {
-      const r = await content(tabId, { type: "setFormValue", ref: a.ref, value: a.value });
+      const r = await content(tabId, {
+        type: "setFormValue",
+        ref: a.ref,
+        value: a.value,
+        rejectSensitive: a.reject_sensitive === true,
+        expectedType: a.expected_type,
+      });
       // The engine is truthful: a content-script failure is a failure, never a masqueraded success.
       if (r && r.result && r.result.error) {
         const msg = r.result.error.endsWith(".") ? r.result.error.slice(0, -1) : r.result.error;

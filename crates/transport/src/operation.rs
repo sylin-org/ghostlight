@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Protocol-neutral browser operations and canonical browser results.
+//! Protocol-neutral Ghostlight browser operations and results.
 //!
-//! Surface profiles translate model-facing calls into these semantic identifiers before work
+//! The MCP edge translates model-facing Ghostlight calls into these typed operations before work
 //! crosses the owner bridge. Browser mechanisms remain a separate, policy-free vocabulary below
 //! the service operation pipeline.
 
@@ -9,6 +9,7 @@ use crate::workspace_id::WorkspaceId;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
+use std::collections::HashSet;
 
 macro_rules! stable_string_enum {
     (
@@ -82,362 +83,771 @@ macro_rules! stable_string_enum {
 }
 
 stable_string_enum! {
-    /// Closed semantic browser-operation families shared by both bridge shores.
-    ///
-    /// The first twelve values are the native core. The browser-prefixed remainder are fixed
-    /// capability pack families. One compatibility-only workflow family preserves the current
-    /// client-side plan echo without pretending it is a browser mechanism. Availability is
-    /// projected separately, so a reserved family does not claim that it is implemented.
-    pub enum OperationId {
-        /// Browser health, limits, and non-sensitive context.
-        BrowserContext => "browser.context",
-        /// Owned tab topology and selection.
-        BrowserTabs => "browser.tabs",
-        /// URL and history navigation.
-        BrowserNavigate => "browser.navigate",
-        /// Bounded structured page observation.
-        BrowserSnapshot => "browser.snapshot",
-        /// Bounded readable page text.
-        BrowserRead => "browser.read",
-        /// Targeted page search.
-        BrowserFind => "browser.find",
-        /// Visual page capture.
-        BrowserScreenshot => "browser.screenshot",
-        /// Target-bound semantic interaction.
-        BrowserAct => "browser.act",
-        /// Bounded multi-field form interaction.
-        BrowserFill => "browser.fill",
-        /// Delay, condition, and settlement observation.
-        BrowserWait => "browser.wait",
-        /// Canonical operation composition.
-        BrowserFlow => "browser.flow",
-        /// Blocking browser-dialog inspection and resolution.
-        BrowserDialog => "browser.dialog",
-        /// Screenshot-frame-bound precision input.
-        BrowserInput => "browser.input",
-        /// Browser-wide viewport control.
-        BrowserViewport => "browser.viewport",
-        /// Governed inbound files and captured artifacts.
-        BrowserUpload => "browser.upload",
-        /// Governed page-triggered download acquisition.
-        BrowserDownload => "browser.download",
-        /// Governed content export.
-        BrowserExport => "browser.export",
-        /// Bounded artifact lifecycle management.
-        BrowserArtifacts => "browser.artifacts",
-        /// Bounded console diagnostics.
-        BrowserConsole => "browser.console",
-        /// Bounded network diagnostics.
-        BrowserNetwork => "browser.network",
-        /// Explicit page-context execution.
-        BrowserEvaluate => "browser.evaluate",
-        /// In-memory browser recording.
-        BrowserRecord => "browser.record",
-        /// Model-authored human-visible narration and highlighting.
-        BrowserPresent => "browser.present",
-        /// Deliberate browser visibility control.
-        BrowserVisibility => "browser.visibility",
-        /// Multi-browser discovery and selection.
-        BrowserInstances => "browser.instances",
-        /// Compatibility-only client workflow state with no browser mechanism.
-        WorkflowPlan => "workflow.plan"
+    /// The complete model-facing and owner-bridge operation vocabulary.
+    pub enum OperationKind {
+        BrowserGetStatus => "browser_get_status",
+        BrowserOpenTab => "browser_open_tab",
+        BrowserListTabs => "browser_list_tabs",
+        BrowserFocusTab => "browser_focus_tab",
+        BrowserCloseTab => "browser_close_tab",
+        BrowserNavigate => "browser_navigate",
+        BrowserGoBack => "browser_go_back",
+        BrowserGoForward => "browser_go_forward",
+        BrowserReloadPage => "browser_reload_page",
+        BrowserInspectPage => "browser_inspect_page",
+        BrowserReadPage => "browser_read_page",
+        BrowserTakeScreenshot => "browser_take_screenshot",
+        BrowserClick => "browser_click",
+        BrowserHover => "browser_hover",
+        BrowserScrollToTarget => "browser_scroll_to_target",
+        BrowserScrollPage => "browser_scroll_page",
+        BrowserPressKey => "browser_press_key",
+        BrowserPressEscape => "browser_press_escape",
+        BrowserDrag => "browser_drag",
+        BrowserFillForm => "browser_fill_form",
+        BrowserWaitFor => "browser_wait_for",
+        BrowserRunSequence => "browser_run_sequence",
+        BrowserGetDialog => "browser_get_dialog",
+        BrowserHandleDialog => "browser_handle_dialog"
     }
 }
 
-stable_string_enum! {
-    /// Closed concrete semantic intents carried alongside an [`OperationId`].
-    ///
-    /// Intent ids deduplicate surface aliases while preserving distinctions needed by validation,
-    /// capability classification, scheduling, result meaning, and audit. The service registry
-    /// validates which intent belongs to which operation family.
-    pub enum IntentId {
-        /// Describe current browser context.
-        ContextDescribe => "context.describe",
-        /// List owned tabs.
-        TabsList => "tabs.list",
-        /// Create a new blank owned tab.
-        TabsNew => "tabs.new",
-        /// Select an owned tab.
-        TabsFocus => "tabs.focus",
-        /// Close an owned tab.
-        TabsClose => "tabs.close",
-        /// Navigate to an explicit URL.
-        NavigateUrl => "navigate.url",
-        /// Traverse backward in tab history.
-        NavigateBack => "navigate.back",
-        /// Traverse forward in tab history.
-        NavigateForward => "navigate.forward",
-        /// Reload the current document.
-        NavigateReload => "navigate.reload",
-        /// Capture a bounded structured page snapshot.
-        SnapshotCapture => "snapshot.capture",
-        /// Read bounded page text.
-        ReadText => "read.text",
-        /// Find ranked page targets.
-        FindQuery => "find.query",
-        /// Capture the current viewport.
-        ScreenshotViewport => "screenshot.viewport",
-        /// Capture a bounded page region.
-        ScreenshotRegion => "screenshot.region",
-        /// Click one semantic target.
-        ActClick => "act.click",
-        /// Double-click one semantic target.
-        ActDoubleClick => "act.double_click",
-        /// Right-click one semantic target.
-        ActRightClick => "act.right_click",
-        /// Triple-click one semantic target for legacy parity.
-        ActTripleClick => "act.triple_click",
-        /// Hover one semantic target.
-        ActHover => "act.hover",
-        /// Scroll one semantic target into view.
-        ActScrollIntoView => "act.scroll_into_view",
-        /// Focus one semantic target.
-        ActFocus => "act.focus",
-        /// Set the value of one semantic target.
-        ActSetValue => "act.set_value",
-        /// Press a key against one semantic target.
-        ActPressKey => "act.press_key",
-        /// Drag one semantic target to a destination.
-        ActDrag => "act.drag",
-        /// Set one compatibility field without target discovery.
-        FillField => "fill.field",
-        /// Fill a bounded set of fields without submitting.
-        FillFields => "fill.fields",
-        /// Fill a bounded set of fields and submit its form.
-        FillFieldsAndSubmit => "fill.fields_and_submit",
-        /// Wait for a fixed bounded duration.
-        WaitDelay => "wait.delay",
-        /// Wait for a bounded condition and optional settlement.
-        WaitUntil => "wait.until",
-        /// Execute a bounded canonical flow.
-        FlowExecute => "flow.execute",
-        /// Preflight a bounded canonical flow without requested effects.
-        FlowPreflight => "flow.preflight",
-        /// Inspect the current blocking dialog.
-        DialogStatus => "dialog.status",
-        /// Accept the current blocking dialog.
-        DialogAccept => "dialog.accept",
-        /// Dismiss the current blocking dialog.
-        DialogDismiss => "dialog.dismiss",
-        /// Respond with text to the current blocking dialog.
-        DialogRespond => "dialog.respond",
-        /// Click a screenshot-frame coordinate.
-        InputPointerClick => "input.pointer.click",
-        /// Right-click a screenshot-frame coordinate.
-        InputPointerRightClick => "input.pointer.right_click",
-        /// Double-click a screenshot-frame coordinate.
-        InputPointerDoubleClick => "input.pointer.double_click",
-        /// Triple-click a screenshot-frame coordinate for legacy parity.
-        InputPointerTripleClick => "input.pointer.triple_click",
-        /// Hover a screenshot-frame coordinate.
-        InputPointerHover => "input.pointer.hover",
-        /// Drag between screenshot-frame coordinates.
-        InputPointerDrag => "input.pointer.drag",
-        /// Type text into the currently focused target.
-        InputTypeText => "input.text.type",
-        /// Press a key against the currently focused target.
-        InputPressKey => "input.key.press",
-        /// Dispatch a bounded wheel delta.
-        InputWheel => "input.scroll.wheel",
-        /// Scroll to a coordinate offset for legacy parity.
-        InputScrollToOffset => "input.scroll.to_offset",
-        /// Resize the browser viewport.
-        ViewportResizeWindow => "viewport.resize_window",
-        /// Upload client-supplied file bytes.
-        UploadClientFiles => "upload.client_files",
-        /// Upload a previously captured browser artifact.
-        UploadCapturedArtifact => "upload.captured_artifact",
-        /// Read bounded console diagnostics.
-        ConsoleRead => "console.read",
-        /// Read and clear bounded console diagnostics.
-        ConsoleReadAndClear => "console.read_and_clear",
-        /// Read bounded network diagnostics.
-        NetworkRead => "network.read",
-        /// Read and clear bounded network diagnostics.
-        NetworkReadAndClear => "network.read_and_clear",
-        /// Evaluate explicit page-context JavaScript.
-        EvaluateJavascript => "evaluate.javascript",
-        /// Begin an in-memory browser recording.
-        RecordStart => "record.start",
-        /// Stop an in-memory browser recording.
-        RecordStop => "record.stop",
-        /// Inspect in-memory recording state.
-        RecordStatus => "record.status",
-        /// Clear in-memory recording state.
-        RecordClear => "record.clear",
-        /// Export an in-memory browser recording.
-        RecordExport => "record.export",
-        /// Narrate a human-visible presentation update.
-        PresentNarrate => "present.narrate",
-        /// Echo a compatibility client workflow-plan update.
-        PlanUpdate => "plan.update"
-    }
-}
+/// Maximum UTF-8 byte length of one canonical page target.
+pub const MAX_OPERATION_TARGET_BYTES: usize = 1000;
+/// Maximum suffix length of one opaque observation cursor.
+pub const MAX_OPERATION_CURSOR_SUFFIX_BYTES: usize = 256;
+/// Maximum UTF-8 byte length of one canonical URL.
+pub const MAX_OPERATION_URL_BYTES: usize = 4096;
+/// Maximum number of operations in one canonical sequence.
+pub const MAX_OPERATION_SEQUENCE_STEPS: usize = 10;
+/// Maximum image-bearing screenshot children accepted in one canonical sequence.
+pub const MAX_OPERATION_SEQUENCE_MEDIA_PARTS: usize = 4;
+/// Minimum number of operations in one canonical sequence.
+pub const MIN_OPERATION_SEQUENCE_STEPS: usize = 2;
 
-/// One closed operation-family and concrete-intent pair.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct OperationKey {
-    /// Canonical operation family.
-    pub id: OperationId,
-    /// Concrete semantic intent.
-    pub intent: IntentId,
-}
+/// A model-authored target reference or unique accessible description.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct OperationTarget(String);
 
-impl OperationKey {
-    /// Construct an operation key without applying registry-owned family validation.
-    pub const fn new(id: OperationId, intent: IntentId) -> Self {
-        Self { id, intent }
-    }
-}
-
-/// One protocol-neutral call accepted by the service operation registry.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BrowserOperation {
-    /// Canonical operation family.
-    pub id: OperationId,
-    /// Concrete semantic intent.
-    pub intent: IntentId,
-    /// Canonical arguments validated by the service registry before admission.
-    pub arguments: Value,
-}
-
-impl BrowserOperation {
-    /// Construct one canonical browser operation.
-    pub const fn new(id: OperationId, intent: IntentId, arguments: Value) -> Self {
-        Self {
-            id,
-            intent,
-            arguments,
+impl OperationTarget {
+    /// Validate and construct one canonical target.
+    pub fn parse(value: &str) -> Option<Self> {
+        if value.is_empty()
+            || value.len() > MAX_OPERATION_TARGET_BYTES
+            || value.chars().any(char::is_control)
+        {
+            return None;
         }
+        Some(Self(value.to_owned()))
     }
 
-    /// Return this operation's closed semantic key.
-    pub const fn key(&self) -> OperationKey {
-        OperationKey::new(self.id, self.intent)
-    }
-}
-
-/// Maximum UTF-8 byte length of one invocation-presentation field.
-pub const MAX_INVOCATION_PRESENTATION_FIELD_BYTES: usize = 128;
-
-/// Validation failure for bounded invocation-presentation metadata.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum InvocationPresentationError {
-    /// Profile versions are positive integers.
-    #[error("profile version must be positive")]
-    InvalidProfileVersion,
-    /// One named field was empty, too long, or contained a control character.
-    #[error("{field} must be non-empty, control-free, and at most 128 UTF-8 bytes")]
-    InvalidField {
-        /// Invalid presentation field.
-        field: &'static str,
-    },
-}
-
-/// Bounded edge-authored facts retained only for corrective copy and audit presentation.
-///
-/// These fields are never an operation lookup key, routing handle, policy input, or authority
-/// claim. The canonical [`BrowserOperation`] alone drives service behavior.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InvocationPresentation {
-    profile_id: String,
-    profile_version: u32,
-    external_tool: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    external_action: Option<String>,
-}
-
-impl InvocationPresentation {
-    /// Validate and construct bounded invocation-presentation metadata.
-    pub fn new(
-        profile_id: impl Into<String>,
-        profile_version: u32,
-        external_tool: impl Into<String>,
-        external_action: Option<String>,
-    ) -> std::result::Result<Self, InvocationPresentationError> {
-        if profile_version == 0 {
-            return Err(InvocationPresentationError::InvalidProfileVersion);
-        }
-
-        let profile_id = profile_id.into();
-        validate_presentation_field("profile_id", &profile_id)?;
-        let external_tool = external_tool.into();
-        validate_presentation_field("external_tool", &external_tool)?;
-        if let Some(action) = external_action.as_deref() {
-            validate_presentation_field("external_action", action)?;
-        }
-
-        Ok(Self {
-            profile_id,
-            profile_version,
-            external_tool,
-            external_action,
-        })
-    }
-
-    /// Return the selected surface profile id.
-    pub fn profile_id(&self) -> &str {
-        &self.profile_id
-    }
-
-    /// Return the positive selected surface profile version.
-    pub const fn profile_version(&self) -> u32 {
-        self.profile_version
-    }
-
-    /// Return the external tool name used for this invocation.
-    pub fn external_tool(&self) -> &str {
-        &self.external_tool
-    }
-
-    /// Return the optional external action spelling used for this invocation.
-    pub fn external_action(&self) -> Option<&str> {
-        self.external_action.as_deref()
+    /// Return the exact model-authored target value.
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
-impl<'de> Deserialize<'de> for InvocationPresentation {
+impl<'de> Deserialize<'de> for OperationTarget {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct WirePresentation {
-            profile_id: String,
-            profile_version: u32,
-            external_tool: String,
-            #[serde(default)]
-            external_action: Option<String>,
-        }
-
-        let value = WirePresentation::deserialize(deserializer)?;
-        Self::new(
-            value.profile_id,
-            value.profile_version,
-            value.external_tool,
-            value.external_action,
-        )
-        .map_err(serde::de::Error::custom)
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).ok_or_else(|| {
+            serde::de::Error::custom(
+                "target must be non-empty, control-free, and at most 1000 UTF-8 bytes",
+            )
+        })
     }
 }
 
-fn validate_presentation_field(
-    field: &'static str,
-    value: &str,
-) -> std::result::Result<(), InvocationPresentationError> {
-    if value.is_empty()
-        || value.len() > MAX_INVOCATION_PRESENTATION_FIELD_BYTES
-        || value.chars().any(char::is_control)
+/// Opaque continuation cursor bound to one prior canonical observation.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct CanonicalCursor(String);
+
+impl CanonicalCursor {
+    /// Validate and construct one canonical continuation cursor.
+    pub fn parse(value: &str) -> Option<Self> {
+        let suffix = value.strip_prefix("c_")?;
+        if !(8..=MAX_OPERATION_CURSOR_SUFFIX_BYTES).contains(&suffix.len())
+            || !suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        {
+            return None;
+        }
+        Some(Self(value.to_owned()))
+    }
+
+    /// Return the exact opaque cursor value.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for CanonicalCursor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
     {
-        return Err(InvocationPresentationError::InvalidField { field });
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).ok_or_else(|| serde::de::Error::custom("invalid observation cursor"))
+    }
+}
+
+stable_string_enum! {
+    /// Optional keyboard modifiers in canonical order.
+    pub enum KeyModifier {
+        Alt => "alt",
+        Control => "control",
+        Meta => "meta",
+        Shift => "shift"
+    }
+}
+
+stable_string_enum! {
+    /// Button used by a canonical click.
+    pub enum ClickButton {
+        Left => "left",
+        Right => "right",
+        Middle => "middle"
+    }
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for ClickButton {
+    fn default() -> Self {
+        Self::Left
+    }
+}
+
+stable_string_enum! {
+    /// Page-inspection detail level.
+    pub enum InspectionDetail {
+        Interactive => "interactive",
+        All => "all"
+    }
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for InspectionDetail {
+    fn default() -> Self {
+        Self::Interactive
+    }
+}
+
+stable_string_enum! {
+    /// Direction of semantic page scrolling.
+    pub enum ScrollDirection {
+        Up => "up",
+        Down => "down"
+    }
+}
+
+stable_string_enum! {
+    /// Amount of semantic page scrolling.
+    pub enum ScrollAmount {
+        Small => "small",
+        Page => "page"
+    }
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for ScrollAmount {
+    fn default() -> Self {
+        Self::Page
+    }
+}
+
+stable_string_enum! {
+    /// Named non-printable key accepted by the canonical key operation.
+    pub enum NamedKey {
+        Enter => "Enter",
+        Tab => "Tab",
+        ArrowUp => "ArrowUp",
+        ArrowDown => "ArrowDown",
+        ArrowLeft => "ArrowLeft",
+        ArrowRight => "ArrowRight",
+        Home => "Home",
+        End => "End",
+        PageUp => "PageUp",
+        PageDown => "PageDown",
+        Backspace => "Backspace",
+        Delete => "Delete",
+        Space => "Space"
+    }
+}
+
+stable_string_enum! {
+    /// Condition state accepted by the canonical wait operation.
+    pub enum WaitState {
+        Visible => "visible",
+        Present => "present",
+        Gone => "gone"
+    }
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for WaitState {
+    fn default() -> Self {
+        Self::Visible
+    }
+}
+
+stable_string_enum! {
+    /// Explicit browser-dialog resolution.
+    pub enum DialogResolution {
+        Accept => "accept",
+        Dismiss => "dismiss",
+        Respond => "respond"
+    }
+}
+
+/// Arguments for a call with no model-authored fields.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyArguments {}
+
+/// Arguments for opening a separate controlled tab.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenTabArguments {
+    /// Optional URL loaded in the new tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// Arguments that require one explicit controlled tab.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequiredTabArguments {
+    /// Exact opaque controlled-tab handle.
+    pub tab: TabHandle,
+}
+
+/// Arguments that may use the workspace current tab.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OptionalTabArguments {
+    /// Exact opaque controlled-tab handle, when the current tab should not be used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+}
+
+/// Arguments for URL navigation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NavigateArguments {
+    /// URL to load.
+    pub url: String,
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+}
+
+/// Arguments for inspecting page structure and controls.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InspectPageArguments {
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+    /// Optional bounded search query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    /// Optional exact subtree target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<OperationTarget>,
+    /// Detail returned when no query is supplied.
+    #[serde(default)]
+    pub include: InspectionDetail,
+    /// Opaque continuation from a prior matching inspection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<CanonicalCursor>,
+}
+
+/// Arguments for reading useful page text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadPageArguments {
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+    /// Optional exact subtree target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<OperationTarget>,
+    /// Maximum returned characters.
+    #[serde(default = "default_read_max_chars")]
+    pub max_chars: u32,
+    /// Opaque continuation from a prior matching read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<CanonicalCursor>,
+}
+
+const fn default_read_max_chars() -> u32 {
+    20_000
+}
+
+impl Default for ReadPageArguments {
+    fn default() -> Self {
+        Self {
+            tab: None,
+            target: None,
+            max_chars: default_read_max_chars(),
+            cursor: None,
+        }
+    }
+}
+
+/// Arguments for a viewport or target screenshot.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenshotArguments {
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+    /// Optional exact capture target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<OperationTarget>,
+}
+
+/// Arguments for clicking one semantic target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClickArguments {
+    /// Exact target ref or unique accessible description.
+    pub target: OperationTarget,
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+    /// Mouse button.
+    #[serde(default)]
+    pub button: ClickButton,
+    /// Number of clicks.
+    #[serde(default = "default_click_count")]
+    pub clicks: u8,
+    /// Keyboard modifiers applied to the click.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modifiers: Vec<KeyModifier>,
+}
+
+const fn default_click_count() -> u8 {
+    1
+}
+
+/// Arguments for one target-only interaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetArguments {
+    /// Exact target ref or unique accessible description.
+    pub target: OperationTarget,
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+}
+
+/// Arguments for semantic page scrolling.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScrollPageArguments {
+    /// Scroll direction.
+    pub direction: ScrollDirection,
+    /// Bounded scroll amount.
+    #[serde(default)]
+    pub amount: ScrollAmount,
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+}
+
+/// Arguments for pressing one named key against one target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PressKeyArguments {
+    /// Named non-printable key.
+    pub key: NamedKey,
+    /// Exact target ref or unique accessible description.
+    pub target: OperationTarget,
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+    /// Keyboard modifiers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modifiers: Vec<KeyModifier>,
+}
+
+/// Arguments for dragging one target to another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DragArguments {
+    /// Exact source target.
+    pub from: OperationTarget,
+    /// Exact destination target.
+    pub to: OperationTarget,
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+}
+
+/// One ordered canonical form field write.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FormField {
+    /// Exact field target.
+    pub field: OperationTarget,
+    /// Scalar value written to the field.
+    pub value: Value,
+}
+
+/// Arguments for atomic form preflight followed by ordered writes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FillFormArguments {
+    /// Ordered field writes.
+    pub fields: Vec<FormField>,
+    /// Optional exact submit control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submit_target: Option<OperationTarget>,
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+}
+
+/// Arguments for one bounded page condition wait.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WaitForArguments {
+    /// Target description or text condition.
+    pub condition: String,
+    /// Requested condition state.
+    #[serde(default)]
+    pub state: WaitState,
+    /// Absolute observation budget in milliseconds.
+    #[serde(default = "default_wait_timeout_ms")]
+    pub timeout_ms: u32,
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+}
+
+const fn default_wait_timeout_ms() -> u32 {
+    10_000
+}
+
+/// Arguments for resolving a browser dialog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HandleDialogArguments {
+    /// Explicit resolution.
+    pub action: DialogResolution,
+    /// Prompt response text, valid only with `respond`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Exact controlled tab, or the current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+}
+
+/// Arguments for one fixed-input canonical sequence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunSequenceArguments {
+    /// Exact root tab, or the workspace current tab when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabHandle>,
+    /// Fully decoded canonical child operations in execution order.
+    pub steps: Vec<Operation>,
+}
+
+/// One closed, typed, protocol-neutral browser operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "operation", content = "arguments", rename_all = "snake_case")]
+pub enum Operation {
+    BrowserGetStatus(EmptyArguments),
+    BrowserOpenTab(OpenTabArguments),
+    BrowserListTabs(EmptyArguments),
+    BrowserFocusTab(RequiredTabArguments),
+    BrowserCloseTab(RequiredTabArguments),
+    BrowserNavigate(NavigateArguments),
+    BrowserGoBack(OptionalTabArguments),
+    BrowserGoForward(OptionalTabArguments),
+    BrowserReloadPage(OptionalTabArguments),
+    BrowserInspectPage(InspectPageArguments),
+    BrowserReadPage(ReadPageArguments),
+    BrowserTakeScreenshot(ScreenshotArguments),
+    BrowserClick(ClickArguments),
+    BrowserHover(TargetArguments),
+    BrowserScrollToTarget(TargetArguments),
+    BrowserScrollPage(ScrollPageArguments),
+    BrowserPressKey(PressKeyArguments),
+    BrowserPressEscape(OptionalTabArguments),
+    BrowserDrag(DragArguments),
+    BrowserFillForm(FillFormArguments),
+    BrowserWaitFor(WaitForArguments),
+    BrowserRunSequence(RunSequenceArguments),
+    BrowserGetDialog(OptionalTabArguments),
+    BrowserHandleDialog(HandleDialogArguments),
+}
+
+/// Semantic validation failure for one typed canonical operation.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum OperationError {
+    #[error("URL must be non-empty, control-free, and at most 4096 UTF-8 bytes")]
+    InvalidUrl,
+    #[error("query must be non-empty and at most 1000 UTF-8 bytes")]
+    InvalidQuery,
+    #[error("inspect accepts query or target, not both")]
+    AmbiguousInspection,
+    #[error("max_chars must be between 1 and 50000")]
+    InvalidMaxChars,
+    #[error("clicks must be between 1 and 3; right and middle clicks must use one click")]
+    InvalidClick,
+    #[error("modifiers must be unique")]
+    DuplicateModifier,
+    #[error("form fields must contain 1 to 20 unique targets with scalar values")]
+    InvalidFormFields,
+    #[error("wait condition must be non-empty and at most 2000 UTF-8 bytes")]
+    InvalidWaitCondition,
+    #[error("wait timeout_ms must be between 1 and 30000")]
+    InvalidWaitTimeout,
+    #[error("dialog text is required only for respond and may contain at most 2000 UTF-8 bytes")]
+    InvalidDialogResponse,
+    #[error("sequence must contain 2 to 10 eligible non-nested operations on one tab")]
+    InvalidSequence,
+}
+
+impl Operation {
+    /// Return this operation's exact canonical identity.
+    pub const fn kind(&self) -> OperationKind {
+        match self {
+            Self::BrowserGetStatus(_) => OperationKind::BrowserGetStatus,
+            Self::BrowserOpenTab(_) => OperationKind::BrowserOpenTab,
+            Self::BrowserListTabs(_) => OperationKind::BrowserListTabs,
+            Self::BrowserFocusTab(_) => OperationKind::BrowserFocusTab,
+            Self::BrowserCloseTab(_) => OperationKind::BrowserCloseTab,
+            Self::BrowserNavigate(_) => OperationKind::BrowserNavigate,
+            Self::BrowserGoBack(_) => OperationKind::BrowserGoBack,
+            Self::BrowserGoForward(_) => OperationKind::BrowserGoForward,
+            Self::BrowserReloadPage(_) => OperationKind::BrowserReloadPage,
+            Self::BrowserInspectPage(_) => OperationKind::BrowserInspectPage,
+            Self::BrowserReadPage(_) => OperationKind::BrowserReadPage,
+            Self::BrowserTakeScreenshot(_) => OperationKind::BrowserTakeScreenshot,
+            Self::BrowserClick(_) => OperationKind::BrowserClick,
+            Self::BrowserHover(_) => OperationKind::BrowserHover,
+            Self::BrowserScrollToTarget(_) => OperationKind::BrowserScrollToTarget,
+            Self::BrowserScrollPage(_) => OperationKind::BrowserScrollPage,
+            Self::BrowserPressKey(_) => OperationKind::BrowserPressKey,
+            Self::BrowserPressEscape(_) => OperationKind::BrowserPressEscape,
+            Self::BrowserDrag(_) => OperationKind::BrowserDrag,
+            Self::BrowserFillForm(_) => OperationKind::BrowserFillForm,
+            Self::BrowserWaitFor(_) => OperationKind::BrowserWaitFor,
+            Self::BrowserRunSequence(_) => OperationKind::BrowserRunSequence,
+            Self::BrowserGetDialog(_) => OperationKind::BrowserGetDialog,
+            Self::BrowserHandleDialog(_) => OperationKind::BrowserHandleDialog,
+        }
+    }
+
+    /// Bind one exact tab to a tab-scoped operation and its sequence children.
+    ///
+    /// Returns false for topology, diagnostic, and creator operations that do not accept a tab.
+    pub fn bind_tab(&mut self, tab: Option<TabHandle>) -> bool {
+        let target = match self {
+            Self::BrowserNavigate(arguments) => &mut arguments.tab,
+            Self::BrowserGoBack(arguments)
+            | Self::BrowserGoForward(arguments)
+            | Self::BrowserReloadPage(arguments)
+            | Self::BrowserPressEscape(arguments)
+            | Self::BrowserGetDialog(arguments) => &mut arguments.tab,
+            Self::BrowserInspectPage(arguments) => &mut arguments.tab,
+            Self::BrowserReadPage(arguments) => &mut arguments.tab,
+            Self::BrowserTakeScreenshot(arguments) => &mut arguments.tab,
+            Self::BrowserClick(arguments) => &mut arguments.tab,
+            Self::BrowserHover(arguments) | Self::BrowserScrollToTarget(arguments) => {
+                &mut arguments.tab
+            }
+            Self::BrowserScrollPage(arguments) => &mut arguments.tab,
+            Self::BrowserPressKey(arguments) => &mut arguments.tab,
+            Self::BrowserDrag(arguments) => &mut arguments.tab,
+            Self::BrowserFillForm(arguments) => &mut arguments.tab,
+            Self::BrowserWaitFor(arguments) => &mut arguments.tab,
+            Self::BrowserHandleDialog(arguments) => &mut arguments.tab,
+            Self::BrowserRunSequence(arguments) => {
+                arguments.tab = tab.clone();
+                for step in &mut arguments.steps {
+                    if !step.bind_tab(tab.clone()) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            _ => return false,
+        };
+        *target = tab;
+        true
+    }
+
+    /// Validate all semantic constraints that do not require live browser state.
+    pub fn validate(&self) -> Result<(), OperationError> {
+        match self {
+            Self::BrowserOpenTab(arguments) => {
+                if let Some(url) = arguments.url.as_deref() {
+                    validate_url(url)?;
+                }
+            }
+            Self::BrowserNavigate(arguments) => validate_url(&arguments.url)?,
+            Self::BrowserInspectPage(arguments) => {
+                if arguments.query.is_some() && arguments.target.is_some() {
+                    return Err(OperationError::AmbiguousInspection);
+                }
+                if arguments.query.as_deref().is_some_and(|query| {
+                    query.is_empty() || query.len() > 1000 || query.chars().any(char::is_control)
+                }) {
+                    return Err(OperationError::InvalidQuery);
+                }
+            }
+            Self::BrowserReadPage(arguments) if !(1..=50_000).contains(&arguments.max_chars) => {
+                return Err(OperationError::InvalidMaxChars);
+            }
+            Self::BrowserClick(arguments) => {
+                if !(1..=3).contains(&arguments.clicks)
+                    || (arguments.button != ClickButton::Left && arguments.clicks != 1)
+                {
+                    return Err(OperationError::InvalidClick);
+                }
+                validate_modifiers(&arguments.modifiers)?;
+            }
+            Self::BrowserPressKey(arguments) => validate_modifiers(&arguments.modifiers)?,
+            Self::BrowserFillForm(arguments) => {
+                if arguments.fields.is_empty() || arguments.fields.len() > 20 {
+                    return Err(OperationError::InvalidFormFields);
+                }
+                let mut targets = HashSet::with_capacity(arguments.fields.len());
+                if arguments.fields.iter().any(|field| {
+                    !targets.insert(field.field.clone())
+                        || !matches!(
+                            field.value,
+                            Value::Bool(_) | Value::Number(_) | Value::String(_)
+                        )
+                        || field
+                            .value
+                            .as_str()
+                            .is_some_and(|value| value.len() > 20_000)
+                }) {
+                    return Err(OperationError::InvalidFormFields);
+                }
+            }
+            Self::BrowserWaitFor(arguments) => {
+                if arguments.condition.is_empty()
+                    || arguments.condition.len() > 1000
+                    || arguments.condition.chars().any(char::is_control)
+                {
+                    return Err(OperationError::InvalidWaitCondition);
+                }
+                if !(1..=30_000).contains(&arguments.timeout_ms) {
+                    return Err(OperationError::InvalidWaitTimeout);
+                }
+            }
+            Self::BrowserHandleDialog(arguments) => {
+                let valid = match (arguments.action, arguments.text.as_deref()) {
+                    (DialogResolution::Respond, Some(text)) => {
+                        text.len() <= 2000 && !text.chars().any(char::is_control)
+                    }
+                    (DialogResolution::Respond, None) => false,
+                    (_, None) => true,
+                    (_, Some(_)) => false,
+                };
+                if !valid {
+                    return Err(OperationError::InvalidDialogResponse);
+                }
+            }
+            Self::BrowserRunSequence(arguments) => validate_sequence(arguments)?,
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+fn validate_url(url: &str) -> Result<(), OperationError> {
+    if url.is_empty()
+        || url.len() > MAX_OPERATION_URL_BYTES
+        || url.chars().any(char::is_control)
+        || url::Url::parse(url).ok().is_none_or(|parsed| {
+            !matches!(parsed.scheme(), "http" | "https") || parsed.host().is_none()
+        })
+    {
+        return Err(OperationError::InvalidUrl);
     }
     Ok(())
 }
 
+fn validate_modifiers(modifiers: &[KeyModifier]) -> Result<(), OperationError> {
+    let unique = modifiers.iter().copied().collect::<HashSet<_>>();
+    if unique.len() != modifiers.len() {
+        return Err(OperationError::DuplicateModifier);
+    }
+    Ok(())
+}
+
+fn validate_sequence(arguments: &RunSequenceArguments) -> Result<(), OperationError> {
+    if !(MIN_OPERATION_SEQUENCE_STEPS..=MAX_OPERATION_SEQUENCE_STEPS)
+        .contains(&arguments.steps.len())
+    {
+        return Err(OperationError::InvalidSequence);
+    }
+    let mut media_parts = 0usize;
+    for step in &arguments.steps {
+        if matches!(step, Operation::BrowserTakeScreenshot(_)) {
+            media_parts += 1;
+        }
+        if matches!(
+            step,
+            Operation::BrowserGetStatus(_)
+                | Operation::BrowserOpenTab(_)
+                | Operation::BrowserListTabs(_)
+                | Operation::BrowserFocusTab(_)
+                | Operation::BrowserCloseTab(_)
+                | Operation::BrowserRunSequence(_)
+        ) || operation_tab(step) != arguments.tab.as_ref()
+            || step.validate().is_err()
+        {
+            return Err(OperationError::InvalidSequence);
+        }
+    }
+    if media_parts > MAX_OPERATION_SEQUENCE_MEDIA_PARTS {
+        return Err(OperationError::InvalidSequence);
+    }
+    Ok(())
+}
+
+fn operation_tab(operation: &Operation) -> Option<&TabHandle> {
+    match operation {
+        Operation::BrowserNavigate(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserGoBack(arguments)
+        | Operation::BrowserGoForward(arguments)
+        | Operation::BrowserReloadPage(arguments)
+        | Operation::BrowserPressEscape(arguments)
+        | Operation::BrowserGetDialog(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserInspectPage(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserReadPage(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserTakeScreenshot(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserClick(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserHover(arguments) | Operation::BrowserScrollToTarget(arguments) => {
+            arguments.tab.as_ref()
+        }
+        Operation::BrowserScrollPage(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserPressKey(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserDrag(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserFillForm(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserWaitFor(arguments) => arguments.tab.as_ref(),
+        Operation::BrowserHandleDialog(arguments) => arguments.tab.as_ref(),
+        _ => None,
+    }
+}
+
 /// Maximum UTF-8 byte length accepted for an opaque tab handle.
-pub const MAX_TAB_HANDLE_BYTES: usize = 256;
+pub const MAX_TAB_HANDLE_BYTES: usize = 130;
 
 /// Opaque, service-issued proof that a tab belongs to a workspace.
 ///
@@ -450,9 +860,11 @@ pub struct TabHandle(String);
 impl TabHandle {
     /// Parse a non-empty, bounded, control-free opaque tab handle.
     pub fn parse(value: &str) -> Option<Self> {
-        if value.is_empty()
-            || value.len() > MAX_TAB_HANDLE_BYTES
-            || value.chars().any(char::is_control)
+        let suffix = value.strip_prefix("t_")?;
+        if !(4..=128).contains(&suffix.len())
+            || !suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
         {
             return None;
         }
@@ -618,15 +1030,90 @@ pub struct Readiness {
     pub elapsed_ms: Option<u64>,
 }
 
-/// Presentation-only corrective guidance attached to a canonical result.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RecoveryHint {
-    /// Human-readable corrective action.
-    pub message: String,
-    /// Optional canonical operation that can refresh relevant state.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_operation: Option<OperationKey>,
+stable_string_enum! {
+    /// Stable service-authored explanation for a non-normal canonical outcome.
+    pub enum ResultProblemCode {
+        InvalidArguments => "invalid_arguments",
+        WorkspaceUnavailable => "workspace_unavailable",
+        TabUnavailable => "tab_unavailable",
+        TargetNotFound => "target_not_found",
+        TargetAmbiguous => "target_ambiguous",
+        TargetStale => "target_stale",
+        TargetIneligible => "target_ineligible",
+        CredentialInputRequired => "credential_input_required",
+        ConditionNotMet => "condition_not_met",
+        OperationBlocked => "operation_blocked",
+        PolicyBlocked => "policy_blocked",
+        ProtectedHost => "protected_host",
+        RequestRestriction => "request_restriction",
+        HeldByUser => "held_by_user",
+        AttentionRequired => "attention_required",
+        SessionEnded => "session_ended",
+        BrowserDisconnected => "browser_disconnected",
+        CapabilityUnavailable => "capability_unavailable",
+        DecisionTraceOverflow => "decision_trace_overflow",
+        LandingIdentityLost => "landing_identity_lost",
+        PartialCompletion => "partial_completion",
+        Cancelled => "cancelled",
+        NotDispatched => "not_dispatched",
+        SequenceStopped => "sequence_stopped",
+        OutcomeUnknown => "outcome_unknown"
+    }
 }
+
+/// One bounded service-authored problem attached to a non-normal result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultProblem {
+    /// Stable machine-readable problem identity.
+    pub code: ResultProblemCode,
+    /// Concise service-authored explanation.
+    pub message: String,
+}
+
+/// One canonical recovery or continuation that an edge may render for a model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SuggestedNextStep {
+    /// Offer one complete canonical call without running it automatically.
+    Call {
+        /// Why the call is relevant now.
+        reason: String,
+        /// Closed typed operation that the edge renders in its current surface.
+        operation: Operation,
+    },
+    /// Give the model one exact question to ask the user.
+    AskUser {
+        /// Why user input is required.
+        reason: String,
+        /// Bounded service-authored question.
+        question: String,
+    },
+    /// Tell the model to wait for the user to return browser control.
+    WaitForUser {
+        /// Why waiting is the safe next move.
+        reason: String,
+    },
+    /// Tell the model that the browser connection must be restored.
+    ReconnectBrowser {
+        /// Why reconnection is required.
+        reason: String,
+    },
+    /// Tell the model that its MCP connection must be restored.
+    ReconnectClient {
+        /// Why reconnection is required.
+        reason: String,
+    },
+    /// Tell the model to stop rather than guess or replay.
+    Stop {
+        /// Why stopping is the safe next move.
+        reason: String,
+    },
+}
+
+/// Maximum number of model-facing next steps on one result.
+pub const MAX_SUGGESTED_NEXT_STEPS: usize = 2;
+/// Maximum UTF-8 byte length of canonical summaries, problems, reasons, and questions.
+pub const MAX_RESULT_GUIDANCE_BYTES: usize = 240;
 
 /// One concise, protocol-neutral model-facing result part.
 ///
@@ -825,7 +1312,323 @@ pub struct ResultTab {
     /// Best available page-derived title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Whether this is the workspace's current controlled tab.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub current: bool,
+    /// Why page facts were withheld from this inventory entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redacted: Option<TabFactRedaction>,
 }
+
+stable_string_enum! {
+    /// Browser connectivity reported by `browser_get_status`.
+    pub enum BrowserConnectionStatus {
+        Connected => "connected",
+        Disconnected => "disconnected"
+    }
+}
+
+stable_string_enum! {
+    /// Effective policy source reported by `browser_get_status`.
+    pub enum PolicySourceStatus {
+        None => "none",
+        User => "user",
+        Machine => "machine",
+        Managed => "managed"
+    }
+}
+
+stable_string_enum! {
+    /// Effective governance posture reported by `browser_get_status`.
+    pub enum GovernanceModeStatus {
+        Open => "open",
+        Observe => "observe",
+        Enforce => "enforce"
+    }
+}
+
+stable_string_enum! {
+    /// Mechanical action that one inspected target supports.
+    pub enum TargetAction {
+        Click => "click",
+        Hover => "hover",
+        ScrollTo => "scroll_to",
+        Fill => "fill",
+        Drag => "drag",
+        PressKey => "press_key"
+    }
+}
+
+stable_string_enum! {
+    /// Scope represented by one screenshot result.
+    pub enum CaptureScope {
+        Viewport => "viewport",
+        Target => "target"
+    }
+}
+
+stable_string_enum! {
+    /// JavaScript dialog kind observed by the browser.
+    pub enum DialogKind {
+        Alert => "alert",
+        Confirm => "confirm",
+        Prompt => "prompt",
+        BeforeUnload => "beforeunload",
+        Unknown => "unknown"
+    }
+}
+
+/// Bounded, operation-ready target facts returned by inspection and action operations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TargetFact {
+    /// Fresh opaque target reference.
+    pub r#ref: String,
+    /// Accessible role when observed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// Accessible name when observed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Current visibility when observed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
+    /// Current eligibility when observed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Mechanical actions supported by the target.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<TargetAction>,
+}
+
+/// Effective status authority facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusAuthority {
+    /// Selected policy source.
+    pub policy_source: PolicySourceStatus,
+    /// Effective policy mode.
+    pub mode: GovernanceModeStatus,
+}
+
+/// Fixed service limits reported to a model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusLimits {
+    /// Maximum children in one sequence.
+    pub max_sequence_steps: u32,
+    /// Maximum owned tabs returned in one inventory.
+    pub max_tabs: u32,
+    /// Maximum characters returned by one page read.
+    pub max_read_chars: u32,
+}
+
+/// One successfully filled form field, without its supplied value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FilledFieldResult {
+    /// Model-authored field description.
+    pub field: String,
+}
+
+/// One form field that was not mutated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedFieldResult {
+    /// Model-authored field description.
+    pub field: String,
+    /// Stable service-authored reason token.
+    pub code: String,
+}
+
+/// Closed typed result vocabulary for all Ghostlight operations.
+///
+/// This enum is the owner-bridge result authority. Its serde tag is an internal transport detail;
+/// model-facing rendering emits only the selected variant payload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "operation", content = "result", rename_all = "snake_case")]
+pub enum OperationResult {
+    /// `browser_get_status` result.
+    BrowserGetStatus {
+        /// Browser connectivity.
+        browser: BrowserConnectionStatus,
+        /// Effective authority.
+        authority: StatusAuthority,
+        /// Available operations.
+        operations: Vec<OperationKind>,
+        /// Enabled optional packs.
+        packs: Vec<String>,
+        /// Fixed limits.
+        limits: StatusLimits,
+    },
+    /// `browser_open_tab` result.
+    BrowserOpenTab {
+        /// Whether tab creation committed.
+        created: bool,
+        /// Whether requested initial navigation conclusively committed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        navigated: Option<bool>,
+    },
+    /// `browser_list_tabs` result.
+    BrowserListTabs { count: u32 },
+    /// `browser_focus_tab` result.
+    BrowserFocusTab { focused: bool },
+    /// `browser_close_tab` result.
+    BrowserCloseTab { closed: bool },
+    /// `browser_navigate` result.
+    BrowserNavigate { landed: bool },
+    /// `browser_go_back` result.
+    BrowserGoBack { moved: bool },
+    /// `browser_go_forward` result.
+    BrowserGoForward { moved: bool },
+    /// `browser_reload_page` result.
+    BrowserReloadPage { reloaded: bool },
+    /// `browser_inspect_page` result.
+    BrowserInspectPage {
+        targets: Vec<TargetFact>,
+        more: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<CanonicalCursor>,
+    },
+    /// `browser_read_page` result.
+    BrowserReadPage {
+        text: String,
+        more: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<CanonicalCursor>,
+    },
+    /// `browser_take_screenshot` result.
+    BrowserTakeScreenshot {
+        frame: String,
+        width: u32,
+        height: u32,
+        scope: CaptureScope,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<TargetFact>,
+    },
+    /// `browser_click` result.
+    BrowserClick {
+        target: TargetFact,
+        clicked: bool,
+        page_changed: bool,
+    },
+    /// `browser_hover` result.
+    BrowserHover {
+        target: TargetFact,
+        hovered: bool,
+        page_changed: bool,
+    },
+    /// `browser_scroll_to_target` result.
+    BrowserScrollToTarget {
+        target: TargetFact,
+        visible: bool,
+        moved: bool,
+        page_changed: bool,
+    },
+    /// `browser_scroll_page` result.
+    BrowserScrollPage {
+        direction: ScrollDirection,
+        amount: ScrollAmount,
+        moved: bool,
+        page_changed: bool,
+    },
+    /// `browser_press_key` result.
+    BrowserPressKey {
+        key: NamedKey,
+        target: TargetFact,
+        pressed: bool,
+        page_changed: bool,
+    },
+    /// `browser_press_escape` result.
+    BrowserPressEscape { pressed: bool, page_changed: bool },
+    /// `browser_drag` result.
+    BrowserDrag {
+        from: TargetFact,
+        to: TargetFact,
+        dragged: bool,
+        page_changed: bool,
+    },
+    /// `browser_fill_form` result.
+    BrowserFillForm {
+        filled: Vec<FilledFieldResult>,
+        skipped: Vec<SkippedFieldResult>,
+        submitted: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        submit_target: Option<TargetFact>,
+    },
+    /// `browser_wait_for` result.
+    BrowserWaitFor {
+        condition: String,
+        state: WaitState,
+        met: bool,
+        elapsed_ms: u32,
+    },
+    /// `browser_run_sequence` result.
+    BrowserRunSequence(FlowResultData),
+    /// `browser_get_dialog` result.
+    BrowserGetDialog {
+        open: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<DialogKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        actions: Vec<DialogResolution>,
+    },
+    /// `browser_handle_dialog` result.
+    BrowserHandleDialog {
+        action: DialogResolution,
+        resolved: bool,
+    },
+}
+
+impl OperationResult {
+    /// Return the exact operation kind that owns this result.
+    pub fn kind(&self) -> OperationKind {
+        match self {
+            Self::BrowserGetStatus { .. } => OperationKind::BrowserGetStatus,
+            Self::BrowserOpenTab { .. } => OperationKind::BrowserOpenTab,
+            Self::BrowserListTabs { .. } => OperationKind::BrowserListTabs,
+            Self::BrowserFocusTab { .. } => OperationKind::BrowserFocusTab,
+            Self::BrowserCloseTab { .. } => OperationKind::BrowserCloseTab,
+            Self::BrowserNavigate { .. } => OperationKind::BrowserNavigate,
+            Self::BrowserGoBack { .. } => OperationKind::BrowserGoBack,
+            Self::BrowserGoForward { .. } => OperationKind::BrowserGoForward,
+            Self::BrowserReloadPage { .. } => OperationKind::BrowserReloadPage,
+            Self::BrowserInspectPage { .. } => OperationKind::BrowserInspectPage,
+            Self::BrowserReadPage { .. } => OperationKind::BrowserReadPage,
+            Self::BrowserTakeScreenshot { .. } => OperationKind::BrowserTakeScreenshot,
+            Self::BrowserClick { .. } => OperationKind::BrowserClick,
+            Self::BrowserHover { .. } => OperationKind::BrowserHover,
+            Self::BrowserScrollToTarget { .. } => OperationKind::BrowserScrollToTarget,
+            Self::BrowserScrollPage { .. } => OperationKind::BrowserScrollPage,
+            Self::BrowserPressKey { .. } => OperationKind::BrowserPressKey,
+            Self::BrowserPressEscape { .. } => OperationKind::BrowserPressEscape,
+            Self::BrowserDrag { .. } => OperationKind::BrowserDrag,
+            Self::BrowserFillForm { .. } => OperationKind::BrowserFillForm,
+            Self::BrowserWaitFor { .. } => OperationKind::BrowserWaitFor,
+            Self::BrowserRunSequence(_) => OperationKind::BrowserRunSequence,
+            Self::BrowserGetDialog { .. } => OperationKind::BrowserGetDialog,
+            Self::BrowserHandleDialog { .. } => OperationKind::BrowserHandleDialog,
+        }
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+stable_string_enum! {
+    /// Stable reason that an owned tab inventory entry omits its page URL and title.
+    pub enum TabFactRedaction {
+        ProtectedHost => "protected_host",
+        Policy => "policy",
+        RequestRestriction => "request_restriction",
+        ResourceIndeterminate => "resource_indeterminate"
+    }
+}
+
+/// Maximum number of owned tab facts carried by one canonical result inventory.
+pub const MAX_RESULT_TABS: usize = 64;
+/// Maximum UTF-8 byte length of a canonical tab URL.
+pub const MAX_RESULT_TAB_URL_BYTES: usize = 4096;
+/// Maximum UTF-8 byte length of a canonical tab title.
+pub const MAX_RESULT_TAB_TITLE_BYTES: usize = 1024;
 
 /// Maximum UTF-8 byte length accepted for a page origin carried as provenance.
 pub const MAX_PAGE_ORIGIN_BYTES: usize = 240;
@@ -849,9 +1652,9 @@ pub enum PageProvenanceError {
 
 /// Scoped provenance for page-derived fields in one canonical result.
 ///
-/// Only page payload under `data`, text/image bytes under `parts`, and page-derived tab URL/title
-/// may be named. Service-authored schema, operation, status, effect, retry, recovery, workspace,
-/// and handle facts remain trusted by construction.
+/// Only page payload under `result`, text/image bytes under `parts`, and page-derived tab URL/title
+/// facts may be named. Service-authored schema, operation, status, effect, retry, recovery,
+/// workspace, and handle facts remain trusted by construction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PageProvenance {
     untrusted_fields: Vec<String>,
@@ -951,11 +1754,19 @@ fn is_valid_page_origin(origin: &str) -> bool {
 }
 
 fn is_page_derived_pointer(pointer: &str) -> bool {
-    if pointer == "/data" || pointer.starts_with("/data/") {
+    if pointer == "/result" || pointer.starts_with("/result/") {
         return true;
     }
     if matches!(pointer, "/tab/url" | "/tab/title") {
         return true;
+    }
+    if let Some(inventory_pointer) = pointer.strip_prefix("/tabs/") {
+        let Some((index, field)) = inventory_pointer.split_once('/') else {
+            return false;
+        };
+        return !index.is_empty()
+            && index.bytes().all(|byte| byte.is_ascii_digit())
+            && matches!(field, "url" | "title");
     }
 
     let Some(part_pointer) = pointer.strip_prefix("/parts/") else {
@@ -974,20 +1785,22 @@ fn is_page_derived_pointer(pointer: &str) -> bool {
 pub struct BrowserResult {
     /// Canonical result schema marker.
     pub schema: BrowserResultSchema,
-    /// Canonical operation family.
-    pub operation: OperationId,
-    /// Concrete semantic intent.
-    pub intent: IntentId,
+    /// Exact canonical operation that produced this result.
+    pub operation: OperationKind,
     /// Canonical terminal status.
     pub status: BrowserResultStatus,
+    /// Concise service-authored account of the outcome.
+    pub summary: String,
     /// Proven physical-effect disposition.
     pub effect: OperationEffect,
-    /// Corrective retry guidance, omitted when no retry guidance applies.
+    /// Corrective replay guidance derived from the proven terminal effect.
+    pub repeat: RetryDisposition,
+    /// Stable service-authored explanation for a non-normal outcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub retry: Option<RetryDisposition>,
-    /// Presentation-only recovery guidance.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recovery: Option<RecoveryHint>,
+    pub problem: Option<ResultProblem>,
+    /// Zero to two safe, immediately actionable continuations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suggested_next_steps: Vec<SuggestedNextStep>,
     /// Readiness evidence, distinct from operation success.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readiness: Option<Readiness>,
@@ -997,12 +1810,15 @@ pub struct BrowserResult {
     /// Bounded tab facts relevant to the result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab: Option<ResultTab>,
+    /// Stable, deduplicated inventory of owned tabs relevant to the result.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tabs: Vec<ResultTab>,
     /// Concise protocol-neutral text and image output.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<ResultPart>,
-    /// Structured canonical result data.
-    #[serde(default, skip_serializing_if = "Value::is_null")]
-    pub data: Value,
+    /// Exact typed result owned by this operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<OperationResult>,
     /// Scoped page-derived provenance, omitted when the result has no page payload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<PageProvenance>,
@@ -1011,6 +1827,38 @@ pub struct BrowserResult {
 /// A canonical browser result carries an internally inconsistent terminal disposition.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BrowserResultValidationError {
+    /// The service-authored result summary was empty, unbounded, or contained a control character.
+    #[error(
+        "a canonical result summary must be non-empty, control-free, and at most 240 UTF-8 bytes"
+    )]
+    InvalidSummary,
+    /// Normal results cannot claim a problem, and every non-normal result must explain one.
+    #[error("a canonical problem is required exactly when status is not ok")]
+    InvalidProblemPresence,
+    /// A problem message was empty, unbounded, or contained a control character.
+    #[error(
+        "a canonical problem message must be non-empty, control-free, and at most 240 UTF-8 bytes"
+    )]
+    InvalidProblemMessage,
+    /// A result exceeded the fixed next-step bound.
+    #[error("a canonical result may suggest at most two next steps")]
+    TooManySuggestedNextSteps,
+    /// A suggested reason or question was empty, unbounded, or contained a control character.
+    #[error(
+        "canonical next-step text must be non-empty, control-free, and at most 240 UTF-8 bytes"
+    )]
+    InvalidSuggestedNextStep,
+    /// An uncertain result suggested replaying the same operation or another effectful action.
+    #[error(
+        "an uncertain result may suggest only an observation, user handoff, reconnect, or stop"
+    )]
+    UnsafeSuggestedNextStep,
+    /// Normal and partially completed operations require their exact typed result payload.
+    #[error("ok, partial, and not_met browser results require a typed operation result")]
+    MissingOperationResult,
+    /// A typed result variant belonged to a different operation.
+    #[error("a canonical operation result must match its enclosing operation")]
+    MismatchedOperationResult,
     /// Terminal results cannot retain the in-flight dispatched effect.
     #[error("a terminal browser result cannot have effect dispatched")]
     TerminalDispatched,
@@ -1026,53 +1874,143 @@ pub enum BrowserResultValidationError {
     /// A proven pre-dispatch terminal cannot claim a physical effect.
     #[error("held, attention_required, and not_dispatched require effect none")]
     PreDispatchStatusWithEffect,
+    /// Readiness aggregate and axis evidence must agree exactly.
+    #[error("readiness aggregate status does not match its requested axes")]
+    InvalidReadiness,
+    /// Canonical tab inventories have one fixed upper bound.
+    #[error("a canonical result tab inventory may contain at most {max} entries")]
+    TooManyTabs {
+        /// Maximum accepted inventory length.
+        max: usize,
+    },
+    /// One opaque tab may appear at most once in the canonical inventory.
+    #[error("a canonical result tab inventory contains a duplicate handle")]
+    DuplicateTab,
+    /// Tab URLs are bounded, non-empty, and control-free.
+    #[error("a canonical result contains an invalid tab URL")]
+    InvalidTabUrl,
+    /// Tab titles are bounded, non-empty, and control-free.
+    #[error("a canonical result contains an invalid tab title")]
+    InvalidTabTitle,
+    /// A redacted inventory entry cannot retain the page facts it withholds.
+    #[error("a redacted canonical tab cannot contain a URL or title")]
+    RedactedTabHasPageFacts,
 }
 
 impl BrowserResult {
     /// Construct an empty version-one canonical result envelope.
     pub fn new(
-        operation: OperationId,
-        intent: IntentId,
+        operation: OperationKind,
         status: BrowserResultStatus,
         effect: OperationEffect,
     ) -> Self {
         Self {
             schema: BrowserResultSchema::V1,
             operation,
-            intent,
             status,
+            summary: default_result_summary(operation, status, effect),
             effect,
-            retry: None,
-            recovery: None,
+            repeat: repeat_for_terminal(status, effect),
+            problem: default_result_problem(status),
+            suggested_next_steps: Vec::new(),
             readiness: None,
             workspace: None,
             tab: None,
+            tabs: Vec::new(),
             parts: Vec::new(),
-            data: Value::Null,
+            result: None,
             provenance: None,
         }
     }
 
     /// Validate the closed status/effect/retry relationship before edge rendering.
     pub fn validate_semantics(&self) -> Result<(), BrowserResultValidationError> {
+        if !is_valid_guidance_text(&self.summary) {
+            return Err(BrowserResultValidationError::InvalidSummary);
+        }
+        if (self.status == BrowserResultStatus::Ok) != self.problem.is_none() {
+            return Err(BrowserResultValidationError::InvalidProblemPresence);
+        }
+        if self
+            .problem
+            .as_ref()
+            .is_some_and(|problem| !is_valid_guidance_text(&problem.message))
+        {
+            return Err(BrowserResultValidationError::InvalidProblemMessage);
+        }
+        if self.suggested_next_steps.len() > MAX_SUGGESTED_NEXT_STEPS {
+            return Err(BrowserResultValidationError::TooManySuggestedNextSteps);
+        }
+        for suggestion in &self.suggested_next_steps {
+            if !suggestion_has_valid_text(suggestion) {
+                return Err(BrowserResultValidationError::InvalidSuggestedNextStep);
+            }
+            if self.effect == OperationEffect::Unknown
+                && matches!(suggestion, SuggestedNextStep::Call { operation, .. } if !is_observation_operation(operation.kind()))
+            {
+                return Err(BrowserResultValidationError::UnsafeSuggestedNextStep);
+            }
+        }
+        if self.tabs.len() > MAX_RESULT_TABS {
+            return Err(BrowserResultValidationError::TooManyTabs {
+                max: MAX_RESULT_TABS,
+            });
+        }
+        let mut tab_handles = HashSet::with_capacity(self.tabs.len());
+        if self
+            .tabs
+            .iter()
+            .any(|tab| !tab_handles.insert(tab.id.clone()))
+        {
+            return Err(BrowserResultValidationError::DuplicateTab);
+        }
+        for tab in self.tab.iter().chain(self.tabs.iter()) {
+            if tab.redacted.is_some() && (tab.url.is_some() || tab.title.is_some()) {
+                return Err(BrowserResultValidationError::RedactedTabHasPageFacts);
+            }
+            if tab.url.as_ref().is_some_and(|url| {
+                url.is_empty()
+                    || url.len() > MAX_RESULT_TAB_URL_BYTES
+                    || url.chars().any(char::is_control)
+            }) {
+                return Err(BrowserResultValidationError::InvalidTabUrl);
+            }
+            if tab.title.as_ref().is_some_and(|title| {
+                title.is_empty()
+                    || title.len() > MAX_RESULT_TAB_TITLE_BYTES
+                    || title.chars().any(char::is_control)
+            }) {
+                return Err(BrowserResultValidationError::InvalidTabTitle);
+            }
+        }
+        if let Some(readiness) = &self.readiness {
+            if matches!(
+                self.status,
+                BrowserResultStatus::Blocked
+                    | BrowserResultStatus::Held
+                    | BrowserResultStatus::AttentionRequired
+                    | BrowserResultStatus::NotDispatched
+                    | BrowserResultStatus::OutcomeUnknown
+                    | BrowserResultStatus::Unavailable
+            ) || !readiness_is_consistent(readiness)
+            {
+                return Err(BrowserResultValidationError::InvalidReadiness);
+            }
+        }
         if self.effect == OperationEffect::Dispatched {
             return Err(BrowserResultValidationError::TerminalDispatched);
         }
         if self.status == BrowserResultStatus::OutcomeUnknown {
-            if self.effect != OperationEffect::Unknown
-                || self.retry != Some(RetryDisposition::Unsafe)
-            {
+            if self.effect != OperationEffect::Unknown || self.repeat != RetryDisposition::Unsafe {
                 return Err(BrowserResultValidationError::InvalidOutcomeUnknown);
             }
             return Ok(());
         }
         if self.status == BrowserResultStatus::Cancelled {
             let valid = match self.effect {
-                OperationEffect::None => {
-                    matches!(self.retry, None | Some(RetryDisposition::Safe))
-                }
+                OperationEffect::None => self.repeat == RetryDisposition::Safe,
                 OperationEffect::Committed | OperationEffect::Unknown => {
-                    self.retry == Some(RetryDisposition::Unsafe)
+                    self.repeat == RetryDisposition::Unsafe
                 }
                 OperationEffect::Dispatched => false,
             };
@@ -1092,7 +2030,184 @@ impl BrowserResult {
         {
             return Err(BrowserResultValidationError::PreDispatchStatusWithEffect);
         }
+        if matches!(
+            self.status,
+            BrowserResultStatus::Ok | BrowserResultStatus::Partial | BrowserResultStatus::NotMet
+        ) && self.result.is_none()
+        {
+            return Err(BrowserResultValidationError::MissingOperationResult);
+        }
+        if self
+            .result
+            .as_ref()
+            .is_some_and(|result| result.kind() != self.operation)
+        {
+            return Err(BrowserResultValidationError::MismatchedOperationResult);
+        }
         Ok(())
+    }
+}
+
+fn default_result_summary(
+    operation: OperationKind,
+    status: BrowserResultStatus,
+    effect: OperationEffect,
+) -> String {
+    let job = operation
+        .as_str()
+        .strip_prefix("browser_")
+        .unwrap_or(operation.as_str())
+        .replace('_', " ");
+    match status {
+        BrowserResultStatus::Ok if effect == OperationEffect::Committed => {
+            format!("Completed {job}.")
+        }
+        BrowserResultStatus::Ok => format!("Finished {job}."),
+        BrowserResultStatus::Partial => {
+            format!("Part of {job} completed; keep the committed work.")
+        }
+        BrowserResultStatus::NotMet => format!("The requested {job} condition was not met."),
+        BrowserResultStatus::Blocked => format!("Ghostlight stopped {job} before acting."),
+        BrowserResultStatus::Held => {
+            "The user is controlling the browser, so this call is paused.".into()
+        }
+        BrowserResultStatus::AttentionRequired => {
+            "Ghostlight needs the user's attention before browser work can continue.".into()
+        }
+        BrowserResultStatus::Cancelled => {
+            format!("Cancelled {job}; completed effects were not undone.")
+        }
+        BrowserResultStatus::NotDispatched => format!("Did not send {job} to the browser."),
+        BrowserResultStatus::OutcomeUnknown => {
+            format!("Ghostlight cannot prove whether {job} completed.")
+        }
+        BrowserResultStatus::Unavailable => format!("The browser could not complete {job}."),
+    }
+}
+
+fn default_result_problem(status: BrowserResultStatus) -> Option<ResultProblem> {
+    let (code, message) = match status {
+        BrowserResultStatus::Ok => return None,
+        BrowserResultStatus::Partial => (
+            ResultProblemCode::PartialCompletion,
+            "Part of the requested work completed.",
+        ),
+        BrowserResultStatus::NotMet => (
+            ResultProblemCode::ConditionNotMet,
+            "The requested condition or state was not met.",
+        ),
+        BrowserResultStatus::Blocked => (
+            ResultProblemCode::OperationBlocked,
+            "Ghostlight blocked the operation before it could complete.",
+        ),
+        BrowserResultStatus::Held => (
+            ResultProblemCode::HeldByUser,
+            "The user currently controls the browser.",
+        ),
+        BrowserResultStatus::AttentionRequired => (
+            ResultProblemCode::AttentionRequired,
+            "Ghostlight needs the user's attention before work can continue.",
+        ),
+        BrowserResultStatus::Cancelled => {
+            (ResultProblemCode::Cancelled, "The operation was cancelled.")
+        }
+        BrowserResultStatus::NotDispatched => (
+            ResultProblemCode::NotDispatched,
+            "The operation was not sent to the browser.",
+        ),
+        BrowserResultStatus::OutcomeUnknown => (
+            ResultProblemCode::OutcomeUnknown,
+            "Ghostlight cannot prove whether the operation completed.",
+        ),
+        BrowserResultStatus::Unavailable => (
+            ResultProblemCode::CapabilityUnavailable,
+            "The required browser capability is unavailable.",
+        ),
+    };
+    Some(ResultProblem {
+        code,
+        message: message.into(),
+    })
+}
+
+fn is_valid_guidance_text(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_RESULT_GUIDANCE_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn suggestion_has_valid_text(suggestion: &SuggestedNextStep) -> bool {
+    match suggestion {
+        SuggestedNextStep::Call { reason, operation } => {
+            is_valid_guidance_text(reason) && operation.validate().is_ok()
+        }
+        SuggestedNextStep::AskUser { reason, question } => {
+            is_valid_guidance_text(reason) && is_valid_guidance_text(question)
+        }
+        SuggestedNextStep::WaitForUser { reason }
+        | SuggestedNextStep::ReconnectBrowser { reason }
+        | SuggestedNextStep::ReconnectClient { reason }
+        | SuggestedNextStep::Stop { reason } => is_valid_guidance_text(reason),
+    }
+}
+
+const fn is_observation_operation(operation: OperationKind) -> bool {
+    matches!(
+        operation,
+        OperationKind::BrowserGetStatus
+            | OperationKind::BrowserListTabs
+            | OperationKind::BrowserInspectPage
+            | OperationKind::BrowserReadPage
+            | OperationKind::BrowserTakeScreenshot
+            | OperationKind::BrowserWaitFor
+            | OperationKind::BrowserGetDialog
+    )
+}
+
+/// Derive the safe default replay guidance for one proven terminal disposition.
+pub const fn repeat_for_terminal(
+    status: BrowserResultStatus,
+    effect: OperationEffect,
+) -> RetryDisposition {
+    match (status, effect) {
+        (
+            BrowserResultStatus::Blocked
+            | BrowserResultStatus::Held
+            | BrowserResultStatus::AttentionRequired,
+            _,
+        ) => RetryDisposition::AfterStateChange,
+        (
+            _,
+            OperationEffect::Committed | OperationEffect::Dispatched | OperationEffect::Unknown,
+        ) => RetryDisposition::Unsafe,
+        _ => RetryDisposition::Safe,
+    }
+}
+
+fn readiness_is_consistent(readiness: &Readiness) -> bool {
+    let condition = readiness.condition;
+    let settlement = readiness.settlement;
+    if condition.is_some_and(|axis| !axis.requested)
+        || settlement.is_some_and(|axis| !axis.requested)
+    {
+        return false;
+    }
+    match readiness.status {
+        ReadinessStatus::NotRequested => condition.is_none() && settlement.is_none(),
+        ReadinessStatus::Ready => {
+            (condition.is_some() || settlement.is_some())
+                && condition.is_none_or(|axis| axis.met)
+                && settlement.is_none_or(|axis| axis.status == SettlementStatus::Settled)
+        }
+        ReadinessStatus::TimedOut => {
+            (condition.is_some() || settlement.is_some())
+                && (condition.is_some_and(|axis| !axis.met)
+                    || settlement.is_some_and(|axis| axis.status == SettlementStatus::NotSettled))
+                && settlement.is_none_or(|axis| axis.status != SettlementStatus::Unavailable)
+        }
+        ReadinessStatus::Unavailable => {
+            settlement.is_some_and(|axis| axis.status == SettlementStatus::Unavailable)
+        }
     }
 }
 
@@ -1191,101 +2306,6 @@ pub struct FlowResultData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
-
-    #[test]
-    fn operation_ids_are_closed_unique_dotted_and_serde_stable() {
-        assert_eq!(OperationId::ALL.len(), 26);
-        let values: BTreeSet<_> = OperationId::ALL.iter().map(|id| id.as_str()).collect();
-        assert_eq!(values.len(), OperationId::ALL.len());
-
-        for id in OperationId::ALL {
-            let wire = id.as_str();
-            assert!(wire.is_ascii());
-            assert!(wire.starts_with("browser.") || wire == "workflow.plan");
-            assert_eq!(OperationId::parse(wire), Some(*id));
-            let json = serde_json::to_string(id).expect("serialize operation id");
-            assert_eq!(
-                serde_json::from_str::<OperationId>(&json).expect("deserialize operation id"),
-                *id
-            );
-        }
-
-        assert_eq!(OperationId::parse("browser.click"), None);
-        assert!(serde_json::from_str::<OperationId>("\"computer\"").is_err());
-    }
-
-    #[test]
-    fn intent_ids_are_closed_unique_dotted_and_serde_stable() {
-        assert_eq!(IntentId::ALL.len(), 60);
-        let values: BTreeSet<_> = IntentId::ALL.iter().map(|id| id.as_str()).collect();
-        assert_eq!(values.len(), IntentId::ALL.len());
-
-        for intent in IntentId::ALL {
-            let wire = intent.as_str();
-            assert!(wire.is_ascii());
-            assert!(wire.contains('.'));
-            assert_eq!(IntentId::parse(wire), Some(*intent));
-            let json = serde_json::to_string(intent).expect("serialize intent id");
-            assert_eq!(
-                serde_json::from_str::<IntentId>(&json).expect("deserialize intent id"),
-                *intent
-            );
-        }
-
-        assert_eq!(IntentId::parse("left_click"), None);
-    }
-
-    #[test]
-    fn browser_operation_has_only_semantic_identity_and_arguments() {
-        let operation = BrowserOperation::new(
-            OperationId::BrowserAct,
-            IntentId::ActClick,
-            serde_json::json!({"target": {"ref": "r_1"}}),
-        );
-        assert_eq!(
-            serde_json::to_value(operation).expect("serialize operation"),
-            serde_json::json!({
-                "id": "browser.act",
-                "intent": "act.click",
-                "arguments": {"target": {"ref": "r_1"}}
-            })
-        );
-    }
-
-    #[test]
-    fn invocation_presentation_is_bounded_and_validated_on_decode() {
-        let presentation = InvocationPresentation::new(
-            "ghostlight-legacy",
-            1,
-            "computer",
-            Some("left_click".into()),
-        )
-        .expect("valid presentation");
-        assert_eq!(presentation.profile_id(), "ghostlight-legacy");
-        assert_eq!(presentation.profile_version(), 1);
-        assert_eq!(presentation.external_tool(), "computer");
-        assert_eq!(presentation.external_action(), Some("left_click"));
-
-        let json = serde_json::to_string(&presentation).expect("serialize presentation");
-        assert_eq!(
-            serde_json::from_str::<InvocationPresentation>(&json)
-                .expect("deserialize presentation"),
-            presentation
-        );
-        assert!(InvocationPresentation::new("native", 0, "tool", None).is_err());
-        assert!(InvocationPresentation::new("native", 1, "", None).is_err());
-        assert!(InvocationPresentation::new("native\n", 1, "tool", None).is_err());
-        assert!(InvocationPresentation::new("x".repeat(129), 1, "tool", None).is_err());
-        assert!(
-            serde_json::from_value::<InvocationPresentation>(serde_json::json!({
-                "profileId": "native",
-                "profileVersion": 1,
-                "externalTool": "bad\nname"
-            }))
-            .is_err()
-        );
-    }
 
     #[test]
     fn tab_handle_is_bounded_opaque_and_redacted() {
@@ -1416,8 +2436,7 @@ mod tests {
         .is_err());
 
         let mut result = BrowserResult::new(
-            OperationId::BrowserScreenshot,
-            IntentId::ScreenshotViewport,
+            OperationKind::BrowserTakeScreenshot,
             BrowserResultStatus::Ok,
             OperationEffect::None,
         );
@@ -1431,13 +2450,16 @@ mod tests {
     fn browser_result_is_canonical_and_protocol_neutral() {
         let workspace = WorkspaceId::mint();
         let tab = TabHandle::parse("t_generation_7").expect("valid handle");
+        let inventory_tab = TabHandle::parse("t_generation_8").expect("valid handle");
         let provenance = PageProvenance::new(
             vec![
                 "/tab/url".into(),
                 "/tab/title".into(),
+                "/tabs/0/url".into(),
+                "/tabs/0/title".into(),
                 "/parts/0/text".into(),
                 "/parts/1/data".into(),
-                "/data/interaction_receipt/target".into(),
+                "/result/target".into(),
             ],
             Some("https://example.com".into()),
             Some("session-7".into()),
@@ -1446,8 +2468,7 @@ mod tests {
         .expect("scoped provenance");
 
         let mut result = BrowserResult::new(
-            OperationId::BrowserAct,
-            IntentId::ActClick,
+            OperationKind::BrowserClick,
             BrowserResultStatus::Ok,
             OperationEffect::Committed,
         );
@@ -1468,7 +2489,16 @@ mod tests {
             id: tab,
             url: Some("https://example.com".into()),
             title: Some("Example".into()),
+            current: false,
+            redacted: None,
         });
+        result.tabs = vec![ResultTab {
+            id: inventory_tab,
+            url: Some("https://inventory.example".into()),
+            title: Some("Inventory".into()),
+            current: false,
+            redacted: None,
+        }];
         result.parts = vec![
             ResultPart::Text {
                 text: "clicked".into(),
@@ -1478,16 +2508,26 @@ mod tests {
                 mime_type: "image/jpeg".into(),
             },
         ];
-        result.data = serde_json::json!({
-            "interaction_receipt": {"target": "Save", "assurance": "ref"}
+        result.result = Some(OperationResult::BrowserClick {
+            target: TargetFact {
+                r#ref: "r_save".into(),
+                role: Some("button".into()),
+                name: Some("Save".into()),
+                visible: Some(true),
+                enabled: Some(true),
+                actions: vec![TargetAction::Click],
+            },
+            clicked: true,
+            page_changed: true,
         });
         result.provenance = Some(provenance);
 
         let value = serde_json::to_value(&result).expect("serialize canonical result");
         assert_eq!(value["schema"], "ghostlight.browser.result/1");
-        assert_eq!(value["operation"], "browser.act");
-        assert_eq!(value["intent"], "act.click");
+        assert_eq!(value["operation"], "browser_click");
+        assert!(value.get("intent").is_none());
         assert_eq!(value["workspace"], workspace.as_str());
+        assert_eq!(value["tabs"][0]["id"], "t_generation_8");
         assert_eq!(value["parts"][0]["type"], "text");
         assert_eq!(value["parts"][1]["type"], "image");
         assert_eq!(value["parts"][1]["mime_type"], "image/jpeg");
@@ -1505,10 +2545,128 @@ mod tests {
     }
 
     #[test]
+    fn browser_result_tab_inventory_is_optional_bounded_and_unique() {
+        let mut result = BrowserResult::new(
+            OperationKind::BrowserListTabs,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        );
+        result.result = Some(OperationResult::BrowserListTabs { count: 0 });
+        let empty = serde_json::to_value(&result).expect("serialize empty inventory");
+        assert!(empty.get("tabs").is_none());
+
+        let first = ResultTab {
+            id: TabHandle::parse("t_first").unwrap(),
+            url: None,
+            title: None,
+            current: false,
+            redacted: None,
+        };
+        result.tabs = vec![first.clone(), first];
+        assert_eq!(
+            result.validate_semantics(),
+            Err(BrowserResultValidationError::DuplicateTab)
+        );
+
+        result.tabs = (0..=MAX_RESULT_TABS)
+            .map(|index| ResultTab {
+                id: TabHandle::parse(&format!("t_tab{index}")).unwrap(),
+                url: None,
+                title: None,
+                current: false,
+                redacted: None,
+            })
+            .collect();
+        assert_eq!(
+            result.validate_semantics(),
+            Err(BrowserResultValidationError::TooManyTabs {
+                max: MAX_RESULT_TABS
+            })
+        );
+    }
+
+    #[test]
+    fn browser_result_tab_fact_bounds_apply_to_singular_and_plural_tabs() {
+        fn result_with_tab(tab: ResultTab, plural: bool) -> BrowserResult {
+            let mut result = BrowserResult::new(
+                OperationKind::BrowserListTabs,
+                BrowserResultStatus::Ok,
+                OperationEffect::None,
+            );
+            result.result = Some(OperationResult::BrowserListTabs { count: 1 });
+            if plural {
+                result.tabs = vec![tab];
+            } else {
+                result.tab = Some(tab);
+            }
+            result
+        }
+
+        fn assert_invalid_fact(
+            url: Option<String>,
+            title: Option<String>,
+            expected: BrowserResultValidationError,
+        ) {
+            for plural in [false, true] {
+                let tab = ResultTab {
+                    id: TabHandle::parse("t_fact_bounds").unwrap(),
+                    url: url.clone(),
+                    title: title.clone(),
+                    current: false,
+                    redacted: None,
+                };
+                assert_eq!(
+                    result_with_tab(tab, plural).validate_semantics(),
+                    Err(expected.clone())
+                );
+            }
+        }
+
+        let url_prefix = "https://example.test/";
+        let boundary_url = format!(
+            "{url_prefix}{}",
+            "u".repeat(MAX_RESULT_TAB_URL_BYTES - url_prefix.len())
+        );
+        let boundary_title = "t".repeat(MAX_RESULT_TAB_TITLE_BYTES);
+        assert_eq!(boundary_url.len(), MAX_RESULT_TAB_URL_BYTES);
+        assert_eq!(boundary_title.len(), MAX_RESULT_TAB_TITLE_BYTES);
+        for plural in [false, true] {
+            let tab = ResultTab {
+                id: TabHandle::parse("t_fact_boundaries").unwrap(),
+                url: Some(boundary_url.clone()),
+                title: Some(boundary_title.clone()),
+                current: false,
+                redacted: None,
+            };
+            assert_eq!(result_with_tab(tab, plural).validate_semantics(), Ok(()));
+        }
+
+        assert_invalid_fact(
+            Some("u".repeat(MAX_RESULT_TAB_URL_BYTES + 1)),
+            Some("valid title".into()),
+            BrowserResultValidationError::InvalidTabUrl,
+        );
+        assert_invalid_fact(
+            Some("https://example.test/bad\nurl".into()),
+            Some("valid title".into()),
+            BrowserResultValidationError::InvalidTabUrl,
+        );
+        assert_invalid_fact(
+            Some("https://example.test/".into()),
+            Some("t".repeat(MAX_RESULT_TAB_TITLE_BYTES + 1)),
+            BrowserResultValidationError::InvalidTabTitle,
+        );
+        assert_invalid_fact(
+            Some("https://example.test/".into()),
+            Some("bad\ntitle".into()),
+            BrowserResultValidationError::InvalidTabTitle,
+        );
+    }
+
+    #[test]
     fn flow_result_round_trips_without_nested_surface_identity() {
         let mut completed = BrowserResult::new(
-            OperationId::BrowserScreenshot,
-            IntentId::ScreenshotViewport,
+            OperationKind::BrowserTakeScreenshot,
             BrowserResultStatus::Ok,
             OperationEffect::None,
         );
@@ -1521,7 +2679,13 @@ mod tests {
                 mime_type: "image/jpeg".into(),
             },
         ];
-        completed.data = serde_json::json!({"image_id": "img_1"});
+        completed.result = Some(OperationResult::BrowserTakeScreenshot {
+            frame: "f_image1".into(),
+            width: 1,
+            height: 1,
+            scope: CaptureScope::Viewport,
+            target: None,
+        });
         completed.provenance = Some(
             PageProvenance::new(
                 vec!["/parts/0/text".into(), "/parts/1/data".into()],
@@ -1533,8 +2697,7 @@ mod tests {
         );
 
         let not_run = BrowserResult::new(
-            OperationId::BrowserAct,
-            IntentId::ActClick,
+            OperationKind::BrowserClick,
             BrowserResultStatus::NotDispatched,
             OperationEffect::None,
         );
@@ -1562,7 +2725,7 @@ mod tests {
         let value = serde_json::to_value(&flow).expect("serialize flow result");
         assert_eq!(
             value["steps"][0]["result"]["operation"],
-            "browser.screenshot"
+            "browser_take_screenshot"
         );
         assert_eq!(value["steps"][1]["status"], "not_run");
         let rendered = value.to_string();
@@ -1576,100 +2739,209 @@ mod tests {
 
     #[test]
     fn browser_result_terminal_dispositions_validate_as_one_closed_contract() {
-        let key = (OperationId::BrowserAct, IntentId::ActClick);
-        for (status, effect, retry, expected) in [
+        let operation = OperationKind::BrowserClick;
+        for (status, effect, repeat, expected) in [
             (
                 BrowserResultStatus::Ok,
                 OperationEffect::Unknown,
-                None,
+                RetryDisposition::Unsafe,
                 BrowserResultValidationError::UnknownEffectWithTerminalStatus,
             ),
             (
                 BrowserResultStatus::Partial,
                 OperationEffect::Dispatched,
-                None,
+                RetryDisposition::Unsafe,
                 BrowserResultValidationError::TerminalDispatched,
             ),
             (
                 BrowserResultStatus::OutcomeUnknown,
                 OperationEffect::Unknown,
-                None,
+                RetryDisposition::Safe,
                 BrowserResultValidationError::InvalidOutcomeUnknown,
             ),
             (
                 BrowserResultStatus::Held,
                 OperationEffect::Committed,
-                Some(RetryDisposition::Unsafe),
+                RetryDisposition::Unsafe,
                 BrowserResultValidationError::PreDispatchStatusWithEffect,
             ),
             (
                 BrowserResultStatus::Cancelled,
                 OperationEffect::Committed,
-                None,
+                RetryDisposition::Safe,
                 BrowserResultValidationError::InvalidCancellation,
             ),
         ] {
-            let mut result = BrowserResult::new(key.0, key.1, status, effect);
-            result.retry = retry;
+            let mut result = BrowserResult::new(operation, status, effect);
+            result.repeat = repeat;
             assert_eq!(result.validate_semantics(), Err(expected));
         }
 
-        for (status, effect, retry) in [
+        for (status, effect, repeat) in [
             (
                 BrowserResultStatus::OutcomeUnknown,
                 OperationEffect::Unknown,
-                Some(RetryDisposition::Unsafe),
+                RetryDisposition::Unsafe,
             ),
             (
                 BrowserResultStatus::Blocked,
                 OperationEffect::Committed,
-                Some(RetryDisposition::Unsafe),
+                RetryDisposition::Unsafe,
             ),
             (
                 BrowserResultStatus::Cancelled,
                 OperationEffect::Committed,
-                Some(RetryDisposition::Unsafe),
+                RetryDisposition::Unsafe,
             ),
             (
                 BrowserResultStatus::Cancelled,
                 OperationEffect::Unknown,
-                Some(RetryDisposition::Unsafe),
+                RetryDisposition::Unsafe,
             ),
         ] {
-            let mut result = BrowserResult::new(key.0, key.1, status, effect);
-            result.retry = retry;
+            let mut result = BrowserResult::new(operation, status, effect);
+            result.repeat = repeat;
             assert_eq!(result.validate_semantics(), Ok(()));
         }
     }
 
     #[test]
-    fn blocked_result_can_carry_state_refresh_recovery() {
+    fn browser_result_readiness_axes_validate_as_one_closed_contract() {
         let mut result = BrowserResult::new(
-            OperationId::BrowserAct,
-            IntentId::ActClick,
+            OperationKind::BrowserNavigate,
+            BrowserResultStatus::Ok,
+            OperationEffect::Committed,
+        );
+        result.result = Some(OperationResult::BrowserNavigate { landed: true });
+        result.readiness = Some(Readiness {
+            status: ReadinessStatus::Ready,
+            condition: None,
+            settlement: Some(ReadinessSettlement {
+                requested: true,
+                status: SettlementStatus::Settled,
+            }),
+            elapsed_ms: Some(125),
+        });
+        assert_eq!(result.validate_semantics(), Ok(()));
+
+        for readiness in [
+            Readiness {
+                status: ReadinessStatus::Ready,
+                condition: None,
+                settlement: None,
+                elapsed_ms: Some(1),
+            },
+            Readiness {
+                status: ReadinessStatus::TimedOut,
+                condition: None,
+                settlement: Some(ReadinessSettlement {
+                    requested: true,
+                    status: SettlementStatus::Settled,
+                }),
+                elapsed_ms: Some(1),
+            },
+            Readiness {
+                status: ReadinessStatus::NotRequested,
+                condition: None,
+                settlement: Some(ReadinessSettlement {
+                    requested: true,
+                    status: SettlementStatus::Unavailable,
+                }),
+                elapsed_ms: Some(1),
+            },
+        ] {
+            result.readiness = Some(readiness);
+            assert_eq!(
+                result.validate_semantics(),
+                Err(BrowserResultValidationError::InvalidReadiness)
+            );
+        }
+
+        result.status = BrowserResultStatus::Blocked;
+        result.problem = default_result_problem(BrowserResultStatus::Blocked);
+        result.readiness = Some(Readiness {
+            status: ReadinessStatus::Unavailable,
+            condition: None,
+            settlement: Some(ReadinessSettlement {
+                requested: true,
+                status: SettlementStatus::Unavailable,
+            }),
+            elapsed_ms: Some(1),
+        });
+        assert_eq!(
+            result.validate_semantics(),
+            Err(BrowserResultValidationError::InvalidReadiness)
+        );
+    }
+
+    #[test]
+    fn blocked_result_can_carry_typed_state_refresh_guidance() {
+        let mut result = BrowserResult::new(
+            OperationKind::BrowserClick,
             BrowserResultStatus::Blocked,
             OperationEffect::None,
         );
-        result.retry = Some(RetryDisposition::AfterStateChange);
-        result.recovery = Some(RecoveryHint {
-            message: "refresh target refs".into(),
-            next_operation: Some(OperationKey::new(
-                OperationId::BrowserSnapshot,
-                IntentId::SnapshotCapture,
-            )),
+        result.repeat = RetryDisposition::AfterStateChange;
+        result.problem = Some(ResultProblem {
+            code: ResultProblemCode::TargetStale,
+            message: "The target belongs to an older page revision.".into(),
         });
+        result.suggested_next_steps = vec![SuggestedNextStep::Call {
+            reason: "Refresh page targets before choosing another action.".into(),
+            operation: Operation::BrowserInspectPage(InspectPageArguments::default()),
+        }];
 
         let value = serde_json::to_value(result).expect("serialize blocked result");
         assert_eq!(value["status"], "blocked");
         assert_eq!(value["effect"], "none");
-        assert_eq!(value["retry"], "after_state_change");
+        assert_eq!(value["repeat"], "after_state_change");
         assert_eq!(
-            value["recovery"]["next_operation"],
+            value["suggested_next_steps"][0]["operation"],
             serde_json::json!({
-                "id": "browser.snapshot",
-                "intent": "snapshot.capture"
+                "operation": "browser_inspect_page",
+                "arguments": {"include":"interactive"}
             })
         );
+    }
+
+    #[test]
+    fn canonical_problem_and_recovery_guidance_fail_closed() {
+        let mut missing_problem = BrowserResult::new(
+            OperationKind::BrowserClick,
+            BrowserResultStatus::Blocked,
+            OperationEffect::None,
+        );
+        missing_problem.problem = None;
+        assert_eq!(
+            missing_problem.validate_semantics(),
+            Err(BrowserResultValidationError::InvalidProblemPresence)
+        );
+
+        let mut uncertain = BrowserResult::new(
+            OperationKind::BrowserClick,
+            BrowserResultStatus::OutcomeUnknown,
+            OperationEffect::Unknown,
+        );
+        uncertain.suggested_next_steps = vec![SuggestedNextStep::Call {
+            reason: "Do the click again.".into(),
+            operation: Operation::BrowserClick(ClickArguments {
+                tab: None,
+                target: OperationTarget::parse("r_example").unwrap(),
+                button: ClickButton::Left,
+                clicks: 1,
+                modifiers: Vec::new(),
+            }),
+        }];
+        assert_eq!(
+            uncertain.validate_semantics(),
+            Err(BrowserResultValidationError::UnsafeSuggestedNextStep)
+        );
+
+        uncertain.suggested_next_steps = vec![SuggestedNextStep::Call {
+            reason: "Inspect current state without replaying the click.".into(),
+            operation: Operation::BrowserInspectPage(InspectPageArguments::default()),
+        }];
+        assert_eq!(uncertain.validate_semantics(), Ok(()));
     }
 
     #[test]
@@ -1680,10 +2952,12 @@ mod tests {
             "/intent",
             "/status",
             "/effect",
-            "/retry",
-            "/recovery",
+            "/repeat",
+            "/problem",
+            "/suggested_next_steps",
             "/workspace",
             "/tab/id",
+            "/tabs/0/id",
             "/parts/0/type",
             "/parts/0/mime_type",
         ] {
@@ -1699,7 +2973,7 @@ mod tests {
     #[test]
     fn provenance_frame_origin_is_bounded_and_validated_on_decode() {
         let provenance = PageProvenance::new(
-            vec!["/data".into()],
+            vec!["/result".into()],
             Some("https://example.com".into()),
             Some("00112233445566778899aabbccddeeff".into()),
             Some("https://frame.example".into()),
@@ -1718,13 +2992,13 @@ mod tests {
             "x".repeat(MAX_PAGE_ORIGIN_BYTES + 1),
         ] {
             assert_eq!(
-                PageProvenance::new(vec!["/data".into()], None, None, Some(frame_origin)),
+                PageProvenance::new(vec!["/result".into()], None, None, Some(frame_origin)),
                 Err(PageProvenanceError::InvalidFrameOrigin)
             );
         }
 
         assert!(serde_json::from_value::<PageProvenance>(serde_json::json!({
-            "untrusted_fields": ["/data"],
+            "untrusted_fields": ["/result"],
             "frame_origin": "bad\norigin"
         }))
         .is_err());

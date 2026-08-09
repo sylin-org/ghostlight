@@ -7,14 +7,12 @@ pub(crate) mod armor;
 pub(crate) mod b64;
 pub mod browser;
 pub mod constants;
-pub mod gif;
 pub mod governance;
 pub mod hub;
 pub mod install;
 pub mod messages;
 pub mod operation;
 pub mod origin;
-pub(crate) mod recording;
 pub mod tool;
 pub mod work;
 

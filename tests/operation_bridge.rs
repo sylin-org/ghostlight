@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-//! Bridge-major-2 integration guards for canonical browser operations.
+//! Bridge-major-3 integration guards for typed canonical browser operations.
 
 use ghostlight_transport::bridge::{
     BridgeSequence, CatalogProjection, EdgeMessage, OperationAvailability, RequestContext,
     ServiceMessage, TerminalOutcome, WorkId, WorkspaceUse, BRIDGE_MAJOR,
 };
 use ghostlight_transport::operation::{
-    BrowserOperation, BrowserResult, BrowserResultStatus, IntentId, InvocationPresentation,
-    OperationEffect, OperationId, ResultPart,
+    BrowserResult, BrowserResultStatus, ClickArguments, ClickButton, InspectPageArguments,
+    Operation, OperationEffect, OperationKind, OperationResult, OperationTarget, ResultPart,
+    RunSequenceArguments, TabHandle,
 };
 use serde_json::{json, Value};
 
@@ -34,84 +35,87 @@ fn assert_no_nested_surface_identity(value: &Value) {
 
 #[test]
 fn recursive_canonical_flow_crosses_the_bridge_without_surface_identity() {
-    let operation = BrowserOperation::new(
-        OperationId::BrowserFlow,
-        IntentId::FlowExecute,
-        json!({
-            "tab": 7,
-            "steps": [
-                BrowserOperation::new(
-                    OperationId::BrowserFind,
-                    IntentId::FindQuery,
-                    json!({"tab":7,"query":"Save"}),
-                ),
-                BrowserOperation::new(
-                    OperationId::BrowserAct,
-                    IntentId::ActClick,
-                    json!({"tab":7,"target":{"ref":"$prev.results.0.ref"}}),
-                ),
-            ]
-        }),
+    let tab = TabHandle::parse("t_12345678").expect("valid tab");
+    let operation = Operation::BrowserRunSequence(RunSequenceArguments {
+        tab: Some(tab.clone()),
+        steps: vec![
+            Operation::BrowserInspectPage(InspectPageArguments {
+                cursor: None,
+                tab: Some(tab.clone()),
+                query: Some("Save".into()),
+                target: None,
+                include: Default::default(),
+            }),
+            Operation::BrowserClick(ClickArguments {
+                target: OperationTarget::parse("Save").expect("valid target"),
+                tab: Some(tab),
+                button: ClickButton::Left,
+                clicks: 1,
+                modifiers: Vec::new(),
+            }),
+        ],
+    });
+    assert_eq!(operation.kind(), OperationKind::BrowserRunSequence);
+    assert_no_nested_surface_identity(
+        &serde_json::to_value(&operation).expect("operation serializes"),
     );
-    assert_eq!(operation.id, OperationId::BrowserFlow);
-    assert_eq!(operation.intent, IntentId::FlowExecute);
-    assert_no_nested_surface_identity(&operation.arguments);
 
     let message = EdgeMessage::Start {
         sequence: BridgeSequence(4),
         operation,
-        presentation: Some(
-            InvocationPresentation::new("ghostlight-legacy", 1, "script", None)
-                .expect("bounded presentation"),
-        ),
         workspace: None,
         context: RequestContext::default(),
     };
     let wire = serde_json::to_value(message).expect("start serializes");
-    assert_eq!(wire["operation"]["id"], "browser.flow");
+    assert_eq!(wire["operation"]["operation"], "browser_run_sequence");
     assert_eq!(
-        wire["operation"]["arguments"]["steps"][0]["id"],
-        "browser.find"
+        wire["operation"]["arguments"]["steps"][0]["operation"],
+        "browser_inspect_page"
     );
     assert_eq!(
-        wire["operation"]["arguments"]["steps"][1]["id"],
-        "browser.act"
+        wire["operation"]["arguments"]["steps"][1]["operation"],
+        "browser_click"
     );
-    assert_eq!(wire["presentation"]["externalTool"], "script");
+    assert!(wire.get("presentation").is_none());
 }
 
 #[test]
 fn catalog_and_success_wire_are_protocol_neutral_and_declaration_free() {
-    assert_eq!(BRIDGE_MAJOR, 2);
+    assert_eq!(BRIDGE_MAJOR, 3);
     let projection = CatalogProjection {
         generation: 9,
         operations: vec![OperationAvailability {
-            id: OperationId::BrowserSnapshot,
-            intent: IntentId::SnapshotCapture,
+            operation: OperationKind::BrowserInspectPage,
             workspace_use: WorkspaceUse::Uses,
         }],
         restricted: false,
     };
     let catalog = serde_json::to_value(projection).expect("projection serializes");
-    assert_eq!(catalog["operations"][0]["id"], "browser.snapshot");
+    assert_eq!(
+        catalog["operations"][0]["operation"],
+        "browser_inspect_page"
+    );
     let catalog_wire = catalog.to_string();
     for forbidden in ["description", "inputSchema", "annotations", "instructions"] {
         assert!(!catalog_wire.contains(forbidden));
     }
 
     let mut result = BrowserResult::new(
-        OperationId::BrowserSnapshot,
-        IntentId::SnapshotCapture,
+        OperationKind::BrowserInspectPage,
         BrowserResultStatus::Ok,
         OperationEffect::None,
     );
     result.parts.push(ResultPart::Text {
         text: "snapshot ready".into(),
     });
-    result.data = json!({"revision": 3});
+    result.result = Some(OperationResult::BrowserInspectPage {
+        targets: Vec::new(),
+        more: false,
+        cursor: None,
+    });
     let completed = ServiceMessage::Completed {
         work_id: WorkId(11),
-        outcome: TerminalOutcome::Success {
+        outcome: TerminalOutcome {
             result: Box::new(result),
         },
     };
@@ -120,7 +124,10 @@ fn catalog_and_success_wire_are_protocol_neutral_and_declaration_free() {
         serde_json::from_value::<ServiceMessage>(wire.clone()).expect("completion round trips"),
         completed
     );
-    assert_eq!(wire["outcome"]["result"]["operation"], "browser.snapshot");
+    assert_eq!(
+        wire["outcome"]["result"]["operation"],
+        "browser_inspect_page"
+    );
     let rendered = wire.to_string();
     for forbidden in [
         "jsonrpc",

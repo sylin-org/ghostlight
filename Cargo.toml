@@ -1,6 +1,6 @@
 [package]
 name = "ghostlight"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 description = "Governed browser automation over the user's own authenticated Chromium session -- for AI coding agents."
 publish = false
@@ -24,6 +24,7 @@ anyhow = "1"
 # Those below are used directly by the integration tests in tests/; they stay in [dependencies]
 # because this package declares no [dev-dependencies] section.
 serde_json = { version = "1", features = ["preserve_order"] }
+serde = { version = "1", features = ["derive"] }
 dirs = "6"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

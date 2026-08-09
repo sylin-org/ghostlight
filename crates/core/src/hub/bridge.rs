@@ -8,20 +8,21 @@
 use crate::governance::overlay::SessionOverlay;
 use crate::governance::ports::ClientInfo;
 use crate::hub::peer::PeerCred;
-use crate::hub::workspace::{WorkspaceError, WorkspaceLease};
+use crate::hub::workspace::{WorkspaceError, WorkspaceLease, WorkspaceRegistry};
 use crate::hub::ServiceContext;
 use crate::operation::registry;
-use crate::operation::result::canonicalize_success;
 use crate::tool::outcome::{CallOutcome, DenialSource as CoreDenialSource};
 use crate::work::{CancellationToken, WorkContext};
 use crate::{Error, ToolError};
 use ghostlight_transport::bridge::{
     read_edge_message, write_service_message, BridgeError, BridgeErrorKind, BridgeSequence,
-    DenialSource, EdgeMessage, RequestContext, ServiceMessage, TerminalOutcome, WorkId,
-    WorkspaceId, WorkspaceUse, BRIDGE_MAJOR,
+    EdgeMessage, RequestContext, ServiceMessage, TerminalOutcome, WorkId, WorkspaceId,
+    WorkspaceUse, BRIDGE_MAJOR,
 };
-use ghostlight_transport::operation::{OperationEffect, OperationKey};
-use serde_json::json;
+use ghostlight_transport::operation::{
+    BrowserResult, BrowserResultStatus, InspectPageArguments, Operation, OperationEffect,
+    OperationKind, ResultProblem, ResultProblemCode, SuggestedNextStep,
+};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -237,7 +238,7 @@ where
                         };
                         let generation = *ctx.catalog_generation.borrow();
                         let authority = ctx.authority.current();
-                        let projection = crate::tool::catalog::project_catalog(
+                        let projection = crate::operation::registry::project_availability(
                             &authority.governance,
                             validated.restriction.as_deref(),
                             generation,
@@ -252,34 +253,13 @@ where
                     EdgeMessage::Start {
                         sequence,
                         operation,
-                        presentation,
                         workspace,
                         context,
                     } => {
                         let workspace_was_supplied = workspace.is_some();
-                        let key = operation.key();
-                        let Some(descriptor) = registry::descriptor(key) else {
-                            if let Err(error) = send_rejection(
-                                &writer_tx,
-                                sequence,
-                                BridgeError {
-                                    kind: BridgeErrorKind::InvalidRequest,
-                                    message: format!(
-                                        "unknown operation: {}/{}",
-                                        key.id.as_str(),
-                                        key.intent.as_str()
-                                    ),
-                                    next_step: Some(
-                                        "request the current catalog and use an advertised operation"
-                                            .to_string(),
-                                    ),
-                                },
-                            ).await {
-                                break Err(error);
-                            }
-                            continue;
-                        };
-                        if let Err(error) = descriptor.validate(&operation.arguments) {
+                        let canonical_kind = operation.kind();
+                        let workspace_use = registry::workspace_use(canonical_kind);
+                        if let Err(error) = operation.validate() {
                             if let Err(error) = send_rejection(
                                 &writer_tx,
                                 sequence,
@@ -291,9 +271,7 @@ where
                                             .to_string(),
                                     ),
                                 },
-                            )
-                            .await
-                            {
+                            ).await {
                                 break Err(error);
                             }
                             continue;
@@ -329,7 +307,7 @@ where
                         let workspace = match resolve_start_workspace(
                             &ctx,
                             &peer,
-                            descriptor.workspace_use,
+                            workspace_use,
                             workspace,
                         ) {
                             Ok(resolved) => resolved,
@@ -340,6 +318,17 @@ where
                                 continue;
                             }
                         };
+                        let _descriptor = registry::descriptor(canonical_kind);
+                        if let Err(error) = validate_explicit_tab_handles(
+                            &ctx.workspaces,
+                            workspace.as_ref(),
+                            &operation,
+                        ) {
+                            if let Err(error) = send_rejection(&writer_tx, sequence, error).await {
+                                break Err(error);
+                            }
+                            continue;
+                        }
                         if !workspace_was_supplied {
                             if let Some(workspace) = workspace.as_ref() {
                                 apply_presentation(&ctx, workspace, validated.client.as_ref());
@@ -392,7 +381,7 @@ where
                                 sequence,
                                 work_id,
                                 workspace: workspace.clone(),
-                                context_creating: descriptor.workspace_use == WorkspaceUse::Creates,
+                                context_creating: workspace_use == WorkspaceUse::Creates,
                             },
                         ).await {
                             active.lock().await.remove(&work_id);
@@ -408,7 +397,6 @@ where
                             WorkContext::new(
                                 workspace,
                                 operation,
-                                presentation,
                                 validated.client,
                                 validated.restriction,
                             ),
@@ -606,7 +594,8 @@ fn spawn_work(
     tokio::spawn(async move {
         let _activity = activity;
         let _lease = lease;
-        let key = work.operation_key();
+        let operation = work.operation().clone();
+        let operation_kind = work.operation_kind();
         let workspace = work.workspace().cloned();
         let work_future = crate::tool::pipeline::run_work(
             &ctx.browser,
@@ -619,9 +608,13 @@ fn spawn_work(
         report_work_with_deadline(
             &writer,
             work_id,
-            key,
+            operation_kind,
             workspace,
             CALLER_RESPONSE_DEADLINE,
+            Some(CompletionContext {
+                operation: &operation,
+                workspaces: &ctx.workspaces,
+            }),
             work_future,
         )
         .await;
@@ -635,9 +628,10 @@ fn spawn_work(
 async fn report_work_with_deadline<F>(
     writer: &mpsc::Sender<ServiceMessage>,
     work_id: WorkId,
-    key: OperationKey,
+    operation_kind: ghostlight_transport::operation::OperationKind,
     workspace: Option<WorkspaceId>,
     response_deadline: Duration,
+    completion: Option<CompletionContext<'_>>,
     work: F,
 ) where
     F: Future<Output = CallOutcome>,
@@ -646,25 +640,100 @@ async fn report_work_with_deadline<F>(
     tokio::select! {
         biased;
         outcome = &mut work => {
+            let outcome = terminal_outcome(
+                outcome,
+                operation_kind,
+                completion.map(|context| context.operation),
+                completion.map(|context| context.workspaces),
+                workspace.clone(),
+            );
             let _ = writer
                 .send(ServiceMessage::Completed {
                     work_id,
-                    outcome: terminal_outcome(outcome, key, workspace),
+                    outcome,
                 })
                 .await;
         }
         _ = tokio::time::sleep(response_deadline) => {
             let response = writer.send(ServiceMessage::Completed {
                 work_id,
-                outcome: TerminalOutcome::OutcomeUnknown {
-                    message: CALLER_DEADLINE_MESSAGE.to_string(),
-                },
+                outcome: canonical_terminal(
+                    operation_kind,
+                    workspace.clone(),
+                    BrowserResultStatus::OutcomeUnknown,
+                    OperationEffect::Unknown,
+                    ResultProblemCode::OutcomeUnknown,
+                    CALLER_DEADLINE_MESSAGE,
+                    uncertain_state_suggestion(),
+                ),
             });
             // Poll the bounded response enqueue and the SAME work future concurrently. A stalled
             // edge must not prevent the service from completing its landing check and audit.
             let (_, _) = tokio::join!(response, &mut work);
         }
     }
+}
+
+fn validate_explicit_tab_handles(
+    workspaces: &WorkspaceRegistry,
+    workspace: Option<&WorkspaceId>,
+    operation: &Operation,
+) -> Result<(), BridgeError> {
+    fn check(
+        workspaces: &WorkspaceRegistry,
+        workspace: Option<&WorkspaceId>,
+        tab: Option<&ghostlight_transport::operation::TabHandle>,
+    ) -> Result<(), BridgeError> {
+        let Some(tab) = tab else { return Ok(()) };
+        if workspace.is_some_and(|workspace| workspaces.resolve_tab(workspace, tab).is_some()) {
+            return Ok(());
+        }
+        Err(BridgeError {
+            kind: BridgeErrorKind::InvalidRequest,
+            message: "unknown tab".to_string(),
+            next_step: Some("list controlled tabs and use a current opaque tab handle".to_string()),
+        })
+    }
+
+    use Operation as C;
+    match operation {
+        C::BrowserFocusTab(arguments) | C::BrowserCloseTab(arguments) => {
+            check(workspaces, workspace, Some(&arguments.tab))
+        }
+        C::BrowserNavigate(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserGoBack(arguments)
+        | C::BrowserGoForward(arguments)
+        | C::BrowserReloadPage(arguments)
+        | C::BrowserPressEscape(arguments)
+        | C::BrowserGetDialog(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserInspectPage(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserReadPage(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserTakeScreenshot(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserClick(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserHover(arguments) | C::BrowserScrollToTarget(arguments) => {
+            check(workspaces, workspace, arguments.tab.as_ref())
+        }
+        C::BrowserScrollPage(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserPressKey(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserDrag(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserFillForm(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserWaitFor(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserHandleDialog(arguments) => check(workspaces, workspace, arguments.tab.as_ref()),
+        C::BrowserRunSequence(arguments) => {
+            check(workspaces, workspace, arguments.tab.as_ref())?;
+            for step in &arguments.steps {
+                validate_explicit_tab_handles(workspaces, workspace, step)?;
+            }
+            Ok(())
+        }
+        C::BrowserGetStatus(_) | C::BrowserOpenTab(_) | C::BrowserListTabs(_) => Ok(()),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CompletionContext<'a> {
+    operation: &'a Operation,
+    workspaces: &'a WorkspaceRegistry,
 }
 
 async fn cancel_active(active: &ActiveWork) {
@@ -676,76 +745,314 @@ async fn cancel_active(active: &ActiveWork) {
 
 fn terminal_outcome(
     outcome: CallOutcome,
-    key: OperationKey,
+    operation_kind: ghostlight_transport::operation::OperationKind,
+    _operation: Option<&Operation>,
+    _workspaces: Option<&WorkspaceRegistry>,
     workspace: Option<WorkspaceId>,
 ) -> TerminalOutcome {
     match outcome {
-        CallOutcome::Success { result } => {
-            let disposition = registry::descriptor(key)
-                .expect("accepted work retains a registered canonical operation")
-                .success_disposition_for(&result);
-            match canonicalize_success(key, disposition, workspace, result) {
-                Ok(result) => TerminalOutcome::Success {
-                    result: Box::new(result),
-                },
-                Err(error) => {
-                    tracing::error!(
-                        operation = key.id.as_str(),
-                        intent = key.intent.as_str(),
-                        error = %error,
-                        "successful operation produced an invalid canonical result"
-                    );
-                    if disposition.effect == OperationEffect::None {
-                        tool_failure(ToolError::binary(format!(
-                            "failed to construct the canonical browser result: {error}"
-                        )))
-                    } else {
-                        TerminalOutcome::OutcomeUnknown {
-                            message: format!(
-                                "The browser operation completed, but Ghostlight could not render its result ({error}). Do not retry automatically; inspect the browser before deciding what to do next."
-                            ),
-                        }
-                    }
-                }
-            }
-        }
-        CallOutcome::Failure { error } => tool_failure(error),
-        CallOutcome::NotDispatched { message } => TerminalOutcome::NotDispatched { message },
-        CallOutcome::OutcomeUnknown { message } => TerminalOutcome::OutcomeUnknown { message },
-        CallOutcome::Denied { message, source } => TerminalOutcome::Denied {
-            message,
-            source: match source {
-                CoreDenialSource::Policy => DenialSource::Policy,
-                CoreDenialSource::Sacred => DenialSource::Sacred,
+        CallOutcome::Success { result } => TerminalOutcome { result },
+        CallOutcome::Failure { error } => tool_failure(operation_kind, workspace, error),
+        CallOutcome::NotDispatched { message } => canonical_terminal(
+            operation_kind,
+            workspace,
+            BrowserResultStatus::NotDispatched,
+            OperationEffect::None,
+            ResultProblemCode::NotDispatched,
+            &message,
+            Vec::new(),
+        ),
+        CallOutcome::OutcomeUnknown { message } => canonical_terminal(
+            operation_kind,
+            workspace,
+            BrowserResultStatus::OutcomeUnknown,
+            OperationEffect::Unknown,
+            ResultProblemCode::OutcomeUnknown,
+            &message,
+            uncertain_state_suggestion(),
+        ),
+        CallOutcome::Denied { message, source } => canonical_terminal(
+            operation_kind,
+            workspace,
+            BrowserResultStatus::Blocked,
+            OperationEffect::None,
+            match source {
+                CoreDenialSource::Policy => ResultProblemCode::PolicyBlocked,
+                CoreDenialSource::Sacred => ResultProblemCode::ProtectedHost,
             },
-        },
-        CallOutcome::Held { prolonged } => TerminalOutcome::Held { prolonged },
-        CallOutcome::AttentionRequired { message } => {
-            TerminalOutcome::AttentionRequired { message }
-        }
+            &message,
+            Vec::new(),
+        ),
+        CallOutcome::Held { prolonged } => canonical_terminal(
+            operation_kind,
+            workspace,
+            BrowserResultStatus::Held,
+            OperationEffect::None,
+            ResultProblemCode::HeldByUser,
+            if prolonged {
+                "The user has controlled the browser for more than two minutes."
+            } else {
+                "The user is controlling the browser."
+            },
+            vec![SuggestedNextStep::WaitForUser {
+                reason: "Wait until the user returns browser control.".into(),
+            }],
+        ),
+        CallOutcome::AttentionRequired { message } => canonical_terminal(
+            operation_kind,
+            workspace,
+            BrowserResultStatus::AttentionRequired,
+            OperationEffect::None,
+            ResultProblemCode::AttentionRequired,
+            &message,
+            vec![SuggestedNextStep::AskUser {
+                reason: "The user must review Ghostlight before work continues.".into(),
+                question: "Please review Ghostlight and tell me when I should continue.".into(),
+            }],
+        ),
         CallOutcome::Cancelled { message, effect } => {
-            TerminalOutcome::Cancelled { message, effect }
+            let (status, effect, suggestions) = match effect {
+                OperationEffect::None => (
+                    BrowserResultStatus::Cancelled,
+                    OperationEffect::None,
+                    Vec::new(),
+                ),
+                OperationEffect::Committed => (
+                    BrowserResultStatus::Cancelled,
+                    OperationEffect::Committed,
+                    Vec::new(),
+                ),
+                OperationEffect::Dispatched | OperationEffect::Unknown => (
+                    BrowserResultStatus::OutcomeUnknown,
+                    OperationEffect::Unknown,
+                    uncertain_state_suggestion(),
+                ),
+            };
+            canonical_terminal(
+                operation_kind,
+                workspace,
+                status,
+                effect,
+                if status == BrowserResultStatus::Cancelled {
+                    ResultProblemCode::Cancelled
+                } else {
+                    ResultProblemCode::OutcomeUnknown
+                },
+                &message,
+                suggestions,
+            )
         }
     }
 }
 
-fn tool_failure(error: ToolError) -> TerminalOutcome {
-    let message = error.to_string();
-    let result = json!({
-        "content": [{ "type": "text", "text": message }],
-        "isError": true,
+fn tool_failure(
+    operation: OperationKind,
+    workspace: Option<WorkspaceId>,
+    error: ToolError,
+) -> TerminalOutcome {
+    let effectful = registry::descriptor(operation)
+        .requires
+        .iter()
+        .any(|capability| {
+            matches!(
+                capability,
+                crate::governance::ports::Capability::Interact
+                    | crate::governance::ports::Capability::Write
+                    | crate::governance::ports::Capability::Execute
+            )
+        });
+    let effect_unknown = effectful
+        && matches!(
+            &error,
+            ToolError::Ipc { .. } | ToolError::Extension { .. } | ToolError::Cdp { .. }
+        );
+    let (code, message, suggestion) = match error {
+        ToolError::InvalidRequest { .. } => (
+            ResultProblemCode::InvalidArguments,
+            "Ghostlight rejected invalid operation arguments.",
+            None,
+        ),
+        ToolError::Page { .. } => (
+            ResultProblemCode::TargetStale,
+            "The page target or document changed before Ghostlight could finish.",
+            Some(SuggestedNextStep::Call {
+                reason: "Inspect the current page to get fresh targets.".into(),
+                operation: Operation::BrowserInspectPage(
+                    InspectPageArguments::default(),
+                ),
+            }),
+        ),
+        ToolError::Ipc { .. } | ToolError::Binary { .. } => (
+            ResultProblemCode::CapabilityUnavailable,
+            "Ghostlight could not complete the operation because its local service path failed.",
+            Some(SuggestedNextStep::ReconnectClient {
+                reason: "Reconnect the MCP client before continuing.".into(),
+            }),
+        ),
+        ToolError::Extension { .. } => (
+            ResultProblemCode::BrowserDisconnected,
+            "Ghostlight could not complete the operation because the browser is unavailable.",
+            Some(SuggestedNextStep::ReconnectBrowser {
+                reason: "Reconnect the Ghostlight browser extension before continuing.".into(),
+            }),
+        ),
+        ToolError::CapabilityNotReady { capability, .. } if capability == "browser" => (
+            ResultProblemCode::BrowserDisconnected,
+            "Ghostlight could not complete the operation because the browser is unavailable.",
+            Some(SuggestedNextStep::ReconnectBrowser {
+                reason: "Reconnect the Ghostlight browser extension before continuing.".into(),
+            }),
+        ),
+        ToolError::CapabilityNotReady { .. } => (
+            ResultProblemCode::CapabilityUnavailable,
+            "The connected browser adapter does not provide a capability required by this operation.",
+            Some(SuggestedNextStep::ReconnectBrowser {
+                reason: "Reload or update the Ghostlight extension before trying again.".into(),
+            }),
+        ),
+        ToolError::Cdp { .. } => (
+            ResultProblemCode::CapabilityUnavailable,
+            "The browser rejected the requested operation.",
+            None,
+        ),
+        ToolError::Held { prolonged } => {
+            return terminal_outcome(
+                CallOutcome::Held { prolonged },
+                operation,
+                None,
+                None,
+                workspace,
+            )
+        }
+        ToolError::AttentionRequired { message } => {
+            return terminal_outcome(
+                CallOutcome::AttentionRequired { message },
+                operation,
+                None,
+                None,
+                workspace,
+            )
+        }
+    };
+    canonical_terminal(
+        operation,
+        workspace,
+        if effect_unknown {
+            BrowserResultStatus::OutcomeUnknown
+        } else if matches!(
+            code,
+            ResultProblemCode::InvalidArguments | ResultProblemCode::TargetStale
+        ) {
+            BrowserResultStatus::Blocked
+        } else {
+            BrowserResultStatus::Unavailable
+        },
+        if effect_unknown {
+            OperationEffect::Unknown
+        } else {
+            OperationEffect::None
+        },
+        if effect_unknown {
+            ResultProblemCode::OutcomeUnknown
+        } else {
+            code
+        },
+        message,
+        if effect_unknown {
+            uncertain_state_suggestion()
+        } else {
+            suggestion.into_iter().collect()
+        },
+    )
+}
+
+fn canonical_terminal(
+    operation: OperationKind,
+    workspace: Option<WorkspaceId>,
+    status: BrowserResultStatus,
+    effect: OperationEffect,
+    code: ResultProblemCode,
+    message: &str,
+    suggested_next_steps: Vec<SuggestedNextStep>,
+) -> TerminalOutcome {
+    let mut result = BrowserResult::new(operation, status, effect);
+    result.workspace = workspace;
+    result.problem = Some(ResultProblem {
+        code,
+        message: bounded_guidance(message),
     });
-    TerminalOutcome::ToolFailure { result, message }
+    result.suggested_next_steps = suggested_next_steps;
+    debug_assert!(result.validate_semantics().is_ok());
+    TerminalOutcome {
+        result: Box::new(result),
+    }
+}
+
+fn uncertain_state_suggestion() -> Vec<SuggestedNextStep> {
+    vec![SuggestedNextStep::Call {
+        reason: "Inspect the current page before deciding what to do next.".into(),
+        operation: Operation::BrowserInspectPage(InspectPageArguments::default()),
+    }]
+}
+
+fn bounded_guidance(message: &str) -> String {
+    let mut bounded = String::new();
+    for character in message.chars().filter(|character| !character.is_control()) {
+        if bounded.len() + character.len_utf8()
+            > ghostlight_transport::operation::MAX_RESULT_GUIDANCE_BYTES
+        {
+            break;
+        }
+        bounded.push(character);
+    }
+    if bounded.is_empty() {
+        "Ghostlight could not complete the operation.".into()
+    } else {
+        bounded
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ghostlight_transport::bridge::ClientPresentation;
-    use ghostlight_transport::operation::{BrowserResultStatus, IntentId, OperationId};
+    use ghostlight_transport::operation::{
+        BrowserConnectionStatus, BrowserResult, BrowserResultStatus, EmptyArguments,
+        GovernanceModeStatus, OperationKind, OperationResult, PolicySourceStatus, RetryDisposition,
+        StatusAuthority, StatusLimits,
+    };
 
-    const TEST_KEY: OperationKey =
-        OperationKey::new(OperationId::BrowserContext, IntentId::ContextDescribe);
+    const TEST_OPERATION: OperationKind = OperationKind::BrowserGetStatus;
+
+    fn test_call() -> Operation {
+        Operation::BrowserGetStatus(EmptyArguments {})
+    }
+
+    fn completed_status_result() -> Box<BrowserResult> {
+        let mut result = BrowserResult::new(
+            OperationKind::BrowserGetStatus,
+            BrowserResultStatus::Ok,
+            OperationEffect::None,
+        );
+        result.result = Some(OperationResult::BrowserGetStatus {
+            browser: BrowserConnectionStatus::Disconnected,
+            authority: StatusAuthority {
+                policy_source: PolicySourceStatus::None,
+                mode: GovernanceModeStatus::Open,
+            },
+            operations: crate::operation::registry::descriptors()
+                .iter()
+                .map(|descriptor| descriptor.operation)
+                .collect(),
+            packs: Vec::new(),
+            limits: StatusLimits {
+                max_sequence_steps: 10,
+                max_tabs: 64,
+                max_read_chars: 50_000,
+            },
+        });
+        Box::new(result)
+    }
 
     #[test]
     fn active_work_guard_covers_the_entire_spawned_future_lifetime() {
@@ -786,89 +1093,98 @@ mod tests {
 
     #[test]
     fn semantic_outcomes_remain_distinct_at_the_edge_boundary() {
-        let TerminalOutcome::Success { result } = terminal_outcome(
+        let call = test_call();
+        let result = terminal_outcome(
             CallOutcome::Success {
-                result: json!({"structuredContent": {"ok": true}}),
+                result: completed_status_result(),
             },
-            TEST_KEY,
+            TEST_OPERATION,
+            Some(&call),
             None,
-        ) else {
-            panic!("expected canonical success");
-        };
-        assert_eq!(result.operation, TEST_KEY.id);
-        assert_eq!(result.intent, TEST_KEY.intent);
+            None,
+        )
+        .result;
+        assert_eq!(result.operation, TEST_OPERATION);
         assert_eq!(result.status, BrowserResultStatus::Ok);
         assert_eq!(result.effect, OperationEffect::None);
-        assert_eq!(result.data, json!({"ok": true}));
+        let ghostlight_transport::operation::OperationResult::BrowserGetStatus {
+            browser,
+            operations,
+            ..
+        } = result.result.as_ref().expect("typed status result")
+        else {
+            panic!("expected browser_get_status result")
+        };
         assert_eq!(
-            terminal_outcome(
-                CallOutcome::Denied {
-                    message: "no".to_string(),
-                    source: CoreDenialSource::Sacred,
-                },
-                TEST_KEY,
-                None,
-            ),
-            TerminalOutcome::Denied {
+            *browser,
+            ghostlight_transport::operation::BrowserConnectionStatus::Disconnected
+        );
+        assert_eq!(operations.len(), 24);
+        let denied = terminal_outcome(
+            CallOutcome::Denied {
                 message: "no".to_string(),
-                source: DenialSource::Sacred,
-            }
-        );
-        assert_eq!(
-            terminal_outcome(
-                CallOutcome::Cancelled {
-                    message: "stopped between steps".to_string(),
-                    effect: OperationEffect::None,
-                },
-                TEST_KEY,
-                None,
-            ),
-            TerminalOutcome::Cancelled {
-                message: "stopped between steps".to_string(),
-                effect: OperationEffect::None,
-            }
-        );
-    }
-
-    #[test]
-    fn invalid_success_payload_never_invites_replay_after_a_committed_effect() {
-        let outcome = terminal_outcome(
-            CallOutcome::Success {
-                result: json!({"unsupported": true}),
+                source: CoreDenialSource::Sacred,
             },
-            OperationKey::new(OperationId::BrowserAct, IntentId::ActClick),
+            TEST_OPERATION,
+            Some(&call),
+            None,
             None,
         );
-        let TerminalOutcome::OutcomeUnknown { message } = outcome else {
-            panic!("committed result-conversion failure must be outcome unknown");
-        };
-        assert!(message.contains("Do not retry automatically"));
+        assert_eq!(denied.result.status, BrowserResultStatus::Blocked);
+        assert_eq!(denied.result.effect, OperationEffect::None);
+        assert_eq!(
+            denied.result.problem.as_ref().map(|problem| problem.code),
+            Some(ResultProblemCode::ProtectedHost)
+        );
+        let cancelled = terminal_outcome(
+            CallOutcome::Cancelled {
+                message: "stopped between steps".to_string(),
+                effect: OperationEffect::None,
+            },
+            TEST_OPERATION,
+            Some(&call),
+            None,
+            None,
+        );
+        assert_eq!(cancelled.result.status, BrowserResultStatus::Cancelled);
+        assert_eq!(cancelled.result.effect, OperationEffect::None);
     }
 
     #[test]
-    fn invalid_read_only_success_payload_is_a_tool_failure() {
-        assert!(matches!(
-            terminal_outcome(
-                CallOutcome::Success {
-                    result: json!({"unsupported": true}),
-                },
-                TEST_KEY,
-                None,
-            ),
-            TerminalOutcome::ToolFailure { .. }
-        ));
+    fn tool_failure_is_a_canonical_problem_not_an_edge_payload() {
+        let outcome = tool_failure(
+            TEST_OPERATION,
+            None,
+            ToolError::invalid_request("bad arguments"),
+        );
+        assert_eq!(outcome.result.status, BrowserResultStatus::Blocked);
+        assert_eq!(outcome.result.effect, OperationEffect::None);
+        assert_eq!(
+            outcome.result.problem.as_ref().map(|problem| problem.code),
+            Some(ResultProblemCode::InvalidArguments)
+        );
     }
 
     #[test]
-    fn tool_failure_has_text_and_explicit_error_marker() {
-        let TerminalOutcome::ToolFailure { result, message } =
-            tool_failure(ToolError::invalid_request("bad arguments"))
-        else {
-            panic!("expected tool failure");
-        };
-        assert_eq!(result["isError"], true);
-        assert_eq!(result["content"][0]["type"], "text");
-        assert_eq!(result["content"][0]["text"], message);
+    fn adapter_capability_mismatch_has_one_actionable_recovery() {
+        let outcome = tool_failure(
+            OperationKind::BrowserOpenTab,
+            None,
+            ToolError::CapabilityNotReady {
+                capability: "atomic tab opening".into(),
+                message: "the adapter is older than this operation".into(),
+                next_step: "reload the extension".into(),
+            },
+        );
+        assert_eq!(outcome.result.status, BrowserResultStatus::Unavailable);
+        assert_eq!(outcome.result.effect, OperationEffect::None);
+        assert_eq!(outcome.result.repeat, RetryDisposition::Safe);
+        assert_eq!(
+            outcome.result.suggested_next_steps,
+            vec![SuggestedNextStep::ReconnectBrowser {
+                reason: "Reload or update the Ghostlight extension before trying again.".into(),
+            }]
+        );
     }
 
     #[tokio::test]
@@ -877,11 +1193,12 @@ mod tests {
         report_work_with_deadline(
             &writer,
             WorkId(7),
-            TEST_KEY,
+            TEST_OPERATION,
             None,
             Duration::ZERO,
+            None,
             std::future::ready(CallOutcome::Success {
-                result: json!({"structuredContent": {"settled": true}}),
+                result: completed_status_result(),
             }),
         )
         .await;
@@ -890,8 +1207,9 @@ mod tests {
             messages.recv().await,
             Some(ServiceMessage::Completed {
                 work_id: WorkId(7),
-                outcome: TerminalOutcome::Success { .. },
+                outcome: TerminalOutcome { result },
             })
+            if result.status == BrowserResultStatus::Ok
         ));
         assert!(matches!(
             messages.try_recv(),
@@ -907,13 +1225,14 @@ mod tests {
             report_work_with_deadline(
                 &writer,
                 WorkId(8),
-                TEST_KEY,
+                TEST_OPERATION,
                 None,
                 Duration::from_millis(5),
+                None,
                 async move {
                     let _ = settled.await;
                     CallOutcome::Success {
-                        result: json!({"structuredContent": {"late": true}}),
+                        result: completed_status_result(),
                     }
                 },
             )
@@ -924,8 +1243,9 @@ mod tests {
             messages.recv().await,
             Some(ServiceMessage::Completed {
                 work_id: WorkId(8),
-                outcome: TerminalOutcome::OutcomeUnknown { .. },
+                outcome: TerminalOutcome { result },
             })
+            if result.status == BrowserResultStatus::OutcomeUnknown
         ));
         assert!(!reporter.is_finished());
         settle.send(()).expect("late work receiver remains live");
@@ -948,14 +1268,15 @@ mod tests {
             report_work_with_deadline(
                 &writer,
                 WorkId(9),
-                TEST_KEY,
+                TEST_OPERATION,
                 None,
                 Duration::ZERO,
+                None,
                 async move {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     work_polled.send(()).ok();
                     CallOutcome::Success {
-                        result: json!({"structuredContent": {"late": true}}),
+                        result: completed_status_result(),
                     }
                 },
             )
@@ -975,8 +1296,9 @@ mod tests {
             messages.recv().await,
             Some(ServiceMessage::Completed {
                 work_id: WorkId(9),
-                outcome: TerminalOutcome::OutcomeUnknown { .. },
+                outcome: TerminalOutcome { result },
             })
+            if result.status == BrowserResultStatus::OutcomeUnknown
         ));
         reporter.await.expect("reporter completes after enqueue");
     }

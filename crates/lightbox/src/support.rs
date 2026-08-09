@@ -59,7 +59,7 @@ impl Drop for ChildGuard {
     }
 }
 
-/// Mint a process-isolated endpoint name for one legacy scenario.
+/// Mint a process-isolated endpoint name for one scenario.
 pub fn unique_endpoint(tag: &str) -> String {
     let n = UNIQUE.fetch_add(1, Ordering::Relaxed);
     format!("lightbox-{tag}-{}-{n}", std::process::id())
@@ -87,14 +87,13 @@ pub fn spawn_service_with_manage_web(
 /// Spawn the production MCP edge against a running scenario service.
 pub fn spawn_mcp_edge(endpoint: &str, log_dir: &Path) -> anyhow::Result<ChildGuard> {
     let mut command = mcp_command()?;
-    let child = command
+    command
         .env("GHOSTLIGHT_ENDPOINT", endpoint)
         .env("GHOSTLIGHT_LOG_DIR", log_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    Ok(ChildGuard(child))
+        .stderr(Stdio::null());
+    spawn_guard(&mut command)
 }
 
 /// Start a command under the child guard used by process-boundary scenarios.
@@ -146,7 +145,9 @@ pub fn initialized_2025() -> serde_json::Value {
 /// Build the trusted browser-result inventory returned by a context-creating tab operation.
 pub fn creator_inventory_result(native_tab_id: i64) -> serde_json::Value {
     let structured = serde_json::json!({
+        "tabId": native_tab_id,
         "mcpGroupId": 1,
+        "created": true,
         "tabs": [{
             "tabId": native_tab_id,
             "title": "Lightbox",
@@ -159,12 +160,13 @@ pub fn creator_inventory_result(native_tab_id: i64) -> serde_json::Value {
     })
 }
 
-/// Read the first service-encoded tab id from an MCP creator response.
-pub fn creator_tab_id(response: &serde_json::Value) -> anyhow::Result<i64> {
+/// Read the first opaque Ghostlight tab handle from a creator response.
+pub fn creator_tab_handle(response: &serde_json::Value) -> anyhow::Result<String> {
     response
-        .pointer("/result/structuredContent/tabs/0/tabId")
-        .and_then(serde_json::Value::as_i64)
-        .ok_or_else(|| anyhow::anyhow!("creator response returned no structured tab inventory"))
+        .pointer("/result/structuredContent/tab/id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow::anyhow!("creator response returned no opaque tab handle"))
 }
 
 /// Wait for at least `count` parseable debug-state files in a scenario log directory.

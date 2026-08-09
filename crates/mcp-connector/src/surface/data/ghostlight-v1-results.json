@@ -1,0 +1,670 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "sequence_status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "partial",
+        "not_met",
+        "blocked",
+        "held",
+        "attention_required",
+        "cancelled",
+        "not_dispatched",
+        "outcome_unknown",
+        "unavailable",
+        "not_run"
+      ]
+    },
+    "effect": {
+      "type": "string",
+      "enum": ["none", "committed", "unknown"]
+    },
+    "repeat": {
+      "type": "string",
+      "enum": ["safe", "check_state_first", "do_not_repeat"]
+    },
+    "target_fact": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string",
+          "pattern": "^r_[A-Za-z0-9_-]{4,256}$"
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "visible": {"type": "boolean"},
+        "enabled": {"type": "boolean"},
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["click", "hover", "scroll_to", "fill", "drag", "press_key"]
+          },
+          "maxItems": 6,
+          "uniqueItems": true
+        }
+      },
+      "required": ["ref"],
+      "additionalProperties": false
+    },
+    "capture": {
+      "type": "object",
+      "properties": {
+        "frame": {
+          "type": "string",
+          "pattern": "^f_[A-Za-z0-9_-]{4,256}$"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["viewport", "target"]
+        },
+        "target": {"$ref": "#/$defs/target_fact"}
+      },
+      "required": ["frame", "width", "height", "scope"],
+      "additionalProperties": false
+    },
+    "safety_park": {
+      "type": "object",
+      "properties": {
+        "destination": {"const": "about:blank"},
+        "status": {
+          "type": "string",
+          "enum": ["parked", "failed", "outcome_unknown"]
+        },
+        "effect": {
+          "type": "string",
+          "enum": ["none", "committed", "unknown"]
+        }
+      },
+      "required": ["destination", "status", "effect"],
+      "additionalProperties": false
+    },
+    "dialog": {
+      "type": "object",
+      "properties": {
+        "open": {"type": "boolean"},
+        "kind": {
+          "type": "string",
+          "enum": ["alert", "confirm", "prompt", "beforeunload", "unknown"]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["accept", "dismiss", "respond"]
+          },
+          "maxItems": 3,
+          "uniqueItems": true
+        }
+      },
+      "required": ["open"],
+      "additionalProperties": false
+    },
+    "field_receipt": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "required": ["field"],
+      "additionalProperties": false
+    },
+    "skipped_field": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        }
+      },
+      "required": ["field", "code"],
+      "additionalProperties": false
+    },
+    "sequence_tab": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "pattern": "^t_[A-Za-z0-9_-]{4,128}$"},
+        "url": {"type": "string", "maxLength": 4096},
+        "title": {"type": "string", "maxLength": 1024},
+        "current": {"type": "boolean"},
+        "redacted": {
+          "type": "string",
+          "enum": ["protected_host", "policy", "request_restriction", "resource_indeterminate"]
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "sequence_readiness": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ready", "timed_out", "unavailable", "not_requested"]
+        },
+        "elapsed_ms": {"type": "integer", "minimum": 0, "maximum": 30000}
+      },
+      "required": ["status"],
+      "additionalProperties": false
+    },
+    "sequence_problem": {
+      "type": "object",
+      "properties": {
+        "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        "message": {"type": "string", "minLength": 1, "maxLength": 240}
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    },
+    "sequence_governance_decision": {
+      "type": "object",
+      "properties": {
+        "outcome": {"type": "string", "enum": ["would_block", "blocked"]},
+        "source": {
+          "type": "string",
+          "enum": ["policy", "protected_host", "request_restriction"]
+        },
+        "phase": {"type": "string", "enum": ["pre_dispatch", "landing"]},
+        "reason": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        "decision_id": {"type": "string", "pattern": "^D-[0-9a-f]{8}$"},
+        "rule_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "restriction_id": {"type": "string", "pattern": "^R-[0-9a-f]{32}$"},
+        "restriction_rule_id": {"type": "string", "minLength": 1, "maxLength": 64}
+      },
+      "required": ["outcome", "source", "phase", "reason", "decision_id"],
+      "additionalProperties": false
+    },
+    "sequence_child_result": {
+      "type": "object",
+      "properties": {
+        "landed": {"type": "boolean"},
+        "moved": {"type": "boolean"},
+        "reloaded": {"type": "boolean"},
+        "targets": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/target_fact"},
+          "maxItems": 100
+        },
+        "text": {"type": "string", "maxLength": 50000},
+        "more": {"type": "boolean"},
+        "cursor": {"type": "string", "pattern": "^c_[A-Za-z0-9_-]{8,256}$"},
+        "frame": {"type": "string", "pattern": "^f_[A-Za-z0-9_-]{4,256}$"},
+        "width": {"type": "integer", "minimum": 1, "maximum": 16384},
+        "height": {"type": "integer", "minimum": 1, "maximum": 16384},
+        "scope": {"type": "string", "enum": ["viewport", "target"]},
+        "target": {"$ref": "#/$defs/target_fact"},
+        "clicked": {"type": "boolean"},
+        "hovered": {"type": "boolean"},
+        "visible": {"type": "boolean"},
+        "direction": {"type": "string", "enum": ["up", "down"]},
+        "amount": {"type": "string", "enum": ["small", "page"]},
+        "key": {
+          "type": "string",
+          "enum": [
+            "Enter",
+            "Space",
+            "Tab",
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "Home",
+            "End",
+            "PageUp",
+            "PageDown",
+            "Backspace",
+            "Delete"
+          ]
+        },
+        "pressed": {"type": "boolean"},
+        "from": {"$ref": "#/$defs/target_fact"},
+        "to": {"$ref": "#/$defs/target_fact"},
+        "dragged": {"type": "boolean"},
+        "page_changed": {"type": "boolean"},
+        "filled": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/field_receipt"},
+          "maxItems": 20
+        },
+        "skipped": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/skipped_field"},
+          "maxItems": 20
+        },
+        "submitted": {"type": "boolean"},
+        "submit_target": {"$ref": "#/$defs/target_fact"},
+        "condition": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "state": {"type": "string", "enum": ["visible", "present", "gone"]},
+        "met": {"type": "boolean"},
+        "elapsed_ms": {"type": "integer", "minimum": 0, "maximum": 30000},
+        "open": {"type": "boolean"},
+        "kind": {
+          "type": "string",
+          "enum": ["alert", "confirm", "prompt", "beforeunload", "unknown"]
+        },
+        "message": {"type": "string", "maxLength": 2000},
+        "actions": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["accept", "dismiss", "respond"]},
+          "maxItems": 3,
+          "uniqueItems": true
+        },
+        "action": {"type": "string", "enum": ["accept", "dismiss", "respond"]},
+        "resolved": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "sequence_step": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9
+        },
+        "tool": {
+          "type": "string",
+          "enum": [
+            "browser_navigate",
+            "browser_go_back",
+            "browser_go_forward",
+            "browser_reload_page",
+            "browser_inspect_page",
+            "browser_read_page",
+            "browser_take_screenshot",
+            "browser_click",
+            "browser_hover",
+            "browser_scroll_to_target",
+            "browser_scroll_page",
+            "browser_press_key",
+            "browser_press_escape",
+            "browser_drag",
+            "browser_fill_form",
+            "browser_wait_for",
+            "browser_get_dialog",
+            "browser_handle_dialog"
+          ]
+        },
+        "status": {"$ref": "#/$defs/sequence_status"},
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "effect": {"$ref": "#/$defs/effect"},
+        "repeat": {"$ref": "#/$defs/repeat"},
+        "tab": {"$ref": "#/$defs/sequence_tab"},
+        "readiness": {"$ref": "#/$defs/sequence_readiness"},
+        "safety_park": {"$ref": "#/$defs/safety_park"},
+        "governance": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/sequence_governance_decision"}
+        },
+        "problem": {"$ref": "#/$defs/sequence_problem"},
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "content_index": {"type": "integer", "minimum": 1, "maximum": 4},
+              "mime_type": {"type": "string", "pattern": "^image/[a-z0-9!#$&^_.+-]+$"}
+            },
+            "required": ["content_index", "mime_type"],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "result": {"$ref": "#/$defs/sequence_child_result"}
+      },
+      "required": ["index", "tool", "status", "summary", "effect", "repeat"],
+      "additionalProperties": false
+    }
+  },
+  "tools": {
+    "browser_get_status": {
+      "type": "object",
+      "properties": {
+        "browser": {
+          "type": "string",
+          "enum": ["connected", "disconnected"]
+        },
+        "authority": {
+          "type": "object",
+          "properties": {
+            "policy_source": {
+              "type": "string",
+              "enum": ["none", "user", "machine", "managed"]
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["open", "observe", "enforce"]
+            }
+          },
+          "required": ["policy_source", "mode"],
+          "additionalProperties": false
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^browser_[a-z0-9_]+$"
+          },
+          "maxItems": 24,
+          "uniqueItems": true
+        },
+        "packs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "max_sequence_steps": {"const": 10},
+            "max_tabs": {"type": "integer", "minimum": 1, "maximum": 64},
+            "max_read_chars": {"const": 50000}
+          },
+          "required": ["max_sequence_steps", "max_tabs", "max_read_chars"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["browser", "authority", "operations", "packs", "limits"],
+      "additionalProperties": false
+    },
+    "browser_open_tab": {
+      "type": "object",
+      "properties": {
+        "created": {"type": "boolean"},
+        "navigated": {"type": "boolean"}
+      },
+      "required": ["created"],
+      "additionalProperties": false
+    },
+    "browser_list_tabs": {
+      "type": "object",
+      "properties": {
+        "count": {"type": "integer", "minimum": 0, "maximum": 64}
+      },
+      "required": ["count"],
+      "additionalProperties": false
+    },
+    "browser_focus_tab": {
+      "type": "object",
+      "properties": {
+        "focused": {"type": "boolean"}
+      },
+      "required": ["focused"],
+      "additionalProperties": false
+    },
+    "browser_close_tab": {
+      "type": "object",
+      "properties": {
+        "closed": {"type": "boolean"}
+      },
+      "required": ["closed"],
+      "additionalProperties": false
+    },
+    "browser_navigate": {
+      "type": "object",
+      "properties": {
+        "landed": {"type": "boolean"}
+      },
+      "required": ["landed"],
+      "additionalProperties": false
+    },
+    "browser_go_back": {
+      "type": "object",
+      "properties": {
+        "moved": {"type": "boolean"}
+      },
+      "required": ["moved"],
+      "additionalProperties": false
+    },
+    "browser_go_forward": {
+      "type": "object",
+      "properties": {
+        "moved": {"type": "boolean"}
+      },
+      "required": ["moved"],
+      "additionalProperties": false
+    },
+    "browser_reload_page": {
+      "type": "object",
+      "properties": {
+        "reloaded": {"type": "boolean"}
+      },
+      "required": ["reloaded"],
+      "additionalProperties": false
+    },
+    "browser_inspect_page": {
+      "type": "object",
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/target_fact"},
+          "maxItems": 100
+        },
+        "more": {"type": "boolean"},
+        "cursor": {
+          "type": "string",
+          "pattern": "^c_[A-Za-z0-9_-]{8,256}$"
+        }
+      },
+      "required": ["targets", "more"],
+      "additionalProperties": false
+    },
+    "browser_read_page": {
+      "type": "object",
+      "properties": {
+        "text": {"type": "string", "maxLength": 50000},
+        "more": {"type": "boolean"},
+        "cursor": {
+          "type": "string",
+          "pattern": "^c_[A-Za-z0-9_-]{8,256}$"
+        }
+      },
+      "required": ["text", "more"],
+      "additionalProperties": false
+    },
+    "browser_take_screenshot": {"$ref": "#/$defs/capture"},
+    "browser_click": {
+      "type": "object",
+      "properties": {
+        "target": {"$ref": "#/$defs/target_fact"},
+        "clicked": {"type": "boolean"},
+        "page_changed": {"type": "boolean"}
+      },
+      "required": ["target", "clicked", "page_changed"],
+      "additionalProperties": false
+    },
+    "browser_hover": {
+      "type": "object",
+      "properties": {
+        "target": {"$ref": "#/$defs/target_fact"},
+        "hovered": {"type": "boolean"},
+        "page_changed": {"type": "boolean"}
+      },
+      "required": ["target", "hovered", "page_changed"],
+      "additionalProperties": false
+    },
+    "browser_scroll_to_target": {
+      "type": "object",
+      "properties": {
+        "target": {"$ref": "#/$defs/target_fact"},
+        "visible": {"type": "boolean"},
+        "moved": {"type": "boolean"},
+        "page_changed": {"type": "boolean"}
+      },
+      "required": ["target", "visible", "moved", "page_changed"],
+      "additionalProperties": false
+    },
+    "browser_scroll_page": {
+      "type": "object",
+      "properties": {
+        "direction": {"type": "string", "enum": ["up", "down"]},
+        "amount": {"type": "string", "enum": ["small", "page"]},
+        "moved": {"type": "boolean"},
+        "page_changed": {"type": "boolean"}
+      },
+      "required": ["direction", "amount", "moved", "page_changed"],
+      "additionalProperties": false
+    },
+    "browser_press_key": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "Enter",
+            "Space",
+            "Tab",
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "Home",
+            "End",
+            "PageUp",
+            "PageDown",
+            "Backspace",
+            "Delete"
+          ]
+        },
+        "target": {"$ref": "#/$defs/target_fact"},
+        "pressed": {"type": "boolean"},
+        "page_changed": {"type": "boolean"}
+      },
+      "required": ["key", "target", "pressed", "page_changed"],
+      "additionalProperties": false
+    },
+    "browser_press_escape": {
+      "type": "object",
+      "properties": {
+        "pressed": {"type": "boolean"},
+        "page_changed": {"type": "boolean"}
+      },
+      "required": ["pressed", "page_changed"],
+      "additionalProperties": false
+    },
+    "browser_drag": {
+      "type": "object",
+      "properties": {
+        "from": {"$ref": "#/$defs/target_fact"},
+        "to": {"$ref": "#/$defs/target_fact"},
+        "dragged": {"type": "boolean"},
+        "page_changed": {"type": "boolean"}
+      },
+      "required": ["from", "to", "dragged", "page_changed"],
+      "additionalProperties": false
+    },
+    "browser_fill_form": {
+      "type": "object",
+      "properties": {
+        "filled": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/field_receipt"},
+          "maxItems": 20
+        },
+        "skipped": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/skipped_field"},
+          "maxItems": 20
+        },
+        "submitted": {"type": "boolean"},
+        "submit_target": {"$ref": "#/$defs/target_fact"}
+      },
+      "required": ["filled", "skipped", "submitted"],
+      "additionalProperties": false
+    },
+    "browser_wait_for": {
+      "type": "object",
+      "properties": {
+        "condition": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "state": {
+          "type": "string",
+          "enum": ["visible", "present", "gone"]
+        },
+        "met": {"type": "boolean"},
+        "elapsed_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30000
+        }
+      },
+      "required": ["condition", "state", "met", "elapsed_ms"],
+      "additionalProperties": false
+    },
+    "browser_run_sequence": {
+      "type": "object",
+      "properties": {
+        "termination": {
+          "type": "string",
+          "enum": ["complete", "stopped"]
+        },
+        "stopped_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9
+        },
+        "steps": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/sequence_step"},
+          "minItems": 2,
+          "maxItems": 10
+        }
+      },
+      "required": ["termination", "steps"],
+      "additionalProperties": false
+    },
+    "browser_get_dialog": {"$ref": "#/$defs/dialog"},
+    "browser_handle_dialog": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["accept", "dismiss", "respond"]
+        },
+        "resolved": {"type": "boolean"}
+      },
+      "required": ["action", "resolved"],
+      "additionalProperties": false
+    }
+  }
+}

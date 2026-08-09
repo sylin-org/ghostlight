@@ -80,21 +80,36 @@ If an older document draws a single-binary `src/` tree, trust the live tree over
 
 ## The one inviolable constraint
 
-**The trained tool identity surface is stable** (ADR-0007, amended by ADR-0034 Decision 7,
-ADR-0050 Decision 6, and ADR-0094). The 13 tool names, parameter names, types, and enums harvested
-from the reference extension remain compatible. Descriptions are model guidance, not frozen
-identity: improve them deliberately when clearer purpose, side effects, or tool choice will help
-agents succeed.
+**Ghostlight 1.0 is a clean-slate, orchestrator-owned product** (ADR-0103). Public tag `v0.8.0`
+is the immutable working prototype. The current 0.9 worktree is an architecture experiment to
+archive, not a release candidate or a base to keep repairing. Version 1.0 harvests observed intent
+and lessons from those versions, not their production code, compatibility layers, or test mass.
 
-- Never rename, remove, or reorder a trained tool, parameter, type, or enum value.
-- Keep descriptions concise and truthful. Name the actual callable tool, distinguish overlapping
-  tools, and state material side effects. Refresh the regression snapshot when guidance changes.
-- Growth is additive only: new tools join via the capability registry (`explain`, `script`,
-  `form_fill`, `wait_for` are sanctioned precedents), and new OPTIONAL parameters may be
-  added to existing tools.
-- Tool declarations and their inline JSON schemas live in the registry, not behind an MCP SDK or
-  a second generated source of truth.
-- `tests/tool_schema_fidelity.rs` is the regression snapshot over the declared surface.
+- Do not extend the 0.9 operation pipeline. Capture it before reset, then implement 1.0 from the
+  accepted bill of intent in `docs/1.0/`.
+- Ghostlight has one model-facing language. Do not add vendor-, model-, or client-specific tool
+  dialects without a new accepted ADR and a measured journey win.
+- The service owns the product catalog, schemas, defaults, typed operations, state machines,
+  governance, results, and recovery. The MCP connector owns protocol lifecycle and generic
+  rendering only.
+- The service is a domain-driven modular monolith. Organize it by bounded product contexts, keep
+  all model-requested mutation behind one application executor and unit of work, and use explicit
+  chokepoints for workspace state, governance, browser effects, and completion. Cross-context
+  reactions use a small typed in-process event vocabulary. Do not introduce a generic event bus,
+  actor system, workflow engine, CQRS split, event store, or microservice without a new accepted
+  decision backed by a concrete need.
+- The browser connector remains a frame relay. The policy-free extension implements typed physical
+  browser primitives and content-free presentation, never model-facing tools or Ghostlight results.
+- Keep schemas flat, typo-closed, omission-tolerant where safe, and aligned with executable
+  defaults. Require only intent or authority that cannot be inferred safely.
+- A feature composed from existing browser primitives changes only the orchestrator. A genuinely
+  new Chrome capability may add one browser primitive; it does not move product orchestration into
+  the adapter.
+- Tests and process must earn their cost. Protect each distinct contract, safety invariant, failure
+  branch, or real user journey once at its narrowest meaningful seam. Do not carry forward old test
+  mass, duplicate the same proof across layers, or require ledgers, checkpoints, approval rounds,
+  exhaustive matrices, and live-stack runs for routine implementation. Use ADRs for durable
+  architecture and trust decisions; run broad and live gates at integration and release milestones.
 
 Two more standing product constraints: **never phone home** (no telemetry, activation
 servers, or update pings -- ADR-0028, the Continuity Promise), and **the extension stays
@@ -108,8 +123,8 @@ Standing technical decisions (each has an ADR or spec section; do not re-litigat
 - Runtime roles are structural: separate executable entry points and dependency direction replace
   the old process-global role marker. Browser work routes only by `WorkspaceId` in compatibility
   `guid`; a human client label is presentation/audit data, never routing or authority.
-- Screenshots return only on `computer` actions that produce one (`screenshot`, `scroll`,
-  `zoom`); everything else returns a text confirmation (roughly 10x context savings).
+- Screenshots return only from `browser_take_screenshot`; other operations return bounded text and
+  structured canonical facts.
   JPEG quality 55 falling back to 30; coordinate model per ADR-0010 (probe the CSS
   viewport + DPR, downscale to the token budget, rescale model coordinates back).
 - Native messaging is the Chromium 4-byte little-endian length-prefix framing.
@@ -131,9 +146,10 @@ Two test tiers (ADR-0032, ADR-0051):
 - **End-to-end (spawn)**: `cargo run -p ghostlight-lightbox -- run --all` launches real binaries
   over the IPC boundary from an isolated target dir and runs the named parity scenarios.
 
-Gate before every commit: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-fast-tier tests green. Extension JS: `node --test` under `extension/`, plus `node --check`
-on changed files.
+For 1.0 routine commits, run formatting, lint the touched targets, and run the focused tests that
+protect the changed contract. Run the full workspace, extension, and live-browser gates at
+integration milestones and release readiness. Do not turn every local edit into a release rehearsal.
+Prototype maintenance may still need its existing compatibility gates until the 0.9 tree is archived.
 
 The dev loop for seeing changes live (engine swap via `scripts/dev-loop.ps1`, shore respawn when
 that shore changes, extension reload at `chrome://extensions`) is in

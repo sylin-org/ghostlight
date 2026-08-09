@@ -2,7 +2,7 @@
 //! Closed JSON-Schema subset used to validate edge-owned tool surfaces.
 //!
 //! Ghostlight keeps model-facing declarations at the protocol edge. This validator implements
-//! every assertion keyword present in the frozen `ghostlight-legacy/v1` input schemas and rejects
+//! every assertion keyword present in the sole Ghostlight input schemas and rejects
 //! unknown future keywords rather than silently weakening the advertised contract.
 
 use serde_json::{Map, Value};
@@ -26,9 +26,11 @@ const SUPPORTED_KEYWORDS: &[&str] = &[
     "minProperties",
     "not",
     "properties",
+    "pattern",
     "required",
     "then",
     "type",
+    "uniqueItems",
 ];
 
 /// One fail-closed schema or instance validation error.
@@ -346,6 +348,18 @@ fn validate_array(
             validate_at(item_schema, item, &format!("{path}/{index}"))?;
         }
     }
+    if let Some(unique) = schema.get("uniqueItems") {
+        let unique = unique
+            .as_bool()
+            .ok_or_else(|| ValidationError::schema(path, "uniqueItems must be a boolean"))?;
+        if unique {
+            for (index, item) in array.iter().enumerate() {
+                if array[..index].contains(item) {
+                    return Err(ValidationError::instance(path, "items must be unique"));
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -373,7 +387,78 @@ fn validate_string(
             ));
         }
     }
+    if let Some(pattern) = schema.get("pattern") {
+        let pattern = pattern
+            .as_str()
+            .ok_or_else(|| ValidationError::schema(path, "pattern must be a string"))?;
+        if !matches_closed_pattern(pattern, text).ok_or_else(|| {
+            ValidationError::schema(path, format!("unsupported pattern '{pattern}'"))
+        })? {
+            return Err(ValidationError::instance(
+                path,
+                format!("must match pattern {pattern}"),
+            ));
+        }
+    }
     Ok(())
+}
+
+fn matches_closed_pattern(pattern: &str, text: &str) -> Option<bool> {
+    let (prefix, minimum, maximum) = match pattern {
+        "^t_[A-Za-z0-9_-]{4,128}$" => ("t_", 4, 128),
+        "^c_[A-Za-z0-9_-]{8,256}$" => ("c_", 8, 256),
+        "^r_[A-Za-z0-9_-]{4,256}$" => ("r_", 4, 256),
+        "^f_[A-Za-z0-9_-]{4,256}$" => ("f_", 4, 256),
+        "^D-[0-9a-f]{8}$" => {
+            return Some(matches_fixed_hex(text, "D-", 8));
+        }
+        "^R-[0-9a-f]{32}$" => {
+            return Some(matches_fixed_hex(text, "R-", 32));
+        }
+        "^[a-z][a-z0-9_]{0,63}$" => {
+            let mut bytes = text.bytes();
+            let Some(first) = bytes.next() else {
+                return Some(false);
+            };
+            return Some(
+                first.is_ascii_lowercase()
+                    && text.len() <= 64
+                    && bytes.all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                    }),
+            );
+        }
+        "^browser_[a-z0-9_]+$" => {
+            let Some(rest) = text.strip_prefix("browser_") else {
+                return Some(false);
+            };
+            return Some(
+                !rest.is_empty()
+                    && rest.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                    }),
+            );
+        }
+        _ => return None,
+    };
+    let Some(rest) = text.strip_prefix(prefix) else {
+        return Some(false);
+    };
+    Some(
+        (minimum..=maximum).contains(&rest.len())
+            && rest
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')),
+    )
+}
+
+fn matches_fixed_hex(text: &str, prefix: &str, digits: usize) -> bool {
+    text.strip_prefix(prefix).is_some_and(|rest| {
+        rest.len() == digits
+            && rest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
 }
 
 fn validate_number(
@@ -484,10 +569,13 @@ mod tests {
     }
 
     #[test]
-    fn unknown_schema_keywords_fail_closed() {
-        let error = validate(&json!({"type":"string","pattern":".*"}), &json!("value"))
+    fn unknown_schema_keywords_and_patterns_fail_closed() {
+        let error = validate(&json!({"type":"string","format":"uri"}), &json!("value"))
             .expect_err("unsupported keyword must fail");
-        assert!(error.to_string().contains("unsupported keyword 'pattern'"));
+        assert!(error.to_string().contains("unsupported keyword 'format'"));
+        let error = validate(&json!({"type":"string","pattern":".*"}), &json!("value"))
+            .expect_err("unsupported pattern must fail");
+        assert!(error.to_string().contains("unsupported pattern"));
     }
 
     #[test]
