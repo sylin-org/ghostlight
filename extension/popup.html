@@ -1,139 +1,40 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Ghostlight in Browser</title>
-<style>
-  body {
-    font-family: system-ui, sans-serif;
-    width: 260px;
-    margin: 0;
-    padding: 12px;
-    color: #1a1a1a;
-  }
-  h1 {
-    font-size: 14px;
-    margin: 0;
-  }
-  #brand {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin: 0 0 8px 0;
-  }
-  #brand img { flex: none; }
-  #link-dot {
-    margin-left: auto;
-    flex: none;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: #cbd5e1;
-    transition: background .25s ease, box-shadow .25s ease;
-  }
-  #link-dot.on { background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2); }
-  #link-dot.wait { background: #f59e0b; }
-  #status {
-    font-size: 13px;
-    margin-bottom: 10px;
-  }
-  #toggle {
-    width: 100%;
-    padding: 8px;
-    font-size: 13px;
-    cursor: pointer;
-  }
-  #toggle:disabled {
-    cursor: default;
-    opacity: 0.6;
-  }
-  #shortcut-note {
-    font-size: 11px;
-    color: #666;
-    margin-top: 10px;
-  }
-  hr {
-    border: none;
-    border-top: 1px solid #ddd;
-    margin: 14px 0;
-  }
-  #session-status {
-    font-size: 13px;
-    margin-bottom: 10px;
-  }
-  #session-button {
-    width: 100%;
-    padding: 8px;
-    font-size: 13px;
-    cursor: pointer;
-  }
-  #session-button.kill {
-    background: #b91c1c;
-    color: #fff;
-    border: 1px solid #7f1d1d;
-  }
-  #captions-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    cursor: pointer;
-  }
-  #captions-row input {
-    cursor: pointer;
-    margin: 0;
-  }
-  #captions-note {
-    font-size: 11px;
-    color: #666;
-    margin-top: 6px;
-  }
-  #open-options {
-    display: inline-block;
-    margin-top: 10px;
-    font-size: 12px;
-    color: #2563eb;
-    text-decoration: none;
-    cursor: pointer;
-  }
-  #open-options:hover {
-    text-decoration: underline;
-  }
-  #attention-section[hidden] { display: none; }
-  #attention-title { font-size: 13px; font-weight: 700; color: #991b1b; margin-bottom: 7px; }
-  .attention-item { padding: 8px; border: 1px solid #fecaca; border-radius: 8px; background: #fff7f7; margin-bottom: 7px; }
-  .attention-label { font-size: 12px; font-weight: 650; margin-bottom: 5px; }
-  .attention-meta { font-size: 11px; color: #666; margin-bottom: 7px; overflow-wrap: anywhere; }
-  .attention-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-  .attention-actions button { padding: 5px; font-size: 10px; cursor: pointer; }
-  .attention-actions button.danger { color: #991b1b; }
-  #local-note { font-size: 11px; color: #475569; line-height: 1.35; margin-top: 8px; }
-</style>
-</head>
-<body>
-  <header id="brand">
-    <img src="icons/icon48.png" alt="" width="22" height="22">
-    <h1>Ghostlight in Browser</h1>
-    <span id="link-dot" title="Checking connection..."></span>
-  </header>
-  <div id="status">Loading...</div>
-  <button id="toggle" disabled>Loading...</button>
-  <div id="shortcut-note">
-    Keyboard shortcut: Alt+Shift+P by default; change it at chrome://extensions/shortcuts
-  </div>
-  <div id="local-note">Local only. No Ghostlight account or sign-in is required.</div>
-  <section id="attention-section" hidden>
-    <hr>
-    <div id="attention-title">A client needs your attention</div>
-    <div id="attention-list"></div>
-  </section>
-  <hr>
-  <div id="session-status">Loading...</div>
-  <button id="session-button" disabled>Loading...</button>
-  <hr>
-  <label id="captions-row"><input type="checkbox" id="captions-toggle"> Show action captions</label>
-  <div id="captions-note">A subtitle naming each agent action. Off by default; handy when recording a demo.</div>
-  <a id="open-options">More settings</a>
-  <script src="popup.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ghostlight in Browser</title>
+    <link rel="stylesheet" href="ui.css">
+  </head>
+  <body class="popup-shell">
+    <main>
+      <header id="brand">
+        <img src="icons/icon48.png" alt="" width="22" height="22">
+        <h1>Ghostlight in Browser</h1>
+        <span id="link-dot" title="Checking connection..."></span>
+      </header>
+
+      <div id="status" aria-live="polite">Loading...</div>
+      <button id="toggle" type="button" disabled>Loading...</button>
+      <p id="shortcut-note">Keyboard shortcut: Alt+Shift+P by default; change it at chrome://extensions/shortcuts</p>
+      <p id="local-note">Local only. No Ghostlight account or sign-in is required.</p>
+
+      <section id="attention-section" hidden aria-labelledby="attention-title">
+        <hr>
+        <h2 id="attention-title">A client needs your attention</h2>
+        <div id="attention-list"></div>
+      </section>
+
+      <hr>
+      <div id="session-status" aria-live="polite">Loading...</div>
+      <button id="session-button" type="button" disabled>Loading...</button>
+
+      <hr>
+      <label id="captions-row"><input type="checkbox" id="captions-toggle"> Show action captions</label>
+      <p id="captions-note">A subtitle naming each agent action. Off by default; handy when recording a demo.</p>
+      <button id="open-options" class="link-button" type="button">More settings</button>
+    </main>
+    <script src="lib/state.js"></script>
+    <script src="popup.js"></script>
+  </body>
 </html>

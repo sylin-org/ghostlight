@@ -1,30 +1,42 @@
 {
   "manifest_version": 3,
   "name": "Ghostlight in Browser",
-  "version": "0.8.1",
   "description": "Governed browser automation over your own authenticated session, for AI agents.",
+  "version": "1.0.0",
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5OBU2elZPOGUA3D9mUZL/nKkekxDmK6ZLQuJCJXVM6EK3szt2s+oG2U2VPTgXdxLDVTL3D0pqhZ0mzF+scDcWux0sGVCpnpmE4KftbJMQrcxwT6oDhMr5IDHjXrm7TLNlvBvyTcsdWnfim8DEC+kQNmS7errGJmWK54vKSRH+6SexjeOWLz94RGvS5t8/yBf36ZN9voOZBMNhyKJsTcppJh6ZGjTiXsGSVRFYn8zrZXx3acX/Q4ryu3+p10dK0R82AYfLp3qSuP4OrirK1dWxzW96QAwFZtCJzLuUNzaCgImZPcIqXogIYK91Q6h+5zRqsw9dvsGLbz62zV77JuyMQIDAQAB",
   "permissions": [
-    "tabs",
+    "alarms",
     "debugger",
-    "scripting",
     "nativeMessaging",
-    "tabGroups",
-    "windows",
     "storage",
-    "alarms"
+    "tabGroups",
+    "tabs",
+    "webNavigation",
+    "windows"
   ],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "service-worker.js"
   },
-  "icons": {
-    "16": "icons/icon16.png",
-    "32": "icons/icon32.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "lib/shared.js",
+        "lib/presentation.js",
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
   "action": {
     "default_title": "Ghostlight in Browser",
     "default_popup": "popup.html",
@@ -35,28 +47,22 @@
       "128": "icons/icon128.png"
     }
   },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
   },
   "commands": {
     "toggle-hold": {
-      "suggested_key": { "default": "Alt+Shift+P" },
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
       "description": "Pause or resume agent browsing (take the wheel)"
     }
-  },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["lib/settle.js", "lib/observation.js", "lib/receipt.js", "lib/treediff.js", "lib/fileset.js", "lib/actionable.js", "lib/keys.js", "lib/drag-session.js", "content.js"],
-      "run_at": "document_idle",
-      "all_frames": false
-    },
-    {
-      "matches": ["<all_urls>"],
-      "js": ["lib/presentation-placement.js", "lib/action-signature.js", "lib/find-visual.js", "lib/keys.js", "agent-visual-indicator.js"],
-      "run_at": "document_idle",
-      "all_frames": false
-    }
-  ]
+  }
 }

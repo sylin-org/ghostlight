@@ -1,4 +1,4 @@
-# Third-party reference implementation — cloned study material, NOT part of this project.
+# Third-party reference implementation -- cloned study material, NOT part of this project.
 # Our analysis lives in reference/ANALYSIS.md (tracked); the cloned source is ignored.
 /reference/open-claude-in-chrome/
 
@@ -19,6 +19,11 @@
 .DS_Store
 Thumbs.db
 /tests/e2e/node_modules/
+**/node_modules/
+*.log
+*.tmp
+*.swp
+/tests/.ghostlight-*
 
 # Stray observability files, in case a debug run is ever pointed at the repo (they normally live
 # under the log dir; see src/observability.rs). Never source.

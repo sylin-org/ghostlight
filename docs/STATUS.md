@@ -1,11 +1,39 @@
 # STATUS -- where the project stands
 
-Last updated: 2026-08-08. This file is a point-in-time snapshot maintained by whoever
+Last updated: 2026-08-10. This file is a point-in-time snapshot maintained by whoever
 finishes significant work. It exists so a fresh agent (or human) can orient without any
 prior session context. **Trust the tree, `git log`, and the batch LEDGERs over this file
 when they disagree**, and update it when you land something that changes the picture.
 
 ## Now
+
+- **Ghostlight 1.0 now inherits the complete project lineage.** The active `ghostlight-1.0`
+  branch descends from the post-0.8 development tip, preserving every root document, license,
+  ADR through ADR-0101, research record, trust document, task ledger, public asset, and release
+  record. The former orphan implementation at `fefb9e4d` was transplanted exactly, verified, and
+  released from its temporary local safety ref after the reconstructed commit passed every gate.
+- **The active implementation is the clean-room 1.0 four-crate workspace.** The orchestrator is
+  the product authority; the MCP connector, browser connector, shared bridge, and browser adapter
+  remain stable fringes. The superseded 0.8 core, transport, lightbox, root binary, tests, release
+  scripts, and packaging launchers are retained in Git history but removed from the active tree.
+- **Documentation is inherited product memory, not old implementation debris.** The four
+  `docs/1.0/` contracts are additive current guidance. Historical documents remain present and
+  must be reconciled as active claims change; they are not quarantined with old source code.
+- **The local `dev` branch has been recreated from `main`.** Remote branches remain untouched.
+  The public release is still v0.8.0; 1.0 is unreleased and must not be represented as packaged or
+  publishable until its installation and release paths are rebuilt and verified.
+- **The orchestrator desktop experience remains an accepted direction, not an implementation.**
+  Its future ADR must continue the existing sequence after ADR-0101 and use the restored decision
+  history before code begins.
+
+## Preserved 0.8 and post-release baseline
+
+The remainder of this file is the complete status snapshot inherited from the pre-1.0 development
+line. It is preserved here so no operational or product evidence is lost while the active sections
+are reconciled for 1.0. Statements below may describe superseded code and are not current 1.0
+implementation claims.
+
+### State at the 1.0 rebaseline
 
 - **Ghostlight v0.8.0 is released.** PR #80 merged to `main` as
   `993135b048b60622157266b53b21f1719c9df4b3`, the immutable `v0.8.0` tag points there, and

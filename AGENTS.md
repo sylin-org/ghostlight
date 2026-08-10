@@ -13,23 +13,48 @@ documents it points to.
    counterpart is `local/NOTES.md` (gitignored).
 2. [docs/STATUS.md](docs/STATUS.md) -- where the project stands right now: version state,
    open PRs, in-flight work, and the owed-items list. Read it before starting anything.
-3. [docs/adr/README.md](docs/adr/README.md) -- the ADR index. **Before touching a subsystem,
+3. [docs/1.0/INTENT.md](docs/1.0/INTENT.md),
+   [docs/1.0/LANGUAGE.md](docs/1.0/LANGUAGE.md),
+   [docs/1.0/ARCHITECTURE.md](docs/1.0/ARCHITECTURE.md), and
+   [docs/1.0/ACCEPTANCE.md](docs/1.0/ACCEPTANCE.md) -- the current implementation contract.
+4. [docs/adr/README.md](docs/adr/README.md) -- the ADR index. **Before touching a subsystem,
    read its ADR(s).** ADRs are the authoritative record of every design decision; do not
    re-litigate a decided question, and do not silently contradict one. To change a decision,
    write a new ADR (or a marked amendment), never rewrite history.
-4. [docs/SPEC.md](docs/SPEC.md) -- the original design specification. Still the best deep
+5. [docs/SPEC.md](docs/SPEC.md) -- the original design specification. Still the best deep
    explanation of the governance model, but ADRs supersede it where they differ.
-5. [docs/DEV-LOOP.md](docs/DEV-LOOP.md) -- read before any build/run/deploy work on a dev
+6. [docs/DEV-LOOP.md](docs/DEV-LOOP.md) -- read before any build/run/deploy work on a dev
    machine. It starts with a "when code changes, do this" table.
-6. `local/MACHINE-STATE.md` and `local/NOTES.md` -- if present (both gitignored): machine-local
+7. `local/MACHINE-STATE.md` and `local/NOTES.md` -- if present (both gitignored): machine-local
    truth (which engine is running, install state, local gotchas) and sensitive/working memory
-   (owner context, credential *locations*, session handoffs). See [local/README.md](local/README.md).
-7. [CONTRIBUTING.md](CONTRIBUTING.md) -- test tiers, PR expectations, licensing boundary.
+   (owner context, credential *locations*, session handoffs). Do not read them without explicit
+   owner authorization. See [local/README.md](local/README.md).
+8. [CONTRIBUTING.md](CONTRIBUTING.md) -- test tiers, PR expectations, licensing boundary.
 
 Larger work is organized as task batches under `docs/tasks/<batch>/`, each with a
 `BOOTSTRAP.md` (ground rules) and a `LEDGER.md` (durable progress, one task = one commit,
 a RESUME HERE section). If you are executing a batch, the ledger is the source of truth
 for what is done.
+
+## Authority and historical continuity
+
+The complete documentation corpus is project memory. Root documentation, `docs/`, ADRs,
+research, trust material, legal material, public assets, and task records must not be discarded
+or quarantined during an implementation rewrite.
+
+- The active request, this file, the current source and tests, and the four `docs/1.0/` contracts
+  govern implementation work.
+- Historical ADRs remain immutable evidence of why the product evolved. A new decision supersedes
+  an old one; it does not erase or silently rewrite it.
+- Older product documents remain required context. Where they describe superseded implementation
+  details, the current source and `docs/1.0/` contract win. Update the active document instead of
+  deleting the history.
+- Source from older implementation commits and branches is not implementation authority for the
+  1.0 clean-room rewrite. Preserve its Git history, but do not copy it into the new internals.
+- Product identity is inherited. Names, icons, visual language, animation, public character, legal
+  identity, and user expectations survive the rewrite unless the owner explicitly changes them.
+- Internal tools and model-facing descriptions are mechanisms, not product identity. The
+  orchestrator owns them and may redesign them deliberately.
 
 ## Cross-session coordination
 
@@ -57,93 +82,60 @@ in Chrome extension: we harvest its observable interface and technique, never it
 
 ## Repository layout (current truth)
 
-The tree is a Cargo workspace (ADR-0044/0046, ADR-0051 P3):
+The tree is a Rust workspace with four process/trust concerns:
 
-- `crates/core/` -- the protocol-neutral engine and governance: `governance/`, `browser/`,
-  `tool/`, and `hub/` modules. `crates/core/src/governance/` is the commercially licensed module
-  (ADR-0027); everything else is Apache-2.0 OR MIT.
-- `crates/transport/` -- typed owner-only service bridge, browser IPC, instance identity, and
-  observability. Its bridge vocabulary carries product work, never MCP JSON-RPC.
-- `crates/mcp-connector/` -- the `ghostlight-mcp-connector` stdio edge. Exact revision state machines live in
-  `mcp_2025_11_25` and `mcp_2026_07_28`; this crate does not depend on core, governance, or browser
-  execution.
-- `crates/browser-connector/` -- the browser-only native-messaging pass-through binary
-  `ghostlight-browser-connector`. It has no MCP-client role.
-- `crates/lightbox/` -- dev-only governance harness (ADR-0056); publish=false, never shipped.
-- `src/` -- the `ghostlight` binary crate (CLI + persistent service) re-exporting the crates.
-- `extension/` -- the Manifest V3 extension. Policy-free and thin: Chrome-API mechanism
-  only, no policy logic, no heavy processing (ADR-0053).
-- `docs/` -- SPEC, ADRs, guides, trust center (`docs/trust/`), task batches, design notes.
-- `scripts/` -- dev loop, e2e runner, release pipeline (`release.ps1`), install helpers.
+- `crates/orchestrator/` -- the product authority: language, workspace aggregate, governance,
+  browser coordination, presentation decisions, execution, and completion.
+- `crates/bridge/` -- small typed service and browser relay contracts plus framing.
+- `crates/mcp-connector/` -- the stable MCP stdio edge. It owns protocol lifecycle and generic
+  rendering, never product decisions.
+- `crates/browser-connector/` -- the stable native-messaging/browser relay executable.
+- `extension/` -- the Manifest V3 browser adapter. It owns Chromium APIs, DOM-local observation,
+  browser-specific durability, and content-free presentation, but no policy or product journeys.
+- `docs/` -- the complete product history and current 1.0 contracts: SPEC, ADRs, guides, trust
+  center, research, design records, task ledgers, and public material.
+- `open-spec/`, `site/`, `examples/`, and root documents -- inherited public, product, legal, and
+  historical surfaces. Keep them and reconcile active claims with the current implementation.
 
-If an older document draws a single-binary `src/` tree, trust the live tree over the drawing.
+If an older document describes a prior source layout, treat the drawing as historical and use the
+live tree plus `docs/1.0/ARCHITECTURE.md` for current placement.
 
-## The one inviolable constraint
+## Product and architecture invariants
 
-**The trained tool identity surface is stable** (ADR-0007, amended by ADR-0034 Decision 7,
-ADR-0050 Decision 6, and ADR-0094). The 13 tool names, parameter names, types, and enums harvested
-from the reference extension remain compatible. Descriptions are model guidance, not frozen
-identity: improve them deliberately when clearer purpose, side effects, or tool choice will help
-agents succeed.
-
-- Never rename, remove, or reorder a trained tool, parameter, type, or enum value.
-- Keep descriptions concise and truthful. Name the actual callable tool, distinguish overlapping
-  tools, and state material side effects. Refresh the regression snapshot when guidance changes.
-- Growth is additive only: new tools join via the capability registry (`explain`, `script`,
-  `form_fill`, `wait_for` are sanctioned precedents), and new OPTIONAL parameters may be
-  added to existing tools.
-- Tool declarations and their inline JSON schemas live in the registry, not behind an MCP SDK or
-  a second generated source of truth.
-- `tests/tool_schema_fidelity.rs` is the regression snapshot over the declared surface.
-
-Two more standing product constraints: **never phone home** (no telemetry, activation
-servers, or update pings -- ADR-0028, the Continuity Promise), and **the extension stays
-policy-free** (all policy, classification, and audit live in the binary).
-
-Standing technical decisions (each has an ADR or spec section; do not re-litigate):
-
-- The MCP protocol is hand-rolled JSON-RPC 2.0 over stdio in `crates/mcp-connector/`. Do NOT introduce an
-  MCP SDK crate (dependency risk, and it must match the preserved schema format exactly). Protocol
-  dates, lifecycle, metadata, request ids, and response envelopes never enter the service core.
-- Runtime roles are structural: separate executable entry points and dependency direction replace
-  the old process-global role marker. Browser work routes only by `WorkspaceId` in compatibility
-  `guid`; a human client label is presentation/audit data, never routing or authority.
-- Screenshots return only on `computer` actions that produce one (`screenshot`, `scroll`,
-  `zoom`); everything else returns a text confirmation (roughly 10x context savings).
-  JPEG quality 55 falling back to 30; coordinate model per ADR-0010 (probe the CSS
-  viewport + DPR, downscale to the token budget, rescale model coordinates back).
-- Native messaging is the Chromium 4-byte little-endian length-prefix framing.
+- The orchestrator is the sole product mutation point and owns model-facing language.
+- The MCP bridge owns protocol lifecycle, framing, correlation, cancellation forwarding, catalog
+  retrieval, and generic invocation/result rendering only.
+- The browser bridge owns typed framing, correlation, connection lifecycle, and relay only.
+- The extension is policy-free. Chrome APIs, page-local DOM access, browser-specific recovery, and
+  visual rendering terminate there without making workspace-authority or journey decisions.
+- Relays and adapters must remain stable as service capabilities evolve. Prefer negotiated closed
+  mechanisms and orchestrator-owned semantics over feature-specific fringe changes.
+- All model-requested work crosses one executor, one workspace aggregate, one governance facade,
+  one browser port, and one completion path.
+- Sessions, operations, browser instances, and harness connections are plural domain collections.
+  Do not build singleton assumptions into new contracts.
+- Use a small closed domain-event vocabulary. Do not add a generic event bus, actors, workflows,
+  CQRS, event sourcing, reflection registries, or microservices.
+- Never phone home. No telemetry, activation service, automatic update ping, or hidden network
+  dependency is allowed.
+- Keep the design simple. Add architecture only when a concrete invariant requires it.
 
 ## Building and testing
 
-**Load-bearing gotcha:** on a dev machine, live MCP clients continuously respawn
-`ghostlight-mcp-connector.exe`, Chromium keeps `ghostlight-browser-connector.exe` alive, and a running service holds
-`ghostlight.exe` against the linker. A plain `cargo build`/`cargo test` can fail with lock errors
-or leave stale binaries. Build and test in an isolated target dir (`CARGO_TARGET_DIR`). Lightbox
-manages its own isolated process build unless `--reuse-cache` is explicitly used on a clean CI
-worker.
+Live clients and Chromium may hold release executables open. Use an isolated target directory when
+a live deployment would otherwise contend with the build under test.
 
-Two test tiers (ADR-0032, ADR-0051):
+Gate before every commit:
 
-- **Fast, in-process**: plain `cargo test --workspace`. No processes spawned; the everyday
-  gate. In-process fixtures live in `tests/support/` (note: tools that orchestrate internal
-  sub-calls need `#[tokio::test(flavor = "multi_thread")]` -- documented in the fixture).
-- **End-to-end (spawn)**: `cargo run -p ghostlight-lightbox -- run --all` launches real binaries
-  over the IPC boundary from an isolated target dir and runs the named parity scenarios.
+- `cargo fmt --check`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+- `npm test` from `extension/`
+- `node --check` on changed extension JavaScript
 
-Gate before every commit: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-fast-tier tests green. Extension JS: `node --test` under `extension/`, plus `node --check`
-on changed files.
-
-The dev loop for seeing changes live (engine swap via `scripts/dev-loop.ps1`, shore respawn when
-that shore changes, extension reload at `chrome://extensions`) is in
-[docs/DEV-LOOP.md](docs/DEV-LOOP.md). One stack (ADR-0065/0096): one native host, one installed
-service identity, one typed MCP-edge endpoint, one browser endpoint, and one `ghostlight` MCP
-entry. Named instances (`--instance`) are a test-isolation seam only, not a user or dev workflow.
-
-The Chrome adapter and service version independently (ADR-0093). The manifest owns the adapter
-version; `compatibility.json` owns its inclusive service range. Do not bump the manifest for a
-service-only release.
+The process and live browser journeys in `tests/` exercise the real executable boundaries. Run
+them when changes touch process startup, relay reconnect, installation state, or live browser
+behavior.
 
 ## Code style
 
@@ -153,8 +145,8 @@ service-only release.
 - Tests: integration in `tests/`, unit inline `#[cfg(test)]`.
 - No `unsafe` unless absolutely required (documented why).
 - `rustfmt` formatted; `clippy` clean with `-D warnings`.
-- No magic strings: repeated string/enum-like literals belong in a namespaced constants
-  module (see `crates/core/src/constants.rs` for the pattern).
+- No magic strings: repeated string/enum-like literals belong beside their usage in a named
+  module.
 - Named event/state vocabularies (wire message types, lifecycle events, FX names) belong in
   a dedicated domain module (struct/enum plus rendering), not scattered inline literals --
   even when there is only one caller today.
@@ -174,42 +166,34 @@ service-only release.
 ## Boundaries -- never do these
 
 - Never copy code from `reference/` (clean-room rule; interface and technique only).
-- Never touch the trained fields of the 13 sacred tool schemas (see above).
 - Never add phone-home behavior of any kind (ADR-0028 is normative and permanent).
 - Never put policy logic, classification, or audit in the extension.
+- Never discard or quarantine product documentation, ADRs, licenses, public identity, or historical
+  records as part of an internal rewrite.
 - Never publish or post anything outward-facing (npm, store listings, social posts, comments
-  on external repos, anything leaving this repo) without explicit owner confirmation. Draft
-  it, then wait. Committing to `dev` is normal autonomous work; `dev -> main` merges and
-  release tags are the owner's call.
+  on external repos, anything leaving this repo) without explicit owner confirmation. Draft it,
+  then wait. Local commits are normal; pushes, merges, releases, and external changes are the
+  owner's call.
 - Never read or publish the contents of `/private/` or `saps/` (gitignored founder-personal
   material) into anything shared.
+- Never read machine-local files under `local/` without explicit owner authorization.
 - Never weaken an over-claim guard in `docs/trust/`: every public claim there was red-teamed
   against the tree; keep claims and code in lockstep (change the code first, or soften the
   claim).
 
-## What NOT to build (annotated scope exclusions)
+## Scope discipline
 
-Still excluded: OIDC/SAML/LDAP federation (identity is local-file / env-resolved);
-content inspection or DLP (governance decides on capability + domain, never page content);
-Firefox support (Chromium Manifest V3 + CDP only).
-
-Superseded with nuance (the ADR is authoritative where they differ):
-
-- Remote policy: `managed://` central policy distribution exists (ADR-0055, signed bundles,
-  fail-closed last-known-good cache). The per-user `--manifest` still has no HTTP source.
-- Multi-user: the Hub (ADR-0030) multiplexes multiple concurrent sessions, all admitted as
-  the same OS user. Multi-session, single-user -- never a shared multi-tenant server.
-- Manifest signing: managed:// bundles and commercial licenses carry a hybrid post-quantum
-  signature (Ed25519 + ML-DSA-65). A plain per-user manifest file is still unsigned.
+Historical ADRs include implemented, superseded, proposed, and deferred capabilities. Their
+presence does not prove that the current 1.0 tree implements them. Check current source and tests
+before making a product claim, then either implement the missing journey properly or mark the
+active documentation honestly.
 
 ## Personal and machine-local data
 
 - `/private/` (gitignored) -- founder-personal stash (legal, entity, financial planning). Not for
   agents; do not read or publish it.
-- `local/` (gitignored except its README) -- machine-local dev state and working notes that any
-  local agent may read and update: `MACHINE-STATE.md` (which engine is running, install state,
-  local gotchas) and `NOTES.md` (owner/working context, credential *locations* -- never values --,
-  session handoffs). See [local/README.md](local/README.md).
+- `local/` (gitignored except its README) -- machine-local dev state and working notes. Do not read
+  or update its contents without explicit owner authorization. See [local/README.md](local/README.md).
 - **Memory is project-level, not model-private** (the owner delegates across several agents/LLMs).
   Durable memory lives in the repo: standing preferences + learnings + index in
   [docs/MEMORY.md](docs/MEMORY.md), current state in `docs/STATUS.md` (or a batch LEDGER), decisions

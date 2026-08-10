@@ -1,17 +1,16 @@
 [package]
 name = "ghostlight-mcp-connector"
-version = "0.8.0"
-edition = "2021"
-description = "Ghostlight's protocol-versioned MCP stdio edge."
-publish = false
-license = "Apache-2.0 OR MIT"
-
-[[bin]]
-name = "ghostlight-mcp-connector"
-path = "src/main.rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-ghostlight-transport = { path = "../transport" }
-serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "net", "sync", "time"] }
-tracing = "0.1"
+anyhow.workspace = true
+ghostlight-bridge = { path = "../bridge" }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

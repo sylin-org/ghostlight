@@ -1,7 +1,0 @@
-{
-  "name": "org.sylin.ghostlight",
-  "description": "Ghostlight native messaging host",
-  "path": "/ABSOLUTE/PATH/TO/ghostlight",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://YOUR_EXTENSION_ID/"]
-}

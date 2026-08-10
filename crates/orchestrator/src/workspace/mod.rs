@@ -1,0 +1,942 @@
+//! The workspace aggregate, opaque handles, ownership, document generations, and leases.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use ghostlight_bridge::browser::{
+    BrowserReadiness, ObservedTarget, PhysicalPoint, PhysicalTab, ViewportGeometry,
+};
+use thiserror::Error;
+use uuid::Uuid;
+
+/// Opaque admitted MCP workspace handle.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct WorkspaceId(String);
+
+impl WorkspaceId {
+    /// String form used at process boundaries and in audit.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Opaque model-facing controlled tab handle.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct TabHandle(String);
+
+impl TabHandle {
+    /// String form returned to the model.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Opaque model-facing document-bound target handle.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct TargetHandle(String);
+
+impl TargetHandle {
+    /// String form returned to the model.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Opaque model-facing screenshot view handle.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct ViewHandle(String);
+
+impl ViewHandle {
+    /// String form returned to the model.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Immutable selected controlled-tab facts used by the executor.
+#[derive(Clone, Debug)]
+pub struct SelectedTab {
+    /// Opaque model-facing handle.
+    pub handle: TabHandle,
+    /// Physical Chromium tab id.
+    pub physical_id: u64,
+    /// Current document generation.
+    pub generation: u64,
+    /// Last governed URL.
+    pub url: String,
+    /// Last bounded title.
+    pub title: String,
+    /// Last governed readiness.
+    pub readiness: BrowserReadiness,
+    /// Whether runtime governance holds the tab.
+    pub held: bool,
+    /// Whether the tab is active in the workspace.
+    pub active: bool,
+}
+
+/// Immutable current target facts used at a browser-effect boundary.
+#[derive(Clone, Debug)]
+pub struct SelectedTarget {
+    /// Opaque model-facing handle.
+    pub handle: TargetHandle,
+    /// Owning tab handle.
+    pub tab: TabHandle,
+    /// Browser-local locator never exposed to the model.
+    pub locator: String,
+    /// Credential classification last observed by the adapter.
+    pub credential_class: bool,
+}
+
+/// Immutable current screenshot transform used at a pointer-effect boundary.
+#[derive(Clone, Debug)]
+pub struct SelectedView {
+    /// Opaque model-facing view handle.
+    pub handle: ViewHandle,
+    /// Owning tab handle.
+    pub tab: TabHandle,
+    /// Exact browser capture transform.
+    pub viewport: ViewportGeometry,
+    /// Returned image width in pixels.
+    pub width: u32,
+    /// Returned image height in pixels.
+    pub height: u32,
+}
+
+#[derive(Clone, Debug)]
+struct TargetState {
+    tab: TabHandle,
+    generation: u64,
+    locator: String,
+    credential_class: bool,
+}
+
+#[derive(Clone, Debug)]
+struct ViewState {
+    tab: TabHandle,
+    generation: u64,
+    viewport: ViewportGeometry,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Clone, Debug)]
+struct TabState {
+    physical_id: u64,
+    generation: u64,
+    url: String,
+    title: String,
+    readiness: BrowserReadiness,
+    active: bool,
+    held: bool,
+}
+
+#[derive(Debug)]
+struct WorkspaceState {
+    client_label: String,
+    leased: bool,
+    tabs: HashMap<TabHandle, TabState>,
+    targets: HashMap<TargetHandle, TargetState>,
+    views: HashMap<ViewHandle, ViewState>,
+}
+
+#[derive(Debug, Default)]
+struct AggregateState {
+    workspaces: HashMap<WorkspaceId, WorkspaceState>,
+}
+
+/// Thread-safe entry to the single workspace aggregate.
+#[derive(Clone, Debug, Default)]
+pub struct WorkspaceStore {
+    inner: Arc<Mutex<AggregateState>>,
+}
+
+impl WorkspaceStore {
+    /// Admit one MCP connection as an isolated workspace.
+    pub fn admit(&self, client_label: String) -> WorkspaceId {
+        let id = WorkspaceId(format!("workspace_{}", Uuid::new_v4().simple()));
+        self.lock().workspaces.insert(
+            id.clone(),
+            WorkspaceState {
+                client_label,
+                leased: false,
+                tabs: HashMap::new(),
+                targets: HashMap::new(),
+                views: HashMap::new(),
+            },
+        );
+        id
+    }
+
+    /// Release an MCP workspace and return physical tabs it owned.
+    pub fn release(&self, workspace: &WorkspaceId) -> Vec<u64> {
+        self.lock()
+            .workspaces
+            .remove(workspace)
+            .map_or_else(Vec::new, |state| {
+                state
+                    .tabs
+                    .into_values()
+                    .map(|tab| tab.physical_id)
+                    .collect()
+            })
+    }
+
+    /// Acquire exclusive mutation ownership for one invocation.
+    pub fn acquire(&self, workspace: &WorkspaceId) -> Result<WorkspaceLease, WorkspaceError> {
+        let mut state = self.lock();
+        let workspace_state = state
+            .workspaces
+            .get_mut(workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        if workspace_state.leased {
+            return Err(WorkspaceError::Busy);
+        }
+        workspace_state.leased = true;
+        Ok(WorkspaceLease {
+            store: self.clone(),
+            workspace: workspace.clone(),
+            released: false,
+        })
+    }
+
+    /// Return presentation-only client label without using it for routing or authority.
+    pub fn client_label(&self, workspace: &WorkspaceId) -> Result<String, WorkspaceError> {
+        self.lock()
+            .workspaces
+            .get(workspace)
+            .map(|state| state.client_label.clone())
+            .ok_or(WorkspaceError::UnknownWorkspace)
+    }
+
+    /// Apply an asynchronous committed landing through the aggregate before later content use.
+    pub fn apply_browser_landing(
+        &self,
+        physical_id: u64,
+        url: &str,
+        allowed: bool,
+    ) -> Option<(WorkspaceId, TabHandle)> {
+        let mut state = self.lock();
+        for (workspace_id, workspace) in &mut state.workspaces {
+            if let Some((handle, tab)) = workspace
+                .tabs
+                .iter_mut()
+                .find(|(_, tab)| tab.physical_id == physical_id)
+            {
+                tab.generation = tab.generation.saturating_add(1);
+                tab.readiness = BrowserReadiness::Loading;
+                tab.held = !allowed;
+                if allowed {
+                    tab.url = url.into();
+                }
+                return Some((workspace_id.clone(), handle.clone()));
+            }
+        }
+        None
+    }
+
+    /// Resolve the owning workspace for an asynchronous physical browser event.
+    #[must_use]
+    pub fn owner_of_physical(&self, physical_id: u64) -> Option<WorkspaceId> {
+        let state = self.lock();
+        state
+            .workspaces
+            .iter()
+            .find_map(|(workspace_id, workspace)| {
+                workspace
+                    .tabs
+                    .values()
+                    .any(|tab| tab.physical_id == physical_id)
+                    .then(|| workspace_id.clone())
+            })
+    }
+
+    /// Apply asynchronous readiness only to a non-held controlled document.
+    pub fn apply_browser_readiness(&self, physical_id: u64, readiness: BrowserReadiness) {
+        let mut state = self.lock();
+        for workspace in state.workspaces.values_mut() {
+            if let Some(tab) = workspace
+                .tabs
+                .values_mut()
+                .find(|tab| tab.physical_id == physical_id && !tab.held)
+            {
+                tab.readiness = readiness;
+                return;
+            }
+        }
+    }
+
+    /// Remove a tab closed outside an invocation.
+    pub fn apply_browser_close(&self, physical_id: u64) {
+        let mut state = self.lock();
+        for workspace in state.workspaces.values_mut() {
+            let handle = workspace
+                .tabs
+                .iter()
+                .find_map(|(handle, tab)| (tab.physical_id == physical_id).then(|| handle.clone()));
+            if let Some(handle) = handle {
+                workspace.tabs.remove(&handle);
+                workspace.targets.retain(|_, target| target.tab != handle);
+                workspace.views.retain(|_, view| view.tab != handle);
+                return;
+            }
+        }
+    }
+
+    /// Adopt a physical child tab only through its already-owned opener.
+    pub fn apply_browser_child(
+        &self,
+        opener_physical_id: u64,
+        tab: &PhysicalTab,
+    ) -> Option<(WorkspaceId, TabHandle)> {
+        let mut state = self.lock();
+        if state.workspaces.values().any(|workspace| {
+            workspace
+                .tabs
+                .values()
+                .any(|known| known.physical_id == tab.tab_id)
+        }) {
+            return None;
+        }
+        for (workspace_id, workspace) in &mut state.workspaces {
+            if !workspace
+                .tabs
+                .values()
+                .any(|known| known.physical_id == opener_physical_id)
+            {
+                continue;
+            }
+            let handle = TabHandle(format!("tab_{}", Uuid::new_v4().simple()));
+            workspace.tabs.insert(
+                handle.clone(),
+                TabState {
+                    physical_id: tab.tab_id,
+                    generation: 0,
+                    url: String::new(),
+                    title: String::new(),
+                    readiness: tab.readiness,
+                    active: tab.active,
+                    held: false,
+                },
+            );
+            return Some((workspace_id.clone(), handle));
+        }
+        None
+    }
+
+    fn lock(&self) -> MutexGuard<'_, AggregateState> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Exclusive workspace mutation lease held for one unit of work.
+#[derive(Debug)]
+pub struct WorkspaceLease {
+    store: WorkspaceStore,
+    workspace: WorkspaceId,
+    released: bool,
+}
+
+impl WorkspaceLease {
+    /// Opaque owning workspace id.
+    #[must_use]
+    pub fn workspace(&self) -> &WorkspaceId {
+        &self.workspace
+    }
+
+    /// List current governed controlled-tab facts.
+    pub fn tabs(&self) -> Result<Vec<SelectedTab>, WorkspaceError> {
+        let state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let mut tabs: Vec<_> = workspace
+            .tabs
+            .iter()
+            .map(|(handle, tab)| selected(handle, tab))
+            .collect();
+        tabs.sort_by(|left, right| left.handle.as_str().cmp(right.handle.as_str()));
+        Ok(tabs)
+    }
+
+    /// Select an exact or unambiguous controlled tab.
+    pub fn select_tab(&self, requested: Option<&str>) -> Result<SelectedTab, WorkspaceError> {
+        let state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        if let Some(requested) = requested {
+            let handle = TabHandle(requested.into());
+            if let Some(tab) = workspace.tabs.get(&handle) {
+                return held_or_selected(&handle, tab);
+            }
+            let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
+                id != &self.workspace && candidate.tabs.contains_key(&handle)
+            });
+            return Err(if owned_elsewhere {
+                WorkspaceError::NotOwnedTab
+            } else {
+                WorkspaceError::StaleTab
+            });
+        }
+        if workspace.tabs.len() == 1 {
+            let (handle, tab) = workspace.tabs.iter().next().expect("length checked");
+            return held_or_selected(handle, tab);
+        }
+        let mut active = workspace.tabs.iter().filter(|(_, tab)| tab.active);
+        let Some((handle, tab)) = active.next() else {
+            return Err(if workspace.tabs.is_empty() {
+                WorkspaceError::NoTab
+            } else {
+                WorkspaceError::AmbiguousTab
+            });
+        };
+        if active.next().is_some() {
+            return Err(WorkspaceError::AmbiguousTab);
+        }
+        held_or_selected(handle, tab)
+    }
+
+    /// Add a physical tab under a new opaque handle.
+    pub fn add_tab(&self, tab: &PhysicalTab) -> Result<SelectedTab, WorkspaceError> {
+        let mut state = self.store.lock();
+        if state.workspaces.iter().any(|(id, workspace)| {
+            id != &self.workspace
+                && workspace
+                    .tabs
+                    .values()
+                    .any(|known| known.physical_id == tab.tab_id)
+        }) {
+            return Err(WorkspaceError::PhysicalTabOwned);
+        }
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        for known in workspace.tabs.values_mut() {
+            known.active = false;
+        }
+        let handle = TabHandle(format!("tab_{}", Uuid::new_v4().simple()));
+        let value = TabState {
+            physical_id: tab.tab_id,
+            generation: 0,
+            url: String::new(),
+            title: String::new(),
+            readiness: BrowserReadiness::Unknown,
+            active: true,
+            held: false,
+        };
+        workspace.tabs.insert(handle.clone(), value.clone());
+        Ok(selected(&handle, &value))
+    }
+
+    /// Mark one controlled tab active and all sibling tabs inactive.
+    pub fn mark_active(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        if !workspace.tabs.contains_key(handle) {
+            return Err(WorkspaceError::StaleTab);
+        }
+        for (candidate, tab) in &mut workspace.tabs {
+            tab.active = candidate == handle;
+        }
+        Ok(())
+    }
+
+    /// Apply one governed committed document and invalidate prior targets by generation.
+    pub fn apply_landing(
+        &self,
+        handle: &TabHandle,
+        tab: &PhysicalTab,
+    ) -> Result<SelectedTab, WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let known = workspace
+            .tabs
+            .get_mut(handle)
+            .ok_or(WorkspaceError::StaleTab)?;
+        if known.physical_id != tab.tab_id {
+            return Err(WorkspaceError::StaleTab);
+        }
+        known.generation = known.generation.saturating_add(1);
+        known.url.clone_from(&tab.url);
+        known.title = bounded(&tab.title, 500);
+        known.readiness = tab.readiness;
+        known.active = tab.active;
+        known.held = false;
+        Ok(selected(handle, known))
+    }
+
+    /// Update readiness without accepting new page content.
+    pub fn update_readiness(
+        &self,
+        handle: &TabHandle,
+        readiness: BrowserReadiness,
+    ) -> Result<(), WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let tab = workspace
+            .tabs
+            .get_mut(handle)
+            .ok_or(WorkspaceError::StaleTab)?;
+        tab.readiness = readiness;
+        Ok(())
+    }
+
+    /// Enter a tab hold after a denied committed landing.
+    pub fn hold_tab(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        workspace
+            .tabs
+            .get_mut(handle)
+            .ok_or(WorkspaceError::StaleTab)?
+            .held = true;
+        Ok(())
+    }
+
+    /// Confirm decisive physical closure, tolerating its earlier asynchronous close event.
+    pub fn confirm_tab_closed(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        workspace.tabs.remove(handle);
+        workspace.targets.retain(|_, target| &target.tab != handle);
+        workspace.views.retain(|_, view| &view.tab != handle);
+        Ok(())
+    }
+
+    /// Map observed browser targets to fresh opaque generation-bound handles.
+    pub fn register_targets(
+        &self,
+        tab: &SelectedTab,
+        targets: &[ObservedTarget],
+    ) -> Result<Vec<(TargetHandle, ObservedTarget)>, WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let known = workspace
+            .tabs
+            .get(&tab.handle)
+            .ok_or(WorkspaceError::StaleTab)?;
+        if known.generation != tab.generation {
+            return Err(WorkspaceError::StaleTab);
+        }
+        let mut mapped = Vec::with_capacity(targets.len());
+        for target in targets {
+            let handle = TargetHandle(format!("target_{}", Uuid::new_v4().simple()));
+            workspace.targets.insert(
+                handle.clone(),
+                TargetState {
+                    tab: tab.handle.clone(),
+                    generation: tab.generation,
+                    locator: target.locator.clone(),
+                    credential_class: target.credential_class,
+                },
+            );
+            mapped.push((handle, target.clone()));
+        }
+        Ok(mapped)
+    }
+
+    /// Resolve a target and prove ownership plus current document generation.
+    pub fn resolve_target(
+        &self,
+        requested: &str,
+        selected_tab: Option<&SelectedTab>,
+    ) -> Result<SelectedTarget, WorkspaceError> {
+        let state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let handle = TargetHandle(requested.into());
+        let Some(target) = workspace.targets.get(&handle) else {
+            let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
+                id != &self.workspace && candidate.targets.contains_key(&handle)
+            });
+            return Err(if owned_elsewhere {
+                WorkspaceError::NotOwnedTarget
+            } else {
+                WorkspaceError::StaleTarget
+            });
+        };
+        let tab = workspace
+            .tabs
+            .get(&target.tab)
+            .ok_or(WorkspaceError::StaleTarget)?;
+        if target.generation != tab.generation {
+            return Err(WorkspaceError::StaleTarget);
+        }
+        if let Some(selected) = selected_tab {
+            if selected.handle != target.tab {
+                return Err(WorkspaceError::TargetTabMismatch);
+            }
+        }
+        if tab.held {
+            return Err(WorkspaceError::Held);
+        }
+        Ok(SelectedTarget {
+            handle,
+            tab: target.tab.clone(),
+            locator: target.locator.clone(),
+            credential_class: target.credential_class,
+        })
+    }
+
+    /// Register one screenshot transform and supersede older views for the same tab.
+    pub fn register_view(
+        &self,
+        tab: &SelectedTab,
+        viewport: ViewportGeometry,
+        width: u32,
+        height: u32,
+    ) -> Result<ViewHandle, WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let known = workspace
+            .tabs
+            .get(&tab.handle)
+            .ok_or(WorkspaceError::StaleTab)?;
+        if known.generation != tab.generation {
+            return Err(WorkspaceError::StaleTab);
+        }
+        workspace.views.retain(|_, view| view.tab != tab.handle);
+        let handle = ViewHandle(format!("view_{}", Uuid::new_v4().simple()));
+        workspace.views.insert(
+            handle.clone(),
+            ViewState {
+                tab: tab.handle.clone(),
+                generation: tab.generation,
+                viewport,
+                width,
+                height,
+            },
+        );
+        Ok(handle)
+    }
+
+    /// Resolve an image point to page CSS coordinates with ownership and generation checks.
+    pub fn resolve_view_point(
+        &self,
+        requested: &str,
+        selected_tab: Option<&SelectedTab>,
+        x: f64,
+        y: f64,
+    ) -> Result<(SelectedView, PhysicalPoint), WorkspaceError> {
+        let state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let handle = ViewHandle(requested.into());
+        let Some(view) = workspace.views.get(&handle) else {
+            let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
+                id != &self.workspace && candidate.views.contains_key(&handle)
+            });
+            return Err(if owned_elsewhere {
+                WorkspaceError::NotOwnedView
+            } else {
+                WorkspaceError::StaleView
+            });
+        };
+        let tab = workspace
+            .tabs
+            .get(&view.tab)
+            .ok_or(WorkspaceError::StaleView)?;
+        if view.generation != tab.generation {
+            return Err(WorkspaceError::StaleView);
+        }
+        if selected_tab.is_some_and(|selected| selected.handle != view.tab) {
+            return Err(WorkspaceError::ViewTabMismatch);
+        }
+        if !x.is_finite()
+            || !y.is_finite()
+            || x < 0.0
+            || y < 0.0
+            || x >= f64::from(view.width)
+            || y >= f64::from(view.height)
+            || view.viewport.output_scale <= 0.0
+        {
+            return Err(WorkspaceError::ViewPointOutOfBounds);
+        }
+        let selected = SelectedView {
+            handle,
+            tab: view.tab.clone(),
+            viewport: view.viewport,
+            width: view.width,
+            height: view.height,
+        };
+        let point = PhysicalPoint {
+            x: view.viewport.page_x + x / view.viewport.output_scale,
+            y: view.viewport.page_y + y / view.viewport.output_scale,
+        };
+        Ok((selected, point))
+    }
+
+    /// Invalidate screenshot coordinates after a viewport-changing operation.
+    pub fn invalidate_views(&self, tab: &TabHandle) -> Result<(), WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        workspace.views.retain(|_, view| &view.tab != tab);
+        Ok(())
+    }
+}
+
+impl Drop for WorkspaceLease {
+    fn drop(&mut self) {
+        if self.released {
+            return;
+        }
+        if let Some(workspace) = self.store.lock().workspaces.get_mut(&self.workspace) {
+            workspace.leased = false;
+        }
+        self.released = true;
+    }
+}
+
+fn selected(handle: &TabHandle, tab: &TabState) -> SelectedTab {
+    SelectedTab {
+        handle: handle.clone(),
+        physical_id: tab.physical_id,
+        generation: tab.generation,
+        url: tab.url.clone(),
+        title: tab.title.clone(),
+        readiness: tab.readiness,
+        held: tab.held,
+        active: tab.active,
+    }
+}
+
+fn held_or_selected(handle: &TabHandle, tab: &TabState) -> Result<SelectedTab, WorkspaceError> {
+    if tab.held {
+        Err(WorkspaceError::Held)
+    } else {
+        Ok(selected(handle, tab))
+    }
+}
+
+fn bounded(value: &str, maximum: usize) -> String {
+    value.chars().take(maximum).collect()
+}
+
+/// Workspace invariant or recovery failure.
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+pub enum WorkspaceError {
+    /// MCP workspace is no longer admitted.
+    #[error("workspace is no longer admitted")]
+    UnknownWorkspace,
+    /// Another invocation owns the workspace lease.
+    #[error("workspace is busy")]
+    Busy,
+    /// No controlled tab exists.
+    #[error("no controlled tab exists")]
+    NoTab,
+    /// More than one controlled tab is a plausible target.
+    #[error("tab selection is ambiguous")]
+    AmbiguousTab,
+    /// Tab handle is closed or stale.
+    #[error("tab handle is stale")]
+    StaleTab,
+    /// Tab belongs to another admitted workspace.
+    #[error("tab is owned by another workspace")]
+    NotOwnedTab,
+    /// Target handle belongs to an old document or is unknown.
+    #[error("target handle is stale")]
+    StaleTarget,
+    /// Target belongs to another admitted workspace.
+    #[error("target is owned by another workspace")]
+    NotOwnedTarget,
+    /// View handle belongs to an old document, viewport, or is unknown.
+    #[error("view handle is stale")]
+    StaleView,
+    /// View handle belongs to another admitted workspace.
+    #[error("view is owned by another workspace")]
+    NotOwnedView,
+    /// Explicit tab does not own the target.
+    #[error("target does not belong to the selected tab")]
+    TargetTabMismatch,
+    /// Explicit tab does not own the view.
+    #[error("view does not belong to the selected tab")]
+    ViewTabMismatch,
+    /// Image coordinate is not finite or is outside the captured view.
+    #[error("view coordinate is outside the captured image")]
+    ViewPointOutOfBounds,
+    /// Runtime governance holds the tab.
+    #[error("tab is held by runtime governance")]
+    Held,
+    /// Physical tab is already controlled by another workspace.
+    #[error("physical tab is already controlled")]
+    PhysicalTabOwned,
+}
+
+#[cfg(test)]
+mod tests {
+    use ghostlight_bridge::browser::{
+        BrowserReadiness, CaptureScope, ObservedTarget, PhysicalTab, ViewportGeometry,
+    };
+
+    use super::{WorkspaceError, WorkspaceStore};
+
+    fn physical(id: u64, url: &str) -> PhysicalTab {
+        PhysicalTab {
+            tab_id: id,
+            title: "title".into(),
+            url: url.into(),
+            active: true,
+            readiness: BrowserReadiness::Complete,
+        }
+    }
+
+    #[test]
+    fn handles_are_owned_and_targets_expire_on_commit() {
+        let store = WorkspaceStore::default();
+        let first = store.admit("first".into());
+        let second = store.admit("second".into());
+        let lease = store.acquire(&first).unwrap();
+        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com"))
+            .unwrap();
+        let targets = lease
+            .register_targets(
+                &tab,
+                &[ObservedTarget {
+                    locator: "l1".into(),
+                    role: "button".into(),
+                    name: "Go".into(),
+                    state: vec![],
+                    credential_class: false,
+                }],
+            )
+            .unwrap();
+        let handle = targets[0].0.as_str().to_owned();
+        assert!(lease.resolve_target(&handle, Some(&tab)).is_ok());
+        let _new = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.org"))
+            .unwrap();
+        assert_eq!(
+            lease.resolve_target(&handle, None).unwrap_err(),
+            WorkspaceError::StaleTarget
+        );
+        drop(lease);
+        let other = store.acquire(&second).unwrap();
+        assert_eq!(
+            other.select_tab(Some(tab.handle.as_str())).unwrap_err(),
+            WorkspaceError::NotOwnedTab
+        );
+    }
+
+    #[test]
+    fn omission_selects_only_an_unambiguous_tab() {
+        let store = WorkspaceStore::default();
+        let workspace = store.admit("test".into());
+        let lease = store.acquire(&workspace).unwrap();
+        assert_eq!(lease.select_tab(None).unwrap_err(), WorkspaceError::NoTab);
+        let first = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        assert_eq!(lease.select_tab(None).unwrap().handle, first.handle);
+        let second = lease.add_tab(&physical(2, "about:blank")).unwrap();
+        assert_eq!(lease.select_tab(None).unwrap().handle, second.handle);
+    }
+
+    #[test]
+    fn decisive_close_receipt_tolerates_an_earlier_async_close_event() {
+        let store = WorkspaceStore::default();
+        let workspace = store.admit("test".into());
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        store.apply_browser_close(7);
+        assert!(lease.confirm_tab_closed(&tab.handle).is_ok());
+        assert_eq!(lease.select_tab(None).unwrap_err(), WorkspaceError::NoTab);
+    }
+
+    #[test]
+    fn screenshot_views_map_coordinates_and_expire_on_commit() {
+        let store = WorkspaceStore::default();
+        let workspace = store.admit("test".into());
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(7, "https://example.com"))
+            .unwrap();
+        let geometry = ViewportGeometry {
+            scope: CaptureScope::Viewport,
+            page_x: 10.0,
+            page_y: 20.0,
+            css_width: 800.0,
+            css_height: 600.0,
+            visual_page_x: 10.0,
+            visual_page_y: 20.0,
+            visual_css_width: 800.0,
+            visual_css_height: 600.0,
+            device_scale: 2.0,
+            zoom: 1.0,
+            output_scale: 0.5,
+        };
+        let view = lease.register_view(&tab, geometry, 400, 300).unwrap();
+        let (_, point) = lease
+            .resolve_view_point(view.as_str(), Some(&tab), 100.0, 50.0)
+            .unwrap();
+        assert_eq!(point.x, 210.0);
+        assert_eq!(point.y, 120.0);
+        assert_eq!(
+            lease
+                .resolve_view_point(view.as_str(), Some(&tab), 401.0, 1.0)
+                .unwrap_err(),
+            WorkspaceError::ViewPointOutOfBounds
+        );
+        let _ = lease
+            .apply_landing(&tab.handle, &physical(7, "https://example.org"))
+            .unwrap();
+        assert_eq!(
+            lease
+                .resolve_view_point(view.as_str(), None, 1.0, 1.0)
+                .unwrap_err(),
+            WorkspaceError::StaleView
+        );
+    }
+
+    #[test]
+    fn child_tabs_are_adopted_only_through_an_owned_opener() {
+        let store = WorkspaceStore::default();
+        let workspace = store.admit("test".into());
+        let lease = store.acquire(&workspace).unwrap();
+        let _ = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        assert!(store
+            .apply_browser_child(7, &physical(8, "about:blank"))
+            .is_some());
+        assert!(store
+            .apply_browser_child(99, &physical(9, "about:blank"))
+            .is_none());
+        assert_eq!(lease.tabs().unwrap().len(), 2);
+    }
+}

@@ -9,19 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Canonical browser-operation kernel (ADR-0101).** Versioned MCP surfaces now translate into
-  protocol-neutral operation and result types before governance, scheduling, execution, and audit.
-  The frozen `ghostlight-legacy/v1` profile remains the automatic default.
-- **Negotiated semantic extension requests.** A browser session advertising exact
-  `mechanismRequestV1` receives typed physical mechanism ids and canonical inputs. Requests are
-  bound to the advertising connection generation, including tab URL and chunked requests.
+- **Ghostlight 1.0 contracts.** `docs/1.0/` defines the current intent, language, architecture,
+  and acceptance boundary without replacing the inherited project documentation.
 
 ### Changed
 
-- **Chrome adapter source v0.8.1.** The policy-free extension accepts both the negotiated semantic
-  request grammar and the covered 0.8 legacy request grammar. Services fall back to the bounded
-  legacy serializer for adapters that do not advertise the feature. Public adapter status remains
-  0.8.0 until a separate adapter release.
+- **1.0 implementation rebaseline.** The active implementation is the clean-room orchestrator,
+  shared typed bridge, stable MCP and browser connectors, and policy-free browser adapter. The
+  branch now descends from the complete post-0.8 project history rather than an orphan root.
+- **Documentation continuity.** Root documentation, licenses, ADRs through ADR-0101, research,
+  trust material, design records, task ledgers, public surfaces, and product identity are retained.
+
+### Removed
+
+- **Superseded implementation code.** The old root binary, core, transport, lightbox, extension
+  mechanisms, test suites, release scripts, and packaging launchers remain in Git history but no
+  longer coexist with the 1.0 implementation.
 
 ## [0.8.0]
 

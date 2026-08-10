@@ -21,27 +21,32 @@ Collaboration and process -- this file is their canonical home:
   model-private memory.
 - **Outward-facing content is draft-then-confirm.** Draft anything that leaves the repo (npm,
   store listings, social posts, website copy, comments on external repos) and WAIT for the owner
-  before posting. Committing to `dev` is normal autonomous work; `dev -> main` merges and release
-  tags are the owner's call.
+  before posting. Local commits are normal autonomous work; pushes, merges, releases, and external
+  changes are the owner's call.
 - **Prefer the root fix over the spot fix.** If a spot fix is genuinely unavoidable, say so
   explicitly in the commit message so the debt stays visible.
+- **Documentation and product history survive internal rewrites.** Root documentation, the full
+  `docs/` tree, ADRs, licenses, public identity, research, trust material, and task records are
+  inherited product knowledge. Reconcile them for a new implementation; never replace them with a
+  narrow clean-room substitute or quarantine them with the old code.
 - **Use the fewest meaningful moving parts.** A logical boundary does not automatically earn a
   process, service, crate, trait framework, or new identity. Add one only for a real lifecycle,
   trust, version, or correctness need. Preserve product capability and safety, not incidental
   compatibility. A break-and-rebuild is welcome when it produces a smaller, clearer, better
   system (ADR-0096).
-- **Keep tool identity stable and guidance current.** Tool names, parameters, types, enums, and
-  ordering are compatibility contracts. Descriptions, examples, annotations, and additive response
-  guidance should improve when they can make purpose, side effects, recovery, or tool choice
-  clearer. External grades are diagnostics, never permission to reshape a trained signature
-  (ADR-0094/0100).
+- **Preserve product identity; redesign internal tools deliberately.** The Ghostlight name, icons,
+  visual language, animation, public character, legal identity, and user expectations survive an
+  internal rewrite. Model-facing tools and descriptions are mechanisms, not identity. The
+  orchestrator owns them and may make them clearer, smaller, and more semantic.
 - **The browser product stays in the local user's context.** Ghostlight is for visible work in the
-  user's existing authenticated Chromium profile. Headless, isolated-profile, cloud, and remote
-  browser execution are product exclusions, not missing parity work.
-- **Browser placement belongs to the user.** Reuse the last-focused eligible normal window for new
-  work and pin the Ghostlight workspace there. Create a browser window only when none is eligible. A tab
-  group is visible organization, not a user-facing security boundary; never move tabs or groups
-  back after the user places them elsewhere (ADR-0085).
+  user's existing authenticated browser. Chromium is the current adapter; the domain must support
+  plural browser instances and future browser families without singleton assumptions. Headless,
+  isolated-profile, cloud, and remote browser execution remain product exclusions.
+- **Browser placement belongs to the user.** Reuse the same-name Ghostlight tab group across open
+  browser windows and place new operation tabs there. Create a separate browser window only when no
+  suitable Ghostlight group exists and avoid disrupting the user's active non-Ghostlight window. A
+  tab group is visible organization, not a user-facing security boundary; never move tabs or groups
+  back after the user places them elsewhere.
 - **A stale workspace recovers only through explicit tab creation.** Known Ghostlight tab ids stay
   authoritative. `tabs_create_mcp` may replace a conclusively dead window pin after safely creating
   a fresh blank tab; other calls never switch workspaces automatically (ADR-0090).
@@ -68,10 +73,10 @@ Collaboration and process -- this file is their canonical home:
   customer-visible, defer that native listing until a legitimate non-home public address exists.
   Use supported store interoperability in the meantime. For Edge, the Chrome Web Store adapter is
   the end-user path.
-- **The Chrome adapter versions independently from the service.** `extension/manifest.json` owns
-  the adapter version. From 0.8 onward, `compatibility.json` declares a major/minor contract block:
-  any 0.8 adapter patch covers any 0.8 service patch. Patch releases do not reset store review. A
-  contract change advances the minor for both components (ADR-0093).
+- **The browser adapter versions independently from the service.** The extension manifest owns the
+  adapter version. The 1.0 runtime negotiates protocol majors and capabilities at connection time;
+  do not infer compatibility from browser-family strings or silently revive the retired 0.8
+  `compatibility.json` mechanism.
 - **Persist before context loss.** On a "prep for compaction" / "handoff" / "save state" request,
   first update memory + durable docs (this file, STATUS, ADRs/LEDGERs) and commit, THEN emit a
   self-contained continuation prompt -- persist first, answer second.
@@ -120,16 +125,10 @@ file does not restate them -- follow AGENTS.md.
   a workspace. A passively adopted browser child becomes service-authoritative only when a later
   creator inventory confirms it. The extension's managed-tab gate remains defense-in-depth for
   those owned tabs and still keeps guessed user tabs out (ADR-0066/0096/0099).
-- **Distribution is automated and credential-gated** in `scripts/release.ps1`; the MCP registry
-  publish is DNS-authed on the sylin.org apex; canonical URLs are `sylin.org` (the github.io site
-  is retired, redirect-stubbed). Off-tree/secret change history is in `local/AUDIT-LOG.md`.
-- **Public release and platform truth is product-owned.** `docs/public-status.json` is the
-  canonical machine-readable service release fallback, live-platform statement, and Chrome store
-  adapter state. The README must contain its exact public claims; the website consumes a synchronized
-  fallback through `scripts/publish-website.ps1`. Run `scripts/check-public-surfaces.ps1` locally
-  and with `-Online` after deployment instead of repairing either surface independently. Chrome
-  review completes asynchronously: use `scripts/reconcile-chrome-store.ps1` after submission and
-  approval so the public version, pending version, README, and compatibility claim move together.
+- **The 0.8 distribution records are historical evidence, not an active 1.0 release pipeline.**
+  The 1.0 rebaseline intentionally removed the superseded launchers and release scripts. Rebuild
+  distribution from current process boundaries before claiming that 1.0 can be packaged or
+  published. Canonical public URLs remain `sylin.org`.
 - **Release reception stays manual and evidence-labeled.** For 0.8, use
   `docs/research/public-reception-loop-0.8.md` at release, 7 days, and 30 days. Keep voluntary human
   reports separate from project-authored distribution and automation-prone counters. Three
@@ -170,6 +169,7 @@ file does not restate them -- follow AGENTS.md.
 | --- | --- |
 | How to work here: conventions, boundaries, architecture | [AGENTS.md](../AGENTS.md) (start here) |
 | Current state: version, in-flight work, owed items | [docs/STATUS.md](STATUS.md) |
+| Current 1.0 intent, language, architecture, and acceptance | [docs/1.0/](1.0/) |
 | Decisions (one per file), authoritative and immutable | [docs/adr/](adr/README.md) |
 | Deep design rationale (superseded by ADRs where they differ) | [docs/SPEC.md](SPEC.md) |
 | Build / run / deploy on a dev machine | [docs/DEV-LOOP.md](DEV-LOOP.md) |

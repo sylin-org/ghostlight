@@ -1,36 +1,29 @@
-[package]
-name = "ghostlight"
-version = "0.8.0"
-edition = "2021"
-description = "Governed browser automation over the user's own authenticated Chromium session -- for AI coding agents."
-publish = false
-# Open-core (ADR-0027): engine is Apache-2.0 OR MIT; src/governance/ is the Ghostlight
-# Commercial License. LICENSING.md defines the split and points to each governing text.
-license-file = "LICENSING.md"
-
 [workspace]
-members = [".", "crates/transport", "crates/core", "crates/browser-connector", "crates/mcp-connector", "crates/lightbox"]
-default-members = [".", "crates/mcp-connector", "crates/browser-connector"]
+members = [
+    "crates/bridge",
+    "crates/orchestrator",
+    "crates/mcp-connector",
+    "crates/browser-connector",
+]
 resolver = "2"
 
-[dependencies]
-ghostlight-core = { path = "crates/core" }
-ghostlight-transport = { path = "crates/transport" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "net", "sync", "time", "process"] }
-clap = { version = "4", features = ["derive"] }
-tracing = "0.1"
-anyhow = "1"
-# The facade crate + main.rs need only the deps above (main.rs uses clap/anyhow/tokio/tracing).
-# Those below are used directly by the integration tests in tests/; they stay in [dependencies]
-# because this package declares no [dev-dependencies] section.
-serde_json = { version = "1", features = ["preserve_order"] }
-dirs = "6"
-uuid = { version = "1", features = ["v4"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-# WHATWG URL parser -- domain matching must never hand-roll URL/host parsing (CVE-2025-47241 class).
-url = "2"
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+rust-version = "1.82"
 
-[features]
-# Founder-only offline license authoring (ADR-0028 Decision 10): forwards to the core crate so
-# `ghostlight license sign` / `pubkey` compile. NEVER enabled in a release build.
-license-admin = ["ghostlight-core/license-admin"]
+[workspace.dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+url = { version = "2.5", features = ["serde"] }
+uuid = { version = "1.10", features = ["v4", "serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"

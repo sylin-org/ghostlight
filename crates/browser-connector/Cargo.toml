@@ -1,16 +1,13 @@
 [package]
 name = "ghostlight-browser-connector"
-version = "0.8.0"
-edition = "2021"
-description = "Ghostlight browser native-messaging relay."
-publish = false
-license = "Apache-2.0 OR MIT"
-
-[[bin]]
-name = "ghostlight-browser-connector"
-path = "src/main.rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-ghostlight-transport = { path = "../transport" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-tracing = "0.1"
+anyhow.workspace = true
+ghostlight-bridge = { path = "../bridge" }
+
+[lints]
+workspace = true
