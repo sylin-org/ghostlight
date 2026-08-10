@@ -1,43 +1,15 @@
 {
-  "schema": 3,
-  "name": "enterprise-healthcare",
-  "version": "2026.07.1",
-  "mode": "enforce",
-  "identity": {
-    "resolved_by": "managed_config",
-    "principal": "GEISINGER\\jdoe",
-    "groups": ["Dept-EA", "App-ServiceNow-Admin", "App-Epic-ClinicalRead"],
-    "resolved_at": "2026-07-01T08:00:00Z"
-  },
-  "grants": [
-    {
-      "id": "servicenow",
-      "hosts": { "allow": ["servicenow.geisinger.org"] },
-      "allowed": ["read", "action", "write"],
-      "description": "ServiceNow incident and change management without arbitrary JS"
-    },
-    {
-      "id": "epic-read",
-      "hosts": { "allow": ["epic.geisinger.org"] },
-      "allowed": ["read"],
-      "description": "EHR read-only for clinical data review"
-    },
-    {
-      "id": "research",
-      "hosts": { "allow": ["*.gartner.com", "*.ieee.org", "scholar.google.com"] },
-      "allowed": ["read"],
-      "description": "External research resources"
-    },
-    {
-      "id": "internal-docs",
-      "hosts": { "allow": ["confluence.geisinger.org", "sharepoint.geisinger.org"] },
-      "allowed": ["read"],
-      "description": "Internal documentation"
-    }
+  "version": 1,
+  "managed": true,
+  "expires_unix_ms": 1893456000000,
+  "allow_capabilities": ["read", "action", "write"],
+  "deny_capabilities": ["execute"],
+  "allow_tab_close": false,
+  "allow_hosts": [
+    "servicenow.geisinger.org",
+    "epic.geisinger.org",
+    "confluence.geisinger.org",
+    "sharepoint.geisinger.org"
   ],
-  "config": [
-    { "key": "audit.enabled", "value": true, "level": "mandatory" },
-    { "key": "audit.destination", "value": "file", "level": "mandatory" },
-    { "key": "content.security.secrets.redact", "value": true, "level": "recommended" }
-  ]
+  "deny_hosts": ["admin.geisinger.org"]
 }

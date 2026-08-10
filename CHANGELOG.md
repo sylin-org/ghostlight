@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Ghostlight 1.0 contracts.** `docs/1.0/` defines the current intent, language, architecture,
   and acceptance boundary without replacing the inherited project documentation.
+- **Integrated desktop workbench (ADR-0102).** The orchestrator now hosts a Tauri 2 tray
+  workbench with at-a-glance plural activity, payload-free history, checkup, runtime controls,
+  global search, supported-harness management, and high-signal native notifications.
+- **Supported-harness management.** Codex, Claude Code, Claude Desktop, Cursor, Visual Studio Code,
+  Windsurf, Zed, OpenCode, and Crush registrations can be checked, installed, or removed through
+  explicit ownership-checked operations that preserve JSONC and TOML comments.
 
 ### Changed
 
@@ -19,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   branch now descends from the complete post-0.8 project history rather than an orphan root.
 - **Documentation continuity.** Root documentation, licenses, ADRs through ADR-0101, research,
   trust material, design records, task ledgers, public surfaces, and product identity are retained.
+- **Fringe stability.** The complete workbench and harness-management feature is implemented
+  without changes to the MCP connector, browser connector, shared bridge, or extension.
 
 ### Removed
 

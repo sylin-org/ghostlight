@@ -1,5 +1,9 @@
 # Ghostlight MCPB
 
+> Historical 0.8 package documentation. Its launcher and packaging script are not present in the
+> 1.0 tree. Preserve this record for future package-design evidence; do not claim or build a 1.0
+> MCPB until a new package contract is accepted and implemented.
+
 This directory is the source template for Ghostlight's Claude Desktop MCPB package. Release
 packaging adds the signed release binaries for Windows x64, macOS Apple Silicon, and macOS Intel.
 The package does not download code or send telemetry at runtime.

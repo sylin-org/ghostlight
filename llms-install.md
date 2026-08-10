@@ -1,99 +1,76 @@
-# Installing and using Ghostlight (for AI agents)
+# Installing and using Ghostlight 1.0 for an AI client
 
-Ghostlight lets you work in the user's signed-in Chromium browser while the user watches and keeps
-control. Personal use is complete without policy. Optional governance may limit capabilities or
-domains, and a denial is a boundary to explain rather than work around.
+Ghostlight works in the user's visible, signed-in Chromium browser. Do not install an extension,
+edit a harness configuration, or retry an uncertain browser effect without the user's knowledge.
+Policy denial and the extension's preserve-tabs refusal are boundaries to explain, not evade.
 
-Install, test, and recover with the steps below. Pull the user in only for the visible actions a
-CLI cannot complete: adding the store extension and restarting an MCP client that did not
-hot-reload its tools.
+This file describes the planned 1.0 package. The public 0.8 package and adapter are not compatible
+substitutes for a 1.0 source build.
 
-## 1. Install and register
+## 1. Complete the user-visible installation
 
-Run the idempotent installer:
+1. Ask the user to install and launch the matching Ghostlight 1.0 platform package.
+2. Ask them to open Ghostlight from the tray and choose **Installations**.
+3. Use **Check** for the current harness, then let the user choose **Install**. Ghostlight changes
+   only its owned entry, creates a backup, and preserves unrelated JSONC or TOML content.
+4. Ask the user to install the matching `Ghostlight in Browser` 1.0 store adapter.
+5. Reconnect or restart the MCP client if it does not refresh its tool catalog.
 
-```sh
-npx -y ghostlight install
-```
+Supported workbench registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
+Code, Windsurf, Zed, OpenCode, and Crush. Another compatible local stdio MCP client can point
+directly at the packaged sibling `ghostlight-mcp-connector` executable with no role flag or model
+dialect.
 
-The launcher fetches the native MCP connector, persistent service, and browser connector. It
-registers detected supported clients and the browser native host. Supported client ids are
-`claude-code`, `claude-desktop`, `cursor`, `vscode`, `codex`, `windsurf`, `zed`, `opencode`, and
-`crush`. Use `--client <id>` only when the user asked to limit the change. Show the user the plan
-or result. Preserve any config the installer says it cannot merge safely.
+Do not launch the connector as a standalone background service. Its stdio lifetime belongs to the
+MCP client; it negotiates with the persistent orchestrator.
 
-For another compatible local stdio MCP client, run the installer for the browser side and add the
-equivalent of this client-owned entry:
+## 2. Test the whole chain
 
-```json
-{
-  "mcpServers": {
-    "ghostlight": {
-      "command": "npx",
-      "args": ["-y", "ghostlight"]
-    }
-  }
-}
-```
+Use only the catalog returned by the client. For the first proof:
 
-Requirements: Node.js for the `npx` launcher and Chrome, Edge, Brave, or Chromium 116+. The running
-Ghostlight service is native Rust, not a Node service.
+1. Call `browser_open_page` with `{"url":"https://example.com"}`.
+2. Call `browser_read_page` with the returned `tab`.
+3. Report the heading and the opaque tab handle.
+4. Do not click, type, submit, upload, or run a script during this proof.
 
-## 2. Complete the visible browser step
+Success proves the MCP client, stdio connector, orchestrator, browser connector, native messaging,
+extension, and visible browser path. On failure, ask the user to open **Checkup** and
+**Installations** in the workbench. Follow the named condition instead of inventing a second stack.
 
-The CLI cannot silently install a Chromium extension. Ask the user to follow the walkthrough
-opened by the installer and add
-[Ghostlight in Browser from the Chrome Web Store](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl).
-Do not offer a release archive, unpacked extension, or other end-user fallback.
+## 3. Choose the narrowest tool
 
-## 3. Test the whole chain
+- Use `browser_list_tabs` to see controlled tabs and `browser_activate_tab` to bring one into view.
+- Use `browser_open_page`, `browser_navigate_page`, `browser_navigate_history`, and
+  `browser_reload_page` for distinct navigation intents.
+- Read with `browser_read_page`; inspect structure with `browser_inspect_page`; obtain a semantic
+  target with `browser_find`.
+- Prefer a semantic target for click, hover, scroll, fill, type, drag, and upload. Use screenshot
+  coordinates only with the current `view` returned by `browser_take_screenshot`.
+- Use `browser_run_sequence` only for a short, fully specified sequence whose later inputs do not
+  depend on earlier page results.
+- Use `browser_run_script` only when explicit execute authority and page JavaScript are genuinely
+  required.
+- Use `browser_wait` for an explicit observable condition and `browser_handle_dialog` for the
+  currently visible browser dialog.
 
-If Ghostlight tools are absent, ask the user to restart or reconnect the current MCP client. Do
-not launch a standalone connector as a workaround.
+The complete schemas, defaults, capabilities, and terminal result envelope are in
+[`docs/1.0/LANGUAGE.md`](docs/1.0/LANGUAGE.md).
 
-When the tools are present:
+## 4. Recover without guessing
 
-1. Call `tabs_context_mcp` with `createIfEmpty: true` to get a valid `tabId`.
-2. Call `navigate` for that tab with `https://example.com/`.
-3. Call `get_page_text` and report the page heading plus the exact tab used.
-4. Do not click, type, submit, or change the page during this proof.
+- **No tools:** reconnect the existing MCP server through the client. A cached catalog does not
+  prove its connector is alive.
+- **Browser unavailable:** ask the user to open Checkup, enable the matching extension, and keep
+  Ghostlight running in the tray.
+- **Ambiguous tab:** call `browser_list_tabs`, then pass the exact `tab`.
+- **Stale target or view:** inspect, find, or capture again. Handles are tied to current document
+  and viewport state.
+- **Transport loss during an effectful call:** inspect current browser state before deciding
+  whether any new action is safe. Never infer failure from a lost response.
+- **Blocked:** report the fixed reason and safe next steps. Do not reach for a lower-level tool to
+  evade the same authority boundary.
+- **Attention required:** stop browser effects and wait for the user.
+- **Unknown or partial effect:** do not replay the call automatically.
 
-If that succeeds, the client, MCP connector, service, browser connector, extension, and browser
-path all work. If it fails, run `npx -y ghostlight doctor` and follow its named finding.
-
-## 4. Choose the next tool class
-
-Keep tool choice compact; the live tool registry is authoritative.
-
-- Inspect owned tabs with `tabs_context_mcp`; create or recover a workspace with
-  `tabs_create_mcp`.
-- Understand a page with `read_page`, `get_page_text`, or `find` before acting.
-- Prefer `act_on` for one semantic target, `form_fill` for several labeled fields, and
-  `form_input` for one field whose fresh ref is already known.
-- Use `computer` for screenshots and low-level coordinate or keyboard work, not as the default for
-  a semantic target or form.
-- Use `browser_batch` when every step input is known before the call. Use `script` when later steps
-  consume structured results from earlier ones.
-- Use `wait_for` for a named page condition. Use page, console, and network reads to diagnose a
-  failed workflow before guessing at another action.
-- Call `explain` for the complete in-session action and capability directory.
-
-## 5. Recover without guessing
-
-- **No tools:** reconnect through the current MCP client. Cached tool names do not prove its stdio
-  connector is still alive.
-- **Browser disconnected:** run `npx -y ghostlight doctor`; ask the user to enable the store
-  extension if the finding says it is disabled.
-- **Stale tab or workspace:** call `tabs_context_mcp`. If no usable workspace remains, call
-  `tabs_create_mcp` once. Do not substitute an arbitrary tab.
-- **`Transport closed` during an effectful call:** stop, reconnect through the client, and inspect
-  current tab/page state before deciding whether a retry is safe.
-- **Denied:** call `explain`, report the missing capability or domain boundary, and stop or choose a
-  genuinely lower-capability way to meet the user's goal. Do not evade policy with a lower-level
-  tool.
-- **Uncertain side effect:** inspect before retrying. A lost response does not mean the page action
-  failed.
-
-Ghostlight 0.8 implements exact local stdio MCP revisions `2025-11-25` and `2026-07-28`. Follow the
-selected revision's workspace contract; do not invent a remote MCP endpoint. Current public
-release and adapter state live in [`docs/public-status.json`](docs/public-status.json).
+Ghostlight 1.0 uses local stdio MCP at the client edge and typed local IPC behind it. It exposes no
+remote MCP endpoint and requires no Node.js launcher.

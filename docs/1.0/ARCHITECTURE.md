@@ -14,6 +14,11 @@ MCP client
   -> Chromium native messaging
   -> policy-free extension
   -> Chrome APIs and page-local observation
+
+local human
+  -> bundled Tauri workbench
+  -> typed WorkbenchFacade
+  -> the same orchestrator contexts
 ```
 
 - `crates/bridge` defines the small versioned service and browser wire vocabularies.
@@ -26,6 +31,10 @@ MCP client
 Only process, lifecycle, and trust boundaries justify these crates. Product contexts remain
 modules inside the orchestrator. The dependency direction points inward to `bridge` types and
 orchestrator ports. The orchestrator does not depend on MCP or Chromium APIs.
+
+The `ghostlight` executable also hosts the Tauri 2 desktop event loop. Tauri is a presentation
+adapter inside the modular monolith, not another service or state authority. `--headless` starts
+the same orchestrator without a WebView, tray, or native notifications.
 
 ## Fringe stability
 
@@ -117,6 +126,24 @@ Chrome details implement this port outside the context.
 Defines content-free feedback events: operation start, target indication, progress, completion,
 denial, and attention. Presentation reacts to domain events through a port. Its failures are
 recorded but cannot affect authority or completion truth.
+
+### Workbench
+
+Owns the payload-free desktop read model, bounded global search, high-signal notification
+decisions, runtime-control intents, and explicit supported-harness management. It projects the
+closed domain-event vocabulary through direct typed reactions and reconstructs bounded terminal
+history from the existing durable audit file. The WebView owns only disposable view state.
+
+Harness registration is an orchestrator-owned local-human capability. Each supported harness has
+one explicit config location and schema. Check is read-only. Install and uninstall are serialized,
+merge only the `ghostlight` entry, keep unrelated siblings, preserve JSONC and TOML comments,
+create a backup, and refuse malformed, unreadable, or foreign-owned configuration rather than
+guessing. The UI exposes no generic filesystem or process operation.
+
+Tauri commands form a small typed inbound adapter over `WorkbenchFacade`. File work runs outside
+the UI event loop. The native notification port is best effort and content-free. WebView, tray,
+notification, and recoverable Tauri failures cannot change domain truth; startup or event-loop
+failure leaves the orchestrator running headlessly.
 
 ## Chokepoints and unit of work
 

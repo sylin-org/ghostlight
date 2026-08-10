@@ -19,7 +19,7 @@ all resolving to artifacts from the same tagged source. Scoop and winget manifes
 the repository but are not public distribution channels until their packages ship. Fixes land on
 the latest tagged release; pre-1.0 there are no
 backport branches (see [SECURITY.md](../../SECURITY.md)). The release pipeline is defined in
-[.github/workflows/release.yml](../../.github/workflows/release.yml).
+[the historical v0.8 release workflow](https://github.com/sylin-org/ghostlight/blob/v0.8.0/.github/workflows/release.yml).
 
 ## Verify a release
 

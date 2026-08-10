@@ -11,18 +11,17 @@ mechanics guides instead of repeating them, so nothing here drifts out of sync w
 | Publish and grow any open-source project   | [open-source-publication.md](open-source-publication.md)   |
 | Write and apply a governance policy        | [governance-configuration.md](governance-configuration.md) |
 | Roll governance out across an organization | [compliance-team.md](compliance-team.md)                   |
-| Send the audit trail to your SIEM          | [siem-integration.md](siem-integration.md)                 |
-| Enter or check a license key (paid tier)   | [licensing.md](licensing.md)                               |
+| Understand the payload-free audit contract | [governance-configuration.md#payload-free-audit-and-history](governance-configuration.md#payload-free-audit-and-history) |
+| Understand the source-license boundary     | [licensing.md](licensing.md)                               |
 | Review Ghostlight for procurement or security | [Trust Center (procurement and security review)](../trust/README.md) |
 
 ## Reference
 
-The reference sources, generated from the binary or maintained with the implementation, so a guide
-does not need to repeat them:
+The maintained 1.0 reference sources are:
 
-- `ghostlight config docs`: every configuration key and its meaning.
-- `ghostlight config schema`: JSON Schema for the user config file.
-- [open-spec/](../../open-spec/): the RAWX capability model, vendor-neutral.
-- [examples/](../../examples/): ready-to-adapt policy manifests.
-- [../SPEC.md](../SPEC.md): the original deep design; accepted ADRs and the live tree supersede it
-  where they differ.
+- [../1.0/INTENT.md](../1.0/INTENT.md): product journeys and exclusions.
+- [../1.0/LANGUAGE.md](../1.0/LANGUAGE.md): complete tool and result contract.
+- [../1.0/ARCHITECTURE.md](../1.0/ARCHITECTURE.md): current contexts and invariants.
+- [../1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md): validation and release gates.
+- [../SPEC.md](../SPEC.md): inherited deep design history; the 1.0 documents, accepted ADRs, and
+  live tree supersede it where they differ.

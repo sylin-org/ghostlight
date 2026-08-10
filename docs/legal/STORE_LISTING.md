@@ -1,296 +1,127 @@
-# Ghostlight in Browser: Chrome Web Store Listing
+# Ghostlight in Browser: planned 1.0 store listing
 
-Last updated: 2026-08-05
+Last updated: 2026-08-10
 
-Paste-ready copy for every text field in the Chrome Web Store developer dashboard, plus the
-non-text asset checklist and the submission steps only the founder can take. Permission
-justifications live in [PERMISSION_JUSTIFICATIONS.md](PERMISSION_JUSTIFICATIONS.md) and the
-privacy policy in [PRIVACY.md](PRIVACY.md); this file does not restate them.
+This is repository-local candidate copy. Do not change the public listing or submit a package until
+the owner approves the signed 1.0 artifacts and compatibility evidence. Recheck the store's current
+fields, asset sizes, and policy wording at submission time.
 
-The package to upload is produced by `scripts/package-extension.ps1` at
-`dist/ghostlight-extension-v<adapter-version>.zip`. That zip already has the local-dev `key`
-stripped, so
-it is valid for a first upload (the store rejects a `key` field on the first upload and assigns the
-extension id itself).
+The public item id is `lejccfmoeogmhemakeknjjdhkfkgncdl`. The pinned source-development key and
+unpacked id are preserved separately by `extension/manifest.json`; release packaging must follow
+the existing store-identity mechanism rather than inventing a new extension identity.
 
-## Store listing tab
+## Listing
 
-**Item name**
+**Name**
 
-```
+```text
 Ghostlight in Browser
 ```
 
-**Summary** (short description, 132 char max; matches the manifest `description`)
+**Summary**
 
-```
+```text
 Governed browser automation over your own authenticated session, for AI agents.
 ```
 
 **Category**
 
-```
+```text
 Developer Tools
 ```
 
-**Language**
+**Detailed description**
 
-```
-English (United States)
-```
+```text
+Ghostlight gives compatible AI agents a visible workspace in the Chromium browser you already
+use, with your existing signed-in sessions and local human control.
 
-**Detailed description** (plain text; the store does not render Markdown)
+Browser work stays together in a clearly named blue tab group. You can watch page reading,
+navigation, clicks, typing, form work, file upload, screenshots, dialogs, and other requested
+actions; pause or end the session at any time; and preserve controlled tabs as visible evidence.
 
-```
-Ghostlight lets AI agents work in the Chromium browser you already use -- with your signed-in
-sessions, visible actions, local control, and optional policy guardrails.
+The extension is a thin adapter for the separately installed Ghostlight application. Policy,
+terminal results, history, and model-facing tools stay in the local native orchestrator. The
+extension owns only Chromium mechanisms, page-local access, observation, and content-free visual
+feedback.
 
-Connect Claude Code, Cursor, VS Code, Codex, and other compatible MCP clients to a clearly labeled
-automation tab group in your real browser. Agents can navigate pages, read content, click, type,
-fill forms, manage tabs, inspect developer information, and complete multi-step browser tasks
-while you watch.
+Ghostlight is local-first. There is no developer-operated runtime service, account, telemetry,
+advertising, tracking, activation, or data sale.
 
-Ghostlight is local-first. The extension communicates directly with the Ghostlight application
-installed on your computer. There is no developer-operated service, telemetry, advertising,
-tracking, or data sale.
-
-You remain in control. Run Ghostlight unrestricted or apply local domain and capability policies.
-Pause automation, take the wheel, or stop it at any time.
-
-Requires the local Ghostlight application:
-
+Requires the matching Ghostlight 1.0 desktop application:
 https://sylin.org/ghostlight/
 
 Source and documentation:
-
 https://github.com/sylin-org/ghostlight
 ```
 
-**Homepage / support URL**
+**Homepage and support**
 
-```
+```text
 https://github.com/sylin-org/ghostlight
 ```
 
-## Privacy tab
+## Privacy
 
-**Single purpose** (required)
+**Single purpose**
 
-```
-Ghostlight in Browser is a thin executor for a separately installed local automation host. It carries
-out browser actions -- reading page content, taking screenshots and (during a user-requested session
-recording) screen-capture frames, dispatching input, placing host-supplied files into page inputs,
-and managing tabs -- on the automated tab, on instruction from that host over Chrome native
-messaging, so a connected AI agent can operate the user's own authenticated browser session. Everything the
-extension does serves that single purpose; it makes no access-control decisions of its own and
-holds no policy or allowlist logic.
+```text
+Ghostlight in Browser is the browser adapter for a separately installed local AI-browser
+automation application. On typed instructions from that local application, it observes and acts in
+visible Ghostlight-controlled HTTP(S) tabs, manages their windows and groups, and renders local
+content-free feedback. Every permission supports that single purpose. The extension makes no
+policy decision and sends no telemetry or browser data to Sylin.
 ```
 
-**Permission justifications**: copy each fenced block from
-[PERMISSION_JUSTIFICATIONS.md](PERMISSION_JUSTIFICATIONS.md) into the matching box (tabs, debugger,
-scripting, nativeMessaging, tabGroups, windows, storage, alarms, and the `<all_urls>` host
-permission). Each paste-ready block is below the dashboard's 1,000-character limit.
+Use the exact blocks in
+[`PERMISSION_JUSTIFICATIONS.md`](PERMISSION_JUSTIFICATIONS.md) for `alarms`, `debugger`,
+`nativeMessaging`, `storage`, `tabGroups`, `tabs`, `webNavigation`, `windows`, HTTP/HTTPS host
+permissions, and explicit page-context JavaScript.
 
-**Privacy policy URL**
+**Privacy policy**
 
-```
+```text
 https://sylin.org/ghostlight/privacy/
 ```
 
-**Remote code use justification**: copy the fenced block under "Remote code use / page-context
-JavaScript" in [PERMISSION_JUSTIFICATIONS.md](PERMISSION_JUSTIFICATIONS.md). That file is the single
-source for dashboard justification text.
+**Limited Use disclosure**
 
-Policy reference: [Chrome Web Store Manifest V3 requirements](https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements).
-
-**Limited Use disclosure** (must also appear at the privacy policy URL)
-
-```
+```text
 The use of information received from Google APIs will adhere to the Chrome Web Store User Data
 Policy, including the Limited Use requirements.
 ```
 
-**Data usage disclosure** -- recommended answers. This is a compliance attestation the founder
-signs at submission; confirm each answer against current dashboard wording before submitting.
+At submission, disclose on-device handling of website content and user activity as required by the
+dashboard's then-current definitions. Do not claim that local processing means no disclosure is
+required. Ghostlight does not request Chrome history, cookies, credentials, payment, geolocation,
+or sync-storage access and does not maintain a browsing-history database.
 
-Policy reference: [Chrome Web Store privacy fields](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy).
+## Assets
 
-- Does this item collect or use user data? Select YES. Chrome requires disclosure even when data is
-  processed only on the user's device.
-- Select **Website content**. The extension handles page text and structure, images and screenshots,
-  console output, hyperlinks, and other content of the automated tab.
-- Select **User activity**. The dashboard definition includes network monitoring, clicks, mouse
-  position, scrolling, and keystrokes; Ghostlight handles network-request metadata and the
-  agent-directed interaction signals used in the visible automation session.
-- Do not select **Web history**: the extension does not request the history permission or maintain a
-  list of pages visited with visit times. Current URLs and titles are transient automation-tab state,
-  disclosed in the privacy policy under browser state.
-- Do not select personally identifiable information, health information, financial and payment
-  information, authentication information, personal communications, or location as separately
-  collected categories. Ghostlight does not target or extract those semantic data types. Content a
-  user explicitly asks it to handle remains covered by Website content; it does not read Chrome's
-  cookie, credential, payment, location, or communication stores.
-- Certifications (all TRUE):
-  - I do not sell user data to third parties.
-  - I do not use or transfer user data for purposes that are unrelated to my item's single purpose.
-  - I do not use or transfer user data to determine creditworthiness or for lending purposes.
+- Use `extension/icons/icon128.png` as the store icon. Do not redraw or recolor it.
+- Capture screenshots externally so the extension's intentional screenshot suppression does not
+  hide its visible cursor, highlights, receipts, and ribbons.
+- Show the real browser chrome, named Ghostlight group, current popup/options visual identity, a
+  safe browser action, and a blocked action with its visible explanation.
+- Use only safe demo content. Remove accounts, notifications, personal tabs, paths, ids, and other
+  private material.
+- Do not invent a demo CLI. Record the real packaged product through a supported MCP harness and
+  the public safe demo forms.
 
-## Graphic assets checklist
+## Submission gate
 
-- Store icon: 128x128 PNG. Present at `extension/icons/icon128.png` (also in the package).
-- Screenshots: at least one required; 1280x800 or 640x400, PNG or JPEG (a 24-bit PNG is safest).
-  The shot list and how to capture each are below.
-- Promotional video: a YouTube URL that shows the extension's features. Required by the current
-  dashboard listing guidance. The recording recipe is below.
-- Small promo tile: 440x280 PNG. Required. Its deterministic capture source is
-  `https://sylin.org/ghostlight/store-assets/promo/`.
-- Marquee promo tile: 1400x560 PNG. Optional; only used if the item is featured.
+Before owner submission:
 
-Policy references: [complete the listing](https://developer.chrome.com/docs/webstore/cws-dashboard-listing)
-and [supply images](https://developer.chrome.com/docs/webstore/images).
+1. Produce the store zip from the approved release commit without the pinned development key or
+   repository-only test material.
+2. Compare the zip's manifest, icons, popup, options, permissions, and scripts with the approved
+   source and exact 1.0 adapter version.
+3. Complete the extension product and visible-browser gates in `docs/1.0/ACCEPTANCE.md`.
+4. Verify the privacy policy public URL already carries the matching 1.0 text.
+5. Upload assets and copy, review every disclosure in the live dashboard, then submit with the
+   owner's explicit approval.
+6. Use deferred publication where available. Publish the service and adapter in the compatibility
+   order recorded by the final release plan.
 
-### How to capture the promotional tiles
-
-The website route `https://sylin.org/ghostlight/store-assets/promo/` is a noindex, static capture
-surface. It uses the Card Foundry visual system but has no animation, personal data, or timing
-dependency. The same document selects the small or marquee composition from the exact viewport.
-
-1. Open the route in Chrome and open DevTools (F12).
-2. Toggle the Device Toolbar (Ctrl+Shift+M), set DPR to 1, and choose one required viewport:
-   - 440 x 280 for the required small promo tile.
-   - 1400 x 560 for the optional marquee promo tile.
-3. Choose "Capture screenshot" from the device-toolbar menu. Do not use the full-size screenshot
-   command; the viewport itself is the asset boundary.
-4. Confirm the resulting PNG has the exact pixel dimensions before uploading it.
-
-Chrome does not define a 1400x650 marquee asset. Use 1400x560 exactly; the dashboard rejects the
-wrong dimensions.
-
-### Promotional video: the shortest honest story
-
-Use the built-in `ghostlight demo` tour. It drives the public demo stage through the same MCP edge
-and tool surface an agent uses. It shows the dedicated Ghostlight tab, visible actions, form work,
-console and network observation, page reading, and a tighten-only session policy refusing an
-off-domain navigation. The default pacing is designed for a roughly 90-second recording.
-
-1. Run `target\release\ghostlight.exe doctor`. Do not record until the verdict is OK and it says
-   `extension connected (live)`.
-2. In the extension popup, turn on **Show action captions**. Close or hide unrelated tabs and any
-   notification surface that could reveal personal information.
-3. In OBS, capture only the Chrome window at 1920x1080. Record without microphone or desktop audio.
-   Keep the browser chrome visible so the Ghostlight tab group and real-browser context are clear.
-4. Start recording, then run:
-
-   ```powershell
-   target\release\ghostlight.exe demo --setup-pause 10 --pause 3
-   ```
-
-   Use the setup pause to bring Chrome to the front. Do not interact until the terminal reports
-   `Demo complete -- every tool ran, and the guardrail held.`
-5. Stop recording. Trim only the idle setup and tail; keep the denial ribbon and its plain-language
-   explanation on screen for at least three seconds. Do not add claims, stock footage, or a sales
-   voice-over. The product behavior is the pitch.
-6. Upload the MP4 to YouTube as **Unlisted** with this metadata:
-
-   **Title**
-
-   ```text
-   Ghostlight: governed browser automation in your real browser
-   ```
-
-   **Description**
-
-   ```text
-   Ghostlight gives MCP agents visible, local access to the Chromium session you already use.
-   This uncut product tour shows real browser actions and a session policy refusing an off-domain
-   request. No cloud browser and no developer-operated service.
-
-   Project and source: https://github.com/sylin-org/ghostlight
-   Privacy: https://sylin.org/ghostlight/privacy/
-   ```
-
-7. Paste the YouTube share URL into **Promotional video** in the Store listing tab. Watch the
-   uploaded video once from a private window before submitting so its visibility and playback are
-   proven.
-
-### How to capture an exact 1280x800 still
-
-Do NOT use the agent's own `computer` screenshot tool for store assets. That path is built for the
-model, not for marketing: it hides the phantom cursor, the ripples, and every per-action effect
-during capture (by design; see docs/design/visual-feedback.md), and it downscales to a token budget,
-so its output is neither on-brand nor a predictable pixel size. Capture externally instead. (The
-agent also cannot open a `chrome-extension://` page: `navigate` forces `https://`, so the options
-page must be opened by hand, as in Shot 2.)
-
-The reliable, display-DPR-independent method for any web or extension page:
-
-1. Open the page in Chrome (see each shot below for how).
-2. Open DevTools (F12) and toggle the Device Toolbar (Ctrl+Shift+M).
-3. Set the dimensions to 1280 x 800 and the device pixel ratio to 1 (the DPR field; add it from the
-   device-toolbar overflow menu if it is hidden).
-4. In the device-toolbar three-dot menu, choose "Capture screenshot". Chrome writes an exact
-   1280x800 PNG regardless of your monitor's scaling. (Use "Capture screenshot", not "Capture full
-   size screenshot", so you get the viewport, not the whole scroll height.)
-
-### Shot 1 (recommended hero): the agent driving a real page
-
-The hook: the sky-blue phantom cursor plus a click ripple, on a recognizable site, inside the
-ghost-marked "Ghostlight" tab group. Because the effects are hidden from the agent's own captures,
-this one is recorded from the outside:
-
-1. Run `target\release\ghostlight.exe doctor`; continue only when the extension is connected.
-2. Run the `ghostlight demo` command from the promotional-video recipe and record the browser window
-   with OBS. The tour self-narrates through timed Agent ribbons, action effects, and the purpose-built
-   demo pages. The current package includes ADR-0072 `narrate`.
-3. Extract the peak frame of an effect from the recording (VLC "Take Snapshot", or ffmpeg). Crop to
-   1280x800 if the recorder added window chrome. Turning on "Show action captions" in the extension
-   popup before recording adds the subtitle line, which reads well in a still.
-
-### Shot 2: the settings page (governed, and yours to configure)
-
-The on-brand dark options page: the "Agent activity effects" and "Action captions" toggles and the
-governance boundary card that says policy lives in the binary, not the extension. Open it the way a
-user would:
-
-1. Click the Ghostlight extension icon, then "More settings"; or open chrome://extensions, find
-   Ghostlight, click "Details", then "Extension options".
-2. Capture at exactly 1280x800 with the DevTools method above.
-
-### Shot 3 (optional): the governance is real
-
-A split of an MCP client hitting a governed denial next to the matching JSON-Lines audit record, or
-the output of `ghostlight policy explain`. This is the differentiator shot for the enterprise
-audience. Capture the terminal window with the OS and crop to 1280x800.
-
-## Submission steps (founder actions)
-
-1. Create a Chrome Web Store developer account (one-time 5 USD fee). Agent cannot do this.
-2. Add new item; upload `dist/ghostlight-extension-v<adapter-version>.zip`.
-3. Fill the Store listing and Privacy tabs from this file; upload at least one screenshot and the
-   required small promo tile, then paste the YouTube promotional-video URL.
-4. Submit for review. Expect extra scrutiny on `debugger` + `<all_urls>` + `nativeMessaging`; the
-   justifications and privacy policy are written to answer exactly that.
-
-## Submitted extension id
-
-The item was submitted for review on 2026-07-13. The store assigned the id
-**`lejccfmoeogmhemakeknjjdhkfkgncdl`** -- this is NOT the unpacked-dev id
-`cjcmhepmagomefjggkcohdbfemacojoa` (the dev id comes from the pinned manifest `key`, which is
-stripped from the store package).
-
-Current release state (2026-08-05): Google approved and published v0.7.1. The public listing serves
-that version, reports an update date of 2026-08-02, and offers `Add to Chrome`. Adapter v0.8.0 was
-submitted for review on 2026-08-05 with deferred publishing. It covers every service v0.8.x patch
-under the 0.8 contract block. Once approved, the staged package expires after 30 days if it is not
-published. Broad host permissions may trigger the expected in-depth review.
-
-Ordinary `ghostlight install` already registers both the Web Store id and the pinned unpacked-dev
-id in the native host's `allowed_origins`. A store user therefore runs the normal command:
-
-```
-ghostlight install
-```
-
-`--extension-id` appends one additional validated origin for a fork or enterprise-packaged build;
-it is not required for either official Ghostlight extension id. The store and unpacked-dev ids are
-intentionally distinct.
+After approval, independently download the public package and compare it with the submitted zip,
+allowing only store-injected metadata. Update `docs/public-status.json` from observed public state.

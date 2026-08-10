@@ -1,5 +1,9 @@
 # Free-surface baseline recipe
 
+> Historical pre-1.0 research recipe. Its runner, tool names, and fixture paths belonged to the
+> 0.8 implementation and are not commands for the 1.0 tree. Preserve it as experiment evidence;
+> use `docs/1.0/ACCEPTANCE.md` and `docs/DEV-LOOP.md` for current validation.
+
 This recipe measures the current Ghostlight shape before either research-18 candidate exists. It
 uses deterministic fixture content only. It does not enable annotated screenshots or tab labels,
 and it does not change the public MCP schema.

@@ -1,6 +1,6 @@
 # Choosing a browser-control approach
 
-Updated 2026-08-05 from the
+Updated 2026-08-10 for the Ghostlight 1.0 contract, retaining the
 [public truth and reception baseline](research/public-reception-2026-08.md) and the linked primary
 sources below. This is a decision guide, not a scorecard. Existing signed-in browser access is a
 shared capability, not a Ghostlight uniqueness claim.
@@ -36,7 +36,7 @@ Its supported combination is:
 1. a dedicated visible workspace in the Chromium profile the person already uses;
 2. a stable tool surface for supported and compatible local stdio MCP clients;
 3. coherent browser work with explicit stale-workspace, child-tab, and transport recovery;
-4. optional identity-bound capability and domain policy plus structured audit; and
+4. optional monotonic capability, host, and tab-close policy plus payload-free audit; and
 5. a local runtime with no Ghostlight account, hosted control plane, or telemetry.
 
 Personal and all-open operation is complete without governance. Ghostlight is open-core: the
@@ -68,8 +68,8 @@ or performance evidence are the result you need. Its documentation also explains
 statistics and performance-data controls; review those settings against your environment.
 
 Choose Ghostlight when the central job is a visible user-session workflow with optional local
-capability/domain policy and structured audit. Ghostlight exposes console and network evidence but
-does not try to replace Chrome's performance toolchain.
+capability/host policy, payload-free audit, and explicit recovery. Ghostlight 1.0 does not expose
+console traces, network capture, or performance tooling.
 
 Source: [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp).
 
@@ -81,7 +81,7 @@ is the only assistant, its plan and platform requirements fit, and its browser p
 enough.
 
 Choose Ghostlight when the same browser capability must work through compatible non-Anthropic MCP
-clients, or when local capability/domain manifests and structured audit are part of the operating
+clients, or when local capability/host authority and payload-free audit are part of the operating
 model.
 
 Sources: [Claude in Chrome documentation](https://code.claude.com/docs/en/chrome) and
@@ -94,8 +94,8 @@ compatible MCP clients, real Chrome tabs and logins, per-site approval, high-ris
 and no analytics. That means local signed-in multi-client access is not a Ghostlight-only idea.
 
 Compare the control model you need. Ghostlight's defensible distinction is its complete stable
-tool surface, explicit workspace and child-tab recovery, capability/domain grants, and structured
-local audit. Browser Bridge may be the simpler fit when its per-site and confirmation model is
+browser job language, explicit workspace and child-tab recovery, monotonic capability/host
+authority, and payload-free local audit. Browser Bridge may be the simpler fit when its per-site and confirmation model is
 enough.
 
 Sources: [Browser Bridge repository](https://github.com/whg517/browser-bridge) and
@@ -116,8 +116,8 @@ clients, keep exact workspace authority, and optionally govern each browser inte
 
 Generic MCP and agent gateways can provide valuable organization-wide policy, identity, and audit.
 They compose in front of Ghostlight. Their tradeoff is browser semantics: a generic gateway sees a
-tool call, while Ghostlight classifies the requested browser action, resolves the current tab host,
-filters the advertised surface, and records the decision at the browser-work dispatch boundary.
+tool call, while Ghostlight classifies the requested browser job, checks its current landing at the
+final boundary, and records one content-free decision and terminal outcome.
 
 Enterprise browsers can govern agent activity inside a managed browser, often with deeper fleet
 administration. They are a different deployment choice: the browser or enterprise service owns
@@ -134,7 +134,8 @@ See the [RAWX capability model](../open-spec/rawx-capability-model.md),
 2. Should the browser be user-owned, test-owned, or remotely hosted?
 3. Is the primary result task completion, deterministic testing, or browser diagnosis?
 4. Which clients must connect, and which have actually been verified?
-5. Are per-site prompts enough, or are capability, identity, domain, and audit records required?
+5. Are per-site prompts enough, or are capability, host, tab-close, and payload-free audit records
+   required?
 6. What should happen when a tab, popup, window, or MCP connection changes?
 7. Does the runtime's telemetry, cloud, licensing, and continuity boundary fit the environment?
 

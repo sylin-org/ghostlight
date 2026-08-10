@@ -1,158 +1,80 @@
-# Ghostlight for the compliance team
+# Ghostlight 1.0 for a compliance team
 
-How to take a policy from a blank page to organization-wide enforcement, with evidence
-at every step. The whole journey below runs on the free tiers; production deployment by
-an organization of more than five people is what requires a license
-([PRICING.md](../../PRICING.md)). Evaluation never does.
+Ghostlight applies local, monotonic authority to visible browser work. The 1.0 runtime does not
+fetch policy, operate a hosted control plane, or transmit page content. An organization provisions
+its managed authority file through its existing endpoint-management channel.
 
-## What you are governing
+## 1. Define the boundary
 
-Ghostlight gives compatible local stdio MCP clients controlled access to employees' real,
-authenticated browser sessions. Every one of its actions carries an intrinsic
-capability classification:
+Start with the smallest capabilities and hosts the user job needs. The flat version-1 schema is
+documented in [`governance-configuration.md`](governance-configuration.md).
 
-- `read` -- provably observation only (screenshots, page reads, console/network reads).
-- `action` -- UI input whose effect the page decides (clicks, typing, keys). An action
-  can cause a write; that is exactly why it is its own class.
-- `write` -- a declared mutation (form field setting).
-- `execute` -- arbitrary code in the page (`javascript_tool`).
+```json
+{
+  "version": 1,
+  "managed": true,
+  "expires_unix_ms": 1893456000000,
+  "allow_capabilities": ["read", "action", "write"],
+  "deny_capabilities": ["execute"],
+  "allow_tab_close": false,
+  "allow_hosts": ["support.example.com", "*.support.example.com"],
+  "deny_hosts": ["admin.support.example.com"]
+}
+```
 
-Policy grants capabilities on hosts; it never has to name tools. The agent-facing
-`explain` tool is the authoritative in-session directory of which action requires what.
+`read`, `action`, `write`, and `execute` are the complete capability vocabulary. Host allow-lists
+from local, managed, and request layers must all match. Any deny wins. `allow_tab_close: false` is
+monotonic and remains independent of the extension's local preserve-tabs interlock.
 
-## The policy document
+## 2. Validate before provisioning
 
-A manifest is a small JSON file (schema 3). A grant names hosts (`allow` patterns, with
-optional `deny` carve-outs) and the capabilities it permits there:
+Run the exact candidate with `GHOSTLIGHT_MANAGED_AUTHORITY_FILE` pointing to a temporary copy.
+Open **Checkup** and confirm managed authority is configured and valid. Exercise:
 
-    {
-      "schema": 3,
-      "name": "support-team-crm",
-      "version": "2026.07.1",
-      "mode": "observe",
-      "identity": { "resolved_by": "local_file", "principal": "support-team" },
-      "grants": [
-        {
-          "id": "crm-read-write",
-          "hosts": { "allow": ["*.crm.example.com"], "deny": ["admin.crm.example.com"] },
-          "allowed": ["read", "action", "write"]
-        },
-        {
-          "id": "docs-read-only",
-          "hosts": { "allow": ["docs.example.com"] },
-          "allowed": ["read"]
-        }
-      ],
-      "config": [
-        { "key": "audit.enabled", "value": true, "level": "mandatory" },
-        { "key": "audit.destination", "value": "syslog", "level": "recommended" }
-      ]
-    }
+- one permitted read;
+- one permitted action if the policy includes action;
+- one host denial;
+- one capability denial; and
+- one model-driven close denial.
 
-Everything not granted is denied. `deny` carve-outs let you say "everywhere on the CRM
-except the admin console" directly. The `config` block carries organization settings;
-`"level": "mandatory"` locks a key so users cannot override it.
+The MCP terminal result, browser receipt, workbench History item, and JSONL audit reason must agree.
+An invalid or expired configured managed file must fail closed.
 
-## Step 1: prototype on your desk
+## 3. Provision locally
 
-Start from an embedded template and read it back in plain sentences:
+Use the organization's authenticated endpoint-management tooling to place the policy at an
+administrator-controlled path and set `GHOSTLIGHT_MANAGED_AUTHORITY_FILE` for the Ghostlight
+process. The path is explicit rather than magical so packaging and fleet management can use native
+OS conventions without teaching the model or extension about them.
 
-    ghostlight policy init --template enterprise-healthcare --out policy.json
-    ghostlight policy explain policy.json
+Every managed file requires `managed: true` and a future Unix-millisecond expiry. Rotation is an
+external deployment transaction: validate the complete replacement, update atomically through the
+endpoint manager, and verify Checkup again. Ghostlight snapshots authority once per started
+invocation, so an in-flight unit of work does not change policy halfway through.
 
-`policy explain` renders exactly what the file permits and denies, in prose, before
-anything runs. The `examples/` directory has five ready-to-adapt manifests
-(`enterprise-healthcare`, `qa-staging`, `research-read-only`, `developer-observe`,
-`developer-unrestricted`).
+The 1.0 runtime deliberately does not implement remote retrieval, signing, last-known-good fetch,
+observe mode, config locks, or tool-catalog filtering. Those historical 0.8 designs are not 1.0
+claims.
 
-## Step 2: replay reality against the draft (no browser needed)
+## 4. Collect payload-free evidence
 
-Have a pilot user run their normal agent work all-open with the audit recorder on
-(`ghostlight config set audit.enabled true`). Then replay that recorded activity
-through your draft:
+Set `GHOSTLIGHT_AUDIT_FILE` to an organization-collected local path. The append-only JSONL records
+contain timestamp, opaque ids, tool, capability, authority id, allow/deny decision, stable reason,
+terminal status, and effect class. They contain no URL, hostname, page content, selector, form
+value, file path, script, screenshot, or dialog text.
 
-    ghostlight policy simulate policy.json --replay audit.jsonl
+Use the endpoint's existing file collector. Ghostlight 1.0 does not open a syslog socket or send
+audit over the network. The exact record contract and safe collection pattern are in
+[`siem-integration.md`](siem-integration.md).
 
-The output is the would-have-been decision for every recorded call: what your policy
-would have allowed, what it would have denied, and under which grant. Iterate on the
-draft until the denials are the ones you intend. No browser, no agent, no risk.
+## 5. Preserve the human controls
 
-## Step 3: observe mode, live
+Compliance policy must not replace user visibility. Keep the extension toolbar, blocked receipt,
+dedicated tab group, workbench history, pause, attention, and end-session paths enabled. The
+browser-local preserve-tabs setting is a second protective gate, not a policy editor.
 
-Set `"mode": "observe"` in the manifest and run it with a pilot group
-(`GHOSTLIGHT_MANIFEST=file://...` per user, or the org path from step 5). In observe
-mode every call still dispatches, and every call that enforce WOULD have blocked is
-recorded as a `shadow_deny` audit record with the same stable denial id it would carry
-in production. You are collecting enforcement evidence with zero user impact.
+## Release evidence
 
-There are exactly two modes: `observe` and `enforce`. Mode resolves with clear
-precedence: a grant's own `mode` overrides the manifest's, which overrides the
-`governance.mode` config default. Sacred domains and user-authored protections always
-enforce, in every mode.
-
-## Step 4: enforce
-
-Flip `"mode": "enforce"` (or remove it and set the config default). Blocked calls now
-return a denial the agent can read and adapt to: the capability, the host, and a stable
-`D-xxxxxxxx` denial id that also appears in the audit record, so a user report and a
-log line are trivially matched. Tool advertisement is filtered too: a governed client
-only sees the tools its grants could ever permit, plus `explain`.
-
-## Step 5: deploy organization-wide
-
-Place the manifest at the machine org-policy path:
-
-- Windows: `%ProgramData%\ghostlight\policy.json`
-- macOS: `/Library/Application Support/ghostlight/policy.json`
-- Linux: `/etc/ghostlight/policy.json`
-
-The path is fixed: no flag, environment variable, or config key relocates or bypasses
-it. When an org policy is present, a user-supplied manifest is ignored (and that
-displacement is itself recorded as a `user_manifest_ignored` audit event).
-`"level": "mandatory"` config entries lock those keys against user override; users see
-the lock in `ghostlight config list`.
-
-Edits hot-reload: the running session re-resolves with no restart, an advertised-set
-change re-advertises the tools, and an invalid edit keeps the last-good policy (fail
-closed) rather than falling open. `ghostlight doctor` shows the active manifest's name,
-version, and hash on any machine.
-
-For a fleet, you can distribute one signed policy centrally instead of placing a file on
-every machine. Sign it with `ghostlight policy publish` and point each endpoint's
-`managed.json` bootstrap at a source you control (an HTTPS URL, an object store, a file
-share, or a USB path for an air-gapped install). Every endpoint verifies the signature
-locally against your public key, caches the last good copy, and keeps enforcing it when
-the source is unreachable; it never falls open, and it refuses a rolled-back version.
-`ghostlight doctor` then reports the managed sequence, freshness, and source on each
-machine, so you can confirm a publish reached the fleet. The mechanics, including the
-signing commands and the bootstrap fields, are in the
-[governance configuration guide](governance-configuration.md).
-
-## Step 6: evidence
-
-Every call -- permitted, denied, and shadow-denied alike -- produces one JSON-Lines
-audit record: identity, tool, capability, host, decision, grant id, denial id, duration,
-and the manifest hash that was in force, so any decision is attributable to the exact
-policy version that made it. Under managed policy each tool-call record also carries
-`policy_seq`, the org-signed publish sequence, so evidence ties a decision to the exact
-published version your fleet was running, not only its hash. Session events (the panic
-kill switch, manifest reloads, user-manifest displacement) land in the same stream.
-
-Send it to your SIEM over RFC 5424 syslog or collect the JSONL file directly: see the
-[SIEM integration guide](siem-integration.md).
-
-## Always-on protections (independent of your policy)
-
-Sacred never-touch domains (user- or org-authored) deny every tool on a matching tab
-regardless of grants or mode. The take-the-wheel pause and the panic kill switch belong
-to the human at the browser, always. Secret-field redaction strips password/OTP/payment
-values from page reads when enabled. None of these are ever gated by licensing
-(ADR-0028: license state never affects behavior).
-
-## Licensing, in one paragraph
-
-Everything above is free to evaluate at any scale, with no key and no registration.
-Production use with organization-configured governance requires a commercial license;
-the first ten organizations get it free for a year ([PRICING.md](../../PRICING.md), the
-founding program). The Continuity Promise applies regardless: license state never
-interrupts enforcement, audit, or your workflows. Questions: hello@sylin.org.
+Before organizational rollout, require the signed platform package, matching extension, clean
+install/upgrade/uninstall evidence, visible-browser policy-denial journey, and native notification
+smoke test from [`../1.0/ACCEPTANCE.md`](../1.0/ACCEPTANCE.md).

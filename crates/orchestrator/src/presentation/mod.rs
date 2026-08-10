@@ -299,6 +299,7 @@ mod tests {
         reactor.react(&DomainEvent::WorkStarted {
             invocation: "invocation_x".into(),
             workspace: "workspace_x".into(),
+            tool: "browser_read_page".into(),
             activity: PresentationActivity::Read,
         });
         reactor.react(&DomainEvent::TargetIndicated {
@@ -332,6 +333,7 @@ mod tests {
         reactor.react(&DomainEvent::WorkStarted {
             invocation: "invocation_x".into(),
             workspace: "workspace_x".into(),
+            tool: "browser_close_tab".into(),
             activity: PresentationActivity::Quiet,
         });
         reactor.react(&DomainEvent::WorkBlocked {

@@ -1,121 +1,98 @@
-# Greenfield first-success acceptance
+# Ghostlight 1.0 greenfield first-success acceptance
 
-Status: ready to run
+Status: planned release gate
 
 ## Purpose
 
-This is the publication gate for a person who did not build Ghostlight. It tests the exact public
-journey from an ordinary machine to one useful, read-only browser result. It is not a feature demo,
-a maintainer-led installation session, or a substitute for the platform lifecycle recipes.
-
-The cohort is five to ten informed participants across at least three MCP clients and both Windows
-and Linux. macOS joins after a visible live-browser platform pass is available.
+Prove that a person who did not build Ghostlight can install the signed 1.0 package, understand the
+tray workbench, connect one supported MCP harness and the matching extension, and obtain one useful
+visible read without maintainer intervention.
 
 ## Ground rules
 
-- Give the participant only `https://sylin.org/ghostlight/install.md` and the first task below.
-- State the extension path honestly. While store review is open, recruit only people who knowingly
-  accept Developer mode and an unpacked release extension.
-- Do not screen-share, type commands, supply private corrections, or explain around a defect.
-- A participant may use their MCP agent to interpret the public guide.
-- Record every maintainer intervention as a failed unaided attempt, even if the final result works.
-- Never collect credentials, cookies, private page content, browser profiles, or raw MCP payloads.
-- Use a safe public page or a purpose-built test identity. Do not use a participant's sensitive
-  authenticated application for first-success evidence.
+- Use one exact signed candidate and matching store-extension version for the cohort.
+- Give participants only the release installation guide and first task below.
+- Do not screen-share, type commands, or explain around a defect.
+- Record every maintainer intervention as a failed unaided attempt.
+- Use a safe public page and collect no credentials, cookies, page content, profile data, prompts,
+  or raw MCP traffic.
 
 ## First task
 
-Use this exact request after installation:
+> Open https://example.com in a new Ghostlight tab, summarize the page, and tell me which tab you
+> used. Do not click, type, submit, or change the page after it opens.
 
-> In my current browser, summarize the active page and tell me which tab you used. Do not click or
-> change anything.
-
-The task passes only when the result comes through Ghostlight from a visible managed browser tab.
-A model answering from prior knowledge or another browser integration is not a pass.
+The result must come through Ghostlight from a visible controlled tab in a dedicated or reused
+Ghostlight group.
 
 ## Minimum matrix
 
 | Dimension | Required coverage |
 | --- | --- |
-| Participants | 5 to 10 people who did not author Ghostlight |
-| Operating systems | Windows and Linux |
-| MCP clients | At least three, including one terminal client and one graphical editor client |
-| Extension path | Current public default; manual release path must be named pre-release |
-| Release | One exact published Ghostlight version for the cohort |
-| Browser | Supported Chromium 116 or later; record browser and version |
+| Participants | 5 to 10 non-authors |
+| Operating systems | Windows, macOS, and Linux |
+| MCP harnesses | At least three, including a terminal client and graphical editor client |
+| Browser | At least two supported Chromium families, version 116 or later |
+| Installation | Signed package, OS-native uninstall path, matching store extension |
+| Existing state | Clean machine or user profile with no Ghostlight 1.0 installation |
 
-Do not count the same person reinstalling repeatedly as multiple participants. A clean virtual
-machine is acceptable for install mechanics, but the browser must remain visible and in the same
-ordinary user context as the MCP client and service.
+## Run
 
-## Run sequence
+1. Record the evidence header.
+2. Let the participant install the package and open Ghostlight from the tray.
+3. Let them find **Installations**, Check and Install their harness registration, and reconnect the
+   harness.
+4. Let them install the matching store extension.
+5. Ask for the exact first task.
+6. Ask them to explain which browser context was used, what stayed local, how to pause work, and
+   where they would look for health or history.
+7. Let them use the workbench to remove the harness registration, then uninstall the package and
+   extension through the documented paths.
 
-1. Record the evidence header before Ghostlight is installed.
-2. Give the participant the canonical install URL and no additional setup advice.
-3. Let the participant complete installation, extension setup, client restart, and doctor.
-4. Ask the participant to run the first task exactly as written.
-5. Ask them to explain, in their own words, which browser context Ghostlight used, what stayed
-   local, and whether an account or subscription was required.
-6. Record the last successful stage, elapsed time, all confusion, and every intervention.
-7. Remove or redact any accidental sensitive material before retaining the record.
-
-## Evidence header
+## Evidence
 
 ```text
 run_id:
 date_utc:
-participant_id:              # pseudonymous
+participant_id:
 ghostlight_version:
-install_url_revision:
+package_signature_or_digest:
 operating_system:
 browser_and_version:
-mcp_client_and_version:
-extension_path:              # store or unpacked release
-existing_ghostlight_state:   # must be none for greenfield
-started_at:
-finished_at:
+mcp_harness_and_version:
+extension_version:
+install_started_at:
+first_success_at:
+uninstall_completed_at:
 ```
 
-## Result record
-
 ```text
-installer_completed: yes/no
+package_installed: yes/no
+tray_and_workbench_found: yes/no
+harness_checked: yes/no
+harness_registered: yes/no
 extension_connected: yes/no
-client_registered: yes/no
-doctor_green: yes/no
 first_task_completed: yes/no
-visible_managed_tab_confirmed: yes/no
+visible_group_confirmed: yes/no
+checkup_understood: yes/no
+pause_path_understood: yes/no
+harness_entry_removed: yes/no
+package_uninstalled_cleanly: yes/no
 maintainer_interventions: 0
 undocumented_steps: 0
-participant_boundary_summary:
 confusion_or_failure:
-public_fix_needed:
 outcome: success/partial/blocked
 ```
 
-Aggregate only counts, durations, client/platform combinations, and categorized friction. Do not
-publish participant-level records without explicit consent.
+## Threshold
 
-## Acceptance threshold
+Broad publication requires:
 
-Broad publication is ready when all of these are true:
+- at least five completed runs;
+- at least 80 percent reaching first success without intervention;
+- an unaided pass on every supported operating system;
+- at least three harnesses and two browser families represented;
+- no unresolved blocker repeated three times; and
+- one clean install-to-first-task-to-uninstall pass per platform.
 
-- at least five participants completed the run;
-- at least 80 percent reached the first task without maintainer intervention;
-- Windows, Linux, and three MCP clients each have at least one unaided pass;
-- no unresolved blocker appeared three times;
-- successful participants accurately describe the visible, local, user-context boundary;
-- the current default extension path has one clean install-to-doctor-to-first-task pass.
-
-Use the Chrome Web Store extension for every cohort run. Source-development extension results do
-not count toward the packaged greenfield acceptance threshold.
-
-## Failure handling
-
-Convert a repeated problem into one public artifact: an installer fix, doctor diagnosis, guide
-correction, or bounded Issue. Rerun the affected stage with a new participant after the fix. Do not
-rewrite a failed record into a success, and do not lower the threshold to preserve a launch date.
-
-The deeper packaged-product lifecycle remains in
-[linux-live-lifecycle.md](linux-live-lifecycle.md). This cohort proves first success, not every
-restart, upgrade, recovery, or uninstall behavior.
+Source-build or unpacked-extension success does not count toward packaged greenfield acceptance.

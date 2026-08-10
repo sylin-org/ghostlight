@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: LicenseRef-Ghostlight-Commercial
+// See docs/licenses/LicenseRef-Ghostlight-Commercial.txt.
+
 //! Authority snapshots, final-boundary admission, runtime controls, and payload-free audit intent.
 
 use std::collections::BTreeSet;
@@ -282,7 +285,40 @@ pub struct GovernanceFacade {
     controls: Arc<RuntimeControls>,
 }
 
+/// Content-free configuration facts for the local workbench.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct GovernanceDiagnostics {
+    /// Whether a local policy source is configured.
+    pub local_policy_configured: bool,
+    /// Whether the configured local policy can be read and validated.
+    pub local_policy_valid: bool,
+    /// Whether a managed authority source is configured.
+    pub managed_authority_configured: bool,
+    /// Whether the configured managed authority can be read and validated.
+    pub managed_authority_valid: bool,
+    /// Whether a runtime-control file is configured.
+    pub runtime_control_file_configured: bool,
+}
+
 impl GovernanceFacade {
+    /// Return content-free configuration health without exposing authority paths or rules.
+    #[must_use]
+    pub fn diagnostics(&self) -> GovernanceDiagnostics {
+        GovernanceDiagnostics {
+            local_policy_configured: self.local_policy.is_some(),
+            local_policy_valid: self
+                .local_policy
+                .as_deref()
+                .is_none_or(|path| read_policy(path, false).is_ok()),
+            managed_authority_configured: self.managed_policy.is_some(),
+            managed_authority_valid: self
+                .managed_policy
+                .as_deref()
+                .is_none_or(|path| read_policy(path, true).is_ok()),
+            runtime_control_file_configured: self.runtime_control.is_some(),
+        }
+    }
+
     /// Construct the facade from explicit policy paths.
     #[must_use]
     pub fn new(local_policy: Option<PathBuf>, managed_policy: Option<PathBuf>) -> Self {
@@ -723,6 +759,55 @@ mod tests {
                 .reason,
             ReasonCode::HostDenied
         );
+    }
+
+    #[test]
+    fn maintained_policy_examples_match_the_version_one_decoder() {
+        for (name, source, managed) in [
+            (
+                "research-read-only",
+                include_str!("../../../../examples/research-read-only.json"),
+                false,
+            ),
+            (
+                "qa-staging",
+                include_str!("../../../../examples/qa-staging.json"),
+                false,
+            ),
+            (
+                "enterprise-healthcare",
+                include_str!("../../../../examples/enterprise-healthcare.json"),
+                true,
+            ),
+            (
+                "developer-unrestricted",
+                include_str!("../../../../examples/developer-unrestricted.json"),
+                false,
+            ),
+            (
+                "developer-observe",
+                include_str!("../../../../examples/developer-observe.json"),
+                false,
+            ),
+            (
+                "dev-live-test",
+                include_str!("../../../../examples/dev-live-test.json"),
+                false,
+            ),
+            (
+                "demo-policy",
+                include_str!("../../../../examples/demo-policy.json"),
+                false,
+            ),
+        ] {
+            let path = temporary(name);
+            fs::write(&path, source).unwrap();
+            assert!(
+                super::read_policy(&path, managed).is_ok(),
+                "{name} must remain a valid 1.0 policy"
+            );
+            let _ = fs::remove_file(path);
+        }
     }
 
     #[test]

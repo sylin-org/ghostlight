@@ -4,167 +4,160 @@
 
 <h1 align="center">Ghostlight MCP</h1>
 
-<p align="center"><strong>Give your agent a place in the browser you already use.</strong></p>
+<p align="center"><strong>Give your agent a visible place in the browser you already use.</strong></p>
 
-<p align="center">
-  <a href="https://github.com/sylin-org/ghostlight/actions/workflows/ci.yml"><img src="https://github.com/sylin-org/ghostlight/actions/workflows/ci.yml/badge.svg?branch=dev" alt="CI"></a>
-  <a href="https://www.npmjs.com/package/ghostlight"><img src="https://img.shields.io/npm/v/ghostlight?color=38BDF8&label=npm" alt="npm"></a>
-  <a href="https://github.com/sylin-org/ghostlight/releases/latest"><img src="https://img.shields.io/github/v/release/sylin-org/ghostlight?color=38BDF8&label=release" alt="release"></a>
-  <a href="https://registry.modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP_registry-org.sylin%2Fghostlight-38BDF8" alt="MCP registry"></a>
-</p>
+Ghostlight lets an MCP client perform browser work in a dedicated group inside the user's existing,
+authenticated Chromium browser. The work stays visible. The user can pause it, take over, require
+attention, or end the session without teaching the model about transports, Chrome internals, or
+policy mechanics.
 
-<p align="center"><img src="docs/assets/demo.gif" alt="Ghostlight reading and completing a launch brief in a real browser with visible page, field, and click feedback" width="838" height="766"></p>
-<p align="center"><sub>A launch brief moves from empty form to ready for review, in full view.</sub></p>
+This branch is the planned Ghostlight 1.0 source candidate. The currently published 0.8 release
+and store adapter remain recorded in [`docs/public-status.json`](docs/public-status.json); they
+must not be mixed with a 1.0 source build.
 
-<p align="center"><a href="#your-first-five-minutes"><strong>Install Ghostlight</strong></a> | <a href="https://sylin.org/ghostlight/decision-aid/">See where it fits</a> | <a href="docs/guides/installation.md">Installation guide</a> | <a href="docs/trust/README.md">Trust Center</a></p>
+## What 1.0 includes
 
-Ghostlight gives compatible AI agents a dedicated workspace inside the Chromium profile you
-already use. Your signed-in sessions are there. The work stays visible. You can pause, take over,
-or stop it at any time.
+- A 24-tool, typo-closed browser language for tabs, navigation, page understanding, screenshots,
+  semantic actions, form input, file upload, script execution, waits, short sequences, and browser
+  dialogs.
+- One orchestrator-owned workspace aggregate, authority snapshot, executor, completion path, and
+  payload-free audit record for every invocation.
+- A durable MCP connector and browser connector that can remain running while the orchestrator
+  restarts. Interrupted effects become truthful unknown outcomes and are never replayed.
+- The established `Ghostlight in Browser` extension identity, artwork, tab grouping, take-the-wheel
+  controls, preserve-tabs interlock, and visible action language.
+- A Tauri 2 desktop workbench built into the orchestrator: at-a-glance home, plural activity,
+  history, checkup, configuration, supported-harness installation, global search, tray lifecycle,
+  and high-signal native notifications.
+- Local operation only. There is no account, telemetry, activation service, update ping, hosted
+  control plane, or hidden browser.
 
-Ask an agent to read a page, complete a form, handle a file, follow a popup, or investigate a
-failed web workflow. Ghostlight carries the task across tabs and browser changes while keeping the
-browser work and its controls on your machine.
+## The workbench
 
-## Your first five minutes
+Opening the Ghostlight tray icon shows the human-facing control surface:
 
-You need Chrome, Edge, Brave, or Chromium 116+, an MCP client, and Node.js for the installer. The
-service you run afterward is native Rust.
+- **Home** answers what is running, what needs attention, and whether the system is healthy.
+- **Activity** lists current MCP sessions, operations, and connected browser instances.
+- **History** shows a bounded, newest-first, payload-free record of terminal outcomes.
+- **Checkup** explains service, browser, authority, and notification health.
+- **Configuration** provides explicit pause, resume, end-session, and start-session controls.
+- **Installations** checks, installs, or removes Ghostlight's owned registration for Codex,
+  Claude Code, Claude Desktop, Cursor, Visual Studio Code, Windsurf, Zed, OpenCode, and Crush.
 
-1. Install Ghostlight and register the MCP clients it finds:
+Global search spans destinations and user-visible records. Closing the window returns it to the
+tray; it does not stop the orchestrator. If the desktop shell cannot start, Ghostlight continues
+headlessly so connected clients and browsers can recover.
 
-   ```sh
-   npx -y ghostlight install
-   ```
+## Build the 1.0 source candidate
 
-2. Add
-   [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
-   from the Chrome Web Store.
-
-3. Restart an MCP client if it does not hot-reload tools.
-
-4. Give it one small, read-only task:
-
-   > Open https://example.com/ in a new Ghostlight tab, summarize the page, and tell me which tab
-   > you used. Do not click, type, submit, or change the page.
-
-A sky-blue Ghostlight group should appear in your browser. The agent opens the page, reads it, and
-names the exact tab it used. That one prompt proves the whole connection without authorizing a
-click or write.
-
-If a step needs attention, run:
+Prerequisites are Rust 1.82 or newer and, for browser validation, Chromium 116 or newer.
 
 ```sh
-npx -y ghostlight doctor
+cargo build --workspace
 ```
 
-`doctor` checks the client entry, local service, browser connection, and extension, then names the
-next action. The [installation guide](docs/guides/installation.md) covers targeted clients,
-Homebrew, source builds, updates, uninstall, and symptom-led recovery.
+The build produces three sibling executables:
 
-## From one page to a whole workflow
+- `ghostlight` -- orchestrator plus the desktop workbench;
+- `ghostlight-mcp-connector` -- generic local stdio MCP lifecycle; and
+- `ghostlight-browser-connector` -- generic Chromium native-messaging relay.
 
-Ghostlight is at its best when browser work has a thread to follow:
+Start the workbench visibly with:
 
-- **Pick up where you are signed in.** Open an application in the Chromium profile you chose and
-  work with the session already there. Credentials stay with the browser.
-- **Finish the interaction.** Navigate, fill forms, upload files, resolve dialogs, wait for page
-  state, and carry results from one step into the next.
-- **Follow the browser.** Keep working when a site opens a supported child tab or when a known
-  workspace changes underneath the task.
-- **See what failed.** Bring page state, console messages, and network requests together so the
-  next debugging step comes from evidence instead of guesswork.
+```sh
+target/debug/ghostlight --show
+```
 
-Use the same browser capability from Codex, Claude Code, Claude Desktop, Cursor, VS Code, Windsurf,
-Zed, OpenCode, Crush, or another compatible stdio MCP client. Agents receive structured page
-reads, exact element references, bounded action receipts, and specific recovery guidance. They can
-call `explain` for the live action and capability directory whenever a task needs it.
+Use `target/debug/ghostlight --headless` for the service-only path. A release package will install
+the sibling binaries and native-messaging registration together. Source-tree browser registration
+and the complete validation loop are documented in [`docs/DEV-LOOP.md`](docs/DEV-LOOP.md).
 
-## The browser stays a shared space
+After the three binaries are side by side, open **Installations** in the workbench and explicitly
+install the desired MCP harness registration. Ghostlight performs an ownership-checked merge,
+creates a backup, preserves JSONC and TOML comments, and never overwrites a foreign `ghostlight`
+entry. Restart or reconnect that harness after the change.
 
-Ghostlight works in a dedicated sky-blue tab group inside the browser window you chose. Page
-scans, clicks, typing, drags, and longer phases share one visual language, so the movement on screen
-has an explanation.
+For end-user 1.0 installation, use only the signed package and matching 1.0 store adapter once the
+release gates in [`docs/STATUS.md`](docs/STATUS.md) are complete.
 
-Pause the workspace, take over for a delicate step, or stop it. Move its tabs where you want them;
-Ghostlight follows the workspace instead of snapping it back. Ordinary tabs remain outside the
-agent's owned set.
+## First browser proof
 
-Personal use is complete without a policy manifest. Start with the full browser engine and get
-useful work done. When a workflow needs stronger boundaries, grant `read`, `action`, `write`, and
-`execute` capabilities by MCP identity and domain. Add sacred domains, dry-run preflight, and
-structured audit while the browser experience stays the same.
+Ask the connected MCP client:
 
-The [governance guide](docs/guides/governance-configuration.md) shows the operating model. The
-[Trust Center](docs/trust/README.md) carries the security, privacy, continuity, deployment, and
-procurement evidence. The [decision aid](https://sylin.org/ghostlight/decision-aid/) covers other
-browser operating models when that is the question.
+> Open https://example.com in a new Ghostlight tab, summarize the page, and tell me which tab you
+> used. Do not click, type, submit, or change the page after it opens.
 
-<details>
-<summary><strong>Current release and compatibility</strong></summary>
+Ghostlight creates or reuses one blue group named for the client. When no matching group exists,
+it creates a dedicated normal browser window instead of inserting work into the user's active
+window. Later sessions reuse the same-name group wherever the user placed it.
 
-**Platform state.** Windows and Linux are verified end to end against live browsers. macOS builds and passes the full test suite in CI; its live-browser verification is still owed.
+## Safety and truthful outcomes
 
-**Extension state.** The Chrome Web Store serves Chrome adapter v0.8.0. Chrome adapter v0.8.0 covers
-Ghostlight service versions v0.8.x. Install the extension from the public listing. See the full
-[adapter compatibility map](compatibility.json).
+No policy means ordinary remote HTTP(S) browser work is allowed. Loopback, link-local metadata,
+non-HTTP schemes, credential entry, and unsafe stale handles remain protected. Optional local and
+managed policy layers can only remove capabilities, hosts, or tab-close authority. Per-request
+restrictions intersect those layers; they never grant access.
 
-The service and Chrome adapter version independently. The
-[compatibility map](compatibility.json) is authoritative, and the
-[public status file](docs/public-status.json) owns current release, platform, and store state.
+Every call returns one terminal envelope: status, observed effect, readiness, replay safety,
+canonical facts, and at most two Ghostlight-authored recovery steps. Page content never authors
+the summary. Unknown or partial effects never recommend replay.
 
-The 0.8 source candidate implements exact local stdio MCP revisions `2025-11-25` and
-`2026-07-28`. See the [changelog](CHANGELOG.md) for release changes and upgrade consequences.
+Model-driven tab close has two independent gates: orchestrator authority and the extension's
+default-on preserve-tabs setting. This keeps the visible evidence of browser work available to the
+user while leaving manual browser closure untouched.
 
-</details>
+See [`docs/1.0/LANGUAGE.md`](docs/1.0/LANGUAGE.md) for the complete catalog and
+[`docs/guides/governance-configuration.md`](docs/guides/governance-configuration.md) for the exact
+policy schema.
 
-<details>
-<summary><strong>How Ghostlight fits together</strong></summary>
+## Architecture
 
 ```text
-MCP Client <--stdio--> ghostlight-mcp-connector <--typed local IPC--> ghostlight service
-    <--browser IPC--> ghostlight-browser-connector <--native messaging--> Extension <--CDP--> Browser
+MCP client <--stdio--> MCP connector <--typed local IPC-->
+                                                     Ghostlight orchestrator
+Desktop WebView <--> typed WorkbenchFacade <---------/       \
+Browser <--> extension <--native messaging--> browser connector <--typed local IPC-->
 ```
 
-The connector owns MCP protocol state. The persistent service owns workspaces, browser
-coordination, optional governance, and audit. The browser connector passes native messages, while
-the extension owns Chrome mechanism. Each role can reconnect independently.
+The orchestrator is the only product mutation point and owns all model-facing language. The MCP
+connector owns protocol negotiation; the browser connector owns relay lifecycle; the extension
+owns physical Chromium, page-local DOM, and content-free rendering mechanisms. Product evolution
+normally changes only the orchestrator.
 
-[ADR-0096](docs/adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md) explains the boundary.
-[docs/SPEC.md](docs/SPEC.md) gives the deeper governance model. The
-[installation guide](docs/guides/installation.md) includes the source-development path.
+The desktop is a presentation adapter inside the modular monolith, not another service. It has no
+GUI protocol, arbitrary command runner, generic filesystem access, or browser primitive access.
+[`ADR-0102`](docs/adr/0102-integrated-desktop-workbench.md) records the decision.
 
-</details>
+## Canonical 1.0 documents
 
-## Choose your next step
-
-| I want to... | Start here |
+| Concern | Source |
 | --- | --- |
-| Install, verify, update, recover, or uninstall | [Installation guide](docs/guides/installation.md) |
-| Let an AI client perform setup | [Agent install guide](llms-install.md) |
-| Try a complete visible workflow | [Launch brief demo](https://sylin.org/ghostlight/demo/brief/) |
-| Build from source and test locally | [Source-development path](docs/guides/installation.md#path-b-build-from-source) |
-| Understand which browser operating model fits | [Decision aid](https://sylin.org/ghostlight/decision-aid/) |
-| Add boundaries or review trust evidence | [Governance guide](docs/guides/governance-configuration.md) and [Trust Center](docs/trust/README.md) |
-| Contribute code, docs, testing, or ideas | [Contributing guide](CONTRIBUTING.md) |
-| Read the architecture decisions | [ADR index](docs/adr/) |
+| Product promise and journeys | [`docs/1.0/INTENT.md`](docs/1.0/INTENT.md) |
+| Complete model-facing language | [`docs/1.0/LANGUAGE.md`](docs/1.0/LANGUAGE.md) |
+| Contexts, ports, and invariants | [`docs/1.0/ARCHITECTURE.md`](docs/1.0/ARCHITECTURE.md) |
+| Acceptance and release gates | [`docs/1.0/ACCEPTANCE.md`](docs/1.0/ACCEPTANCE.md) |
+| Mutable candidate status | [`docs/STATUS.md`](docs/STATUS.md) |
+| Historical decisions | [`docs/adr/`](docs/adr/) |
+
+Historical 0.8 release, trust, business, research, and distribution records remain part of the
+project's evidence. They are not silently rewritten as 1.0 claims.
 
 ## License and continuity
 
-The browser automation engine outside `crates/core/src/governance/` is Apache-2.0 OR MIT. The
-governance module is source-available under the Ghostlight Commercial License and is free for
-individuals, teams of up to five, evaluation, development, all-open operation, and qualifying
-noncommercial use. [LICENSING.md](LICENSING.md) maps the exact boundary.
+The engine outside `crates/orchestrator/src/governance/` is Apache-2.0 OR MIT. The governance
+module is source-available under the Ghostlight Commercial License and is free for individuals,
+teams of up to five, evaluation, development, all-open operation, and qualifying noncommercial
+use. [`LICENSING.md`](LICENSING.md) maps the exact boundary.
 
-License state never changes runtime behavior. An installed copy does not call a Ghostlight service
-for telemetry, activation, or updates, and it keeps working without the vendor. The
-[Continuity Promise](docs/trust/continuity.md) and [PRICING.md](PRICING.md) carry the durable terms.
+License state never changes runtime behavior. Ghostlight does not phone home, and an installed
+copy does not depend on a Ghostlight-operated service. The
+[`Continuity Promise`](docs/trust/continuity.md) and [`PRICING.md`](PRICING.md) carry the durable
+terms.
 
-## Questions and contributing
+## Questions and contributions
 
 Use [GitHub Issues](https://github.com/sylin-org/ghostlight/issues) for reproducible defects and
 [GitHub Discussions](https://github.com/sylin-org/ghostlight/discussions) for questions and ideas.
 Use hello@sylin.org for security, licensing, or information that cannot be public.
 
-[CONTRIBUTING.md](CONTRIBUTING.md) explains the project's boundaries, test expectations, and ways
-to participate.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) explains the current boundaries and validation gates.

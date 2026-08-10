@@ -1,94 +1,50 @@
-# Ghostlight for the solo developer
+# Ghostlight 1.0 for a solo developer
 
-A few minutes from install to an agent driving your real browser, plus optional personal safety
-rails. Everything on this page is free, forever, with no key and no account.
+Ghostlight gives a compatible local MCP client a visible workspace in the Chromium profile where
+you are already signed in. There is no account, Node.js service, telemetry, activation, or remote
+control plane.
 
-## What you get
+## Start
 
-Your AI agent (Claude Code, Claude Desktop, Cursor, VS Code, or another compatible local stdio MCP
-client) gets your signed-in Chromium profile inside Ghostlight-managed tabs, separate from your
-ordinary tabs. Twenty-five tools
--- navigate, click,
-type, screenshot, read the page, find elements, fill forms (by ref or by label), run
-JavaScript, inspect console and network traffic, wait for dynamic pages to settle,
-compose multi-step scripts, upload files and screenshots to page inputs, batch actions, narrate a
-watched workflow, record a GIF of a session, and manage tabs -- with the 13 trained structural
-identities preserved and additive tools alongside them. The agent works inside its own tab group
-(labeled with a ghost) so its activity is visually separate from yours.
+1. Install the matching signed 1.0 package and `Ghostlight in Browser` 1.0 adapter when the release
+   is available. For the source candidate, follow [`installation.md`](installation.md).
+2. Open Ghostlight from the tray.
+3. In **Installations**, Check and Install the registration for your MCP harness.
+4. Reconnect the harness and ask for the bounded `example.com` proof in the README.
 
-By default Ghostlight is all-open: no policy and no restrictions. The local flight recorder is on
-so you can understand what happened; it does not enforce anything. Governance is an overlay you can
-opt into later, one setting at a time.
+Ghostlight creates one blue group named for that client. If the group already exists in another
+normal browser window, new work goes there. If none exists, Ghostlight opens a dedicated window
+instead of changing your active personal window.
 
-## Setup
+## Stay in control
 
-Prerequisites: a Chromium browser (Chrome, Edge, Brave, or Chromium 116+), an MCP client, and Node
-for the `npx` launcher. Ghostlight itself runs as native Rust executables and does not keep a Node
-service running.
+- Use the extension popup or `Alt+Shift+P` to pause and resume browser work.
+- Use the panic/end-session control when work must stop completely.
+- Keep **Preserve controlled tabs** enabled when you want browser evidence to survive a malicious
+  or mistaken close request.
+- Use the tray workbench for plural activity, payload-free history, health, and high-signal blocked
+  notices.
+- Ghostlight never enters credentials. A credential-class target becomes a visible handoff to you.
 
-1. Install the local service, native host, and detected MCP clients:
+No policy is required for ordinary remote browsing. Loopback and link-local destinations remain
+protected. If you want narrower personal boundaries, create the small version-1 file documented in
+[`governance-configuration.md`](governance-configuration.md) and set `GHOSTLIGHT_POLICY_FILE`
+before launching Ghostlight.
 
-       npx -y ghostlight install
+## Pick tools by intent
 
-   The command is idempotent and opens the current browser-extension walkthrough. Use `--dry-run`
-   if you want to see every planned change first, or `--no-open` for a quiet installation.
+Let the client use semantic reads and targets before screenshot coordinates. Target handles become
+stale after a committed document change; view handles also become stale after viewport or zoom
+changes. This refusal is useful evidence, not a reason to reach around Ghostlight with a lower-level
+mechanism.
 
-2. Install
-   [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
-   from the Chrome Web Store using that walkthrough.
+File upload accepts only explicitly supplied absolute paths, at most five files, after governance
+and credential preflight. Script execution requires `execute` authority. Neither file content nor
+script source enters audit or desktop history.
 
-3. Restart your MCP client. If you want to verify the whole chain:
+## When something needs attention
 
-       npx -y ghostlight doctor
-
-   A healthy report says the browser and client are registered, the IPC endpoint
-   accepts, and the extension is connected. Anything wrong prints as a specific finding.
-
-4. First prompt to your agent:
-
-   > Open a new browser tab, go to example.com, and tell me what the page says.
-
-## Optional personal safety rails
-
-These are for you, not for an employer, and they are always free.
-
-**Sacred domains** -- sites the agent must never touch, enforced on every tool call
-regardless of anything else:
-
-    ./target/release/ghostlight config set content.security.sacred_domains '["*.mybank.com","brokerage.example"]'
-
-**The pause and the kill switch.** The extension popup gives you take-the-wheel: pause
-the agent mid-run, take over the browser, resume when ready. The panic kill switch
-severs the session outright.
-
-**Secret redaction.** Password, OTP, and payment field values are replaced with
-`[value redacted]` in page reads when `content.security.secrets.redact` is on (it is on
-under the default preset).
-
-**The audit trail, for yourself.** The default flight recorder writes one JSON line per tool call
-to your local data directory (`audit.jsonl`). `ghostlight config get audit.file.path` shows where;
-set `audit.enabled` to `false` if you prefer not to retain it.
-
-**A personal policy**, if you want the agent limited to certain sites. Start from an
-example and preview what it means in plain sentences:
-
-    npx -y ghostlight policy init --template developer-unrestricted --out my-policy.json
-    npx -y ghostlight policy explain my-policy.json
-
-Then point the server at it by setting `GHOSTLIGHT_MANIFEST=file:///path/to/my-policy.json`
-in the MCP server's environment (or see `examples/research-read-only.json` for a
-read-only starting point). No manifest means all-open; removing the variable removes all
-policy.
-
-## Where the free line is
-
-Everything above, all of it, free forever, including for your side business. The paid
-line is organizations of more than five people running centrally-managed governance in
-production: see [PRICING.md](../../PRICING.md). If that is not you, you never need to
-think about it.
-
-## When something breaks
-
-Run `npx -y ghostlight doctor` first; it pinpoints the common failures. If you are building from
-source on Windows, use the isolated dev loop documented in [DEV-LOOP.md](../DEV-LOOP.md); a live installed
-service can otherwise hold release executables open. The installation guide has the rest.
+Open **Checkup** for service, browser, authority, audit, and notification state. Open
+**Installations** for an exact harness registration check. If transport was lost during an
+effectful call, inspect the visible page before taking another action; durable relays reconnect,
+but unknown work is never replayed.

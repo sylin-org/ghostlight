@@ -5,16 +5,13 @@
 **Author:** Leonardo Botinelly / Kintsugi Architecture  
 **Date:** 2026-07-01  
 **Status:** Draft  
-**License:** Open-core -- engine Apache-2.0 OR MIT; `crates/core/src/governance/` source-available (ADR-0027)
+**License:** Open-core -- engine Apache-2.0 OR MIT; `crates/orchestrator/src/governance/` source-available (ADR-0027)
 
 > **Historical design baseline.** This document preserves the original 2026-07-01 design and its
-> deep governance rationale. It is not a current topology or tool inventory. Accepted and amended
-> [ADRs](adr/README.md), the live tree, and generated schemas are authoritative where they differ.
-> In particular, Ghostlight now runs as `ghostlight-mcp-connector` at the exact-revision stdio
-> shore, the persistent protocol-neutral `ghostlight` service, and browser-only
-> `ghostlight-browser-connector`. Browser
-> routing uses service-minted `WorkspaceId` in the compatibility `guid` field, not a process role
-> or client-name key. Its additive tool surface has also grown beyond the inventory below.
+> deep governance rationale. It is not the 1.0 topology, policy schema, tool inventory, or release
+> contract. The canonical sources are [1.0/INTENT.md](1.0/INTENT.md),
+> [1.0/LANGUAGE.md](1.0/LANGUAGE.md), [1.0/ARCHITECTURE.md](1.0/ARCHITECTURE.md),
+> [1.0/ACCEPTANCE.md](1.0/ACCEPTANCE.md), accepted [ADRs](adr/README.md), and the live tree.
 
 ---
 

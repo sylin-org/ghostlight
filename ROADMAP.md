@@ -1,31 +1,37 @@
 # Roadmap
 
-Ghostlight ships today as a governed browser-automation MCP server for Chromium, verified
-end-to-end on Windows and Linux. This page is what we are working toward next. Nothing here changes
-the Continuity Promise or the trained tool surface.
+Ghostlight's current development target is the planned 1.0 release. The public 0.8 release remains
+the installed baseline until 1.0 completes its release gates.
 
-## Near term
+## 1.0 release completion
 
-- **Complete Chrome Web Store review.** The listing is under review. When it is public, make the
-  store path the default extension-installation route.
-- **Live browser verification on macOS.** It already builds and passes the full test suite in CI;
-  this brings end-to-end browser coverage on par with Windows and Linux.
-- **Evaluate transaction-bound managed confirmation.** Validate client-mediated MCP form
-  elicitation, stale-target refusal, and the privacy model before accepting or implementing the
-  proposed confirmation boundary for selected managed actions
-  ([ADR-0075](docs/adr/0075-transaction-bound-managed-confirmation.md)).
+- Finish the accepted visible-browser journey matrix across screenshots, semantic input, upload,
+  dialogs, governed denial, reconnect, tab-close interlock, tab grouping, and multiple concurrent
+  client sessions.
+- Produce signed Windows, macOS, and Linux packages containing the orchestrator/workbench and both
+  version-matched connectors.
+- Verify clean install, upgrade, harness registration, native messaging, tray, notification,
+  headless fallback, and uninstall on each platform.
+- Complete live-browser verification on supported Chromium families and publish a matching 1.0
+  extension only after service compatibility is proven.
+- Reconcile release metadata, compatibility, public status, stores, package registries, and final
+  public documentation from the signed artifacts.
 
-## Direction
+The canonical gates are [`docs/1.0/ACCEPTANCE.md`](docs/1.0/ACCEPTANCE.md); mutable evidence is in
+[`docs/STATUS.md`](docs/STATUS.md).
 
-More adapters will follow on the same governance spine. The browser is the first surface, not
-the last. The durable asset is the [RAWX capability model](open-spec/rawx-capability-model.md);
-the mechanisms around it will change.
+## Direction after 1.0
 
-Two proposed directions are being explored rather than promised: local evaluation artifacts for
-comparing agent journeys ([ADR-0069](docs/adr/0069-agent-journey-evaluation-artifacts.md)), and
-bounded delegation contracts grounded in a concrete user scenario
-([design note](docs/design/bounded-delegation-scenario.md)). WebMCP remains a research and standards
-participation track until its browser API stabilizes.
+- Add browser families only behind the existing browser port and explicit capability negotiation.
+  A new browser must not spread product policy into its adapter.
+- Expand the workbench only when a new destination materially improves at-a-glance understanding,
+  recovery, or explicit user control. The compact rail is a product constraint.
+- Evolve model-facing jobs in the orchestrator without routine edits to the MCP connector, browser
+  connector, shared bridge, or extension.
+- Keep policy local, monotonic, inspectable, and payload-free. Ghostlight will not add telemetry,
+  activation, update polling, or a hosted control plane.
 
-Have a request? [GitHub Discussions](../../discussions) is the place, and every request gets a
-disposition with reasoning.
+Historical proposals remain in the ADR, design, research, and business records. They are evidence,
+not automatic roadmap commitments. Use
+[GitHub Discussions](https://github.com/sylin-org/ghostlight/discussions) for a concrete user job;
+accepted work receives an ADR or an explicit 1.0 contract amendment.

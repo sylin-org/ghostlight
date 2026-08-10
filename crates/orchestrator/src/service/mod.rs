@@ -25,12 +25,15 @@ use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade, Js
 use crate::language::{catalog, RequestRestrictions, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::work::{ActiveAuthorityRegistry, ApplicationExecutor, CancellationToken};
+use crate::workbench::{ProjectingAuditSink, WorkbenchFacade, WorkbenchProjection};
 use crate::workspace::WorkspaceStore;
 
 /// A running local service host. Dropping it requests listener shutdown.
 pub struct ServiceHost {
     /// Published authenticated endpoint.
     pub endpoint: RuntimeEndpoint,
+    /// Typed in-process application boundary for the disposable desktop workbench.
+    pub workbench: WorkbenchFacade,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
     runtime_path: PathBuf,
@@ -71,12 +74,26 @@ impl ServiceHost {
         let audit_path = env::var_os("GHOSTLIGHT_AUDIT_FILE")
             .map(PathBuf::from)
             .unwrap_or_else(|| path.with_file_name("audit.jsonl"));
-        let audit = Arc::new(JsonlAuditSink::open(&audit_path).context("open payload-free audit")?);
+        let projection = WorkbenchProjection::default();
+        projection
+            .load_history(&audit_path)
+            .context("restore payload-free workbench history")?;
+        let durable_audit =
+            Arc::new(JsonlAuditSink::open(&audit_path).context("open payload-free audit")?);
+        let audit: Arc<dyn AuditSink> =
+            Arc::new(ProjectingAuditSink::new(durable_audit, projection.clone()));
+        let workbench = WorkbenchFacade::new(
+            projection.clone(),
+            workspaces.clone(),
+            governance.clone(),
+            browser.clone(),
+        );
         let executor = Arc::new(ApplicationExecutor::new(
             governance.clone(),
             workspaces.clone(),
             browser_port.clone(),
             presentation.clone(),
+            projection,
             audit.clone(),
         ));
         browser.set_event_sink(Arc::new(ServiceBrowserEvents {
@@ -105,6 +122,7 @@ impl ServiceHost {
         );
         Ok(Self {
             endpoint,
+            workbench,
             stop,
             threads: vec![service_thread, browser_thread],
             runtime_path: path.into(),

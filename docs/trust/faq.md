@@ -307,7 +307,7 @@ channels until their public packages ship. The dependency tree is deliberately l
 flag yields an air-gap binary with no HTTP or TLS stack at all.
 
 See [supply-chain.md](supply-chain.md) and the
-[release workflow](../../.github/workflows/release.yml).
+[historical v0.8 release workflow](https://github.com/sylin-org/ghostlight/blob/v0.8.0/.github/workflows/release.yml).
 
 Evidence: supply-chain.md (releases, SBOM, dependencies); .github/workflows/release.yml (checksums, provenance, SBOM step).
 

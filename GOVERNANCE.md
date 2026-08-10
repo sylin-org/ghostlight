@@ -12,13 +12,14 @@ committee, or claim of community consensus.
   silently rewritten; a later decision amends or supersedes them.
 - Requests receive a reasoned disposition: accepted, deferred with a re-evaluation condition, or
   declined against the recorded product constraints.
-- The byte-stable trained schemas, no-phone-home promise, policy-free extension, clean-room rule,
-  and first-class unrestricted engine are standing boundaries.
+- The complete orchestrator-owned 1.0 language, no-phone-home promise, stable thin connectors,
+  policy-free extension, clean-room rule, and first-class unrestricted engine are standing
+  boundaries.
 
 ## Contributions and licensing
 
 Contributions to the open engine use the DCO and the repository's Apache-2.0 OR MIT terms.
-Contributions to `crates/core/src/governance/` require a CLA because that module has a separate
+Contributions to `crates/orchestrator/src/governance/` require a CLA because that module has a separate
 commercial license. Read [CONTRIBUTING.md](CONTRIBUTING.md) before starting substantial work.
 
 ## Accountability and continuity

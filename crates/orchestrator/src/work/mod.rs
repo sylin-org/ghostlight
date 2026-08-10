@@ -30,6 +30,7 @@ use crate::language::{
     ScrollPage, SequenceStep, TypeText, UploadFiles, Wait,
 };
 use crate::presentation::PresentationReactor;
+use crate::workbench::WorkbenchProjection;
 use crate::workspace::{
     SelectedTab, SelectedTarget, SelectedView, WorkspaceError, WorkspaceId, WorkspaceLease,
     WorkspaceStore,
@@ -61,6 +62,7 @@ pub struct ApplicationExecutor {
     workspaces: WorkspaceStore,
     browser: Arc<dyn BrowserPort>,
     presentation: PresentationReactor,
+    workbench: WorkbenchProjection,
     audit: Arc<dyn AuditSink>,
     active_authority: ActiveAuthorityRegistry,
 }
@@ -76,6 +78,7 @@ impl ApplicationExecutor {
         workspaces: WorkspaceStore,
         browser: Arc<dyn BrowserPort>,
         presentation: PresentationReactor,
+        workbench: WorkbenchProjection,
         audit: Arc<dyn AuditSink>,
     ) -> Self {
         Self {
@@ -83,6 +86,7 @@ impl ApplicationExecutor {
             workspaces,
             browser,
             presentation,
+            workbench,
             audit,
             active_authority: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -171,6 +175,7 @@ impl ApplicationExecutor {
             self.emit(DomainEvent::WorkStarted {
                 invocation: invocation.clone(),
                 workspace: workspace.as_str().into(),
+                tool: tool.into(),
                 activity: operation_activity(&operation),
             });
             self.active_authority
@@ -2596,6 +2601,7 @@ impl ApplicationExecutor {
 
     fn emit(&self, event: DomainEvent) {
         self.presentation.react(&event);
+        self.workbench.react(&event);
     }
 }
 
@@ -2910,6 +2916,7 @@ mod tests {
     use crate::browser::testing::FakeBrowser;
     use crate::governance::{AuditRecord, AuditSink, GovernanceFacade};
     use crate::presentation::{PresentationError, PresentationPort, PresentationReactor};
+    use crate::workbench::WorkbenchProjection;
     use crate::workspace::WorkspaceStore;
 
     use super::{observation_budget_ms, ApplicationExecutor, CancellationToken, Effect, Status};
@@ -2962,6 +2969,7 @@ mod tests {
             workspaces.clone(),
             browser.clone(),
             PresentationReactor::new(Arc::new(NoPresentation)),
+            WorkbenchProjection::default(),
             audit.clone(),
         );
         (executor, browser, workspaces, workspace, audit)

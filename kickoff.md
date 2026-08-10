@@ -1,5 +1,10 @@
 # Kickoff: Phase 0, Reference Study + Project Bootstrap
 
+> Historical bootstrap record only. Do not execute these instructions on the Ghostlight 1.0
+> branch. They require quarantined reference material and contradict the current clean-room
+> authority in `AGENTS.md`. The completed history remains valuable evidence of how the project
+> began; current work starts from `AGENTS.md` and `docs/1.0/`.
+
 Read CLAUDE.md and docs/SPEC.md fully before doing anything else. These are your authoritative sources.
 
 Then execute the following:
@@ -30,7 +35,7 @@ For each of the 18 tools, record:
 - Tool name (exact string)
 - Input schema (exact JSON schema object)
 - Description (exact string)
-- Classification: Observe / Mutate / Manage / Excluded (per our spec §3)
+- Classification: Observe / Mutate / Manage / Excluded (per our spec section 3)
 
 ### Section 2: CDP Commands
 For each tool, list the CDP methods it invokes and their parameters. This is the mapping from MCP tool call to CDP command(s).

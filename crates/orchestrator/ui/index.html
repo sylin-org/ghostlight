@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ghostlight</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="rail" aria-label="Ghostlight navigation">
+      <button class="brand-button" type="button" data-view="home" aria-label="Ghostlight home">
+        <img class="brand-mark" src="ghostlight.png" alt="">
+      </button>
+      <nav class="rail-nav">
+        <button class="rail-item active" type="button" data-view="home" aria-label="Home" aria-current="page">
+          <svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20H5V10.5Z"/><path d="M9 20v-6h6v6"/></svg>
+          <span>Home</span>
+        </button>
+        <button class="rail-item" type="button" data-view="activity" aria-label="Sessions and operations">
+          <svg viewBox="0 0 24 24"><path d="M5 5h14v5H5zM5 14h8v5H5z"/><path d="M17 14h2v5h-2z"/></svg>
+          <span>Activity</span>
+        </button>
+        <button class="rail-item" type="button" data-view="history" aria-label="History">
+          <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.5"/><path d="M4 4v4.5h4.5M12 8v5l3 2"/></svg>
+          <span>History</span>
+        </button>
+        <button class="rail-item" type="button" data-view="checkup" aria-label="Checkup">
+          <svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/><path d="M20 12a8 8 0 1 1-5-7.4"/></svg>
+          <span>Checkup</span>
+        </button>
+        <button class="rail-item" type="button" data-view="configuration" aria-label="Configuration">
+          <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6"/></svg>
+          <span>Configure</span>
+        </button>
+        <button class="rail-item" type="button" data-view="install" aria-label="Installations">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
+          <span>Install</span>
+        </button>
+      </nav>
+      <div class="rail-footer">
+        <span class="connection-light" id="rail-light" aria-hidden="true"></span>
+        <span class="sr-only" id="rail-status">Connecting</span>
+      </div>
+    </aside>
+
+    <div class="workbench">
+      <header class="topbar">
+        <div class="crumb">
+          <span class="crumb-brand">Ghostlight</span>
+          <span class="crumb-separator">/</span>
+          <span id="page-title">Home</span>
+        </div>
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+          <label class="sr-only" for="global-search">Search Ghostlight</label>
+          <input id="global-search" type="search" maxlength="120" autocomplete="off" placeholder="Search sessions, operations, and history">
+          <kbd>Ctrl K</kbd>
+          <div class="search-results" id="search-results" hidden></div>
+        </div>
+        <div class="topbar-state" id="topbar-state">
+          <span class="state-dot"></span>
+          <span>Connecting</span>
+        </div>
+      </header>
+
+      <main id="main-content" tabindex="-1">
+        <section class="view active" id="view-home" data-page="home" aria-labelledby="home-heading">
+          <div class="hero panel">
+            <div class="hero-copy">
+              <div class="eyebrow"><span class="pulse-dot"></span> Local browser orchestrator</div>
+              <h1 id="home-heading">Everything under one light.</h1>
+              <p id="hero-summary">Ghostlight is starting its private browser workspace.</p>
+              <div class="hero-actions">
+                <button class="button primary" type="button" id="hero-control" data-intent="hold" disabled>Pause browser work</button>
+                <button class="button quiet" type="button" data-view="activity">View current activity</button>
+              </div>
+            </div>
+            <div class="hero-orbit" aria-hidden="true">
+              <div class="orbit orbit-one"></div>
+              <div class="orbit orbit-two"></div>
+              <img class="hero-ghost" src="ghostlight.png" alt="">
+            </div>
+          </div>
+
+          <div class="metric-grid" id="home-metrics" aria-label="At a glance"></div>
+
+          <div class="home-grid">
+            <section class="panel section-panel" aria-labelledby="current-heading">
+              <div class="section-heading">
+                <div><span class="section-kicker">Live</span><h2 id="current-heading">Current work</h2></div>
+                <button class="text-button" type="button" data-view="activity">See all</button>
+              </div>
+              <div id="home-current"></div>
+            </section>
+            <section class="panel section-panel" aria-labelledby="health-heading">
+              <div class="section-heading">
+                <div><span class="section-kicker">Checkup</span><h2 id="health-heading">System health</h2></div>
+                <button class="text-button" type="button" data-view="checkup">Details</button>
+              </div>
+              <div id="home-health"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-activity" data-page="activity" aria-labelledby="activity-heading">
+          <div class="page-heading"><div><span class="section-kicker">Right now</span><h1 id="activity-heading">Sessions and operations</h1><p>Every active client, browser, and unit of work in one place.</p></div></div>
+          <div class="stack" id="activity-content"></div>
+        </section>
+
+        <section class="view" id="view-history" data-page="history" aria-labelledby="history-heading">
+          <div class="page-heading"><div><span class="section-kicker">Payload-free</span><h1 id="history-heading">History</h1><p>A local account of completed work, decisions, and effects without page content.</p></div><span class="count-badge" id="history-count">0 records</span></div>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>When</th><th>Operation</th><th>Client session</th><th>Capability</th><th>Outcome</th><th>Effect</th></tr></thead><tbody id="history-body"></tbody></table></div></div>
+        </section>
+
+        <section class="view" id="view-checkup" data-page="checkup" aria-labelledby="checkup-heading">
+          <div class="page-heading"><div><span class="section-kicker">Local diagnostics</span><h1 id="checkup-heading">Checkup</h1><p>A quick answer to whether Ghostlight is ready, connected, and governed.</p></div><button class="button quiet" type="button" id="refresh-checkup">Refresh</button></div>
+          <div class="diagnostic-grid" id="diagnostic-grid"></div>
+          <section class="panel test-card">
+            <div><h2>Test notifications</h2><p>Send one local Ghostlight checkup notification. Nothing leaves this device.</p></div>
+            <button class="button quiet" type="button" id="test-notification">Send test</button>
+          </section>
+        </section>
+
+        <section class="view" id="view-configuration" data-page="configuration" aria-labelledby="configuration-heading">
+          <div class="page-heading"><div><span class="section-kicker">Authority stays central</span><h1 id="configuration-heading">Configuration</h1><p>Control the current runtime and inspect which authority sources are active.</p></div></div>
+          <section class="panel runtime-card">
+            <div><span class="section-kicker">Runtime control</span><h2 id="runtime-heading">Browser work is active</h2><p id="runtime-detail">New governed operations may proceed.</p></div>
+            <div class="segmented" aria-label="Runtime control">
+              <button type="button" data-intent="resume">Active</button>
+              <button type="button" data-intent="hold">Pause</button>
+              <button type="button" data-intent="end_session">End session</button>
+            </div>
+          </section>
+          <div class="configuration-grid" id="configuration-grid"></div>
+        </section>
+
+        <section class="view" id="view-install" data-page="install" aria-labelledby="install-heading">
+          <div class="page-heading"><div><span class="section-kicker">Development harnesses</span><h1 id="install-heading">Installations</h1><p>Check, connect, or remove Ghostlight from supported local coding harnesses.</p></div><button class="button quiet" type="button" id="refresh-install">Check all</button></div>
+          <div class="stack" id="install-content"></div>
+        </section>
+      </main>
+      <div class="app-toast" id="app-toast" role="status" aria-live="polite" hidden></div>
+    </div>
+  </div>
+  <div class="dialog-backdrop" id="confirm-dialog" hidden>
+    <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-detail">
+      <span class="section-kicker">Confirm local change</span>
+      <h2 id="confirm-title">Remove Ghostlight registration?</h2>
+      <p id="confirm-detail">Only the registration owned by Ghostlight will be removed.</p>
+      <div class="dialog-actions">
+        <button class="button quiet" type="button" data-confirm="cancel">Cancel</button>
+        <button class="button danger" type="button" data-confirm="remove">Remove</button>
+      </div>
+    </section>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

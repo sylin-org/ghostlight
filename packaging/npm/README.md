@@ -1,5 +1,9 @@
 # ghostlight (npm launcher)
 
+> Historical 0.8 package documentation. The launcher source was intentionally removed during the
+> 1.0 rebaseline. Do not publish or use this package as a 1.0 installation mechanism; the planned
+> native desktop packages are specified in `docs/RELEASE.md`.
+
 Delightful, responsible browser automation for AI coding agents. Ghostlight gives any MCP client
 access to your own authenticated Chromium session, keeps the work visible, and adds inspectable
 boundaries when you want them. All-open is a first-class default.

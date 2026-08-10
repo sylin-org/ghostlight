@@ -21,6 +21,7 @@ pub enum DomainEvent {
     WorkStarted {
         invocation: String,
         workspace: String,
+        tool: String,
         activity: PresentationActivity,
     },
     /// A controlled tab was created.

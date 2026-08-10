@@ -1,8 +1,8 @@
 # Ghostlight -- Claude Code instructions
 
 The canonical, model-agnostic agent guide for this repository is [AGENTS.md](AGENTS.md).
-Everything that used to live in this file (project identity, architecture, the sacred
-tool-schema constraint, code style, test strategy, scope exclusions) moved there so that
+Everything that used to live in this file (project identity, architecture, model-language
+ownership, code style, test strategy, scope exclusions) moved there so that
 every agentic tool reads the same instructions. This file just imports it:
 
 @AGENTS.md

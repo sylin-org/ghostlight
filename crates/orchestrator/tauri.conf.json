@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ghostlight",
+  "version": "1.0.0",
+  "identifier": "org.sylin.ghostlight",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Ghostlight",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 880,
+        "minHeight": 620,
+        "center": true,
+        "visible": false,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "capabilities": ["main"],
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data: asset:; style-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "../../extension/icons/icon32.png",
+      "../../extension/icons/icon128.png",
+      "../../extension/icons/icon512.png"
+    ]
+  }
+}

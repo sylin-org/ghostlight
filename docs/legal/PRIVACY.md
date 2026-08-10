@@ -1,112 +1,77 @@
 # Ghostlight in Browser: Privacy Policy
 
-Last updated: 2026-07-14
+Last updated: 2026-08-10 for the planned 1.0 adapter
 
 Canonical public URL: https://sylin.org/ghostlight/privacy/
 
-This policy covers the "Ghostlight in Browser" Chrome extension (Manifest V3), published by
-Sylin. It explains what the extension can access, why it needs that access, and where the data
-goes and does not go.
+This policy covers the `Ghostlight in Browser` Manifest V3 extension published by Sylin. It
+explains what the extension can access, why it needs that access, and where data does and does not
+go.
 
-## What Ghostlight in Browser is
+## What the extension is
 
-Ghostlight has two local components:
+Ghostlight has a native application installed on the same machine and a thin browser extension.
+The native orchestrator owns browser jobs, policy, runtime controls, completion truth, and
+payload-free audit. The extension owns physical Chromium operations, page-local DOM access, local
+observation, and content-free visual feedback.
 
-1. A native Rust application installed separately on the user's machine. It provides the MCP
-   server, policy engine, and audit log.
-2. This Chrome extension. It is a thin browser executor that receives instructions from the
-   native application over Chrome native messaging.
+The extension receives typed instructions through Chrome native messaging. It does not make policy
+decisions, expose model-facing tools, maintain an allow-list, send telemetry, or operate without
+the separately installed native application.
 
-The extension reads and acts only when the local application requests a named browser operation.
-It does not make access-control decisions, maintain a domain policy, or send telemetry. Without
-the separately installed and registered native application, the extension cannot receive
-instructions or automate the browser.
+## Data used for requested browser work
 
-## Data and capabilities used
+For controlled Ghostlight tabs, the extension may handle:
 
-For tabs in the visible Ghostlight automation session, the extension can use:
+- page text, structure, accessibility-relevant controls, open shadow DOM, element state and bounds;
+- current tab URL, title, loading state, window, opener, and tab-group facts;
+- screenshots explicitly requested for the current viewport, page, or target;
+- pointer, keyboard, scroll, drag, zoom, navigation, and dialog actions;
+- ordinary form values supplied by the connected MCP client;
+- explicit page-script source and its bounded serializable result; and
+- file bytes supplied by the native application for an explicitly named page file input.
 
-- **Page content and structure.** Text, DOM structure, accessibility information, shadow DOM, form
-  fields, and element locations support page reading, element discovery, and interaction.
-- **Screenshots and screen-capture frames.** On-demand screenshots support visual browser tools.
-  During an explicitly requested recording, the extension relays frames to the local application,
-  which assembles the animated GIF. Before explicit export, frame and GIF bytes remain only in
-  bounded volatile memory and never spill to disk. A frozen recording expires after five minutes;
-  explicit clear, session end, policy revocation, panic kill, or service exit erases it sooner.
-  Export creates a copy only at the destination the user requested, such as the MCP client or a
-  page input; the local in-memory recording still follows clear and retention rules.
-- **Console and network information.** Console messages and network request metadata support
-  debugging tools. Ghostlight does not use this capability to build a browsing history.
-- **Browser state.** Tab URLs, titles, identifiers, window state, and tab-group state let
-  Ghostlight create and maintain its visible automation workspace.
-- **Synthetic input and navigation.** Clicks, keystrokes, scrolling, drags, navigation, and tab
-  management are the actions the automation tools perform.
-- **User-requested page JavaScript.** When the connected MCP client explicitly invokes
-  `javascript_tool`, the JavaScript text supplied through the local native application is
-  evaluated in the attached web page through the Chrome DevTools Protocol. It runs in that page's
-  context, not in the extension's own origin, and is not installed or retained as extension code.
-- **Host-supplied files and images.** When requested, the local application may supply file or
-  image bytes for placement into a page's file input or drop target. The extension does not browse
-  or read the user's filesystem.
-
-The extension does not collect these data in the background for Sylin. Each access supports a
-specific operation requested through the local Ghostlight installation.
+The extension does not browse the filesystem. File paths are validated and bytes are read by the
+native application only for the requested upload. Ghostlight refuses credential-class fields and
+does not type passwords, one-time codes, or payment secrets.
 
 ## Where data goes
 
-Data returned by the extension travels over Chrome native messaging to the Ghostlight application
-on the same machine. Native messaging is a direct local process-to-process channel; the data does
-not cross the network to reach Ghostlight.
+Browser results travel through Chrome native messaging to the local Ghostlight application and
+then to the MCP client the user chose. This local process channel does not send data to Sylin.
+The MCP client's own handling of tool results is governed by that client's configuration and
+privacy terms.
 
-The user chooses the MCP client connected to the local application. That client's own handling of
-tool results is governed by the client's configuration and privacy terms. Sylin does not operate a
-runtime service in this path and does not receive the browser data.
+Ghostlight's local audit and desktop history are payload-free. They contain opaque ids, tool,
+capability, decision, reason, terminal status, and effect class, never URLs, page text, selectors,
+form values, file paths, scripts, screenshots, or dialog text.
 
 ## What Sylin does not do
 
-- **No developer-operated runtime service.** The extension does not send browsing data to a Sylin
-  server.
-- **No analytics or telemetry.** The extension contains no analytics SDK and sends no usage
-  reports.
-- **No advertising or profiling.** Browser data is not used for advertising, profiling,
-  creditworthiness, or lending.
-- **No sale or developer transfer.** Sylin does not receive, sell, or transfer data accessed by
-  the extension.
-- **No remotely hosted extension logic.** The service worker, content scripts, and supporting
-  JavaScript that implement the extension ship in the reviewed extension package. The extension
-  does not fetch or dynamically import code that changes its own behavior. The explicitly
-  requested page JavaScript described above is an automation input from the local MCP client; it
-  is evaluated only in the attached page and does not become extension logic.
-
-## Limited Use
+- No developer-operated runtime service receives browser data.
+- No analytics, telemetry, advertising, profiling, creditworthiness, or lending use.
+- No sale or developer transfer of browser data.
+- No remotely hosted extension logic or runtime update code.
+- No Chrome sync storage; adapter identity and user settings remain local to the browser profile.
+- No browsing-history database or background collection unrelated to a requested operation.
 
 The use of information received from Google APIs will adhere to the Chrome Web Store User Data
 Policy, including the Limited Use requirements.
 
-Ghostlight uses browser information only to provide the browser operation the user requested. It
-does not use or transfer that information for advertising, profiling, creditworthiness, lending,
-or any purpose unrelated to its single browser-automation purpose.
+## User control
 
-## Local governance and user control
+The user controls whether the native application and extension are installed, which MCP harness is
+registered, whether a session is active or paused, whether controlled tabs may be closed by the
+model, and whether Ghostlight remains running. Visual browser receipts, the extension popup, and
+the tray workbench expose those controls without reading page content.
 
-The native application evaluates tool calls against its configured capability policy and writes a
-local structured audit record. Governance runs on the user's machine, not inside the extension or
-on a Sylin service.
-
-The user controls the complete local chain:
-
-- whether the native application is installed and running;
-- which MCP client and policy configuration it uses;
-- whether automation is active;
-- whether to pause, stop, or panic-kill the session; and
-- whether the extension remains installed.
-
-Removing the extension or stopping the local application ends its browser access.
+Removing the extension or stopping the native application ends its browser access. Closing only
+the workbench window hides it to the tray and does not imply the orchestrator stopped.
 
 ## Policy changes
 
 If the extension's data access, use, or destination changes, this policy will be updated before the
-changed version is published.
+changed version is submitted.
 
 ## Contact
 

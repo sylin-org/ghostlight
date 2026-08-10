@@ -9,6 +9,21 @@ use ghostlight_bridge::browser::{
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Immutable user-facing summary of one admitted workspace.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkspaceSummary {
+    /// Opaque workspace identity.
+    pub id: String,
+    /// Presentation-only client label.
+    pub client_label: String,
+    /// Whether one invocation currently owns the workspace lease.
+    pub leased: bool,
+    /// Number of controlled tabs.
+    pub tab_count: usize,
+    /// Number of controlled tabs held by runtime governance.
+    pub held_tab_count: usize,
+}
+
 /// Opaque admitted MCP workspace handle.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct WorkspaceId(String);
@@ -155,6 +170,25 @@ pub struct WorkspaceStore {
 }
 
 impl WorkspaceStore {
+    /// Return a stable, content-free snapshot of every admitted workspace.
+    #[must_use]
+    pub fn summaries(&self) -> Vec<WorkspaceSummary> {
+        let state = self.lock();
+        let mut summaries: Vec<_> = state
+            .workspaces
+            .iter()
+            .map(|(id, workspace)| WorkspaceSummary {
+                id: id.as_str().into(),
+                client_label: workspace.client_label.clone(),
+                leased: workspace.leased,
+                tab_count: workspace.tabs.len(),
+                held_tab_count: workspace.tabs.values().filter(|tab| tab.held).count(),
+            })
+            .collect();
+        summaries.sort_by(|left, right| left.id.cmp(&right.id));
+        summaries
+    }
+
     /// Admit one MCP connection as an isolated workspace.
     pub fn admit(&self, client_label: String) -> WorkspaceId {
         let id = WorkspaceId(format!("workspace_{}", Uuid::new_v4().simple()));

@@ -54,6 +54,33 @@ Internal browser commands are combined when a person experiences them as one job
   page joins the same workspace when ownership is unambiguous.
 - Visual feedback follows the active document without leaking page content or becoming required
   for successful work.
+- The tray opens a calm workbench that answers what is running, what happened, whether Ghostlight
+  is healthy, which controls apply, and where it is installed without turning setup into a CLI
+  archaeology exercise.
+- One compact rail and one global search reach every workbench destination and user-visible record.
+  Home carries only the few current facts and actions that matter at a glance.
+
+## Desktop workbench experience
+
+The workbench is the orchestrator's local-human presentation surface. It is part of the same
+installed product and process, while remaining a separate presentation and application context.
+
+- Home summarizes plural MCP sessions, operations, and browser instances, blocked history, current
+  work, and system health.
+- Activity names every current client session, operation, and compatible browser instance.
+- History is bounded, local, newest first, and payload-free.
+- Checkup explains service, browser, and authority state and can test native notifications.
+- Configuration applies explicit pause, resume, end-session, and start-session intents through the
+  same governance owner used by browser and MCP flows.
+- Installations checks, installs, or uninstalls Ghostlight's owned registration for explicitly
+  supported development harnesses. It never overwrites a foreign entry or exposes a generic file
+  editor or command runner.
+- Important blocked and attention-required facts may produce quiet, deduplicated OS notifications.
+  Routine successful work does not.
+- Closing the window returns it to the tray without ending browser service. A failed or reloaded
+  WebView is disposable and reconstructs from the orchestrator.
+- The original Ghostlight artwork, palette, motion character, and reduced-motion behavior remain
+  product identity across extension and desktop surfaces.
 
 ## Extension experience
 

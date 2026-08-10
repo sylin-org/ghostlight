@@ -41,10 +41,9 @@ license. Two standing accommodations:
 
 > Ghostlight never phones home and license state never affects behavior. Enforcement,
 > audit, and your workflows are never interrupted, degraded, or disabled by license
-> expiry, by the vendor being unreachable, or by the vendor ceasing to exist. An expired
-> license changes exactly one thing: license-state notices appear in `ghostlight doctor`,
-> `ghostlight license status`, and your own audit records until it is renewed. Your
-> deployment works as-is, offline, indefinitely.
+> terms, by the vendor being unreachable, or by the vendor ceasing to exist. The 1.0 runtime
+> contains no activation, license check, behavior gate, or license marker. Your deployment works
+> as-is, offline, indefinitely.
 
 This commitment is recorded in
 [ADR-0028](docs/adr/0028-tripwire-licensing-and-continuity-promise.md) (Decision 6) and
@@ -65,27 +64,16 @@ use case, and a rough seat count. The agreement is one page.
 
 ## How licensing works
 
-A license is a small signed file the binary verifies fully offline -- a composite **Ed25519 +
-ML-DSA-65** signature (the latter is post-quantum, FIPS 204), so forging one would mean breaking
-both a classical and a post-quantum scheme. There is no activation server, no telemetry, and no
-network traffic in the license path. License state is observational: while governance is actually
-operating and the license state is abnormal (expired, invalid, or missing), the binary keeps
-working exactly as before and appends a `license` field to your own audit records, so your
-compliance process sees it. In the free all-open path the licensing layer is dormant and writes
-nothing at all.
-
-License verification is present and never gates behavior. Production key issuance opens with the
-founding program; until then every documented feature works without a key, and evaluation requires
-no contact with us (a public evaluation key lets you self-sign). The terms in
-[LICENSING.md](LICENSING.md) apply regardless of tooling.
-
-To install, check, or refresh a key once you have one, see
-[entering a license](docs/guides/licensing.md).
+Licensing is contractual, not an activation mechanism. The 1.0 runtime has no key file, activation
+server, license-status command, telemetry, network traffic, or audit marker. Every documented
+feature works without entering a key; the terms in [LICENSING.md](LICENSING.md) define permitted
+use. Commercial customers receive the applicable agreement through the ordinary procurement
+process.
 
 ## Questions
 
-**What happens when a license expires?** Nothing stops; see the Continuity Promise. Your
-audit records carry a `"license": "expired"` marker until renewal.
+**What happens when a commercial term expires?** Nothing technical stops or changes; see the
+Continuity Promise. Renewal is a contractual and procurement matter.
 
 **Do we need a license to evaluate?** No. Evaluation, development, testing, and all-open
 operation are free at any organization size, with no key and no registration.

@@ -8,8 +8,8 @@ files govern. Decision record:
 
 | Part | License | SPDX |
 |---|---|---|
-| Engine: everything outside `crates/core/src/governance/` -- the automation engine, the 13 trained tools, the Chromium extension, the CLIs and installers | Apache-2.0 OR MIT, at your option ([Apache-2.0](LICENSE), [MIT](docs/licenses/MIT.txt)) | `Apache-2.0 OR MIT` |
-| Governance module: `crates/core/src/governance/` -- identity-bound grants, org policy locks, structured audit, sacred never-touch domains, the `explain` tool, central management | Ghostlight Commercial License, source-available ([license text](docs/licenses/LicenseRef-Ghostlight-Commercial.txt)) | `LicenseRef-Ghostlight-Commercial` |
+| Engine: everything outside `crates/orchestrator/src/governance/` -- the orchestrator application, browser engine, relays, desktop workbench, and installers | Apache-2.0 OR MIT, at your option ([Apache-2.0](LICENSE), [MIT](docs/licenses/MIT.txt)) | `Apache-2.0 OR MIT` |
+| Governance module: `crates/orchestrator/src/governance/` -- authority snapshots, protected-host ceiling, local and managed restrictions, runtime controls, and payload-free audit | Ghostlight Commercial License, source-available ([license text](docs/licenses/LicenseRef-Ghostlight-Commercial.txt)) | `LicenseRef-Ghostlight-Commercial` |
 
 ## Am I free to use it?
 
@@ -24,8 +24,9 @@ files govern. Decision record:
 
 If your row says "commercial subscription", contact hello@sylin.org. In short: exactly
 one situation pays, and everything else is free -- see [PRICING.md](PRICING.md) for the
-tiers, plus the hardship and outgrew-the-tier accommodations. Once you have a license,
-[docs/guides/licensing.md](docs/guides/licensing.md) shows how to install and refresh it.
+tiers, plus the hardship and outgrew-the-tier accommodations. Ghostlight 1.0 has no runtime key,
+activation, status command, or behavior gate; [docs/guides/licensing.md](docs/guides/licensing.md)
+explains the source boundary.
 
 ## Labels, precisely
 
@@ -46,5 +47,5 @@ tiers, plus the hardship and outgrew-the-tier accommodations. Once you have a li
 
 - Engine contributions are accepted under the Developer Certificate of
   Origin (inbound = outbound, Apache-2.0 OR MIT).
-- Contributions to `crates/core/src/governance/` are not open yet; if you want to
+- Contributions to `crates/orchestrator/src/governance/` are not open yet; if you want to
   contribute there, open an issue first (a CLA will be required).

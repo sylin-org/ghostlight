@@ -1,154 +1,68 @@
-# Ghostlight SIEM integration
+# Collecting Ghostlight 1.0 audit
 
-Every governed (and ungoverned, when audit is on) tool call produces exactly one JSON
-Lines record. This guide covers turning the stream on, the two collection paths (RFC
-5424 syslog over UDP, or tailing the JSONL file), the record schema, and paste-ready
-starts for Splunk, Microsoft Sentinel, and Elastic.
+Ghostlight appends one payload-free JSON object for every terminal invocation. It does not send
+syslog, open a network listener, or call a hosted collector. SIEM delivery belongs to the endpoint's
+existing file-collection agent.
 
-## Turn it on
+## Select the file
 
-    ghostlight config set audit.enabled true
-    ghostlight config set audit.destination syslog
-    ghostlight config set audit.syslog.address "10.0.0.5:514"
+Set `GHOSTLIGHT_AUDIT_FILE` to an absolute local path before starting Ghostlight. Without that
+variable, `audit.jsonl` sits beside the runtime discovery file.
 
-`audit.destination` is one of `file` (default), `stderr`, `syslog`, `none`. Under the
-`safe` preset, `audit.enabled` is already true. An organization pins these keys for
-everyone via the org policy manifest's `config` block with `"level": "mandatory"` (see
-the [compliance team guide](compliance-team.md)).
+The orchestrator creates the parent directory when possible, opens the file append-only, writes one
+LF-terminated record, and flushes it. The workbench also reconstructs its bounded History view from
+this file.
 
-For file collection instead: leave `audit.destination` at `file`; records append to
-`audit.jsonl` in the platform data directory (`%LOCALAPPDATA%\ghostlight\` on Windows,
-`~/Library/Application Support/ghostlight/` on macOS, `~/.local/share/ghostlight/` on
-Linux), or set an absolute path with `audit.file.path`. One JSON object per line, LF
-terminated; open-append-close per record, so rotation-friendly.
+## Record shape
 
-## Wire format (syslog)
+```json
+{
+  "timestamp_ms": 1786334400000,
+  "invocation": "invocation_opaque",
+  "workspace": "workspace_opaque",
+  "tool": "browser_read_page",
+  "capability": "read",
+  "authority": "authority_opaque",
+  "allowed": true,
+  "reason": "permitted",
+  "status": "succeeded",
+  "effect": "none"
+}
+```
 
-One RFC 5424 datagram per record, over UDP, payload:
+Fields are typo-closed:
 
-    <134>1 {timestamp} - ghostlight {pid} - - {json}
+| Field | Meaning |
+| --- | --- |
+| `timestamp_ms` | Local observation time as Unix milliseconds. |
+| `invocation` | Opaque invocation correlation handle. |
+| `workspace` | Opaque admitted MCP workspace handle. |
+| `tool` | Exact 1.0 catalog tool name. |
+| `capability` | `read`, `action`, `write`, or `execute`. |
+| `authority` | Opaque immutable authority snapshot id. |
+| `allowed` | Final-boundary authority decision. |
+| `reason` | Stable closed reason such as `permitted`, `host_denied`, or `runtime_hold`. |
+| `status` | Terminal result status. |
+| `effect` | `none`, `applied`, `partial`, or `unknown`. |
 
-PRI 134 = facility 16 (local0), severity 6 (info). HOSTNAME, MSGID, and STRUCTURED-DATA
-are the RFC nil value `-`. `{timestamp}` is UTC RFC 3339 with millisecond precision.
-`{json}` is the record, unchanged from the file format. Example datagram:
+There are deliberately no URLs, hosts, client names, page text, target descriptions, selectors,
+form values, filenames, paths, file bytes, scripts, screenshots, dialog text, policy rules, or
+model prompts.
 
-    <134>1 2026-07-03T14:32:15.003Z - ghostlight 18104 - - {"event_id":"1c5e...","ts":"2026-07-03T14:32:15.001Z","identity":{"principal":"support-team","resolved_by":"local_file"},"client":{"name":"claude-code","version":"2.1.0"},"tool":"computer","action":"left_click","capability":"action","domain":"app.crm.example.com","decision":"allow","grant_id":"crm-read-write","denial_id":null,"duration_ms":312,"manifest":{"name":"support-team-crm","version":"2026.07.1","hash":"9f31..."},"held":false,"attention_required":false,"orchestrator":null,"batch_id":null,"step":null,"dry_run":false}
+## Collection
 
-Send failures are logged locally and never break the tool call.
+Configure the endpoint collector to tail the selected JSONL file and parse one object per line.
+Use file identity and offsets so rotation does not duplicate evidence. Apply filesystem access
+controls appropriate to operational metadata even though payloads are excluded.
 
-## Record schema (tool calls)
+Useful high-signal queries include:
 
-Field order is stable and part of the format. Absent values are `null`, not omitted.
+- `allowed = false` grouped by `reason` and `tool`;
+- `effect in (partial, unknown)` because those outcomes are never replay-safe;
+- `status = attention_required` or `reason = runtime_attention`;
+- changes in managed `invalid_authority` volume; and
+- gaps in expected endpoint delivery, which are collector health rather than browser truth.
 
-| Field | Type | Meaning |
-|---|---|---|
-| `event_id` | string | UUID v4, unique per record. |
-| `ts` | string | RFC 3339 UTC, millisecond precision. |
-| `identity` | object or null | `{principal, resolved_by}` from the active manifest. |
-| `client` | object or null | `{name, version}` from the MCP client's initialize. |
-| `tool` | string | MCP tool name as received. |
-| `action` | string or null | `computer` sub-action (e.g. `left_click`); null otherwise. |
-| `capability` | string | `read`, `action`, `write`, `execute`, or `none`. |
-| `domain` | string or null | Normalized host of the governed tab at decision time. |
-| `decision` | string | `allow`, `deny`, or `shadow_deny` (observe mode's would-deny). |
-| `grant_id` | string or null | The grant that resolved an allow. |
-| `denial_id` | string or null | Stable `D-` + 8 hex id; matches the message users see. |
-| `duration_ms` | number | Dispatch-to-result wall time. |
-| `manifest` | object or null | `{name, version, hash}` of the policy in force. |
-| `held` | boolean | True when answered with the take-the-wheel pause text. |
-| `attention_required` | boolean | True when this workspace's denial circuit refused dispatch pending a human disposition. |
-| `orchestrator` | string or null | `script` or `form_fill` on an internal execution. |
-| `batch_id` | string or null | Correlates an orchestrator parent with its internal executions. |
-| `step` | number or null | One-indexed internal execution position. |
-| `dry_run` | boolean | True only on a `script` dry-run parent record. |
-
-Session events share the stream and are distinguishable by an `event` field (and the
-absence of `tool`/`decision`): `event` is `session_killed` (panic kill switch),
-`manifest_reload` (hot-reload swap), or `user_manifest_ignored` (org policy displaced a
-user manifest). Route on `event` presence.
-
-Attention transitions also share the stream and carry `event` values `attention_opened`,
-`attention_resumed`, `attention_quieted`, or `attention_ended`. Their stable content-free fields
-are `event_id`, `ts`, `client`, `event`, `category`, `capability`, `domain`, `threshold`, `count`,
-`window_ms`, and `disposition`. Null threshold/count/window values identify a closing disposition.
-These records do not contain the opaque workspace id, full URL, tool arguments, denial message, or
-page content.
-
-A `license` field is additionally appended to tool-call records only while an organization-managed
-governance deployment has abnormal license state (see [PRICING.md](../../PRICING.md)); it never
-affects behavior.
-
-A `policy_seq` field (a number) is appended to tool-call records under managed policy
-(central signed-policy distribution, see the [governance configuration
-guide](governance-configuration.md)): the org-signed publish sequence the decision ran
-under. Like `license`, it appears only on tool-call records, never on session events, and
-never changes behavior. Pivot on it to tie a decision to the exact published policy
-version, not just the manifest hash.
-
-## Splunk
-
-UDP input on the syslog port, then extract the JSON payload:
-
-    # inputs.conf
-    [udp://514]
-    sourcetype = ghostlight:audit
-
-    # props.conf
-    [ghostlight:audit]
-    KV_MODE = none
-    REPORT-json = ghostlight-json
-
-    # transforms.conf
-    [ghostlight-json]
-    REGEX = -\s-\s(\{.*\})$
-    FORMAT = json_payload::$1
-
-Then in SPL:
-
-    sourcetype="ghostlight:audit"
-    | spath input=json_payload
-    | search decision="deny" OR decision="shadow_deny"
-    | stats count by identity.principal, domain, capability, denial_id
-
-(For file collection, a Universal Forwarder monitoring `audit.jsonl` with
-`sourcetype=_json` needs no extraction at all.)
-
-## Microsoft Sentinel
-
-Land the syslog stream via the Azure Monitor Agent (or rsyslog forwarder) into the
-Syslog table with facility `local0`, then parse in KQL:
-
-    Syslog
-    | where Facility == "local0" and ProcessName == "ghostlight"
-    | extend record = parse_json(extract(@"-\s-\s(\{.*\})$", 1, SyslogMessage))
-    | where record.decision in ("deny", "shadow_deny")
-    | project TimeGenerated, principal = record.identity.principal,
-              domain = record.domain, capability = record.capability,
-              denial_id = record.denial_id, manifest = record.manifest.name
-
-## Elastic
-
-Filebeat/Logstash UDP syslog input, then decode the trailing JSON:
-
-    # logstash pipeline
-    input { udp { port => 514 } }
-    filter {
-      grok { match => { "message" => "- - %{GREEDYDATA:payload}$" } }
-      json { source => "payload" target => "ghostlight" }
-    }
-    output { elasticsearch { index => "ghostlight-audit-%{+YYYY.MM.dd}" } }
-
-(For file collection, Filebeat's `json.keys_under_root: true` on `audit.jsonl` is
-simpler.)
-
-## Alerts worth having on day one
-
-- `decision:"deny"` rate spike per principal or domain (agent fighting a policy, or a
-  policy that is wrong).
-- Any `event:"session_killed"` (a human hit the panic switch; someone should ask why).
-- Any `event:"user_manifest_ignored"` (a user-supplied policy was displaced by org
-  policy; expected at rollout, interesting later).
-- `shadow_deny` volume trending to zero in observe mode (the signal that the policy is
-  ready to enforce; see the compliance guide, step 3).
-- Records with a `license` field (compliance noise by design; it means the deployment's license
-  state needs attention, never that execution was restricted).
+Do not join opaque ids to page content or inject URL collection into Ghostlight. If a compliance
+workflow requires content capture, it is a separate system with a separate consent and retention
+decision.

@@ -1,5 +1,9 @@
 # Configuration key reference
 
+> Historical 0.8 generated fixture retained as implementation evidence. Ghostlight 1.0 has no
+> typed dotted-key registry or `ghostlight config` CLI. Its current flat authority schema is in
+> `docs/guides/governance-configuration.md`.
+
 Generated from the typed key registry in src/policy/mod.rs by `ghostlight config docs`.
 Do not edit by hand; change the registry and regenerate.
 

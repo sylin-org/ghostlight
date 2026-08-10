@@ -1,212 +1,96 @@
-# Releasing Ghostlight
+# Releasing Ghostlight 1.0
 
-This is the single, complete map of what a Ghostlight release touches, which parts are automated,
-and what still needs a human. The driver is `scripts/release.ps1 <version>`, run from `main` after
-the `dev -> main` release PR is merged. Everything downstream of the git tag reacts to the assets
-the Release workflow builds.
+This is the release plan for the current 1.0 implementation. The completed 0.8 publication record
+lives in [`business/PUBLICATION-PACKET-0.8.md`](business/PUBLICATION-PACKET-0.8.md); its scripts,
+package launchers, adapter compatibility, and registry state are historical evidence, not a 1.0
+pipeline.
 
-The release spans three first-party repositories plus external registries:
+No release action is authorized merely by this document. Tags, pushes, packages, store
+submissions, registry mutations, website publication, and external messages require explicit owner
+approval.
 
-- `sylin-org/ghostlight` (this repo): binaries, the npm launcher, package managers, the independently
-  versioned browser adapter, and the MCP registry entry.
-- `sylin-org/website` (sylin.org): the install guide, canonical public-status fallback, and demo
-  pages. It is designed to auto-track this repo, so a release touches it only lightly (see
-  "Website" below).
-- `sylin-org/homebrew-tap`: the Homebrew formula and its release-asset integrity pins.
+## Release unit
 
-## The channel map
+One Ghostlight version comprises:
 
-| Channel | What ships | Automation | Driven by |
-| --- | --- | --- | --- |
-| GitHub Release | cross-platform binaries, raw per-target bins, SBOM, the store-ready adapter zip, checksums, Sigstore attestations | Automated | tag push -> `.github/workflows/release.yml`; `release.ps1` tags, watches, verifies |
-| npm (`ghostlight`) | the launcher that fetches the three matching release executables, integrity-pinned | Automated | `release.ps1` (`sums` writes `checksums.json`, `npm` publishes) |
-| Homebrew tap (`sylin-org/homebrew-tap`) | the formula (version + macOS/Linux sums) | Automated | `release.ps1` (`tap`) |
-| Scoop | in-repo manifest `packaging/scoop/ghostlight.json` | Automated | `release.ps1` (`sums`) |
-| Winget | in-repo manifest `packaging/winget/Sylin.Ghostlight.yaml` | Semi: sums filled automatically; a PR to `microsoft/winget-pkgs` is manual, per version | `release.ps1` fills; you open the PR |
-| Chrome Web Store | the extension zip (`key` stripped, dev files excluded) | Submission automated when store creds are set; public-state reconciliation is explicit after review | `release.ps1` (`extension`) -> `publish-extension.ps1`; after approval -> `reconcile-chrome-store.ps1` |
-| Edge Add-ons | the same zip | Automated when store creds are set, else printed steps | `release.ps1` (`extension`) -> `publish-extension.ps1` |
-| Trust center (`docs/trust/`) | "reviewed against vX.Y.Z" footer restamp | Automated | `release.ps1` (`trust`) |
-| Website (sylin.org) | refresh install-guide and public-status fallbacks + trigger a rebuild | Automated | `release.ps1` (`website`) -> `publish-website.ps1` |
-| MCP Registry | `server.json` entry | Automated when `MCP_DNS_PRIVATE_KEY` is set, else skipped | `release.ps1` (`registry`) -> `mcp-publisher` (DNS auth) |
+- `ghostlight`, including the orchestrator, tray, native shell, and bundled workbench;
+- sibling `ghostlight-mcp-connector`;
+- sibling `ghostlight-browser-connector`;
+- a platform-native package that installs and removes the browser native-messaging registration;
+- the independently delivered but contract-matched `Ghostlight in Browser` adapter; and
+- checksums, signatures/attestations, SBOM, license notices, source archive, and release notes.
 
-The privileged GitHub publisher deliberately has no repository checkout. Every `gh` mutation in
-that job must therefore pass an explicit repository identity; do not make it depend on `.git` state.
+The desktop and service are one executable. The connectors are deliberately stable independent
+process shores, but a package must ship a tested sibling set. The extension keeps its established
+name, store identity, artwork, settings, and permissions.
 
-`release.ps1` runs these as ordered, resumable steps: `preflight, tag, watch, verify, sums, tap,
-npm, registry, trust, extension, website, report`. Each step detects whether it is already done and
-skips, so the script is safe to re-run; resume at any step with `-From <step>`.
+## Candidate gates
 
-## Prerequisites
+### Source
 
-Every release needs these (the script checks them in `preflight`):
-
-- `git`, `gh` (authenticated: `gh auth status`), and `npm` (logged in: `npm whoami`) on PATH.
-- You are on `main`, the tree is clean, and `main == origin/main`.
-- All service version files agree on the release version (bump them on `dev` before the release PR;
-  the same list `release.ps1` checks: the root and runtime-crate `Cargo.toml` files, `packaging/npm/package.json`,
-  `server.json`, the scoop/winget/homebrew manifests, and `docs/public-status.json`).
-- The source, public-store, and pending Chrome adapter versions each have a `compatibility.json`
-  row that covers the service release.
-- `scripts/check-public-surfaces.ps1` confirms the README uses the canonical platform, extension,
-  and decision-path claims.
-- `CHANGELOG.md` has a `## [<version>]` section.
-
-Optional, for the automated extension and website steps (see "One-time credential setup" below).
-Without them, the extension step prints exact manual submission instructions instead of failing.
-
-## Cutting a release
-
-1. Land everything on `dev`, bump every service version surface, write the CHANGELOG section, and
-   merge the `dev -> main` PR (CI green). For a service-only patch within the current contract
-   block, leave `extension/manifest.json` and `compatibility.json` alone. The
-   versioned changelog section becomes the `What's changed` body in the GitHub Release. `main` now
-   carries the release commit.
-2. From `main`:
-
-   ```
-   pwsh -File scripts/release.ps1 <version> -DryRun   # preview the whole plan, mutate nothing
-   pwsh -File scripts/release.ps1 <version>           # live: confirms the two irreversible steps
-   ```
-
-   The live run: tags `v<version>` (this fires the Release workflow), watches it green, verifies
-   every expected asset, fills and commits the package-manager checksums, updates the homebrew tap,
-   publishes npm and smoke-tests the launcher, restamps the trust footers, publishes the extension
-   (auto or printed steps), and refreshes the website fallbacks.
-
-3. Do the one remaining manual channel (the `report` step reminds you):
-   - **Winget**: run `scripts/prepare-winget.ps1`. It writes the three-file
-     `microsoft/winget-pkgs` submission tree under the system temp directory and runs
-     `winget validate`. Copy that version directory into a `winget-pkgs` fork and open the PR
-     (needs the one-time CLA). Use `-OutputRoot <fork-root>` to write into a chosen checkout.
-
-Useful flags: `-From <step>` resumes after a partial run; `-SkipTap`, `-SkipNpm`, `-SkipExtension`,
-`-SkipWebsite`, `-SkipRegistry` skip a channel; `-Yes` skips the interactive confirmations.
-
-### MCP registry (`MCP_DNS_PRIVATE_KEY`)
-
-The `registry` step publishes `server.json` to registry.modelcontextprotocol.io via `mcp-publisher`
-(downloaded on demand, pinned). Authentication is DNS ownership of the namespace's domain
-(`org.sylin/...` -> `sylin.org`): a one-time apex TXT proof record, `v=MCPv1; k=ed25519; p=<pubkey>`,
-must stay in place. Generate the ed25519 key with `openssl` (see `local/RELEASE-CREDENTIALS.md` / the
-audit log), store the private hex as `MCP_DNS_PRIVATE_KEY`, and the step logs in and publishes. The
-registry is immutable per version, so re-running the same version is a no-op. If the key is unset,
-the step skips (not fatal).
-
-## Extension stores
-
-The store zip is one artifact, produced by `scripts/package-extension.ps1`: it stages `extension/`,
-excludes dev-only files, and STRIPS the manifest `key` field (the Chrome Web Store rejects a `key`
-on upload). Its version comes from `extension/manifest.json`, not the service release. The Release
-workflow builds this exact zip as the `ghostlight-extension-v<adapter-version>.zip` release asset
-(via `pwsh` on the runner), so the shipped asset is directly submittable.
-
-`scripts/publish-extension.ps1` publishes it. For each store, if the credentials are present in the
-environment it uploads and publishes via the store's API; otherwise it prints the manual dashboard
-steps (pointing at the built zip). It never fails a release for a missing credential. The
-`release.ps1` `extension` step runs it ONLY when `extension/` actually changed since the previous
-tag (a Rust-only release needs no store resubmission).
-
-### Adapter compatibility
-
-`compatibility.json` is the canonical support map. Historical Chrome adapter rows retain explicit
-inclusive service ranges. From 0.8 onward, each row gives a major/minor service block. Read
-`"serviceVersionBlock": "0.8"` as: "this adapter covers every 0.8.x service patch." The current
-source adapter version comes from `extension/manifest.json`; the public and pending store versions
-come from `docs/public-status.json`.
-
-On a compatible patch, bump only the component that changed. Do not edit the compatibility row or
-bump the other component. When the adapter/service contract changes, advance the minor, bump both
-components into that block, add the new compatibility row, and get the adapter public before the
-service release. Release preflight and public-surface CI reject uncovered combinations. Runtime
-version reporting remains deferred until a real adapter update adds truthful version evidence to
-the browser handshake (ADR-0093).
-
-Run it standalone any time:
-
-```
-pwsh -File scripts/publish-extension.ps1 -DryRun          # show the plan + which creds are set
-pwsh -File scripts/publish-extension.ps1                  # publish where creds exist, else steps
-pwsh -File scripts/publish-extension.ps1 -Target trustedTesters -SkipEdge
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+npm test --prefix extension
+cargo build --workspace --target-dir .target-ghostlight-1.0
+node tests/process-journey.mjs
+node --check crates/orchestrator/ui/app.js
+node --check tests/workbench-preview-server.mjs
 ```
 
-## Website (sylin.org)
+The completed feature diff must remain empty under `crates/mcp-connector`,
+`crates/browser-connector`, `crates/bridge`, and `extension` for ADR-0102.
 
-The website (`sylin-org/website`, an Eleventy site deployed by an external host that builds on push
-to its `main`) is built to auto-track this repo. `src/_data/ghostlightInstall.js` fetches
-`llms-install.md` from ghostlight's `main` at build time and republishes it at
-`sylin.org/ghostlight/install.md`, with a committed fallback snapshot as a safety net.
-`docs/public-status.json` is the canonical source for the release fallback, platform proof, and
-extension-store state shown on the project page. The website consumes a committed synchronized
-fallback so a failed network fetch cannot invent or retain a different product story.
+### Desktop and package
 
-`scripts/publish-website.ps1` clones the website repo, copies this repo's install guide and public
-status over their committed fallbacks, and pushes if either changed. That triggers the host rebuild
-and a live install-guide fetch. If both fallbacks are unchanged, nothing is pushed;
-`-ForceRebuild` pushes an empty commit to rebuild anyway. After deployment, run
-`scripts/check-public-surfaces.ps1 -Online` to verify GitHub, npm, the rendered project page, the
-install guide, the decision aid, and the privacy route.
+For Windows, macOS, and Linux:
 
-## One-time credential setup (for the automated store/website steps)
+1. Build a native release bundle with the original Ghostlight icon and bundled local UI.
+2. Verify code signature or platform attestation and published checksum.
+3. Install as an ordinary user on a clean machine.
+4. Verify tray launch, open/hide/quit, headless fallback, global search, plural snapshots, Checkup,
+   notifications, harness Check/Install/Uninstall, JSONC/TOML preservation, and no remote WebView
+   access.
+5. Verify native messaging points at the packaged sibling browser connector.
+6. Upgrade from the latest supported public release without clobbering unrelated state.
+7. Uninstall and prove only Ghostlight-owned files, registrations, desktop entries, and selected
+   harness entries are removed. Record the audit-retention choice.
 
-Store these as environment variables in your release shell or a secret manager. NEVER commit them.
+### Browser and MCP journeys
 
-### Chrome Web Store (`CWS_*`)
+Run the accepted matrix in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md) with a visible ordinary browser
+profile. Include two supported Chromium families where available and at least three supported MCP
+harnesses. Exercise concurrent sessions, screenshots, semantic and coordinate input, file upload,
+dialogs, scripts, governed denial, blocked close, group reuse across windows, child-tab adoption,
+orchestrator restart, browser restart, extension reload, and unknown-effect non-replay.
 
-Uses the Chrome Web Store API v1.1 (OAuth2). One-time setup:
+### First success
 
-1. In a Google Cloud project, enable the "Chrome Web Store API".
-2. Create an OAuth client of type "Desktop app"; note the client id and secret.
-3. Obtain a refresh token once via the OAuth consent flow for scope
-   `https://www.googleapis.com/auth/chromewebstore`. `scripts/get-cws-refresh-token.ps1` runs the
-   loopback flow end to end (opens the consent page, catches the redirect, prints the refresh
-   token); authorize as the account that owns the listing.
-4. The item id is the extension's Web Store id (in the dashboard URL).
+Complete [`testing/greenfield-first-success.md`](testing/greenfield-first-success.md) using the signed
+candidate and matching store adapter. Source-build success does not substitute for this gate.
 
-Set: `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`, `CWS_ITEM_ID`. The full click-by-click
-walkthrough (kept machine-local) is `local/RELEASE-CREDENTIALS.md`.
+## Publication sequence
 
-If an older package is still awaiting review, Chrome rejects a new upload. Do not cancel that
-review automatically: cancellation loses its queue position and is an owner release decision. If
-the owner approves replacement, use Chrome's v2
-[`publishers.items.cancelSubmission`](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/publishers.items/cancelSubmission)
-method, upload the current package, and submit it again. Record both the cancelled version and the
-accepted replacement in `docs/STATUS.md` and `docs/legal/STORE_LISTING.md`.
+After all gates are evidenced and the owner approves:
 
-Chrome review completes after the release process has returned. When Google reports approval,
-reconcile the public version from Chrome's machine-readable update endpoint instead of editing
-version prose by hand:
+1. Freeze versions and compatibility; build each release artifact from the approved commit.
+2. Verify artifacts independently, including exact embedded UI/icon bytes and native-host paths.
+3. Publish the matching browser adapter through deferred store publication if the store supports
+   it.
+4. Publish signed platform packages and immutable source/binary release assets.
+5. Publish package-manager and MCP-registry metadata only after their referenced assets exist.
+6. Reconcile store feeds and public compatibility from independently downloaded artifacts.
+7. Update `docs/public-status.json`, README release language, trust review stamps, website copy,
+   distribution records, and changelog from observed public state.
+8. Run one public install-to-first-task smoke per platform.
 
-```
-pwsh -File scripts/reconcile-chrome-store.ps1 -PendingVersion <adapter-version>
-pwsh -File scripts/reconcile-chrome-store.ps1 -ExpectedVersion <adapter-version> -DryRun
-pwsh -File scripts/reconcile-chrome-store.ps1 -ExpectedVersion <adapter-version>
-```
+Never claim a platform, store, package manager, or compatibility combination before the public
+artifact is independently observable.
 
-Run the `-PendingVersion` form immediately after the store accepts a submission. The command always
-reads the public version, validates compatibility, updates `docs/public-status.json` and the README,
-clears a pending version once it is live, and runs the local public-surface check. Review and commit
-those changes, then run `scripts/publish-website.ps1` after the usual outward-publication
-confirmation. The online public-surface check independently compares the tracked version with
-Chrome's public update feed.
+## Rollback
 
-### Edge Add-ons (`EDGE_*`)
-
-Uses the Edge Add-ons API v1.1 (Partner Center). In Partner Center -> the extension ->
-Publish API, create an API credential: note the product id (the extension's Partner Center product
-id), the client id, and the API key.
-
-Set: `EDGE_PRODUCT_ID`, `EDGE_CLIENT_ID`, `EDGE_API_KEY`.
-
-### Website
-
-No extra credentials: `publish-website.ps1` uses your existing `gh` auth to clone and push the
-website repo.
-
-## After a release
-
-- **CHANGELOG date / next cycle**: start the next `## [Unreleased]` section on `dev` as work lands.
-- **Chrome/Edge review latency**: store publishing is queued for review (hours to a few days); the
-  automated step returns as soon as the store accepts the submission, not when it goes live. After
-  Chrome approval, run `reconcile-chrome-store.ps1` as described above.
-- **Verify**: the GitHub release page, `npm view ghostlight version`, `brew info sylin-org/tap/ghostlight`,
-  and `sylin.org/ghostlight/install.md`.
+Published versions and tags remain immutable. If a release is defective, mark the affected channel
+clearly and publish a higher corrected version. Browser stores generally require forward version
+movement, so an adapter rollback is a higher-version code correction. Preserve evidence and do not
+rewrite a failed candidate as a pass.

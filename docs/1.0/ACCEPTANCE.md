@@ -137,6 +137,37 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 10. No extension storage key contains URL, title, page text, target name, locator, form value,
    script, file path, file bytes, screenshot, dialog text, or policy.
 
+## Desktop workbench gates
+
+1. Normal `ghostlight` startup starts the orchestrator before the Tauri shell; `--headless` starts
+   no desktop runtime. Closing the window hides it, and only explicit quit stops the process.
+2. Home presents plural session, operation, and browser counts plus current work and system health
+   at a glance. Activity, history, checkup, configuration, and installations remain separate
+   focused destinations behind one compact rail.
+3. Global search covers destinations, sessions, operations, browser instances, terminal history,
+   diagnostics, configuration, and supported harnesses. Search input is bounded at the adapter.
+4. Reloading the disposable WebView reconstructs its state from `WorkbenchFacade`; it owns no
+   product state, runtime token, authority, or durable history.
+5. Blocked and attention-required operations request at most one content-free native notification
+   per invocation. Notification failure cannot change governance, audit, or completion truth.
+6. Workbench runtime controls use the existing governance facade and publish the resulting state
+   through the existing browser port. The desktop adapter cannot dispatch a browser primitive.
+7. Installations explicitly check, install, and uninstall Codex, Claude Code, Claude Desktop,
+   Cursor, Visual Studio Code, Windsurf, Zed, OpenCode, and Crush registrations. Mutations are
+   serialized, idempotent, backed up, preserve unrelated entries, and touch only an entry whose
+   command identifies Ghostlight's connector.
+8. JSONC and Codex TOML comments, trailing commas, formatting, and unrelated values survive
+   install and uninstall. Malformed configuration, unreadable files, and foreign `ghostlight`
+   entries are left untouched with an actionable result.
+9. The WebView loads bundled assets under a restrictive CSP and has no shell, arbitrary file,
+   remote-navigation, or network capability. File mutation terminates in the explicit harness
+   application service, outside the UI event loop.
+10. The desktop executable, tray, bundle, and workbench use the original Ghostlight icon bytes,
+    established palette and spring curve, and a static readable reduced-motion treatment.
+11. Recoverable Tauri setup or event-loop failure leaves the orchestrator service alive in
+    headless mode. The MCP connector, browser connector, shared bridge, and extension have empty
+    diffs for the complete workbench feature.
+
 ## Integration and release-readiness gates
 
 1. `cargo fmt --check` passes.
@@ -153,3 +184,5 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 9. The complete documented catalog, extension manifest, popup/options states, and all browser-job
    journeys are audited against `INTENT.md`; there are no undocumented placeholders or accepted
    journeys lacking implementation.
+10. The bundled workbench HTML, CSS, and JavaScript render against a representative plural-state
+    fixture, every destination is keyboard reachable, and frontend scripts pass syntax checks.

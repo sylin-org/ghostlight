@@ -1,69 +1,66 @@
 # Ghostlight in Browser: Permission Justifications
 
-Last updated: 2026-07-16
+Last updated: 2026-08-10 for the planned 1.0 manifest
 
-Each fenced block below is paste-ready for the matching Chrome Web Store Privacy practices field.
-Every block is intentionally below the dashboard's 1,000-character limit. Keep the copy focused on
-what uses the permission, why it is needed, and how its scope is bounded.
+These blocks correspond exactly to `extension/manifest.json`. Recheck store field names and length
+limits at submission time.
 
-## tabs
+## alarms
 
 ```text
-The tabs permission lets Ghostlight identify and manage tabs in its labeled automation groups. It uses chrome.tabs to list and inspect those tabs, report their URLs and titles, create or navigate tabs, reload them, and track navigation or closure. Without it, Ghostlight cannot maintain accurate automation-tab state or report tab context to the connected local host.
+The alarms permission schedules local reconnection and lifecycle checks for the Manifest V3 service worker. It does not schedule browsing, contact a server, or collect activity. Ghostlight uses it only to keep the local native-messaging relationship durable while browser work is active.
 ```
 
 ## debugger
 
 ```text
-The debugger permission attaches Chrome DevTools Protocol 1.3 only to actively automated tabs. Ghostlight uses it to dispatch mouse, keyboard, scroll, and drag input; capture screenshots and user-requested recording frames; observe console and network events; and run explicitly requested javascript_tool code in the attached page. Chrome shows its standard debugging indicator while attached, and Ghostlight detaches when automation ends.
-```
-
-## Remote code use / page-context JavaScript
-
-```text
-All extension logic ships in the submitted package. When javascript_tool is explicitly requested, JavaScript text arrives from the separately installed local Ghostlight application and runs through the documented Debugger API Runtime.evaluate method only in the attached web page. It is not retained or executed in the extension origin. The Debugger API is a Manifest V3 permitted API for remote-source execution when used for its documented purpose.
-```
-
-Policy reference: [Chrome Web Store Manifest V3 requirements](https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements).
-
-## scripting
-
-```text
-The scripting permission lets Ghostlight inject or restore packaged content scripts in the active automation tab. Those scripts read page structure, find elements, interact with forms and shadow DOM, and render visible cursor and action feedback. They contain no access-control logic and are used only to support the current browser-automation session.
+The debugger permission attaches Chrome DevTools Protocol only to Ghostlight-controlled tabs. It captures requested screenshots, dispatches pointer and keyboard input, scrolls, drags, changes zoom, handles page navigation state, and evaluates an explicitly requested bounded page script. Chrome displays its normal debugging indicator. Ghostlight detaches when the controlled relationship ends.
 ```
 
 ## nativeMessaging
 
 ```text
-The nativeMessaging permission connects the extension to the separately installed local Ghostlight application. Chrome native messaging is the on-device channel that carries browser instructions and results between them. Without this permission, the extension cannot receive an instruction or function at all.
-```
-
-## tabGroups
-
-```text
-The tabGroups permission creates and labels Ghostlight automation groups, keeps automated tabs visibly organized, and locates those groups again after a Manifest V3 service-worker restart. Groups are scoped to the client and browser window. It is used only for tabs Ghostlight manages.
-```
-
-## windows
-
-```text
-The windows permission lets Ghostlight find the most recently focused eligible normal browser window and create tabs in that user-placed window. It creates a new normal window only when no eligible one exists. It also validates a session's selected window so work does not silently move elsewhere.
+The nativeMessaging permission connects the extension to the separately installed local Ghostlight browser connector. This on-device channel carries typed browser instructions and results. Without it the extension cannot receive work. The channel does not send browser data to Sylin.
 ```
 
 ## storage
 
 ```text
-The storage permission keeps the local browser identity and user display settings in chrome.storage.local, and ephemeral automation tab IDs, group IDs, recent eligible-window focus order, and panic-stop state in chrome.storage.session. Ghostlight does not use chrome.storage.sync, so this state is not synced to the user's Google account or other devices.
+The storage permission retains the opaque local adapter installation identity and user-controlled presentation settings, including effects, captions, diagnostics, and preserve-tabs. Restart-local connection and notice state is also kept locally. Ghostlight does not use Chrome sync storage and does not store URLs, titles, page content, selectors, values, scripts, file paths, screenshots, or policy.
 ```
 
-## alarms
+## tabGroups
 
 ```text
-The alarms permission runs a periodic keepalive during browser automation so Chrome does not evict the Manifest V3 service worker mid-session, drop the native-messaging connection, or leave an attached tab without its controller. It performs no scheduled browsing or network activity.
+The tabGroups permission creates and reuses the visible blue group named for each Ghostlight client. It keeps controlled tabs together, finds the same-name group across normal windows, and respects where the user moved it. This avoids creating duplicate groups or inserting new work into an unrelated active window.
 ```
 
-## host_permissions: <all_urls>
+## tabs
 
 ```text
-The <all_urls> host permission is required because Ghostlight is a general-purpose browser automation tool and the sites a user asks it to operate are not known in advance. It is used to run packaged content scripts in the active automation tab. Domain and capability restrictions are enforced by the separate local Ghostlight application's policy; the extension contains no allowlist or policy logic.
+The tabs permission lets Ghostlight observe and manage only its controlled tabs: list their current facts, activate them, create a tab in the correct group, navigate, reload, adopt an unambiguous child, and close when both service authority and the user's local preserve-tabs setting permit it. It does not build browsing history.
+```
+
+## webNavigation
+
+```text
+The webNavigation permission observes document commits and loading lifecycle in controlled tabs. Ghostlight uses those facts to invalidate stale target and screenshot handles, reattach content-free visual feedback, and report the committed landing truthfully after navigation. It does not monitor unrelated tabs for analytics or history.
+```
+
+## windows
+
+```text
+The windows permission locates the user-placed window containing an existing same-name Ghostlight group, focuses an exact controlled tab when requested, and creates a dedicated normal window when no group exists. This prevents browser work from disrupting the user's unrelated active window.
+```
+
+## Host permissions: `http://*/*` and `https://*/*`
+
+```text
+HTTP and HTTPS host permissions are required because a user may ask Ghostlight to operate a site not known at publication time. Packaged content scripts read and interact only in Ghostlight-controlled tabs and render local action feedback. Host and capability authority is enforced by the native orchestrator; the extension contains no policy logic.
+```
+
+## Page-context JavaScript
+
+```text
+All extension logic ships in the reviewed package. When the MCP client explicitly requests browser_run_script, bounded script text arrives from the local Ghostlight application and is evaluated through the documented Debugger API only in the attached web page. It is not retained, installed, or executed in the extension origin.
 ```
