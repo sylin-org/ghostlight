@@ -599,6 +599,11 @@ pub struct AuditRecord {
     /// Ghostlight-authored sentence naming what happened. Page content never authors it.
     #[serde(default)]
     pub summary: String,
+    /// How long the invocation took, from decode to terminal outcome.
+    ///
+    /// For a navigation this is the time to a governed, settled landing.
+    #[serde(default)]
+    pub duration_ms: u64,
 }
 
 impl AuditRecord {
@@ -615,6 +620,7 @@ impl AuditRecord {
         status: &str,
         effect: &str,
         summary: &str,
+        duration_ms: u64,
     ) -> Self {
         Self {
             timestamp_ms: unix_ms(),
@@ -628,6 +634,7 @@ impl AuditRecord {
             status: status.into(),
             effect: effect.into(),
             summary: summary.into(),
+            duration_ms,
         }
     }
 }
@@ -858,6 +865,7 @@ mod tests {
             "succeeded",
             "applied",
             "Page text read.",
+            1200,
         );
         let value = serde_json::to_value(record).unwrap();
         let object = value.as_object().unwrap();

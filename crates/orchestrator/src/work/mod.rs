@@ -108,6 +108,7 @@ impl ApplicationExecutor {
         cancellation: &CancellationToken,
     ) -> InvocationResult {
         let invocation = format!("invocation_{}", Uuid::new_v4().simple());
+        let started = std::time::Instant::now();
         let gate = CompletionGate::default();
         let decoded = language::decode(tool, input);
         let (operation, capability) = match decoded {
@@ -141,10 +142,13 @@ impl ApplicationExecutor {
                 return self.finish(
                     &gate,
                     terminal,
-                    workspace,
-                    tool,
-                    Capability::Read,
-                    &snapshot,
+                    Completion {
+                        workspace,
+                        tool,
+                        capability: Capability::Read,
+                        snapshot: &snapshot,
+                        duration_ms: elapsed_ms(started),
+                    },
                 );
             }
         };
@@ -228,18 +232,32 @@ impl ApplicationExecutor {
         } else {
             self.workspace_failure(&context, WorkspaceError::UnknownWorkspace)
         };
-        self.finish(&gate, terminal, workspace, tool, capability, &snapshot)
+        self.finish(
+            &gate,
+            terminal,
+            Completion {
+                workspace,
+                tool,
+                capability,
+                snapshot: &snapshot,
+                duration_ms: elapsed_ms(started),
+            },
+        )
     }
 
     fn finish(
         &self,
         gate: &CompletionGate,
         terminal: Terminal,
-        workspace: &WorkspaceId,
-        tool: &str,
-        capability: Capability,
-        snapshot: &AuthoritySnapshot,
+        completion: Completion<'_>,
     ) -> InvocationResult {
+        let Completion {
+            workspace,
+            tool,
+            capability,
+            snapshot,
+            duration_ms,
+        } = completion;
         let event = match terminal.result.status {
             Status::Blocked => DomainEvent::WorkBlocked {
                 invocation: terminal.result.invocation.clone(),
@@ -277,6 +295,7 @@ impl ApplicationExecutor {
             &status,
             &effect,
             &terminal.result.summary,
+            duration_ms,
         );
         let _ = self.audit.record(&record);
         gate.complete(terminal.result)
@@ -2623,6 +2642,24 @@ fn denial_presentation(tool: &str, result: &InvocationResult) -> DenialPresentat
         };
     }
     DenialPresentation::Guardrail
+}
+
+/// What the single completion path needs to record one terminal outcome.
+///
+/// These travel together and only together, so they arrive as one value rather than as a
+/// growing parameter list on `finish`.
+struct Completion<'a> {
+    workspace: &'a WorkspaceId,
+    tool: &'a str,
+    capability: Capability,
+    snapshot: &'a AuthoritySnapshot,
+    /// Measured span from decode to terminal outcome. For a navigation this is time to settle.
+    duration_ms: u64,
+}
+
+/// Milliseconds elapsed since an invocation began, saturating rather than wrapping.
+fn elapsed_ms(started: std::time::Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 struct InvocationContext<'a> {

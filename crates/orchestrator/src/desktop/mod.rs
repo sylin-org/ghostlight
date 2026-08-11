@@ -367,6 +367,7 @@ mod tests {
             status: "succeeded".into(),
             effect: "none".into(),
             summary: "Page text read.".into(),
+            duration_ms: 1200,
         };
 
         for change in [

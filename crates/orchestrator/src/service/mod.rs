@@ -484,6 +484,7 @@ impl BrowserEventSink for ServiceBrowserEvents {
                     } else {
                         "Authority blocked the page the browser landed on."
                     },
+                    0,
                 );
                 let _ = self.audit.record(&record);
             }

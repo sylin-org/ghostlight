@@ -211,11 +211,19 @@ function entryFromRecord(record, existing) {
     status: record.status,
     effect: record.effect,
     summary: record.summary,
+    durationMs: record.duration_ms,
     settled: true
   };
 }
 
 const entryTime = entry => entry.endedAt ?? entry.startedAt ?? 0;
+
+/**
+ * How long the work took. The orchestrator measures this, so a record restored from the audit
+ * file reports a real span instead of the blank left by never having watched it start.
+ */
+const settledMs = entry =>
+  entry.durationMs || (entry.endedAt && entry.startedAt ? entry.endedAt - entry.startedAt : NaN);
 const isRunning = entry => !entry.settled && (entry.phase === "running" || entry.phase === "held" || entry.phase === "attention");
 const isBlocked = entry => entry.phase === "blocked" || entry.allowed === false;
 
@@ -277,7 +285,7 @@ function heroRightMarkup(entry) {
   const running = isRunning(entry);
   const elapsed = running
     ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
-    : duration(entry.endedAt && entry.startedAt ? entry.endedAt - entry.startedAt : NaN);
+    : duration(settledMs(entry));
   const outcome = running
     ? words(entry.phase)
     : isBlocked(entry)
@@ -315,7 +323,7 @@ function rowMarkup(entry) {
   const running = isRunning(entry);
   const time = running
     ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
-    : duration(entry.endedAt && entry.startedAt ? entry.endedAt - entry.startedAt : NaN);
+    : duration(settledMs(entry));
   return `<div class="med-mini">${glyphFor(entry)}</div>`
     + `<div class="row-tool">${escapeHtml(entry.tool)}</div>`
     + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
