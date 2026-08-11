@@ -10,7 +10,7 @@ preserved `docs/0.8/` material carry history; this file does not rewrite it.
 - `ghostlight-1.0` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`.
 - `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and now matches
   `ghostlight-1.0` exactly. Before that it sat at the 0.8 line (`3fb093eb`, 2026-08-07).
-- `origin/main` is 20 commits behind `origin/dev` and still carries the 0.8 line. Promoting it is
+- `origin/main` is 24 commits behind `origin/dev` and still carries the 0.8 line. Promoting it is
   a deliberate release decision, not routine sync.
 - 13 pull requests are open. All 13 are Dependabot dependency and action bumps; none are human
   contributions awaiting review. They target the 0.8 line and have not been reconciled against the
