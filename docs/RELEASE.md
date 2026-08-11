@@ -49,9 +49,9 @@ For Windows, macOS, and Linux:
 1. Build a native release bundle with the original Ghostlight icon and bundled local UI.
 2. Verify code signature or platform attestation and published checksum.
 3. Install as an ordinary user on a clean machine.
-4. Verify tray launch, open/hide/quit, headless fallback, global search, plural snapshots, Checkup,
-   notifications, harness Check/Install/Uninstall, JSONC/TOML preservation, and no remote WebView
-   access.
+4. Verify tray launch, open/hide/quit, headless fallback, global search, plural snapshots, Status,
+   notifications, MCP integrations connect/disconnect, JSONC/TOML preservation, and no remote
+   WebView access.
 5. Verify native messaging points at the packaged sibling browser connector.
 6. Upgrade from the latest supported public release without clobbering unrelated state.
 7. Uninstall and prove only Ghostlight-owned files, registrations, desktop entries, and selected

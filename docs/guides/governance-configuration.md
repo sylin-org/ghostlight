@@ -150,6 +150,6 @@ an external retention decision; it does not alter authority.
 ## Validate a policy
 
 Before release, policy validation is performed by the same strict decoder used to start work.
-Open **Checkup** to see whether configured local and managed sources are present and valid. Then
+Open **Status** to see whether configured local and managed sources are present and valid. Then
 exercise both an allowed journey and a deliberately blocked journey against a non-sensitive test
 site. The browser receipt, MCP result, audit reason, and workbench history must agree.

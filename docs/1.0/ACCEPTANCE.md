@@ -152,7 +152,7 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
    per invocation. Notification failure cannot change governance, audit, or completion truth.
 6. Workbench runtime controls use the existing governance facade and publish the resulting state
    through the existing browser port. The desktop adapter cannot dispatch a browser primitive.
-7. Installations explicitly check, install, and uninstall Codex, Claude Code, Claude Desktop,
+7. MCP integrations explicitly check, connect, and disconnect Codex, Claude Code, Claude Desktop,
    Cursor, Visual Studio Code, Windsurf, Zed, OpenCode, and Crush registrations. Mutations are
    serialized, idempotent, backed up, preserve unrelated entries, and touch only an entry whose
    command identifies Ghostlight's connector.

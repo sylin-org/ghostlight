@@ -78,8 +78,8 @@ to that `ghostlight-browser-connector`. Load `extension/` unpacked and reload it
 extension edit. Its pinned development identity and `org.sylin.ghostlight` host name must not
 change.
 
-Run `ghostlight --show`, open Checkup, and verify a compatible browser instance appears. Use a
-supported MCP harness registration from Installations, reconnect that harness, and execute the
+Run `ghostlight --show`, open Status, and verify a compatible browser instance appears. Use a
+supported MCP client registration from MCP integrations, reconnect that client, and execute the
 journeys in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md). Use the `sylin.org` demo forms for visible
 form, upload, dialog, navigation, policy-denial, and screenshot work.
 

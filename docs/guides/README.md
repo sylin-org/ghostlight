@@ -1,7 +1,7 @@
 # Ghostlight guides
 
-Task-oriented guides. Each one owns its topic; the persona walkthroughs point back to the
-mechanics guides instead of repeating them, so nothing here drifts out of sync with another page.
+Task-oriented guides. Each one owns its topic, and the walkthroughs point back at the mechanics
+guides rather than restating them, so a change lands in one place instead of three.
 
 | If you want to...                          | Read                                                       |
 | ------------------------------------------ | ---------------------------------------------------------- |

@@ -6,8 +6,7 @@ Email hello@sylin.org with "SECURITY" in the subject. Do not open a public issue
 suspected vulnerability.
 
 Ghostlight is a solo project, so the timelines below are **best-effort targets, not contractual
-guarantees** -- a report that arrives during a quiet maintenance period may take longer, and that
-is an honest description rather than a hidden asterisk:
+guarantees**. A report that arrives during a quiet maintenance period may take longer:
 
 - Acknowledgement: typically within a few days.
 - Assessment and severity triage: as soon as the issue is understood, usually within a week or two.
@@ -67,7 +66,7 @@ fund a bounty; reports are handled through the private channel above and credite
 release notes.
 
 Because the runtime holds no customer data on the vendor side, the vendor-side incident that
-matters is a compromise of what we ship (the build, the signing keys, or the update channel).
+matters is a compromise of what I ship: the build, the signing keys, or the update channel.
 For that case the aim is to publish a security advisory, with the affected versions and the
 remediation, promptly (typically within a few business days) of confirming a vendor-side
 compromise -- again a best-effort target for a solo maintainer, not a contractual SLA. Advisories

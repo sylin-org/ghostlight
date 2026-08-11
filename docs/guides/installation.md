@@ -1,11 +1,12 @@
 # Installing Ghostlight 1.0
 
-Ghostlight 1.0 installs one local product with three sibling executables, a tray workbench, and a
-matching Chromium extension. There is no hosted account and no Node.js launcher.
+Ghostlight installs as one local product: three sibling executables, a tray workbench, and a
+matching Chromium extension. No account, no launcher runtime, no admin rights.
 
-This guide describes the planned signed 1.0 package and the current source-development path. The
-public 0.8 package and Chrome adapter remain documented in
-[`../public-status.json`](../public-status.json) and must not be mixed with a 1.0 build.
+This guide covers the planned signed 1.0 package and the source-development path you can follow
+today. The published 0.8 package and its Chrome adapter are documented in
+[`../public-status.json`](../public-status.json); keep those and a 1.0 build apart, because they
+are not interchangeable.
 
 ## Release installation journey
 
@@ -13,7 +14,7 @@ public 0.8 package and Chrome adapter remain documented in
    `ghostlight`, `ghostlight-mcp-connector`, and `ghostlight-browser-connector` side by side and
    registers the browser connector as the `org.sylin.ghostlight` native host for the current user.
 2. Launch Ghostlight. It starts the orchestrator and remains available from the tray.
-3. Open **Installations**, choose the intended harness, run **Check**, and then choose **Install**.
+3. Open **MCP integrations**, find your client, and choose **Connect**.
 4. Install the matching `Ghostlight in Browser` 1.0 extension from its release listing.
 5. Restart or reconnect the MCP harness, then run the bounded first proof from the README.
 
@@ -23,7 +24,7 @@ tree.
 
 ## Workbench installation behavior
 
-Installations supports these explicit user-level configurations:
+MCP integrations supports these explicit user-level configurations:
 
 | Harness | Configuration family |
 | --- | --- |
@@ -84,7 +85,7 @@ node tests/process-journey.mjs
 
 ## Verify
 
-Open **Checkup**. A useful report distinguishes:
+Open **Status**. A useful report distinguishes:
 
 - orchestrator runtime state;
 - connected browser adapter state;
@@ -92,7 +93,7 @@ Open **Checkup**. A useful report distinguishes:
 - audit/history readiness; and
 - native notification availability through an explicit test.
 
-Open **Installations** and Check the active harness. Then ask it:
+Open **MCP integrations** and confirm your client reads Connected. Then ask it:
 
 > Open https://example.com in a new Ghostlight tab, summarize the page, and tell me which tab you
 > used. Do not click, type, submit, or change the page after it opens.
@@ -105,11 +106,11 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 - **Workbench window is gone:** open Ghostlight from the tray. Closing the window only hides it.
 - **Workbench cannot initialize:** the orchestrator continues headlessly; reconnect after fixing
   the native WebView or tray environment.
-- **Tools are absent:** Check the harness registration, then reconnect that MCP server in its own
-  client.
+- **Tools are absent:** re-check the registration in MCP integrations, then reconnect that MCP
+  server in its own client.
 - **Browser is disconnected:** keep Ghostlight running, enable the matching extension, and inspect
-  Checkup again.
-- **A harness needs attention:** inspect its configuration. Ghostlight deliberately did not
+  Status again.
+- **A client needs attention:** inspect its configuration. Ghostlight deliberately did not
   overwrite malformed or foreign data.
 - **A tab close was blocked:** the tab is retained as visible evidence. Change both applicable
   orchestrator policy and the extension's local preserve-tabs setting only if the user wants
@@ -122,7 +123,7 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 A 1.0 updater replaces the three version-matched sibling executables and desktop assets as one
 package. It does not silently edit harness registrations or extension settings.
 
-Before removing Ghostlight, use **Installations** to Uninstall each owned harness registration.
+Before removing Ghostlight, use **MCP integrations** to Disconnect each registration it owns.
 Then remove the matching browser extension and use the operating system's package uninstall. A
 release package must remove only its own native-messaging registration and files; clean-machine
 verification of that behavior is required before publication.

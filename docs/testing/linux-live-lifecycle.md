@@ -46,10 +46,10 @@ data, raw MCP payloads, or browser profiles.
 2. Verify and install the signed package as the standard user.
 3. Launch Ghostlight and open it from the tray.
 4. Install the matching extension visibly.
-5. In Installations, Check and Install one graphical harness registration.
+5. In MCP integrations, connect one graphical MCP client.
 
 Pass: all three executables are version-matched; native messaging points to the packaged browser
-connector; Checkup names healthy service/browser/authority state; unrelated harness config remains
+connector; Status names healthy service/browser/authority state; unrelated client config remains
 unchanged.
 
 ### L2. Visible browser journey
@@ -92,12 +92,12 @@ tray identity, and the journeys affected by the release.
 
 Inject one realistic failure at a time: stopped orchestrator, missing native registration,
 disabled extension, malformed owned harness config, expired managed authority, and unavailable
-native notifications. Confirm Checkup or Installations names the condition and no failure expands
+native notifications. Confirm Status or MCP integrations names the condition and no failure expands
 authority or changes terminal truth.
 
 ### L9. Uninstall
 
-Use Installations to remove owned harness entries. Remove the extension and package through their
+Use MCP integrations to remove owned client entries. Remove the extension and package through their
 normal UI. Confirm only Ghostlight-owned native registration, binaries, desktop entries, and
 configured harness entries are removed. Document the retention decision for audit/history.
 

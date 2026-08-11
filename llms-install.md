@@ -10,7 +10,7 @@ substitutes for a 1.0 source build.
 ## 1. Complete the user-visible installation
 
 1. Ask the user to install and launch the matching Ghostlight 1.0 platform package.
-2. Ask them to open Ghostlight from the tray and choose **Installations**.
+2. Ask them to open Ghostlight from the tray and choose **MCP integrations**.
 3. Use **Check** for the current harness, then let the user choose **Install**. Ghostlight changes
    only its owned entry, creates a backup, and preserves unrelated JSONC or TOML content.
 4. Ask the user to install the matching `Ghostlight in Browser` 1.0 store adapter.
@@ -34,8 +34,8 @@ Use only the catalog returned by the client. For the first proof:
 4. Do not click, type, submit, upload, or run a script during this proof.
 
 Success proves the MCP client, stdio connector, orchestrator, browser connector, native messaging,
-extension, and visible browser path. On failure, ask the user to open **Checkup** and
-**Installations** in the workbench. Follow the named condition instead of inventing a second stack.
+extension, and visible browser path. On failure, ask the user to open **Status** and
+**MCP integrations** in the workbench. Follow the named condition instead of inventing a second stack.
 
 ## 3. Choose the narrowest tool
 
@@ -60,7 +60,7 @@ The complete schemas, defaults, capabilities, and terminal result envelope are i
 
 - **No tools:** reconnect the existing MCP server through the client. A cached catalog does not
   prove its connector is alive.
-- **Browser unavailable:** ask the user to open Checkup, enable the matching extension, and keep
+- **Browser unavailable:** ask the user to open Status, enable the matching extension, and keep
   Ghostlight running in the tray.
 - **Ambiguous tab:** call `browser_list_tabs`, then pass the exact `tab`.
 - **Stale target or view:** inspect, find, or capture again. Handles are tied to current document

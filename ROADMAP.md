@@ -25,7 +25,8 @@ The canonical gates are [`docs/1.0/ACCEPTANCE.md`](docs/1.0/ACCEPTANCE.md); muta
 - Add browser families only behind the existing browser port and explicit capability negotiation.
   A new browser must not spread product policy into its adapter.
 - Expand the workbench only when a new destination materially improves at-a-glance understanding,
-  recovery, or explicit user control. The compact rail is a product constraint.
+  recovery, or explicit user control. Monitor, MCP integrations, and Status are a deliberate
+  ceiling, not a starting point.
 - Evolve model-facing jobs in the orchestrator without routine edits to the MCP connector, browser
   connector, shared bridge, or extension.
 - Keep policy local, monotonic, inspectable, and payload-free. Ghostlight will not add telemetry,

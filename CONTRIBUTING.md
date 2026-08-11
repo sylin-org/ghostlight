@@ -1,8 +1,8 @@
 # Contributing, questions, and requests
 
-Input is genuinely wanted -- questions, requests, and contributions have three lanes.
+I want the input. Questions, requests, and contributions have three lanes.
 
-## Where to reach us
+## Where to reach me
 
 | Lane                                    | Use it for                                                                                                                                                                 |
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -10,16 +10,15 @@ Input is genuinely wanted -- questions, requests, and contributions have three l
 | [GitHub Discussions](https://github.com/sylin-org/ghostlight/discussions) | Questions, ideas, feature requests, policy patterns, show-and-tell.                                                                                                        |
 | hello@sylin.org                         | Anything that cannot be public: security reports (see [SECURITY.md](SECURITY.md)), licensing and founding-program matters, or a compliance team that cannot post publicly. |
 
-Public lanes are preferred when possible: an answered question becomes documentation,
-and a discussed request becomes a visible roadmap decision. Founding and enterprise
-licensees get the response times in [PRICING.md](PRICING.md); everyone gets best-effort,
-honestly.
+Use a public lane where you can: an answered question becomes documentation, and a
+discussed request becomes a visible roadmap decision. Founding and enterprise licensees
+get the response times in [PRICING.md](PRICING.md). Everyone else gets my best effort.
 
 ## How requests are evaluated
 
-Every request gets a disposition, with reasoning: accepted (and roughly when), deferred
-(and what would change that), or declined (and why). The filter is the project's
-recorded vision, not taste of the day:
+Every request gets a disposition and the reasoning behind it: accepted (and roughly
+when), deferred (and what would change that), or declined (and why). The filter is the
+project's recorded vision, not taste of the day:
 
 - **User delight first; governance that never punishes the ungoverned.** All-open stays
   first-class. Features that make the free path worse to upsell the paid one are
@@ -51,8 +50,8 @@ Contribution terms follow the open-core boundary (ADR-0027 Decision 5):
 - **Governance module** (`crates/orchestrator/src/governance/`): contributions require a Contributor
   License Agreement (the module is distributed under a commercial license, and only the
   copyright holder can sell that). The CLA will be in place before the first outside
-  governance PR is merged; if you want to contribute there, open a Discussion first and
-  we will sort the paperwork.
+  governance PR is merged. If you want to contribute there, open a Discussion first and
+  I will sort out the paperwork with you.
 
 Practical expectations for PRs: `cargo fmt --all -- --check`,
 `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and

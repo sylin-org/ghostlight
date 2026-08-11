@@ -1,8 +1,8 @@
 # Ghostlight 1.0 for a compliance team
 
-Ghostlight applies local, monotonic authority to visible browser work. The 1.0 runtime does not
-fetch policy, operate a hosted control plane, or transmit page content. An organization provisions
-its managed authority file through its existing endpoint-management channel.
+Ghostlight applies local, monotonic authority to browser work the user can see happening. Policy
+lives in a file on the endpoint, provisioned through the endpoint-management channel you already
+run. Every hop stays inside your network, and page content stays in the browser.
 
 ## 1. Define the boundary
 
@@ -29,7 +29,7 @@ monotonic and remains independent of the extension's local preserve-tabs interlo
 ## 2. Validate before provisioning
 
 Run the exact candidate with `GHOSTLIGHT_MANAGED_AUTHORITY_FILE` pointing to a temporary copy.
-Open **Checkup** and confirm managed authority is configured and valid. Exercise:
+Open **Status** and confirm managed authority is configured and valid. Exercise:
 
 - one permitted read;
 - one permitted action if the policy includes action;
@@ -49,7 +49,7 @@ OS conventions without teaching the model or extension about them.
 
 Every managed file requires `managed: true` and a future Unix-millisecond expiry. Rotation is an
 external deployment transaction: validate the complete replacement, update atomically through the
-endpoint manager, and verify Checkup again. Ghostlight snapshots authority once per started
+endpoint manager, and verify Status again. Ghostlight snapshots authority once per started
 invocation, so an in-flight unit of work does not change policy halfway through.
 
 The 1.0 runtime deliberately does not implement remote retrieval, signing, last-known-good fetch,

@@ -1,8 +1,9 @@
 # Project governance
 
-Ghostlight is a maintainer-led open-core project. The current maintainer is `lbotinelly`, who makes
-release, roadmap, security, licensing, and final merge decisions. There is no foundation, steering
-committee, or claim of community consensus.
+Ghostlight is a maintainer-led open-core project. I maintain it (`lbotinelly`), and the release,
+roadmap, security, licensing, and final merge calls are mine. There is no foundation, no steering
+committee, and no community consensus behind those decisions -- one person makes them, and you
+should know that before you build on it.
 
 ## How decisions are made
 
@@ -24,10 +25,10 @@ commercial license. Read [CONTRIBUTING.md](CONTRIBUTING.md) before starting subs
 
 ## Accountability and continuity
 
-Architectural reasoning lives in [docs/adr/](docs/adr/). Current state lives in
-[docs/STATUS.md](docs/STATUS.md). Release history lives in [CHANGELOG.md](CHANGELOG.md), and
-[MAINTENANCE.md](MAINTENANCE.md) names the solo-maintainer and publisher risks plainly. Security
-reports follow [SECURITY.md](SECURITY.md).
+Every architectural decision and its reasoning live in [docs/adr/](docs/adr/). Where the project
+stands right now lives in [docs/STATUS.md](docs/STATUS.md), release history in
+[CHANGELOG.md](CHANGELOG.md), and [MAINTENANCE.md](MAINTENANCE.md) names what depends on me alone.
+Security reports follow [SECURITY.md](SECURITY.md).
 
-This structure may evolve if sustained outside participation creates a real need for shared
-authority. It will not be described as shared governance before that authority exists.
+This structure can change if sustained outside participation creates a real need for shared
+authority. Until that authority exists, I will not call it shared governance.

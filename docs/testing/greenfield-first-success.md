@@ -40,7 +40,7 @@ Ghostlight group.
 
 1. Record the evidence header.
 2. Let the participant install the package and open Ghostlight from the tray.
-3. Let them find **Installations**, Check and Install their harness registration, and reconnect the
+3. Let them find **MCP integrations**, Connect their MCP client, and reconnect the
    harness.
 4. Let them install the matching store extension.
 5. Ask for the exact first task.

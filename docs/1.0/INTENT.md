@@ -55,32 +55,41 @@ Internal browser commands are combined when a person experiences them as one job
 - Visual feedback follows the active document without leaking page content or becoming required
   for successful work.
 - The tray opens a calm workbench that answers what is running, what happened, whether Ghostlight
-  is healthy, which controls apply, and where it is installed without turning setup into a CLI
+  is healthy, which controls apply, and where it is connected, without turning setup into a CLI
   archaeology exercise.
-- One compact rail and one global search reach every workbench destination and user-visible record.
-  Home carries only the few current facts and actions that matter at a glance.
+- Three destinations and one global search reach every workbench surface and user-visible record.
+  The monitor carries the current action in full and the recent ones beneath it, so a glance is
+  enough.
 
 ## Desktop workbench experience
 
 The workbench is the orchestrator's local-human presentation surface. It is part of the same
 installed product and process, while remaining a separate presentation and application context.
 
-- Home summarizes plural MCP sessions, operations, and browser instances, blocked history, current
-  work, and system health.
-- Activity names every current client session, operation, and compatible browser instance.
-- History is bounded, local, newest first, and payload-free.
-- Checkup explains service, browser, and authority state and can test native notifications.
-- Configuration applies explicit pause, resume, end-session, and start-session intents through the
-  same governance owner used by browser and MCP flows.
-- Installations checks, installs, or uninstalls Ghostlight's owned registration for explicitly
-  supported development harnesses. It never overwrites a foreign entry or exposes a generic file
-  editor or command runner.
+- Monitor is where the work becomes visible. The current action stands in full with its elapsed
+  time running. When the next one starts, that action settles and drops into a newest-first queue
+  beneath it, so a person can watch a session unfold and scroll back through what already happened.
+  While nothing is running, the last completed action stays on screen rather than an empty panel.
+  Plural MCP sessions and browser instances appear beside it.
+- The record beneath the current action is bounded, local, newest first, and payload-free.
+- MCP integrations checks, connects, and disconnects Ghostlight's owned registration for explicitly
+  supported MCP clients. It never overwrites a foreign entry or exposes a generic file editor or
+  command runner.
+- Status explains service, browser, and authority state, tests native notifications, and applies
+  the explicit end-session intent through the same governance owner used by browser and MCP flows.
+- Pause, resume, and start-session apply from the persistent header beside the connection state
+  and match the tray, so taking the wheel has one affordance rather than several.
 - Important blocked and attention-required facts may produce quiet, deduplicated OS notifications.
   Routine successful work does not.
+- The orchestrator publishes sequenced changes, so the surface shows work as it happens instead of
+  sampling for it. A surface that misses a change resynchronizes from a snapshot rather than
+  guessing.
 - Closing the window returns it to the tray without ending browser service. A failed or reloaded
   WebView is disposable and reconstructs from the orchestrator.
-- The original Ghostlight artwork, palette, motion character, and reduced-motion behavior remain
-  product identity across extension and desktop surfaces.
+- The original Ghostlight artwork, motion character, and reduced-motion behavior remain product
+  identity across extension and desktop surfaces. The desktop carries Ghostlight's published teal
+  accent and night-garden ground, while the in-page renderer keeps the sky signal users are already
+  trained on. The amendment to ADR-0102 records why the two differ.
 
 ## Extension experience
 

@@ -6,109 +6,121 @@
 
 <p align="center"><strong>Give your agent a visible place in the browser you already use.</strong></p>
 
-Ghostlight lets an MCP client perform browser work in a dedicated group inside the user's existing,
-authenticated Chromium browser. The work stays visible. The user can pause it, take over, require
-attention, or end the session without teaching the model about transports, Chrome internals, or
-policy mechanics.
+Your agent needs a page you are signed in to. The usual answer is a second, empty browser that
+knows none of your sessions, driven by a model that has to learn Chrome internals to get anything
+done.
 
-This branch is the planned Ghostlight 1.0 source candidate. The currently published 0.8 release
-and store adapter remain recorded in [`docs/public-status.json`](docs/public-status.json); they
-must not be mixed with a 1.0 source build.
+Ghostlight gives it a tab group inside the Chromium you already have open. The work happens in
+front of you: watch it, pause it, take the wheel, or end the session. The model says what it
+wants, and Ghostlight does the browser part.
 
-## What 1.0 includes
+> A light left burning, so the halls stay safe.
 
-- A 24-tool, typo-closed browser language for tabs, navigation, page understanding, screenshots,
-  semantic actions, form input, file upload, script execution, waits, short sequences, and browser
-  dialogs.
-- One orchestrator-owned workspace aggregate, authority snapshot, executor, completion path, and
-  payload-free audit record for every invocation.
-- A durable MCP connector and browser connector that can remain running while the orchestrator
-  restarts. Interrupted effects become truthful unknown outcomes and are never replayed.
-- The established `Ghostlight in Browser` extension identity, artwork, tab grouping, take-the-wheel
-  controls, preserve-tabs interlock, and visible action language.
-- A Tauri 2 desktop workbench built into the orchestrator: at-a-glance home, plural activity,
-  history, checkup, configuration, supported-harness installation, global search, tray lifecycle,
-  and high-signal native notifications.
-- Local operation only. There is no account, telemetry, activation service, update ping, hosted
-  control plane, or hidden browser.
+## Where it stands today
+
+This branch is the 1.0 source candidate. It builds and runs, and the browser tool schemas are
+stable -- I am holding those steady. What is still settling is the shape around them: packaging,
+upgrade guarantees, and the installed-product path to 1.0.
+
+The published release is 0.8, recorded in [`docs/public-status.json`](docs/public-status.json).
+Keep a 0.8 package and a 1.0 source build apart; they are not interchangeable.
+
+## What you get
+
+- **24 browser tools** covering tabs, navigation, reading a page, screenshots, semantic clicks and
+  hovers, form input, file upload, scripts, waits, short sequences, and dialogs. One call carries
+  the intent; Ghostlight performs the browser steps behind it.
+- **One truthful answer per call**: what happened, what changed in the browser, what is ready, and
+  whether running it again is safe. Ghostlight writes that answer, never the page, and adds at most
+  two recovery steps of its own. When an effect is uncertain it says so rather than guessing, and
+  never proposes a replay that could submit a form twice.
+- **A desktop workbench** in the tray that shows work as it happens.
+- **Your machine, and only your machine.** Ghostlight runs as you, reaches your browser over local
+  IPC, and keeps a payload-free local record. No account, no telemetry, no activation service, no
+  update ping, no hosted control plane, and no second hidden browser. The only network traffic is
+  the browsing you asked for.
 
 ## The workbench
 
-Opening the Ghostlight tray icon shows the human-facing control surface:
+Open the tray icon and you get three places:
 
-- **Home** answers what is running, what needs attention, and whether the system is healthy.
-- **Activity** lists current MCP sessions, operations, and connected browser instances.
-- **History** shows a bounded, newest-first, payload-free record of terminal outcomes.
-- **Checkup** explains service, browser, authority, and notification health.
-- **Configuration** provides explicit pause, resume, end-session, and start-session controls.
-- **Installations** checks, installs, or removes Ghostlight's owned registration for Codex,
-  Claude Code, Claude Desktop, Cursor, Visual Studio Code, Windsurf, Zed, OpenCode, and Crush.
+- **Monitor** is where you land. The action Ghostlight is taking right now sits at the top in
+  full, elapsed time running. When the next one starts, that action freezes and drops into the
+  queue below, newest first, so you can watch a session unfold and scroll back through what
+  already happened. While nothing is running, the last thing that finished stays on screen.
+- **MCP integrations** connects Ghostlight to the coding clients you have installed: Claude Code,
+  Claude Desktop, Codex, Crush, Cursor, OpenCode, Visual Studio Code, Windsurf, and Zed. It merges
+  into their configuration with a backup, keeps your comments intact, and leaves any entry it does
+  not own untouched.
+- **Status** answers whether Ghostlight is healthy, shows which authority sources apply, and ends
+  the runtime session when you want that.
 
-Global search spans destinations and user-visible records. Closing the window returns it to the
-tray; it does not stop the orchestrator. If the desktop shell cannot start, Ghostlight continues
-headlessly so connected clients and browsers can recover.
+Pause and resume sit in the header beside the lamp, the same control the tray offers. Closing the
+window returns it to the tray and leaves the service running. If the desktop shell cannot start,
+Ghostlight carries on headless so your clients and browser stay connected.
 
-## Build the 1.0 source candidate
+## Build it
 
-Prerequisites are Rust 1.82 or newer and, for browser validation, Chromium 116 or newer.
+Rust 1.82 or newer, plus Chromium 116 or newer for browser validation.
 
 ```sh
 cargo build --workspace
 ```
 
-The build produces three sibling executables:
+Three executables land side by side:
 
-- `ghostlight` -- orchestrator plus the desktop workbench;
-- `ghostlight-mcp-connector` -- generic local stdio MCP lifecycle; and
-- `ghostlight-browser-connector` -- generic Chromium native-messaging relay.
-
-Start the workbench visibly with:
+- `ghostlight` -- the orchestrator and the desktop workbench;
+- `ghostlight-mcp-connector` -- the MCP stdio edge;
+- `ghostlight-browser-connector` -- the Chromium native-messaging relay.
 
 ```sh
 target/debug/ghostlight --show
 ```
 
-Use `target/debug/ghostlight --headless` for the service-only path. A release package will install
-the sibling binaries and native-messaging registration together. Source-tree browser registration
-and the complete validation loop are documented in [`docs/DEV-LOOP.md`](docs/DEV-LOOP.md).
+Use `--headless` for the service on its own. Then open **MCP integrations**, connect the client
+you want, and restart or reconnect it. [`docs/DEV-LOOP.md`](docs/DEV-LOOP.md) covers browser
+registration and the full validation loop.
 
-After the three binaries are side by side, open **Installations** in the workbench and explicitly
-install the desired MCP harness registration. Ghostlight performs an ownership-checked merge,
-creates a backup, preserves JSONC and TOML comments, and never overwrites a foreign `ghostlight`
-entry. Restart or reconnect that harness after the change.
+For an end-user install, use the signed package and its matching store adapter once the gates in
+[`docs/STATUS.md`](docs/STATUS.md) are met.
 
-For end-user 1.0 installation, use only the signed package and matching 1.0 store adapter once the
-release gates in [`docs/STATUS.md`](docs/STATUS.md) are complete.
+## Your first proof
 
-## First browser proof
-
-Ask the connected MCP client:
+Ask your connected client:
 
 > Open https://example.com in a new Ghostlight tab, summarize the page, and tell me which tab you
 > used. Do not click, type, submit, or change the page after it opens.
 
-Ghostlight creates or reuses one blue group named for the client. When no matching group exists,
-it creates a dedicated normal browser window instead of inserting work into the user's active
-window. Later sessions reuse the same-name group wherever the user placed it.
+You should see a blue tab group named for your client, the exact tab it used, and a summary that
+arrived without a single click. When no Ghostlight group exists yet, it opens a dedicated window
+rather than dropping work into whatever you were in the middle of. Next time it reuses that group,
+wherever you moved it.
 
-## Safety and truthful outcomes
+## What it will and will not do
 
-No policy means ordinary remote HTTP(S) browser work is allowed. Loopback, link-local metadata,
-non-HTTP schemes, credential entry, and unsafe stale handles remain protected. Optional local and
-managed policy layers can only remove capabilities, hosts, or tab-close authority. Per-request
-restrictions intersect those layers; they never grant access.
+With no policy configured, ordinary remote HTTP(S) browsing is allowed. Loopback addresses,
+link-local metadata endpoints, non-HTTP schemes, credential fields, and stale handles stay
+protected regardless. Optional local and managed policy layers can only take capability away, and
+per-request restrictions narrow things further. Nothing hands access back.
 
-Every call returns one terminal envelope: status, observed effect, readiness, replay safety,
-canonical facts, and at most two Ghostlight-authored recovery steps. Page content never authors
-the summary. Unknown or partial effects never recommend replay.
+Credential-class fields come to you. Ghostlight does not type secrets.
 
-Model-driven tab close has two independent gates: orchestrator authority and the extension's
-default-on preserve-tabs setting. This keeps the visible evidence of browser work available to the
-user while leaving manual browser closure untouched.
+Closing a tab needs two independent yes votes: the orchestrator's authority, and the browser's own
+preserve-tabs setting, which ships on. That keeps the evidence of what happened in front of you.
+Closing a tab yourself always works.
 
-See [`docs/1.0/LANGUAGE.md`](docs/1.0/LANGUAGE.md) for the complete catalog and
-[`docs/guides/governance-configuration.md`](docs/guides/governance-configuration.md) for the exact
-policy schema.
+The audit record holds identifiers and decisions. URLs, page text, field values, screenshots,
+selectors, and dialog text never enter it.
+
+The full catalog is in [`docs/1.0/LANGUAGE.md`](docs/1.0/LANGUAGE.md), and the exact policy schema
+is in [`docs/guides/governance-configuration.md`](docs/guides/governance-configuration.md).
+
+## When to choose something else
+
+- You need headless, stealth, bulk, or remote-cloud automation. Reach for Playwright.
+- Nobody will be responsible for the browser session while it runs.
+- Claude's first-party browser integration already covers the whole job.
+- You need Firefox.
 
 ## Architecture
 
@@ -119,14 +131,14 @@ Desktop WebView <--> typed WorkbenchFacade <---------/       \
 Browser <--> extension <--native messaging--> browser connector <--typed local IPC-->
 ```
 
-The orchestrator is the only product mutation point and owns all model-facing language. The MCP
-connector owns protocol negotiation; the browser connector owns relay lifecycle; the extension
-owns physical Chromium, page-local DOM, and content-free rendering mechanisms. Product evolution
-normally changes only the orchestrator.
+The orchestrator makes every product decision and owns everything the model reads. The two
+connectors carry protocol and relay lifecycle, nothing more. The extension owns Chromium, the
+page, and the drawing, and never policy. Adding a feature normally means changing the orchestrator
+alone; that is a contract the shores are held to, not a happy accident.
 
-The desktop is a presentation adapter inside the modular monolith, not another service. It has no
-GUI protocol, arbitrary command runner, generic filesystem access, or browser primitive access.
-[`ADR-0102`](docs/adr/0102-integrated-desktop-workbench.md) records the decision.
+The desktop is a presentation adapter inside the same process, not a second service. It has no GUI
+protocol, command runner, filesystem access, or browser primitives.
+[`ADR-0102`](docs/adr/0102-integrated-desktop-workbench.md) records why.
 
 ## Canonical 1.0 documents
 
@@ -136,28 +148,29 @@ GUI protocol, arbitrary command runner, generic filesystem access, or browser pr
 | Complete model-facing language | [`docs/1.0/LANGUAGE.md`](docs/1.0/LANGUAGE.md) |
 | Contexts, ports, and invariants | [`docs/1.0/ARCHITECTURE.md`](docs/1.0/ARCHITECTURE.md) |
 | Acceptance and release gates | [`docs/1.0/ACCEPTANCE.md`](docs/1.0/ACCEPTANCE.md) |
-| Mutable candidate status | [`docs/STATUS.md`](docs/STATUS.md) |
-| Historical decisions | [`docs/adr/`](docs/adr/) |
+| Where the candidate stands | [`docs/STATUS.md`](docs/STATUS.md) |
+| Every decision, and why | [`docs/adr/`](docs/adr/) |
 
-Historical 0.8 release, trust, business, research, and distribution records remain part of the
-project's evidence. They are not silently rewritten as 1.0 claims.
+The 0.8 release, trust, business, research, and distribution records stay where they are. They are
+this project's evidence, and they do not get quietly restated as 1.0 claims.
 
 ## License and continuity
 
-The engine outside `crates/orchestrator/src/governance/` is Apache-2.0 OR MIT. The governance
-module is source-available under the Ghostlight Commercial License and is free for individuals,
-teams of up to five, evaluation, development, all-open operation, and qualifying noncommercial
-use. [`LICENSING.md`](LICENSING.md) maps the exact boundary.
+Everything outside `crates/orchestrator/src/governance/` is Apache-2.0 OR MIT. The governance
+module is source-available under the Ghostlight Commercial License, free for individuals, teams of
+five or fewer, evaluation, development, all-open operation, and qualifying noncommercial use.
+[`LICENSING.md`](LICENSING.md) draws the exact line.
 
-License state never changes runtime behavior. Ghostlight does not phone home, and an installed
-copy does not depend on a Ghostlight-operated service. The
-[`Continuity Promise`](docs/trust/continuity.md) and [`PRICING.md`](PRICING.md) carry the durable
-terms.
+License state never reaches runtime. An installed copy keeps working on its own terms, with no
+check-in and no expiry. The [Continuity Promise](docs/trust/continuity.md) and
+[`PRICING.md`](PRICING.md) carry the durable version of that.
 
 ## Questions and contributions
 
-Use [GitHub Issues](https://github.com/sylin-org/ghostlight/issues) for reproducible defects and
-[GitHub Discussions](https://github.com/sylin-org/ghostlight/discussions) for questions and ideas.
-Use hello@sylin.org for security, licensing, or information that cannot be public.
+[GitHub Issues](https://github.com/sylin-org/ghostlight/issues) for reproducible defects,
+[GitHub Discussions](https://github.com/sylin-org/ghostlight/discussions) for questions and ideas,
+and hello@sylin.org for security, licensing, or anything that should not be public.
 
-[`CONTRIBUTING.md`](CONTRIBUTING.md) explains the current boundaries and validation gates.
+I build Ghostlight in partnership with AI coding agents.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) explains the current boundaries and the gates every change
+passes.

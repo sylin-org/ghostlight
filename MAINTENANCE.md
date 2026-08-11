@@ -1,9 +1,9 @@
 # Maintenance and continuity
 
 Ghostlight is a solo project by design, and it is built to keep working with little or no active
-maintenance. This document is the honest picture of who keeps the lights on, what happens if that
-person steps back, and how someone else could pick it up. It exists so that "bus factor 1" is a
-known, planned-for condition rather than a hidden risk.
+maintenance. This is the picture of who keeps the lights on, what happens if I step back, and how
+someone else could pick it up. It exists so that "bus factor 1" is a known, planned-for condition
+rather than something you discover later.
 
 ## Who maintains it
 
