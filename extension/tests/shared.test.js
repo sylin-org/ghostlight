@@ -53,6 +53,14 @@ test("presentation preserves the established Ghostlight palette and motion", () 
   assert.match(renderer, /aria-live", "polite"/);
   assert.match(renderer, /aria-atomic", "true"/);
   assert.match(renderer, /\.denial-ribbon\{animation:none!important\}/);
+  // The guardrail must rise, not squash: scaling a flex row vertically deforms its badge.
+  assert.doesNotMatch(renderer, /ghostlight-notif-grow\{0%\{opacity:0;transform:scaleY\(0\)\}/);
+  // One ring per click, dashed for a secondary button (tool-visual-signatures.md).
+  assert.match(renderer, /\.ripple\.secondary\{border-style:dashed\}/);
+  assert.match(renderer, /const clicks = Math\.min\(3, Math\.max\(1, Number\(shape && shape\.clicks\) \|\| 1\)\)/);
+  assert.match(renderer, /index \* CLICK_STAGGER_MS/);
+  // The read scan must reach zero, or an interrupted sweep leaves a lit bar.
+  assert.doesNotMatch(renderer, /100%\{opacity:\.85;transform:translateY\(100vh\)\}/);
   assert.match(renderer, /setTimeout\(\(\) => denialLayer\.replaceChildren\(\), DENIAL_MS\)/);
   assert.match(chrome, /#0a0e17/);
   assert.match(chrome, /rgba\(56,189,248,\.10\)/);

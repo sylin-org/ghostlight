@@ -11,6 +11,7 @@
   const GROUND = "#0c0f14";
   const SPRING = "cubic-bezier(.22,1,.36,1)";
   const DENIAL_MS = 5000;
+  const CLICK_STAGGER_MS = 150;
   const visualIdentity = Object.freeze({
     sky: SKY,
     ink: INK,
@@ -75,6 +76,7 @@
       .caption{position:fixed;left:50%;bottom:22px;z-index:4;opacity:0;transform:translate(-50%,8px);padding:6px 13px;border:1px solid rgba(${SKY_RGB},.4);border-radius:999px;color:${INK};background:rgba(10,16,26,.82);font:12px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;transition:opacity .2s ease,transform .2s ${SPRING}}
       .caption.on{opacity:1;transform:translate(-50%,0)}
       .target-glow{position:fixed;border-radius:8px;box-shadow:0 0 0 2px rgba(${SKY_RGB},.9),0 0 20px rgba(${SKY_RGB},.55);animation:ghostlight-targetglow 720ms ease-out forwards}
+      .ripple.secondary{border-style:dashed}
       .ripple{position:fixed;width:34px;height:34px;border:2px solid rgba(${SKY_RGB},.9);border-radius:50%;box-shadow:0 0 12px rgba(${SKY_RGB},.55),inset 0 0 8px rgba(${SKY_RGB},.35);transform:translate(-50%,-50%) scale(.3);animation:ghostlight-ripple 620ms ease-out forwards}
       .trail-dot{position:fixed;width:14px;height:14px;border-radius:50%;transform:translate(-50%,-50%);background:radial-gradient(circle,rgba(${SKY_RGB},.9) 0%,rgba(${SKY_RGB},0) 70%);animation:ghostlight-trail 520ms ease-out forwards}
       .field-shimmer{position:fixed;border:1.5px solid rgba(${SKY_RGB},.85);border-radius:6px;box-shadow:0 0 10px rgba(${SKY_RGB},.5),inset 0 0 8px rgba(${SKY_RGB},.25);animation:ghostlight-shimmer 900ms ease-in-out forwards}
@@ -251,9 +253,19 @@
     placeRectangle(effect, paddedRectangle(rectangle, 4));
   }
 
-  function clickRipple(rectangle) {
+  // One ring per click on the language's stagger unit, dashed for a secondary button.
+  // Without a shape this stays exactly one primary ring, so an orchestrator that does not
+  // describe the click renders what it always did.
+  function clickRipple(rectangle, shape) {
     const point = center(rectangle);
-    addEffect("ripple", { left: `${point.x}px`, top: `${point.y}px` }, 700);
+    const clicks = Math.min(3, Math.max(1, Number(shape && shape.clicks) || 1));
+    const secondary = Boolean(shape) && shape.button === "secondary";
+    for (let index = 0; index < clicks; index += 1) {
+      setTimeout(() => {
+        const effect = addEffect("ripple", { left: `${point.x}px`, top: `${point.y}px` }, 700);
+        if (secondary) effect.classList.add("secondary");
+      }, index * CLICK_STAGGER_MS);
+    }
   }
 
   function dragTrail(rectangle) {
@@ -459,7 +471,7 @@
       if (["click", "hover"].includes(activity)) moveCursor(rectangle);
       if (activity === "click") {
         targetGlow(rectangle);
-        clickRipple(rectangle);
+        clickRipple(rectangle, signal.click);
       }
       if (activity === "drag") dragTrail(rectangle);
       if (["fill", "upload"].includes(activity)) fieldEffect(rectangle, "field-splash");

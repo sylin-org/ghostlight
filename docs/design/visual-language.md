@@ -64,13 +64,19 @@ domain modules.
 
 Named here so nobody reads an intention as a shipped capability.
 
-- **Click ripples do not encode the click.** The renderer draws one ring wherever a click lands.
-  A double click draws one ring, and a secondary-button click looks identical to a primary one.
-  The count and button exist on the browser command wire (`click_count`, button), but
-  `PresentationSignal` does not carry them, so `clickRipple()` in
-  `extension/lib/presentation.js` genuinely cannot know. Giving a double click two staggered
-  rings and a secondary click a dashed one needs a field on that signal, populated by the
-  orchestrator: a small versioned bridge addition, not a renderer change.
+- **Click ripples can encode the click, but nothing describes it yet.** `clickRipple()` in
+  `extension/lib/presentation.js` now reads an optional `signal.click` shape and draws one ring
+  per click on the 150ms stagger unit, dashed when the button is secondary. Without that shape it
+  draws exactly one primary ring, which is what every click renders today.
+
+  What is missing is the description. `PresentationSignal` has no click field, so the orchestrator
+  never sends one. Completing it means adding a bounded content-free shape
+  (`clicks: u8`, `button`) to `PresentationSignal` in `crates/bridge/src/browser.rs`, carrying it
+  on `DomainEvent::TargetIndicated`, populating it at the three emit sites in
+  `crates/orchestrator/src/work/mod.rs`, and mapping it through
+  `crates/orchestrator/src/presentation/mod.rs`. Serde defaults keep an older adapter working.
+  Until then the ledger rows for `computer.right_click` and `computer.double_click` describe a
+  capability the renderer has and the service does not yet exercise.
 
 ## The desktop workbench shares this language
 
