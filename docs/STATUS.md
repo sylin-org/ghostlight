@@ -1,9 +1,20 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-10.
+Last updated: 2026-08-11.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
+
+## Where the branches stand
+
+- `ghostlight-1.0` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`.
+- `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and now matches
+  `ghostlight-1.0` exactly. Before that it sat at the 0.8 line (`3fb093eb`, 2026-08-07).
+- `origin/main` is 13 commits behind `origin/dev` and still carries the 0.8 line. Promoting it is
+  a deliberate release decision, not routine sync.
+- 13 pull requests are open. All 13 are Dependabot dependency and action bumps; none are human
+  contributions awaiting review. They target the 0.8 line and have not been reconciled against the
+  1.0 rebuild.
 
 ## Implemented
 
@@ -18,29 +29,69 @@ preserved `docs/0.8/` material carry history; this file does not rewrite it.
 - Model-driven tab close is admitted by service authority and then checked by the extension's
   default-on preserve-tabs interlock. A refusal stays visible and returns a blocked no-effect
   result.
-- The `ghostlight` executable now hosts a Tauri 2 workbench inside the modular monolith. It has a
-  tray lifecycle, at-a-glance home, plural sessions/operations/browser instances, payload-free
-  history, checkup, runtime configuration, supported-harness installations, bounded global search,
-  and content-free native notifications.
-- Supported harness registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
-  Code, Windsurf, Zed, OpenCode, and Crush. Check is read-only. Install/uninstall are explicit,
-  serialized, ownership-checked, backed up, and preserve unrelated JSONC/TOML comments and
-  configuration.
+- The `ghostlight` executable hosts a Tauri 2 workbench inside the modular monolith, with a tray
+  lifecycle, bounded global search, and content-free native notifications. It presents three
+  destinations:
+  - **Monitor**, the landing surface. The current action stands in full with its elapsed time,
+    then settles and drops into a newest-first queue as the next one rises. Connected sessions and
+    browser instances sit alongside it, and the last completed action stays on screen while
+    nothing is running.
+  - **MCP integrations**, which checks, connects, and disconnects Ghostlight's owned registration.
+  - **Status**, which carries diagnostics, authority sources, and the end-session intent.
+
+  Pause and resume live in the persistent header beside the connection state and match the tray.
+- The orchestrator publishes a closed sequenced change vocabulary (`OperationStarted`,
+  `OperationChanged`, `OperationSettled`, `RuntimeChanged`) through a best-effort
+  `WorkbenchEventSink`. Snapshots carry the sequence they reflect; a surface that receives a gap
+  resynchronizes from a fresh snapshot rather than trusting its cache. The WebView may listen and
+  is not granted permission to emit. A projection with no sink attached publishes nothing, so
+  headless runs and domain tests stay free of presentation.
+- `OperationSummary` carries the governed capability, so live work is classified as plainly as
+  completed history.
+- The workbench follows the published sylin.org palette: Ghostlight's teal accent carried as
+  `--a`/`--al`/`--argb`, the night-garden ground, and the five-step ink ramp. The in-page renderer
+  deliberately keeps its trained sky signal. The two surfaces still share the spring curve and the
+  ADR-0083 medallion vocabulary.
+- Supported MCP client registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
+  Code, Windsurf, Zed, OpenCode, and Crush. Re-check is read-only. Connect and disconnect are
+  explicit, serialized, ownership-checked, backed up, and preserve unrelated JSONC/TOML comments
+  and configuration.
 - `ghostlight --headless` retains the service-only execution path. Recoverable desktop startup and
   event-loop failures leave that service running.
 
 ## Verified in this workspace
 
+Re-run on 2026-08-11 against the current tree:
+
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 64 Rust tests across orchestrator, bridge, and MCP edge.
+- `cargo test --workspace`: 74 Rust tests -- 62 in the orchestrator, 9 in the shared bridge, and 3
+  in the MCP connector.
 - `npm test --prefix extension`: 39 extension tests.
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
   restart without replaying an interrupted effect, then complete open/read/close.
-- The workbench renders against a plural-state visual fixture, uses the byte-identical original
-  Ghostlight artwork, and exposes keyboard-reachable rail destinations and controls.
-- The complete desktop-workbench change has an empty diff under `crates/mcp-connector`,
-  `crates/browser-connector`, `crates/bridge`, and `extension`.
+- `cargo build --workspace --target-dir .target-ghostlight-1.0`.
+- `node --check` on the bundled workbench script and the preview server.
+- The workbench renders against the repository preview server, which now drives the real sequenced
+  event path, and uses the byte-identical original Ghostlight artwork.
+- Five guard tests keep the surface and the orchestrator in step: every publishable change has a
+  handler, every capability class has a visual treatment, every runtime intent stays reachable
+  (guarded by an exhaustive match), the published palette is present with the accent defined once,
+  and the workbench capability grants listen without emit.
+- The complete desktop-workbench change, from its starting revision through the live-monitor
+  rebuild, has an empty diff under `crates/mcp-connector`, `crates/browser-connector`,
+  `crates/bridge`, and `extension`.
+
+## Owed
+
+- `docs/trust/` (14 files) has not had the editorial pass applied to the rest of the reader-facing
+  documentation. Every claim there was red-teamed against the tree, so warming it requires a
+  claim-by-claim diff proving nothing moved.
+- The 13 open Dependabot pull requests target the 0.8 line and need reconciling against the 1.0
+  rebuild before they can land.
+- `origin/main` still carries 0.8. Deciding when the 1.0 line is promoted is a release decision.
+- ADR-0084's complete browser-window attention routing remains deferred; only the narrow Chromium
+  slice is implemented.
 
 ## Release gates still requiring an owner or release environment
 
@@ -61,4 +112,6 @@ preserved `docs/0.8/` material carry history; this file does not rewrite it.
 - Model-facing language: [`1.0/LANGUAGE.md`](1.0/LANGUAGE.md)
 - Architecture: [`1.0/ARCHITECTURE.md`](1.0/ARCHITECTURE.md)
 - Acceptance: [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md)
-- Desktop decision: [`adr/0102-integrated-desktop-workbench.md`](adr/0102-integrated-desktop-workbench.md)
+- Desktop decision: [`adr/0102-integrated-desktop-workbench.md`](adr/0102-integrated-desktop-workbench.md),
+  including its 2026-08-11 amendment for the live monitor, the published palette, and the
+  three-destination workbench.
