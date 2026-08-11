@@ -11,14 +11,14 @@ Distances below are measured against the local remote-tracking refs, which are o
 last fetch.
 
 - `ghostlight-1.0` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`.
-- `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and sits at `7ff27598`.
-  `ghostlight-1.0` is 3 commits ahead of it: per-action observation, the language-owned outcome
-  voice, and demand-start. Those three are local and unpushed; pushing is the owner's call.
-  Before the fast-forward `origin/dev` sat at the 0.8 line (`3fb093eb`, 2026-08-07).
-- `origin/main` still carries the 0.8 line at `95468758`. It is 26 commits behind `origin/dev` and
-  29 behind `ghostlight-1.0`. Promoting it is a deliberate release decision, not routine sync.
-  (An earlier pass recorded 24; `git rev-list --count origin/main..origin/dev` says 26, with and
-  without merges, and the tree wins.)
+- `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and again on 2026-08-11 to
+  `89bcbe6b`, which carries per-action observation, the language-owned outcome voice, demand-start,
+  and this documentation pass. `ghostlight-1.0` and `origin/dev` match exactly. Before the first
+  fast-forward `origin/dev` sat at the 0.8 line (`3fb093eb`, 2026-08-07).
+- `origin/main` still carries the 0.8 line at `95468758`, now 32 commits behind `origin/dev`.
+  Promoting it is a deliberate release decision, not routine sync. (An earlier pass recorded the
+  distance as 24 when `git rev-list --count origin/main..origin/dev` said 26. Re-measure rather
+  than carry the number forward.)
 - 13 pull requests are open. All 13 are Dependabot dependency and action bumps; none are human
   contributions awaiting review. They target the 0.8 line and have not been reconciled against the
   1.0 rebuild.
