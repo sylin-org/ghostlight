@@ -48,6 +48,9 @@ Open the tray icon and you get three places:
   full, elapsed time running. When the next one starts, that action freezes and drops into the
   queue below, newest first, so you can watch a session unfold and scroll back through what
   already happened. While nothing is running, the last thing that finished stays on screen.
+  Every row says what happened in Ghostlight's own words, never the page's: "Opened example.com.",
+  "Read 1,240 words.", "Filled 3 fields and submitted the form.", "Stopped at step 3 of 5." The
+  site an action landed on is named; nothing from inside the page is.
 - **MCP integrations** connects Ghostlight to the coding clients you have installed: Claude Code,
   Claude Desktop, Codex, Crush, Cursor, OpenCode, Visual Studio Code, Windsurf, and Zed. It merges
   into their configuration with a backup, keeps your comments intact, and leaves any entry it does
@@ -74,12 +77,16 @@ Three executables land side by side:
 - `ghostlight-browser-connector` -- the Chromium native-messaging relay.
 
 ```sh
-target/debug/ghostlight --show
+target/debug/ghostlight
 ```
 
-Use `--headless` for the service on its own. Then open **MCP integrations**, connect the client
-you want, and restart or reconnect it. [`docs/DEV-LOOP.md`](docs/DEV-LOOP.md) covers browser
-registration and the full validation loop.
+That shows the workbench, or focuses the one already running. Then open **MCP integrations**,
+connect the client you want, and restart or reconnect it. [`docs/DEV-LOOP.md`](docs/DEV-LOOP.md)
+covers browser registration and the full validation loop.
+
+After that first setup there is no startup ritual: launching a connected MCP client or Chromium
+demand-starts the local service when it is not already running. `--background` starts it hidden
+with its tray, and `--headless` runs the service on its own with no desktop at all.
 
 For an end-user install, use the signed package and its matching store adapter once the gates in
 [`docs/STATUS.md`](docs/STATUS.md) are met.

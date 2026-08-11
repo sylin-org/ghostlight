@@ -61,6 +61,9 @@ node --check tests/workbench-preview-server.mjs
 ```
 
 `process-journey.mjs` uses repository-local runtime and audit files and the isolated target above.
+It resolves the executables from `.target-ghostlight-1.0/debug` unless `GHOSTLIGHT_BIN_DIR` points
+elsewhere, so a build into a different target directory needs that variable or the journey passes
+against stale binaries.
 It places the deployment lock to isolate the established reconnect proof, starts the real
 executables, interrupts an in-flight operation by stopping the service, proves both relays stay
 alive and renegotiate, then completes new open/read/close work. Bridge and orchestrator tests cover

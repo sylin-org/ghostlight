@@ -106,7 +106,12 @@ Those sources win when they disagree with this file.
   Use the strongest structural owner available. Browser host/readiness belongs at the exhaustive
   dispatch seam; counts and sizes belong on the required typed outcome that also names them.
 - A guard that parses nothing passes everything. Check every source-scraping test against a negative
-  control before trusting it.
+  control before trusting it. A guard can also go stale in the same commit that makes it stale:
+  when a rendered string starts carrying a fact, an assertion that the fact appears separately stops
+  protecting anything and starts pinning the duplication in place.
+- A delegated batch spec must say what a change makes redundant, not only what it adds. Pinning the
+  new sentence without naming the chrome and guards that quietly depended on the old wording leaves
+  the executor correct and the surface repetitive.
 - The public 0.8 distribution and trust records are historical truth, not a working 1.0 release
   pipeline. Rebuild package and release automation from the current boundaries before claiming a
   1.0 artifact exists.

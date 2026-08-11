@@ -86,7 +86,8 @@ The tree is a Rust workspace with four process/trust concerns:
 
 - `crates/orchestrator/` -- the product authority: language, workspace aggregate, governance,
   browser coordination, presentation decisions, execution, and completion.
-- `crates/bridge/` -- small typed service and browser relay contracts plus framing.
+- `crates/bridge/` -- small typed service and browser relay contracts plus framing, and the one
+  shared local service-lifecycle seam both connectors use to demand-start the sibling authority.
 - `crates/mcp-connector/` -- the stable MCP stdio edge. It owns protocol lifecycle and generic
   rendering, never product decisions.
 - `crates/browser-connector/` -- the stable native-messaging/browser relay executable.
@@ -102,7 +103,11 @@ live tree plus `docs/1.0/ARCHITECTURE.md` for current placement.
 
 ## Product and architecture invariants
 
-- The orchestrator is the sole product mutation point and owns model-facing language.
+- The orchestrator is the sole product mutation point and owns model-facing language. Both
+  directions of that language live in `crates/orchestrator/src/language/`: the catalog and decoding
+  for what Ghostlight accepts, and `outcome.rs` for what Ghostlight says happened. A completed
+  action's sentence, its safe next steps, and its content-free measurements come from one typed
+  `Outcome`. Do not write a completed-action sentence as a literal at a call site.
 - The MCP bridge owns protocol lifecycle, framing, correlation, cancellation forwarding, catalog
   retrieval, and generic invocation/result rendering only.
 - The browser bridge owns typed framing, correlation, connection lifecycle, and relay only.
@@ -136,6 +141,11 @@ Gate before every commit:
 The process and live browser journeys in `tests/` exercise the real executable boundaries. Run
 them when changes touch process startup, relay reconnect, installation state, or live browser
 behavior.
+
+`tests/process-journey.mjs` resolves executables from `.target-ghostlight-1.0/debug` unless
+`GHOSTLIGHT_BIN_DIR` says otherwise. If you built into any other target directory, pass it
+(`GHOSTLIGHT_BIN_DIR=.target-yours/debug node tests/process-journey.mjs`) or the journey will
+quietly pass against stale binaries and tell you nothing about your change.
 
 ## Code style
 

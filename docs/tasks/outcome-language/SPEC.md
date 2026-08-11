@@ -1,8 +1,13 @@
 # SPEC: one module owns what Ghostlight says happened
 
-Normative for this batch. Task files cite this document by section; they do not restate it. Where a
-task file and this SPEC disagree, this SPEC wins. Where this SPEC and the live tree disagree about a
-fact, STOP (see BOOTSTRAP failure protocol).
+**Status: executed, 2026-08-11, in `9609fcfc`. This document is now history.** The durable decision
+record is [ADR-0103](../../adr/0103-language-owned-outcome-voice.md); current state is in
+[STATUS.md](../../STATUS.md); the execution log and its findings are in [LEDGER.md](LEDGER.md).
+Nothing here is pending work. The sentence and projection tables below stayed the oracles and are
+preserved as authored, so a later reader can see what was pinned before the code existed.
+
+It was authored as a batch spec for unattended execution but was executed in one pass, so this
+directory has no BOOTSTRAP. Where this SPEC and the live tree disagree now, the tree wins.
 
 ## 1. Problem
 

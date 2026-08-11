@@ -1,17 +1,24 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-11 (fourth pass).
+Last updated: 2026-08-11 (fifth pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
 
 ## Where the branches stand
 
+Distances below are measured against the local remote-tracking refs, which are only as fresh as the
+last fetch.
+
 - `ghostlight-1.0` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`.
-- `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and now matches
-  `ghostlight-1.0` exactly. Before that it sat at the 0.8 line (`3fb093eb`, 2026-08-07).
-- `origin/main` is 24 commits behind `origin/dev` and still carries the 0.8 line. Promoting it is
-  a deliberate release decision, not routine sync.
+- `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and sits at `7ff27598`.
+  `ghostlight-1.0` is 3 commits ahead of it: per-action observation, the language-owned outcome
+  voice, and demand-start. Those three are local and unpushed; pushing is the owner's call.
+  Before the fast-forward `origin/dev` sat at the 0.8 line (`3fb093eb`, 2026-08-07).
+- `origin/main` still carries the 0.8 line at `95468758`. It is 26 commits behind `origin/dev` and
+  29 behind `ghostlight-1.0`. Promoting it is a deliberate release decision, not routine sync.
+  (An earlier pass recorded 24; `git rev-list --count origin/main..origin/dev` says 26, with and
+  without merges, and the tree wins.)
 - 13 pull requests are open. All 13 are Dependabot dependency and action bumps; none are human
   contributions awaiting review. They target the 0.8 line and have not been reconciled against the
   1.0 rebuild.
@@ -141,8 +148,9 @@ Re-run on 2026-08-11 against the current tree:
     their measurement: "Read 1,240 words.", "Filled 3 fields and submitted the form.", "Found 7
     matches.", "Captured the viewport at 1280x720."
   - Rows always render the outcome sentence and add a readiness note where a document never
-    settled. They no longer guess between host and measurement. The hero keeps the sentence and
-    carries the host beside it.
+    settled. They no longer guess between host and measurement, because the orchestrator already
+    chose which register the sentence uses. The hero renders the same sentence and still carries a
+    separate host chip, which now repeats what the sentence says. See Owed.
   - The audit stays payload-free. `InvocationResult::facts` still carries page text and full URLs
     to the model; the observation is a separate closed type so there is no shortcut between them.
     [`guides/siem-integration.md`](guides/siem-integration.md) now documents `summary`,
@@ -151,6 +159,21 @@ Re-run on 2026-08-11 against the current tree:
 
 ## Owed
 
+- The workbench hero says the host twice. Its meta chip was added when the sentence beside it was
+  boilerplate ("Page opened and its landing was governed."); now that sentence is "Opened
+  example.com." Dropping the chip in `heroMarkup` is the fix, and it restores the design note's own
+  rule that nothing is said twice. Two things travel with it: the `has` helper in `app.js` becomes
+  unused, and `surface_renders_seam_facts_and_trusts_outcome_language_for_measurements` currently
+  requires `observed.host` to appear in `app.js`, which only the chip satisfies. That assertion was
+  written before the sentence carried the host and now pins the duplication in place; readiness is
+  the fact the surface can only get from the observation, and the host's real consumer is the audit
+  record, guarded in [`guides/siem-integration.md`](guides/siem-integration.md).
+- A row that never settled reads its readiness as a parenthetical. Colour would carry it better
+  than words: the duration cell already has a running and a blocked treatment, and an unsettled one
+  would be found while scrolling instead of read for.
+- Refusal sentences were deliberately left unchanged when the voice moved into
+  `language/outcome.rs`, so they are the last boilerplate on the monitor. "Authority blocked the
+  browser job." could name the host the seam already recorded.
 - The extension stylesheet could move to its own module now that it is static. Lowest value of the
   maintainability steps; needs about eight test assertions reworked.
 - The 13 open Dependabot pull requests target the 0.8 line and need reconciling against the 1.0
