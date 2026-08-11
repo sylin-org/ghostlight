@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ghostlight_bridge::browser::{PresentationActivity, RuntimeControlIntent, RuntimeControlState};
+use ghostlight_bridge::service::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -872,6 +873,8 @@ pub struct HistoryItem {
     pub duration_ms: u64,
     /// What the action did, as stated by the orchestrator's outcome language.
     pub observed: Observed,
+    /// Which intake the work arrived on, when the workspace was still known.
+    pub channel: Option<IntakeChannel>,
 }
 
 impl From<AuditRecord> for HistoryItem {
@@ -892,6 +895,7 @@ impl From<AuditRecord> for HistoryItem {
             summary: value.summary,
             duration_ms: value.duration_ms,
             observed: value.observed,
+            channel: value.channel,
         }
     }
 }

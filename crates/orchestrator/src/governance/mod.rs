@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
+use ghostlight_bridge::service::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;
@@ -607,6 +608,11 @@ pub struct AuditRecord {
     /// What the action did, merged from browser-seam landing facts and outcome measurements.
     #[serde(default)]
     pub observed: Observed,
+    /// Which intake the work arrived on. Attribution only, never authority (ADR-0105).
+    ///
+    /// Absent when the workspace was already gone by the time the record was written.
+    #[serde(default)]
+    pub channel: Option<IntakeChannel>,
 }
 
 impl AuditRecord {
@@ -639,7 +645,15 @@ impl AuditRecord {
             summary: summary.into(),
             duration_ms,
             observed: Observed::default(),
+            channel: None,
         }
+    }
+
+    /// Attach the intake the work arrived on.
+    #[must_use]
+    pub fn from_channel(mut self, channel: Option<IntakeChannel>) -> Self {
+        self.channel = channel;
+        self
     }
 
     /// Attach the action's content-free observation after completion.

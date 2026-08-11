@@ -11,7 +11,8 @@ use ghostlight_bridge::framing::{read_json_line, write_json_line};
 use ghostlight_bridge::lifecycle::request_orchestrator_start;
 use ghostlight_bridge::runtime::{read_runtime, runtime_file};
 use ghostlight_bridge::service::{
-    ServerProfile, ServiceRequest, ServiceResponse, ToolDefinition, SERVICE_BRIDGE_MAJOR,
+    IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, ToolDefinition,
+    SERVICE_BRIDGE_MAJOR,
 };
 
 /// Protocol-neutral events emitted by the reconnecting service session.
@@ -173,6 +174,7 @@ fn connect(
             major: SERVICE_BRIDGE_MAJOR,
             token: endpoint.token,
             client_label: client_label.into(),
+            channel: IntakeChannel::Mcp,
         },
     )
     .context("send service hello")?;

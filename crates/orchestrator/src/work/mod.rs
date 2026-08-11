@@ -23,6 +23,8 @@ use uuid::Uuid;
 
 use crate::browser::{BrowserError, BrowserPort};
 use crate::events::{DenialPresentation, DomainEvent};
+use ghostlight_bridge::service::IntakeChannel;
+
 use crate::governance::{
     AuditRecord, AuditSink, AuthoritySnapshot, Capability, Decision, GovernanceFacade, ReasonCode,
 };
@@ -162,6 +164,7 @@ impl ApplicationExecutor {
                         capability: Capability::Read,
                         snapshot: &snapshot,
                         duration_ms: elapsed_ms(started),
+                        channel: self.workspaces.channel(workspace).ok(),
                     },
                 );
             }
@@ -261,6 +264,7 @@ impl ApplicationExecutor {
                 capability,
                 snapshot: &snapshot,
                 duration_ms: elapsed_ms(started),
+                channel: self.workspaces.channel(workspace).ok(),
             },
         )
     }
@@ -277,6 +281,7 @@ impl ApplicationExecutor {
             capability,
             snapshot,
             duration_ms,
+            channel,
         } = completion;
         let event = match terminal.result.status {
             Status::Blocked => DomainEvent::WorkBlocked {
@@ -320,6 +325,7 @@ impl ApplicationExecutor {
             &terminal.result.summary,
             duration_ms,
         )
+        .from_channel(channel)
         .with_observation(observed);
         let _ = self.audit.record(&record);
         gate.complete(terminal.result)
@@ -2782,6 +2788,8 @@ struct Completion<'a> {
     snapshot: &'a AuthoritySnapshot,
     /// Measured span from decode to terminal outcome. For a navigation this is time to settle.
     duration_ms: u64,
+    /// Which intake admitted the workspace this work arrived on.
+    channel: Option<IntakeChannel>,
 }
 
 /// Milliseconds elapsed since an invocation began, saturating rather than wrapping.
@@ -3169,6 +3177,8 @@ mod tests {
     use serde_json::json;
 
     use crate::browser::testing::FakeBrowser;
+    use ghostlight_bridge::service::IntakeChannel;
+
     use crate::governance::{AuditRecord, AuditSink, GovernanceFacade};
     use crate::language::outcome::Observed;
     use crate::presentation::{PresentationError, PresentationPort, PresentationReactor};
@@ -3221,7 +3231,7 @@ mod tests {
     ) {
         let browser = Arc::new(FakeBrowser::default());
         let workspaces = WorkspaceStore::default();
-        let workspace = workspaces.admit("test".into());
+        let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);
         let audit = Arc::new(MemoryAudit::default());
         let executor = ApplicationExecutor::new(
             governance,

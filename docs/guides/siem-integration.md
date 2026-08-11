@@ -56,6 +56,7 @@ Fields are typo-closed:
 | `summary` | Ghostlight-authored sentence naming what happened. Page content never authors it. |
 | `duration_ms` | Decode to terminal outcome. For a navigation, the time to a settled landing. |
 | `observed` | Content-free landing facts and outcome measurements for the action. |
+| `channel` | Which intake the work arrived on: `mcp` or `cli`. Attribution only, never authority. |
 
 `observed` is a closed set assembled at completion. The exhaustive browser seam supplies host and
 readiness. The typed language outcome supplies counts and sizes from the same value that authored
@@ -89,6 +90,7 @@ Useful high-signal queries include:
 - `effect in (partial, unknown)` because those outcomes are never replay-safe;
 - `status = attention_required` or `reason = runtime_attention`;
 - `observed.host` grouped by `capability`, for where write and execute authority actually went;
+- `channel = cli` grouped by `capability`, for what scripted work is doing without a model watching;
 - `observed.readiness = loading` beside a long `duration_ms`, which is work that never settled;
 - changes in managed `invalid_authority` volume; and
 - gaps in expected endpoint delivery, which are collector health rather than browser truth.

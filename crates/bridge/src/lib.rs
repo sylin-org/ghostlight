@@ -1,6 +1,7 @@
 //! Stable, versioned wire contracts shared across Ghostlight process boundaries.
 
 pub mod browser;
+pub mod client;
 pub mod framing;
 pub mod lifecycle;
 pub mod relay;

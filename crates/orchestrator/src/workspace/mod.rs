@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ghostlight_bridge::browser::{
     BrowserReadiness, ObservedTarget, PhysicalPoint, PhysicalTab, ViewportGeometry,
 };
+use ghostlight_bridge::service::IntakeChannel;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -14,8 +15,10 @@ use uuid::Uuid;
 pub struct WorkspaceSummary {
     /// Opaque workspace identity.
     pub id: String,
-    /// Presentation-only client label.
+    /// Presentation-only client label, claimed by the edge.
     pub client_label: String,
+    /// Which intake admitted this workspace. Attribution only (ADR-0105).
+    pub channel: IntakeChannel,
     /// Whether one invocation currently owns the workspace lease.
     pub leased: bool,
     /// Number of controlled tabs.
@@ -152,6 +155,7 @@ struct TabState {
 #[derive(Debug)]
 struct WorkspaceState {
     client_label: String,
+    channel: IntakeChannel,
     leased: bool,
     tabs: HashMap<TabHandle, TabState>,
     targets: HashMap<TargetHandle, TargetState>,
@@ -180,6 +184,7 @@ impl WorkspaceStore {
             .map(|(id, workspace)| WorkspaceSummary {
                 id: id.as_str().into(),
                 client_label: workspace.client_label.clone(),
+                channel: workspace.channel,
                 leased: workspace.leased,
                 tab_count: workspace.tabs.len(),
                 held_tab_count: workspace.tabs.values().filter(|tab| tab.held).count(),
@@ -189,13 +194,14 @@ impl WorkspaceStore {
         summaries
     }
 
-    /// Admit one MCP connection as an isolated workspace.
-    pub fn admit(&self, client_label: String) -> WorkspaceId {
+    /// Admit one edge connection as an isolated workspace.
+    pub fn admit(&self, client_label: String, channel: IntakeChannel) -> WorkspaceId {
         let id = WorkspaceId(format!("workspace_{}", Uuid::new_v4().simple()));
         self.lock().workspaces.insert(
             id.clone(),
             WorkspaceState {
                 client_label,
+                channel,
                 leased: false,
                 tabs: HashMap::new(),
                 targets: HashMap::new(),
@@ -243,6 +249,15 @@ impl WorkspaceStore {
             .workspaces
             .get(workspace)
             .map(|state| state.client_label.clone())
+            .ok_or(WorkspaceError::UnknownWorkspace)
+    }
+
+    /// The intake that admitted a workspace, for attribution at completion.
+    pub fn channel(&self, workspace: &WorkspaceId) -> Result<IntakeChannel, WorkspaceError> {
+        self.lock()
+            .workspaces
+            .get(workspace)
+            .map(|state| state.channel)
             .ok_or(WorkspaceError::UnknownWorkspace)
     }
 
@@ -838,6 +853,7 @@ mod tests {
     use ghostlight_bridge::browser::{
         BrowserReadiness, CaptureScope, ObservedTarget, PhysicalTab, ViewportGeometry,
     };
+    use ghostlight_bridge::service::IntakeChannel;
 
     use super::{WorkspaceError, WorkspaceStore};
 
@@ -854,8 +870,8 @@ mod tests {
     #[test]
     fn handles_are_owned_and_targets_expire_on_commit() {
         let store = WorkspaceStore::default();
-        let first = store.admit("first".into());
-        let second = store.admit("second".into());
+        let first = store.admit("first".into(), IntakeChannel::Mcp);
+        let second = store.admit("second".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&first).unwrap();
         let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
         let tab = lease
@@ -893,7 +909,7 @@ mod tests {
     #[test]
     fn omission_selects_only_an_unambiguous_tab() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into());
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
         assert_eq!(lease.select_tab(None).unwrap_err(), WorkspaceError::NoTab);
         let first = lease.add_tab(&physical(1, "about:blank")).unwrap();
@@ -905,7 +921,7 @@ mod tests {
     #[test]
     fn decisive_close_receipt_tolerates_an_earlier_async_close_event() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into());
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
         let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
         store.apply_browser_close(7);
@@ -916,7 +932,7 @@ mod tests {
     #[test]
     fn screenshot_views_map_coordinates_and_expire_on_commit() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into());
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
         let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
         let tab = lease
@@ -962,7 +978,7 @@ mod tests {
     #[test]
     fn child_tabs_are_adopted_only_through_an_owned_opener() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into());
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
         let _ = lease.add_tab(&physical(7, "about:blank")).unwrap();
         assert!(store

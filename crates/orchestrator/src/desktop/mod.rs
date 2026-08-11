@@ -377,6 +377,7 @@ mod tests {
             summary: "Read 1,240 words.".into(),
             duration_ms: 1200,
             observed: sample_observation(),
+            channel: Some(ghostlight_bridge::service::IntakeChannel::Mcp),
         };
 
         for change in [

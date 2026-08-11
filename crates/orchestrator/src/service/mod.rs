@@ -17,7 +17,7 @@ use ghostlight_bridge::lifecycle::ServiceLease;
 use ghostlight_bridge::relay::{BrowserRelayRequest, BrowserRelayResponse, BROWSER_RELAY_MAJOR};
 use ghostlight_bridge::runtime::{read_runtime, runtime_file, write_runtime, RuntimeEndpoint};
 use ghostlight_bridge::service::{
-    ServerProfile, ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR,
+    IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR,
 };
 use uuid::Uuid;
 
@@ -42,7 +42,10 @@ pub struct ServiceHost {
 }
 
 enum ServiceOpening {
-    Workspace { client_label: String },
+    Workspace {
+        client_label: String,
+        channel: IntakeChannel,
+    },
     WorkbenchActivation,
 }
 
@@ -342,7 +345,15 @@ fn serve_session(
             major,
             token,
             client_label,
-        } => (major, token, ServiceOpening::Workspace { client_label }),
+            channel,
+        } => (
+            major,
+            token,
+            ServiceOpening::Workspace {
+                client_label,
+                channel,
+            },
+        ),
         _ => {
             write_response(
                 &writer,
@@ -379,7 +390,7 @@ fn serve_session(
         );
         return Ok(());
     }
-    let client_label = match opening {
+    let (client_label, channel) = match opening {
         ServiceOpening::WorkbenchActivation => {
             write_response(
                 &writer,
@@ -389,9 +400,12 @@ fn serve_session(
             );
             return Ok(());
         }
-        ServiceOpening::Workspace { client_label } => client_label,
+        ServiceOpening::Workspace {
+            client_label,
+            channel,
+        } => (client_label, channel),
     };
-    let workspace = workspaces.admit(client_label);
+    let workspace = workspaces.admit(client_label, channel);
     write_response(
         &writer,
         &ServiceResponse::HelloAccepted {
@@ -569,7 +583,9 @@ mod tests {
     use std::sync::Arc;
 
     use ghostlight_bridge::framing::{read_json_line, write_json_line};
-    use ghostlight_bridge::service::{ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR};
+    use ghostlight_bridge::service::{
+        IntakeChannel, ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR,
+    };
 
     use crate::workbench::{
         WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
@@ -598,6 +614,7 @@ mod tests {
                 major: SERVICE_BRIDGE_MAJOR + 1,
                 token: host.endpoint.token.clone(),
                 client_label: "test".into(),
+                channel: IntakeChannel::Mcp,
             },
         )
         .unwrap();

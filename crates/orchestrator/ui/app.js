@@ -213,6 +213,7 @@ function entryFromRecord(record, existing) {
     summary: record.summary,
     durationMs: record.duration_ms,
     observed: record.observed ?? null,
+    channel: record.channel ?? null,
     settled: true
   };
 }
@@ -300,6 +301,8 @@ function heroMarkup(entry) {
   const note = observed ? READINESS_NOTE[observed.readiness] ?? "" : "";
   const meta = [];
   if (entry.workspace) meta.push(`<span>${escapeHtml(clientFor(entry.workspace))}</span>`);
+  // Only a non-default intake earns words. Labelling every agent row "mcp" is noise.
+  if (entry.channel && entry.channel !== "mcp") meta.push(`<span><i></i>via ${escapeHtml(entry.channel)}</span>`);
   if (entry.capability) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
   if (entry.settled && entry.status) meta.push(`<span><i></i>${escapeHtml(words(entry.status))}</span>`);
   if (note) meta.push(`<span><i></i>${escapeHtml(note)}</span>`);

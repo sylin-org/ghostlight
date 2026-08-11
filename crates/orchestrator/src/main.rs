@@ -13,6 +13,8 @@ enum LaunchMode {
     Headless,
     Background,
     Show,
+    /// The command-line intake. A script asked for work, not for a window (ADR-0105).
+    Call,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,6 +29,43 @@ fn main() -> anyhow::Result<()> {
         LaunchMode::Headless => ghostlight::service::run_forever(),
         LaunchMode::Background => ghostlight::desktop::run(false),
         LaunchMode::Show => show_or_start(),
+        LaunchMode::Call => run_call(),
+    }
+}
+
+/// Invoke one tool, or a batch of them, against the local authority.
+///
+/// Demand-start applies here exactly as it does to a connector: a script that runs before anything
+/// else has started gets an authority rather than an error.
+fn run_call() -> anyhow::Result<()> {
+    let arguments: Vec<String> = std::env::args()
+        .skip(1)
+        .skip_while(|argument| argument != "call")
+        .skip(1)
+        .collect();
+    let command = match ghostlight::cli::parse(&arguments) {
+        Ok(command) => command,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
+    let runtime = ghostlight_bridge::runtime::runtime_file();
+    if ghostlight_bridge::runtime::read_runtime(&runtime).is_err() {
+        let _ = ghostlight_bridge::lifecycle::request_orchestrator_start();
+        wait_for_runtime(&runtime);
+    }
+    let mut out = std::io::stdout().lock();
+    let code = ghostlight::cli::run(command, &runtime, &mut out);
+    std::process::exit(code);
+}
+
+fn wait_for_runtime(runtime: &Path) {
+    for _ in 0..ACTIVATION_RETRY_COUNT {
+        if ghostlight_bridge::runtime::read_runtime(runtime).is_ok() {
+            return;
+        }
+        thread::sleep(ACTIVATION_RETRY_DELAY);
     }
 }
 
@@ -79,7 +118,9 @@ fn finish_activation(
 
 fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> LaunchMode {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
-    if arguments.iter().any(|argument| argument == "--headless") {
+    if arguments.iter().any(|argument| argument == "call") {
+        LaunchMode::Call
+    } else if arguments.iter().any(|argument| argument == "--headless") {
         LaunchMode::Headless
     } else if arguments.iter().any(|argument| argument == "--background") {
         LaunchMode::Background

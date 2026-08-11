@@ -1,6 +1,7 @@
 //! Ghostlight's single mutable, domain-driven browser orchestrator.
 
 pub mod browser;
+pub mod cli;
 pub mod desktop;
 pub mod events;
 pub mod governance;

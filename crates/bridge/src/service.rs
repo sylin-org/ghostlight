@@ -7,7 +7,7 @@ use serde_json::Value;
 pub const SERVICE_BRIDGE_MAJOR: u16 = 1;
 
 /// Product metadata supplied by the orchestrator and rendered by protocol edges.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerProfile {
     /// Stable product name.
@@ -44,6 +44,32 @@ pub enum ServiceContent {
     },
 }
 
+/// Which intake a session arrived on.
+///
+/// Closed on purpose: an intake is a fact about the shape of the caller, not an open label. It is
+/// recorded for attribution and presentation and is never an input to an authority decision
+/// (ADR-0105 Decision 2).
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntakeChannel {
+    /// A model-facing MCP client, through the stdio connector.
+    #[default]
+    Mcp,
+    /// A local script or program, through the Ghostlight command line.
+    Cli,
+}
+
+impl IntakeChannel {
+    /// Render the stable ASCII channel name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Mcp => "mcp",
+            Self::Cli => "cli",
+        }
+    }
+}
+
 /// A request sent from the generic MCP edge to the orchestrator.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -63,6 +89,9 @@ pub enum ServiceRequest {
         token: String,
         /// Human-readable client label used only for audit and presentation.
         client_label: String,
+        /// Which intake this session arrived on. Attribution only, never authority (ADR-0105).
+        #[serde(default)]
+        channel: IntakeChannel,
     },
     /// Retrieve the orchestrator-owned catalog.
     Catalog,
@@ -133,8 +162,8 @@ pub enum ServiceResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        ServerProfile, ServiceContent, ServiceRequest, ServiceResponse, ToolDefinition,
-        SERVICE_BRIDGE_MAJOR,
+        IntakeChannel, ServerProfile, ServiceContent, ServiceRequest, ServiceResponse,
+        ToolDefinition, SERVICE_BRIDGE_MAJOR,
     };
     use serde_json::json;
 
@@ -149,6 +178,7 @@ mod tests {
                 major: 1,
                 token: "token".into(),
                 client_label: "test".into(),
+                channel: IntakeChannel::Cli,
             },
             ServiceRequest::Catalog,
             ServiceRequest::Invoke {

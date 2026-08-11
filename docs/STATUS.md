@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-11 (fifth pass).
+Last updated: 2026-08-11 (sixth pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -73,6 +73,16 @@ last fetch.
 - Direct/default launch and `--show` reveal the existing authenticated workbench or start it
   visibly. `--background` starts the full tray authority hidden. `--headless` remains the explicit
   presentation-free mode.
+- `ghostlight call` is a second intake for scripts and programs (ADR-0105). It invokes one tool, or
+  a batch of them over one session with `--stdin`, prints the outcome sentence or `--json`, and maps
+  the terminal status to distinct exit codes where an uncertain effect is never zero. It demand-
+  starts the authority like any connector, and it crosses the same executor, governance facade, and
+  completion path, so there is no scripting bypass.
+- Every session records the intake it arrived on, and every audit record carries it. `ghostlight
+  call` work is attributed to the `cli` channel and grouped under its own browser tab-group name.
+  The channel is attribution and is never an input to an authority decision.
+- `ghostlight_bridge::client::ServiceClient` is the one place the service handshake lives, so a
+  second edge does not grow a second copy of it.
 
 ## Verified in this workspace
 
@@ -80,16 +90,20 @@ Re-run on 2026-08-11 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 99 Rust tests -- 81 in the orchestrator including its launch-mode
+- `cargo test --workspace`: 101 Rust tests -- 83 in the orchestrator including its launch-mode
   binary test, 15 in the shared bridge, and 3 in the MCP connector.
 - `npm test --prefix extension`: 39 extension tests.
+- `node tests/cli-journey.mjs`: the real executable's command line reaches a real service, returns a
+  governed result, exits non-zero on refusal, is attributed to the `cli` channel in the audit file
+  the service wrote, and keeps one workspace across a `--stdin` batch while separate processes get
+  separate workspaces.
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
   restart without replaying an interrupted effect, then complete open/read/close. The journey uses
   a fresh deployment lock to isolate explicit restart recovery from demand-start. It also reads
   the audit file the real executable wrote and checks that the read records a host and a word
   count, and no page text.
 - `cargo build --workspace --target-dir .target-ghostlight-1.0`.
-- `node --check` on the process journey, bundled workbench script, and preview server.
+- `node --check` on both journeys, the bundled workbench script, and the preview server.
 - Live isolated demand-start proofs began with no service. The MCP connector started one exact
   sibling authority and completed MCP initialization. In a separate run, the browser connector
   reported `backend_unavailable`, started one exact sibling authority, and completed its adapter
@@ -168,6 +182,14 @@ Re-run on 2026-08-11 against the current tree:
 - A row that never settled reads its readiness as a parenthetical. Colour would carry it better
   than words: the duration cell already has a running and a blocked treatment, and an unsettled one
   would be found while scrolling instead of read for.
+- ADR-0105 stages 2 and 3 are not built. The channel is asserted by a first-party edge rather than
+  observed from the socket peer, and there is no signer-gated admission. Stage 1 is safe without
+  them only because the channel is never an authority input; nothing may start deciding on it
+  before peer identification lands.
+- The CLI omits bounded rich content: a screenshot's image is reported as omitted rather than
+  written to a file. `--output` is the obvious next step.
+- `crates/mcp-connector` still has its own copy of the service handshake and did not adopt
+  `ServiceClient`. One home exists now; the connector should move to it.
 - Refusal sentences were deliberately left unchanged when the voice moved into
   `language/outcome.rs`, so they are the last boilerplate on the monitor. "Authority blocked the
   browser job." could name the host the seam already recorded.
