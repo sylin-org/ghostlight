@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-11.
+Last updated: 2026-08-11 (second pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -10,7 +10,7 @@ preserved `docs/0.8/` material carry history; this file does not rewrite it.
 - `ghostlight-1.0` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`.
 - `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and now matches
   `ghostlight-1.0` exactly. Before that it sat at the 0.8 line (`3fb093eb`, 2026-08-07).
-- `origin/main` is 13 commits behind `origin/dev` and still carries the 0.8 line. Promoting it is
+- `origin/main` is 20 commits behind `origin/dev` and still carries the 0.8 line. Promoting it is
   a deliberate release decision, not routine sync.
 - 13 pull requests are open. All 13 are Dependabot dependency and action bumps; none are human
   contributions awaiting review. They target the 0.8 line and have not been reconciled against the
@@ -65,7 +65,7 @@ Re-run on 2026-08-11 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 74 Rust tests -- 62 in the orchestrator, 9 in the shared bridge, and 3
+- `cargo test --workspace`: 76 Rust tests -- 64 in the orchestrator, 9 in the shared bridge, and 3
   in the MCP connector.
 - `npm test --prefix extension`: 39 extension tests.
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
@@ -74,19 +74,38 @@ Re-run on 2026-08-11 against the current tree:
 - `node --check` on the bundled workbench script and the preview server.
 - The workbench renders against the repository preview server, which now drives the real sequenced
   event path, and uses the byte-identical original Ghostlight artwork.
-- Five guard tests keep the surface and the orchestrator in step: every publishable change has a
+- Guard tests keep the surface and the orchestrator in step: every publishable change has a
   handler, every capability class has a visual treatment, every runtime intent stays reachable
   (guarded by an exhaustive match), the published palette is present with the accent defined once,
-  and the workbench capability grants listen without emit.
+  the workbench capability grants listen without emit, and every catalog tool has a medallion.
 - The complete desktop-workbench change, from its starting revision through the live-monitor
   rebuild, has an empty diff under `crates/mcp-connector`, `crates/browser-connector`,
   `crates/bridge`, and `extension`.
 
+## Visual language and monitor content
+
+- Both surfaces share one motion vocabulary. The workbench names its beats as `--beat-*` tokens
+  taken from the renderer's frozen `visualIdentity`, so a treatment meaning the same thing in the
+  page and the window keeps the same tempo.
+- The in-page effect registry (`TRANSIENT_EFFECTS`) owns both reduced-motion enrollment and each
+  treatment's beat, and teardown derives from the beat. No effect lifetime is hand-picked.
+- The renderer stylesheet is static CSS: identity arrives once as custom properties, leaving only
+  the token block and the generated reduced-motion selector interpolated.
+- A click describes itself end to end. `ClickShape { clicks, button }` rides on
+  `PresentationSignal`, and the renderer draws one ring per click, dashed for a secondary button.
+- Audit records and workbench history carry the Ghostlight-authored `summary` and a measured
+  `duration_ms`, so every row states what happened and how long it took.
+- Per-action observation is designed but not built. See
+  [`design/action-observations.md`](design/action-observations.md).
+
 ## Owed
 
-- `docs/trust/` (14 files) has not had the editorial pass applied to the rest of the reader-facing
-  documentation. Every claim there was red-teamed against the tree, so warming it requires a
-  claim-by-claim diff proving nothing moved.
+- Per-action observation: `Observed` at the `dispatch` seam, then host and readiness, then counts
+  tool by tool. Designed in [`design/action-observations.md`](design/action-observations.md).
+- `docs/1.0/INTENT.md` says file upload records no "paths, names, or bytes". Tighten "bytes" to
+  "contents" before any upload size is recorded, so document and code cannot be read as disagreeing.
+- The extension stylesheet could move to its own module now that it is static. Lowest value of the
+  maintainability steps; needs about eight test assertions reworked.
 - The 13 open Dependabot pull requests target the 0.8 line and need reconciling against the 1.0
   rebuild before they can land.
 - `origin/main` still carries 0.8. Deciding when the 1.0 line is promoted is a release decision.

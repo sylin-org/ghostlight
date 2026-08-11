@@ -85,6 +85,12 @@ Those sources win when they disagree with this file.
   externally; a clean captured page is not evidence that feedback failed.
 - Debugging and audit remain metadata-only. Never persist MCP bodies, page content, results,
   screenshots, form values, scripts, paths, or file bytes.
+- Correctness kept by memory rots. A hand-maintained list that a new case must be added to will
+  eventually miss one: the extension reduced-motion selector list silently skipped new effects, and
+  per-tool fact reporting would have made every new tool silent by default. Derive the list from a
+  registry, or observe at the one seam every case already crosses.
+- A guard that parses nothing passes everything. Check every source-scraping test against a negative
+  control before trusting it.
 - The public 0.8 distribution and trust records are historical truth, not a working 1.0 release
   pipeline. Rebuild package and release automation from the current boundaries before claiming a
   1.0 artifact exists.
@@ -98,6 +104,8 @@ Those sources win when they disagree with this file.
 | Current 1.0 contracts | [`1.0/`](1.0/) |
 | Architecture history | [`adr/`](adr/README.md) |
 | Integrated desktop decision | [`adr/0102-integrated-desktop-workbench.md`](adr/0102-integrated-desktop-workbench.md) |
+| Visual vocabulary, both surfaces | [`design/visual-language.md`](design/visual-language.md) |
+| Where per-action facts belong | [`design/action-observations.md`](design/action-observations.md) |
 | Build, restart, and live validation | [`DEV-LOOP.md`](DEV-LOOP.md) |
 | Planned release procedure | [`RELEASE.md`](RELEASE.md) |
 | Historical deep design | [`SPEC.md`](SPEC.md) |
