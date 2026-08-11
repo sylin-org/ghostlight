@@ -2,7 +2,7 @@
 
 use crate::governance::Capability;
 use crate::workspace::TabHandle;
-use ghostlight_bridge::browser::PresentationActivity;
+use ghostlight_bridge::browser::{ClickShape, PresentationActivity};
 
 /// Closed user-facing meaning for one blocked browser job.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,6 +46,8 @@ pub enum DomainEvent {
         workspace: String,
         physical_id: u64,
         locator: String,
+        /// Present only when the action is a click, so its confirmation can match it.
+        click: Option<ClickShape>,
     },
     /// One bounded sequence phase started.
     WorkPhaseStarted {

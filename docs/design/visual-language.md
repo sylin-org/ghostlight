@@ -39,7 +39,7 @@ domain modules.
 | --- | --- | --- | --- |
 | Phantom cursor | pointer moves | "the agent's hand is HERE" | sky arrow glyph, glides with a 150ms transition |
 | Controlled-tab border | every Ghostlight-managed tab | "an agent can act inside this tab" | persistent inset sky border with a slow, low-amplitude breathing pulse |
-| Click ripple | any click | "clicked here" | one expanding sky ring at the point |
+| Click ripple | any click | "clicked here, this many times, with this button" | one expanding sky ring per click, staggered by 150ms; a secondary-button ring is dashed |
 | Drag trail | click-drag path | "dragged along this path" | comet trail of fading radial dots |
 | Type shimmer | typing into the focused element | "typing into THIS field" | soft outline pulse on the focused element |
 | Field splash | a form write lands (`form_input`, `form_fill`, `file_upload`, `upload_image`) | "the agent just SET this field" | ring + interior wash hugging the field's own rectangle (borrows its border-radius), settles then releases outward |
@@ -60,23 +60,20 @@ domain modules.
 | Attention overlay | ADR-0079 denial burst | "this MCP session is paused until a person decides" | page-softening modal with service-provided controls and popup fallback |
 | Recording badge | active screencast lifecycle | "Ghostlight is recording" | truthful red REC extension badge and popup state, never a simulated live preview |
 
-## Not yet in the vocabulary
+## How a click describes itself
 
-Named here so nobody reads an intention as a shipped capability.
+A click is the one action whose confirmation has to match what actually landed, so it is the one
+indication that carries a shape.
 
-- **Click ripples can encode the click, but nothing describes it yet.** `clickRipple()` in
-  `extension/lib/presentation.js` now reads an optional `signal.click` shape and draws one ring
-  per click on the 150ms stagger unit, dashed when the button is secondary. Without that shape it
-  draws exactly one primary ring, which is what every click renders today.
+`ClickShape { clicks, button }` rides on `PresentationSignal`, populated from
+`DomainEvent::TargetIndicated` at the single click emit site in
+`crates/orchestrator/src/work/mod.rs`. The other three indications -- hover, drag, and type --
+pass `None`, because they have no click to describe. The renderer draws one ring per click on the
+150ms stagger unit and dashes the ring when the button is secondary.
 
-  What is missing is the description. `PresentationSignal` has no click field, so the orchestrator
-  never sends one. Completing it means adding a bounded content-free shape
-  (`clicks: u8`, `button`) to `PresentationSignal` in `crates/bridge/src/browser.rs`, carrying it
-  on `DomainEvent::TargetIndicated`, populating it at the three emit sites in
-  `crates/orchestrator/src/work/mod.rs`, and mapping it through
-  `crates/orchestrator/src/presentation/mod.rs`. Serde defaults keep an older adapter working.
-  Until then the ledger rows for `computer.right_click` and `computer.double_click` describe a
-  capability the renderer has and the service does not yet exercise.
+The field is optional on the wire with a serde default, so an adapter that predates it renders one
+primary ring, exactly as every click did before. The shape carries how the click landed and never
+what the page holds.
 
 ## The desktop workbench shares this language
 

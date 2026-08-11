@@ -219,6 +219,21 @@ pub struct PresentationSignal {
     /// Optional browser-local target locator used only for indication.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locator: Option<String>,
+    /// Optional content-free shape of the click being confirmed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub click: Option<ClickShape>,
+}
+
+/// Content-free shape of one governed click, carried only so its confirmation can be drawn.
+///
+/// An adapter that does not understand this field renders one primary ring, which is what every
+/// click drew before it existed.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ClickShape {
+    /// How many clicks landed, as bounded by the catalog.
+    pub clicks: u8,
+    /// Which button produced them.
+    pub button: String,
 }
 
 /// Established Ghostlight activity treatments rendered by the browser adapter.
@@ -747,6 +762,7 @@ mod tests {
                         detail: Some("Closing tabs is blocked by policy.".into()),
                         tab_id: Some(7),
                         locator: None,
+                        click: None,
                     },
                 },
             },

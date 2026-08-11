@@ -189,6 +189,11 @@ impl PresentationReactor {
                 true,
             ),
         };
+        // Only a click describes its own shape, so the confirmation can match what landed.
+        let click = match event {
+            DomainEvent::TargetIndicated { click, .. } => click.clone(),
+            _ => None,
+        };
         let frame = PresentationSignal {
             invocation: event.invocation().into(),
             signal,
@@ -197,6 +202,7 @@ impl PresentationReactor {
             detail: detail.map(str::to_owned),
             tab_id,
             locator,
+            click,
         };
         let _ = self.port.present(event.workspace(), frame);
         if terminal {
@@ -309,6 +315,7 @@ mod tests {
             workspace: "workspace_x".into(),
             physical_id: 7,
             locator: "locator_1".into(),
+            click: None,
         });
         let signals = port.0.lock().unwrap();
         assert_eq!(signals[0].phase, "Reading page");
@@ -316,6 +323,47 @@ mod tests {
         let json = serde_json::to_string(&signals[0]).unwrap();
         assert!(!json.contains("url"));
         assert!(!json.contains("content"));
+    }
+
+    #[test]
+    fn a_click_describes_its_shape_and_nothing_else_does() {
+        use ghostlight_bridge::browser::ClickShape;
+
+        let port = Arc::new(RecordingPort::default());
+        let reactor = PresentationReactor::new(port.clone());
+        reactor.react(&DomainEvent::TargetIndicated {
+            invocation: "invocation_x".into(),
+            workspace: "workspace_x".into(),
+            physical_id: 7,
+            locator: "locator_1".into(),
+            click: Some(ClickShape {
+                clicks: 2,
+                button: "secondary".into(),
+            }),
+        });
+        reactor.react(&DomainEvent::TargetIndicated {
+            invocation: "invocation_x".into(),
+            workspace: "workspace_x".into(),
+            physical_id: 7,
+            locator: "locator_2".into(),
+            click: None,
+        });
+
+        let signals = port.0.lock().unwrap();
+        let shape = signals[0].click.as_ref().expect("a click describes itself");
+        assert_eq!(shape.clicks, 2);
+        assert_eq!(shape.button, "secondary");
+        assert!(
+            signals[1].click.is_none(),
+            "a hover, drag, or type indication has no click to describe"
+        );
+
+        // The shape says how the click landed, never what the page holds. The locator is a
+        // legitimate indication field and is expected here.
+        let encoded = serde_json::to_string(&signals[0]).unwrap();
+        for forbidden in ["url", "content", "password", "text"] {
+            assert!(!encoded.contains(forbidden), "leaked {forbidden}");
+        }
     }
 
     #[test]

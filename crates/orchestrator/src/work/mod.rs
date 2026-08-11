@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use ghostlight_bridge::browser::{
-    BrowserCommand, BrowserOutcome, BrowserReadiness, PhysicalField, PhysicalFile, PhysicalPoint,
-    PhysicalTab, PresentationActivity,
+    BrowserCommand, BrowserOutcome, BrowserReadiness, ClickShape, PhysicalField, PhysicalFile,
+    PhysicalPoint, PhysicalTab, PresentationActivity,
 };
 use ghostlight_bridge::service::ServiceContent;
 use serde_json::{json, Value};
@@ -1064,6 +1064,10 @@ impl ApplicationExecutor {
                     workspace: context.workspace.as_str().into(),
                     physical_id: tab.physical_id,
                     locator: target.locator.clone(),
+                    click: Some(ClickShape {
+                        clicks: value.click_count,
+                        button: value.button.clone(),
+                    }),
                 });
                 (
                     BrowserCommand::Activate {
@@ -1263,6 +1267,7 @@ impl ApplicationExecutor {
                     workspace: context.workspace.as_str().into(),
                     physical_id: tab.physical_id,
                     locator: target.locator.clone(),
+                    click: None,
                 });
                 (
                     BrowserCommand::Hover {
@@ -1444,6 +1449,7 @@ impl ApplicationExecutor {
             workspace: context.workspace.as_str().into(),
             physical_id: selected.physical_id,
             locator: target.locator.clone(),
+            click: None,
         });
         match self.dispatch(
             context,
@@ -1501,6 +1507,7 @@ impl ApplicationExecutor {
                 workspace: context.workspace.as_str().into(),
                 physical_id: selected.physical_id,
                 locator: source.locator.clone(),
+                click: None,
             });
             let facts = json!({"tab":selected.handle.as_str(),"source_target":source.handle.as_str(),"destination_target":destination.handle.as_str(),"dragged":true});
             let command = BrowserCommand::Drag {
