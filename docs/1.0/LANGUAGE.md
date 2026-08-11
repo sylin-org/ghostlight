@@ -272,8 +272,8 @@ Upload explicitly named local files to one ordinary file input. Shortest call:
 Inputs: required `target`; required `paths` array of one to five absolute local paths; optional
 `tab`; optional `timeout_ms`; optional restrictions. Capability: `write`. Ghostlight rejects
 directories, missing files, files larger than 5,000,000 bytes, and a combined payload larger than
-5,000,000 bytes before browser dispatch. File paths, names, and bytes never enter audit or
-presentation.
+5,000,000 bytes before browser dispatch. File paths, names, and contents never enter audit or
+presentation; how many files were uploaded does.
 
 Facts: `tab`, `target`, `uploaded_count`, and `uploaded_bytes`.
 

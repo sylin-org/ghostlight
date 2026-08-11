@@ -121,6 +121,7 @@ Those sources win when they disagree with this file.
 | Need | Source |
 | --- | --- |
 | Repository authority and implementation rules | [`AGENTS.md`](../AGENTS.md) |
+| A map of this documentation tree | [`README.md`](README.md) |
 | Mutable implementation status | [`STATUS.md`](STATUS.md) |
 | Current 1.0 contracts | [`1.0/`](1.0/) |
 | Architecture history | [`adr/`](adr/README.md) |
@@ -130,6 +131,7 @@ Those sources win when they disagree with this file.
 | Visual vocabulary, both surfaces | [`design/visual-language.md`](design/visual-language.md) |
 | Where per-action facts belong | [`design/action-observations.md`](design/action-observations.md) |
 | What an audit record contains | [`guides/siem-integration.md`](guides/siem-integration.md) |
+| What each task batch was, and where it stopped | [`tasks/README.md`](tasks/README.md) |
 | Build, restart, and live validation | [`DEV-LOOP.md`](DEV-LOOP.md) |
 | Planned release procedure | [`RELEASE.md`](RELEASE.md) |
 | Historical deep design | [`SPEC.md`](SPEC.md) |

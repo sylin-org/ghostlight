@@ -34,7 +34,9 @@ documents it points to.
 Larger work is organized as task batches under `docs/tasks/<batch>/`, each with a
 `BOOTSTRAP.md` (ground rules) and a `LEDGER.md` (durable progress, one task = one commit,
 a RESUME HERE section). If you are executing a batch, the ledger is the source of truth
-for what is done.
+for what is done. [docs/tasks/README.md](docs/tasks/README.md) indexes all of them and says which
+predate the 1.0 internals rebuild, which is all but one: never take a file path or code excerpt
+from an old batch as current.
 
 ## Authority and historical continuity
 

@@ -139,9 +139,16 @@ closure remains the user's action.
 The orchestrator appends one JSONL record per terminal invocation. By default the file is
 `audit.jsonl` beside the runtime discovery file; `GHOSTLIGHT_AUDIT_FILE` selects an explicit path.
 
-Records contain only timestamp, opaque invocation/workspace/authority ids, tool, capability,
-allowed decision, stable reason, terminal status, and effect class. They never contain URLs, page
-text, selectors, target labels, form values, file paths, scripts, screenshots, or dialog text.
+A record carries three kinds of thing: identifiers (opaque invocation, workspace, and authority
+ids), the decision (capability, allowed, stable reason, terminal status, effect class), and
+content-free measurements of what the action did (a Ghostlight-authored sentence, how long it took,
+the host it landed on, and a count or capture size).
+
+The landed host is the only page-derived value, and it is deliberate: it answers where the agent
+went and is already visible in the user's own tab strip. Paths, queries, fragments, page text,
+selectors, target labels, form values, file paths, scripts, screenshots, and dialog text never
+appear. The exact field list lives in one place, [`siem-integration.md`](siem-integration.md), so
+that it cannot drift from the code in three documents at once.
 
 The workbench reconstructs at most 500 newest terminal facts from this audit for History. Search
 and notifications operate on the same content-free projection. Deleting or rotating the audit is

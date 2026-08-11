@@ -116,8 +116,12 @@ Closing a tab needs two independent yes votes: the orchestrator's authority, and
 preserve-tabs setting, which ships on. That keeps the evidence of what happened in front of you.
 Closing a tab yourself always works.
 
-The audit record holds identifiers and decisions. URLs, page text, field values, screenshots,
-selectors, and dialog text never enter it.
+The audit record holds identifiers, decisions, and content-free measurements: which tool ran,
+whether authority allowed it, how long it took, and what it did -- 3 fields, 1,240 words, 1280x720.
+The site an action landed on is named, because that answers where your agent went and is already in
+your own tab strip. Paths, queries, fragments, page text, field values, screenshots, selectors, and
+dialog text never enter it. [`docs/guides/siem-integration.md`](docs/guides/siem-integration.md) is
+the exact record shape.
 
 The full catalog is in [`docs/1.0/LANGUAGE.md`](docs/1.0/LANGUAGE.md), and the exact policy schema
 is in [`docs/guides/governance-configuration.md`](docs/guides/governance-configuration.md).

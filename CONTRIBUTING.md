@@ -75,7 +75,9 @@ The suite has three useful layers:
 - **Policy-free extension mechanisms:** `npm test --prefix extension`.
 - **Real process topology:** build into `.target-ghostlight-1.0`, then run
   `node tests/process-journey.mjs`. It keeps both relay processes alive through an orchestrator
-  interruption and proves they renegotiate without replaying the interrupted effect.
+  interruption and proves they renegotiate without replaying the interrupted effect. The journey
+  looks for the executables in that directory; if you built somewhere else, say so with
+  `GHOSTLIGHT_BIN_DIR`, or it will pass against stale binaries and tell you nothing.
 
 Visible browser journeys and native tray/notification smoke tests remain release gates because a
 green unit suite cannot substitute for the user's actual desktop and browser.

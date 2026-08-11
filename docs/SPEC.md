@@ -4,7 +4,7 @@
 
 **Author:** Leonardo Botinelly / Kintsugi Architecture  
 **Date:** 2026-07-01  
-**Status:** Draft  
+**Status:** Historical baseline, superseded in part -- see the note below  
 **License:** Open-core -- engine Apache-2.0 OR MIT; `crates/orchestrator/src/governance/` source-available (ADR-0027)
 
 > **Historical design baseline.** This document preserves the original 2026-07-01 design and its

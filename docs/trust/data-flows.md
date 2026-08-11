@@ -50,8 +50,9 @@ Ghostlight writes a small set of artifacts, all on your endpoint and all owned a
 you:
 
 - Audit records: JSON Lines files (or a syslog stream, or nothing) at the destination you
-  set. Records are decision metadata only, never page content, typed values, or screenshots;
-  the records are not themselves signed, so integrity of the log store is a customer-side
+  set. Records are decision metadata and content-free measurements of what each action did,
+  including the host it landed on; never page content, typed values, screenshots, or the rest of
+  a URL. The records are not themselves signed, so integrity of the log store is a customer-side
   control.
 - Policy cache and status sidecar: present only when you use central policy. The cache is
   signed and its signature is verified on load, so a tampered on-disk policy is rejected rather

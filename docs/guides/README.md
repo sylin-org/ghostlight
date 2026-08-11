@@ -12,6 +12,7 @@ guides rather than restating them, so a change lands in one place instead of thr
 | Write and apply a governance policy        | [governance-configuration.md](governance-configuration.md) |
 | Roll governance out across an organization | [compliance-team.md](compliance-team.md)                   |
 | Understand the payload-free audit contract | [governance-configuration.md#payload-free-audit-and-history](governance-configuration.md#payload-free-audit-and-history) |
+| Collect audit into a SIEM, field by field   | [siem-integration.md](siem-integration.md)                 |
 | Understand the source-license boundary     | [licensing.md](licensing.md)                               |
 | Review Ghostlight for procurement or security | [Trust Center (procurement and security review)](../trust/README.md) |
 

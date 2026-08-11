@@ -17,6 +17,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Supported-harness management.** Codex, Claude Code, Claude Desktop, Cursor, Visual Studio Code,
   Windsurf, Zed, OpenCode, and Crush registrations can be checked, installed, or removed through
   explicit ownership-checked operations that preserve JSONC and TOML comments.
+- **A live monitor.** The workbench's landing surface carries the current action in full with its
+  elapsed time, then settles it into a newest-first queue as the next one rises. The orchestrator
+  publishes sequenced changes rather than being polled, and a surface that misses one resynchronizes
+  from a snapshot instead of trusting its cache.
+- **Rows that say what happened.** Every record carries a Ghostlight-authored sentence and a
+  measured duration: "Opened example.com.", "Read 1,240 words.", "Filled 3 fields and submitted the
+  form.", "Stopped at step 3 of 5."
+- **Per-action observation (ADR-0103).** Audit records gained a closed, content-free `observed`
+  projection: the host an action landed on, the readiness the browser reported, a count, and a
+  capture size. Never a path, query, or fragment; never page text. See
+  [docs/guides/siem-integration.md](docs/guides/siem-integration.md) for the record shape.
+- **Demand-start and one local authority (ADR-0104).** Launching a connected MCP client or Chromium
+  starts the local service when it is absent. A lifetime lease admits exactly one authority, so
+  concurrent launches converge on one engine and one tray instead of racing. Launching Ghostlight
+  directly shows the workbench or focuses the running one; `--background` starts it hidden and
+  `--headless` remains the explicit service-only mode.
 
 ### Changed
 
@@ -26,7 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation continuity.** Root documentation, licenses, ADRs through ADR-0101, research,
   trust material, design records, task ledgers, public surfaces, and product identity are retained.
 - **Fringe stability.** The complete workbench and harness-management feature is implemented
-  without changes to the MCP connector, browser connector, shared bridge, or extension.
+  without changes to the MCP connector, browser connector, shared bridge, or extension. The later
+  demand-start work changes the bridge and both connectors at their connection-lifetime seam, which
+  is the one reason those fringes are allowed to change; the extension remains untouched.
+- **One place authors what Ghostlight says (ADR-0103).** Completed-action sentences, safe next
+  steps, and content-free measurements now come from one typed outcome in the language module
+  instead of string literals spread through the executor. A sentence and the measurement beside it
+  can no longer disagree, because they are read from the same value.
 
 ### Removed
 

@@ -59,9 +59,13 @@ claims.
 ## 4. Collect payload-free evidence
 
 Set `GHOSTLIGHT_AUDIT_FILE` to an organization-collected local path. The append-only JSONL records
-contain timestamp, opaque ids, tool, capability, authority id, allow/deny decision, stable reason,
-terminal status, and effect class. They contain no URL, hostname, page content, selector, form
-value, file path, script, screenshot, or dialog text.
+carry opaque ids, the governed decision, and content-free measurements of what each action did:
+a Ghostlight-authored sentence, a duration, the host the action landed on, and a count or capture
+size where one applies.
+
+The landed host is the one page-derived value, and it is what makes the trail answer "where did
+this agent go" rather than only "what was allowed". No full URL, path, query, fragment, page
+content, selector, form value, file path, script, screenshot, or dialog text is recorded.
 
 Use the endpoint's existing file collector. Ghostlight 1.0 does not open a syslog socket or send
 audit over the network. The exact record contract and safe collection pattern are in
