@@ -366,6 +366,7 @@ mod tests {
             reason: "permitted".into(),
             status: "succeeded".into(),
             effect: "none".into(),
+            summary: "Page text read.".into(),
         };
 
         for change in [
@@ -383,6 +384,32 @@ mod tests {
             assert!(
                 app.contains(&format!("case \"{kind}\":")),
                 "the workbench does not handle the {kind} change"
+            );
+        }
+    }
+
+    #[test]
+    fn every_catalog_tool_has_a_medallion() {
+        let app = include_str!("../../ui/app.js");
+        let language = include_str!("../language/mod.rs");
+        let mut tools: Vec<&str> = language
+            .match_indices("\"browser_")
+            .filter_map(|(index, _)| {
+                let rest = &language[index + 1..];
+                rest.find('"').map(|end| &rest[..end])
+            })
+            .collect();
+        tools.sort_unstable();
+        tools.dedup();
+        assert!(
+            tools.len() >= 20,
+            "expected the catalog, saw {}",
+            tools.len()
+        );
+        for tool in tools {
+            assert!(
+                app.contains(&format!("{tool}: \"")),
+                "{tool} has no medallion, so its row would fall back to a generic glyph"
             );
         }
     }

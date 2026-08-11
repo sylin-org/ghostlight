@@ -276,6 +276,7 @@ impl ApplicationExecutor {
             terminal.decision,
             &status,
             &effect,
+            &terminal.result.summary,
         );
         let _ = self.audit.record(&record);
         gate.complete(terminal.result)

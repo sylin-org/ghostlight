@@ -143,7 +143,39 @@ function shortId(value) {
   return text.length <= 20 ? text : `${text.slice(0, 10)}...${text.slice(-6)}`;
 }
 
-const glyphFor = entry => GLYPHS[ACTIVITY_GLYPH[entry.activity] ?? "scan"];
+/**
+ * A settled record has no presentation activity, so its medallion comes from the tool.
+ * Without this every historical row wears the same glyph and the queue reads as one texture.
+ */
+const TOOL_GLYPH = {
+  browser_open_page: "navigate",
+  browser_navigate_page: "navigate",
+  browser_navigate_history: "navigate",
+  browser_reload_page: "navigate",
+  browser_activate_tab: "navigate",
+  browser_scroll_page: "navigate",
+  browser_read_page: "scan",
+  browser_inspect_page: "scan",
+  browser_find: "scan",
+  browser_list_tabs: "scan",
+  browser_set_zoom: "scan",
+  browser_click: "pointer",
+  browser_hover: "pointer",
+  browser_drag: "pointer",
+  browser_close_tab: "pointer",
+  browser_type_text: "keyboard",
+  browser_fill_form: "keyboard",
+  browser_press_key: "keyboard",
+  browser_take_screenshot: "camera",
+  browser_wait: "wait",
+  browser_handle_dialog: "wait",
+  browser_run_script: "workwheel",
+  browser_run_sequence: "workwheel",
+  browser_upload_files: "workwheel"
+};
+
+const glyphFor = entry =>
+  GLYPHS[ACTIVITY_GLYPH[entry.activity] ?? TOOL_GLYPH[entry.tool] ?? "scan"];
 const capabilityClass = entry => CAPABILITY_CLASS[entry.capability] ?? "cap-read";
 
 /* -------------------------------- entries ------------------------------- */
@@ -167,7 +199,9 @@ function entryFromRecord(record, existing) {
     invocation: record.invocation,
     workspace: record.workspace,
     tool: record.tool,
-    activity: existing?.activity ?? "Ghostlight",
+    // No activity when the record was restored rather than watched: the medallion then comes
+    // from the tool. Defaulting to the quiet label is what made every row identical.
+    activity: existing?.activity,
     capability: record.capability,
     startedAt: existing?.startedAt,
     endedAt: record.timestamp_ms,
@@ -176,6 +210,7 @@ function entryFromRecord(record, existing) {
     reason: record.reason,
     status: record.status,
     effect: record.effect,
+    summary: record.summary,
     settled: true
   };
 }
@@ -210,10 +245,9 @@ const EFFECT_STORY = {
  */
 function describe(entry) {
   if (!entry.settled) return entry.activity;
+  if (entry.summary) return entry.summary;
   if (isBlocked(entry)) return entry.reason ? words(entry.reason) : "blocked";
-  const story = EFFECT_STORY[entry.effect];
-  if (story) return story;
-  return entry.status ? words(entry.status) : "completed";
+  return EFFECT_STORY[entry.effect] || (entry.status ? words(entry.status) : "completed");
 }
 
 /** The client that asked, resolved through the current sessions when it is still connected. */

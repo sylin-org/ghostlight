@@ -596,6 +596,9 @@ pub struct AuditRecord {
     pub status: String,
     /// Terminal effect class.
     pub effect: String,
+    /// Ghostlight-authored sentence naming what happened. Page content never authors it.
+    #[serde(default)]
+    pub summary: String,
 }
 
 impl AuditRecord {
@@ -611,6 +614,7 @@ impl AuditRecord {
         decision: Decision,
         status: &str,
         effect: &str,
+        summary: &str,
     ) -> Self {
         Self {
             timestamp_ms: unix_ms(),
@@ -623,6 +627,7 @@ impl AuditRecord {
             reason: decision.reason,
             status: status.into(),
             effect: effect.into(),
+            summary: summary.into(),
         }
     }
 }
@@ -852,6 +857,7 @@ mod tests {
             },
             "succeeded",
             "applied",
+            "Page text read.",
         );
         let value = serde_json::to_value(record).unwrap();
         let object = value.as_object().unwrap();

@@ -853,6 +853,8 @@ pub struct HistoryItem {
     pub status: String,
     /// Effect class.
     pub effect: String,
+    /// Ghostlight-authored sentence naming what happened.
+    pub summary: String,
 }
 
 impl From<AuditRecord> for HistoryItem {
@@ -870,6 +872,7 @@ impl From<AuditRecord> for HistoryItem {
             reason: value.reason.as_str().into(),
             status: value.status,
             effect: value.effect,
+            summary: value.summary,
         }
     }
 }
@@ -1171,6 +1174,7 @@ mod tests {
             },
             "succeeded",
             "none",
+            "Page text read.",
         );
         sink.record(&record).unwrap();
 
@@ -1212,6 +1216,7 @@ mod tests {
                 },
                 "succeeded",
                 "wrote",
+                "Page text read.",
             ))
             .unwrap();
 
