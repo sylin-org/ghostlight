@@ -18,12 +18,14 @@ use ghostlight_bridge::browser::{
 };
 use ghostlight_bridge::service::ServiceContent;
 use serde_json::{json, Value};
+use url::Url;
 use uuid::Uuid;
 
 use crate::browser::{BrowserError, BrowserPort};
 use crate::events::{DenialPresentation, DomainEvent};
 use crate::governance::{
-    AuditRecord, AuditSink, AuthoritySnapshot, Capability, Decision, GovernanceFacade, ReasonCode,
+    AuditRecord, AuditSink, AuthoritySnapshot, Capability, Decision, GovernanceFacade, Observed,
+    ReasonCode,
 };
 use crate::language::{
     self, Click, Drag, FillForm, FormField, Hover, Operation, PressKey, RunScript, RunSequence,
@@ -65,10 +67,17 @@ pub struct ApplicationExecutor {
     workbench: WorkbenchProjection,
     audit: Arc<dyn AuditSink>,
     active_authority: ActiveAuthorityRegistry,
+    observations: ObservationRegistry,
 }
 
 /// Current immutable invocation snapshots used only to govern asynchronous browser events.
 pub type ActiveAuthorityRegistry = Arc<Mutex<HashMap<String, AuthoritySnapshot>>>;
+
+/// What each in-flight invocation has been observed doing at the browser boundary.
+///
+/// An entry lives from the invocation's first browser crossing until the completion path reads it,
+/// which happens exactly once per invocation.
+type ObservationRegistry = Arc<Mutex<HashMap<String, Observed>>>;
 
 impl ApplicationExecutor {
     /// Construct the orchestrator's only model-requested mutation entry point.
@@ -89,6 +98,7 @@ impl ApplicationExecutor {
             workbench,
             audit,
             active_authority: Arc::new(Mutex::new(HashMap::new())),
+            observations: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -296,7 +306,8 @@ impl ApplicationExecutor {
             &effect,
             &terminal.result.summary,
             duration_ms,
-        );
+        )
+        .with_observation(self.take_observation(&terminal.result.invocation));
         let _ = self.audit.record(&record);
         gate.complete(terminal.result)
             .expect("single executor completion path");
@@ -391,6 +402,10 @@ impl ApplicationExecutor {
         match lease.tabs() {
             Ok(tabs) => {
                 let facts: Vec<_> = tabs.into_iter().map(|tab| json!({"tab":tab.handle.as_str(),"title":tab.title,"url":tab.url,"active":tab.active,"readiness":readiness(tab.readiness)})).collect();
+                let summary = format!(
+                    "Listed {}.",
+                    counted(facts.len(), "controlled tab", "controlled tabs")
+                );
                 self.succeeded(
                     context,
                     decision,
@@ -398,7 +413,7 @@ impl ApplicationExecutor {
                     Effect::None,
                     Readiness::NotApplicable,
                     true,
-                    "Controlled tabs listed.",
+                    &summary,
                     json!({"tabs":facts}),
                 )
             }
@@ -849,7 +864,11 @@ impl ApplicationExecutor {
                     let _ = lease.hold_tab(&selected.handle);
                     return self.blocked(context, landing, Some(tab_id), Effect::None, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}));
                 }
-                self.succeeded(context, landing, Some(tab_id), Effect::None, readiness(selected.readiness), true, "Page text read.", json!({"tab":selected.handle.as_str(),"url":url,"title":bounded(&title,500),"text":bounded(&text,max_chars),"truncated":truncated || text.chars().count() > max_chars,"document_generation":selected.generation}))
+                let summary = format!(
+                    "Read {} of page text.",
+                    counted(word_count(&text), "word", "words")
+                );
+                self.succeeded(context, landing, Some(tab_id), Effect::None, readiness(selected.readiness), true, &summary, json!({"tab":selected.handle.as_str(),"url":url,"title":bounded(&title,500),"text":bounded(&text,max_chars),"truncated":truncated || text.chars().count() > max_chars,"document_generation":selected.generation}))
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
@@ -876,8 +895,8 @@ impl ApplicationExecutor {
                 kind: kind.into(),
                 max_items,
             },
-            "Page inspected.",
-            "items",
+            "Inspected the page and found",
+            ("item", "items"),
         )
     }
 
@@ -901,11 +920,15 @@ impl ApplicationExecutor {
                 kind: kind.into(),
                 max_results,
             },
-            "Targets found.",
-            "matches",
+            "Found",
+            ("match", "matches"),
         )
     }
 
+    /// One governed target retrieval.
+    ///
+    /// `verb` and `noun` compose the summary once the count is known, and the plural noun is also
+    /// the fact key, so a row and its facts cannot disagree about what was counted.
     #[allow(clippy::too_many_arguments)]
     fn targets_operation(
         &self,
@@ -914,8 +937,8 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         capability: Capability,
         command: BrowserCommand,
-        summary: &str,
-        fact_key: &str,
+        verb: &str,
+        noun: (&str, &str),
     ) -> Terminal {
         let selected = match lease.select_tab(requested_tab) {
             Ok(tab) => tab,
@@ -960,10 +983,11 @@ impl ApplicationExecutor {
                     Err(error) => return self.workspace_failure(context, error),
                 };
                 let items: Vec<_> = mapped.into_iter().map(|(handle, target)| json!({"target":handle.as_str(),"role":bounded(&target.role,100),"name":bounded(&target.name,500),"state":target.state,"credential_class":target.credential_class})).collect();
+                let summary = format!("{verb} {}.", counted(items.len(), noun.0, noun.1));
                 let mut facts = serde_json::Map::new();
                 facts.insert("tab".into(), json!(selected.handle.as_str()));
                 facts.insert("document_generation".into(), json!(selected.generation));
-                facts.insert(fact_key.into(), json!(items));
+                facts.insert(noun.1.into(), json!(items));
                 self.succeeded(
                     context,
                     decision,
@@ -971,7 +995,7 @@ impl ApplicationExecutor {
                     Effect::None,
                     readiness(selected.readiness),
                     true,
-                    summary,
+                    &summary,
                     Value::Object(facts),
                 )
             }
@@ -1035,7 +1059,11 @@ impl ApplicationExecutor {
                     Ok(view) => view,
                     Err(error) => return self.workspace_failure(context, error),
                 };
-                let mut terminal = self.succeeded(context, decision, Some(tab_id), Effect::None, readiness(selected.readiness), true, "Screenshot captured.", json!({"tab":selected.handle.as_str(),"view":view.as_str(),"mime_type":mime_type,"width":width,"height":height}));
+                let summary = format!(
+                    "Captured the {} at {width}x{height}.",
+                    if full_page { "full page" } else { "viewport" }
+                );
+                let mut terminal = self.succeeded(context, decision, Some(tab_id), Effect::None, readiness(selected.readiness), true, &summary, json!({"tab":selected.handle.as_str(),"view":view.as_str(),"mime_type":mime_type,"width":width,"height":height}));
                 terminal.result = terminal
                     .result
                     .with_content(ServiceContent::Image { mime_type, data });
@@ -1416,10 +1444,35 @@ impl ApplicationExecutor {
                 value,
             })
             .collect();
-        match self.dispatch(context, BrowserCommand::Fill { tab_id: selected.physical_id, fields, submit_locator: submit.map(|target| target.locator) }) {
-            Ok(BrowserOutcome::Filled { tab, filled_count, submitted, committed_urls }) => self.action_success(context, lease, decision, capability, &selected, &tab, &committed_urls, "Form fields filled.", json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted})),
+        match self.dispatch(
+            context,
+            BrowserCommand::Fill {
+                tab_id: selected.physical_id,
+                fields,
+                submit_locator: submit.map(|target| target.locator),
+            },
+        ) {
+            Ok(BrowserOutcome::Filled {
+                tab,
+                filled_count,
+                submitted,
+                committed_urls,
+            }) => {
+                let summary = format!(
+                    "Filled {}{}.",
+                    counted(filled_count, "field", "fields"),
+                    if submitted {
+                        " and submitted the form"
+                    } else {
+                        ""
+                    }
+                );
+                self.action_success(context, lease, decision, capability, &selected, &tab, &committed_urls, &summary, json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted}))
+            }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
-            Err(error) => self.browser_failure(context, decision, error, Some(selected.physical_id)),
+            Err(error) => {
+                self.browser_failure(context, decision, error, Some(selected.physical_id))
+            }
         }
     }
 
@@ -1679,6 +1732,10 @@ impl ApplicationExecutor {
                 && uploaded_count == value.paths.len()
                 && uploaded_bytes == total =>
             {
+                let summary = format!(
+                    "Uploaded {} to the selected control.",
+                    counted(uploaded_count, "file", "files")
+                );
                 self.succeeded(
                     context,
                     decision,
@@ -1686,7 +1743,7 @@ impl ApplicationExecutor {
                     Effect::Applied,
                     readiness(selected.readiness),
                     false,
-                    "Files uploaded to the selected control.",
+                    &summary,
                     json!({"tab":selected.handle.as_str(),"target":target.handle.as_str(),"uploaded_count":uploaded_count,"uploaded_bytes":uploaded_bytes}),
                 )
             }
@@ -1889,6 +1946,19 @@ impl ApplicationExecutor {
                 } else {
                     Status::Failed
                 };
+                // The condition is a closed vocabulary and its value is not: only the name of the
+                // condition joins the sentence that reaches audit.
+                let summary = if satisfied {
+                    format!(
+                        "Wait condition {} was satisfied after {elapsed_ms} ms.",
+                        value.condition
+                    )
+                } else {
+                    format!(
+                        "Wait condition {} was not satisfied within {elapsed_ms} ms.",
+                        value.condition
+                    )
+                };
                 Terminal {
                     result: InvocationResult::new(
                         context.invocation,
@@ -1896,11 +1966,7 @@ impl ApplicationExecutor {
                         Effect::None,
                         readiness(observed),
                         true,
-                        if satisfied {
-                            "Wait condition satisfied."
-                        } else {
-                            "Wait condition was not satisfied before the timeout."
-                        },
+                        &summary,
                         json!({"tab":selected.handle.as_str(),"condition":value.condition,"satisfied":satisfied,"elapsed_ms":elapsed_ms}),
                         if satisfied {
                             vec![]
@@ -2333,17 +2399,50 @@ impl ApplicationExecutor {
         context.snapshot.authorize_tab_close()
     }
 
+    /// The one browser seam.
+    ///
+    /// Every model-requested browser command crosses here, which is why the invocation's
+    /// observation is gathered here rather than at each of the call sites that funnel into it. A
+    /// tool written tomorrow is observed for free; a tool that had to remember would not be.
     fn dispatch(
         &self,
         context: &InvocationContext<'_>,
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
-        self.browser.call(
+        let outcome = self.browser.call(
             context.workspace.as_str(),
             command,
             context.deadline,
             context.cancellation.flag(),
-        )
+        );
+        if let Ok(outcome) = &outcome {
+            self.observe(context.invocation, observed_from(outcome));
+        }
+        outcome
+    }
+
+    /// Record what one crossing saw, on top of what the invocation already observed.
+    fn observe(&self, invocation: &str, observed: Observed) {
+        let mut registry = self.observations();
+        let merged = registry
+            .remove(invocation)
+            .unwrap_or_default()
+            .merged(observed);
+        registry.insert(invocation.into(), merged);
+    }
+
+    /// Take the invocation's observation and leave nothing behind.
+    ///
+    /// The completion path runs exactly once per invocation, so reading here is what keeps the
+    /// registry bounded by work in flight rather than by work ever done.
+    fn take_observation(&self, invocation: &str) -> Observed {
+        self.observations().remove(invocation).unwrap_or_default()
+    }
+
+    fn observations(&self) -> std::sync::MutexGuard<'_, HashMap<String, Observed>> {
+        self.observations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn compensate_close(
@@ -2915,6 +3014,126 @@ fn readiness(value: BrowserReadiness) -> Readiness {
     }
 }
 
+/// The product readiness vocabulary as a name, so audit, surface, and result all say one thing.
+fn readiness_name(value: Readiness) -> &'static str {
+    match value {
+        Readiness::NotApplicable => "not_applicable",
+        Readiness::Loading => "loading",
+        Readiness::Interactive => "interactive",
+        Readiness::Complete => "complete",
+        Readiness::Unknown => "unknown",
+    }
+}
+
+/// What one crossing of the browser boundary can honestly say about the action.
+///
+/// This match is exhaustive on purpose: a new browser outcome must not compile until someone
+/// decides what it observes. That is the whole point of observing at the seam instead of asking
+/// each tool to remember.
+///
+/// A count is recorded only where the summary beside it names what was counted, because `count` is
+/// general by design and takes its meaning from that sentence.
+fn observed_from(outcome: &BrowserOutcome) -> Observed {
+    match outcome {
+        BrowserOutcome::TabOpened { tab, .. }
+        | BrowserOutcome::Navigated { tab, .. }
+        | BrowserOutcome::Activated { tab, .. }
+        | BrowserOutcome::Dragged { tab, .. }
+        | BrowserOutcome::KeyPressed { tab, .. }
+        | BrowserOutcome::Typed { tab, .. }
+        | BrowserOutcome::ScriptEvaluated { tab, .. } => landed(tab),
+        BrowserOutcome::Filled {
+            tab, filled_count, ..
+        } => Observed {
+            count: measured(*filled_count),
+            ..landed(tab)
+        },
+        // The text itself is counted and dropped here. Only the count crosses into audit.
+        BrowserOutcome::Text { text, url, .. } => Observed {
+            host: observed_host(url),
+            count: measured(word_count(text)),
+            ..Observed::default()
+        },
+        BrowserOutcome::Tabs { tabs } => Observed {
+            count: measured(tabs.len()),
+            ..Observed::default()
+        },
+        BrowserOutcome::Targets { targets, .. } => Observed {
+            count: measured(targets.len()),
+            ..Observed::default()
+        },
+        BrowserOutcome::Screenshot { width, height, .. } => Observed {
+            width: Some(*width),
+            height: Some(*height),
+            ..Observed::default()
+        },
+        BrowserOutcome::FilesUploaded { uploaded_count, .. } => Observed {
+            count: measured(*uploaded_count),
+            ..Observed::default()
+        },
+        BrowserOutcome::Observed {
+            elapsed_ms,
+            readiness: observed,
+            ..
+        } => Observed {
+            readiness: Some(readiness_name(readiness(*observed)).into()),
+            count: measured(*elapsed_ms),
+            ..Observed::default()
+        },
+        // Receipts that carry a tab id and nothing else worth measuring. What the invocation
+        // already observed stands.
+        BrowserOutcome::TabFocused { .. }
+        | BrowserOutcome::TabClosed { .. }
+        | BrowserOutcome::TargetsDescribed { .. }
+        | BrowserOutcome::Scrolled { .. }
+        | BrowserOutcome::Zoomed { .. }
+        | BrowserOutcome::Hovered { .. }
+        | BrowserOutcome::Dialog { .. }
+        | BrowserOutcome::DialogHandled { .. }
+        | BrowserOutcome::Presented { .. }
+        | BrowserOutcome::Cancelled
+        | BrowserOutcome::EffectUnknown { .. } => Observed::default(),
+    }
+}
+
+/// Where a committed landing put the browser, and how far that document had come.
+fn landed(tab: &PhysicalTab) -> Observed {
+    Observed {
+        host: observed_host(&tab.url),
+        readiness: Some(readiness_name(readiness(tab.readiness)).into()),
+        ..Observed::default()
+    }
+}
+
+/// The host of a landed URL, and never anything after it.
+fn observed_host(url: &str) -> Option<String> {
+    Url::parse(url)
+        .ok()?
+        .host_str()
+        .map(str::to_ascii_lowercase)
+}
+
+/// A measured quantity as the observation's general count, saturating rather than wrapping.
+fn measured<T: TryInto<u32>>(value: T) -> Option<u32> {
+    Some(value.try_into().unwrap_or(u32::MAX))
+}
+
+/// How many words of text a page returned. The words themselves go no further than this count.
+fn word_count(text: &str) -> usize {
+    text.split_whitespace().count()
+}
+
+/// "1 field" or "3 fields": a measurement with the noun that gives it meaning.
+///
+/// The observation beside it is one general count, so the sentence is where the noun lives.
+fn counted(count: usize, singular: &str, plural: &str) -> String {
+    if count == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{count} {plural}")
+    }
+}
+
 fn bounded(value: &str, maximum: usize) -> String {
     value.chars().take(maximum).collect()
 }
@@ -2965,7 +3184,10 @@ mod tests {
     use crate::workbench::WorkbenchProjection;
     use crate::workspace::WorkspaceStore;
 
-    use super::{observation_budget_ms, ApplicationExecutor, CancellationToken, Effect, Status};
+    use super::{
+        observation_budget_ms, readiness_name, ApplicationExecutor, CancellationToken, Effect,
+        Readiness, Status,
+    };
 
     #[derive(Default)]
     struct MemoryAudit(Mutex<Vec<AuditRecord>>);
@@ -3150,6 +3372,180 @@ mod tests {
             BrowserCommand::OpenTab { url, group_title }
                 if url == "https://example.com" && group_title == "Ghostlight - test"
         ));
+    }
+
+    #[test]
+    fn readiness_names_stay_the_vocabulary_a_result_uses() {
+        for value in [
+            Readiness::NotApplicable,
+            Readiness::Loading,
+            Readiness::Interactive,
+            Readiness::Complete,
+            Readiness::Unknown,
+        ] {
+            let encoded = serde_json::to_value(value).unwrap();
+            assert_eq!(
+                encoded.as_str().unwrap(),
+                readiness_name(value),
+                "the observation and the result would disagree about readiness"
+            );
+        }
+    }
+
+    #[test]
+    fn actions_are_observed_at_the_seam_without_carrying_page_detail() {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://Example.com/patients/48219?ssn=1#note"),
+            committed_urls: vec!["https://example.com/patients/48219?ssn=1#note".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_open_page",
+            json!({"url":"https://example.com/patients/48219?ssn=1#note"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(opened.status, Status::Succeeded);
+        let handle = opened.facts["tab"].as_str().unwrap().to_owned();
+
+        browser.push(Ok(BrowserOutcome::Text {
+            tab_id: 7,
+            text: "Patient 48219 has an appointment".into(),
+            truncated: false,
+            title: "Example".into(),
+            url: "https://example.com/patients/48219?ssn=1#note".into(),
+        }));
+        let read = executor.execute(
+            &workspace,
+            "browser_read_page",
+            json!({"tab":handle}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(read.status, Status::Succeeded);
+        assert_eq!(read.summary, "Read 5 words of page text.");
+
+        let records = audit.0.lock().unwrap();
+        let landing = &records[0].observed;
+        assert_eq!(landing.host.as_deref(), Some("example.com"));
+        assert_eq!(landing.readiness.as_deref(), Some("complete"));
+        let text = &records[1].observed;
+        assert_eq!(text.host.as_deref(), Some("example.com"));
+        assert_eq!(text.count, Some(5));
+
+        // The model-facing facts legitimately carry the URL and the text. The audit carries the
+        // same action, and none of it.
+        assert!(read.facts["url"].as_str().unwrap().contains("48219"));
+        let encoded = serde_json::to_string(&*records).unwrap();
+        for detail in ["patients", "48219", "ssn", "note", "appointment"] {
+            assert!(
+                !encoded.contains(detail),
+                "the audit leaked {detail} from a page"
+            );
+        }
+    }
+
+    #[test]
+    fn an_observation_never_outlives_the_invocation_it_describes() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        executor.execute(
+            &workspace,
+            "browser_open_page",
+            json!({"url":"https://example.com"}),
+            None,
+            &CancellationToken::default(),
+        );
+        // A failure before any browser crossing must not leave a key behind either.
+        executor.execute(
+            &workspace,
+            "browser_open_page",
+            json!({"nonsense":true}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert!(
+            executor.observations().is_empty(),
+            "the registry grows with every invocation instead of with work in flight"
+        );
+    }
+
+    #[test]
+    fn a_capture_reports_its_size_and_a_wait_reports_how_long_it_waited() {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_open_page",
+            json!({"url":"https://example.com"}),
+            None,
+            &CancellationToken::default(),
+        );
+        let handle = opened.facts["tab"].as_str().unwrap().to_owned();
+        browser.push(Ok(BrowserOutcome::Screenshot {
+            tab_id: 7,
+            mime_type: "image/jpeg".into(),
+            data: "image".into(),
+            width: 1280,
+            height: 720,
+            viewport: ViewportGeometry {
+                scope: CaptureScope::Viewport,
+                page_x: 0.0,
+                page_y: 0.0,
+                css_width: 1280.0,
+                css_height: 720.0,
+                visual_page_x: 0.0,
+                visual_page_y: 0.0,
+                visual_css_width: 1280.0,
+                visual_css_height: 720.0,
+                device_scale: 1.0,
+                zoom: 1.0,
+                output_scale: 1.0,
+            },
+        }));
+        let captured = executor.execute(
+            &workspace,
+            "browser_take_screenshot",
+            json!({"tab":handle}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(captured.summary, "Captured the viewport at 1280x720.");
+
+        browser.push(Ok(BrowserOutcome::Observed {
+            tab_id: 7,
+            satisfied: true,
+            elapsed_ms: 1_830,
+            readiness: BrowserReadiness::Complete,
+        }));
+        let waited = executor.execute(
+            &workspace,
+            "browser_wait",
+            json!({"tab":handle,"condition":"load_ready","timeout_ms":5_000}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(
+            waited.summary,
+            "Wait condition load_ready was satisfied after 1830 ms."
+        );
+
+        let records = audit.0.lock().unwrap();
+        let capture = &records[1].observed;
+        assert_eq!((capture.width, capture.height), (Some(1280), Some(720)));
+        // A capture is its own invocation. It reports the size it took and leaves the landing to
+        // the invocation that navigated, because an observation never outlives its invocation.
+        assert_eq!(capture.host.as_deref(), None);
+        let wait = &records[2].observed;
+        assert_eq!(wait.count, Some(1_830));
+        assert_eq!(wait.readiness.as_deref(), Some("complete"));
     }
 
     #[test]

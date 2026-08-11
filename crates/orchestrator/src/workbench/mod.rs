@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::browser::{BrowserPort, RelayBrowserPort};
 use crate::events::DomainEvent;
-use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade};
+use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade, Observed};
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSummary,
 };
@@ -857,6 +857,8 @@ pub struct HistoryItem {
     pub summary: String,
     /// How long the work took, in milliseconds.
     pub duration_ms: u64,
+    /// What the action did, observed where it crossed the browser boundary.
+    pub observed: Observed,
 }
 
 impl From<AuditRecord> for HistoryItem {
@@ -876,6 +878,7 @@ impl From<AuditRecord> for HistoryItem {
             effect: value.effect,
             summary: value.summary,
             duration_ms: value.duration_ms,
+            observed: value.observed,
         }
     }
 }
@@ -1110,11 +1113,14 @@ mod tests {
     use ghostlight_bridge::browser::PresentationActivity;
 
     use crate::events::{DenialPresentation, DomainEvent};
-    use crate::governance::{AuditRecord, AuditSink, Capability, Decision, GovernanceFacade};
+    use crate::governance::{
+        AuditRecord, AuditSink, Capability, Decision, GovernanceFacade, Observed,
+    };
 
     use super::{
-        NotificationKind, ProjectingAuditSink, WorkbenchChange, WorkbenchEvent, WorkbenchEventSink,
-        WorkbenchPresentationError, WorkbenchPresentationPort, WorkbenchProjection,
+        HistoryItem, NotificationKind, ProjectingAuditSink, WorkbenchChange, WorkbenchEvent,
+        WorkbenchEventSink, WorkbenchPresentationError, WorkbenchPresentationPort,
+        WorkbenchProjection,
     };
 
     #[derive(Default)]
@@ -1177,13 +1183,23 @@ mod tests {
             },
             "succeeded",
             "none",
-            "Page text read.",
+            "Read 1240 words of page text.",
             1200,
-        );
+        )
+        .with_observation(Observed {
+            host: Some("example.com".into()),
+            count: Some(1240),
+            ..Observed::default()
+        });
         sink.record(&record).unwrap();
 
         assert!(projection.operations().is_empty());
         assert_eq!(projection.history()[0].tool, "browser_read_page");
+        assert_eq!(
+            projection.history()[0].observed.host.as_deref(),
+            Some("example.com"),
+            "history dropped what the action was observed doing"
+        );
         assert_eq!(durable.0.lock().unwrap().len(), 1);
     }
 
@@ -1262,11 +1278,44 @@ mod tests {
             capability: Capability::Execute,
         });
 
+        let settled = WorkbenchChange::OperationSettled {
+            record: HistoryItem::from(
+                AuditRecord::now(
+                    "invocation_1",
+                    "workspace_1",
+                    "browser_run_script",
+                    Capability::Execute,
+                    "authority_1",
+                    Decision {
+                        allowed: true,
+                        reason: crate::governance::ReasonCode::Permitted,
+                    },
+                    "succeeded",
+                    "applied",
+                    "Page script evaluated.",
+                    140,
+                )
+                .with_observation(Observed {
+                    host: Some("example.com".into()),
+                    readiness: Some("complete".into()),
+                    ..Observed::default()
+                }),
+            ),
+        };
+
         let published = events.0.lock().unwrap();
-        let encoded = serde_json::to_string(&published[0]).unwrap();
-        for forbidden in ["url", "selector", "content", "password"] {
-            assert!(!encoded.contains(forbidden), "leaked {forbidden}");
+        for encoded in [
+            serde_json::to_string(&published[0]).unwrap(),
+            serde_json::to_string(&settled).unwrap(),
+        ] {
+            for forbidden in ["url", "selector", "content", "password"] {
+                assert!(!encoded.contains(forbidden), "leaked {forbidden}");
+            }
         }
+        // The settled change still carries the observation the surface renders.
+        assert!(serde_json::to_string(&settled)
+            .unwrap()
+            .contains("example.com"));
     }
 
     #[test]

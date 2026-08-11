@@ -266,6 +266,7 @@ try {
   const read = structured(await mcp.request("tools/call", { name: "browser_read_page", arguments: { tab: restartedHandle } }));
   assert.equal(read.status, "succeeded");
   assert.equal(read.facts.text, "Example Domain");
+  assert.equal(read.summary, "Read 2 words of page text.");
 
   const delayed = mcp.beginRequest("tools/call", { name: "browser_wait", arguments: { tab: restartedHandle, condition: "load_ready" } });
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
@@ -280,6 +281,17 @@ try {
   assert.equal(closed.status, "succeeded");
   assert.equal(closed.facts.closed, true);
   assert.equal(existsSync(auditFile), true);
+
+  // The real executable's audit file, not a fixture: what an action did, and none of what it saw.
+  const records = readFileSync(auditFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const readRecord = records.findLast((record) => record.tool === "browser_read_page");
+  assert.equal(readRecord.observed.host, "example.com");
+  assert.equal(readRecord.observed.count, 2);
+  assert.equal(readRecord.observed.readiness, null);
+  const openRecord = records.findLast((record) => record.tool === "browser_open_page");
+  assert.equal(openRecord.observed.host, "example.com");
+  assert.equal(openRecord.observed.readiness, "complete");
+  assert.equal(records.some((record) => JSON.stringify(record).includes("Example Domain")), false);
   console.log("process journey ok: stable relays -> service restart -> MCP/browser reconnect -> open/read/close");
 } finally {
   for (const child of children.reverse()) {

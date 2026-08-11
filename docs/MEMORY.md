@@ -84,7 +84,10 @@ Those sources win when they disagree with this file.
 - Browser screenshots intentionally suppress the extension's visual layer. Visual QA must observe
   externally; a clean captured page is not evidence that feedback failed.
 - Debugging and audit remain metadata-only. Never persist MCP bodies, page content, results,
-  screenshots, form values, scripts, paths, or file bytes.
+  screenshots, form values, scripts, paths, or file bytes. The landed host is the one deliberate
+  exception, gathered at the browser seam as `Observed`: it answers where the agent went and is
+  already visible in the user's own tab strip, while path, query, and fragment are where
+  identifying detail sits. Measurements about an action are recorded; nothing the action saw is.
 - Correctness kept by memory rots. A hand-maintained list that a new case must be added to will
   eventually miss one: the extension reduced-motion selector list silently skipped new effects, and
   per-tool fact reporting would have made every new tool silent by default. Derive the list from a
@@ -106,6 +109,7 @@ Those sources win when they disagree with this file.
 | Integrated desktop decision | [`adr/0102-integrated-desktop-workbench.md`](adr/0102-integrated-desktop-workbench.md) |
 | Visual vocabulary, both surfaces | [`design/visual-language.md`](design/visual-language.md) |
 | Where per-action facts belong | [`design/action-observations.md`](design/action-observations.md) |
+| What an audit record contains | [`guides/siem-integration.md`](guides/siem-integration.md) |
 | Build, restart, and live validation | [`DEV-LOOP.md`](DEV-LOOP.md) |
 | Planned release procedure | [`RELEASE.md`](RELEASE.md) |
 | Historical deep design | [`SPEC.md`](SPEC.md) |

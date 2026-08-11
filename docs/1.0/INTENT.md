@@ -140,7 +140,7 @@ The unpacked extension is a complete local product surface, not an invisible rel
 - Managed authority that is present but invalid fails closed.
 - Credential-class fields require visible user handoff. Ghostlight never types secrets.
 - Local file upload reads only paths explicitly supplied for that invocation, enforces count and
-  byte bounds before browser dispatch, and never records paths, names, or bytes in audit.
+  byte bounds before browser dispatch, and never records paths, names, or contents in audit.
 - Script execution is explicit `execute` authority. Its source and result are bounded and never
   enter audit or presentation.
 - Screenshot coordinates are accepted only with a current opaque view handle. A document commit,

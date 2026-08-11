@@ -212,6 +212,7 @@ function entryFromRecord(record, existing) {
     effect: record.effect,
     summary: record.summary,
     durationMs: record.duration_ms,
+    observed: record.observed ?? null,
     settled: true
   };
 }
@@ -246,16 +247,52 @@ const EFFECT_STORY = {
 };
 
 /**
- * The best sentence available for an entry.
+ * What a readiness adds to a settled row.
  *
- * A live operation names what it is doing. A settled one can only describe its governed
- * outcome, because the record is payload-free by design: no URL, no page text, no field value.
+ * Complete is the quiet case and earns no words. The others are the difference between "2.5s",
+ * which is reassurance, and "8.0s, never settled", which explains why an agent looked stuck.
  */
-function describe(entry) {
+const READINESS_NOTE = {
+  not_applicable: "",
+  complete: "",
+  interactive: "interactive",
+  loading: "never settled",
+  unknown: "readiness unknown"
+};
+
+const has = value => value !== null && value !== undefined;
+
+/** Whether the orchestrator measured this action, in which case its sentence already says so. */
+const measured = observed =>
+  Boolean(observed) && (has(observed.count) || (has(observed.width) && has(observed.height)));
+
+/**
+ * The sentence the orchestrator authored for an entry.
+ *
+ * A live operation names what it is doing. A settled one falls back to its governed outcome,
+ * because the record is payload-free by design: no page text, no field value, and no URL past
+ * the host the action landed on.
+ */
+function sentence(entry) {
   if (!entry.settled) return entry.activity;
   if (entry.summary) return entry.summary;
   if (isBlocked(entry)) return entry.reason ? words(entry.reason) : "blocked";
   return EFFECT_STORY[entry.effect] || (entry.status ? words(entry.status) : "completed");
+}
+
+/**
+ * What the row says happened.
+ *
+ * A measured action already names its measurement in its sentence, so the sentence stands. A
+ * landing that measured nothing says far more as the host it reached than as boilerplate.
+ */
+function describe(entry) {
+  const observed = entry.settled ? entry.observed : null;
+  const body = observed && has(observed.host) && !measured(observed)
+    ? observed.host
+    : sentence(entry);
+  const note = observed ? READINESS_NOTE[observed.readiness] ?? "" : "";
+  return note ? `${body} (${note})` : body;
 }
 
 /** The client that asked, resolved through the current sessions when it is still connected. */
@@ -265,10 +302,16 @@ function clientFor(workspace) {
 }
 
 function heroMarkup(entry) {
+  // The hero has room for the whole sentence, so the observation sits beside it as evidence
+  // rather than replacing it the way it does in a row.
+  const observed = entry.settled ? entry.observed : null;
+  const note = observed ? READINESS_NOTE[observed.readiness] ?? "" : "";
   const meta = [];
   if (entry.workspace) meta.push(`<span>${escapeHtml(clientFor(entry.workspace))}</span>`);
+  if (observed && has(observed.host)) meta.push(`<span><i></i>${escapeHtml(observed.host)}</span>`);
   if (entry.capability) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
   if (entry.settled && entry.status) meta.push(`<span><i></i>${escapeHtml(words(entry.status))}</span>`);
+  if (note) meta.push(`<span><i></i>${escapeHtml(note)}</span>`);
   if (entry.settled && entry.endedAt) meta.push(`<span><i></i>${escapeHtml(ago(entry.endedAt))} ago</span>`);
 
   const reason = isBlocked(entry) && entry.reason
@@ -276,7 +319,7 @@ function heroMarkup(entry) {
     : "";
 
   return `<div class="hero-tool">${escapeHtml(entry.tool)}<span class="cap-label">${escapeHtml(entry.capability ?? "read")}</span></div>`
-    + `<p class="hero-activity">${escapeHtml(describe(entry))}</p>`
+    + `<p class="hero-activity">${escapeHtml(sentence(entry))}</p>`
     + reason
     + (meta.length ? `<div class="hero-meta">${meta.join("")}</div>` : "");
 }

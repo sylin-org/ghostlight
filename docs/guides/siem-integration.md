@@ -26,7 +26,16 @@ this file.
   "allowed": true,
   "reason": "permitted",
   "status": "succeeded",
-  "effect": "none"
+  "effect": "none",
+  "summary": "Read 1240 words of page text.",
+  "duration_ms": 412,
+  "observed": {
+    "host": "example.com",
+    "readiness": "complete",
+    "count": 1240,
+    "width": null,
+    "height": null
+  }
 }
 ```
 
@@ -44,10 +53,28 @@ Fields are typo-closed:
 | `reason` | Stable closed reason such as `permitted`, `host_denied`, or `runtime_hold`. |
 | `status` | Terminal result status. |
 | `effect` | `none`, `applied`, `partial`, or `unknown`. |
+| `summary` | Ghostlight-authored sentence naming what happened. Page content never authors it. |
+| `duration_ms` | Decode to terminal outcome. For a navigation, the time to a settled landing. |
+| `observed` | What the action did, measured where it crossed the browser boundary. |
 
-There are deliberately no URLs, hosts, client names, page text, target descriptions, selectors,
-form values, filenames, paths, file bytes, scripts, screenshots, dialog text, policy rules, or
-model prompts.
+`observed` is a closed set of measurements gathered at that one boundary. Every field is null when
+the action could not see it:
+
+| Field | Meaning |
+| --- | --- |
+| `host` | Host the action landed on, lowercased. Never the path, query, or fragment. |
+| `readiness` | `not_applicable`, `loading`, `interactive`, `complete`, or `unknown`. |
+| `count` | However many things the action touched. `summary` names what was counted. |
+| `width`, `height` | Pixel size of a capture. |
+
+Records written before 1.0 have no `summary`, `duration_ms`, or `observed`; parse them as absent
+rather than as an error.
+
+The landed host is the one piece of page-derived text in a record, and it is deliberate: it answers
+"where did the agent go", it is already visible in the user's own tab strip, and the identifying
+detail of a URL lives after it. There are deliberately no full URLs, paths, queries, fragments,
+client names, page text, target descriptions, selectors, form values, filenames, file bytes,
+scripts, screenshots, dialog text, policy rules, or model prompts.
 
 ## Collection
 
@@ -60,9 +87,11 @@ Useful high-signal queries include:
 - `allowed = false` grouped by `reason` and `tool`;
 - `effect in (partial, unknown)` because those outcomes are never replay-safe;
 - `status = attention_required` or `reason = runtime_attention`;
+- `observed.host` grouped by `capability`, for where write and execute authority actually went;
+- `observed.readiness = loading` beside a long `duration_ms`, which is work that never settled;
 - changes in managed `invalid_authority` volume; and
 - gaps in expected endpoint delivery, which are collector health rather than browser truth.
 
-Do not join opaque ids to page content or inject URL collection into Ghostlight. If a compliance
-workflow requires content capture, it is a separate system with a separate consent and retention
-decision.
+Do not join opaque ids to page content or inject full-URL collection into Ghostlight. If a
+compliance workflow requires content capture, it is a separate system with a separate consent and
+retention decision.

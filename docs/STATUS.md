@@ -65,19 +65,23 @@ Re-run on 2026-08-11 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 76 Rust tests -- 64 in the orchestrator, 9 in the shared bridge, and 3
+- `cargo test --workspace`: 83 Rust tests -- 71 in the orchestrator, 9 in the shared bridge, and 3
   in the MCP connector.
 - `npm test --prefix extension`: 39 extension tests.
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
-  restart without replaying an interrupted effect, then complete open/read/close.
+  restart without replaying an interrupted effect, then complete open/read/close. It now also reads
+  the audit file the real executable wrote and checks that the read records a host and a word
+  count, and no page text.
 - `cargo build --workspace --target-dir .target-ghostlight-1.0`.
 - `node --check` on the bundled workbench script and the preview server.
 - The workbench renders against the repository preview server, which now drives the real sequenced
   event path, and uses the byte-identical original Ghostlight artwork.
 - Guard tests keep the surface and the orchestrator in step: every publishable change has a
   handler, every capability class has a visual treatment, every runtime intent stays reachable
-  (guarded by an exhaustive match), the published palette is present with the accent defined once,
-  the workbench capability grants listen without emit, and every catalog tool has a medallion.
+  (guarded by an exhaustive match), every observed fact reaches the surface, every readiness has a
+  note, the published palette is present with the accent defined once, the workbench capability
+  grants listen without emit, and every catalog tool has a medallion. Each of these was checked
+  against a negative control: breaking the thing it guards makes it fail.
 - The complete desktop-workbench change, from its starting revision through the live-monitor
   rebuild, has an empty diff under `crates/mcp-connector`, `crates/browser-connector`,
   `crates/bridge`, and `extension`.
@@ -95,15 +99,30 @@ Re-run on 2026-08-11 against the current tree:
   `PresentationSignal`, and the renderer draws one ring per click, dashed for a secondary button.
 - Audit records and workbench history carry the Ghostlight-authored `summary` and a measured
   `duration_ms`, so every row states what happened and how long it took.
-- Per-action observation is designed but not built. See
+- Per-action observation is built, at the seam it was designed for. See
   [`design/action-observations.md`](design/action-observations.md).
+  - `Observed { host, readiness, count, width, height }` is gathered in `Executor::dispatch`, keyed
+    by invocation, and read and cleared by the one completion path. Every tool benefits, including
+    tools not written yet, because the match on browser outcomes is exhaustive: a new outcome does
+    not compile until someone decides what it observes.
+  - The host is the deliberate line. Never the path, query, or fragment. A capture reports its
+    pixel size, a wait reports how long it waited and which condition it waited on, and a read
+    reports how many words it read.
+  - A count is recorded only where the Ghostlight-authored sentence beside it names what was
+    counted, so the count needs no per-tool wording table on the surface. Those summaries now state
+    their measurement: "Read 1240 words of page text.", "Filled 3 fields and submitted the form.",
+    "Found 7 matches.", "Captured the viewport at 1280x720."
+  - Rows show the host where a landing measured nothing, the sentence where it measured something,
+    and a readiness note where a document never settled. The hero keeps the sentence and carries
+    the host beside it.
+  - The audit stays payload-free. `InvocationResult::facts` still carries page text and full URLs
+    to the model; the observation is a separate closed type so there is no shortcut between them.
+    [`guides/siem-integration.md`](guides/siem-integration.md) now documents `summary`,
+    `duration_ms`, and `observed`, and states the host exception where it used to claim that no
+    host is ever recorded.
 
 ## Owed
 
-- Per-action observation: `Observed` at the `dispatch` seam, then host and readiness, then counts
-  tool by tool. Designed in [`design/action-observations.md`](design/action-observations.md).
-- `docs/1.0/INTENT.md` says file upload records no "paths, names, or bytes". Tighten "bytes" to
-  "contents" before any upload size is recorded, so document and code cannot be read as disagreeing.
 - The extension stylesheet could move to its own module now that it is static. Lowest value of the
   maintainability steps; needs about eight test assertions reworked.
 - The 13 open Dependabot pull requests target the 0.8 line and need reconciling against the 1.0

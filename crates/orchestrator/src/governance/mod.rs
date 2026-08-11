@@ -572,6 +572,57 @@ fn unix_ms() -> u64 {
     u64::try_from(millis).unwrap_or(u64::MAX)
 }
 
+/// Content-free observations about one action, gathered where it crosses the browser boundary.
+///
+/// This is deliberately not `InvocationResult::facts`. Facts legitimately carry page text and full
+/// URLs for the model; an audit record carries measurements and metadata only. Keeping the two as
+/// separate closed types is what makes copying one into the other impossible rather than merely
+/// discouraged.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Observed {
+    /// Host the action landed on, lowercased.
+    ///
+    /// Never the path, query, or fragment. The host answers "where did the agent go" and is already
+    /// visible in the user's own tab strip; the path is where a record number would sit.
+    #[serde(default)]
+    pub host: Option<String>,
+    /// Product readiness the browser reported, in the same vocabulary a result uses.
+    ///
+    /// This is what turns a bare `8.0s` into `8.0s, never settled`.
+    #[serde(default)]
+    pub readiness: Option<String>,
+    /// However many things the action touched.
+    ///
+    /// Deliberately general: the summary beside it names what was counted, because a field per tool
+    /// would not survive the catalog growing.
+    #[serde(default)]
+    pub count: Option<u32>,
+    /// Captured width in pixels.
+    #[serde(default)]
+    pub width: Option<u32>,
+    /// Captured height in pixels.
+    #[serde(default)]
+    pub height: Option<u32>,
+}
+
+impl Observed {
+    /// Fold a later crossing of the browser boundary into what the invocation already observed.
+    ///
+    /// A crossing that cannot see a fact leaves the earlier one standing, so an action that
+    /// describes targets before it fills them still reports where it happened.
+    #[must_use]
+    pub fn merged(self, later: Self) -> Self {
+        Self {
+            host: later.host.or(self.host),
+            readiness: later.readiness.or(self.readiness),
+            count: later.count.or(self.count),
+            width: later.width.or(self.width),
+            height: later.height.or(self.height),
+        }
+    }
+}
+
 /// A payload-free audit record produced after a terminal outcome.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -604,6 +655,9 @@ pub struct AuditRecord {
     /// For a navigation this is the time to a governed, settled landing.
     #[serde(default)]
     pub duration_ms: u64,
+    /// What the action did, observed where it crossed the browser boundary.
+    #[serde(default)]
+    pub observed: Observed,
 }
 
 impl AuditRecord {
@@ -635,7 +689,18 @@ impl AuditRecord {
             effect: effect.into(),
             summary: summary.into(),
             duration_ms,
+            observed: Observed::default(),
         }
+    }
+
+    /// Attach what the action was observed doing at the browser boundary.
+    ///
+    /// This arrives separately from `now` because only work that crossed that boundary has one:
+    /// a rejected call or an asynchronous landing denial observes nothing.
+    #[must_use]
+    pub fn with_observation(mut self, observed: Observed) -> Self {
+        self.observed = observed;
+        self
     }
 }
 
@@ -692,7 +757,7 @@ mod tests {
     use crate::language::RequestRestrictions;
     use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
 
-    use super::{AuditRecord, Capability, Decision, GovernanceFacade, ReasonCode};
+    use super::{AuditRecord, Capability, Decision, GovernanceFacade, Observed, ReasonCode};
 
     fn temporary(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -850,9 +915,8 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
-    #[test]
-    fn audit_record_has_no_payload_fields() {
-        let record = AuditRecord::now(
+    fn sample_record() -> AuditRecord {
+        AuditRecord::now(
             "invocation_x",
             "workspace_x",
             "browser_fill_form",
@@ -866,9 +930,45 @@ mod tests {
             "applied",
             "Page text read.",
             1200,
-        );
+        )
+    }
+
+    /// Every key anywhere in the record, so a payload cannot hide one level down.
+    fn keys(value: &serde_json::Value, found: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(object) => {
+                for (key, nested) in object {
+                    found.push(key.clone());
+                    keys(nested, found);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    keys(item, found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn audit_record_has_no_payload_fields() {
+        let record = sample_record().with_observation(Observed {
+            host: Some("example.com".into()),
+            readiness: Some("complete".into()),
+            count: Some(3),
+            width: Some(1280),
+            height: Some(720),
+        });
         let value = serde_json::to_value(record).unwrap();
-        let object = value.as_object().unwrap();
+        let mut found = Vec::new();
+        keys(&value, &mut found);
+        // The walk must reach nested keys, or it would pass any payload hidden one level down.
+        assert!(found.contains(&"observed".to_owned()));
+        assert!(
+            found.contains(&"host".to_owned()),
+            "the walk stops at the top"
+        );
         for forbidden in [
             "url",
             "text",
@@ -877,9 +977,43 @@ mod tests {
             "value",
             "screenshot",
             "dialog",
+            "path",
+            "query",
         ] {
-            assert!(!object.contains_key(forbidden));
+            assert!(
+                !found.contains(&forbidden.to_owned()),
+                "the record grew a {forbidden} field"
+            );
         }
+    }
+
+    /// The record has exactly one URL-shaped field and it is a host.
+    ///
+    /// What the executor puts in it is guarded where it is extracted, in `work`; this pins that
+    /// there is nowhere else for the rest of a URL to travel.
+    #[test]
+    fn an_observation_has_one_place_for_a_host_and_none_for_the_rest_of_a_url() {
+        let record = sample_record().with_observation(Observed {
+            host: Some("example.com".into()),
+            readiness: Some("complete".into()),
+            count: Some(3),
+            width: Some(1280),
+            height: Some(720),
+        });
+        let encoded = serde_json::to_value(&record).unwrap();
+        let observed = encoded["observed"].as_object().unwrap();
+        assert_eq!(observed["host"], "example.com");
+        let mut text: Vec<&str> = observed
+            .iter()
+            .filter(|(_, value)| value.is_string())
+            .map(|(key, _)| key.as_str())
+            .collect();
+        text.sort_unstable();
+        assert_eq!(
+            text,
+            ["host", "readiness"],
+            "an observation grew another field a URL could travel in"
+        );
     }
 
     #[test]

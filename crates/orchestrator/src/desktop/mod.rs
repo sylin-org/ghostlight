@@ -366,8 +366,9 @@ mod tests {
             reason: "permitted".into(),
             status: "succeeded".into(),
             effect: "none".into(),
-            summary: "Page text read.".into(),
+            summary: "Read 1240 words of page text.".into(),
             duration_ms: 1200,
+            observed: sample_observation(),
         };
 
         for change in [
@@ -385,6 +386,61 @@ mod tests {
             assert!(
                 app.contains(&format!("case \"{kind}\":")),
                 "the workbench does not handle the {kind} change"
+            );
+        }
+    }
+
+    /// One observation with every field populated, so a guard sees the whole vocabulary.
+    fn sample_observation() -> crate::governance::Observed {
+        crate::governance::Observed {
+            host: Some("example.com".into()),
+            readiness: Some("complete".into()),
+            count: Some(1240),
+            width: Some(1280),
+            height: Some(720),
+        }
+    }
+
+    #[test]
+    fn every_observed_fact_the_orchestrator_records_reaches_the_surface() {
+        let app = include_str!("../../ui/app.js");
+        let encoded = serde_json::to_value(sample_observation()).expect("observations serialize");
+        let fields = encoded.as_object().expect("an observation is an object");
+        assert_eq!(fields.len(), 5, "the observation vocabulary changed");
+        for field in fields.keys() {
+            assert!(
+                app.contains(&format!("observed.{field}")),
+                "the workbench never reads the observed {field}, so recording it says nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn every_readiness_the_surface_can_receive_has_a_note() {
+        use crate::work::result::Readiness;
+
+        let app = include_str!("../../ui/app.js");
+        // Read the table itself rather than the whole file: several of these words appear in the
+        // effect story too, and a guard that matches anywhere would pass without the table.
+        let notes = app
+            .split_once("const READINESS_NOTE = {")
+            .and_then(|(_, rest)| rest.split_once('}'))
+            .map(|(block, _)| block)
+            .expect("the surface keeps a readiness note table");
+        // Exhaustive on purpose: a new readiness must not compile until the surface decides what
+        // it says about a settled row.
+        for readiness in [
+            Readiness::NotApplicable,
+            Readiness::Loading,
+            Readiness::Interactive,
+            Readiness::Complete,
+            Readiness::Unknown,
+        ] {
+            let name = serde_json::to_value(readiness).expect("readiness serializes");
+            let name = name.as_str().expect("readiness encodes as a string");
+            assert!(
+                notes.contains(&format!("{name}:")),
+                "the surface has no note for {name} readiness"
             );
         }
     }
