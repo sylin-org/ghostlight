@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -9,9 +9,11 @@ const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0", "debug");
 const runtimeFile = join(repository, `tests/.ghostlight-runtime-${process.pid}.json`);
 const auditFile = join(repository, `tests/.ghostlight-audit-${process.pid}.jsonl`);
+const deployLock = join(binDir, "deploy.lock");
 const environment = { ...process.env, GHOSTLIGHT_RUNTIME_FILE: runtimeFile, GHOSTLIGHT_AUDIT_FILE: auditFile };
 const children = [];
 const physicalCommands = [];
+let createdDeployLock = false;
 
 function executable(name) {
   const path = join(binDir, `${name}${executableSuffix}`);
@@ -181,6 +183,9 @@ async function waitForMcpReady(mcp, timeoutMs = 10000) {
 try {
   rmSync(runtimeFile, { force: true });
   rmSync(auditFile, { force: true });
+  if (existsSync(deployLock)) throw new Error(`Refusing to replace existing deploy lock ${deployLock}`);
+  writeFileSync(deployLock, "process journey quiesce", { flag: "wx" });
+  createdDeployLock = true;
   const browserConnector = start(executable("ghostlight-browser-connector"));
   const native = new NativePeer(browserConnector);
   native.send({
@@ -204,7 +209,7 @@ try {
   assert.equal(connector.exitCode, null);
   assert.equal(browserConnector.exitCode, null);
 
-  let service = start(executable("ghostlight"));
+  let service = start(executable("ghostlight"), ["--headless"]);
   await waitForFile(runtimeFile);
   const endpoint = JSON.parse(readFileSync(runtimeFile, "utf8"));
   assert.equal(endpoint.service_bridge_major, 1);
@@ -249,7 +254,7 @@ try {
   assert.match(interruptedResult.error.message, /outcome is unavailable/);
 
   const reconnected = native.waitFor((frame) => frame.kind === "hello_accepted", 10000);
-  service = start(executable("ghostlight"));
+  service = start(executable("ghostlight"), ["--headless"]);
   await waitForFile(runtimeFile);
   const secondBrowserHello = await reconnected;
   assert.equal(secondBrowserHello.kind, "hello_accepted");
@@ -299,4 +304,5 @@ try {
   }
   rmSync(runtimeFile, { force: true });
   rmSync(auditFile, { force: true });
+  if (createdDeployLock) rmSync(deployLock, { force: true });
 }

@@ -19,8 +19,10 @@ The sibling executables are:
 Run the product with its workbench:
 
 ```powershell
-target/debug/ghostlight --show
+target/debug/ghostlight
 ```
+
+`--show` is retained as an explicit alias for the same human launch behavior.
 
 Run only the persistent orchestrator service:
 
@@ -28,8 +30,9 @@ Run only the persistent orchestrator service:
 target/debug/ghostlight --headless
 ```
 
-The normal desktop starts hidden in the tray unless `--show` is present. Closing its window hides
-it; the tray Quit action ends the whole process.
+A direct launch starts visibly or focuses the workbench owned by the running authority. Connectors
+demand-start the sibling executable with `--background`, which keeps the workbench hidden and the
+tray available. Closing the window hides it; the tray Quit action ends the whole process.
 
 ## What to restart
 
@@ -58,8 +61,10 @@ node --check tests/workbench-preview-server.mjs
 ```
 
 `process-journey.mjs` uses repository-local runtime and audit files and the isolated target above.
-It starts the real executables, interrupts an in-flight operation by stopping the service, proves
-both relays stay alive and renegotiate, then completes new open/read/close work.
+It places the deployment lock to isolate the established reconnect proof, starts the real
+executables, interrupts an in-flight operation by stopping the service, proves both relays stay
+alive and renegotiate, then completes new open/read/close work. Bridge and orchestrator tests cover
+demand-start admission; the live journey starts from no service and proves adapter demand-start.
 
 The workbench preview server supplies only representative local test facts to the exact bundled
 HTML, CSS, JavaScript, and artwork:

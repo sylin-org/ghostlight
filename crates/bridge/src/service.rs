@@ -48,6 +48,13 @@ pub enum ServiceContent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServiceRequest {
+    /// Ask an already-running desktop orchestrator to reveal its workbench.
+    ActivateWorkbench {
+        /// Bridge major supported by the requesting executable.
+        major: u16,
+        /// Runtime authentication token.
+        token: String,
+    },
     /// Establish a compatible authenticated session.
     Hello {
         /// Bridge major supported by the edge.
@@ -82,6 +89,11 @@ pub enum ServiceRequest {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServiceResponse {
+    /// Result of asking the current desktop presentation adapter to reveal itself.
+    WorkbenchActivated {
+        /// Whether a native workbench was attached and accepted the request.
+        available: bool,
+    },
     /// A compatible session was established.
     HelloAccepted {
         /// Orchestrator bridge major.
@@ -129,6 +141,10 @@ mod tests {
     #[test]
     fn service_messages_round_trip() {
         let requests = [
+            ServiceRequest::ActivateWorkbench {
+                major: 1,
+                token: "token".into(),
+            },
             ServiceRequest::Hello {
                 major: 1,
                 token: "token".into(),
@@ -153,6 +169,7 @@ mod tests {
         }
 
         let responses = [
+            ServiceResponse::WorkbenchActivated { available: true },
             ServiceResponse::HelloAccepted {
                 major: SERVICE_BRIDGE_MAJOR,
                 session: "workspace_test".into(),

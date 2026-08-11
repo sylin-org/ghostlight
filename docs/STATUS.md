@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-11 (third pass).
+Last updated: 2026-08-11 (fourth pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -58,6 +58,14 @@ preserved `docs/0.8/` material carry history; this file does not rewrite it.
   and configuration.
 - `ghostlight --headless` retains the service-only execution path. Recoverable desktop startup and
   event-loop failures leave that service running.
+- The shared bridge owns one demand-start seam used by both connectors after a failed service
+  connection. It starts only the exact sibling `ghostlight --background`, honors a fresh deploy
+  lock, and preserves each connector's established reconnect behavior.
+- The orchestrator holds an operating-system lifetime lease before publishing runtime discovery or
+  initializing Tauri. Concurrent launch attempts therefore converge on one authority and one tray.
+- Direct/default launch and `--show` reveal the existing authenticated workbench or start it
+  visibly. `--background` starts the full tray authority hidden. `--headless` remains the explicit
+  presentation-free mode.
 
 ## Verified in this workspace
 
@@ -65,15 +73,25 @@ Re-run on 2026-08-11 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 89 Rust tests -- 77 in the orchestrator, 9 in the shared bridge, and 3
-  in the MCP connector.
+- `cargo test --workspace`: 98 Rust tests -- 80 in the orchestrator including its launch-mode
+  binary test, 15 in the shared bridge, and 3 in the MCP connector.
 - `npm test --prefix extension`: 39 extension tests.
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
-  restart without replaying an interrupted effect, then complete open/read/close. It now also reads
+  restart without replaying an interrupted effect, then complete open/read/close. The journey uses
+  a fresh deployment lock to isolate explicit restart recovery from demand-start. It also reads
   the audit file the real executable wrote and checks that the read records a host and a word
   count, and no page text.
 - `cargo build --workspace --target-dir .target-ghostlight-1.0`.
-- `node --check` on the bundled workbench script and the preview server.
+- `node --check` on the process journey, bundled workbench script, and preview server.
+- Live isolated demand-start proofs began with no service. The MCP connector started one exact
+  sibling authority and completed MCP initialization. In a separate run, the browser connector
+  reported `backend_unavailable`, started one exact sibling authority, and completed its adapter
+  hello. Each run found exactly one service at the isolated executable path and removed only that
+  test-owned process afterward.
+- The repository's live Windows `target/release` stack was replaced from an isolated release
+  build under the deploy lock. Stopping its one service authority caused the already-running
+  browser connector to demand-start one replacement with a fresh runtime token. A direct launch
+  then revealed that workbench and exited while the authority count stayed one.
 - The workbench renders against the repository preview server, which now drives the real sequenced
   event path, and uses the byte-identical original Ghostlight artwork.
 - Guard tests keep the surface and the orchestrator in step: every publishable change has a
@@ -89,7 +107,8 @@ Re-run on 2026-08-11 against the current tree:
   counts and the completion path still combines host/readiness with the outcome measurement.
 - The complete desktop-workbench change, from its starting revision through the live-monitor
   rebuild, has an empty diff under `crates/mcp-connector`, `crates/browser-connector`,
-  `crates/bridge`, and `extension`.
+  `crates/bridge`, and `extension`. The later demand-start lifecycle intentionally changes the
+  bridge and both connectors at their connection-lifetime seam; the extension remains unchanged.
 
 ## Visual language and monitor content
 
@@ -147,6 +166,8 @@ Re-run on 2026-08-11 against the current tree:
 - Complete interactive native-window, tray, and notification smoke tests on each platform. The
   automated environment verifies native build and failure containment but does not expose its GUI
   desktop to the test runner.
+- Verify demand-start, direct workbench activation, and deploy quiesce from each clean signed
+  platform installation.
 - Run the accepted browser-job matrix against visible supported Chromium browsers, including
   screenshots, file upload, form input, dialogs, governed denial, reconnect, and local close
   interlock journeys.
@@ -164,3 +185,5 @@ Re-run on 2026-08-11 against the current tree:
   three-destination workbench.
 - Outcome language decision:
   [`adr/0103-language-owned-outcome-voice.md`](adr/0103-language-owned-outcome-voice.md).
+- Demand-start and single-engine decision:
+  [`adr/0104-demand-start-single-engine-and-workbench-activation.md`](adr/0104-demand-start-single-engine-and-workbench-activation.md).

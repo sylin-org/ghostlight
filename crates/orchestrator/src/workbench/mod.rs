@@ -577,6 +577,15 @@ impl WorkbenchFacade {
         Ok(())
     }
 
+    /// Ask the attached native presentation adapter to reveal the existing workbench.
+    pub fn reveal(&self) -> Result<(), WorkbenchError> {
+        let port = lock(&self.projection.presentation)
+            .clone()
+            .ok_or(WorkbenchError::PresentationUnavailable)?;
+        port.reveal()?;
+        Ok(())
+    }
+
     fn browser_summary(&self) -> Option<BrowserInstanceSummary> {
         self.browser.is_connected().then(|| BrowserInstanceSummary {
             id: self
@@ -592,6 +601,9 @@ impl WorkbenchFacade {
 
 /// Best-effort operating-system presentation port.
 pub trait WorkbenchPresentationPort: Send + Sync {
+    /// Reveal and focus the existing native workbench surface.
+    fn reveal(&self) -> Result<(), WorkbenchPresentationError>;
+
     /// Deliver one high-signal, content-free notification.
     fn notify(&self, notification: WorkbenchNotification)
         -> Result<(), WorkbenchPresentationError>;
@@ -1146,6 +1158,10 @@ mod tests {
     struct Notifications(Mutex<Vec<super::WorkbenchNotification>>);
 
     impl WorkbenchPresentationPort for Notifications {
+        fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+            Ok(())
+        }
+
         fn notify(
             &self,
             notification: super::WorkbenchNotification,
@@ -1359,6 +1375,10 @@ mod tests {
     fn presentation_failure_does_not_change_projection() {
         struct Failing;
         impl WorkbenchPresentationPort for Failing {
+            fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+                Err(WorkbenchPresentationError::Native("injected".into()))
+            }
+
             fn notify(
                 &self,
                 _notification: super::WorkbenchNotification,

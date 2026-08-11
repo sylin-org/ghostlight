@@ -58,6 +58,12 @@ Those sources win when they disagree with this file.
   durable adapter identity support negotiation without moving product evolution to the fringe.
 - In-flight effects interrupted after dispatch become unknown and are never replayed. Both relay
   processes can remain alive while the orchestrator restarts and renegotiate for later work.
+- Both connectors use the bridge-owned demand-start seam after a failed service connection. It
+  starts only the exact sibling `ghostlight --background`, honors deployment quiesce, and leaves
+  product and workbench decisions in the orchestrator.
+- The orchestrator holds an operating-system lifetime lease before publishing runtime discovery or
+  initializing the desktop. Direct human launch reuses the authenticated service bridge to reveal
+  the existing workbench. Default/`--show`, `--background`, and `--headless` are distinct intents.
 - Browser state is plural by design: MCP sessions, workspaces, operations, browser instances, and
   future browser families must not be modeled as global singletons.
 - The Tauri 2 workbench is an integrated presentation adapter in the modular monolith, behind a
@@ -76,6 +82,9 @@ Those sources win when they disagree with this file.
   paths and stop only test-owned processes.
 - A cached MCP catalog is not a transport-liveness signal. Reconnect through the owning MCP client,
   then inspect visible browser state before retrying an effectful call.
+- Reconnection without demand-start is not local availability. Put one idempotent recovery action
+  at the failed-connection seam, then let a service-held lifetime lease decide authority before
+  discovery or presentation state exists.
 - Chrome native messaging has directional size limits. Generic corruption ceilings and browser
   chunking are different contracts.
 - A native-port or service-worker restart is not a browser restart. Preserve uncertain resource
@@ -112,6 +121,7 @@ Those sources win when they disagree with this file.
 | Architecture history | [`adr/`](adr/README.md) |
 | Integrated desktop decision | [`adr/0102-integrated-desktop-workbench.md`](adr/0102-integrated-desktop-workbench.md) |
 | Outcome language decision | [`adr/0103-language-owned-outcome-voice.md`](adr/0103-language-owned-outcome-voice.md) |
+| Demand-start and single-engine decision | [`adr/0104-demand-start-single-engine-and-workbench-activation.md`](adr/0104-demand-start-single-engine-and-workbench-activation.md) |
 | Visual vocabulary, both surfaces | [`design/visual-language.md`](design/visual-language.md) |
 | Where per-action facts belong | [`design/action-observations.md`](design/action-observations.md) |
 | What an audit record contains | [`guides/siem-integration.md`](guides/siem-integration.md) |

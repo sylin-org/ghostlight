@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use ghostlight_bridge::framing::{read_json_line, write_json_line};
+use ghostlight_bridge::lifecycle::request_orchestrator_start;
 use ghostlight_bridge::runtime::{read_runtime, runtime_file};
 use ghostlight_bridge::service::{
     ServerProfile, ServiceRequest, ServiceResponse, ToolDefinition, SERVICE_BRIDGE_MAJOR,
@@ -96,12 +97,20 @@ fn reconnect_loop(
     client_label: String,
     event_handler: Arc<dyn Fn(ServiceEvent) + Send + Sync>,
 ) {
+    let mut startup_error_reported = false;
     loop {
         let connection = connect(&client_label);
         let Ok((stream, reader, server, catalog)) = connection else {
+            if let Err(error) = request_orchestrator_start() {
+                if !startup_error_reported {
+                    eprintln!("Ghostlight could not start its local orchestrator: {error}");
+                    startup_error_reported = true;
+                }
+            }
             thread::sleep(Duration::from_millis(500));
             continue;
         };
+        startup_error_reported = false;
         let writer = Arc::new(Mutex::new(stream));
         let (generation, catalog_changed) = {
             let mut locked = lock(&state.0);

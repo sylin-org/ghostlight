@@ -31,6 +31,10 @@ struct NativePresentation {
 }
 
 impl WorkbenchPresentationPort for NativePresentation {
+    fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+        show_workbench(&self.app)
+    }
+
     fn notify(
         &self,
         notification: WorkbenchNotification,
@@ -59,7 +63,7 @@ impl WorkbenchEventSink for NativeEvents {
 }
 
 /// Start the orchestrator and its disposable desktop workbench in one process.
-pub fn run() -> Result<()> {
+pub fn run(initially_visible: bool) -> Result<()> {
     let host = ServiceHost::start(&ghostlight_bridge::runtime::runtime_file())?;
     eprintln!(
         "Ghostlight 1.0 ready on local ports {} and {}",
@@ -95,8 +99,8 @@ pub fn run() -> Result<()> {
             if let Err(error) = build_tray(app) {
                 eprintln!("Ghostlight tray is unavailable: {error}");
             }
-            if std::env::args_os().any(|argument| argument == "--show") {
-                show_workbench(app.handle());
+            if initially_visible {
+                let _ = show_workbench(app.handle());
             }
             Ok(())
         });
@@ -144,7 +148,9 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "open" => show_workbench(app),
+            "open" => {
+                let _ = show_workbench(app);
+            }
             "hold" => apply_tray_intent(app, WorkbenchRuntimeIntent::Hold),
             "resume" => apply_tray_intent(app, WorkbenchRuntimeIntent::Resume),
             "quit" => app.exit(0),
@@ -159,7 +165,7 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
                     ..
                 }
             ) {
-                show_workbench(tray.app_handle());
+                let _ = show_workbench(tray.app_handle());
             }
         })
         .build(app)?;
@@ -171,22 +177,24 @@ fn apply_tray_intent(app: &AppHandle, intent: WorkbenchRuntimeIntent) {
     let _ = state.workbench.apply_runtime_intent(intent);
 }
 
-fn show_workbench(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-        show_window(&window);
-    }
+fn show_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
+    let window = app.get_webview_window(MAIN_WINDOW).ok_or_else(|| {
+        WorkbenchPresentationError::Native("Ghostlight workbench window is unavailable".into())
+    })?;
+    show_window(&window)
 }
 
-fn show_window(window: &WebviewWindow) {
-    if let Err(error) = window.unminimize() {
-        eprintln!("Ghostlight workbench could not restore its window: {error}");
-    }
-    if let Err(error) = window.show() {
-        eprintln!("Ghostlight workbench could not show its window: {error}");
-    }
-    if let Err(error) = window.set_focus() {
-        eprintln!("Ghostlight workbench could not focus its window: {error}");
-    }
+fn show_window(window: &WebviewWindow) -> Result<(), WorkbenchPresentationError> {
+    window
+        .unminimize()
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
+    window
+        .show()
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
+    window
+        .set_focus()
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
+    Ok(())
 }
 
 #[tauri::command]

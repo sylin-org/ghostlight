@@ -2,6 +2,7 @@
 
 pub mod browser;
 pub mod framing;
+pub mod lifecycle;
 pub mod relay;
 pub mod runtime;
 pub mod service;

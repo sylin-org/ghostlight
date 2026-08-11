@@ -13,10 +13,14 @@ are not interchangeable.
 1. Install the signed Ghostlight package for the operating system. Packaging places
    `ghostlight`, `ghostlight-mcp-connector`, and `ghostlight-browser-connector` side by side and
    registers the browser connector as the `org.sylin.ghostlight` native host for the current user.
-2. Launch Ghostlight. It starts the orchestrator and remains available from the tray.
-3. Open **MCP integrations**, find your client, and choose **Connect**.
-4. Install the matching `Ghostlight in Browser` 1.0 extension from its release listing.
-5. Restart or reconnect the MCP harness, then run the bounded first proof from the README.
+2. Install the matching `Ghostlight in Browser` 1.0 extension from its release listing.
+3. Launch Ghostlight, open **MCP integrations**, find your client, and choose **Connect**.
+4. Restart or reconnect the MCP harness, then run the bounded first proof from the README.
+
+Setup is now complete. Launching the registered MCP client or Chromium demand-starts Ghostlight if
+it is absent. The service starts in the background with its tray available. Launch Ghostlight
+directly whenever you want the workbench; a direct launch focuses the existing authority instead
+of creating another one.
 
 Only signed 1.0 packages and the matching 1.0 extension satisfy this journey. Artifact signing,
 clean-machine install, upgrade, and uninstall are release gates, not claims made by this source
@@ -61,8 +65,10 @@ cargo build --workspace
 Start the workbench:
 
 ```sh
-target/debug/ghostlight --show
+target/debug/ghostlight
 ```
+
+`--show` is an equivalent explicit spelling. `--background` is reserved for adapter demand-start.
 
 Or start only the persistent service:
 
@@ -103,7 +109,10 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 
 ## Recovery
 
-- **Workbench window is gone:** open Ghostlight from the tray. Closing the window only hides it.
+- **Service is not running:** reconnect the MCP integration or enable the matching extension.
+  Either connector demand-starts its exact sibling service and keeps retrying.
+- **Workbench window is gone:** launch Ghostlight directly or open it from the tray. Closing the
+  window only hides it.
 - **Workbench cannot initialize:** the orchestrator continues headlessly; reconnect after fixing
   the native WebView or tray environment.
 - **Tools are absent:** re-check the registration in MCP integrations, then reconnect that MCP

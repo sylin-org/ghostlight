@@ -57,6 +57,11 @@ Internal browser commands are combined when a person experiences them as one job
 - The tray opens a calm workbench that answers what is running, what happened, whether Ghostlight
   is healthy, which controls apply, and where it is connected, without turning setup into a CLI
   archaeology exercise.
+- Once its connector registration and browser extension are installed, Ghostlight needs no
+  separate startup ritual. Launching an MCP client or Chromium demand-starts the local service
+  when it is absent.
+- Launching Ghostlight directly shows the workbench or focuses the workbench owned by the running
+  authority. Adapter demand-start keeps the workbench hidden but leaves the tray available.
 - Three destinations and one global search reach every workbench surface and user-visible record.
   The monitor carries the current action in full and the recent ones beneath it, so a glance is
   enough.
@@ -65,6 +70,7 @@ Internal browser commands are combined when a person experiences them as one job
 
 The workbench is the orchestrator's local-human presentation surface. It is part of the same
 installed product and process, while remaining a separate presentation and application context.
+Headless operation is an explicit service-only mode, not the ordinary installed experience.
 
 - Monitor is where the work becomes visible. The current action stands in full with its elapsed
   time running. When the next one starts, that action settles and drops into a newest-first queue

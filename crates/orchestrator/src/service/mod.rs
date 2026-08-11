@@ -10,11 +10,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use ghostlight_bridge::browser::{BrowserCommand, BrowserEvent};
 use ghostlight_bridge::framing::{read_json_line, read_native, write_json_line, write_native};
+use ghostlight_bridge::lifecycle::ServiceLease;
 use ghostlight_bridge::relay::{BrowserRelayRequest, BrowserRelayResponse, BROWSER_RELAY_MAJOR};
-use ghostlight_bridge::runtime::{runtime_file, write_runtime, RuntimeEndpoint};
+use ghostlight_bridge::runtime::{read_runtime, runtime_file, write_runtime, RuntimeEndpoint};
 use ghostlight_bridge::service::{
     ServerProfile, ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR,
 };
@@ -37,11 +38,20 @@ pub struct ServiceHost {
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
     runtime_path: PathBuf,
+    _lease: ServiceLease,
+}
+
+enum ServiceOpening {
+    Workspace { client_label: String },
+    WorkbenchActivation,
 }
 
 impl ServiceHost {
     /// Start both authenticated loopback listeners and publish runtime discovery.
     pub fn start(path: &Path) -> Result<Self> {
+        let lease = ServiceLease::try_acquire(path)
+            .context("open the orchestrator service lease")?
+            .context("another Ghostlight orchestrator already owns this runtime")?;
         let service_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .context("bind service bridge")?;
         let browser_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
@@ -112,6 +122,7 @@ impl ServiceHost {
             executor,
             workspaces,
             browser_port,
+            workbench.clone(),
             endpoint.token.clone(),
         );
         let browser_thread = spawn_browser_listener(
@@ -126,6 +137,7 @@ impl ServiceHost {
             stop,
             threads: vec![service_thread, browser_thread],
             runtime_path: path.into(),
+            _lease: lease,
         })
     }
 
@@ -167,12 +179,38 @@ pub fn run_forever() -> Result<()> {
     Ok(())
 }
 
+/// Ask an already-running authenticated service to reveal its attached desktop workbench.
+pub fn request_workbench_activation(path: &Path) -> Result<bool> {
+    let endpoint = read_runtime(path).context("read current Ghostlight runtime")?;
+    if endpoint.service_bridge_major != SERVICE_BRIDGE_MAJOR {
+        bail!("running Ghostlight service bridge is incompatible");
+    }
+    let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, endpoint.service_port))
+        .context("connect current Ghostlight service")?;
+    stream.set_nodelay(true)?;
+    write_json_line(
+        &mut stream,
+        &ServiceRequest::ActivateWorkbench {
+            major: SERVICE_BRIDGE_MAJOR,
+            token: endpoint.token,
+        },
+    )
+    .context("request workbench activation")?;
+    let mut reader = BufReader::new(stream);
+    match read_json_line::<ServiceResponse>(&mut reader).context("read workbench activation")? {
+        Some(ServiceResponse::WorkbenchActivated { available }) => Ok(available),
+        Some(ServiceResponse::Error { message, .. }) => bail!(message),
+        _ => bail!("service returned an invalid workbench activation response"),
+    }
+}
+
 fn spawn_service_listener(
     listener: TcpListener,
     stop: Arc<AtomicBool>,
     executor: Arc<ApplicationExecutor>,
     workspaces: WorkspaceStore,
     browser: Arc<dyn BrowserPort>,
+    workbench: WorkbenchFacade,
     token: String,
 ) -> JoinHandle<()> {
     thread::Builder::new()
@@ -184,13 +222,14 @@ fn spawn_service_listener(
                         let executor = Arc::clone(&executor);
                         let workspaces = workspaces.clone();
                         let browser = Arc::clone(&browser);
+                        let workbench = workbench.clone();
                         let token = token.clone();
                         let _ = thread::Builder::new()
                             .name("ghostlight-mcp-session".into())
                             .spawn(move || {
-                                if let Err(error) =
-                                    serve_session(stream, executor, workspaces, browser, &token)
-                                {
+                                if let Err(error) = serve_session(
+                                    stream, executor, workspaces, browser, workbench, &token,
+                                ) {
                                     eprintln!("MCP service session ended: {error:#}");
                                 }
                             });
@@ -284,6 +323,7 @@ fn serve_session(
     executor: Arc<ApplicationExecutor>,
     workspaces: WorkspaceStore,
     browser: Arc<dyn BrowserPort>,
+    workbench: WorkbenchFacade,
     expected_token: &str,
 ) -> Result<()> {
     stream.set_nonblocking(false)?;
@@ -294,12 +334,15 @@ fn serve_session(
     let Some(request) = read_json_line::<ServiceRequest>(&mut reader)? else {
         return Ok(());
     };
-    let (major, token, client_label) = match request {
+    let (major, token, opening) = match request {
+        ServiceRequest::ActivateWorkbench { major, token } => {
+            (major, token, ServiceOpening::WorkbenchActivation)
+        }
         ServiceRequest::Hello {
             major,
             token,
             client_label,
-        } => (major, token, client_label),
+        } => (major, token, ServiceOpening::Workspace { client_label }),
         _ => {
             write_response(
                 &writer,
@@ -336,6 +379,18 @@ fn serve_session(
         );
         return Ok(());
     }
+    let client_label = match opening {
+        ServiceOpening::WorkbenchActivation => {
+            write_response(
+                &writer,
+                &ServiceResponse::WorkbenchActivated {
+                    available: workbench.reveal().is_ok(),
+                },
+            );
+            return Ok(());
+        }
+        ServiceOpening::Workspace { client_label } => client_label,
+    };
     let workspace = workspaces.admit(client_label);
     write_response(
         &writer,
@@ -395,14 +450,16 @@ fn serve_session(
                     token.cancel();
                 }
             }
-            ServiceRequest::Hello { .. } => write_response(
-                &writer,
-                &ServiceResponse::Error {
-                    id: None,
-                    code: "duplicate_hello".into(),
-                    message: "Session is already established.".into(),
-                },
-            ),
+            ServiceRequest::Hello { .. } | ServiceRequest::ActivateWorkbench { .. } => {
+                write_response(
+                    &writer,
+                    &ServiceResponse::Error {
+                        id: None,
+                        code: "duplicate_hello".into(),
+                        message: "Session is already established.".into(),
+                    },
+                )
+            }
         }
     }
 
@@ -508,17 +565,31 @@ impl BrowserEventSink for ServiceBrowserEvents {
 mod tests {
     use std::io::BufReader;
     use std::net::TcpStream;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     use ghostlight_bridge::framing::{read_json_line, write_json_line};
     use ghostlight_bridge::service::{ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR};
 
-    use super::ServiceHost;
+    use crate::workbench::{
+        WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
+    };
+
+    use super::{request_workbench_activation, ServiceHost};
+
+    fn runtime_path(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let directory = std::env::temp_dir().join(format!(
+            "ghostlight-service-{name}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("ghostlight-runtime.json");
+        (directory, path)
+    }
 
     #[test]
     fn incompatible_service_bridge_fails_before_catalog() {
-        let path =
-            std::env::temp_dir().join(format!("ghostlight-runtime-{}.json", uuid::Uuid::new_v4()));
-        std::env::set_var("GHOSTLIGHT_RUNTIME_FILE", &path);
+        let (directory, path) = runtime_path("incompatible");
         let host = ServiceHost::start(&path).unwrap();
         let mut stream = TcpStream::connect(("127.0.0.1", host.endpoint.service_port)).unwrap();
         write_json_line(
@@ -536,6 +607,54 @@ mod tests {
             matches!(response, ServiceResponse::Error { code, .. } if code == "incompatible_bridge")
         );
         drop(host);
-        std::env::remove_var("GHOSTLIGHT_RUNTIME_FILE");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn service_lease_prevents_concurrent_authorities() {
+        let (directory, path) = runtime_path("singleton");
+        let first = ServiceHost::start(&path).unwrap();
+        let second = ServiceHost::start(&path)
+            .err()
+            .expect("second authority is rejected");
+        let detail = format!("{second:#}");
+        assert!(
+            detail.contains("another Ghostlight orchestrator already owns this runtime"),
+            "{detail}"
+        );
+        drop(first);
+        let replacement = ServiceHost::start(&path).unwrap();
+        drop(replacement);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[derive(Default)]
+    struct RevealCounter(AtomicUsize);
+
+    impl WorkbenchPresentationPort for RevealCounter {
+        fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn notify(
+            &self,
+            _notification: WorkbenchNotification,
+        ) -> Result<(), WorkbenchPresentationError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn authenticated_activation_reveals_the_existing_workbench() {
+        let (directory, path) = runtime_path("activation");
+        let host = ServiceHost::start(&path).unwrap();
+        assert!(!request_workbench_activation(&path).unwrap());
+        let reveals = Arc::new(RevealCounter::default());
+        host.workbench.attach_presentation(reveals.clone());
+        assert!(request_workbench_activation(&path).unwrap());
+        assert_eq!(reveals.0.load(Ordering::SeqCst), 1);
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

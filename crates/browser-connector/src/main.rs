@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use ghostlight_bridge::framing::{
     read_length_frame, read_native, write_length_frame, write_native,
 };
+use ghostlight_bridge::lifecycle::request_orchestrator_start;
 use ghostlight_bridge::relay::{
     BrowserRelayRequest, BrowserRelayResponse, BrowserRelayStatus, BROWSER_RELAY_MAJOR,
 };
@@ -137,9 +138,16 @@ fn connect_adapter(
     if adapter_hello.is_empty() {
         return Ok(None);
     }
+    let mut startup_error_reported = false;
     while chrome_alive.load(Ordering::SeqCst) {
         if let Ok(connection) = connect_once(adapter_hello) {
             return Ok(Some(connection));
+        }
+        if let Err(error) = request_orchestrator_start() {
+            if !startup_error_reported {
+                eprintln!("Ghostlight could not start its local orchestrator: {error}");
+                startup_error_reported = true;
+            }
         }
         thread::sleep(RETRY_INTERVAL);
     }

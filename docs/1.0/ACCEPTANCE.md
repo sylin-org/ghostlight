@@ -25,6 +25,15 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 11. A real process test starts both relays without the service, interrupts an in-flight browser
     effect by stopping the service, restarts it, and proves the same MCP stdio and native-message
     processes renegotiate and complete new work without replaying the interrupted effect.
+12. After either connector fails to find the service, it uses the one shared lifecycle seam to
+    start only the exact sibling `ghostlight --background` executable and continues its existing
+    reconnect loop.
+13. A fresh deployment lock suppresses demand-start. A stale deployment lock cannot suppress it
+    indefinitely.
+14. Concurrent demand-start requests converge on one lifetime-leased service authority before
+    runtime publication or desktop initialization.
+15. A direct/default launch reveals the existing authenticated authority's workbench without a
+    new listener or workspace. A headless authority refuses that presentation request clearly.
 
 ## Executor and truth gates
 
@@ -139,8 +148,9 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 
 ## Desktop workbench gates
 
-1. Normal `ghostlight` startup starts the orchestrator before the Tauri shell; `--headless` starts
-   no desktop runtime. Closing the window hides it, and only explicit quit stops the process.
+1. Direct/default `ghostlight` startup starts visibly or focuses the existing workbench.
+   `--background` starts the full desktop authority hidden with a tray; `--headless` starts no
+   desktop runtime. Closing the window hides it, and only explicit quit stops the process.
 2. Home presents plural session, operation, and browser counts plus current work and system health
    at a glance. Activity, history, checkup, configuration, and installations remain separate
    focused destinations behind one compact rail.

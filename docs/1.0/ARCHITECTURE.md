@@ -21,7 +21,8 @@ local human
   -> the same orchestrator contexts
 ```
 
-- `crates/bridge` defines the small versioned service and browser wire vocabularies.
+- `crates/bridge` defines the small versioned service and browser wire vocabularies plus the one
+  shared local service-lifecycle seam.
 - `crates/orchestrator` is the domain-driven modular monolith and service process.
 - `crates/mcp-connector` is the hand-rolled JSON-RPC MCP stdio edge.
 - `crates/browser-connector` is a frame relay between native messaging and the service.
@@ -36,12 +37,31 @@ The `ghostlight` executable also hosts the Tauri 2 desktop event loop. Tauri is 
 adapter inside the modular monolith, not another service or state authority. `--headless` starts
 the same orchestrator without a WebView, tray, or native notifications.
 
+## Local lifecycle
+
+The orchestrator acquires an operating-system lifetime lease beside its runtime document before
+opening listeners or initializing the desktop. The lease, not the replaceable discovery document,
+admits the single local authority. Concurrent launch losers exit before creating a second runtime
+identity or tray.
+
+Both connectors call the same bridge-owned recovery operation after a service connection fails.
+It observes the lifetime lease, honors a fresh deployment lock, and starts only the exact sibling
+`ghostlight --background` executable with detached null standard streams. The connectors retain
+their existing reconnect behavior and learn no workbench or product semantics.
+
+A direct/default launch, or the compatible `--show` spelling, first asks the running authority to
+reveal its workbench through an authenticated first message on the existing service bridge. That
+request admits no workspace and adds no listener. If no authority exists, the launch starts the
+desktop visibly. `--background` starts the same desktop authority hidden with a tray;
+`--headless` is the explicit service-only mode and cannot reveal a workbench.
+
 ## Fringe stability
 
 Ghostlight's fringes are independently versioned compatibility products. Their size is not
 constrained; their reasons to change are. The MCP connector changes only for MCP negotiation and
-protocol compatibility. The browser connector changes only for native messaging, local relay
-authentication, framing, discovery, and connection lifetime. The extension changes only for
+protocol compatibility and local service connection lifetime. The browser connector changes only
+for native messaging, local relay authentication, framing, discovery, and connection lifetime.
+The extension changes only for
 Chromium mechanisms, browser-execution integrity and recovery, or the preserved Ghostlight user
 experience. Any product feature expressible through existing physical browser capabilities changes
 only the orchestrator.
