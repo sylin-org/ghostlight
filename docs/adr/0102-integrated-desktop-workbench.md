@@ -1,6 +1,6 @@
 # ADR-0102: Integrated desktop workbench in the orchestrator monolith
 
-- Status: Accepted
+- Status: Accepted; amended 2026-08-11 (see the amendment below)
 - Date: 2026-08-10
 - Amends: ADR-0030's local console process placement and ADR-0077's management surface
   placement
@@ -187,3 +187,99 @@ behind a transport without moving domain ownership into the desktop adapter.
 7. Headless startup retains the existing service journeys.
 8. Native builds and smoke tests cover each supported operating system before release.
 9. Diffs for the MCP connector, browser connector, shared bridge, and extension are empty.
+
+## Amendment (2026-08-11): live monitor surface, published palette, three destinations
+
+Status: Accepted. Implemented in `73ee6d6`. Supersedes the palette list in Decision 7 and the
+destination list in Decision 8, and refines Decisions 4 and 5 with a sequenced change channel.
+Decisions 1, 2, 3, 6, and 9 stand exactly as written. Additionally builds on ADR-0083, whose
+signature medallion vocabulary the workbench reuses.
+
+### A1. The read model gains sequenced changes (refines D4 and D5)
+
+D4 said the WebView obtains an immutable snapshot when it opens or reloads. That is still true and
+the orchestrator is still the only authority, but a snapshot-only surface could not show work
+happening. The implementation polled a full snapshot every 1.5 seconds, so any operation that
+started and finished inside one poll window was never seen running, only recorded afterwards. The
+product promise is that browser work stays visible; a surface that samples cannot keep it.
+
+The orchestrator now also publishes a closed sequenced change vocabulary through a
+`WorkbenchEventSink` outbound port, shaped like the existing `WorkbenchPresentationPort`:
+
+- `OperationStarted`, `OperationChanged`, `OperationSettled`;
+- `RuntimeChanged`.
+
+Every change carries a monotonic `seq`, and `WorkbenchSnapshot` carries the `seq` it reflects,
+read after assembly so a snapshot never claims to be newer than its contents. A surface receiving
+a sequence other than its last plus one has missed a change and must resynchronize from a fresh
+snapshot instead of trusting its cache. Application is idempotent by invocation, so a change
+re-delivered across a snapshot boundary is harmless. The WebView therefore holds a cache it can
+prove is current, and never becomes the source of truth.
+
+This adds no process, listener, credential, wire protocol, or generic event bus. Delivery is best
+effort: a closed or reloading WebView is an ordinary presentation outcome and cannot change
+governance or completion truth. A projection with no sink attached publishes nothing and leaves
+its sequence at zero, so headless runs and domain tests stay free of presentation. Locks are never
+held across a publish, per D3. The WebView may listen but is not granted permission to emit.
+
+Collections that change rarely -- sessions, browser instances, diagnostics, harnesses, and
+configuration -- remain snapshot-owned. Granularity is spent where it buys live presentation
+rather than uniformly.
+
+`OperationSummary` now carries the governed `Capability`, so live work can be classified as
+plainly as completed history already could. `DomainEvent::WorkStarted` carries it to get there.
+
+### A2. Colour follows the published sylin.org palette (supersedes D7's palette list)
+
+D7 pinned sky `#38bdf8`, ink `#eaf6ff`, and governance ground `#0c0f14`. The workbench now follows
+the sylin.org night-garden standard using Ghostlight's own published accent:
+
+- accent teal `#5eead4`, carried as `--a` / `--al` / `--argb`;
+- ground `#0f0e12`, the five-step ink ramp, and hairline edges.
+
+No rule hard-codes the hue, matching the site standard that a project accent is a property rather
+than a literal. The accent is reserved for live activity, so the window stays neutral at rest and
+brightens only when work is genuinely happening.
+
+The in-page renderer keeps sky. It is a different surface -- Ghostlight drawing inside somebody
+else's page, where the signal colour is already trained on users and frozen by an extension test --
+and `extension/` sits inside D9's must-be-empty diff. The two surfaces now differ deliberately.
+What they still share is the spring curve `cubic-bezier(.22,1,.36,1)` and the medallion vocabulary
+of ADR-0083, which the workbench reuses so a settled action in the window shows the same shape the
+user saw floating in the page. The name, icon assets, and reduced-motion behaviour named by D7 are
+unchanged. Unifying the two palettes would require an extension change and a new decision.
+
+### A3. Three destinations, and one runtime control (supersedes D8's destination list)
+
+D8 specified one at-a-glance home and five destinations. In use, home, sessions and operations,
+and history proved to be one dataset at three ages, and the split made a user asking "what
+happened" check three pages. Configuration held three read-only cards once the runtime control
+left it. Runtime control had three separate affordances: a home button, a segmented control, and
+the tray.
+
+The workbench now provides:
+
+- **Monitor**, the landing surface. One hero action that is never empty, and a newest-first queue
+  that a finished action lands in as the next one rises, so idle shows the last completed action
+  rather than an empty panel. Connected sessions and browser instances appear as a compact strip.
+- **MCP integrations**, to check, connect, and disconnect explicitly supported MCP clients. The
+  former "Install" label did not say what was being installed.
+- **Status**, holding checkup diagnostics, authority sources, and the end-session intent.
+
+The runtime control lives in the persistent lamp band beside the connection state, giving pause
+and resume one affordance that matches the tray. The rare, consequential end-session intent stays
+on Status rather than in always-visible chrome. Search still spans user-visible records. The rest
+of D8 holds unchanged: blocked and attention-required transitions may still request a deduplicated
+notification, routine success stays quiet, and there is no telemetry, activation service, update
+ping, remote application content, or decorative placeholder state.
+
+### Acceptance evidence added
+
+10. Every change the orchestrator can publish has a handler in the surface, and every governed
+    capability class has a visual treatment.
+11. Every runtime intent stays reachable from the surface, guarded by an exhaustive match that
+    fails to compile when a new intent is added.
+12. The published palette is present and the accent is defined once, so no rule hard-codes it.
+13. A projection with no sink attached publishes nothing and leaves its sequence at zero.
+14. One operation lifetime publishes a gapless sequence, and published changes stay payload-free.
+15. The workbench capability grants listen and unlisten, and does not grant emit.
