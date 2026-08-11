@@ -102,7 +102,7 @@ Evidence: dpa.md (no-processing DPA template, pending counsel review); docs/lega
 ### How do you mitigate prompt injection, including indirect injection from web content?
 
 Prompt injection, including indirect injection from page content, is an unsolved problem
-industry-wide, and we will not claim to have solved it. What Ghostlight does is bound the
+industry-wide, and I will not claim to have solved it. What Ghostlight does is bound the
 blast radius so a successful injection cannot become an unbounded action. Sacred never-touch
 domains are refused even when a policy or a prompt asks for them; capability grants scope what
 the agent may do to which hosts; observe and enforce modes control whether actions run at
@@ -198,7 +198,7 @@ policy-free extension); ADR-0096 (current MCP edge, neutral service, and browser
 None yet. Ghostlight holds no SOC 2 report and no ISO/IEC 27001, ISO/IEC 42001, or CSA STAR
 certification. Most of those attestations describe how a vendor protects data on its own
 systems, and Ghostlight's runtime holds your data only on your systems, so their assurance
-does not map onto this architecture. In their place we offer architecture-as-evidence
+does not map onto this architecture. In their place I offer architecture-as-evidence
 (documented decisions, runnable scenarios, source-available governance code); certification
 is planned as the customer base grows, beginning with a CSA STAR Level 1 self-assessment
 submission. The full inventory of absent attestations, with reasons, is published in the
@@ -211,15 +211,15 @@ Evidence: README.md what-we-do-not-have section; controls.md framework orientati
 ### How do you secure your own infrastructure?
 
 The assets that matter on the vendor side are the source repository, the release pipeline,
-and the signing keys for licenses and policy bundles, and those are what we protect. The
+and the signing keys for licenses and policy bundles, and those are what I protect. The
 license- and policy-signing keys are held offline on an air-gapped machine and never touch CI
 or any online system. Release binaries are protected differently: per-file SHA-256 checksums
 and build-provenance attestations tie each artifact to the exact source commit and workflow
 run that produced it. Source and pipeline access is a single maintainer account with
 multi-factor authentication, no shared accounts, and no third-party write access, and changes
 reach a release only through recorded decision records and CI gates. There is no
-customer-data store on our side to defend, so our security effort concentrates on the
-integrity of what we ship to you.
+customer-data store on the vendor side to defend, so the security effort concentrates on
+the integrity of what I ship to you.
 
 See [supply-chain.md](supply-chain.md).
 
@@ -228,7 +228,7 @@ Evidence: supply-chain.md (build and change management); ADR-0028 Decision 10 (a
 ### Has Ghostlight been penetration tested? How do you handle vulnerabilities?
 
 Ghostlight has not yet commissioned a third-party penetration test; one is planned and will be
-run when funding allows. We make a standing commitment that any third-party security audit of
+run when funding allows. I make a standing commitment that any third-party security audit of
 Ghostlight will be published in full, including findings, and until then the source access
 granted by the governance license functions as a standing audit right: you can read the code
 that enforces policy. Suspected vulnerabilities go through the private disclosure channel
@@ -242,8 +242,8 @@ Evidence: SECURITY.md (disclosure channel); security-overview.md (publish-all-au
 ### What is your incident response and breach notification commitment?
 
 Ghostlight operates no customer-data store, so the meaningful vendor-side incident is a compromise
-of what we ship: the source repository, build pipeline, offline signing keys, or distribution
-channel. After confirming such a compromise, we aim to publish a GitHub Security Advisory promptly,
+of what I ship: the source repository, build pipeline, offline signing keys, or distribution
+channel. After confirming such a compromise, I aim to publish a GitHub Security Advisory promptly,
 typically within a few business days, naming affected versions and remediation. This is a
 best-effort solo-maintainer target, not a contractual notification window. Release notes and the
 repository advisory feed are the subscription path. Incidents inside your own deployment remain
@@ -334,8 +334,8 @@ Evidence: docs/legal/PERMISSION_JUSTIFICATIONS.md (per-permission and page-JavaS
 
 Support runs by email at support@sylin.org, and the commitment is an acknowledgment time, not
 a resolution time: a first human acknowledgment within 3 business days for Team and within 2
-business days for Enterprise. From there we work the issue with you; the acknowledgment clock
-is what we promise to meet. Suspected security vulnerabilities do not go to the support lane;
+business days for Enterprise. From there I work the issue with you; the acknowledgment clock
+is what I promise to meet. Suspected security vulnerabilities do not go to the support lane;
 they go through the private disclosure channel documented in the project's SECURITY.md.
 
 See [support-policy.md](support-policy.md).

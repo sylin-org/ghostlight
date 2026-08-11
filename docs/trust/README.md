@@ -3,15 +3,15 @@
 This is the front door for anyone reviewing Ghostlight for procurement, security, or
 compliance. Every document here is public. Nothing in this trust center is gated behind an
 NDA, a form, or a sales call. You can read, quote, and file any page before you ever talk
-to us.
+to me.
 
 Ghostlight is a governed browser automation tool: a local binary and a thin Chromium
 extension that give your MCP client controlled access to a browser session you are already
 signed into. The runtime executes entirely on your own infrastructure. That single fact
 shapes almost every answer below, because most vendor risk questions assume a vendor-side
-service that, in our case, does not exist.
+service that, here, does not exist.
 
-Where a claim can be verified, the answer links the evidence. We would rather show you the
+Where a claim can be verified, the answer links the evidence. I would rather show you the
 mechanism than ask you to trust a summary of it.
 
 ## How to read this
@@ -55,14 +55,13 @@ local-only architecture.
 
 ## What we do not have
 
-Ghostlight is early software from a small company, and this section is deliberate. Stating
-what is absent, with the reason, is more useful to a reviewer than a page of green
-checkmarks.
+Ghostlight is early software from a one-person company, and this section is deliberate: a
+reviewer can act on a stated absence, and cannot act on a page of green checkmarks.
 
 - **No SOC 2 report, and no ISO/IEC 27001, ISO/IEC 42001, or CSA STAR certification.** These
   attestations largely describe how a vendor handles data on its own systems. Ghostlight's
   runtime handles your data only on your systems, so the assurance those reports provide does
-  not map onto our architecture. In their place we offer architecture-as-evidence: the design
+  not map onto this architecture. In their place I offer architecture-as-evidence: the design
   is documented in decision records, the behavior is exercised by runnable scenarios, and the
   governance module ships as source-available code you can read. Certification is planned as
   the customer base grows, beginning with a CSA STAR Level 1 self-assessment submission; see

@@ -70,18 +70,18 @@ and no third-party write access. A change reaches a release only through a disci
 architecture decision records for design, CI gates (formatting, linting, tests, dependency
 audit, and the lightbox scenario runner) for correctness, and checksummed,
 provenance-attested artifacts for distribution. There is no customer-data store on the
-vendor side, so the security effort concentrates on the integrity of what we ship.
+vendor side, so the security effort concentrates on the integrity of what I ship.
 
 ## Incident response
 
 Ghostlight operates no customer-data store. The consequential vendor-side incident is therefore a
-compromise of what we ship: the source repository, build pipeline, offline signing keys, or
-distribution channel. After confirming such a compromise, we aim to publish a security advisory
+compromise of what I ship: the source repository, build pipeline, offline signing keys, or
+distribution channel. After confirming such a compromise, I aim to publish a security advisory
 promptly, typically within a few business days, naming affected versions and remediation. This is
 a best-effort solo-maintainer target, not a contractual notification window. Advisories are
 published as GitHub Security Advisories and named in release notes; watching the repository's
-releases is the subscription path. Suspected vulnerabilities reach us through the private channel
-documented in SECURITY.md. We also make a standing transparency commitment: any third-party
+releases is the subscription path. Suspected vulnerabilities reach me through the private channel
+documented in SECURITY.md. I also make a standing transparency commitment: any third-party
 security audit of Ghostlight will be published in full, including findings.
 
 See [SECURITY.md](../../SECURITY.md), [supply-chain.md](supply-chain.md), and

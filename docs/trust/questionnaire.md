@@ -3,7 +3,7 @@
 This is a self-assessment in the shape of the Cloud Security Alliance CAIQ v4, organized by
 its control domains. It is a self-assessment, not a third-party attestation. Where your
 process accepts a domain-level self-assessment, it can be filed as-is; where it requires the
-full question-level set, we complete one questionnaire per year on request
+full question-level set, I complete one questionnaire per year on request
 ([support-policy.md](support-policy.md)). A CSA STAR Level 1 registry submission is
 planned as a later step; no date is committed. Many domains that assume a hosted
 software-as-a-service vendor do not apply to Ghostlight, because the runtime executes on your

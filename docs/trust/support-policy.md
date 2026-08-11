@@ -1,6 +1,6 @@
 # Ghostlight Support Policy
 
-This page states the support channel, what we commit to, and what support covers.
+This page states the support channel, what I commit to, and what support covers.
 
 ## Channel
 
@@ -13,12 +13,12 @@ required subject line are stated in SECURITY.md.
 
 ## Response commitment
 
-The commitment is a first human acknowledgment, not a resolution. We acknowledge Team support
+The commitment is a first human acknowledgment, not a resolution. I acknowledge Team support
 requests within 3 business days and Enterprise support requests within 2 business days. The
-clock measures the time to a first human reply that confirms we have the request and are
+clock measures the time to a first human reply that confirms I have the request and am
 looking at it; it does not promise that the issue is resolved within that window, because
 resolution time depends on the issue. Business days are Monday through Friday, measured in UTC.
-In practice acknowledgment is typically much faster, but the commitment above is what we hold
+In practice acknowledgment is typically much faster, but the commitment above is what I hold
 ourselves to.
 
 ## Scope
@@ -37,7 +37,7 @@ Enterprise includes deployment help and roadmap input in addition to the faster
 acknowledgment window: hands-on assistance standing up central policy and audit in your
 environment, and a standing channel for roadmap input. Enterprise also covers completed
 security questionnaires: where the published CAIQ-shaped self-assessment does not satisfy a
-portal, we complete one full questionnaire per year on request. These match the Enterprise
+portal, I complete one full questionnaire per year on request. These match the Enterprise
 commitments on the pricing page.
 
 Last reviewed: 2026-07-14 against v0.8.0 | Contact: support@sylin.org
