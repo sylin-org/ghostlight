@@ -61,6 +61,31 @@ test("presentation preserves the established Ghostlight palette and motion", () 
   assert.match(renderer, /index \* CLICK_STAGGER_MS/);
   // The read scan must reach zero, or an interrupted sweep leaves a lit bar.
   assert.doesNotMatch(renderer, /100%\{opacity:\.85;transform:translateY\(100vh\)\}/);
+
+  // Identity reaches the stylesheet once as custom properties; the vocabulary below is static
+  // CSS, so a colour or curve changes in exactly one place.
+  assert.match(renderer, /:host\{all:initial;\$\{TOKENS\}\}/);
+  assert.match(renderer, /--gl-sky:\$\{SKY\};--gl-argb:\$\{SKY_RGB\}/);
+  const stylesheet = renderer.slice(renderer.indexOf("style.textContent = `"), renderer.indexOf("`;", renderer.indexOf("style.textContent = `")));
+  const interpolations = stylesheet.match(/\$\{[A-Z_]+\}/g) || [];
+  assert.deepEqual(
+    [...new Set(interpolations)].sort(),
+    ["${REDUCED_FADE_SELECTOR}", "${TOKENS}"],
+    "the stylesheet must stay static apart from its tokens and generated reduced-motion list"
+  );
+
+  // Reduced-motion coverage is generated from the registry, so a new effect cannot silently
+  // keep animating for someone who asked it not to.
+  assert.match(renderer, /\$\{REDUCED_FADE_SELECTOR\}\{animation-name:ghostlight-fade!important/);
+  assert.doesNotMatch(renderer, /\.trail-dot,\.field-shimmer,\.field-splash,\.target-glow/);
+  const registry = [...renderer.slice(renderer.indexOf("const TRANSIENT_EFFECTS"), renderer.indexOf("REDUCED_FADE_SELECTOR")).matchAll(/"([a-z- ]+)"/g)].map((match) => match[1]);
+  assert.ok(registry.length >= 17, `expected the full transient vocabulary, saw ${registry.length}`);
+  for (const name of registry) {
+    assert.ok(
+      stylesheet.includes(`.${name}{`),
+      `${name} is enrolled for reduced motion but has no rule in the stylesheet`
+    );
+  }
   assert.match(renderer, /setTimeout\(\(\) => denialLayer\.replaceChildren\(\), DENIAL_MS\)/);
   assert.match(chrome, /#0a0e17/);
   assert.match(chrome, /rgba\(56,189,248,\.10\)/);
