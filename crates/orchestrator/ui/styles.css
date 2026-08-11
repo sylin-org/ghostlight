@@ -48,10 +48,28 @@
   --mono: 'Cascadia Code', 'JetBrains Mono', ui-monospace, Consolas, monospace;
   --sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
 
-  /* Motion: the renderer's spring, the site's calm easing. */
+  /*
+   * Motion. The grammar is docs/design/visual-language.md: entrances settle on the spring,
+   * exits fade on ease-out, and only genuine ongoing state breathes.
+   *
+   * The beats are the in-page renderer's frozen visualIdentity, not new numbers. A treatment
+   * that means the same thing in the page and in this window keeps the same tempo, so the
+   * medallion a person sees floating over a page beats at the rate they see here.
+   */
   --spring: cubic-bezier(.22, 1, .36, 1);
   --calm: cubic-bezier(.4, 0, .2, 1);
-  --breathe: 4000ms;
+
+  --beat-glance: 150ms;    /* cursor_ms, and the stagger unit for a row of lights */
+  --beat-arrive: 320ms;    /* a signature fading in */
+  --beat-settle: 420ms;    /* a signature settling on the spring */
+  --beat-wait: 1050ms;     /* three waiting lights */
+  --beat-key: 1150ms;      /* the keyboard's illumination rhythm */
+  --beat-particle: 1300ms; /* the workwheel's light particles */
+  --beat-scan: 1450ms;     /* read_scan_ms */
+  --beat-capture: 1500ms;  /* screenshot_ms */
+  --beat-wheel: 2400ms;    /* the workwheel turning */
+  --beat-breathe: 4000ms;  /* border_breathe_ms; scope remains true */
+
   --band: 58px;
 }
 
@@ -94,7 +112,7 @@ h1, h2, h3 { margin: 0; font-weight: 400; }
   filter: drop-shadow(0 0 7px rgba(var(--argb), .28));
   transition: filter .9s var(--calm);
 }
-body.runtime-working .lamp-halo { opacity: 1; animation: halo-breathe var(--breathe) ease-in-out infinite; }
+body.runtime-working .lamp-halo { opacity: 1; animation: halo-breathe var(--beat-breathe) ease-in-out infinite; }
 body.runtime-working .lamp-ghost { filter: drop-shadow(0 0 13px rgba(var(--argb), .75)); }
 @keyframes halo-breathe { 0%, 100% { opacity: .55; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.1); } }
 body.runtime-held .lamp-halo { opacity: .9; background: radial-gradient(circle, rgba(251, 191, 36, .32), transparent 66%); }
@@ -139,7 +157,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 #main-content::-webkit-scrollbar { width: 10px; }
 #main-content::-webkit-scrollbar-thumb { border: 3px solid var(--bg); border-radius: 10px; background: #2a2830; }
 .view { display: none; width: min(1180px, 100%); margin: 0 auto; }
-.view.active { display: block; animation: view-in .34s var(--spring) both; }
+.view.active { display: block; animation: view-in var(--beat-arrive) var(--spring) both; }
 @keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 .kicker { color: var(--muted); font: 500 9px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; }
@@ -199,7 +217,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 .outcome { margin-top: 7px; color: var(--muted); font: 500 9px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
 .hero.blocked .outcome { color: var(--danger); }
 
-.swap-in { animation: swap-in .4s var(--spring) both; }
+.swap-in { animation: swap-in var(--beat-settle) var(--spring) both; }
 @keyframes swap-in { from { opacity: 0; transform: translateY(-9px); } to { opacity: 1; transform: none; } }
 
 /* ------------------------------- the queue ------------------------------ */
@@ -220,7 +238,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 .row-dur { color: var(--faint); font: 400 11px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .row-when { color: var(--faint); font: 400 10px/1 var(--mono); text-align: right; }
 .row.running .row-dur { color: var(--a); }
-.row.landing { animation: land .46s var(--spring) both; }
+.row.landing { animation: land var(--beat-settle) var(--spring) both; }
 @keyframes land { from { height: 0; opacity: 0; transform: translateY(-10px); } to { height: 42px; opacity: 1; transform: none; } }
 
 .empty { padding: 30px 4px; color: var(--muted); font-size: 12.5px; }
@@ -238,23 +256,23 @@ body.runtime-offline .state-word { color: var(--muted); }
 .row.blocked .med-mini svg { stroke: var(--danger); }
 
 /* Inner treatments animate only while the action is genuinely running. */
-.hero.live .spin { animation: spin 2.4s linear infinite; transform-origin: 12px 12px; }
+.hero.live .spin { animation: spin var(--beat-wheel) linear infinite; transform-origin: 12px 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.hero.live .particle { animation: particle 1.6s ease-in-out infinite; }
-.hero.live .particle:nth-of-type(2) { animation-delay: .53s; }
-.hero.live .particle:nth-of-type(3) { animation-delay: 1.06s; }
+.hero.live .particle { animation: particle var(--beat-particle) ease-in-out infinite; }
+.hero.live .particle:nth-of-type(2) { animation-delay: 433ms; }
+.hero.live .particle:nth-of-type(3) { animation-delay: 866ms; }
 @keyframes particle { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
-.hero.live .keylight { animation: keylight 1.45s ease-in-out infinite; }
-.hero.live .keylight:nth-of-type(2) { animation-delay: .18s; }
-.hero.live .keylight:nth-of-type(3) { animation-delay: .36s; }
+.hero.live .keylight { animation: keylight var(--beat-key) ease-in-out infinite; }
+.hero.live .keylight:nth-of-type(2) { animation-delay: var(--beat-glance); }
+.hero.live .keylight:nth-of-type(3) { animation-delay: 300ms; }
 @keyframes keylight { 0%, 100% { opacity: .28; } 45% { opacity: 1; } }
-.hero.live .scanline { animation: scan 1.45s ease-in-out infinite; }
+.hero.live .scanline { animation: scan var(--beat-scan) ease-in-out infinite; }
 @keyframes scan { 0% { opacity: 0; transform: translateY(-6px); } 25%, 75% { opacity: 1; } 100% { opacity: 0; transform: translateY(6px); } }
-.hero.live .glint { animation: glint 1.5s ease-in-out infinite; }
+.hero.live .glint { animation: glint var(--beat-capture) ease-in-out infinite; }
 @keyframes glint { 0%, 70%, 100% { opacity: 0; } 82% { opacity: 1; } }
-.hero.live .waitdot { animation: waitdot 1.6s ease-in-out infinite; }
-.hero.live .waitdot:nth-of-type(2) { animation-delay: .27s; }
-.hero.live .waitdot:nth-of-type(3) { animation-delay: .54s; }
+.hero.live .waitdot { animation: waitdot var(--beat-wait) ease-in-out infinite; }
+.hero.live .waitdot:nth-of-type(2) { animation-delay: var(--beat-glance); }
+.hero.live .waitdot:nth-of-type(3) { animation-delay: 300ms; }
 @keyframes waitdot { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
 
 /* ------------------------------ tiles, cards ---------------------------- */
@@ -294,7 +312,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 .colophon { margin: 22px 0 0; color: var(--faint); font: 400 10.5px/1.6 var(--mono); }
 
 /* ---------------------------- command palette --------------------------- */
-.palette-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; padding: 14vh 20px 20px; background: rgba(9, 8, 11, .66); justify-items: center; align-items: start; backdrop-filter: blur(4px); animation: fade-in .16s ease-out both; }
+.palette-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; padding: 14vh 20px 20px; background: rgba(9, 8, 11, .66); justify-items: center; align-items: start; backdrop-filter: blur(4px); animation: fade-in var(--beat-glance) ease-out both; }
 .palette-box { width: min(620px, 100%); overflow: hidden; border: 1px solid var(--line-2); border-radius: 12px; background: #17161b; box-shadow: 0 28px 80px rgba(0, 0, 0, .55); }
 .palette-input { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 0 14px; height: 46px; border-bottom: 1px solid var(--line); }
 .palette-input svg { width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 1.8; }
@@ -311,10 +329,10 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 .palette-empty { padding: 22px; color: var(--muted); font-size: 12.5px; text-align: center; }
 
 /* ------------------------------ toast, dialog --------------------------- */
-.toast { position: fixed; right: 18px; bottom: 18px; z-index: 40; max-width: 420px; padding: 11px 14px; border: 1px solid var(--line-2); border-radius: 9px; color: var(--ink-2); background: #17161b; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); font-size: 12px; animation: toast-in .34s var(--spring) both; }
+.toast { position: fixed; right: 18px; bottom: 18px; z-index: 40; max-width: 420px; padding: 11px 14px; border: 1px solid var(--line-2); border-radius: 9px; color: var(--ink-2); background: #17161b; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); font-size: 12px; animation: toast-in var(--beat-arrive) var(--spring) both; }
 .toast.error { border-color: rgba(248, 113, 113, .45); color: #fecaca; background: #241419; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
-.dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; padding: 20px; background: rgba(9, 8, 11, .72); place-items: center; backdrop-filter: blur(4px); animation: fade-in .18s ease-out both; }
+.dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; padding: 20px; background: rgba(9, 8, 11, .72); place-items: center; backdrop-filter: blur(4px); animation: fade-in var(--beat-glance) ease-out both; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .confirm-dialog { width: min(420px, calc(100vw - 40px)); padding: 22px; border: 1px solid var(--line-2); border-radius: 14px; background: #17161b; box-shadow: 0 24px 80px rgba(0, 0, 0, .55); }
 .confirm-dialog h2 { margin: 8px 0 6px; color: var(--ink); font-size: 18px; font-weight: 300; letter-spacing: -.02em; }

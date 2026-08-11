@@ -4,7 +4,7 @@ Ghostlight drives a person's real browser, and the person is allowed to watch. E
 effect exists for one reason: to answer, at a glance, "what is the agent doing to my page right
 now?" The effects are a product surface with a designed vocabulary, not decoration. This document
 is the normative reference for that vocabulary; the implementation lives in
-`extension/agent-visual-indicator.js`.
+`extension/lib/presentation.js`.
 
 The principle behind all of it: **show, never surprise.** The agent's presence should feel like a
 courteous guest who narrates what they touch -- visible enough to trust, quiet enough to ignore.
@@ -39,7 +39,7 @@ domain modules.
 | --- | --- | --- | --- |
 | Phantom cursor | pointer moves | "the agent's hand is HERE" | sky arrow glyph, glides with a 150ms transition |
 | Controlled-tab border | every Ghostlight-managed tab | "an agent can act inside this tab" | persistent inset sky border with a slow, low-amplitude breathing pulse |
-| Click ripple | left/middle click | "clicked, this many times" | expanding ring per click, staggered for double/triple; right-click ring is dashed |
+| Click ripple | any click | "clicked here" | one expanding sky ring at the point |
 | Drag trail | click-drag path | "dragged along this path" | comet trail of fading radial dots |
 | Type shimmer | typing into the focused element | "typing into THIS field" | soft outline pulse on the focused element |
 | Field splash | a form write lands (`form_input`, `form_fill`, `file_upload`, `upload_image`) | "the agent just SET this field" | ring + interior wash hugging the field's own rectangle (borrows its border-radius), settles then releases outward |
@@ -59,6 +59,34 @@ domain modules.
 | Denial sticker | one enforced denial via `Browser::notify()` | "a guardrail held; here is why" | compact centered sticker, replaced or removed after three seconds |
 | Attention overlay | ADR-0079 denial burst | "this MCP session is paused until a person decides" | page-softening modal with service-provided controls and popup fallback |
 | Recording badge | active screencast lifecycle | "Ghostlight is recording" | truthful red REC extension badge and popup state, never a simulated live preview |
+
+## Not yet in the vocabulary
+
+Named here so nobody reads an intention as a shipped capability.
+
+- **Click ripples do not encode the click.** The renderer draws one ring wherever a click lands.
+  A double click draws one ring, and a secondary-button click looks identical to a primary one.
+  The count and button exist on the browser command wire (`click_count`, button), but
+  `PresentationSignal` does not carry them, so `clickRipple()` in
+  `extension/lib/presentation.js` genuinely cannot know. Giving a double click two staggered
+  rings and a secondary click a dashed one needs a field on that signal, populated by the
+  orchestrator: a small versioned bridge addition, not a renderer change.
+
+## The desktop workbench shares this language
+
+The workbench window is a second surface for the same vocabulary, with two deliberate differences.
+
+- **Tempo is shared.** A treatment that means the same thing in both places keeps the same beat.
+  The workbench names them as `--beat-*` tokens in `crates/orchestrator/ui/styles.css`, taken from
+  the renderer's frozen `visualIdentity`: the workwheel turns over 2400ms in both, waiting lights
+  breathe over 1050ms with a 150ms stagger in both, the keyboard pulses over 1150ms, the read scan
+  runs 1450ms, and scope breathes over four seconds.
+- **Accent differs on purpose.** The workbench carries Ghostlight's published teal, while the
+  in-page renderer keeps the sky signal users are trained on. See the 2026-08-11 amendment to
+  ADR-0102.
+- **The medallion shapes are the same four**: workwheel, keyboard, waiting lights, camera. In the
+  page they mark live activity; in the workbench they animate while an action runs and freeze when
+  it settles, so the frozen glyph in the queue is the same shape that was moving a moment earlier.
 
 ## Invariants
 

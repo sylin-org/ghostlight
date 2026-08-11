@@ -106,12 +106,12 @@
       .attention{position:fixed;inset:0;z-index:6;display:none;place-items:center;padding:24px;pointer-events:auto;background:rgba(5,10,18,.55);backdrop-filter:blur(5px) saturate(.7)}.attention.on{display:grid}.attention-card{width:min(92vw,560px);padding:24px;border:1px solid rgba(239,68,68,.7);border-radius:22px;color:${INK};background:rgba(10,16,26,.97);box-shadow:0 24px 80px -24px rgba(239,68,68,.75);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.attention-icon{display:grid;place-items:center;width:58px;height:58px;margin:0 auto 14px;border-radius:50%;color:#fff;background:#ef4444;box-shadow:0 0 28px rgba(239,68,68,.55);font:800 30px/1 system-ui}.attention-card h2{margin:0;text-align:center;font-size:22px}.attention-card p{margin:8px 0 20px;color:#cbd5e1;text-align:center;font-size:14px;line-height:1.45}.attention-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.attention-actions button{min-height:42px;padding:9px 12px;border:1px solid rgba(148,163,184,.38);border-radius:10px;color:${INK};background:#172033;font:600 12px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;cursor:pointer}.attention-actions button:hover,.attention-actions button:focus-visible{border-color:${SKY};background:#1d2b42;outline:none}.attention-actions .danger{border-color:rgba(239,68,68,.6);color:#fecaca}
       @keyframes ghostlight-control-breathe{0%,100%{opacity:.58}50%{opacity:.82}}
       @keyframes ghostlight-ripple{0%{opacity:.85;transform:translate(-50%,-50%) scale(.3)}100%{opacity:0;transform:translate(-50%,-50%) scale(2.8)}}
-      @keyframes ghostlight-trail{0%{opacity:.9}100%{opacity:0}}
-      @keyframes ghostlight-shimmer{0%{opacity:0}25%{opacity:1}60%{opacity:.7}100%{opacity:0}}
+      @keyframes ghostlight-trail{0%{opacity:.9;transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-50%) scale(.55)}}
+      @keyframes ghostlight-shimmer{0%{opacity:0;transform:scale(.985)}25%{opacity:1;transform:scale(1)}60%{opacity:.7}100%{opacity:0;transform:scale(1.015)}}
       @keyframes ghostlight-fieldsplash{0%{opacity:0;transform:scale(.97)}18%{opacity:1;transform:scale(1)}62%{opacity:.85}100%{opacity:0;transform:scale(1.05)}}
-      @keyframes ghostlight-targetglow{0%{opacity:0}22%{opacity:1}100%{opacity:0}}
+      @keyframes ghostlight-targetglow{0%{opacity:0;transform:scale(.94)}22%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.06)}}
       @keyframes ghostlight-chev{0%{opacity:0;transform:translateY(-8px)}30%{opacity:1}100%{opacity:0;transform:translateY(10px)}}
-      @keyframes ghostlight-scan{0%{opacity:0;transform:translateY(-80px)}12%{opacity:1}90%{opacity:1}100%{opacity:.85;transform:translateY(100vh)}}
+      @keyframes ghostlight-scan{0%{opacity:0;transform:translateY(-80px)}12%{opacity:1}90%{opacity:1}100%{opacity:0;transform:translateY(100vh)}}
       @keyframes ghostlight-nav{0%{opacity:0;transform:translate(-50%,-14px)}14%{opacity:1;transform:translate(-50%,0)}82%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-8px)}}
       @keyframes ghostlight-lozenge{0%{opacity:0;transform:translate(-50%,12px)}16%{opacity:1;transform:translate(-50%,0)}78%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-6px)}}
       @keyframes ghostlight-flash{0%{opacity:.42}100%{opacity:0}}
@@ -123,7 +123,7 @@
       @keyframes ghostlight-signature-dot{0%,20%,100%{opacity:.25;transform:translateY(1px) scale(.72)}50%{opacity:1;transform:translateY(-1px) scale(1)}}
       @keyframes ghostlight-signature-glint{0%{opacity:0;transform:translate(-50%,-50%) rotate(-80deg)}25%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%) rotate(250deg)}}
       @keyframes ghostlight-find-lens{0%,100%{transform:translate(-1px,-1px) rotate(-7deg)}50%{transform:translate(2px,2px) rotate(5deg)}}
-      @keyframes ghostlight-notif-grow{0%{opacity:0;transform:scaleY(0)}100%{opacity:1;transform:scaleY(1)}}
+      @keyframes ghostlight-notif-grow{0%{opacity:0;transform:translateY(10px) scale(.96)}100%{opacity:1;transform:none}}
       @keyframes ghostlight-notif-desc{0%{opacity:0}100%{opacity:.85}}
       @media(max-width:520px){.attention-actions{grid-template-columns:1fr}}
       @media(prefers-reduced-motion:reduce){.scope.on{animation:none;opacity:.7}.cursor{transition:none}.ripple{animation-name:ghostlight-fade}.trail-dot,.field-shimmer,.field-splash,.target-glow,.chevrons svg,.read-scan,.nav-pill,.key-lozenge,.capture-flash,.capture-frame,.zoom-frame,.workwheel,.particle,.keyboard,.wait-lights span,.lens,.glint{animation-name:ghostlight-fade!important;animation-duration:180ms!important}.signature{transition:opacity 180ms ease-out}.denial-ribbon{animation:none!important}.denial-description{animation:none!important;opacity:.85}}
