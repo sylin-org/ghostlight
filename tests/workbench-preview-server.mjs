@@ -12,8 +12,9 @@ const snapshot = {
   service: { version: "1.0.0", started_at_ms: Date.now() - 540000, runtime_state: "active" },
   overview: { active_sessions: 2, active_operations: 2, connected_browsers: 2, blocked_in_history: 1 },
   sessions: [
-    { id: "workspace_codex", client_label: "Codex", leased: true, tab_count: 3, held_tab_count: 0, active_operations: 1 },
-    { id: "workspace_claude", client_label: "Claude Code", leased: true, tab_count: 1, held_tab_count: 0, active_operations: 1 }
+    { id: "workspace_codex", client_label: "Codex", channel: "mcp", leased: true, tab_count: 3, held_tab_count: 0, active_operations: 1 },
+    { id: "workspace_claude", client_label: "Claude Code", channel: "mcp", leased: true, tab_count: 1, held_tab_count: 0, active_operations: 1 },
+    { id: "workspace_script", client_label: "ghostlight call", channel: "cli", leased: false, tab_count: 1, held_tab_count: 0, active_operations: 0 }
   ],
   operations: [
     { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read_page", activity: "Reading page", capability: "read", started_at_ms: Date.now() - 12000, phase: "running" },
@@ -24,8 +25,8 @@ const snapshot = {
     { id: "browser_edge", family: "Edge", adapter_version: "1.0.0", connected: true }
   ],
   history: [
-    { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_close_tab", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {} },
-    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_codex", tool: "browser_open_page", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" } }
+    { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_close_tab", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp" },
+    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_codex", tool: "browser_open_page", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli" }
   ],
   diagnostics: [
     { id: "service", label: "Orchestrator", severity: "passing", detail: "Ghostlight is accepting local connections." },
@@ -100,7 +101,9 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
         effect: blocked ? "none" : spec.effect,
         summary: blocked ? "Authority blocked the browser job." : spec.summary,
         duration_ms: spec.ms,
-        observed: blocked ? {} : spec.observed
+        observed: blocked ? {} : spec.observed,
+        // Alternate the intake so both read side by side in the queue.
+        channel: counter % 3 === 0 ? "cli" : "mcp"
       };
       preview.history.unshift(record);
       publish({ kind: "operation_settled", record });

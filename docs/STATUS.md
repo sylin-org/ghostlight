@@ -94,6 +94,10 @@ last fetch.
   over the CLI: open, list, read, capture to a file, close, with a non-zero exit if any step fails.
   It holds one `--stdin` session open and writes a line at a time, so each step uses the handle the
   previous one returned.
+- Monitor rows carry the intake between the tool and the description, resolved from the record when
+  settled and from the still-connected session while running. A guard derives the row's grid track
+  count and each width's hidden cells from the stylesheet and compares them to the cells the surface
+  renders, so a new column cannot silently shift the ones after it.
 
 ## Verified in this workspace
 
@@ -101,7 +105,7 @@ Re-run on 2026-08-11 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 106 Rust tests -- 88 in the orchestrator including its launch-mode
+- `cargo test --workspace`: 107 Rust tests -- 89 in the orchestrator including its launch-mode
   binary test, 15 in the shared bridge, and 3 in the MCP connector.
 - `npm test --prefix extension`: 39 extension tests.
 - `node tests/cli-powershell-journey.mjs`: the shipped PowerShell script drives a real service and a

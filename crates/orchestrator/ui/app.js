@@ -288,6 +288,18 @@ function describe(entry) {
   return note ? `${body} (${note})` : body;
 }
 
+/**
+ * Which intake drove this action.
+ *
+ * A settled row carries it on the record. A running one has no record yet, so it resolves through
+ * the session that admitted it, which is still connected while the work is in flight.
+ */
+function channelFor(entry) {
+  if (entry.channel) return entry.channel;
+  const session = state.snapshot?.sessions.find((item) => item.id === entry.workspace);
+  return session?.channel ?? "";
+}
+
 /** The client that asked, resolved through the current sessions when it is still connected. */
 function clientFor(workspace) {
   const session = state.snapshot?.sessions.find((item) => item.id === workspace);
@@ -363,6 +375,7 @@ function rowMarkup(entry) {
     : duration(settledMs(entry));
   return `<div class="med-mini">${glyphFor(entry)}</div>`
     + `<div class="row-tool">${escapeHtml(entry.tool)}</div>`
+    + `<div class="row-channel">${escapeHtml(channelFor(entry))}</div>`
     + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
     + `<div class="row-client">${escapeHtml(clientFor(entry.workspace))}</div>`
     + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`

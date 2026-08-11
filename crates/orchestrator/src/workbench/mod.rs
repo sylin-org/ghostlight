@@ -309,6 +309,7 @@ impl WorkbenchFacade {
                     .count(),
                 id: workspace.id,
                 client_label: workspace.client_label,
+                channel: workspace.channel,
                 leased: workspace.leased,
                 tab_count: workspace.tab_count,
                 held_tab_count: workspace.held_tab_count,
@@ -762,6 +763,8 @@ pub struct SessionSummary {
     pub id: String,
     /// Presentation-only client label.
     pub client_label: String,
+    /// Which intake admitted this session, so live work can be attributed before it settles.
+    pub channel: IntakeChannel,
     /// Whether one invocation currently owns the workspace.
     pub leased: bool,
     /// Controlled tab count.

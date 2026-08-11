@@ -449,6 +449,76 @@ mod tests {
     }
 
     #[test]
+    fn every_row_cell_has_a_grid_track_at_every_width() {
+        // A row is a CSS grid, so adding a cell without adding a track silently shifts every
+        // column after it. Both numbers are derived here rather than pinned, and the narrow
+        // layouts are checked against what they hide.
+        let app = include_str!("../../ui/app.js");
+        let styles = include_str!("../../ui/styles.css");
+
+        let markup = app
+            .split_once("function rowMarkup(entry) {")
+            .and_then(|(_, rest)| {
+                rest.split_once(
+                    "
+function ",
+                )
+            })
+            .map(|(body, _)| body)
+            .expect("the surface still builds rows");
+        let cells = markup.matches("<div class=\"").count();
+        assert!(cells >= 6, "expected a row of cells, saw {cells}");
+
+        fn tracks(block: &str) -> usize {
+            let value = block
+                .split_once("grid-template-columns:")
+                .and_then(|(_, rest)| rest.split_once(';'))
+                .map(|(value, _)| value)
+                .expect("a row grid declares its columns");
+            // minmax(0, 1fr) is one track that contains a space; collapse it before counting.
+            let mut collapsed = String::new();
+            let mut depth = 0_usize;
+            for character in value.chars() {
+                match character {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    c if c.is_whitespace() && depth > 0 => continue,
+                    _ => {}
+                }
+                collapsed.push(character);
+            }
+            collapsed.split_whitespace().count()
+        }
+
+        // Narrower media queries stack on wider ones, so what a width hides is everything hidden
+        // up to and including its own section.
+        let mut hidden = 0_usize;
+        for (index, section) in styles.split("@media").enumerate() {
+            hidden += section
+                .lines()
+                .filter(|line| line.contains("display: none"))
+                .flat_map(|line| line.split(','))
+                .filter(|selector| selector.trim_start().starts_with(".row-"))
+                .count();
+            let Some((_, rest)) = section.split_once(".row {") else {
+                continue;
+            };
+            let Some((block, _)) = rest.split_once('}') else {
+                continue;
+            };
+            if !block.contains("grid-template-columns") {
+                continue;
+            }
+            assert_eq!(
+                tracks(block) + hidden,
+                cells,
+                "row layout {index} declares {} tracks and hides {hidden} of {cells} cells",
+                tracks(block)
+            );
+        }
+    }
+
+    #[test]
     fn every_readiness_the_surface_can_receive_has_a_note() {
         use crate::work::result::Readiness;
 
