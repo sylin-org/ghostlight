@@ -6,7 +6,7 @@
 // from one line resolve on the next.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 
@@ -17,6 +17,7 @@ const runtimeFile = join(repository, `tests/.ghostlight-cli-runtime-${process.pi
 const auditFile = join(repository, `tests/.ghostlight-cli-audit-${process.pid}.jsonl`);
 // The service holds its lifetime lease beside the runtime file; killing it leaves the lease behind.
 const leaseFile = runtimeFile.replace(/\.json$/, ".lock");
+const policyFile = join(repository, `tests/.ghostlight-cli-policy-${process.pid}.json`);
 const environment = {
   ...process.env,
   GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
@@ -41,7 +42,10 @@ function records() {
 rmSync(runtimeFile, { force: true });
 rmSync(auditFile, { force: true });
 rmSync(leaseFile, { force: true });
+const services = [];
+const cleanup = [runtimeFile, auditFile, leaseFile, policyFile];
 const service = spawn(ghostlight, ["--headless"], { env: environment, stdio: ["pipe", "pipe", "pipe"] });
+services.push(service);
 service.stderr.on("data", (chunk) => process.stderr.write(`[ghostlight] ${chunk}`));
 
 try {
@@ -91,10 +95,52 @@ try {
     "separate processes are separate workspaces, which is why batch mode exists"
   );
 
-  console.log("cli journey ok: demand-free call -> governed result -> cli-attributed audit -> batch session");
+  // An authority layer may decline the intake outright. Governance belongs to the service, so
+  // this needs its own authority with the policy in its environment.
+  writeFileSync(policyFile, JSON.stringify({ version: 1, channels: { cli: {} } }));
+  const governedRuntime = `${runtimeFile}.governed.json`;
+  const governedAudit = `${auditFile}.governed.jsonl`;
+  const governedEnvironment = {
+    ...process.env,
+    GHOSTLIGHT_RUNTIME_FILE: governedRuntime,
+    GHOSTLIGHT_AUDIT_FILE: governedAudit,
+    GHOSTLIGHT_POLICY_FILE: policyFile
+  };
+  cleanup.push(governedRuntime, governedAudit, governedRuntime.replace(/\.json$/, ".lock"));
+  const governedService = spawn(ghostlight, ["--headless"], {
+    env: governedEnvironment,
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  services.push(governedService);
+  for (let attempt = 0; attempt < 80 && !existsSync(governedRuntime); attempt += 1) await sleep(50);
+  assert.equal(existsSync(governedRuntime), true, "the governed service never started");
+
+  const refused = spawnSync(ghostlight, ["call", "browser_list_tabs"], {
+    env: governedEnvironment,
+    encoding: "utf8"
+  });
+  assert.notEqual(refused.status, 0, "a disabled channel must not succeed");
+  assert.match(
+    refused.stderr,
+    /channel_denied/,
+    `expected a channel refusal, saw: ${refused.stderr}`
+  );
+  // The refusal lands at admission, before a workspace exists, so nothing was invoked.
+  assert.equal(
+    existsSync(governedAudit) ? readFileSync(governedAudit, "utf8").trim() : "",
+    "",
+    "a refused intake must not write an audit record"
+  );
+  // The negative control: the same service admits the MCP intake, so the refusal is this policy
+  // naming this channel rather than the authority being broken.
+  assert.equal(
+    JSON.parse(readFileSync(governedRuntime, "utf8")).service_bridge_major,
+    1,
+    "the governed service is otherwise healthy"
+  );
+
+  console.log("cli journey ok: demand-free call -> governed result -> cli-attributed audit -> batch session -> channel refusal");
 } finally {
-  if (!service.killed) service.kill();
-  rmSync(runtimeFile, { force: true });
-  rmSync(auditFile, { force: true });
-  rmSync(leaseFile, { force: true });
+  for (const child of services) if (!child.killed) child.kill();
+  for (const file of cleanup) rmSync(file, { force: true });
 }

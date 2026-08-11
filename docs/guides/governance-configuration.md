@@ -47,6 +47,7 @@ Fields:
 | `allow_tab_close` | no | `false` removes model-driven close. `true` cannot restore another layer's denial. |
 | `allow_hosts` | no | Adds a required host allow-list layer. Every configured layer must match. |
 | `deny_hosts` | no | Denies matching hosts regardless of an allow-list match. |
+| `channels` | no | Intake channels this layer takes control of. See below. |
 
 Unknown fields, unknown capabilities, unsupported versions, invalid host patterns, and non-JSON
 input invalidate the layer. A configured invalid layer fails closed; Ghostlight does not silently
@@ -133,6 +134,38 @@ Model-driven tab close requires both:
 Either layer may deny. Neither can expand the other. A refusal keeps the tab available as visual
 evidence, shows a fixed browser receipt, and returns a blocked no-effect result. Manual browser
 closure remains the user's action.
+
+## Turning an intake channel off
+
+Ghostlight accepts work on two intakes: `mcp`, the stdio connector a coding client speaks, and
+`cli`, the `ghostlight call` command line that scripts use. Both cross the same executor and the
+same authority, and neither grants a capability the other does not.
+
+A layer that wants to allow only agent work names the channel it is closing:
+
+```json
+{
+  "version": 1,
+  "allow_capabilities": ["read", "action", "write"],
+  "channels": { "cli": {} }
+}
+```
+
+Naming a channel is how a layer takes control of it, and taking control means saying yes
+explicitly. `{}` and `{"enabled": false}` both refuse the channel; `{"enabled": true}` admits it.
+A channel the map does not mention is unrestricted, and an absent `channels` map restricts nothing
+at all, so an unconfigured Ghostlight admits both intakes.
+
+Layers compose the way hosts and capabilities do. If managed authority refuses a channel, a local
+policy naming `{"enabled": true}` cannot hand it back. A channel name that is not `mcp` or `cli` is
+a typo, and like every other policy typo it makes the layer invalid, which denies rather than
+silently restricting nothing.
+
+The refusal happens at admission, before a session exists. The caller sees the stable
+`channel_denied` reason and exits non-zero, and because no work was invoked, no audit record is
+written. Turning `cli` off is a real boundary for an organization's own deployment, but it is worth
+knowing what it is not: anyone who can run `ghostlight call` on that machine can also start the MCP
+connector by hand, so this narrows a deployment rather than containing a determined local user.
 
 ## Payload-free audit and history
 

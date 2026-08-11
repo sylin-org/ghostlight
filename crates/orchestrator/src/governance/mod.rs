@@ -3,7 +3,7 @@
 
 //! Authority snapshots, final-boundary admission, runtime controls, and payload-free audit intent.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -82,6 +82,8 @@ pub enum ReasonCode {
     RuntimeAttention,
     /// Runtime control ended the session.
     SessionEnded,
+    /// An authority layer does not admit this intake channel.
+    ChannelDenied,
 }
 
 impl ReasonCode {
@@ -99,6 +101,7 @@ impl ReasonCode {
             Self::RuntimeHold => "runtime_hold",
             Self::RuntimeAttention => "runtime_attention",
             Self::SessionEnded => "session_ended",
+            Self::ChannelDenied => "channel_denied",
         }
     }
 }
@@ -368,6 +371,31 @@ impl GovernanceFacade {
     }
 
     /// Build one immutable snapshot and apply caller restrictions by intersection.
+    /// Decide whether an intake channel may open a session at all.
+    ///
+    /// This is admission, not capability: an admitted channel is still bound by every ceiling the
+    /// same layers impose, and no layer can raise one channel above another. Layers compose by
+    /// intersection, so a managed refusal cannot be undone locally, and an invalid layer denies.
+    #[must_use]
+    pub fn admits_channel(&self, channel: IntakeChannel) -> Decision {
+        for (path, managed) in [(&self.local_policy, false), (&self.managed_policy, true)] {
+            let Some(path) = path else { continue };
+            match read_policy(path, managed) {
+                Ok(policy) => {
+                    if let Some(channels) = &policy.channels {
+                        if let Some(rule) = channels.get(&channel) {
+                            if !rule.enabled {
+                                return Decision::deny(ReasonCode::ChannelDenied);
+                            }
+                        }
+                    }
+                }
+                Err(_) => return Decision::deny(ReasonCode::InvalidAuthority),
+            }
+        }
+        Decision::allow()
+    }
+
     pub fn snapshot(&self, restrictions: &RequestRestrictions) -> AuthoritySnapshot {
         let mut capabilities = all_capabilities();
         let mut tab_close_allowed = true;
@@ -454,6 +482,22 @@ struct PolicyDocument {
     allow_hosts: Option<Vec<String>>,
     #[serde(default)]
     deny_hosts: Vec<String>,
+    /// Intake channels this layer takes control of.
+    ///
+    /// Absent means the layer restricts no channel, so an unconfigured Ghostlight admits every
+    /// intake and the ungoverned path stays first-class (ADR-0013). Naming a channel is how a
+    /// layer takes control of it, and taking control means saying yes explicitly.
+    #[serde(default)]
+    channels: Option<BTreeMap<IntakeChannel, ChannelRule>>,
+}
+
+/// What one authority layer says about one intake channel.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChannelRule {
+    /// Whether this layer admits the channel. Absent means no, so `{}` fully disables it.
+    #[serde(default)]
+    enabled: bool,
 }
 
 fn read_policy(path: &Path, must_be_managed: bool) -> Result<PolicyDocument, GovernanceError> {
@@ -837,6 +881,11 @@ mod tests {
                 include_str!("../../../../examples/demo-policy.json"),
                 false,
             ),
+            (
+                "scripting-disabled",
+                include_str!("../../../../examples/scripting-disabled.json"),
+                false,
+            ),
         ] {
             let path = temporary(name);
             fs::write(&path, source).unwrap();
@@ -975,6 +1024,90 @@ mod tests {
             ["host", "readiness"],
             "an observation grew another field a URL could travel in"
         );
+    }
+
+    #[test]
+    fn naming_a_channel_is_how_a_layer_takes_control_of_it() {
+        use ghostlight_bridge::service::IntakeChannel;
+
+        let unconfigured = GovernanceFacade::new(None, None);
+        for channel in [IntakeChannel::Mcp, IntakeChannel::Cli] {
+            assert!(
+                unconfigured.admits_channel(channel).allowed,
+                "an unconfigured Ghostlight must admit every intake"
+            );
+        }
+
+        // An empty rule is a refusal: taking control of a channel means saying yes explicitly.
+        let path = temporary("channel-empty");
+        fs::write(&path, br#"{"version":1,"channels":{"cli":{}}}"#).unwrap();
+        let empty = GovernanceFacade::new(Some(path.clone()), None);
+        assert_eq!(
+            empty.admits_channel(IntakeChannel::Cli).reason,
+            ReasonCode::ChannelDenied
+        );
+        assert!(
+            empty.admits_channel(IntakeChannel::Mcp).allowed,
+            "a layer restricts only the channels it names"
+        );
+        let _ = fs::remove_file(path);
+
+        let path = temporary("channel-false");
+        fs::write(
+            &path,
+            br#"{"version":1,"channels":{"cli":{"enabled":false},"mcp":{"enabled":true}}}"#,
+        )
+        .unwrap();
+        let explicit = GovernanceFacade::new(Some(path.clone()), None);
+        assert!(!explicit.admits_channel(IntakeChannel::Cli).allowed);
+        assert!(explicit.admits_channel(IntakeChannel::Mcp).allowed);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_local_layer_cannot_readmit_a_channel_managed_authority_refused() {
+        use ghostlight_bridge::service::IntakeChannel;
+
+        let managed = temporary("channel-managed");
+        fs::write(
+            &managed,
+            br#"{"version":1,"managed":true,"expires_unix_ms":99999999999999,"channels":{"cli":{}}}"#,
+        )
+        .unwrap();
+        let local = temporary("channel-local");
+        fs::write(
+            &local,
+            br#"{"version":1,"channels":{"cli":{"enabled":true}}}"#,
+        )
+        .unwrap();
+
+        let facade = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()));
+        assert_eq!(
+            facade.admits_channel(IntakeChannel::Cli).reason,
+            ReasonCode::ChannelDenied,
+            "layers compose by intersection; local cannot hand access back"
+        );
+        // The negative control: the same local layer alone does admit it, so the refusal above
+        // is the managed layer's doing and not an accident of parsing.
+        let alone = GovernanceFacade::new(Some(local.clone()), None);
+        assert!(alone.admits_channel(IntakeChannel::Cli).allowed);
+        let _ = fs::remove_file(managed);
+        let _ = fs::remove_file(local);
+    }
+
+    #[test]
+    fn an_unknown_channel_name_is_a_typo_not_a_silent_pass() {
+        use ghostlight_bridge::service::IntakeChannel;
+
+        let path = temporary("channel-typo");
+        fs::write(&path, br#"{"version":1,"channels":{"cli-tool":{}}}"#).unwrap();
+        let facade = GovernanceFacade::new(Some(path.clone()), None);
+        assert_eq!(
+            facade.admits_channel(IntakeChannel::Cli).reason,
+            ReasonCode::InvalidAuthority,
+            "a misspelled channel must fail closed rather than restrict nothing"
+        );
+        let _ = fs::remove_file(path);
     }
 
     #[test]

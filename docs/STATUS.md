@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-11 (sixth pass).
+Last updated: 2026-08-11 (seventh pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -83,6 +83,17 @@ last fetch.
   The channel is attribution and is never an input to an authority decision.
 - `ghostlight_bridge::client::ServiceClient` is the one place the service handshake lives, so a
   second edge does not grow a second copy of it.
+- `--output <file>` writes bounded content, so a scripted capture lands as an image rather than as
+  base64 in a terminal. Later captures in one session gain an index instead of overwriting.
+- A policy layer may close an intake: `{"channels":{"cli":{}}}` refuses it, `{"enabled":true}`
+  admits it, and an absent map restricts nothing, so all-open is untouched. Layers intersect, so a
+  managed refusal cannot be undone locally, and an unknown channel name is a typo that fails closed.
+  The refusal lands at admission with the stable `channel_denied` reason, before a workspace exists,
+  so nothing is invoked and nothing is audited (ADR-0105 amendment).
+- [`scripts/browser-journey.ps1`](../scripts/browser-journey.ps1) is a complete PowerShell journey
+  over the CLI: open, list, read, capture to a file, close, with a non-zero exit if any step fails.
+  It holds one `--stdin` session open and writes a line at a time, so each step uses the handle the
+  previous one returned.
 
 ## Verified in this workspace
 
@@ -90,13 +101,17 @@ Re-run on 2026-08-11 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 101 Rust tests -- 83 in the orchestrator including its launch-mode
+- `cargo test --workspace`: 106 Rust tests -- 88 in the orchestrator including its launch-mode
   binary test, 15 in the shared bridge, and 3 in the MCP connector.
 - `npm test --prefix extension`: 39 extension tests.
+- `node tests/cli-powershell-journey.mjs`: the shipped PowerShell script drives a real service and a
+  scripted browser adapter through open/list/read/capture/close, exits zero, writes real JPEG bytes,
+  and every step is audited as `cli` with the landing host and no page text.
 - `node tests/cli-journey.mjs`: the real executable's command line reaches a real service, returns a
   governed result, exits non-zero on refusal, is attributed to the `cli` channel in the audit file
   the service wrote, and keeps one workspace across a `--stdin` batch while separate processes get
-  separate workspaces.
+  separate workspaces. A second service started with `{"channels":{"cli":{}}}` refuses the intake
+  with `channel_denied`, exits non-zero, and writes no audit record.
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
   restart without replaying an interrupted effect, then complete open/read/close. The journey uses
   a fresh deployment lock to isolate explicit restart recovery from demand-start. It also reads
@@ -182,12 +197,12 @@ Re-run on 2026-08-11 against the current tree:
 - A row that never settled reads its readiness as a parenthetical. Colour would carry it better
   than words: the duration cell already has a running and a blocked treatment, and an unsettled one
   would be found while scrolling instead of read for.
-- ADR-0105 stages 2 and 3 are not built. The channel is asserted by a first-party edge rather than
-  observed from the socket peer, and there is no signer-gated admission. Stage 1 is safe without
-  them only because the channel is never an authority input; nothing may start deciding on it
-  before peer identification lands.
-- The CLI omits bounded rich content: a screenshot's image is reported as omitted rather than
-  written to a file. `--output` is the obvious next step.
+- ADR-0105 stages 2 and 3 are blocked on an owner decision, recorded in that ADR's amendment.
+  Identifying the socket peer and verifying a signature are both raw Win32 FFI, and the workspace
+  sets `unsafe_code = "forbid"`, which no scoped `#[allow]` can override. The choice is to relax
+  that invariant for one audited module or to depend on a wrapper crate on a security-sensitive
+  path. Until then the channel stays attribution: the `channels` switch decides whether an intake
+  may open a session, which is a weaker claim than knowing who is calling.
 - `crates/mcp-connector` still has its own copy of the service handshake and did not adopt
   `ServiceClient`. One home exists now; the connector should move to it.
 - Refusal sentences were deliberately left unchanged when the voice moved into

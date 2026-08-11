@@ -106,6 +106,36 @@ It is accepted because a signer allowlist is meaningless without a caller to all
 alternative -- organizations reverse-engineering the same wire and depending on it anyway -- is
 worse and unversioned.
 
+## Amendment 2026-08-11 (signer gating deferred; plain channel admission ships instead)
+
+Decision 3 is not implemented as written, and Decision 4 is not yet acted on. What ships is the
+admission switch without the signer allowlist:
+
+```json
+{ "version": 1, "channels": { "cli": {} } }
+```
+
+An absent `channels` map restricts nothing, so all-open is untouched. Naming a channel is how a
+layer takes control of it, and taking control means saying yes explicitly: `{}` and
+`{"enabled": false}` both refuse the channel, `{"enabled": true}` admits it. Layers still compose by
+intersection, so a managed refusal cannot be undone locally. A misspelled channel name is a decode
+error and fails closed, like every other policy typo. The refusal lands at admission, before a
+workspace exists, so nothing is invoked and no audit record is written; the caller gets the stable
+`channel_denied` reason and a non-zero exit.
+
+The deferral is not a change of mind about Decision 3's shape. It is that its precondition cannot be
+met today: signature checking is only meaningful against the socket peer, identifying the socket
+peer needs `GetExtendedTcpTable`, verifying a signature needs `WinVerifyTrust`, and both are raw
+Win32 FFI while this workspace sets `unsafe_code = "forbid"` -- which, unlike `deny`, no scoped
+`#[allow]` can override. Reaching stage 3 therefore requires an owner decision that is larger than
+the feature: relax that invariant for one audited module, or take a dependency that wraps those
+calls, on a security-sensitive path, in a project whose trust material advertises supply-chain
+discipline.
+
+Until that decision is made, nothing may treat the channel as an authenticated identity. It remains
+what Decision 2 says it is: attribution. The switch above governs whether an intake may open a
+session at all, which is a different and weaker claim than knowing who is calling.
+
 ## Consequences
 
 - Governance is not bypassed. Every channel crosses the same executor, workspace aggregate,

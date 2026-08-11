@@ -33,6 +33,10 @@ facts:
 ghostlight call browser_read_page '{"tab":"tab_a1b2"}' --json | jq -r .facts.text
 ```
 
+`--output <file>` writes bounded content, which today means a screenshot's image bytes. Without it
+a capture reports that its content was omitted, since a megabyte of base64 in a terminal helps
+nobody. In a batch, later captures gain an index rather than overwriting the first.
+
 `--catalog` lists the tools this build offers. Their full contract is in
 [`../1.0/LANGUAGE.md`](../1.0/LANGUAGE.md).
 
@@ -75,6 +79,36 @@ One caveat worth stating plainly: on a machine where a person can already run pr
 line grants nothing they did not already have. Anyone who can run `ghostlight call` could also start
 the MCP connector by hand. The channel is recorded so that you can *see* what happened; it is not a
 security boundary, and Ghostlight does not pretend it is.
+
+## Turning it off
+
+An organization that wants agent work but not scripted work closes the channel in policy:
+
+```json
+{ "version": 1, "channels": { "cli": {} } }
+```
+
+`ghostlight call` then exits non-zero with `channel_denied` before any session opens, and nothing is
+invoked or audited. The full rules, including how layers compose, are in
+[governance-configuration.md](governance-configuration.md#turning-an-intake-channel-off).
+
+## A worked example
+
+[`scripts/browser-journey.ps1`](../../scripts/browser-journey.ps1) is a complete PowerShell journey:
+open a page, list tabs, read it, capture it to a file, close the tab, and exit non-zero if any step
+did not succeed. It is worth reading for one detail in particular -- it keeps a single
+`ghostlight call --stdin` process open and writes a line at a time, so each step can use the handle
+the previous step returned. That is how it closes exactly the tab it opened and nothing else.
+
+```
+STEP         STATUS     WHAT HAPPENED
+----         ------     -------------
+open         succeeded  Opened example.com.
+list         succeeded  Listed 1 controlled tab.
+read         succeeded  Read 9 words.
+screenshot   succeeded  Captured the viewport at 1280x720.
+close        succeeded  Closed the controlled tab.
+```
 
 ## If nothing is running
 

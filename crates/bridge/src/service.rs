@@ -49,7 +49,9 @@ pub enum ServiceContent {
 /// Closed on purpose: an intake is a fact about the shape of the caller, not an open label. It is
 /// recorded for attribution and presentation and is never an input to an authority decision
 /// (ADR-0105 Decision 2).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum IntakeChannel {
     /// A model-facing MCP client, through the stdio connector.

@@ -110,7 +110,7 @@ impl ServiceHost {
             audit.clone(),
         ));
         browser.set_event_sink(Arc::new(ServiceBrowserEvents {
-            governance,
+            governance: governance.clone(),
             workspaces: workspaces.clone(),
             active: executor.active_authority(),
             audit,
@@ -126,6 +126,7 @@ impl ServiceHost {
             workspaces,
             browser_port,
             workbench.clone(),
+            governance.clone(),
             endpoint.token.clone(),
         );
         let browser_thread = spawn_browser_listener(
@@ -207,6 +208,7 @@ pub fn request_workbench_activation(path: &Path) -> Result<bool> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_service_listener(
     listener: TcpListener,
     stop: Arc<AtomicBool>,
@@ -214,6 +216,7 @@ fn spawn_service_listener(
     workspaces: WorkspaceStore,
     browser: Arc<dyn BrowserPort>,
     workbench: WorkbenchFacade,
+    governance: GovernanceFacade,
     token: String,
 ) -> JoinHandle<()> {
     thread::Builder::new()
@@ -226,12 +229,14 @@ fn spawn_service_listener(
                         let workspaces = workspaces.clone();
                         let browser = Arc::clone(&browser);
                         let workbench = workbench.clone();
+                        let governance = governance.clone();
                         let token = token.clone();
                         let _ = thread::Builder::new()
                             .name("ghostlight-mcp-session".into())
                             .spawn(move || {
                                 if let Err(error) = serve_session(
-                                    stream, executor, workspaces, browser, workbench, &token,
+                                    stream, executor, workspaces, browser, workbench, governance,
+                                    &token,
                                 ) {
                                     eprintln!("MCP service session ended: {error:#}");
                                 }
@@ -321,12 +326,14 @@ fn serve_browser_relay(
     browser.attach(stream).map_err(anyhow::Error::msg)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn serve_session(
     stream: TcpStream,
     executor: Arc<ApplicationExecutor>,
     workspaces: WorkspaceStore,
     browser: Arc<dyn BrowserPort>,
     workbench: WorkbenchFacade,
+    governance: GovernanceFacade,
     expected_token: &str,
 ) -> Result<()> {
     stream.set_nonblocking(false)?;
@@ -405,6 +412,22 @@ fn serve_session(
             channel,
         } => (client_label, channel),
     };
+    // Admission, before any workspace exists: an authority layer may decline an intake entirely.
+    let admission = governance.admits_channel(channel);
+    if !admission.allowed {
+        write_response(
+            &writer,
+            &ServiceResponse::Error {
+                id: None,
+                code: admission.reason.as_str().into(),
+                message: format!(
+                    "Configured authority does not admit the {} intake channel.",
+                    channel.as_str()
+                ),
+            },
+        );
+        return Ok(());
+    }
     let workspace = workspaces.admit(client_label, channel);
     write_response(
         &writer,
