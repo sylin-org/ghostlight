@@ -177,6 +177,7 @@ impl ApplicationExecutor {
                 workspace: workspace.as_str().into(),
                 tool: tool.into(),
                 activity: operation_activity(&operation),
+                capability,
             });
             self.active_authority
                 .lock()

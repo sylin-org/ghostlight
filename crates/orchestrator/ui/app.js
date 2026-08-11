@@ -1,35 +1,103 @@
 "use strict";
 
+/*
+ * Ghostlight workbench.
+ *
+ * The orchestrator is the only authority. This surface holds a cache it can always prove is
+ * current: every change arrives with a monotonic sequence, and a gap means the cache is thrown
+ * away and rebuilt from a fresh snapshot. Nothing here is ever the source of truth.
+ */
+
 const invoke = window.__TAURI__?.core?.invoke;
-const pageNames = {
-  home: "Home",
-  activity: "Sessions and operations",
-  history: "History",
-  checkup: "Checkup",
-  configuration: "Configuration",
-  install: "Installations"
-};
-const appState = {
-  snapshot: null,
-  view: "home",
-  refreshTimer: null,
-  searchTimer: null,
-  toastTimer: null,
-  connected: false,
-  pendingHarnesses: new Set(),
-  confirmation: null,
-  renderKey: null
+const listen = window.__TAURI__?.event?.listen;
+
+/** Single channel the orchestrator publishes sequenced changes on. */
+const CHANGE_EVENT = "ghostlight://change";
+/** Slow safety pull for collections that have no change event of their own. */
+const HEARTBEAT_MS = 10000;
+/** Bound on the retained feed, matching the orchestrator's own bounded history. */
+const FEED_LIMIT = 200;
+
+/** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
+const VIEWS = { monitor: "Monitor", integrations: "MCP integrations", status: "Status" };
+const SEARCH_VIEWS = {
+  home: "monitor",
+  activity: "monitor",
+  history: "monitor",
+  checkup: "status",
+  configuration: "status",
+  install: "integrations"
 };
 
-const elements = {
-  title: document.querySelector("#page-title"),
-  search: document.querySelector("#global-search"),
-  searchResults: document.querySelector("#search-results"),
-  railLight: document.querySelector("#rail-light"),
-  railStatus: document.querySelector("#rail-status"),
-  topbarState: document.querySelector("#topbar-state"),
-  toast: document.querySelector("#app-toast")
+/* --------------------------------------------------------------------------
+ * The medallion vocabulary, keyed by the orchestrator's fixed activity labels.
+ * These are the same four shapes the renderer draws inside the page, so the
+ * window and the browser tell the same story.
+ * ----------------------------------------------------------------------- */
+const GLYPHS = {
+  scan: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><g class="scanline"><path d="M7 12h10"/></g></svg>',
+  navigate: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M15.5 8.5 10.6 10.6 8.5 15.5l4.9-2.1z"/></svg>',
+  pointer: '<svg viewBox="0 0 24 24"><path d="M6 3.5 18.5 12 13 13.2l-2.2 5.6z"/><path d="M13.2 13.4 17.5 18"/></svg>',
+  keyboard: '<svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="19" height="11" rx="2"/><g class="keylight"><path d="M6.5 10.5h.01"/></g><g class="keylight"><path d="M10.5 10.5h.01"/></g><g class="keylight"><path d="M14.5 10.5h.01"/></g><path d="M8 14h8"/></svg>',
+  workwheel: '<svg viewBox="0 0 24 24"><g class="spin"><circle cx="12" cy="12" r="7.5" stroke-dasharray="5 4"/></g><circle class="particle" cx="12" cy="3.4" r="1.25" fill="currentColor" stroke="none"/><circle class="particle" cx="19.4" cy="16" r="1.25" fill="currentColor" stroke="none"/><circle class="particle" cx="4.6" cy="16" r="1.25" fill="currentColor" stroke="none"/></svg>',
+  camera: '<svg viewBox="0 0 24 24"><path d="M3.5 8.5h4l1.5-2.5h6L16.5 8.5h4v11h-17z"/><circle cx="12" cy="13.5" r="3.4"/><g class="glint"><path d="M9.8 11.4 11 10.4"/></g></svg>',
+  wait: '<svg viewBox="0 0 24 24"><circle class="waitdot" cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle class="waitdot" cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle class="waitdot" cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>'
 };
+
+const ACTIVITY_GLYPH = {
+  "Ghostlight": "scan",
+  "Navigating": "navigate",
+  "Clicking": "pointer",
+  "Hovering": "pointer",
+  "Dragging": "pointer",
+  "Typing": "keyboard",
+  "Keyboard": "keyboard",
+  "Scrolling": "navigate",
+  "Reading page": "scan",
+  "Finding on page": "scan",
+  "Screenshot": "camera",
+  "Zooming": "scan",
+  "Filling form": "keyboard",
+  "Uploading file": "workwheel",
+  "Running JavaScript": "workwheel",
+  "Waiting": "wait",
+  "Browser dialog": "wait"
+};
+
+const CAPABILITY_CLASS = {
+  read: "cap-read",
+  action: "cap-action",
+  write: "cap-write",
+  execute: "cap-execute"
+};
+
+const state = {
+  seq: 0,
+  connected: false,
+  view: "monitor",
+  runtime: "active",
+  snapshot: null,
+  feed: [],
+  rowNodes: new Map(),
+  pendingHarnesses: new Set(),
+  painted: {},
+  confirmation: null,
+  toastTimer: null,
+  searchTimer: null
+};
+
+const el = {};
+for (const id of [
+  "lamp", "state-word", "state-facts", "wheel", "wheel-icon", "wheel-label",
+  "main-content", "connections", "hero", "hero-med", "hero-body", "hero-right",
+  "queue", "queue-count", "integration-grid", "diagnostic-grid", "authority-grid",
+  "colophon", "palette", "palette-query", "palette-results", "toast",
+  "confirm-dialog", "confirm-title", "confirm-detail"
+]) {
+  el[id] = document.getElementById(id);
+}
+
+/* ------------------------------ formatting ------------------------------ */
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -40,274 +108,534 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function label(value) {
-  return String(value ?? "unknown")
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, character => character.toUpperCase());
+function words(value) {
+  return String(value ?? "").replaceAll("_", " ");
+}
+
+function duration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${String(Math.floor(seconds % 60)).padStart(2, "0")}s`;
+}
+
+function stopwatch(ms) {
+  const seconds = Math.max(0, ms) / 1000;
+  if (seconds < 60) return seconds.toFixed(1).padStart(4, "0");
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+}
+
+function ago(timestamp) {
+  if (!timestamp) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 function shortId(value) {
   const text = String(value ?? "");
-  if (text.length <= 23) return text;
-  return `${text.slice(0, 11)}...${text.slice(-8)}`;
+  return text.length <= 20 ? text : `${text.slice(0, 10)}...${text.slice(-6)}`;
 }
 
-function formatTime(timestamp) {
-  if (!timestamp) return "Now";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit"
-  }).format(new Date(timestamp));
+const glyphFor = entry => GLYPHS[ACTIVITY_GLYPH[entry.activity] ?? "scan"];
+const capabilityClass = entry => CAPABILITY_CLASS[entry.capability] ?? "cap-read";
+
+/* -------------------------------- entries ------------------------------- */
+
+function entryFromOperation(operation) {
+  return {
+    invocation: operation.invocation,
+    workspace: operation.workspace,
+    tool: operation.tool,
+    activity: operation.activity,
+    capability: operation.capability,
+    startedAt: operation.started_at_ms ?? Date.now(),
+    phase: operation.phase,
+    settled: false
+  };
 }
 
-function relativeTime(timestamp) {
-  if (!timestamp) return "now";
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (seconds < 10) return "just now";
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+function entryFromRecord(record, existing) {
+  return {
+    ...(existing ?? {}),
+    invocation: record.invocation,
+    workspace: record.workspace,
+    tool: record.tool,
+    activity: existing?.activity ?? "Ghostlight",
+    capability: record.capability,
+    startedAt: existing?.startedAt,
+    endedAt: record.timestamp_ms,
+    phase: record.allowed ? "completed" : "blocked",
+    allowed: record.allowed,
+    reason: record.reason,
+    status: record.status,
+    effect: record.effect,
+    settled: true
+  };
 }
 
-function setConnection(connected, message = "Orchestrator ready") {
-  appState.connected = connected;
-  elements.railLight.className = `connection-light ${connected ? "connected" : "error"}`;
-  elements.railStatus.textContent = message;
-  elements.topbarState.className = `topbar-state ${connected ? "connected" : "error"}`;
-  elements.topbarState.innerHTML = `<span class="state-dot"></span><span>${escapeHtml(message)}</span>`;
+const entryTime = entry => entry.endedAt ?? entry.startedAt ?? 0;
+const isRunning = entry => !entry.settled && (entry.phase === "running" || entry.phase === "held" || entry.phase === "attention");
+const isBlocked = entry => entry.phase === "blocked" || entry.allowed === false;
+
+function trimFeed() {
+  while (state.feed.length > FEED_LIMIT) {
+    const dropped = state.feed.pop();
+    state.rowNodes.get(dropped.invocation)?.remove();
+    state.rowNodes.delete(dropped.invocation);
+  }
 }
 
-function showToast(message, error = false) {
-  clearTimeout(appState.toastTimer);
-  elements.toast.textContent = message;
-  elements.toast.className = `app-toast${error ? " error" : ""}`;
-  elements.toast.hidden = false;
-  appState.toastTimer = setTimeout(() => { elements.toast.hidden = true; }, 4200);
+/* --------------------------- monitor rendering -------------------------- */
+
+function heroMarkup(entry) {
+  const meta = [];
+  if (entry.workspace) meta.push(`<span>${escapeHtml(shortId(entry.workspace))}</span>`);
+  if (entry.settled && entry.effect) meta.push(`<span><i></i>${escapeHtml(words(entry.effect))}</span>`);
+  if (entry.settled && entry.endedAt) meta.push(`<span><i></i>${escapeHtml(ago(entry.endedAt))} ago</span>`);
+
+  const reason = isBlocked(entry) && entry.reason
+    ? `<p class="hero-reason">${escapeHtml(words(entry.reason))}</p>`
+    : "";
+
+  return `<div class="hero-tool">${escapeHtml(entry.tool)}<span class="cap-label">${escapeHtml(entry.capability ?? "read")}</span></div>`
+    + `<p class="hero-activity">${escapeHtml(entry.activity)}</p>`
+    + reason
+    + (meta.length ? `<div class="hero-meta">${meta.join("")}</div>` : "");
 }
 
-function renderKey(snapshot) {
-  return JSON.stringify({ ...snapshot, generated_at_ms: 0 });
+function heroRightMarkup(entry) {
+  const running = isRunning(entry);
+  const elapsed = running
+    ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
+    : duration(entry.endedAt && entry.startedAt ? entry.endedAt - entry.startedAt : NaN);
+  const outcome = running
+    ? words(entry.phase)
+    : isBlocked(entry)
+      ? "blocked"
+      : words(entry.status ?? "completed");
+  return `<div class="elapsed" id="elapsed">${escapeHtml(elapsed)}</div>`
+    + `<div class="outcome">${escapeHtml(outcome)}</div>`;
 }
 
-function navigate(view) {
-  if (!pageNames[view]) return;
-  appState.view = view;
-  document.querySelectorAll(".view").forEach(element => {
-    element.classList.toggle("active", element.dataset.page === view);
+function paintHero(entry, animate) {
+  if (!entry) {
+    el.hero.className = "hero";
+    el["hero-med"].innerHTML = GLYPHS.scan;
+    el["hero-body"].innerHTML = '<div class="hero-tool">Nothing yet</div>'
+      + '<p class="hero-activity">The first browser action an agent takes will appear here.</p>';
+    el["hero-right"].innerHTML = "";
+    return;
+  }
+  el.hero.className = `hero ${capabilityClass(entry)}`;
+  if (isRunning(entry)) el.hero.classList.add("live");
+  if (isBlocked(entry)) el.hero.classList.add("blocked");
+  el["hero-med"].innerHTML = glyphFor(entry);
+  el["hero-body"].innerHTML = heroMarkup(entry);
+  el["hero-right"].innerHTML = heroRightMarkup(entry);
+  if (animate) {
+    for (const node of [el["hero-med"], el["hero-body"], el["hero-right"]]) {
+      node.classList.remove("swap-in");
+      void node.offsetWidth;
+      node.classList.add("swap-in");
+    }
+  }
+}
+
+function rowMarkup(entry) {
+  const running = isRunning(entry);
+  const detail = isBlocked(entry) && entry.reason ? words(entry.reason) : entry.activity;
+  const time = running
+    ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
+    : duration(entry.endedAt && entry.startedAt ? entry.endedAt - entry.startedAt : NaN);
+  return `<div class="med-mini">${glyphFor(entry)}</div>`
+    + `<div class="row-tool">${escapeHtml(entry.tool)}</div>`
+    + `<div class="row-activity">${escapeHtml(detail)}</div>`
+    + `<div class="row-dur">${escapeHtml(time)}</div>`
+    + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`;
+}
+
+function rowClass(entry) {
+  let name = `row ${capabilityClass(entry)}`;
+  if (isRunning(entry)) name += " running";
+  if (isBlocked(entry)) name += " blocked";
+  return name;
+}
+
+function buildRow(entry, landing) {
+  const row = document.createElement("div");
+  row.className = rowClass(entry) + (landing ? " landing" : "");
+  row.innerHTML = rowMarkup(entry);
+  if (landing) {
+    row.addEventListener("animationend", () => row.classList.remove("landing"), { once: true });
+  }
+  state.rowNodes.set(entry.invocation, row);
+  return row;
+}
+
+function paintRow(entry) {
+  const row = state.rowNodes.get(entry.invocation);
+  if (!row) return;
+  row.className = rowClass(entry);
+  row.innerHTML = rowMarkup(entry);
+}
+
+function paintQueueCount() {
+  const rows = Math.max(0, state.feed.length - 1);
+  el["queue-count"].textContent = rows ? `${rows} ${rows === 1 ? "action" : "actions"}` : "";
+}
+
+/** Full rebuild. Only used on first paint and after a detected sequence gap. */
+function rebuildFeedDom() {
+  el.queue.replaceChildren();
+  state.rowNodes.clear();
+  paintHero(state.feed[0], false);
+  const rows = document.createDocumentFragment();
+  for (const entry of state.feed.slice(1)) rows.append(buildRow(entry, false));
+  el.queue.append(rows);
+  if (state.feed.length <= 1) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "Nothing earlier in this session.";
+    el.queue.append(empty);
+  }
+  paintQueueCount();
+}
+
+/** The conveyor: whatever held the hero slides down, the new action rises. */
+function promote(entry) {
+  const previous = state.feed[0];
+  state.feed.unshift(entry);
+  if (previous && previous.invocation !== entry.invocation) {
+    el.queue.querySelector(".empty")?.remove();
+    el.queue.prepend(buildRow(previous, true));
+  }
+  trimFeed();
+  paintHero(entry, true);
+  paintQueueCount();
+}
+
+function applyStarted(operation) {
+  const entry = entryFromOperation(operation);
+  const index = state.feed.findIndex(item => item.invocation === entry.invocation);
+  if (index === 0) {
+    state.feed[0] = { ...state.feed[0], ...entry };
+    paintHero(state.feed[0], false);
+    return;
+  }
+  if (index > 0) {
+    state.rowNodes.get(entry.invocation)?.remove();
+    state.rowNodes.delete(entry.invocation);
+    state.feed.splice(index, 1);
+  }
+  promote(entry);
+}
+
+function applyChanged(operation) {
+  const index = state.feed.findIndex(item => item.invocation === operation.invocation);
+  if (index < 0) return applyStarted(operation);
+  state.feed[index] = { ...state.feed[index], ...entryFromOperation(operation) };
+  if (index === 0) paintHero(state.feed[0], false);
+  else paintRow(state.feed[index]);
+}
+
+function applySettled(record) {
+  const index = state.feed.findIndex(item => item.invocation === record.invocation);
+  if (index < 0) {
+    promote(entryFromRecord(record, null));
+    return;
+  }
+  state.feed[index] = entryFromRecord(record, state.feed[index]);
+  if (index === 0) paintHero(state.feed[0], false);
+  else paintRow(state.feed[index]);
+}
+
+/* ------------------------------- lamp band ------------------------------ */
+
+function runtimeClass() {
+  if (!state.connected) return "runtime-offline";
+  if (state.runtime === "held" || state.runtime === "ended") return "runtime-held";
+  if (state.runtime === "attention") return "runtime-attention";
+  return state.feed.some(isRunning) ? "runtime-working" : "runtime-quiet";
+}
+
+function runtimeWord(name) {
+  if (name === "runtime-offline") return "Not connected";
+  if (name === "runtime-held") return state.runtime === "ended" ? "Session ended" : "Paused";
+  if (name === "runtime-attention") return "Needs you";
+  if (name === "runtime-working") return "Working";
+  return "Quiet";
+}
+
+function paintLamp() {
+  const name = runtimeClass();
+  document.body.className = name;
+  el["state-word"].textContent = runtimeWord(name);
+
+  const snapshot = state.snapshot;
+  if (!snapshot) {
+    el["state-facts"].textContent = "";
+  } else {
+    const running = state.feed.filter(isRunning).length;
+    el["state-facts"].innerHTML = `<b>${snapshot.sessions.length}</b> sessions`
+      + ` &middot; <b>${snapshot.browsers.length}</b> browsers`
+      + ` &middot; <b>${running}</b> running`
+      + ` &middot; <b>${snapshot.history.length}</b> recorded`;
+  }
+
+  const paused = state.runtime !== "active";
+  el.wheel.disabled = !state.connected;
+  el.wheel.dataset.intent = state.runtime === "ended" ? "start_session" : paused ? "resume" : "hold";
+  el["wheel-label"].textContent = state.runtime === "ended" ? "Start session" : paused ? "Resume" : "Pause";
+  el["wheel-icon"].innerHTML = paused
+    ? '<path d="M7 4.5 19 12 7 19.5z"/>'
+    : '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';
+}
+
+/* ------------------------------ collections ----------------------------- */
+
+function paintConnections(snapshot) {
+  const chips = snapshot.sessions.map(session => {
+    const busy = session.active_operations > 0;
+    return `<span class="chip ${busy ? "busy" : "on"}"><span class="dot"></span>${escapeHtml(session.client_label)}`
+      + `<small>${session.tab_count} tabs</small></span>`;
   });
-  document.querySelectorAll(".rail-item").forEach(element => {
-    const active = element.dataset.view === view;
-    element.classList.toggle("active", active);
-    if (active) element.setAttribute("aria-current", "page");
-    else element.removeAttribute("aria-current");
-  });
-  elements.title.textContent = pageNames[view];
-  elements.searchResults.hidden = true;
-  document.querySelector("#main-content").scrollTop = 0;
+  chips.push(...snapshot.browsers.map(browser =>
+    `<span class="chip on"><span class="dot"></span>${escapeHtml(browser.family)}`
+    + `<small>adapter ${escapeHtml(browser.adapter_version ?? "unknown")}</small></span>`));
+  if (!chips.length) {
+    chips.push('<span class="chip"><span class="dot"></span>Waiting for a client or a browser</span>');
+  }
+  el.connections.innerHTML = chips.join("");
 }
 
-async function refreshSnapshot({ quiet = true } = {}) {
+function paintIntegrations(snapshot) {
+  const order = { installed: 0, needs_attention: 1, available: 2, not_detected: 3 };
+  const harnesses = [...snapshot.harnesses].sort((left, right) =>
+    (order[left.state] ?? 9) - (order[right.state] ?? 9) || left.name.localeCompare(right.name));
+
+  if (!harnesses.length) {
+    el["integration-grid"].innerHTML = '<div class="empty">No supported MCP client was found for this user.</div>';
+    return;
+  }
+
+  el["integration-grid"].innerHTML = harnesses.map(harness => {
+    const installed = harness.state === "installed";
+    const pending = state.pendingHarnesses.has(harness.id);
+    const allowed = installed ? harness.can_uninstall : harness.can_install;
+    const tone = installed ? " connected" : harness.state === "needs_attention" ? " attention" : "";
+    const label = pending ? "Working" : installed ? "Connected" : words(harness.state);
+    const action = installed ? "uninstall" : "install";
+    const verb = installed ? "Disconnect" : "Connect";
+    const button = installed ? "danger-button" : "ghost-button";
+    return `<article class="tile${tone}">`
+      + `<div class="tile-top"><h2>${escapeHtml(harness.name)}</h2>`
+      + `<span class="tile-state">${escapeHtml(label)}</span></div>`
+      + `<p>${escapeHtml(harness.detail)}</p>`
+      + `<div class="tile-actions"><button class="${button}" type="button" data-harness-action="${action}"`
+      + ` data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}"`
+      + `${pending || !allowed ? " disabled" : ""}>${pending ? "Working..." : verb}</button></div>`
+      + `</article>`;
+  }).join("");
+}
+
+function paintStatus(snapshot) {
+  el["diagnostic-grid"].innerHTML = snapshot.diagnostics.map(item =>
+    `<article class="card"><span class="severity ${escapeHtml(item.severity)}"><span class="dot"></span>`
+    + `${escapeHtml(item.severity)}</span><h2>${escapeHtml(item.label)}</h2>`
+    + `<p>${escapeHtml(item.detail)}</p></article>`).join("");
+
+  const config = snapshot.configuration;
+  const sources = [
+    ["Local policy", config.local_policy_configured, config.local_policy_valid, "Authority rules you own."],
+    ["Managed authority", config.managed_authority_configured, config.managed_authority_valid, "A monotonic managed restriction layer."],
+    ["Runtime control file", config.runtime_control_file_configured, true, "A local final-boundary control source."]
+  ];
+  el["authority-grid"].innerHTML = sources.map(([title, configured, valid, detail]) => {
+    const severity = !configured ? "" : valid ? "passing" : "failing";
+    const label = !configured ? "not configured" : valid ? "valid" : "invalid, failing closed";
+    return `<article class="card"><span class="severity ${severity}"><span class="dot"></span>${escapeHtml(label)}</span>`
+      + `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(detail)}</p></article>`;
+  }).join("");
+
+  const started = snapshot.service.started_at_ms ? new Date(snapshot.service.started_at_ms).toLocaleString() : "unknown";
+  el.colophon.textContent = `Ghostlight ${snapshot.service.version} - running since ${started} - everything on this page stays on this device.`;
+}
+
+/* ------------------------------ synchronizing --------------------------- */
+
+function seedFeed(snapshot) {
+  const live = snapshot.operations.map(entryFromOperation);
+  const settled = snapshot.history.map(record => entryFromRecord(record, null));
+  const byInvocation = new Map();
+  for (const entry of [...live, ...settled]) {
+    if (!byInvocation.has(entry.invocation)) byInvocation.set(entry.invocation, entry);
+  }
+  state.feed = [...byInvocation.values()].sort((left, right) => entryTime(right) - entryTime(left));
+  trimFeed();
+}
+
+/**
+ * Repaint a section only when its own facts changed, so the safety pull never
+ * rewrites a surface the user is pointing at.
+ */
+function paintIfChanged(key, facts, paint) {
+  const signature = JSON.stringify(facts);
+  if (state.painted[key] === signature) return;
+  state.painted[key] = signature;
+  paint();
+}
+
+function applySnapshot(snapshot, rebuildFeed) {
+  state.snapshot = snapshot;
+  state.seq = snapshot.seq;
+  state.runtime = snapshot.service.runtime_state;
+  if (rebuildFeed) {
+    seedFeed(snapshot);
+    rebuildFeedDom();
+  }
+  paintIfChanged("connections", [snapshot.sessions, snapshot.browsers], () => paintConnections(snapshot));
+  paintIfChanged("integrations", [snapshot.harnesses, [...state.pendingHarnesses]], () => paintIntegrations(snapshot));
+  paintIfChanged("status", [snapshot.diagnostics, snapshot.configuration, snapshot.service], () => paintStatus(snapshot));
+  paintLamp();
+}
+
+async function resync({ rebuildFeed = false, quiet = true } = {}) {
   if (!invoke) {
-    setConnection(false, "Desktop bridge unavailable");
+    state.connected = false;
+    paintLamp();
     return;
   }
   try {
     const snapshot = await invoke("workbench_snapshot");
-    const nextRenderKey = renderKey(snapshot);
-    appState.snapshot = snapshot;
-    setConnection(true, `Ready - ${label(appState.snapshot.service.runtime_state)}`);
-    if (nextRenderKey !== appState.renderKey) {
-      appState.renderKey = nextRenderKey;
-      renderSnapshot(appState.snapshot);
-    }
-    if (!quiet) showToast("Checkup refreshed.");
+    state.connected = true;
+    applySnapshot(snapshot, rebuildFeed || snapshot.seq !== state.seq || !state.snapshot);
   } catch (error) {
-    setConnection(false, "Orchestrator unavailable");
+    state.connected = false;
+    paintLamp();
     if (!quiet) showToast(String(error), true);
   }
 }
 
-function renderSnapshot(snapshot) {
-  renderHome(snapshot);
-  renderActivity(snapshot);
-  renderHistory(snapshot);
-  renderCheckup(snapshot);
-  renderConfiguration(snapshot);
-  renderInstall(snapshot);
-}
-
-function renderHome(snapshot) {
-  const runtime = snapshot.service.runtime_state;
-  const heroSummary = document.querySelector("#hero-summary");
-  heroSummary.textContent = runtime === "active"
-    ? "Your local orchestrator is ready. Browser work remains governed, visible, and inspectable."
-    : runtime === "ended"
-      ? "The runtime session has ended. Start a fresh session before accepting new browser work."
-      : "Browser effects are paused while Ghostlight keeps its current state available.";
-  const control = document.querySelector("#hero-control");
-  control.disabled = false;
-  control.dataset.intent = runtime === "active" ? "hold" : runtime === "ended" ? "start_session" : "resume";
-  control.textContent = runtime === "active" ? "Pause browser work" : runtime === "ended" ? "Start new session" : "Resume browser work";
-
-  const metrics = [
-    [snapshot.overview.active_sessions, "Sessions", "Connected MCP clients"],
-    [snapshot.overview.active_operations, "Operations", "Currently in progress"],
-    [snapshot.overview.connected_browsers, "Browsers", "Compatible adapters online"],
-    [snapshot.overview.blocked_in_history, "Blocked", "In local bounded history"]
-  ];
-  document.querySelector("#home-metrics").innerHTML = metrics.map(([value, name, note]) => `
-    <article class="metric-card"><span class="metric-label">${name}</span><strong class="metric-value">${value}</strong><span class="metric-note">${note}</span></article>
-  `).join("");
-
-  const current = document.querySelector("#home-current");
-  if (snapshot.operations.length) {
-    current.innerHTML = `<div class="compact-list">${snapshot.operations.slice(0, 4).map(operationRow).join("")}</div>`;
-  } else if (snapshot.sessions.length) {
-    current.innerHTML = `<div class="compact-list">${snapshot.sessions.slice(0, 4).map(sessionRow).join("")}</div>`;
-  } else {
-    current.innerHTML = emptyState("Quiet for now", "Connected coding harness sessions and their operations will appear here.");
-  }
-
-  const health = document.querySelector("#home-health");
-  health.innerHTML = `<div class="compact-list">${snapshot.diagnostics.map(diagnosticRow).join("")}</div>`;
-}
-
-function operationRow(operation) {
-  return `<div class="compact-row">
-    <span class="status-icon ${escapeHtml(operation.phase)}"></span>
-    <div><strong>${escapeHtml(operation.tool)}</strong><small>${escapeHtml(operation.activity)} - ${escapeHtml(shortId(operation.workspace))}</small></div>
-    <span class="micro-badge">${escapeHtml(operation.phase)}</span>
-  </div>`;
-}
-
-function sessionRow(session) {
-  return `<div class="compact-row">
-    <span class="status-icon ${session.leased ? "running" : "passing"}"></span>
-    <div><strong>${escapeHtml(session.client_label)}</strong><small>${session.tab_count} controlled tabs - ${session.active_operations} current operations</small></div>
-    <span class="micro-badge">Session</span>
-  </div>`;
-}
-
-function diagnosticRow(item) {
-  return `<div class="compact-row">
-    <span class="status-icon ${escapeHtml(item.severity)}"></span>
-    <div><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.detail)}</small></div>
-    <span class="micro-badge">${escapeHtml(item.severity)}</span>
-  </div>`;
-}
-
-function emptyState(title, detail) {
-  return `<div class="empty-state"><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div></div>`;
-}
-
-function renderActivity(snapshot) {
-  const groups = [
-    ["Sessions", `${snapshot.sessions.length} connected client sessions`, snapshot.sessions.length
-      ? `<div class="card-grid">${snapshot.sessions.map(sessionCard).join("")}</div>`
-      : emptyState("No client sessions", "A supported harness will appear when it connects through the MCP relay.")],
-    ["Operations", `${snapshot.operations.length} current units of work`, snapshot.operations.length
-      ? `<div class="card-grid">${snapshot.operations.map(operationCard).join("")}</div>`
-      : emptyState("No current operations", "New work appears here for its complete orchestrator lifetime.")],
-    ["Browser instances", `${snapshot.browsers.length} compatible adapters`, snapshot.browsers.length
-      ? `<div class="card-grid">${snapshot.browsers.map(browserCard).join("")}</div>`
-      : emptyState("Waiting for a browser", "Open a supported Chromium browser with Ghostlight in Browser enabled.")]
-  ];
-  document.querySelector("#activity-content").innerHTML = groups.map(([title, note, content]) => `
-    <section class="panel group-panel"><div class="section-heading"><div><span class="section-kicker">${escapeHtml(note)}</span><h2>${escapeHtml(title)}</h2></div></div>${content}</section>
-  `).join("");
-}
-
-function sessionCard(session) {
-  return `<article class="entity-card"><div class="entity-top"><h3>${escapeHtml(session.client_label)}</h3><span class="status-icon ${session.leased ? "running" : "passing"}"></span></div><span class="entity-id">${escapeHtml(session.id)}</span><div class="entity-facts"><span class="fact">${session.tab_count} tabs</span><span class="fact">${session.active_operations} operations</span>${session.held_tab_count ? `<span class="fact">${session.held_tab_count} held</span>` : ""}</div></article>`;
-}
-
-function operationCard(operation) {
-  return `<article class="entity-card"><div class="entity-top"><h3>${escapeHtml(operation.tool)}</h3><span class="micro-badge">${escapeHtml(operation.phase)}</span></div><span class="entity-id">${escapeHtml(operation.invocation)}</span><div class="entity-facts"><span class="fact">${escapeHtml(operation.activity)}</span><span class="fact">${escapeHtml(relativeTime(operation.started_at_ms))}</span></div></article>`;
-}
-
-function browserCard(browser) {
-  return `<article class="entity-card"><div class="entity-top"><h3>${escapeHtml(browser.family)}</h3><span class="status-icon passing"></span></div><span class="entity-id">${escapeHtml(browser.id)}</span><div class="entity-facts"><span class="fact">Adapter ${escapeHtml(browser.adapter_version || "unknown")}</span><span class="fact">Connected</span></div></article>`;
-}
-
-function renderHistory(snapshot) {
-  document.querySelector("#history-count").textContent = `${snapshot.history.length} ${snapshot.history.length === 1 ? "record" : "records"}`;
-  const body = document.querySelector("#history-body");
-  if (!snapshot.history.length) {
-    body.innerHTML = `<tr><td colspan="6">${emptyState("No completed work yet", "Payload-free completion records will appear here.")}</td></tr>`;
+function applyChange(event) {
+  if (!event || typeof event.seq !== "number") return;
+  if (event.seq !== state.seq + 1) {
+    // A gap means this cache can no longer be trusted. Rebuild rather than guess.
+    resync({ rebuildFeed: true });
     return;
   }
-  body.innerHTML = snapshot.history.map(item => `<tr>
-    <td title="${escapeHtml(formatTime(item.timestamp_ms))}">${escapeHtml(relativeTime(item.timestamp_ms))}</td>
-    <td><strong>${escapeHtml(item.tool)}</strong><div class="mono">${escapeHtml(shortId(item.invocation))}</div></td>
-    <td class="mono" title="${escapeHtml(item.workspace)}">${escapeHtml(shortId(item.workspace))}</td>
-    <td>${escapeHtml(label(item.capability))}</td>
-    <td><span class="outcome ${item.allowed ? "" : "blocked"}">${escapeHtml(label(item.status))}</span><div class="mono">${escapeHtml(item.reason)}</div></td>
-    <td>${escapeHtml(label(item.effect))}</td>
-  </tr>`).join("");
+  state.seq = event.seq;
+  const change = event.change;
+  switch (change.kind) {
+    case "operation_started": applyStarted(change.operation); break;
+    case "operation_changed": applyChanged(change.operation); break;
+    case "operation_settled": applySettled(change.record); break;
+    case "runtime_changed": state.runtime = change.runtime_state; break;
+    default: return;
+  }
+  paintLamp();
 }
 
-function renderCheckup(snapshot) {
-  document.querySelector("#diagnostic-grid").innerHTML = snapshot.diagnostics.map(item => `
-    <article class="panel diagnostic-card"><div class="diagnostic-status"><span class="status-icon ${escapeHtml(item.severity)}"></span>${escapeHtml(item.severity)}</div><h2>${escapeHtml(item.label)}</h2><p>${escapeHtml(item.detail)}</p></article>
-  `).join("");
+/* ------------------------------ live stopwatch -------------------------- */
+
+setInterval(() => {
+  if (document.hidden) return;
+  const hero = state.feed[0];
+  if (hero && isRunning(hero)) {
+    const node = document.getElementById("elapsed");
+    if (node) node.textContent = stopwatch(Date.now() - (hero.startedAt ?? Date.now()));
+  }
+  for (const entry of state.feed.slice(1)) {
+    if (!isRunning(entry)) continue;
+    const cell = state.rowNodes.get(entry.invocation)?.querySelector(".row-dur");
+    if (cell) cell.textContent = stopwatch(Date.now() - (entry.startedAt ?? Date.now()));
+  }
+}, 100);
+
+setInterval(() => {
+  if (document.hidden) return;
+  for (const entry of state.feed.slice(1)) {
+    if (!entry.endedAt) continue;
+    const cell = state.rowNodes.get(entry.invocation)?.querySelector(".row-when");
+    if (cell) cell.textContent = ago(entry.endedAt);
+  }
+}, 15000);
+
+/* -------------------------------- surfaces ------------------------------ */
+
+function navigate(view) {
+  if (!VIEWS[view]) return;
+  state.view = view;
+  for (const node of document.querySelectorAll(".view")) {
+    node.classList.toggle("active", node.dataset.page === view);
+  }
+  for (const tab of document.querySelectorAll(".tab")) {
+    const active = tab.dataset.view === view;
+    tab.classList.toggle("active", active);
+    if (active) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  }
+  el["main-content"].scrollTop = 0;
 }
 
-function renderConfiguration(snapshot) {
-  const config = snapshot.configuration;
-  const runtime = config.runtime_state;
-  document.querySelector("#runtime-heading").textContent = runtime === "active" ? "Browser work is active" : runtime === "ended" ? "The runtime session has ended" : "Browser work is paused";
-  document.querySelector("#runtime-detail").textContent = runtime === "active" ? "New governed operations may proceed." : runtime === "ended" ? "Start a new session before accepting further effects." : "State remains available while later effects wait.";
-  document.querySelectorAll(".segmented [data-intent]").forEach(button => {
-    const selected = (runtime === "active" && button.dataset.intent === "resume") ||
-      (["held", "attention"].includes(runtime) && button.dataset.intent === "hold") ||
-      (runtime === "ended" && button.dataset.intent === "end_session");
-    button.classList.toggle("selected", selected);
-  });
-  const cards = [
-    ["Local policy", config.local_policy_configured, config.local_policy_valid, "Optional user-owned authority rules."],
-    ["Managed authority", config.managed_authority_configured, config.managed_authority_valid, "An optional monotonic managed restriction layer."],
-    ["Runtime control file", config.runtime_control_file_configured, true, "An optional local final-boundary control source."]
-  ];
-  document.querySelector("#configuration-grid").innerHTML = cards.map(([title, configured, valid, detail]) => `
-    <article class="panel configuration-card"><span class="section-kicker">Authority source</span><h2>${escapeHtml(title)}</h2><p>${escapeHtml(detail)}</p><span class="config-state ${!configured ? "neutral" : !valid ? "invalid" : ""}">${!configured ? "Not configured" : valid ? "Configured and valid" : "Invalid - failing closed"}</span></article>
-  `).join("");
+function showToast(message, error = false) {
+  clearTimeout(state.toastTimer);
+  el.toast.textContent = message;
+  el.toast.className = `toast${error ? " error" : ""}`;
+  el.toast.hidden = false;
+  state.toastTimer = setTimeout(() => { el.toast.hidden = true; }, 4200);
 }
 
-function renderInstall(snapshot) {
-  const install = document.querySelector("#install-content");
-  if (Array.isArray(snapshot.harnesses) && snapshot.harnesses.length) {
-    install.innerHTML = snapshot.harnesses.map(harness => harnessCard(harness)).join("");
-  } else {
-    install.innerHTML = `<section class="panel group-panel">${emptyState("No supported harnesses discovered", "Ghostlight has not found a supported development harness in this user context.")}</section>`;
+function openPalette() {
+  el.palette.hidden = false;
+  el["palette-query"].value = "";
+  el["palette-results"].innerHTML = "";
+  el["palette-query"].focus();
+}
+
+function closePalette() {
+  el.palette.hidden = true;
+}
+
+async function search(query) {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    el["palette-results"].innerHTML = "";
+    return;
+  }
+  try {
+    const hits = await invoke("workbench_search", { query: trimmed });
+    el["palette-results"].innerHTML = hits.length
+      ? hits.map(hit => `<button class="hit" type="button" data-search-view="${escapeHtml(hit.view)}">`
+        + `<span class="hit-kind">${escapeHtml(words(hit.kind))}</span>`
+        + `<span><strong>${escapeHtml(hit.title)}</strong><small>${escapeHtml(hit.detail)}</small></span></button>`).join("")
+      : '<div class="palette-empty">No matching Ghostlight records.</div>';
+  } catch (error) {
+    el["palette-results"].innerHTML = `<div class="palette-empty">${escapeHtml(String(error))}</div>`;
   }
 }
 
-function harnessCard(harness) {
-  const installed = harness.state === "installed";
-  const pending = appState.pendingHarnesses.has(harness.id);
-  const allowed = installed ? harness.can_uninstall : harness.can_install;
-  return `<article class="panel harness-card"><div><div class="entity-top"><h2>${escapeHtml(harness.name)}</h2><span class="micro-badge">${escapeHtml(label(harness.state))}</span></div><p>${escapeHtml(harness.detail)}</p></div><div class="harness-actions"><button class="button quiet" type="button" data-harness-action="check" data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}" ${pending ? "disabled" : ""}>Check</button><button class="button ${installed ? "danger" : "primary"}" type="button" data-harness-action="${installed ? "uninstall" : "install"}" data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}" ${pending || !allowed ? "disabled" : ""}>${pending ? "Working..." : installed ? "Uninstall" : "Install"}</button></div></article>`;
-}
-
-function confirmUninstall(name) {
-  if (appState.confirmation) return Promise.resolve(false);
-  const backdrop = document.querySelector("#confirm-dialog");
-  document.querySelector("#confirm-title").textContent = `Remove Ghostlight from ${name}?`;
+function confirmRemoval(name) {
+  if (state.confirmation) return Promise.resolve(false);
+  el["confirm-title"].textContent = `Disconnect Ghostlight from ${name}?`;
+  el["confirm-detail"].textContent = "Only the entry Ghostlight owns will be removed.";
   return new Promise(resolve => {
     const finish = confirmed => {
-      backdrop.hidden = true;
-      appState.confirmation = null;
+      el["confirm-dialog"].hidden = true;
+      state.confirmation = null;
       document.removeEventListener("keydown", onKeyDown);
       resolve(confirmed);
     };
-    const onKeyDown = event => {
-      if (event.key === "Escape") finish(false);
-    };
-    appState.confirmation = finish;
-    backdrop.hidden = false;
-    backdrop.querySelector('[data-confirm="cancel"]').focus();
+    const onKeyDown = event => { if (event.key === "Escape") finish(false); };
+    state.confirmation = finish;
+    el["confirm-dialog"].hidden = false;
+    el["confirm-dialog"].querySelector('[data-confirm="cancel"]').focus();
     document.addEventListener("keydown", onKeyDown);
   });
 }
@@ -315,18 +643,17 @@ function confirmUninstall(name) {
 async function handleHarnessAction(button) {
   if (!invoke || button.disabled) return;
   const { harness: id, harnessAction: action, harnessName: name } = button.dataset;
-  if (action === "uninstall" && !await confirmUninstall(name)) return;
-  appState.pendingHarnesses.add(id);
-  if (appState.snapshot) renderInstall(appState.snapshot);
+  if (action === "uninstall" && !(await confirmRemoval(name))) return;
+  state.pendingHarnesses.add(id);
+  if (state.snapshot) paintIntegrations(state.snapshot);
   try {
     const result = await invoke("manage_harness", { id, action });
     showToast(result.message);
   } catch (error) {
     showToast(String(error), true);
   } finally {
-    appState.pendingHarnesses.delete(id);
-    await refreshSnapshot();
-    if (appState.snapshot) renderInstall(appState.snapshot);
+    state.pendingHarnesses.delete(id);
+    await resync();
   }
 }
 
@@ -335,89 +662,67 @@ async function applyIntent(intent) {
   try {
     const result = await invoke("apply_runtime_intent", { intent });
     showToast(result.message);
-    await refreshSnapshot();
+    await resync();
   } catch (error) {
     showToast(String(error), true);
   }
 }
 
-async function search(query) {
-  const trimmed = query.trim();
-  if (!trimmed) {
-    elements.searchResults.hidden = true;
-    elements.searchResults.innerHTML = "";
-    return;
-  }
-  try {
-    const hits = await invoke("workbench_search", { query: trimmed });
-    elements.searchResults.innerHTML = hits.length ? hits.map(hit => `
-      <button class="search-hit" type="button" data-search-view="${escapeHtml(hit.view)}">
-        <span class="search-kind">${escapeHtml(hit.kind)}</span><span><strong>${escapeHtml(hit.title)}</strong><small>${escapeHtml(hit.detail)}</small></span>
-      </button>
-    `).join("") : `<div class="search-empty">No matching Ghostlight records.</div>`;
-    elements.searchResults.hidden = false;
-  } catch (error) {
-    elements.searchResults.innerHTML = `<div class="search-empty">${escapeHtml(String(error))}</div>`;
-    elements.searchResults.hidden = false;
-  }
-}
+/* -------------------------------- wiring -------------------------------- */
 
 document.addEventListener("click", event => {
   const confirmation = event.target.closest("[data-confirm]");
-  if (confirmation && appState.confirmation) {
-    appState.confirmation(confirmation.dataset.confirm === "remove");
+  if (confirmation && state.confirmation) {
+    state.confirmation(confirmation.dataset.confirm === "remove");
     return;
   }
-  const viewButton = event.target.closest("[data-view]");
-  if (viewButton) navigate(viewButton.dataset.view);
-  const intentButton = event.target.closest("[data-intent]");
-  if (intentButton && !intentButton.disabled) applyIntent(intentButton.dataset.intent);
-  const searchHit = event.target.closest("[data-search-view]");
-  if (searchHit) {
-    navigate(searchHit.dataset.searchView);
-    elements.search.value = "";
-    elements.searchResults.hidden = true;
+  const tab = event.target.closest("[data-view]");
+  if (tab) navigate(tab.dataset.view);
+  const intent = event.target.closest("[data-intent]");
+  if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
+  const harness = event.target.closest("[data-harness-action]");
+  if (harness) handleHarnessAction(harness);
+  const hit = event.target.closest("[data-search-view]");
+  if (hit) {
+    navigate(SEARCH_VIEWS[hit.dataset.searchView] ?? "monitor");
+    closePalette();
   }
-  const harnessButton = event.target.closest("[data-harness-action]");
-  if (harnessButton) handleHarnessAction(harnessButton);
-  if (!event.target.closest(".search-wrap")) elements.searchResults.hidden = true;
+  if (event.target === el.palette) closePalette();
 });
 
-elements.search.addEventListener("input", () => {
-  clearTimeout(appState.searchTimer);
-  appState.searchTimer = setTimeout(() => search(elements.search.value), 140);
-});
-
-elements.search.addEventListener("keydown", event => {
-  if (event.key === "Escape") {
-    elements.search.value = "";
-    elements.searchResults.hidden = true;
-    elements.search.blur();
-  }
+el["palette-query"].addEventListener("input", () => {
+  clearTimeout(state.searchTimer);
+  state.searchTimer = setTimeout(() => search(el["palette-query"].value), 140);
 });
 
 document.addEventListener("keydown", event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
-    elements.search.focus();
-    elements.search.select();
+    if (el.palette.hidden) openPalette();
+    else closePalette();
+    return;
   }
+  if (event.key === "Escape" && !el.palette.hidden) closePalette();
 });
 
-document.querySelector("#refresh-checkup").addEventListener("click", () => refreshSnapshot({ quiet: false }));
-document.querySelector("#refresh-install").addEventListener("click", async event => {
+document.getElementById("refresh-status").addEventListener("click", () => {
+  resync({ quiet: false }).then(() => showToast("Status refreshed."));
+});
+
+document.getElementById("refresh-integrations").addEventListener("click", async event => {
   event.currentTarget.disabled = true;
   try {
     await invoke("refresh_harnesses");
-    await refreshSnapshot();
-    showToast("Installations checked.");
+    await resync();
+    showToast("MCP clients re-checked.");
   } catch (error) {
     showToast(String(error), true);
   } finally {
     event.currentTarget.disabled = false;
   }
 });
-document.querySelector("#test-notification").addEventListener("click", async event => {
+
+document.getElementById("test-notification").addEventListener("click", async event => {
   event.currentTarget.disabled = true;
   try {
     await invoke("test_notification");
@@ -430,10 +735,12 @@ document.querySelector("#test-notification").addEventListener("click", async eve
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refreshSnapshot();
+  if (!document.hidden) resync();
 });
 
-refreshSnapshot();
-appState.refreshTimer = setInterval(() => {
-  if (!document.hidden) refreshSnapshot();
-}, 1500);
+if (listen) listen(CHANGE_EVENT, message => applyChange(message.payload));
+
+resync({ rebuildFeed: true });
+setInterval(() => {
+  if (!document.hidden) resync();
+}, HEARTBEAT_MS);

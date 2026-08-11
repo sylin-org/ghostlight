@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,7 +14,7 @@ use thiserror::Error;
 
 use crate::browser::{BrowserPort, RelayBrowserPort};
 use crate::events::DomainEvent;
-use crate::governance::{AuditRecord, AuditSink, GovernanceFacade};
+use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade};
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSummary,
 };
@@ -27,6 +28,8 @@ const SEARCH_LIMIT: usize = 100;
 pub struct WorkbenchProjection {
     inner: Arc<Mutex<ProjectionState>>,
     presentation: Arc<Mutex<Option<Arc<dyn WorkbenchPresentationPort>>>>,
+    events: Arc<Mutex<Option<Arc<dyn WorkbenchEventSink>>>>,
+    seq: Arc<AtomicU64>,
 }
 
 #[derive(Default)]
@@ -36,11 +39,23 @@ struct ProjectionState {
     notified: HashSet<(String, NotificationKind)>,
 }
 
+impl ProjectionState {
+    /// Move one tracked operation to a new phase and describe the change for the workbench.
+    fn set_phase(&mut self, invocation: &str, phase: OperationPhase) -> Option<WorkbenchChange> {
+        let operation = self.operations.get_mut(invocation)?;
+        operation.phase = phase;
+        Some(WorkbenchChange::OperationChanged {
+            operation: OperationSummary::from(&*operation),
+        })
+    }
+}
+
 struct OperationState {
     invocation: String,
     workspace: String,
     tool: String,
     activity: PresentationActivity,
+    capability: Capability,
     started_at_ms: u64,
     phase: OperationPhase,
 }
@@ -71,9 +86,32 @@ impl WorkbenchProjection {
         *lock(&self.presentation) = Some(port);
     }
 
+    /// Attach or replace the best-effort sequenced change-event sink.
+    pub fn attach_events(&self, sink: Arc<dyn WorkbenchEventSink>) {
+        *lock(&self.events) = Some(sink);
+    }
+
+    /// Sequence number of the most recently published change.
+    #[must_use]
+    pub fn current_seq(&self) -> u64 {
+        self.seq.load(Ordering::Acquire)
+    }
+
+    /// Publish one sequenced change to the disposable presentation surface, if any is attached.
+    ///
+    /// Never call this while holding the projection state lock: presentation adapters are
+    /// outbound boundaries and must not be reached across a domain lock.
+    fn publish(&self, change: WorkbenchChange) {
+        let Some(sink) = lock(&self.events).clone() else {
+            return;
+        };
+        let seq = self.seq.fetch_add(1, Ordering::AcqRel) + 1;
+        sink.publish(WorkbenchEvent { seq, change });
+    }
+
     /// React to one completed domain transition without affecting its authority or truth.
     pub fn react(&self, event: &DomainEvent) {
-        let notification = {
+        let (notification, change) = {
             let mut state = self.lock();
             match event {
                 DomainEvent::WorkStarted {
@@ -81,71 +119,69 @@ impl WorkbenchProjection {
                     workspace,
                     tool,
                     activity,
+                    capability,
                 } => {
-                    state.operations.insert(
-                        invocation.clone(),
-                        OperationState {
-                            invocation: invocation.clone(),
-                            workspace: workspace.clone(),
-                            tool: tool.clone(),
-                            activity: *activity,
-                            started_at_ms: unix_ms(),
-                            phase: OperationPhase::Running,
-                        },
-                    );
-                    None
+                    let operation = OperationState {
+                        invocation: invocation.clone(),
+                        workspace: workspace.clone(),
+                        tool: tool.clone(),
+                        activity: *activity,
+                        capability: *capability,
+                        started_at_ms: unix_ms(),
+                        phase: OperationPhase::Running,
+                    };
+                    let started = WorkbenchChange::OperationStarted {
+                        operation: OperationSummary::from(&operation),
+                    };
+                    state.operations.insert(invocation.clone(), operation);
+                    (None, Some(started))
                 }
                 DomainEvent::WorkPhaseStarted {
                     invocation,
                     activity,
                     ..
                 } => {
-                    if let Some(operation) = state.operations.get_mut(invocation) {
+                    let change = state.operations.get_mut(invocation).map(|operation| {
                         operation.activity = *activity;
-                    }
-                    None
+                        WorkbenchChange::OperationChanged {
+                            operation: OperationSummary::from(&*operation),
+                        }
+                    });
+                    (None, change)
                 }
                 DomainEvent::HoldEntered { invocation, .. } => {
-                    if let Some(operation) = state.operations.get_mut(invocation) {
-                        operation.phase = OperationPhase::Held;
-                    }
-                    None
+                    (None, state.set_phase(invocation, OperationPhase::Held))
                 }
                 DomainEvent::AttentionRequired { invocation, .. } => {
-                    if let Some(operation) = state.operations.get_mut(invocation) {
-                        operation.phase = OperationPhase::Attention;
-                    }
-                    state
+                    let change = state.set_phase(invocation, OperationPhase::Attention);
+                    let notification = state
                         .notified
                         .insert((invocation.clone(), NotificationKind::Attention))
                         .then(|| WorkbenchNotification {
                             kind: NotificationKind::Attention,
                             title: "Ghostlight needs your attention".into(),
                             body: "A browser operation is waiting for you.".into(),
-                        })
+                        });
+                    (notification, change)
                 }
                 DomainEvent::WorkBlocked { invocation, .. } => {
-                    if let Some(operation) = state.operations.get_mut(invocation) {
-                        operation.phase = OperationPhase::Blocked;
-                    }
-                    state
+                    let change = state.set_phase(invocation, OperationPhase::Blocked);
+                    let notification = state
                         .notified
                         .insert((invocation.clone(), NotificationKind::Blocked))
                         .then(|| WorkbenchNotification {
                             kind: NotificationKind::Blocked,
                             title: "Ghostlight blocked an action".into(),
                             body: "A configured guardrail prevented browser work.".into(),
-                        })
+                        });
+                    (notification, change)
                 }
                 DomainEvent::WorkCompleted { invocation, .. } => {
-                    if let Some(operation) = state.operations.get_mut(invocation) {
-                        operation.phase = OperationPhase::Completed;
-                    }
-                    None
+                    (None, state.set_phase(invocation, OperationPhase::Completed))
                 }
                 DomainEvent::TabCreated { .. }
                 | DomainEvent::DocumentCommitted { .. }
-                | DomainEvent::TargetIndicated { .. } => None,
+                | DomainEvent::TargetIndicated { .. } => (None, None),
             }
         };
         if let Some(notification) = notification {
@@ -153,15 +189,22 @@ impl WorkbenchProjection {
                 let _ = port.notify(notification);
             }
         }
+        if let Some(change) = change {
+            self.publish(change);
+        }
     }
 
     fn record(&self, record: &AuditRecord) {
-        let mut state = self.lock();
-        state.operations.remove(&record.invocation);
-        state
-            .notified
-            .retain(|(invocation, _)| invocation != &record.invocation);
-        push_bounded(&mut state.history, HistoryItem::from(record.clone()));
+        let item = HistoryItem::from(record.clone());
+        {
+            let mut state = self.lock();
+            state.operations.remove(&record.invocation);
+            state
+                .notified
+                .retain(|(invocation, _)| invocation != &record.invocation);
+            push_bounded(&mut state.history, item.clone());
+        }
+        self.publish(WorkbenchChange::OperationSettled { record: item });
     }
 
     fn operations(&self) -> Vec<OperationSummary> {
@@ -244,6 +287,11 @@ impl WorkbenchFacade {
         self.projection.attach_presentation(port);
     }
 
+    /// Attach the best-effort sequenced change-event sink used by a live presentation surface.
+    pub fn attach_events(&self, sink: Arc<dyn WorkbenchEventSink>) {
+        self.projection.attach_events(sink);
+    }
+
     /// Build an immutable, content-free snapshot for a disposable UI.
     #[must_use]
     pub fn snapshot(&self) -> WorkbenchSnapshot {
@@ -300,7 +348,11 @@ impl WorkbenchFacade {
             },
         );
         let history = self.projection.history();
+        // Read the sequence after gathering, so a snapshot never claims to be newer than it is.
+        // A change published mid-assembly is re-delivered and applied idempotently by key.
+        let seq = self.projection.current_seq();
         WorkbenchSnapshot {
+            seq,
             generated_at_ms: unix_ms(),
             service: ServiceSummary {
                 version: env!("CARGO_PKG_VERSION").into(),
@@ -341,39 +393,21 @@ impl WorkbenchFacade {
         let mut hits = Vec::new();
         for (id, title, detail, view) in [
             (
-                "home",
-                "Home",
-                "At-a-glance service, session, operation, browser, and checkup state",
-                SearchDestination::Home,
-            ),
-            (
-                "activity",
-                "Sessions and operations",
-                "Current MCP sessions, operations, and browser instances",
+                "monitor",
+                "Monitor",
+                "Live actions, connected clients and browsers, and recorded work",
                 SearchDestination::Activity,
             ),
             (
-                "history",
-                "History",
-                "Payload-free completed work and governance outcomes",
-                SearchDestination::History,
-            ),
-            (
-                "checkup",
-                "Checkup",
-                "Local service, browser, authority, and notification diagnostics",
+                "status",
+                "Status",
+                "Local service, browser, and authority diagnostics",
                 SearchDestination::Checkup,
             ),
             (
-                "configuration",
-                "Configuration",
-                "Runtime controls and authority-source state",
-                SearchDestination::Configuration,
-            ),
-            (
-                "install",
-                "Installations",
-                "Supported development-harness registrations",
+                "integrations",
+                "MCP integrations",
+                "Supported MCP client registrations",
                 SearchDestination::Install,
             ),
         ] {
@@ -500,6 +534,9 @@ impl WorkbenchFacade {
     pub fn apply_runtime_intent(&self, intent: WorkbenchRuntimeIntent) -> WorkbenchIntentResult {
         let state = self.governance.apply_runtime_intent(intent.into());
         let browser_notified = self.browser.publish_control_state(state).is_ok();
+        self.projection.publish(WorkbenchChange::RuntimeChanged {
+            runtime_state: state,
+        });
         WorkbenchIntentResult {
             accepted: true,
             runtime_state: state,
@@ -559,6 +596,56 @@ pub trait WorkbenchPresentationPort: Send + Sync {
         -> Result<(), WorkbenchPresentationError>;
 }
 
+/// Best-effort outbound port for sequenced workbench changes.
+///
+/// Delivery failures are presentation failures. The adapter contains them, and they never reach
+/// domain authority, governance, or completion truth.
+pub trait WorkbenchEventSink: Send + Sync {
+    /// Deliver one sequenced change to the attached presentation surface.
+    fn publish(&self, event: WorkbenchEvent);
+}
+
+/// One sequenced workbench change fact for a disposable presentation surface.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct WorkbenchEvent {
+    /// Monotonic publication sequence.
+    ///
+    /// A surface that receives a sequence other than its last plus one has missed a change and
+    /// must resynchronize from a fresh snapshot rather than trust its local cache.
+    pub seq: u64,
+    /// What changed.
+    pub change: WorkbenchChange,
+}
+
+/// Closed vocabulary of workbench changes worth rendering without a full snapshot.
+///
+/// Operation lifetime is per-item because it drives live presentation. Collections that change
+/// rarely stay snapshot-owned rather than growing a second authority here.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkbenchChange {
+    /// One operation entered the live set.
+    OperationStarted {
+        /// The newly tracked operation.
+        operation: OperationSummary,
+    },
+    /// One live operation changed activity or phase.
+    OperationChanged {
+        /// The operation in its current state.
+        operation: OperationSummary,
+    },
+    /// One operation reached its terminal record and left the live set.
+    OperationSettled {
+        /// The payload-free completion record.
+        record: HistoryItem,
+    },
+    /// Authoritative runtime control state changed.
+    RuntimeChanged {
+        /// The new runtime control state.
+        runtime_state: RuntimeControlState,
+    },
+}
+
 /// One content-free notification decision made by the orchestrator.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct WorkbenchNotification {
@@ -604,6 +691,10 @@ pub enum WorkbenchError {
 /// Complete immutable workbench read model.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct WorkbenchSnapshot {
+    /// Projection sequence this snapshot reflects.
+    ///
+    /// A surface applies a later change only when its sequence follows this one.
+    pub seq: u64,
     /// Time at which this snapshot was assembled.
     pub generated_at_ms: u64,
     /// Service identity and control state.
@@ -678,6 +769,8 @@ pub struct OperationSummary {
     pub tool: String,
     /// Fixed presentation activity name.
     pub activity: String,
+    /// Governed capability class this work required.
+    pub capability: Capability,
     /// Local start time.
     pub started_at_ms: Option<u64>,
     /// Current semantic phase.
@@ -691,6 +784,7 @@ impl From<&OperationState> for OperationSummary {
             workspace: value.workspace.clone(),
             tool: value.tool.clone(),
             activity: activity_label(value.activity).into(),
+            capability: value.capability,
             started_at_ms: Some(value.started_at_ms),
             phase: value.phase,
         }
@@ -1013,9 +1107,18 @@ mod tests {
     use crate::governance::{AuditRecord, AuditSink, Capability, Decision, GovernanceFacade};
 
     use super::{
-        NotificationKind, ProjectingAuditSink, WorkbenchPresentationError,
-        WorkbenchPresentationPort, WorkbenchProjection,
+        NotificationKind, ProjectingAuditSink, WorkbenchChange, WorkbenchEvent, WorkbenchEventSink,
+        WorkbenchPresentationError, WorkbenchPresentationPort, WorkbenchProjection,
     };
+
+    #[derive(Default)]
+    struct Events(Mutex<Vec<WorkbenchEvent>>);
+
+    impl WorkbenchEventSink for Events {
+        fn publish(&self, event: WorkbenchEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
 
     #[derive(Default)]
     struct MemoryAudit(Mutex<Vec<AuditRecord>>);
@@ -1048,6 +1151,7 @@ mod tests {
             workspace: "workspace_1".into(),
             tool: "browser_read_page".into(),
             activity: PresentationActivity::Read,
+            capability: Capability::Read,
         });
         assert_eq!(projection.operations().len(), 1);
 
@@ -1073,6 +1177,100 @@ mod tests {
         assert!(projection.operations().is_empty());
         assert_eq!(projection.history()[0].tool, "browser_read_page");
         assert_eq!(durable.0.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn operation_lifetime_publishes_one_gapless_sequence() {
+        let projection = WorkbenchProjection::default();
+        let events = Arc::new(Events::default());
+        projection.attach_events(events.clone());
+
+        projection.react(&DomainEvent::WorkStarted {
+            invocation: "invocation_1".into(),
+            workspace: "workspace_1".into(),
+            tool: "browser_fill_form".into(),
+            activity: PresentationActivity::Fill,
+            capability: Capability::Write,
+        });
+        projection.react(&DomainEvent::WorkCompleted {
+            invocation: "invocation_1".into(),
+            workspace: "workspace_1".into(),
+            physical_id: None,
+        });
+        let governance = GovernanceFacade::new(None, None);
+        let authority = governance.snapshot(&Default::default());
+        ProjectingAuditSink::new(Arc::new(MemoryAudit::default()), projection.clone())
+            .record(&AuditRecord::now(
+                "invocation_1",
+                "workspace_1",
+                "browser_fill_form",
+                Capability::Write,
+                authority.id(),
+                Decision {
+                    allowed: true,
+                    reason: crate::governance::ReasonCode::Permitted,
+                },
+                "succeeded",
+                "wrote",
+            ))
+            .unwrap();
+
+        let published = events.0.lock().unwrap();
+        assert_eq!(
+            published.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            vec![1, 2, 3],
+            "a surface must be able to detect a gap"
+        );
+        assert_eq!(projection.current_seq(), 3);
+        match &published[0].change {
+            WorkbenchChange::OperationStarted { operation } => {
+                assert_eq!(operation.tool, "browser_fill_form");
+                assert_eq!(operation.capability, Capability::Write);
+            }
+            other => panic!("expected a started change, got {other:?}"),
+        }
+        assert!(matches!(
+            published[1].change,
+            WorkbenchChange::OperationChanged { .. }
+        ));
+        assert!(matches!(
+            published[2].change,
+            WorkbenchChange::OperationSettled { .. }
+        ));
+    }
+
+    #[test]
+    fn published_changes_stay_payload_free() {
+        let projection = WorkbenchProjection::default();
+        let events = Arc::new(Events::default());
+        projection.attach_events(events.clone());
+        projection.react(&DomainEvent::WorkStarted {
+            invocation: "invocation_1".into(),
+            workspace: "workspace_1".into(),
+            tool: "browser_run_script".into(),
+            activity: PresentationActivity::Script,
+            capability: Capability::Execute,
+        });
+
+        let published = events.0.lock().unwrap();
+        let encoded = serde_json::to_string(&published[0]).unwrap();
+        for forbidden in ["url", "selector", "content", "password"] {
+            assert!(!encoded.contains(forbidden), "leaked {forbidden}");
+        }
+    }
+
+    #[test]
+    fn a_projection_without_a_sink_publishes_nothing_and_stays_at_zero() {
+        let projection = WorkbenchProjection::default();
+        projection.react(&DomainEvent::WorkStarted {
+            invocation: "invocation_1".into(),
+            workspace: "workspace_1".into(),
+            tool: "browser_read_page".into(),
+            activity: PresentationActivity::Read,
+            capability: Capability::Read,
+        });
+        assert_eq!(projection.current_seq(), 0);
+        assert_eq!(projection.operations().len(), 1);
     }
 
     #[test]
@@ -1121,6 +1319,7 @@ mod tests {
             workspace: "workspace_1".into(),
             tool: "browser_list_tabs".into(),
             activity: PresentationActivity::Read,
+            capability: Capability::Read,
         });
         assert_eq!(projection.operations().len(), 1);
     }

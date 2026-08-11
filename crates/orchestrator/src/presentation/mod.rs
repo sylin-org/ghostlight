@@ -262,6 +262,7 @@ mod tests {
     use ghostlight_bridge::browser::{PresentationActivity, PresentationKind, PresentationSignal};
 
     use crate::events::{DenialPresentation, DomainEvent};
+    use crate::governance::Capability;
 
     use super::{PresentationError, PresentationPort, PresentationReactor};
 
@@ -301,6 +302,7 @@ mod tests {
             workspace: "workspace_x".into(),
             tool: "browser_read_page".into(),
             activity: PresentationActivity::Read,
+            capability: Capability::Read,
         });
         reactor.react(&DomainEvent::TargetIndicated {
             invocation: "invocation_x".into(),
@@ -335,6 +337,7 @@ mod tests {
             workspace: "workspace_x".into(),
             tool: "browser_close_tab".into(),
             activity: PresentationActivity::Quiet,
+            capability: Capability::Action,
         });
         reactor.react(&DomainEvent::WorkBlocked {
             invocation: "invocation_x".into(),
