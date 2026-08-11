@@ -194,10 +194,39 @@ function trimFeed() {
 
 /* --------------------------- monitor rendering -------------------------- */
 
+/** What the audit can honestly say happened to the page, with no payload to draw on. */
+const EFFECT_STORY = {
+  none: "left the page unchanged",
+  applied: "changed the page",
+  partial: "changed the page in part",
+  unknown: "outcome could not be confirmed"
+};
+
+/**
+ * The best sentence available for an entry.
+ *
+ * A live operation names what it is doing. A settled one can only describe its governed
+ * outcome, because the record is payload-free by design: no URL, no page text, no field value.
+ */
+function describe(entry) {
+  if (!entry.settled) return entry.activity;
+  if (isBlocked(entry)) return entry.reason ? words(entry.reason) : "blocked";
+  const story = EFFECT_STORY[entry.effect];
+  if (story) return story;
+  return entry.status ? words(entry.status) : "completed";
+}
+
+/** The client that asked, resolved through the current sessions when it is still connected. */
+function clientFor(workspace) {
+  const session = state.snapshot?.sessions.find((item) => item.id === workspace);
+  return session ? session.client_label : shortId(workspace);
+}
+
 function heroMarkup(entry) {
   const meta = [];
-  if (entry.workspace) meta.push(`<span>${escapeHtml(shortId(entry.workspace))}</span>`);
-  if (entry.settled && entry.effect) meta.push(`<span><i></i>${escapeHtml(words(entry.effect))}</span>`);
+  if (entry.workspace) meta.push(`<span>${escapeHtml(clientFor(entry.workspace))}</span>`);
+  if (entry.capability) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
+  if (entry.settled && entry.status) meta.push(`<span><i></i>${escapeHtml(words(entry.status))}</span>`);
   if (entry.settled && entry.endedAt) meta.push(`<span><i></i>${escapeHtml(ago(entry.endedAt))} ago</span>`);
 
   const reason = isBlocked(entry) && entry.reason
@@ -205,7 +234,7 @@ function heroMarkup(entry) {
     : "";
 
   return `<div class="hero-tool">${escapeHtml(entry.tool)}<span class="cap-label">${escapeHtml(entry.capability ?? "read")}</span></div>`
-    + `<p class="hero-activity">${escapeHtml(entry.activity)}</p>`
+    + `<p class="hero-activity">${escapeHtml(describe(entry))}</p>`
     + reason
     + (meta.length ? `<div class="hero-meta">${meta.join("")}</div>` : "");
 }
@@ -250,13 +279,14 @@ function paintHero(entry, animate) {
 
 function rowMarkup(entry) {
   const running = isRunning(entry);
-  const detail = isBlocked(entry) && entry.reason ? words(entry.reason) : entry.activity;
   const time = running
     ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
     : duration(entry.endedAt && entry.startedAt ? entry.endedAt - entry.startedAt : NaN);
   return `<div class="med-mini">${glyphFor(entry)}</div>`
     + `<div class="row-tool">${escapeHtml(entry.tool)}</div>`
-    + `<div class="row-activity">${escapeHtml(detail)}</div>`
+    + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
+    + `<div class="row-client">${escapeHtml(clientFor(entry.workspace))}</div>`
+    + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`
     + `<div class="row-dur">${escapeHtml(time)}</div>`
     + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`;
 }

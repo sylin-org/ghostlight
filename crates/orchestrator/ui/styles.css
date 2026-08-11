@@ -224,7 +224,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 .queue-head { display: flex; align-items: baseline; justify-content: space-between; margin: 20px 2px 6px; color: var(--faint); font: 500 9px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; }
 .queue { display: flex; flex-direction: column; }
 .row {
-  display: grid; grid-template-columns: 24px 150px minmax(0, 1fr) auto 54px;
+  display: grid; grid-template-columns: 24px 168px minmax(0, 1fr) 132px 62px 52px 46px;
   align-items: center; gap: 12px; overflow: hidden;
   height: 42px; padding: 0 12px 0 11px;
   border-bottom: 1px solid var(--line); border-left: 3px solid var(--cap, var(--cap-read));
@@ -235,7 +235,9 @@ body.runtime-offline .state-word { color: var(--muted); }
 .row-tool { overflow: hidden; color: var(--ink-2); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .row-activity { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .row.blocked .row-activity { color: #fca5a5; }
-.row-dur { color: var(--faint); font: 400 11px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.row-client { overflow: hidden; color: var(--muted); font: 400 11px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.row-cap { color: var(--cap, var(--cap-read)); font: 500 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.row-dur { color: var(--faint); font: 400 11px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
 .row-when { color: var(--faint); font: 400 10px/1 var(--mono); text-align: right; }
 .row.running .row-dur { color: var(--a); }
 .row.landing { animation: land var(--beat-settle) var(--spring) both; }
@@ -341,11 +343,17 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 
 :focus-visible { outline: 2px solid rgba(var(--argb), .7); outline-offset: 2px; border-radius: 4px; }
 
-@media (max-width: 900px) {
+/* Narrow: the capability already reads as the left edge, and the age matters least. */
+@media (max-width: 1040px) {
+  .row { grid-template-columns: 24px 156px minmax(0, 1fr) 116px 52px; }
+  .row-cap, .row-when { display: none; }
+}
+
+@media (max-width: 820px) {
   .state-facts { display: none; }
   .hero { grid-template-columns: 54px minmax(0, 1fr) auto; gap: 14px; }
-  .row { grid-template-columns: 24px 130px minmax(0, 1fr) auto; }
-  .row-when { display: none; }
+  .row { grid-template-columns: 24px 140px minmax(0, 1fr) 52px; }
+  .row-client { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
