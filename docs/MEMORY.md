@@ -105,6 +105,11 @@ Those sources win when they disagree with this file.
   eventually miss one: the extension reduced-motion selector list silently skipped new effects.
   Use the strongest structural owner available. Browser host/readiness belongs at the exhaustive
   dispatch seam; counts and sizes belong on the required typed outcome that also names them.
+- Replace only what changed, and decide that from the source diff per crate rather than from the
+  build output. A fringe binary that merely recompiled because a shared crate moved is not a changed
+  fringe: stopping a live relay to swap a behaviourally identical executable costs a killed native
+  host, an extension reload, and a browser reconnect for nothing. This is the deploy analogue of the
+  restart rule already in DEV-LOOP: do not disturb a shore because the orchestrator changed.
 - A guard that parses nothing passes everything. Check every source-scraping test against a negative
   control before trusting it. A guard can also go stale in the same commit that makes it stale:
   when a rendered string starts carrying a fact, an assertion that the fact appears separately stops

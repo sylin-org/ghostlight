@@ -47,6 +47,33 @@ tray available. Closing the window hides it; the tray Quit action ends the whole
 Do not restart a shore merely because an orchestrator feature changed. That is the fringe-stability
 contract, not an optimization.
 
+## Replacing a live stack
+
+A running stack holds its own executables open, so a release swap is build-elsewhere, stop, copy,
+start. The order matters less than the scope.
+
+1. Build into an isolated target: `CARGO_TARGET_DIR=.target-release-swap cargo build --workspace
+   --release`.
+2. **Decide what to replace from the source diff, not from the build output.** Every binary is
+   rebuilt whenever a shared crate changes, so a differing file size proves nothing. Check
+   `git diff --stat <base>..HEAD -- crates/<crate>` per crate, and check whether the connector even
+   imports the bridge module that moved. A connector whose source did not change should be left
+   running: it reconnects to the new service on its own, which is exactly what
+   `process-journey.mjs` proves.
+3. Place `deploy.lock` in the live directory before stopping anything. It suppresses demand-start
+   for 30 minutes so a connector cannot start a replacement service mid-swap.
+4. Stop only processes whose exact image path is that directory. Never stop by image name; an
+   installed or user-owned stack may be running beside the build.
+5. Copy the binaries that changed, remove `deploy.lock`, then start `ghostlight --background` (tray,
+   hidden) or `ghostlight` (visible workbench).
+
+Replacing `ghostlight-browser-connector` has a cost the other two do not: Chromium respawns the
+native host within a second or two while the extension's service worker is awake, so the copy needs
+a short kill-and-retry loop, and afterwards the extension must be reloaded explicitly at
+`chrome://extensions` before any browser work succeeds. An MV3 worker that has since suspended will
+not reconnect on its own. That is the reason step 2 matters: if the connector did not change, none
+of this happens.
+
 ## Automated gates
 
 ```powershell
