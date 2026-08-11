@@ -13,31 +13,59 @@
   const DENIAL_MS = 5000;
   const CLICK_STAGGER_MS = 150;
 
-  // The transient effect vocabulary: one row per treatment that plays and clears.
+  // The transient effect vocabulary. One row per treatment, and the row is the whole truth
+  // about it: `selector` enrolls it for reduced motion, and `beat` is how long it is visibly
+  // on screen, which is what its teardown is derived from.
   //
-  // This list is the reason a new effect cannot silently keep moving for someone who asked for
-  // reduced motion. Reduced-motion coverage is generated from it below, so adding a treatment
-  // here is what enrolls it, rather than remembering to extend a selector list by hand.
+  // Adding a row is what gives a treatment reduced-motion coverage and a lifetime. Nothing about
+  // an effect is hand-maintained anywhere else, so a new one cannot keep animating for someone
+  // who asked it not to, and cannot be torn down at a number somebody guessed.
+  //
+  // `beat` covers the treatment's full visible span, including any internal stagger: the scroll
+  // chevrons animate for 900ms behind a 200ms cascade, so they occupy 1100ms.
+  // A row without a `beat` loops inside a signature medallion and is cleared by that signature's
+  // lifecycle rather than by a timer of its own.
+  const CLEANUP_GRACE_MS = 100;
   const TRANSIENT_EFFECTS = Object.freeze([
-    "trail-dot",
-    "field-shimmer",
-    "field-splash",
-    "target-glow",
-    "chevrons svg",
-    "read-scan",
-    "nav-pill",
-    "key-lozenge",
-    "capture-flash",
-    "capture-frame",
-    "zoom-frame",
-    "workwheel",
-    "particle",
-    "keyboard",
-    "wait-lights span",
-    "lens",
-    "glint"
+    { selector: "trail-dot", beat: 520 },
+    { selector: "field-shimmer", beat: 900 },
+    { selector: "field-splash", beat: 700 },
+    { selector: "target-glow", beat: 720 },
+    { selector: "ripple", beat: 620 },
+    { selector: "chevrons svg", effect: "chevrons", beat: 1100 },
+    { selector: "read-scan", beat: 1450 },
+    { selector: "nav-pill", beat: 1600 },
+    { selector: "key-lozenge", beat: 1250 },
+    { selector: "capture-flash", beat: 260 },
+    { selector: "capture-frame", beat: 1500 },
+    { selector: "zoom-frame", beat: 1150 },
+    { selector: "workwheel" },
+    { selector: "particle" },
+    { selector: "keyboard" },
+    { selector: "wait-lights span" },
+    { selector: "lens" },
+    { selector: "glint" }
   ]);
-  const REDUCED_FADE_SELECTOR = TRANSIENT_EFFECTS.map((name) => `.${name}`).join(",");
+
+  // The ripple keeps its own reduced-motion rule, so it is enrolled for a beat but not for the
+  // generated fade selector.
+  const REDUCED_FADE_SELECTOR = TRANSIENT_EFFECTS.filter((row) => row.selector !== "ripple")
+    .map((row) => `.${row.selector}`)
+    .join(",");
+
+  const EFFECT_BEATS = new Map(
+    TRANSIENT_EFFECTS.filter((row) => typeof row.beat === "number").map((row) => [
+      row.effect || row.selector,
+      row.beat
+    ])
+  );
+
+  // A treatment is torn down one grace period after it stops being visible. Deriving this from
+  // the row keeps the animation and its cleanup from drifting apart.
+  function lifetimeFor(className) {
+    const beat = EFFECT_BEATS.get(className);
+    return (beat || 0) + CLEANUP_GRACE_MS;
+  }
 
   // Identity values reach the stylesheet once, as custom properties. Everything below is then
   // static CSS with no interpolation, so the vocabulary reads as a dictionary rather than a
@@ -229,7 +257,7 @@
     scope.classList.toggle("on", managed && runtimeReachable);
   }
 
-  function addEffect(className, styles, lifetime) {
+  function addEffect(className, styles) {
     const element = document.createElement("div");
     element.className = className;
     Object.assign(element.style, styles);
@@ -241,7 +269,7 @@
       element.remove();
     };
     element.addEventListener("animationend", remove, { once: true });
-    setTimeout(remove, lifetime);
+    setTimeout(remove, lifetimeFor(className));
     return element;
   }
 
@@ -281,7 +309,7 @@
 
   function targetGlow(rectangle) {
     if (!rectangle) return;
-    const effect = addEffect("target-glow", {}, 780);
+    const effect = addEffect("target-glow", {});
     placeRectangle(effect, paddedRectangle(rectangle, 4));
   }
 
@@ -294,7 +322,7 @@
     const secondary = Boolean(shape) && shape.button === "secondary";
     for (let index = 0; index < clicks; index += 1) {
       setTimeout(() => {
-        const effect = addEffect("ripple", { left: `${point.x}px`, top: `${point.y}px` }, 700);
+        const effect = addEffect("ripple", { left: `${point.x}px`, top: `${point.y}px` });
         if (secondary) effect.classList.add("secondary");
       }, index * CLICK_STAGGER_MS);
     }
@@ -306,20 +334,20 @@
       const ratio = (step + 1) / 12;
       const x = previous.x + (point.x - previous.x) * ratio;
       const y = previous.y + (point.y - previous.y) * ratio;
-      setTimeout(() => addEffect("trail-dot", { left: `${x}px`, top: `${y}px` }, 600), step * 22);
+      setTimeout(() => addEffect("trail-dot", { left: `${x}px`, top: `${y}px` }), step * 22);
     }
   }
 
   function fieldEffect(rectangle, treatment) {
     if (!rectangle) return;
     const padding = treatment === "field-splash" ? 4 : 3;
-    const effect = addEffect(treatment, {}, treatment === "field-splash" ? 780 : 1000);
+    const effect = addEffect(treatment, {});
     placeRectangle(effect, paddedRectangle(rectangle, padding));
   }
 
   function scrollCue(rectangle) {
     const point = center(rectangle);
-    const effect = addEffect("chevrons", {}, 1150);
+    const effect = addEffect("chevrons", {});
     effect.style.left = `${point.x}px`;
     effect.style.top = `${point.y}px`;
     effect.innerHTML = chevron + chevron + chevron;
@@ -327,12 +355,12 @@
   }
 
   function readScan() {
-    addEffect("read-scan", {}, 1510);
+    addEffect("read-scan", {});
   }
 
   function navigationPill() {
     const path = `${location.host}${location.pathname === "/" ? "" : location.pathname}` || "this page";
-    const pill = addEffect("nav-pill", {}, 1640);
+    const pill = addEffect("nav-pill", {});
     const arrow = document.createElement("span");
     arrow.className = "nav-arrow";
     arrow.textContent = "->";
@@ -342,15 +370,15 @@
   }
 
   function keyLozenge() {
-    const lozenge = addEffect("key-lozenge", {}, 1290);
+    const lozenge = addEffect("key-lozenge", {});
     const keycap = document.createElement("span");
     keycap.className = "private-keycap";
     lozenge.appendChild(keycap);
   }
 
   function screenshotEffect() {
-    addEffect("capture-flash", {}, 320);
-    addEffect("capture-frame", {}, 1560);
+    addEffect("capture-flash", {});
+    addEffect("capture-frame", {});
   }
 
   function zoomEffect(rectangle) {
@@ -360,7 +388,7 @@
       width: innerWidth * 0.6,
       height: innerHeight * 0.6
     };
-    const effect = addEffect("zoom-frame", {}, 1210);
+    const effect = addEffect("zoom-frame", {});
     placeRectangle(effect, region);
   }
 

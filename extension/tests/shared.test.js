@@ -78,13 +78,26 @@ test("presentation preserves the established Ghostlight palette and motion", () 
   // keep animating for someone who asked it not to.
   assert.match(renderer, /\$\{REDUCED_FADE_SELECTOR\}\{animation-name:ghostlight-fade!important/);
   assert.doesNotMatch(renderer, /\.trail-dot,\.field-shimmer,\.field-splash,\.target-glow/);
-  const registry = [...renderer.slice(renderer.indexOf("const TRANSIENT_EFFECTS"), renderer.indexOf("REDUCED_FADE_SELECTOR")).matchAll(/"([a-z- ]+)"/g)].map((match) => match[1]);
-  assert.ok(registry.length >= 17, `expected the full transient vocabulary, saw ${registry.length}`);
+  const registrySource = renderer.slice(renderer.indexOf("const TRANSIENT_EFFECTS"), renderer.indexOf("REDUCED_FADE_SELECTOR"));
+  const registry = [...registrySource.matchAll(/"([a-z- ]+)"/g)].map((match) => match[1]);
+  assert.ok(registry.length >= 18, `expected the full transient vocabulary, saw ${registry.length}`);
   for (const name of registry) {
     assert.ok(
       stylesheet.includes(`.${name}{`),
-      `${name} is enrolled for reduced motion but has no rule in the stylesheet`
+      `${name} is in the effect registry but has no rule in the stylesheet`
     );
+  }
+
+  // Teardown is derived from each row's beat, never hand-picked at the call site.
+  assert.match(renderer, /setTimeout\(remove, lifetimeFor\(className\)\)/);
+  assert.doesNotMatch(renderer, /addEffect\([^)]*,\s*\d+\)/, "an effect lifetime was hand-picked");
+
+  // Every ephemeral effect must own a beat, or it would tear down after the grace alone.
+  const withBeat = new Set([...registrySource.matchAll(/(?:effect|selector): "([a-z- ]+)",\s*beat:/g)].map((match) => match[1]));
+  const created = [...new Set([...renderer.matchAll(/addEffect\("([a-z-]+)"/g)].map((match) => match[1]))];
+  assert.ok(created.length >= 8, `expected the ephemeral call sites, saw ${created.length}`);
+  for (const name of created) {
+    assert.ok(withBeat.has(name), `addEffect("${name}") has no beat in the effect registry`);
   }
   assert.match(renderer, /setTimeout\(\(\) => denialLayer\.replaceChildren\(\), DENIAL_MS\)/);
   assert.match(chrome, /#0a0e17/);
