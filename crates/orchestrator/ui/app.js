@@ -262,10 +262,6 @@ const READINESS_NOTE = {
 
 const has = value => value !== null && value !== undefined;
 
-/** Whether the orchestrator measured this action, in which case its sentence already says so. */
-const measured = observed =>
-  Boolean(observed) && (has(observed.count) || (has(observed.width) && has(observed.height)));
-
 /**
  * The sentence the orchestrator authored for an entry.
  *
@@ -283,14 +279,12 @@ function sentence(entry) {
 /**
  * What the row says happened.
  *
- * A measured action already names its measurement in its sentence, so the sentence stands. A
- * landing that measured nothing says far more as the host it reached than as boilerplate.
+ * The orchestrator already chose the outcome's useful register and made every named measurement
+ * agree with the structured observation. The surface renders that sentence without guessing.
  */
 function describe(entry) {
   const observed = entry.settled ? entry.observed : null;
-  const body = observed && has(observed.host) && !measured(observed)
-    ? observed.host
-    : sentence(entry);
+  const body = sentence(entry);
   const note = observed ? READINESS_NOTE[observed.readiness] ?? "" : "";
   return note ? `${body} (${note})` : body;
 }

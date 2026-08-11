@@ -20,7 +20,7 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
-use crate::language::RequestRestrictions;
+use crate::language::{outcome::Observed, RequestRestrictions};
 
 const RUNTIME_ACTIVE: u8 = 0;
 const RUNTIME_HOLD: u8 = 1;
@@ -572,57 +572,6 @@ fn unix_ms() -> u64 {
     u64::try_from(millis).unwrap_or(u64::MAX)
 }
 
-/// Content-free observations about one action, gathered where it crosses the browser boundary.
-///
-/// This is deliberately not `InvocationResult::facts`. Facts legitimately carry page text and full
-/// URLs for the model; an audit record carries measurements and metadata only. Keeping the two as
-/// separate closed types is what makes copying one into the other impossible rather than merely
-/// discouraged.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Observed {
-    /// Host the action landed on, lowercased.
-    ///
-    /// Never the path, query, or fragment. The host answers "where did the agent go" and is already
-    /// visible in the user's own tab strip; the path is where a record number would sit.
-    #[serde(default)]
-    pub host: Option<String>,
-    /// Product readiness the browser reported, in the same vocabulary a result uses.
-    ///
-    /// This is what turns a bare `8.0s` into `8.0s, never settled`.
-    #[serde(default)]
-    pub readiness: Option<String>,
-    /// However many things the action touched.
-    ///
-    /// Deliberately general: the summary beside it names what was counted, because a field per tool
-    /// would not survive the catalog growing.
-    #[serde(default)]
-    pub count: Option<u32>,
-    /// Captured width in pixels.
-    #[serde(default)]
-    pub width: Option<u32>,
-    /// Captured height in pixels.
-    #[serde(default)]
-    pub height: Option<u32>,
-}
-
-impl Observed {
-    /// Fold a later crossing of the browser boundary into what the invocation already observed.
-    ///
-    /// A crossing that cannot see a fact leaves the earlier one standing, so an action that
-    /// describes targets before it fills them still reports where it happened.
-    #[must_use]
-    pub fn merged(self, later: Self) -> Self {
-        Self {
-            host: later.host.or(self.host),
-            readiness: later.readiness.or(self.readiness),
-            count: later.count.or(self.count),
-            width: later.width.or(self.width),
-            height: later.height.or(self.height),
-        }
-    }
-}
-
 /// A payload-free audit record produced after a terminal outcome.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -655,7 +604,7 @@ pub struct AuditRecord {
     /// For a navigation this is the time to a governed, settled landing.
     #[serde(default)]
     pub duration_ms: u64,
-    /// What the action did, observed where it crossed the browser boundary.
+    /// What the action did, merged from browser-seam landing facts and outcome measurements.
     #[serde(default)]
     pub observed: Observed,
 }
@@ -693,10 +642,7 @@ impl AuditRecord {
         }
     }
 
-    /// Attach what the action was observed doing at the browser boundary.
-    ///
-    /// This arrives separately from `now` because only work that crossed that boundary has one:
-    /// a rejected call or an asynchronous landing denial observes nothing.
+    /// Attach the action's content-free observation after completion.
     #[must_use]
     pub fn with_observation(mut self, observed: Observed) -> Self {
         self.observed = observed;
@@ -757,7 +703,8 @@ mod tests {
     use crate::language::RequestRestrictions;
     use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
 
-    use super::{AuditRecord, Capability, Decision, GovernanceFacade, Observed, ReasonCode};
+    use super::{AuditRecord, Capability, Decision, GovernanceFacade, ReasonCode};
+    use crate::language::outcome::Observed;
 
     fn temporary(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

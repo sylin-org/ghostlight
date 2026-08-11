@@ -25,7 +25,7 @@ const snapshot = {
   ],
   history: [
     { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_close_tab", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {} },
-    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_codex", tool: "browser_open_page", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Page opened and its landing was governed.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" } }
+    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_codex", tool: "browser_open_page", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" } }
   ],
   diagnostics: [
     { id: "service", label: "Orchestrator", severity: "passing", detail: "Ghostlight is accepting local connections." },
@@ -42,14 +42,14 @@ const snapshot = {
 
 // Representative work the monitor can page through, so the conveyor is reviewable.
 const script = [
-  { tool: "browser_open_page", activity: "Navigating", capability: "read", ms: 1700, effect: "committed", summary: "Page opened and its landing was governed.", observed: { host: "example.com", readiness: "complete" } },
-  { tool: "browser_read_page", activity: "Reading page", capability: "read", ms: 900, effect: "none", summary: "Read 1240 words of page text.", observed: { host: "example.com", count: 1240 } },
+  { tool: "browser_open_page", activity: "Navigating", capability: "read", ms: 1700, effect: "committed", summary: "Opened example.com.", observed: { host: "example.com", readiness: "complete" } },
+  { tool: "browser_read_page", activity: "Reading page", capability: "read", ms: 900, effect: "none", summary: "Read 1,240 words.", observed: { host: "example.com", count: 1240 } },
   { tool: "browser_find", activity: "Finding on page", capability: "read", ms: 700, effect: "none", summary: "Found 7 matches.", observed: { count: 7 } },
   { tool: "browser_fill_form", activity: "Filling form", capability: "write", ms: 2400, effect: "wrote", summary: "Filled 3 fields and submitted the form.", observed: { host: "example.com", readiness: "complete", count: 3 } },
   { tool: "browser_take_screenshot", activity: "Screenshot", capability: "read", ms: 1100, effect: "none", summary: "Captured the viewport at 1280x720.", observed: { width: 1280, height: 720 } },
-  { tool: "browser_click", activity: "Clicking", capability: "action", ms: 800, effect: "clicked", summary: "Target activated.", observed: { host: "example.com", readiness: "interactive" } },
+  { tool: "browser_click", activity: "Clicking", capability: "action", ms: 800, effect: "clicked", summary: "Clicked a target on example.com.", observed: { host: "example.com", readiness: "interactive" } },
   { tool: "browser_wait", activity: "Waiting", capability: "read", ms: 1900, effect: "none", summary: "Wait condition target_present was satisfied after 1830 ms.", observed: { readiness: "complete", count: 1830 } },
-  { tool: "browser_run_script", activity: "Running JavaScript", capability: "execute", ms: 1500, effect: "executed", summary: "Page script evaluated.", observed: { host: "example.com", readiness: "complete" } }
+  { tool: "browser_run_script", activity: "Running JavaScript", capability: "execute", ms: 1500, effect: "executed", summary: "Evaluated a script on example.com.", observed: { host: "example.com", readiness: "complete" } }
 ];
 
 const fixture = `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(snapshot)};

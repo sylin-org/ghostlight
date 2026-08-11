@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-11 (second pass).
+Last updated: 2026-08-11 (third pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -65,7 +65,7 @@ Re-run on 2026-08-11 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 83 Rust tests -- 71 in the orchestrator, 9 in the shared bridge, and 3
+- `cargo test --workspace`: 89 Rust tests -- 77 in the orchestrator, 9 in the shared bridge, and 3
   in the MCP connector.
 - `npm test --prefix extension`: 39 extension tests.
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
@@ -78,10 +78,15 @@ Re-run on 2026-08-11 against the current tree:
   event path, and uses the byte-identical original Ghostlight artwork.
 - Guard tests keep the surface and the orchestrator in step: every publishable change has a
   handler, every capability class has a visual treatment, every runtime intent stays reachable
-  (guarded by an exhaustive match), every observed fact reaches the surface, every readiness has a
-  note, the published palette is present with the accent defined once, the workbench capability
-  grants listen without emit, and every catalog tool has a medallion. Each of these was checked
-  against a negative control: breaking the thing it guards makes it fail.
+  (guarded by an exhaustive match), every seam-owned observed fact reaches the surface, every
+  outcome measurement agrees with its sentence, every readiness has a note, the published palette
+  is present with the accent defined once, the workbench capability grants listen without emit,
+  and every catalog tool has a medallion. Each of these was checked against a negative control:
+  breaking the thing it guards makes it fail.
+- Outcome-language oracles cover every success sentence, every refusal sentence, workspace reason
+  mapping, number grouping, safe next steps, sentence/measurement agreement, and the unchanged
+  `Observed` JSON round trip. Executor tests prove the browser seam records landing facts without
+  counts and the completion path still combines host/readiness with the outcome measurement.
 - The complete desktop-workbench change, from its starting revision through the live-monitor
   rebuild, has an empty diff under `crates/mcp-connector`, `crates/browser-connector`,
   `crates/bridge`, and `extension`.
@@ -101,20 +106,24 @@ Re-run on 2026-08-11 against the current tree:
   `duration_ms`, so every row states what happened and how long it took.
 - Per-action observation is built, at the seam it was designed for. See
   [`design/action-observations.md`](design/action-observations.md).
-  - `Observed { host, readiness, count, width, height }` is gathered in `Executor::dispatch`, keyed
-    by invocation, and read and cleared by the one completion path. Every tool benefits, including
-    tools not written yet, because the match on browser outcomes is exhaustive: a new outcome does
-    not compile until someone decides what it observes.
+  - `language/outcome.rs` owns `Outcome`, `Refusal`, `WorkspaceReason`, and
+    `Observed { host, readiness, count, width, height }`. Every successful completion requires an
+    `Outcome`, so its Ghostlight-authored sentence, safe next steps, and named measurements cannot
+    drift into separate call-site strings.
+  - `Executor::dispatch` remains exhaustive over browser outcomes and gathers host/readiness keyed
+    by invocation. `Outcome::observed` supplies counts and capture sizes from the same value that
+    authored their sentence. The one completion path merges the outcome over the seam and clears
+    the registry.
   - The host is the deliberate line. Never the path, query, or fragment. A capture reports its
     pixel size, a wait reports how long it waited and which condition it waited on, and a read
     reports how many words it read.
   - A count is recorded only where the Ghostlight-authored sentence beside it names what was
     counted, so the count needs no per-tool wording table on the surface. Those summaries now state
-    their measurement: "Read 1240 words of page text.", "Filled 3 fields and submitted the form.",
-    "Found 7 matches.", "Captured the viewport at 1280x720."
-  - Rows show the host where a landing measured nothing, the sentence where it measured something,
-    and a readiness note where a document never settled. The hero keeps the sentence and carries
-    the host beside it.
+    their measurement: "Read 1,240 words.", "Filled 3 fields and submitted the form.", "Found 7
+    matches.", "Captured the viewport at 1280x720."
+  - Rows always render the outcome sentence and add a readiness note where a document never
+    settled. They no longer guess between host and measurement. The hero keeps the sentence and
+    carries the host beside it.
   - The audit stays payload-free. `InvocationResult::facts` still carries page text and full URLs
     to the model; the observation is a separate closed type so there is no shortcut between them.
     [`guides/siem-integration.md`](guides/siem-integration.md) now documents `summary`,
@@ -153,3 +162,5 @@ Re-run on 2026-08-11 against the current tree:
 - Desktop decision: [`adr/0102-integrated-desktop-workbench.md`](adr/0102-integrated-desktop-workbench.md),
   including its 2026-08-11 amendment for the live monitor, the published palette, and the
   three-destination workbench.
+- Outcome language decision:
+  [`adr/0103-language-owned-outcome-voice.md`](adr/0103-language-owned-outcome-voice.md).

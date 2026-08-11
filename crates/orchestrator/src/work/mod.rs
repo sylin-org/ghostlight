@@ -24,11 +24,12 @@ use uuid::Uuid;
 use crate::browser::{BrowserError, BrowserPort};
 use crate::events::{DenialPresentation, DomainEvent};
 use crate::governance::{
-    AuditRecord, AuditSink, AuthoritySnapshot, Capability, Decision, GovernanceFacade, Observed,
-    ReasonCode,
+    AuditRecord, AuditSink, AuthoritySnapshot, Capability, Decision, GovernanceFacade, ReasonCode,
 };
 use crate::language::{
-    self, Click, Drag, FillForm, FormField, Hover, Operation, PressKey, RunScript, RunSequence,
+    self,
+    outcome::{Observed, Outcome, Refusal, TargetNoun, WorkspaceReason},
+    Click, Drag, FillForm, FormField, Hover, Operation, PressKey, RunScript, RunSequence,
     ScrollPage, SequenceStep, TypeText, UploadFiles, Wait,
 };
 use crate::presentation::PresentationReactor;
@@ -134,20 +135,23 @@ impl ApplicationExecutor {
                     allowed: false,
                     reason: ReasonCode::InvalidRequest,
                 };
+                let refusal = Refusal::InvalidRequest;
+                let summary = refusal.summary();
                 let result = InvocationResult::new(
                     &invocation,
                     Status::Failed,
                     Effect::None,
                     Readiness::NotApplicable,
                     true,
-                    "The call does not match the Ghostlight catalog.",
+                    &summary,
                     json!({"reason":"invalid_input","detail":error.to_string()}),
-                    vec!["Correct the call using the advertised tool schema.".into()],
+                    refusal.next_steps(),
                 );
                 let terminal = Terminal {
                     result,
                     decision,
                     physical_id: None,
+                    observed: Observed::default(),
                 };
                 return self.finish(
                     &gate,
@@ -204,6 +208,8 @@ impl ApplicationExecutor {
                 .remove(workspace.as_str());
             terminal
         } else if cancellation.is_cancelled() {
+            let refusal = Refusal::CancelledBeforeStart;
+            let summary = refusal.summary();
             Terminal {
                 result: InvocationResult::new(
                     &invocation,
@@ -211,17 +217,20 @@ impl ApplicationExecutor {
                     Effect::None,
                     Readiness::NotApplicable,
                     true,
-                    "The browser job was cancelled before it started.",
+                    &summary,
                     json!({"reason":"cancelled"}),
-                    vec![],
+                    refusal.next_steps(),
                 ),
                 decision: Decision {
                     allowed: true,
                     reason: ReasonCode::Permitted,
                 },
                 physical_id: None,
+                observed: Observed::default(),
             }
         } else if Instant::now() >= deadline {
+            let refusal = Refusal::DeadlineBeforeStart;
+            let summary = refusal.summary();
             Terminal {
                 result: InvocationResult::new(
                     &invocation,
@@ -229,15 +238,16 @@ impl ApplicationExecutor {
                     Effect::None,
                     Readiness::NotApplicable,
                     true,
-                    "The browser job deadline expired while waiting for the workspace.",
+                    &summary,
                     json!({"reason":"deadline"}),
-                    vec![],
+                    refusal.next_steps(),
                 ),
                 decision: Decision {
                     allowed: true,
                     reason: ReasonCode::Permitted,
                 },
                 physical_id: None,
+                observed: Observed::default(),
             }
         } else {
             self.workspace_failure(&context, WorkspaceError::UnknownWorkspace)
@@ -295,6 +305,9 @@ impl ApplicationExecutor {
             .ok()
             .and_then(|value| value.as_str().map(str::to_owned))
             .unwrap_or_else(|| "unknown".into());
+        let observed = self
+            .take_observation(&terminal.result.invocation)
+            .merged(terminal.observed.clone());
         let record = AuditRecord::now(
             &terminal.result.invocation,
             workspace.as_str(),
@@ -307,7 +320,7 @@ impl ApplicationExecutor {
             &terminal.result.summary,
             duration_ms,
         )
-        .with_observation(self.take_observation(&terminal.result.invocation));
+        .with_observation(observed);
         let _ = self.audit.record(&record);
         gate.complete(terminal.result)
             .expect("single executor completion path");
@@ -402,10 +415,7 @@ impl ApplicationExecutor {
         match lease.tabs() {
             Ok(tabs) => {
                 let facts: Vec<_> = tabs.into_iter().map(|tab| json!({"tab":tab.handle.as_str(),"title":tab.title,"url":tab.url,"active":tab.active,"readiness":readiness(tab.readiness)})).collect();
-                let summary = format!(
-                    "Listed {}.",
-                    counted(facts.len(), "controlled tab", "controlled tabs")
-                );
+                let outcome = Outcome::TabsListed { count: facts.len() };
                 self.succeeded(
                     context,
                     decision,
@@ -413,7 +423,7 @@ impl ApplicationExecutor {
                     Effect::None,
                     Readiness::NotApplicable,
                     true,
-                    &summary,
+                    outcome,
                     json!({"tabs":facts}),
                 )
             }
@@ -463,7 +473,9 @@ impl ApplicationExecutor {
                     Effect::Applied,
                     readiness(selected.readiness),
                     true,
-                    "Controlled tab brought into view.",
+                    Outcome::TabActivated {
+                        host: observed_host(&selected.url),
+                    },
                     json!({"tab":selected.handle.as_str(),"active":active,"window_focused":window_focused}),
                 )
             }
@@ -543,7 +555,7 @@ impl ApplicationExecutor {
                     context,
                     landing,
                     Some(tab.tab_id),
-                    "The landing was denied, but the new tab's final state cannot be determined.",
+                    Refusal::LandingDeniedUnknown,
                     json!({"reason":landing.reason.as_str(),"compensated":false}),
                 ),
             };
@@ -558,7 +570,7 @@ impl ApplicationExecutor {
             tab: governed.handle.clone(),
             physical_id: governed.physical_id,
         });
-        self.succeeded(context, landing, Some(governed.physical_id), Effect::Applied, readiness(governed.readiness), false, "Page opened and its landing was governed.", json!({"tab":governed.handle.as_str(),"url":governed.url,"title":governed.title,"created":true,"document_generation":governed.generation}))
+        self.succeeded(context, landing, Some(governed.physical_id), Effect::Applied, readiness(governed.readiness), false, Outcome::PageOpened { host: observed_host(&governed.url) }, json!({"tab":governed.handle.as_str(),"url":governed.url,"title":governed.title,"created":true,"document_generation":governed.generation}))
     }
 
     fn navigate_page(
@@ -615,7 +627,7 @@ impl ApplicationExecutor {
                     tab: governed.handle.clone(),
                     physical_id: governed.physical_id,
                 });
-                self.succeeded(context, landing, Some(governed.physical_id), Effect::Applied, readiness(governed.readiness), false, "Page navigation completed and its landing was governed.", json!({"tab":governed.handle.as_str(),"url":governed.url,"title":governed.title,"document_generation":governed.generation}))
+                self.succeeded(context, landing, Some(governed.physical_id), Effect::Applied, readiness(governed.readiness), false, Outcome::PageNavigated { host: observed_host(&governed.url) }, json!({"tab":governed.handle.as_str(),"url":governed.url,"title":governed.title,"document_generation":governed.generation}))
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
@@ -659,7 +671,10 @@ impl ApplicationExecutor {
             &selected,
             decision,
             outcome,
-            "Browser history navigation completed and its landing was governed.",
+            |host| Outcome::HistoryTraversed {
+                direction: direction.into(),
+                host,
+            },
             json!({"direction":direction}),
         )
     }
@@ -699,22 +714,25 @@ impl ApplicationExecutor {
             &selected,
             decision,
             outcome,
-            "Page reloaded and its landing was governed.",
+            |host| Outcome::PageReloaded { host },
             json!({"bypass_cache":bypass_cache}),
         )
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn complete_navigation(
+    fn complete_navigation<F>(
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         selected: &SelectedTab,
         decision: Decision,
         outcome: Result<BrowserOutcome, BrowserError>,
-        summary: &str,
+        make_outcome: F,
         mut facts: Value,
-    ) -> Terminal {
+    ) -> Terminal
+    where
+        F: FnOnce(Option<String>) -> Outcome,
+    {
         match outcome {
             Ok(BrowserOutcome::Navigated {
                 tab,
@@ -742,6 +760,7 @@ impl ApplicationExecutor {
                     Ok(tab) => tab,
                     Err(error) => return self.workspace_failure(context, error),
                 };
+                let outcome = make_outcome(observed_host(&governed.url));
                 if let Some(object) = facts.as_object_mut() {
                     object.insert("tab".into(), json!(governed.handle.as_str()));
                     object.insert("url".into(), json!(governed.url));
@@ -761,7 +780,7 @@ impl ApplicationExecutor {
                     Effect::Applied,
                     readiness(governed.readiness),
                     false,
-                    summary,
+                    outcome,
                     facts,
                 )
             }
@@ -810,7 +829,7 @@ impl ApplicationExecutor {
                     Effect::Applied,
                     Readiness::NotApplicable,
                     false,
-                    "Controlled tab closed.",
+                    Outcome::TabClosed,
                     json!({"tab":selected.handle.as_str(),"closed":true}),
                 )
             }
@@ -864,11 +883,8 @@ impl ApplicationExecutor {
                     let _ = lease.hold_tab(&selected.handle);
                     return self.blocked(context, landing, Some(tab_id), Effect::None, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}));
                 }
-                let summary = format!(
-                    "Read {} of page text.",
-                    counted(word_count(&text), "word", "words")
-                );
-                self.succeeded(context, landing, Some(tab_id), Effect::None, readiness(selected.readiness), true, &summary, json!({"tab":selected.handle.as_str(),"url":url,"title":bounded(&title,500),"text":bounded(&text,max_chars),"truncated":truncated || text.chars().count() > max_chars,"document_generation":selected.generation}))
+                let words = word_count(&text);
+                self.succeeded(context, landing, Some(tab_id), Effect::None, readiness(selected.readiness), true, Outcome::TextRead { words }, json!({"tab":selected.handle.as_str(),"url":url,"title":bounded(&title,500),"text":bounded(&text,max_chars),"truncated":truncated || text.chars().count() > max_chars,"document_generation":selected.generation}))
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
@@ -895,8 +911,7 @@ impl ApplicationExecutor {
                 kind: kind.into(),
                 max_items,
             },
-            "Inspected the page and found",
-            ("item", "items"),
+            TargetNoun::Item,
         )
     }
 
@@ -920,15 +935,13 @@ impl ApplicationExecutor {
                 kind: kind.into(),
                 max_results,
             },
-            "Found",
-            ("match", "matches"),
+            TargetNoun::Match,
         )
     }
 
     /// One governed target retrieval.
     ///
-    /// `verb` and `noun` compose the summary once the count is known, and the plural noun is also
-    /// the fact key, so a row and its facts cannot disagree about what was counted.
+    /// The closed noun chooses both the product sentence and the structured fact key.
     #[allow(clippy::too_many_arguments)]
     fn targets_operation(
         &self,
@@ -937,8 +950,7 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         capability: Capability,
         command: BrowserCommand,
-        verb: &str,
-        noun: (&str, &str),
+        noun: TargetNoun,
     ) -> Terminal {
         let selected = match lease.select_tab(requested_tab) {
             Ok(tab) => tab,
@@ -983,11 +995,18 @@ impl ApplicationExecutor {
                     Err(error) => return self.workspace_failure(context, error),
                 };
                 let items: Vec<_> = mapped.into_iter().map(|(handle, target)| json!({"target":handle.as_str(),"role":bounded(&target.role,100),"name":bounded(&target.name,500),"state":target.state,"credential_class":target.credential_class})).collect();
-                let summary = format!("{verb} {}.", counted(items.len(), noun.0, noun.1));
+                let outcome = Outcome::TargetsListed {
+                    noun,
+                    count: items.len(),
+                };
+                let fact_key = match noun {
+                    TargetNoun::Match => "matches",
+                    TargetNoun::Item => "items",
+                };
                 let mut facts = serde_json::Map::new();
                 facts.insert("tab".into(), json!(selected.handle.as_str()));
                 facts.insert("document_generation".into(), json!(selected.generation));
-                facts.insert(noun.1.into(), json!(items));
+                facts.insert(fact_key.into(), json!(items));
                 self.succeeded(
                     context,
                     decision,
@@ -995,7 +1014,7 @@ impl ApplicationExecutor {
                     Effect::None,
                     readiness(selected.readiness),
                     true,
-                    &summary,
+                    outcome,
                     Value::Object(facts),
                 )
             }
@@ -1050,20 +1069,20 @@ impl ApplicationExecutor {
                         context,
                         decision,
                         Some(tab_id),
-                        "Screenshot exceeded the product result bound.",
+                        Refusal::CaptureTooLarge,
                         json!({"reason":"screenshot_too_large"}),
-                        vec![],
                     );
                 }
                 let view = match lease.register_view(&selected, viewport, width, height) {
                     Ok(view) => view,
                     Err(error) => return self.workspace_failure(context, error),
                 };
-                let summary = format!(
-                    "Captured the {} at {width}x{height}.",
-                    if full_page { "full page" } else { "viewport" }
-                );
-                let mut terminal = self.succeeded(context, decision, Some(tab_id), Effect::None, readiness(selected.readiness), true, &summary, json!({"tab":selected.handle.as_str(),"view":view.as_str(),"mime_type":mime_type,"width":width,"height":height}));
+                let outcome = Outcome::Captured {
+                    full_page,
+                    width,
+                    height,
+                };
+                let mut terminal = self.succeeded(context, decision, Some(tab_id), Effect::None, readiness(selected.readiness), true, outcome, json!({"tab":selected.handle.as_str(),"view":view.as_str(),"mime_type":mime_type,"width":width,"height":height}));
                 terminal.result = terminal
                     .result
                     .with_content(ServiceContent::Image { mime_type, data });
@@ -1105,7 +1124,7 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        let (command, facts, summary) = match location {
+        let (command, facts, target_clicked) = match location {
             ResolvedLocation::Target { tab, target } => {
                 self.emit(DomainEvent::TargetIndicated {
                     invocation: context.invocation.into(),
@@ -1125,7 +1144,7 @@ impl ApplicationExecutor {
                         click_count: value.click_count,
                     },
                     json!({"tab":tab.handle.as_str(),"target":target.handle.as_str(),"activated":true}),
-                    "Target activated.",
+                    true,
                 )
             }
             ResolvedLocation::Point { tab, view, point } => (
@@ -1137,24 +1156,32 @@ impl ApplicationExecutor {
                     click_count: value.click_count,
                 },
                 json!({"tab":tab.handle.as_str(),"view":view.handle.as_str(),"activated":true}),
-                "Screenshot point activated.",
+                false,
             ),
         };
         match self.dispatch(context, command) {
             Ok(BrowserOutcome::Activated {
                 tab,
                 committed_urls,
-            }) => self.action_success(
-                context,
-                lease,
-                decision,
-                Capability::Action,
-                &selected,
-                &tab,
-                &committed_urls,
-                summary,
-                facts,
-            ),
+            }) => {
+                let host = observed_host(&tab.url);
+                let outcome = if target_clicked {
+                    Outcome::TargetClicked { host }
+                } else {
+                    Outcome::PointClicked { host }
+                };
+                self.action_success(
+                    context,
+                    lease,
+                    decision,
+                    Capability::Action,
+                    &selected,
+                    &tab,
+                    &committed_urls,
+                    outcome,
+                    facts,
+                )
+            }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
@@ -1214,9 +1241,13 @@ impl ApplicationExecutor {
                     readiness(selected.readiness),
                     value.target.is_some(),
                     if value.target.is_some() {
-                        "Target revealed."
+                        Outcome::TargetRevealed {
+                            host: observed_host(&selected.url),
+                        }
                     } else {
-                        "Page scrolled."
+                        Outcome::PageScrolled {
+                            host: observed_host(&selected.url),
+                        }
                     },
                     json!({"tab":selected.handle.as_str(),"target":value.target,"scrolled":true,"x":x,"y":y}),
                 )
@@ -1261,6 +1292,7 @@ impl ApplicationExecutor {
                 if let Err(error) = lease.invalidate_views(&selected.handle) {
                     return self.workspace_failure(context, error);
                 }
+                let actual_percent = (zoom * 100.0).round() as u16;
                 self.succeeded(
                     context,
                     decision,
@@ -1268,8 +1300,11 @@ impl ApplicationExecutor {
                     Effect::Applied,
                     readiness(selected.readiness),
                     true,
-                    "Tab zoom set.",
-                    json!({"tab":selected.handle.as_str(),"percent":(zoom * 100.0).round() as u16,"zoomed":true}),
+                    Outcome::ZoomSet {
+                        percent: actual_percent,
+                        host: observed_host(&selected.url),
+                    },
+                    json!({"tab":selected.handle.as_str(),"percent":actual_percent,"zoomed":true}),
                 )
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -1343,7 +1378,9 @@ impl ApplicationExecutor {
                     Effect::Applied,
                     readiness(selected.readiness),
                     true,
-                    "Pointer hover applied.",
+                    Outcome::Hovered {
+                        host: observed_host(&selected.url),
+                    },
                     facts,
                 ),
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -1457,18 +1494,7 @@ impl ApplicationExecutor {
                 filled_count,
                 submitted,
                 committed_urls,
-            }) => {
-                let summary = format!(
-                    "Filled {}{}.",
-                    counted(filled_count, "field", "fields"),
-                    if submitted {
-                        " and submitted the form"
-                    } else {
-                        ""
-                    }
-                );
-                self.action_success(context, lease, decision, capability, &selected, &tab, &committed_urls, &summary, json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted}))
-            }
+            }) => self.action_success(context, lease, decision, capability, &selected, &tab, &committed_urls, Outcome::FormFilled { fields: filled_count, submitted }, json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted})),
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
@@ -1537,17 +1563,22 @@ impl ApplicationExecutor {
                 tab,
                 character_count,
                 committed_urls,
-            }) => self.action_success(
-                context,
-                lease,
-                decision,
-                Capability::Write,
-                &selected,
-                &tab,
-                &committed_urls,
-                "Text typed through browser input events.",
-                json!({"tab":selected.handle.as_str(),"target":target.handle.as_str(),"typed":true,"character_count":character_count}),
-            ),
+            }) => {
+                let outcome = Outcome::TextTyped {
+                    host: observed_host(&tab.url),
+                };
+                self.action_success(
+                    context,
+                    lease,
+                    decision,
+                    Capability::Write,
+                    &selected,
+                    &tab,
+                    &committed_urls,
+                    outcome,
+                    json!({"tab":selected.handle.as_str(),"target":target.handle.as_str(),"typed":true,"character_count":character_count}),
+                )
+            }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
@@ -1644,17 +1675,22 @@ impl ApplicationExecutor {
             Ok(BrowserOutcome::Dragged {
                 tab,
                 committed_urls,
-            }) => self.action_success(
-                context,
-                lease,
-                decision,
-                Capability::Action,
-                &selected,
-                &tab,
-                &committed_urls,
-                "Drag completed.",
-                facts,
-            ),
+            }) => {
+                let outcome = Outcome::Dragged {
+                    host: observed_host(&tab.url),
+                };
+                self.action_success(
+                    context,
+                    lease,
+                    decision,
+                    Capability::Action,
+                    &selected,
+                    &tab,
+                    &committed_urls,
+                    outcome,
+                    facts,
+                )
+            }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
@@ -1710,9 +1746,8 @@ impl ApplicationExecutor {
                     context,
                     decision,
                     Some(selected.physical_id),
-                    "The selected local files could not be prepared safely.",
+                    Refusal::FilesUnreadable,
                     json!({"reason":reason}),
-                    vec![],
                 )
             }
         };
@@ -1732,10 +1767,6 @@ impl ApplicationExecutor {
                 && uploaded_count == value.paths.len()
                 && uploaded_bytes == total =>
             {
-                let summary = format!(
-                    "Uploaded {} to the selected control.",
-                    counted(uploaded_count, "file", "files")
-                );
                 self.succeeded(
                     context,
                     decision,
@@ -1743,7 +1774,9 @@ impl ApplicationExecutor {
                     Effect::Applied,
                     readiness(selected.readiness),
                     false,
-                    &summary,
+                    Outcome::FilesUploaded {
+                        count: uploaded_count,
+                    },
                     json!({"tab":selected.handle.as_str(),"target":target.handle.as_str(),"uploaded_count":uploaded_count,"uploaded_bytes":uploaded_bytes}),
                 )
             }
@@ -1790,6 +1823,9 @@ impl ApplicationExecutor {
                 committed_urls,
             }) => {
                 let rendered = serde_json::from_str(&value).unwrap_or(Value::String(value));
+                let outcome = Outcome::ScriptEvaluated {
+                    host: observed_host(&tab.url),
+                };
                 self.action_success(
                     context,
                     lease,
@@ -1798,7 +1834,7 @@ impl ApplicationExecutor {
                     &selected,
                     &tab,
                     &committed_urls,
-                    "Page script evaluated.",
+                    outcome,
                     json!({"tab":selected.handle.as_str(),"value":rendered,"truncated":truncated}),
                 )
             }
@@ -1824,6 +1860,8 @@ impl ApplicationExecutor {
             workspace: context.workspace.as_str().into(),
             physical_id: Some(selected.physical_id),
         });
+        let refusal = Refusal::CredentialHandoff;
+        let summary = refusal.summary();
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
@@ -1831,12 +1869,13 @@ impl ApplicationExecutor {
                 Effect::None,
                 readiness(selected.readiness),
                 false,
-                "A credential-class field requires user handoff in the visible browser.",
+                &summary,
                 json!({"tab":selected.handle.as_str(),"credential_handoff":true,"values_sent":false}),
-                vec!["Complete the credential field in the visible browser, then inspect the page again.".into()],
+                refusal.next_steps(),
             ),
             decision,
             physical_id: Some(selected.physical_id),
+            observed: Observed::default(),
         }
     }
 
@@ -1878,17 +1917,22 @@ impl ApplicationExecutor {
                 tab,
                 key,
                 committed_urls,
-            }) => self.action_success(
-                context,
-                lease,
-                decision,
-                Capability::Action,
-                &selected,
-                &tab,
-                &committed_urls,
-                "Keyboard action sent.",
-                json!({"tab":selected.handle.as_str(),"key":key,"pressed":true}),
-            ),
+            }) => {
+                let outcome = Outcome::KeyboardSent {
+                    host: observed_host(&tab.url),
+                };
+                self.action_success(
+                    context,
+                    lease,
+                    decision,
+                    Capability::Action,
+                    &selected,
+                    &tab,
+                    &committed_urls,
+                    outcome,
+                    json!({"tab":selected.handle.as_str(),"key":key,"pressed":true}),
+                )
+            }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
@@ -1938,9 +1982,9 @@ impl ApplicationExecutor {
                 tab_id,
                 satisfied,
                 elapsed_ms,
-                readiness: observed,
+                readiness: browser_readiness,
             }) if tab_id == selected.physical_id => {
-                let _ = lease.update_readiness(&selected.handle, observed);
+                let _ = lease.update_readiness(&selected.handle, browser_readiness);
                 let status = if satisfied {
                     Status::Succeeded
                 } else {
@@ -1948,34 +1992,28 @@ impl ApplicationExecutor {
                 };
                 // The condition is a closed vocabulary and its value is not: only the name of the
                 // condition joins the sentence that reaches audit.
-                let summary = if satisfied {
-                    format!(
-                        "Wait condition {} was satisfied after {elapsed_ms} ms.",
-                        value.condition
-                    )
-                } else {
-                    format!(
-                        "Wait condition {} was not satisfied within {elapsed_ms} ms.",
-                        value.condition
-                    )
+                let outcome = Outcome::Waited {
+                    condition: value.condition.clone(),
+                    elapsed_ms,
+                    satisfied,
                 };
+                let summary = outcome.summary();
+                let next_steps = outcome.next_steps();
+                let outcome_observed = outcome.observed();
                 Terminal {
                     result: InvocationResult::new(
                         context.invocation,
                         status,
                         Effect::None,
-                        readiness(observed),
+                        readiness(browser_readiness),
                         true,
                         &summary,
                         json!({"tab":selected.handle.as_str(),"condition":value.condition,"satisfied":satisfied,"elapsed_ms":elapsed_ms}),
-                        if satisfied {
-                            vec![]
-                        } else {
-                            vec!["Inspect the current page before choosing another action.".into()]
-                        },
+                        next_steps,
                     ),
                     decision,
                     physical_id: Some(tab_id),
+                    observed: outcome_observed,
                 }
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -2141,6 +2179,12 @@ impl ApplicationExecutor {
             } else {
                 terminal.result.status
             };
+            let outcome = Outcome::SequenceRan {
+                completed,
+                total: value.steps.len(),
+            };
+            let summary = outcome.summary();
+            let observed = outcome.observed();
             return Terminal {
                 result: InvocationResult::new(
                     context.invocation,
@@ -2148,15 +2192,16 @@ impl ApplicationExecutor {
                     effect,
                     terminal.result.readiness,
                     effect == Effect::None,
-                    "Sequence stopped at the first non-successful step.",
+                    &summary,
                     json!({"tab":selected.handle.as_str(),"completed_steps":completed,"total_steps":value.steps.len(),"steps":statuses}),
-                    vec![],
+                    outcome.next_steps(),
                 ),
                 decision: last_decision,
                 physical_id: terminal.physical_id,
+                observed,
             };
         }
-        self.succeeded(context, last_decision, Some(selected.physical_id), if applied_any { Effect::Applied } else { Effect::None }, readiness(selected.readiness), !applied_any, "Sequence completed.", json!({"tab":selected.handle.as_str(),"completed_steps":completed,"total_steps":value.steps.len(),"steps":statuses}))
+        self.succeeded(context, last_decision, Some(selected.physical_id), if applied_any { Effect::Applied } else { Effect::None }, readiness(selected.readiness), !applied_any, Outcome::SequenceRan { completed, total: value.steps.len() }, json!({"tab":selected.handle.as_str(),"completed_steps":completed,"total_steps":value.steps.len(),"steps":statuses}))
     }
 
     fn handle_dialog(
@@ -2203,9 +2248,8 @@ impl ApplicationExecutor {
                     context,
                     decision,
                     Some(selected.physical_id),
-                    "No JavaScript dialog is currently visible.",
+                    Refusal::NoDialogVisible,
                     json!({"tab":selected.handle.as_str(),"handled":false}),
-                    vec![],
                 )
             }
             Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -2214,7 +2258,7 @@ impl ApplicationExecutor {
             }
         };
         match self.dispatch(context, BrowserCommand::HandleDialog { tab_id: selected.physical_id, accept, text: text.map(str::to_owned) }) {
-            Ok(BrowserOutcome::DialogHandled { tab_id, dialog_type: handled_type, accepted }) if tab_id == selected.physical_id => self.succeeded(context, decision, Some(tab_id), Effect::Applied, readiness(selected.readiness), false, "Browser dialog handled.", json!({"tab":selected.handle.as_str(),"dialog_type":if handled_type.is_empty(){dialog_type}else{handled_type},"accepted":accepted,"handled":true})),
+            Ok(BrowserOutcome::DialogHandled { tab_id, dialog_type: handled_type, accepted }) if tab_id == selected.physical_id => self.succeeded(context, decision, Some(tab_id), Effect::Applied, readiness(selected.readiness), false, Outcome::DialogHandled { accepted }, json!({"tab":selected.handle.as_str(),"dialog_type":if handled_type.is_empty(){dialog_type}else{handled_type},"accepted":accepted,"handled":true})),
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => self.browser_failure(context, decision, error, Some(selected.physical_id)),
         }
@@ -2230,7 +2274,7 @@ impl ApplicationExecutor {
         selected: &SelectedTab,
         physical: &PhysicalTab,
         commits: &[String],
-        summary: &str,
+        outcome: Outcome,
         mut facts: Value,
     ) -> Terminal {
         let landing = self.authorize_commits(context, landing_capability, physical, commits);
@@ -2274,7 +2318,7 @@ impl ApplicationExecutor {
             Effect::Applied,
             readiness(physical.readiness),
             false,
-            summary,
+            outcome,
             facts,
         )
     }
@@ -2485,9 +2529,12 @@ impl ApplicationExecutor {
         effect: Effect,
         readiness: Readiness,
         repeat_safe: bool,
-        summary: &str,
+        outcome: Outcome,
         facts: Value,
     ) -> Terminal {
+        let summary = outcome.summary();
+        let next_steps = outcome.next_steps();
+        let observed = outcome.observed();
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
@@ -2495,12 +2542,13 @@ impl ApplicationExecutor {
                 effect,
                 readiness,
                 repeat_safe,
-                summary,
+                &summary,
                 facts,
-                vec![],
+                next_steps,
             ),
             decision,
             physical_id,
+            observed,
         }
     }
 
@@ -2514,6 +2562,12 @@ impl ApplicationExecutor {
         facts: Value,
     ) -> Terminal {
         let attention = decision.reason == ReasonCode::RuntimeAttention;
+        let refusal = if attention {
+            Refusal::AttentionRequired
+        } else {
+            Refusal::AuthorityBlocked
+        };
+        let summary = refusal.summary();
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
@@ -2525,16 +2579,13 @@ impl ApplicationExecutor {
                 effect,
                 Readiness::Unknown,
                 repeat_safe,
-                if attention {
-                    "The browser job requires user attention."
-                } else {
-                    "Authority blocked the browser job."
-                },
+                &summary,
                 facts,
-                vec![],
+                refusal.next_steps(),
             ),
             decision,
             physical_id,
+            observed: Observed::default(),
         }
     }
 
@@ -2543,10 +2594,10 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         decision: Decision,
         physical_id: Option<u64>,
-        summary: &str,
+        refusal: Refusal,
         facts: Value,
-        next_steps: Vec<String>,
     ) -> Terminal {
+        let summary = refusal.summary();
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
@@ -2554,12 +2605,13 @@ impl ApplicationExecutor {
                 Effect::None,
                 Readiness::Unknown,
                 true,
-                summary,
+                &summary,
                 facts,
-                next_steps,
+                refusal.next_steps(),
             ),
             decision,
             physical_id,
+            observed: Observed::default(),
         }
     }
 
@@ -2568,9 +2620,10 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         decision: Decision,
         physical_id: Option<u64>,
-        summary: &str,
+        refusal: Refusal,
         facts: Value,
     ) -> Terminal {
+        let summary = refusal.summary();
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
@@ -2578,12 +2631,13 @@ impl ApplicationExecutor {
                 Effect::Unknown,
                 Readiness::Unknown,
                 false,
-                summary,
+                &summary,
                 facts,
-                vec![],
+                refusal.next_steps(),
             ),
             decision,
             physical_id,
+            observed: Observed::default(),
         }
     }
 
@@ -2597,9 +2651,8 @@ impl ApplicationExecutor {
             context,
             decision,
             physical_id,
-            "The browser adapter returned an incompatible primitive receipt.",
+            Refusal::IncompatibleReceipt,
             json!({"reason":"incompatible_browser_receipt"}),
-            vec![],
         )
     }
 
@@ -2611,6 +2664,8 @@ impl ApplicationExecutor {
         physical_id: Option<u64>,
     ) -> Terminal {
         if matches!(&error, BrowserError::LocalInterlock(_)) {
+            let refusal = Refusal::LocalInterlock;
+            let summary = refusal.summary();
             return Terminal {
                 result: InvocationResult::new(
                     context.invocation,
@@ -2618,15 +2673,13 @@ impl ApplicationExecutor {
                     Effect::None,
                     Readiness::NotApplicable,
                     true,
-                    "A local browser safety setting blocked this action.",
+                    &summary,
                     json!({"reason":"browser_local_interlock"}),
-                    vec![
-                        "The user can change the relevant Ghostlight extension setting or perform the action directly."
-                            .into(),
-                    ],
+                    refusal.next_steps(),
                 ),
                 decision,
                 physical_id,
+                observed: Observed::default(),
             };
         }
         if error.effect_unknown() {
@@ -2634,7 +2687,7 @@ impl ApplicationExecutor {
                 context,
                 decision,
                 physical_id,
-                "A browser effect was dispatched, but its final state cannot be determined.",
+                Refusal::EffectUnknown,
                 json!({"reason":"browser_effect_unknown"}),
             );
         }
@@ -2643,11 +2696,10 @@ impl ApplicationExecutor {
         } else {
             Status::Failed
         };
-        let next_steps = if matches!(error, BrowserError::DisconnectedBeforeDispatch) {
-            vec!["Reconnect the Ghostlight browser adapter.".into()]
-        } else {
-            vec![]
+        let refusal = Refusal::BrowserStopped {
+            reconnect: matches!(error, BrowserError::DisconnectedBeforeDispatch),
         };
+        let summary = refusal.summary();
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
@@ -2655,12 +2707,13 @@ impl ApplicationExecutor {
                 Effect::None,
                 Readiness::Unknown,
                 true,
-                "The browser job stopped before a physical effect.",
+                &summary,
                 json!({"reason":browser_reason(&error)}),
-                next_steps,
+                refusal.next_steps(),
             ),
             decision,
             physical_id,
+            observed: Observed::default(),
         }
     }
 
@@ -2669,35 +2722,9 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         error: WorkspaceError,
     ) -> Terminal {
-        let (reason, next_steps) = match error {
-            WorkspaceError::StaleTab | WorkspaceError::NoTab | WorkspaceError::AmbiguousTab => (
-                "tab_unavailable",
-                vec!["Call browser_list_tabs to obtain current controlled tab handles.".into()],
-            ),
-            WorkspaceError::StaleTarget => (
-                "stale_target",
-                vec![
-                    "Call browser_inspect_page or browser_find to obtain current target handles."
-                        .into(),
-                ],
-            ),
-            WorkspaceError::StaleView | WorkspaceError::ViewPointOutOfBounds => (
-                "stale_view",
-                vec!["Call browser_take_screenshot to obtain a current view handle.".into()],
-            ),
-            WorkspaceError::Held => ("tab_held", vec![]),
-            WorkspaceError::Busy => (
-                "workspace_busy",
-                vec!["Wait for the active Ghostlight invocation to finish.".into()],
-            ),
-            WorkspaceError::NotOwnedTab
-            | WorkspaceError::NotOwnedTarget
-            | WorkspaceError::NotOwnedView
-            | WorkspaceError::TargetTabMismatch
-            | WorkspaceError::ViewTabMismatch
-            | WorkspaceError::PhysicalTabOwned => ("ownership_mismatch", vec![]),
-            WorkspaceError::UnknownWorkspace => ("workspace_closed", vec![]),
-        };
+        let reason = WorkspaceReason::from(error);
+        let refusal = Refusal::WorkspaceUnusable { reason };
+        let summary = refusal.summary();
         let status = if error == WorkspaceError::Held {
             Status::Blocked
         } else {
@@ -2710,9 +2737,9 @@ impl ApplicationExecutor {
                 Effect::None,
                 Readiness::Unknown,
                 status == Status::Failed,
-                "The requested workspace target is not currently usable.",
-                json!({"reason":reason}),
-                next_steps,
+                &summary,
+                json!({"reason":reason.as_fact()}),
+                refusal.next_steps(),
             ),
             decision: Decision {
                 allowed: status != Status::Blocked,
@@ -2723,6 +2750,7 @@ impl ApplicationExecutor {
                 },
             },
             physical_id: None,
+            observed: Observed::default(),
         }
     }
 
@@ -2773,6 +2801,7 @@ struct Terminal {
     result: InvocationResult,
     decision: Decision,
     physical_id: Option<u64>,
+    observed: Observed,
 }
 
 enum ResolvedLocation {
@@ -3025,14 +3054,14 @@ fn readiness_name(value: Readiness) -> &'static str {
     }
 }
 
-/// What one crossing of the browser boundary can honestly say about the action.
+/// What one crossing of the browser boundary can honestly say about its landing.
 ///
 /// This match is exhaustive on purpose: a new browser outcome must not compile until someone
 /// decides what it observes. That is the whole point of observing at the seam instead of asking
 /// each tool to remember.
 ///
-/// A count is recorded only where the summary beside it names what was counted, because `count` is
-/// general by design and takes its meaning from that sentence.
+/// Counts and sizes belong to `Outcome`, where the sentence gives them meaning. This seam owns the
+/// host and readiness that every browser-crossing result should receive without per-tool memory.
 fn observed_from(outcome: &BrowserOutcome) -> Observed {
     match outcome {
         BrowserOutcome::TabOpened { tab, .. }
@@ -3042,47 +3071,24 @@ fn observed_from(outcome: &BrowserOutcome) -> Observed {
         | BrowserOutcome::KeyPressed { tab, .. }
         | BrowserOutcome::Typed { tab, .. }
         | BrowserOutcome::ScriptEvaluated { tab, .. } => landed(tab),
-        BrowserOutcome::Filled {
-            tab, filled_count, ..
-        } => Observed {
-            count: measured(*filled_count),
-            ..landed(tab)
-        },
-        // The text itself is counted and dropped here. Only the count crosses into audit.
-        BrowserOutcome::Text { text, url, .. } => Observed {
+        BrowserOutcome::Filled { tab, .. } => landed(tab),
+        BrowserOutcome::Text { url, .. } => Observed {
             host: observed_host(url),
-            count: measured(word_count(text)),
-            ..Observed::default()
-        },
-        BrowserOutcome::Tabs { tabs } => Observed {
-            count: measured(tabs.len()),
-            ..Observed::default()
-        },
-        BrowserOutcome::Targets { targets, .. } => Observed {
-            count: measured(targets.len()),
-            ..Observed::default()
-        },
-        BrowserOutcome::Screenshot { width, height, .. } => Observed {
-            width: Some(*width),
-            height: Some(*height),
-            ..Observed::default()
-        },
-        BrowserOutcome::FilesUploaded { uploaded_count, .. } => Observed {
-            count: measured(*uploaded_count),
             ..Observed::default()
         },
         BrowserOutcome::Observed {
-            elapsed_ms,
             readiness: observed,
             ..
         } => Observed {
             readiness: Some(readiness_name(readiness(*observed)).into()),
-            count: measured(*elapsed_ms),
             ..Observed::default()
         },
-        // Receipts that carry a tab id and nothing else worth measuring. What the invocation
-        // already observed stands.
-        BrowserOutcome::TabFocused { .. }
+        // Receipts without landing metadata leave what the invocation already observed standing.
+        BrowserOutcome::Tabs { .. }
+        | BrowserOutcome::Targets { .. }
+        | BrowserOutcome::Screenshot { .. }
+        | BrowserOutcome::FilesUploaded { .. }
+        | BrowserOutcome::TabFocused { .. }
         | BrowserOutcome::TabClosed { .. }
         | BrowserOutcome::TargetsDescribed { .. }
         | BrowserOutcome::Scrolled { .. }
@@ -3113,25 +3119,9 @@ fn observed_host(url: &str) -> Option<String> {
         .map(str::to_ascii_lowercase)
 }
 
-/// A measured quantity as the observation's general count, saturating rather than wrapping.
-fn measured<T: TryInto<u32>>(value: T) -> Option<u32> {
-    Some(value.try_into().unwrap_or(u32::MAX))
-}
-
-/// How many words of text a page returned. The words themselves go no further than this count.
+/// How many words of text a page returned. The words themselves do not enter outcome language.
 fn word_count(text: &str) -> usize {
     text.split_whitespace().count()
-}
-
-/// "1 field" or "3 fields": a measurement with the noun that gives it meaning.
-///
-/// The observation beside it is one general count, so the sentence is where the noun lives.
-fn counted(count: usize, singular: &str, plural: &str) -> String {
-    if count == 1 {
-        format!("1 {singular}")
-    } else {
-        format!("{count} {plural}")
-    }
 }
 
 fn bounded(value: &str, maximum: usize) -> String {
@@ -3180,13 +3170,14 @@ mod tests {
 
     use crate::browser::testing::FakeBrowser;
     use crate::governance::{AuditRecord, AuditSink, GovernanceFacade};
+    use crate::language::outcome::Observed;
     use crate::presentation::{PresentationError, PresentationPort, PresentationReactor};
     use crate::workbench::WorkbenchProjection;
     use crate::workspace::WorkspaceStore;
 
     use super::{
-        observation_budget_ms, readiness_name, ApplicationExecutor, CancellationToken, Effect,
-        Readiness, Status,
+        observation_budget_ms, observed_from, readiness_name, ApplicationExecutor,
+        CancellationToken, Effect, Readiness, Status,
     };
 
     #[derive(Default)]
@@ -3393,7 +3384,34 @@ mod tests {
     }
 
     #[test]
-    fn actions_are_observed_at_the_seam_without_carrying_page_detail() {
+    fn browser_seam_observes_landing_facts_but_not_outcome_measurements() {
+        let tabs = observed_from(&BrowserOutcome::Tabs {
+            tabs: vec![tab(7, "https://example.com/")],
+        });
+        assert_eq!(tabs, Observed::default());
+
+        let text = observed_from(&BrowserOutcome::Text {
+            tab_id: 7,
+            text: "three private words".into(),
+            truncated: false,
+            title: "Example".into(),
+            url: "https://example.com/private?id=3".into(),
+        });
+        assert_eq!(text.host.as_deref(), Some("example.com"));
+        assert_eq!(text.count, None);
+
+        let wait = observed_from(&BrowserOutcome::Observed {
+            tab_id: 7,
+            satisfied: true,
+            elapsed_ms: 1_830,
+            readiness: BrowserReadiness::Complete,
+        });
+        assert_eq!(wait.readiness.as_deref(), Some("complete"));
+        assert_eq!(wait.count, None);
+    }
+
+    #[test]
+    fn outcome_language_and_the_seam_observe_without_carrying_page_detail() {
         let (executor, browser, _, workspace, audit) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
             tab: tab(7, "https://Example.com/patients/48219?ssn=1#note"),
@@ -3424,7 +3442,7 @@ mod tests {
             &CancellationToken::default(),
         );
         assert_eq!(read.status, Status::Succeeded);
-        assert_eq!(read.summary, "Read 5 words of page text.");
+        assert_eq!(read.summary, "Read 5 words.");
 
         let records = audit.0.lock().unwrap();
         let landing = &records[0].observed;

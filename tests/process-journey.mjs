@@ -266,7 +266,7 @@ try {
   const read = structured(await mcp.request("tools/call", { name: "browser_read_page", arguments: { tab: restartedHandle } }));
   assert.equal(read.status, "succeeded");
   assert.equal(read.facts.text, "Example Domain");
-  assert.equal(read.summary, "Read 2 words of page text.");
+  assert.equal(read.summary, "Read 2 words.");
 
   const delayed = mcp.beginRequest("tools/call", { name: "browser_wait", arguments: { tab: restartedHandle, condition: "load_ready" } });
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));

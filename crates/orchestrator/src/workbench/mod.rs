@@ -14,10 +14,11 @@ use thiserror::Error;
 
 use crate::browser::{BrowserPort, RelayBrowserPort};
 use crate::events::DomainEvent;
-use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade, Observed};
+use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade};
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSummary,
 };
+use crate::language::outcome::Observed;
 use crate::workspace::WorkspaceStore;
 
 const HISTORY_LIMIT: usize = 500;
@@ -857,7 +858,7 @@ pub struct HistoryItem {
     pub summary: String,
     /// How long the work took, in milliseconds.
     pub duration_ms: u64,
-    /// What the action did, observed where it crossed the browser boundary.
+    /// What the action did, as stated by the orchestrator's outcome language.
     pub observed: Observed,
 }
 
@@ -1113,9 +1114,8 @@ mod tests {
     use ghostlight_bridge::browser::PresentationActivity;
 
     use crate::events::{DenialPresentation, DomainEvent};
-    use crate::governance::{
-        AuditRecord, AuditSink, Capability, Decision, GovernanceFacade, Observed,
-    };
+    use crate::governance::{AuditRecord, AuditSink, Capability, Decision, GovernanceFacade};
+    use crate::language::outcome::Observed;
 
     use super::{
         HistoryItem, NotificationKind, ProjectingAuditSink, WorkbenchChange, WorkbenchEvent,
@@ -1183,7 +1183,7 @@ mod tests {
             },
             "succeeded",
             "none",
-            "Read 1240 words of page text.",
+            "Read 1,240 words.",
             1200,
         )
         .with_observation(Observed {
@@ -1292,7 +1292,7 @@ mod tests {
                     },
                     "succeeded",
                     "applied",
-                    "Page script evaluated.",
+                    "Evaluated a script on example.com.",
                     140,
                 )
                 .with_observation(Observed {

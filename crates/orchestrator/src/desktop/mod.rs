@@ -366,7 +366,7 @@ mod tests {
             reason: "permitted".into(),
             status: "succeeded".into(),
             effect: "none".into(),
-            summary: "Read 1240 words of page text.".into(),
+            summary: "Read 1,240 words.".into(),
             duration_ms: 1200,
             observed: sample_observation(),
         };
@@ -391,8 +391,8 @@ mod tests {
     }
 
     /// One observation with every field populated, so a guard sees the whole vocabulary.
-    fn sample_observation() -> crate::governance::Observed {
-        crate::governance::Observed {
+    fn sample_observation() -> crate::language::outcome::Observed {
+        crate::language::outcome::Observed {
             host: Some("example.com".into()),
             readiness: Some("complete".into()),
             count: Some(1240),
@@ -402,17 +402,22 @@ mod tests {
     }
 
     #[test]
-    fn every_observed_fact_the_orchestrator_records_reaches_the_surface() {
+    fn surface_renders_seam_facts_and_trusts_outcome_language_for_measurements() {
         let app = include_str!("../../ui/app.js");
         let encoded = serde_json::to_value(sample_observation()).expect("observations serialize");
         let fields = encoded.as_object().expect("an observation is an object");
         assert_eq!(fields.len(), 5, "the observation vocabulary changed");
-        for field in fields.keys() {
+        for field in ["host", "readiness"] {
             assert!(
                 app.contains(&format!("observed.{field}")),
-                "the workbench never reads the observed {field}, so recording it says nothing"
+                "the workbench never renders seam-owned {field} evidence"
             );
         }
+        assert!(app.contains("const body = sentence(entry);"));
+        assert!(
+            !app.contains("measured("),
+            "the surface is still guessing which outcome register to render"
+        );
     }
 
     #[test]

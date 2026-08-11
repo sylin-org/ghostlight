@@ -46,6 +46,10 @@ Those sources win when they disagree with this file.
 - The orchestrator owns the complete 24-tool catalog, workspaces, immutable authority snapshots,
   runtime controls, one executor, one completion path, browser port, content-free presentation,
   and payload-free audit.
+- `language/outcome.rs` owns Ghostlight's terminal voice in both registers: the sentence and safe
+  next steps a person reads, and the content-free measurements a machine queries. The exhaustive
+  browser seam supplies host/readiness; the required typed outcome supplies named counts/sizes;
+  the completion path merges them.
 - The MCP connector owns local stdio protocol lifecycle, catalog retrieval, correlation,
   cancellation forwarding, and generic invocation rendering only.
 - The browser connector owns native-message framing, typed relay correlation, and durable
@@ -89,9 +93,9 @@ Those sources win when they disagree with this file.
   already visible in the user's own tab strip, while path, query, and fragment are where
   identifying detail sits. Measurements about an action are recorded; nothing the action saw is.
 - Correctness kept by memory rots. A hand-maintained list that a new case must be added to will
-  eventually miss one: the extension reduced-motion selector list silently skipped new effects, and
-  per-tool fact reporting would have made every new tool silent by default. Derive the list from a
-  registry, or observe at the one seam every case already crosses.
+  eventually miss one: the extension reduced-motion selector list silently skipped new effects.
+  Use the strongest structural owner available. Browser host/readiness belongs at the exhaustive
+  dispatch seam; counts and sizes belong on the required typed outcome that also names them.
 - A guard that parses nothing passes everything. Check every source-scraping test against a negative
   control before trusting it.
 - The public 0.8 distribution and trust records are historical truth, not a working 1.0 release
@@ -107,6 +111,7 @@ Those sources win when they disagree with this file.
 | Current 1.0 contracts | [`1.0/`](1.0/) |
 | Architecture history | [`adr/`](adr/README.md) |
 | Integrated desktop decision | [`adr/0102-integrated-desktop-workbench.md`](adr/0102-integrated-desktop-workbench.md) |
+| Outcome language decision | [`adr/0103-language-owned-outcome-voice.md`](adr/0103-language-owned-outcome-voice.md) |
 | Visual vocabulary, both surfaces | [`design/visual-language.md`](design/visual-language.md) |
 | Where per-action facts belong | [`design/action-observations.md`](design/action-observations.md) |
 | What an audit record contains | [`guides/siem-integration.md`](guides/siem-integration.md) |

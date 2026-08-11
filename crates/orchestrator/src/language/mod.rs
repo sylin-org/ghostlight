@@ -1,5 +1,7 @@
 //! The complete model-facing catalog, typo-closed decoding, and executable defaults.
 
+pub mod outcome;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 

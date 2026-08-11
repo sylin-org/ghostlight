@@ -1,23 +1,20 @@
 # Observing what an action did
 
-The workbench can say which tool ran and whether authority admitted it. It cannot yet say what
-happened: how long a page took to settle, how many fields were filled, how large a capture was.
-This note records where that observation belongs, so the next person does not thread it through
-fifty call sites by hand.
+The workbench says which tool ran, whether authority admitted it, and what happened without storing
+page payloads. This note records the two structural owners that keep that account complete.
 
 ## The wrong cut
 
-The obvious approach is to have each tool report its own facts. Every terminal outcome carries
-them upward, `Terminal` grows a field, and each of the fifty construction sites in
-`crates/orchestrator/src/work/mod.rs` decides what to put in it.
+The obvious approach is to have each tool independently report a sentence and measurements. Every
+terminal construction site in `crates/orchestrator/src/work/mod.rs` would decide both.
 
-That makes every tool responsible for remembering, which means a new tool is silent by default and
-the surface degrades one addition at a time. It is the same failure the reduced-motion selector
-list had in the extension: correctness maintained by memory rather than by structure.
+That makes every tool responsible for remembering two parallel accounts, which means the sentence
+and machine projection can drift. It is the same failure the reduced-motion selector list had in
+the extension: correctness maintained by memory rather than by structure.
 
-## The right cut
+## The two structural owners
 
-An observation is a fact about crossing the browser boundary, not about a use case.
+There are two different facts, and each has one owner.
 
 Every browser command in the executor goes through one seam:
 
@@ -27,14 +24,23 @@ fn dispatch(&self, context: &InvocationContext<'_>, command: BrowserCommand)
 ```
 
 Twenty-five call sites funnel through it, and it is the only route to the browser port apart from
-one compensating close. That seam already knows everything worth recording:
+one compensating close. The seam records facts about the browser crossing:
 
-- when the command went out and when the outcome came back, which is the settle time;
-- the readiness the adapter reported;
-- the outcome itself, which carries the committed landing and any counts.
+- the landed host, never the path, query, or fragment; and
+- the readiness the adapter reported.
 
-So `dispatch` observes, keyed by invocation, and `finish` reads the accumulated observation when
-it writes the audit record. One place. Every tool benefits, including tools not written yet.
+That match remains exhaustive over `BrowserOutcome`. A new browser outcome does not compile until
+someone decides whether it carries host or readiness.
+
+Counts and sizes are not browser-generic facts. Their meaning comes from the product sentence:
+three fields, seven matches, 1,240 words, or a 1280x720 capture. They belong to the required typed
+`Outcome` in `language/outcome.rs`. `Outcome::summary()` and `Outcome::observed()` read the same
+value, so a sentence and its measurement cannot diverge. `succeeded` cannot be called without an
+`Outcome`.
+
+`finish` reads and clears the seam observation, then merges the outcome observation over it. One
+completion path produces the audit record. Neither guarantee depends on a future tool remembering
+another reporting call.
 
 ## What may be observed
 
@@ -59,7 +65,7 @@ a separate, closed, typed value for exactly that reason.
 ## Shape
 
 ```rust
-/// Content-free observations about one action, gathered at the browser boundary.
+/// Content-free landing facts and outcome measurements about one action.
 struct Observed {
     host: Option<String>,
     readiness: Option<String>,
@@ -69,39 +75,34 @@ struct Observed {
 }
 ```
 
-`count` is deliberately general and takes its meaning from the summary beside it: "Filled 3
-fields", "Found 7 matches", "Listed 4 controlled tabs". A field per tool would not survive the
-catalog growing.
+`count` is deliberately general and takes its meaning from the outcome summary beside it: "Filled
+3 fields", "Found 7 matches", "Listed 4 controlled tabs". A field per tool would not survive the
+catalog growing. The JSON shape did not change when the type moved from `governance` to `language`.
 
 ## How the surface uses it
 
-The row already has columns for the tool, the elapsed time, the client, and the capability. An
-observation fills the description column and nothing else, so nothing is said twice:
+The row already has columns for the tool, the elapsed time, the client, and the capability. It
+renders the Ghostlight-authored sentence directly and adds only a readiness note when useful:
 
 ```
-[nav]  browser_open_page   example.com          claude-code  read   2.5s  7h
-[scan] browser_read_page   1,240 words          claude-code  read   0.4s  7h
-[key]  browser_fill_form   3 fields             codex        write  1.1s  6h
-[cam]  browser_take_screenshot  viewport, 1280x720  codex     read   0.9s  6h
+[nav]  browser_open_page   Opened example.com.             claude-code  action  2.5s  7h
+[scan] browser_read_page   Read 1,240 words.                claude-code  read    0.4s  7h
+[key]  browser_fill_form   Filled 3 fields.                 codex        write   1.1s  6h
+[cam]  browser_take_screenshot  Captured the viewport at 1280x720.  codex  read  0.9s  6h
 ```
 
-The hero has room for the sentence: "Opened example.com. Settled in 2.5s."
+The hero also keeps the sentence and carries host, capability, status, and readiness as separate
+metadata where available.
 
 Readiness earns its place on the unhappy path. `2.5s` is reassurance; `8.0s, never settled` is the
 row that explains why an agent looked stuck, and a bare number cannot say it.
 
-## Order of work
+## Current implementation
 
-1. `Observed` and the map on the executor, recorded in `dispatch`, read in `finish`.
-2. Host and readiness, which are already returned and currently discarded.
-3. Counts, tool by tool: `read_page`, `fill_form`, `find`, `take_screenshot`, `wait`.
+1. `dispatch` records host/readiness in an invocation-keyed map through an exhaustive outcome match.
+2. `Outcome` renders the sentence, next steps, and the counts/sizes that sentence names.
+3. `finish` merges outcome measurements over seam landing facts and clears the map.
+4. The workbench renders the sentence without its former `measured()` host-or-summary guess.
 
-Each step lands on its own and improves its own rows. `duration_ms` already ships and is measured
-in `execute` rather than at the seam, because it covers the whole invocation rather than one
-browser round trip; the two are different spans and both are worth having.
-
-## An adjacent wording fix
-
-`docs/1.0/INTENT.md` says file upload "never records paths, names, or bytes in audit." Read as
-file contents that is correct and a byte count is fine, but the sentence should say "or contents"
-before any size is recorded, so the document and the code cannot be read as disagreeing.
+`duration_ms` remains measured in `execute` rather than at the seam, because it covers the whole
+invocation rather than one browser round trip.

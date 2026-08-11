@@ -27,7 +27,7 @@ this file.
   "reason": "permitted",
   "status": "succeeded",
   "effect": "none",
-  "summary": "Read 1240 words of page text.",
+  "summary": "Read 1,240 words.",
   "duration_ms": 412,
   "observed": {
     "host": "example.com",
@@ -55,10 +55,11 @@ Fields are typo-closed:
 | `effect` | `none`, `applied`, `partial`, or `unknown`. |
 | `summary` | Ghostlight-authored sentence naming what happened. Page content never authors it. |
 | `duration_ms` | Decode to terminal outcome. For a navigation, the time to a settled landing. |
-| `observed` | What the action did, measured where it crossed the browser boundary. |
+| `observed` | Content-free landing facts and outcome measurements for the action. |
 
-`observed` is a closed set of measurements gathered at that one boundary. Every field is null when
-the action could not see it:
+`observed` is a closed set assembled at completion. The exhaustive browser seam supplies host and
+readiness. The typed language outcome supplies counts and sizes from the same value that authored
+the sentence. Every field is null when neither register can state it:
 
 | Field | Meaning |
 | --- | --- |

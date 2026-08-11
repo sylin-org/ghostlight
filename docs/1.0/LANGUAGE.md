@@ -47,6 +47,11 @@ The MCP edge renders this envelope as text plus `structuredContent`. Bounded ric
 the bridge in a separate generic content vocabulary. In 1.0 the only rich content is the image
 block returned by `browser_take_screenshot`; image bytes are not copied into structured facts.
 
+The language context produces `summary`, `next_steps`, and the content-free observation projection
+from one typed outcome. A sentence that names a host, count, or capture size carries the same value
+in that projection. The browser seam contributes landing host and readiness; the outcome contributes
+the counts and sizes whose nouns only its sentence knows. The completion path merges the two.
+
 Page content never authors `summary` or `next_steps`. A result with `effect` equal to `partial`
 or `unknown`, or with a committed effect that is unsafe to duplicate, has `repeat_safe: false`
 and does not suggest replay.
