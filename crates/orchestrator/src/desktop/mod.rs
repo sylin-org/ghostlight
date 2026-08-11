@@ -412,20 +412,39 @@ mod tests {
     #[test]
     fn surface_renders_seam_facts_and_trusts_outcome_language_for_measurements() {
         let app = include_str!("../../ui/app.js");
-        let encoded = serde_json::to_value(sample_observation()).expect("observations serialize");
-        let fields = encoded.as_object().expect("an observation is an object");
-        assert_eq!(fields.len(), 5, "the observation vocabulary changed");
-        for field in ["host", "readiness"] {
-            assert!(
-                app.contains(&format!("observed.{field}")),
-                "the workbench never renders seam-owned {field} evidence"
-            );
-        }
+        // Readiness is the only observed fact no sentence states, so it is the only one the
+        // surface must read structurally. The host is guarded where it is collected instead: an
+        // assertion that the surface renders it separately would only pin a second rendering of
+        // what the sentence already says.
+        assert!(
+            app.contains("observed.readiness"),
+            "the workbench never renders seam-owned readiness evidence"
+        );
         assert!(app.contains("const body = sentence(entry);"));
         assert!(
             !app.contains("measured("),
             "the surface is still guessing which outcome register to render"
         );
+        assert!(
+            !app.contains("observed.host"),
+            "the hero says the host twice: the sentence already names it"
+        );
+    }
+
+    #[test]
+    fn every_observed_fact_is_documented_where_it_is_collected() {
+        // The audit record's consumer is a person configuring a collector, so the guide is where
+        // the vocabulary has to stay honest. A new field that nobody documents fails here.
+        let guide = include_str!("../../../../docs/guides/siem-integration.md");
+        let encoded = serde_json::to_value(sample_observation()).expect("observations serialize");
+        let fields = encoded.as_object().expect("an observation is an object");
+        assert_eq!(fields.len(), 5, "the observation vocabulary changed");
+        for field in fields.keys() {
+            assert!(
+                guide.contains(&format!("`{field}`")),
+                "siem-integration.md documents no {field} field, so collectors cannot expect it"
+            );
+        }
     }
 
     #[test]

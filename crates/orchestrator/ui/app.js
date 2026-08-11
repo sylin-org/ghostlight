@@ -260,8 +260,6 @@ const READINESS_NOTE = {
   unknown: "readiness unknown"
 };
 
-const has = value => value !== null && value !== undefined;
-
 /**
  * The sentence the orchestrator authored for an entry.
  *
@@ -296,13 +294,12 @@ function clientFor(workspace) {
 }
 
 function heroMarkup(entry) {
-  // The hero has room for the whole sentence, so the observation sits beside it as evidence
-  // rather than replacing it the way it does in a row.
+  // The sentence names the host itself now, so the hero carries no host chip: it would say the
+  // same thing twice. Readiness is the one observed fact no sentence states.
   const observed = entry.settled ? entry.observed : null;
   const note = observed ? READINESS_NOTE[observed.readiness] ?? "" : "";
   const meta = [];
   if (entry.workspace) meta.push(`<span>${escapeHtml(clientFor(entry.workspace))}</span>`);
-  if (observed && has(observed.host)) meta.push(`<span><i></i>${escapeHtml(observed.host)}</span>`);
   if (entry.capability) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
   if (entry.settled && entry.status) meta.push(`<span><i></i>${escapeHtml(words(entry.status))}</span>`);
   if (note) meta.push(`<span><i></i>${escapeHtml(note)}</span>`);

@@ -31,7 +31,10 @@ at each stage: `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -
 - Refusal wording is unchanged, as SPEC section 3.4 required.
 - `Observed` moved without changing its five fields or a serialized byte, and has a round-trip test.
 
-## Findings (the feedback channel; each is now an Owed item in STATUS)
+## Findings (the feedback channel)
+
+Findings 1 and 2 were fixed together after the pass, in the commit that dropped the hero chip and
+moved the host guard to the guide. Finding 3 remains owed in [STATUS.md](../../STATUS.md).
 
 1. **The hero says the host twice.** SPEC section 2.3 removed the surface's guess in `describe`,
    which the change did correctly, but it left the hero's separate host chip in place. When the

@@ -80,7 +80,7 @@ Re-run on 2026-08-11 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 98 Rust tests -- 80 in the orchestrator including its launch-mode
+- `cargo test --workspace`: 99 Rust tests -- 81 in the orchestrator including its launch-mode
   binary test, 15 in the shared bridge, and 3 in the MCP connector.
 - `npm test --prefix extension`: 39 extension tests.
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
@@ -103,8 +103,10 @@ Re-run on 2026-08-11 against the current tree:
   event path, and uses the byte-identical original Ghostlight artwork.
 - Guard tests keep the surface and the orchestrator in step: every publishable change has a
   handler, every capability class has a visual treatment, every runtime intent stays reachable
-  (guarded by an exhaustive match), every seam-owned observed fact reaches the surface, every
-  outcome measurement agrees with its sentence, every readiness has a note, the published palette
+  (guarded by an exhaustive match), the surface reads the one observed fact no sentence states and
+  renders the sentence for the rest, every observed fact is documented where collectors read it,
+  every outcome measurement agrees with its sentence, every readiness has a note, the published
+  palette
   is present with the accent defined once, the workbench capability grants listen without emit,
   and every catalog tool has a medallion. Each of these was checked against a negative control:
   breaking the thing it guards makes it fail.
@@ -149,8 +151,12 @@ Re-run on 2026-08-11 against the current tree:
     matches.", "Captured the viewport at 1280x720."
   - Rows always render the outcome sentence and add a readiness note where a document never
     settled. They no longer guess between host and measurement, because the orchestrator already
-    chose which register the sentence uses. The hero renders the same sentence and still carries a
-    separate host chip, which now repeats what the sentence says. See Owed.
+    chose which register the sentence uses. The hero renders the same sentence and carries no host
+    chip: the sentence names the host, so a chip would say it twice. Readiness is the one observed
+    fact no sentence states, and it is the only one the surface reads structurally. The host is
+    guarded where it is collected, in
+    [`guides/siem-integration.md`](guides/siem-integration.md), because that guide is what a
+    person configuring a collector reads.
   - The audit stays payload-free. `InvocationResult::facts` still carries page text and full URLs
     to the model; the observation is a separate closed type so there is no shortcut between them.
     [`guides/siem-integration.md`](guides/siem-integration.md) now documents `summary`,
@@ -159,15 +165,6 @@ Re-run on 2026-08-11 against the current tree:
 
 ## Owed
 
-- The workbench hero says the host twice. Its meta chip was added when the sentence beside it was
-  boilerplate ("Page opened and its landing was governed."); now that sentence is "Opened
-  example.com." Dropping the chip in `heroMarkup` is the fix, and it restores the design note's own
-  rule that nothing is said twice. Two things travel with it: the `has` helper in `app.js` becomes
-  unused, and `surface_renders_seam_facts_and_trusts_outcome_language_for_measurements` currently
-  requires `observed.host` to appear in `app.js`, which only the chip satisfies. That assertion was
-  written before the sentence carried the host and now pins the duplication in place; readiness is
-  the fact the surface can only get from the observation, and the host's real consumer is the audit
-  record, guarded in [`guides/siem-integration.md`](guides/siem-integration.md).
 - A row that never settled reads its readiness as a parenthetical. Colour would carry it better
   than words: the duration cell already has a running and a blocked treatment, and an unsettled one
   would be found while scrolling instead of read for.
