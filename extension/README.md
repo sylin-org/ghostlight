@@ -60,9 +60,11 @@ or 2 MiB for five idle minutes. Reads default to 50 problem entries and cannot r
 200; console text is capped at 2,000 characters.
 
 Recording uses `Page.startScreencast` and acknowledges every compositor frame. The extension owns
-the plural in-memory registry, opaque recording ids, fixed frame and byte bounds, the 120-second
-hard stop, final screenshot, five-minute frozen retention, erase, and truthful REC badge. The
-service sends only start/status/stop/read/discard requests; read returns bounded JPEG frames for
-service-side GIF rendering and delivery. Browser loss, service disconnect, runtime hold, hard
-deadline, memory limit, or a JPEG larger than 2 MiB stops capture locally. No pixels enter
-extension storage.
+the plural in-memory registry, opaque recording ids, compressed-byte bounds, the 120-second hard
+stop, final screenshot, five-minute frozen retention, erase, and truthful REC badge. Before
+retention it folds each byte-identical JPEG sample into the preceding frame and extends that
+frame's visual duration. While recording it disables only the perpetual controlled-scope glow;
+transient action feedback remains available. The service sends only start/status/stop/read/discard
+requests; read returns bounded JPEG frames and their durations for service-side GIF rendering and
+delivery. Browser loss, service disconnect, runtime hold, hard deadline, memory limit, or a JPEG
+larger than 2 MiB stops capture locally. No pixels enter extension storage.

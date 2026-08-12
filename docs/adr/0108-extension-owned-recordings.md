@@ -64,6 +64,40 @@ loses all recording memory by design.
 Frames are never written to extension storage, service storage, logs, audit, restart state, or a
 temporary file. Chrome and JavaScript runtime copies are outside a meaningful zeroization claim.
 
+#### Amendment: retained visual spans
+
+The fixed 100-frame limit is replaced by exact-frame folding. Before retaining a sampled frame,
+the extension compares its bytes with the latest retained frame. If they are identical, it keeps
+one frame and adds the elapsed sample time to that frame's `duration_ms`. Ten identical samples at
+100 millisecond intervals therefore become one retained frame with a 1,000 millisecond duration.
+
+Capture time and compressed bytes are the ordinary limits. A derived 1,202-frame ceiling remains
+only as a defensive invariant: it is the maximum implied by the 120-second hard deadline, the
+100-millisecond sampling interval, and seed/final capture. The read receipt carries each retained
+frame's duration instead of its wall-clock timestamp, and the GIF renderer uses that duration
+directly.
+
+The first JPEG and PNG live trials both retained hundreds of frames on Example Domain. They did not
+prove encoder instability: the composed page still contained Ghostlight's four-second controlled-
+scope breath, so its pixels genuinely changed. Recording remains JPEG. While capture is active,
+the extension disables only that perpetual border glow. Cursor movement, target effects, captions,
+signatures, denials, and attention remain available. Every terminal recording path restores the
+glow, and service-worker recovery resets it because recording memory is already gone. Comparison
+remains deliberately byte-exact; differently encoded frames remain separate and the existing byte
+limits stop capture safely.
+
+The resulting live trial retained 15 frames and 121,293 JPEG bytes across 35 seconds on the same
+page. The GIF was 211,458 bytes, carried 35,320 milliseconds of playback, and represented the
+static tail as one 33,720-millisecond frame. Repeating save produced identical bytes. This is the
+accepted mechanism; decoded-pixel hashing is not needed.
+
+A separate Foundry trial proved the dynamic path. A tightly bounded hover, click, and type sequence
+retained six distinct frames across 670 milliseconds and produced a 595,861-byte GIF. Repeated save
+was byte-identical. Longer Foundry trials also exposed the limit of the deliberately basic GIF
+renderer: 116 dynamic frames held 3,328,297 JPEG bytes but encoded beyond the 5 MiB output ceiling,
+and a later 189-frame capture stopped itself at the recording memory limit. Improving long dynamic
+GIF output remains part of the deferred GIF work, not the capture ownership mechanism.
+
 ### 4. Governance and delivery stay in the orchestrator
 
 The orchestrator authorizes start against the source tab and authorizes disclosure before bytes

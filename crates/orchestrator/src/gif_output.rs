@@ -13,8 +13,7 @@ use zeroize::Zeroizing;
 pub const MAX_GIF_BYTES: usize = 5 * 1024 * 1024;
 const MAX_DECODED_PIXELS: usize = 8_000_000;
 const MIN_FRAME_DELAY_MS: u64 = 20;
-const MAX_FRAME_DELAY_MS: u64 = 10_000;
-const FINAL_FRAME_DELAY_MS: u64 = 500;
+const MAX_FRAME_DELAY_MS: u64 = (u16::MAX as u64) * 10;
 
 /// A decisive recording-encoding failure.
 #[derive(Debug, Error)]
@@ -57,7 +56,7 @@ pub fn encode(frames: &[PhysicalRecordingFrame]) -> Result<Zeroizing<Vec<u8>>, G
             let bytes = decode_frame(recorded, index)?;
             let (mut pixels, _, _) = decode_normalized(&bytes, index, width, height)?;
             let mut frame = Frame::from_rgba_speed(width_u16, height_u16, &mut pixels, 10);
-            frame.delay = delay_centiseconds(frames, index);
+            frame.delay = delay_centiseconds(recorded);
             encoder.write_frame(&frame).map_err(map_encode_error)?;
         }
     }
@@ -193,13 +192,11 @@ fn resize_nearest(
     resized
 }
 
-fn delay_centiseconds(frames: &[PhysicalRecordingFrame], index: usize) -> u16 {
-    let milliseconds = frames.get(index + 1).map_or(FINAL_FRAME_DELAY_MS, |next| {
-        next.timestamp_ms
-            .saturating_sub(frames[index].timestamp_ms)
-            .clamp(MIN_FRAME_DELAY_MS, MAX_FRAME_DELAY_MS)
-    });
-    u16::try_from(milliseconds.div_ceil(10)).unwrap_or(400)
+fn delay_centiseconds(frame: &PhysicalRecordingFrame) -> u16 {
+    let milliseconds = frame
+        .duration_ms
+        .clamp(MIN_FRAME_DELAY_MS, MAX_FRAME_DELAY_MS);
+    u16::try_from(milliseconds.div_ceil(10)).unwrap_or(u16::MAX)
 }
 
 fn map_encode_error(error: gif::EncodingError) -> GifError {
@@ -260,10 +257,10 @@ mod tests {
 
     use super::{delay_centiseconds, encode, BoundedOutput, GifError};
 
-    fn frame(data: &str, timestamp_ms: u64) -> PhysicalRecordingFrame {
+    fn frame(data: &str, duration_ms: u64) -> PhysicalRecordingFrame {
         PhysicalRecordingFrame {
             frame_kind: RecordingFrameKind::Screencast,
-            timestamp_ms,
+            duration_ms,
             mime_type: "image/jpeg".into(),
             data: data.into(),
         }
@@ -284,17 +281,12 @@ mod tests {
     }
 
     #[test]
-    fn frame_delays_keep_real_time_and_final_viewing_pause() {
-        let frames = vec![
-            frame("", 1_000),
-            frame("", 1_055),
-            frame("", 7_000),
-            frame("", 7_125),
-        ];
-        assert_eq!(delay_centiseconds(&frames, 0), 6);
-        assert_eq!(delay_centiseconds(&frames, 1), 595);
-        assert_eq!(delay_centiseconds(&frames, 2), 13);
-        assert_eq!(delay_centiseconds(&frames, 3), 50);
+    fn frame_delays_use_extension_authored_visual_spans() {
+        assert_eq!(delay_centiseconds(&frame("", 55)), 6);
+        assert_eq!(delay_centiseconds(&frame("", 5_945)), 595);
+        assert_eq!(delay_centiseconds(&frame("", 125)), 13);
+        assert_eq!(delay_centiseconds(&frame("", 1_000)), 100);
+        assert_eq!(delay_centiseconds(&frame("", 0)), 2);
     }
 
     #[test]

@@ -293,6 +293,7 @@
       if (message.kind === "present") return { presented: renderPresentation(message.signal, message.preferences) };
       if (message.kind === "managed_scope") { globalThis.GhostlightPresentation.setManaged(message.active); return { managed: Boolean(message.active) }; }
       if (message.kind === "presentation_visibility") { globalThis.GhostlightPresentation.setHidden(message.hidden); return { hidden: Boolean(message.hidden) }; }
+      if (message.kind === "recording_state") { globalThis.GhostlightPresentation.setRecording(message.active); return { recording: Boolean(message.active) }; }
       if (message.kind === "runtime_state") { globalThis.GhostlightPresentation.setRuntimeState(message.state); return { state: message.state }; }
       throw new Error("unknown content primitive");
     }).then((result) => sendResponse({ ok: true, result })).catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));

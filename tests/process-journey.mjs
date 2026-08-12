@@ -191,7 +191,7 @@ async function runAdapter(peer) {
         const changed = recording.state === "recording";
         recording.state = "frozen";
         if (recording.frames.length === 0) {
-          recording.frames.push({ frame_kind: "final", timestamp_ms: Date.now(), mime_type: "image/jpeg", data: ONE_PIXEL_JPEG });
+          recording.frames.push({ frame_kind: "final", duration_ms: 1_000, mime_type: "image/jpeg", data: ONE_PIXEL_JPEG });
         }
         result = { outcome: "recording_stopped", summary: recordingSummary(recording), changed };
       }

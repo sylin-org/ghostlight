@@ -322,8 +322,8 @@ pub struct PhysicalRecordingSummary {
 pub struct PhysicalRecordingFrame {
     /// Capture role of this frame.
     pub frame_kind: RecordingFrameKind,
-    /// Adapter-wall-clock capture time.
-    pub timestamp_ms: u64,
+    /// Time this exact visual state remained current in the recording.
+    pub duration_ms: u64,
     /// Exact media type. Version two supports JPEG only.
     pub mime_type: String,
     /// Base64-encoded compressed bytes.
@@ -1132,7 +1132,7 @@ mod tests {
                         },
                         frames: vec![PhysicalRecordingFrame {
                             frame_kind: RecordingFrameKind::Final,
-                            timestamp_ms: 6,
+                            duration_ms: 6,
                             mime_type: "image/jpeg".into(),
                             data: "AA==".into(),
                         }],
@@ -1200,5 +1200,15 @@ mod tests {
             "text": "failed"
         });
         assert!(serde_json::from_value::<DiagnosticEntry>(missing_url).is_err());
+    }
+
+    #[test]
+    fn recording_frames_require_an_authored_visual_duration() {
+        let missing_duration = serde_json::json!({
+            "frame_kind": "screencast",
+            "mime_type": "image/jpeg",
+            "data": "AA=="
+        });
+        assert!(serde_json::from_value::<PhysicalRecordingFrame>(missing_duration).is_err());
     }
 }

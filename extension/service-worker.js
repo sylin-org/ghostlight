@@ -42,6 +42,7 @@ let liveState = {
 const recording = globalThis.GhostlightRecording.create({
   onStop: (tabId) => {
     chrome.debugger.sendCommand({ tabId }, "Page.stopScreencast").catch(() => {});
+    setRecordingPresentation(tabId, false).catch(() => {});
     publishUiState();
   }
 });
@@ -75,7 +76,7 @@ async function initializeLocalState() {
     .filter((tab) => tab.id && topology.workspaceFor(tab.id))
     .map(async (tab) => {
       await retainManagedDebugger(tab.id);
-      await content(tab.id, { kind: "managed_scope", active: true }, true);
+      await syncPresentationState(tab.id);
       await flushPendingPresentation(tab.id);
     }));
 }
@@ -179,7 +180,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (!changeInfo.status) return;
   send(shared.browserEventFrame({ event: "readiness_changed", tab_id: tabId, readiness: shared.readinessForStatus(changeInfo.status) }));
   if (changeInfo.status === "complete" && topology.workspaceFor(tabId)) {
-    content(tabId, { kind: "managed_scope", active: true }, true)
+    syncPresentationState(tabId)
       .then(() => flushPendingPresentation(tabId))
       .catch(() => {});
   }
@@ -204,7 +205,7 @@ chrome.tabs.onCreated.addListener((tab) => {
   topology.assign(tab.id, workspace)
     .then(async () => {
       await retainManagedDebugger(tab.id);
-      return content(tab.id, { kind: "managed_scope", active: true }, true);
+      return syncPresentationState(tab.id);
     })
     .catch((error) => setConnection({ last_error: shared.bounded(error?.message ?? error, 500) }));
 });
@@ -649,6 +650,7 @@ async function captureRecordingFrame(state, frameKind) {
 async function startRecording(workspace, command) {
   const tab = await chrome.tabs.get(command.tab_id);
   const started = recording.start(workspace, command.tab_id, tab.url);
+  await setRecordingPresentation(command.tab_id, true);
   if (started.existing) return { outcome: "recording_started", summary: started.existing, existing: true };
   const state = recording.activeForTab(command.tab_id);
   let screencastAttempted = false;
@@ -724,6 +726,15 @@ async function content(tabId, message, optional = false) {
     if (optional) return { presented: false };
     throw error;
   }
+}
+
+async function setRecordingPresentation(tabId, active) {
+  return content(tabId, { kind: "recording_state", active }, true);
+}
+
+async function syncPresentationState(tabId) {
+  await content(tabId, { kind: "managed_scope", active: true }, true);
+  await setRecordingPresentation(tabId, Boolean(recording.activeForTab(tabId)));
 }
 
 async function broadcastRuntimeState(controlState) {

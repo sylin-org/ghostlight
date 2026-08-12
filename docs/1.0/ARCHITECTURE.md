@@ -243,8 +243,12 @@ Recording follows one-owner semantics. The extension's plural registry owns Chro
 start, frame acknowledgement, identity, compressed frames, fixed bounds, autonomous stop, frozen
 retention, erase, and the truthful recording indicator. The orchestrator sends only start, status,
 stop, read, and discard requests. A read receipt carries bounded JPEG frames only after governance;
-the orchestrator renders the basic GIF and owns client or page delivery truth. Relays remain opaque.
-No recording bytes enter extension storage, service storage, logs, audit, or restart state.
+each frame carries its extension-authored visual duration. The extension folds byte-identical
+successive JPEGs into one visual span before retention, so capture time and compressed bytes are
+the ordinary limits. While recording, presentation disables only the perpetual controlled-scope
+glow; transient action feedback remains available. The orchestrator renders the basic GIF from
+those spans and owns client or page delivery truth. Relays remain opaque. No recording bytes enter
+extension storage, service storage, logs, audit, or restart state.
 
 Diagnostics are off until an authorized `browser_diagnose` call enables bounded volatile rings for
 one owned tab. The extension captures only the Chrome event facts that must originate there, owns

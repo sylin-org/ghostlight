@@ -118,6 +118,7 @@ function contentHarness() {
       render() { return false; },
       setManaged() {},
       setHidden() {},
+      setRecording() {},
       setRuntimeState() {}
     }
   };

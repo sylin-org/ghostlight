@@ -116,7 +116,11 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
     outcome-unknown.
 18. Prove recordings are plural and workspace-isolated; hard timeout, frozen retention,
     browser-loss, service disconnect, runtime hold, memory-limit, oversized-frame, discard, and MV3
-    worker-loss paths stop or erase as ADR-0108 requires, without persistent pixel bytes.
+    worker-loss paths stop or erase as ADR-0108 requires, without persistent pixel bytes. Prove
+    ten byte-identical samples at 100-millisecond intervals retain one frame with a 1,000-millisecond
+    visual duration rather than consuming ten frame slots. During recording, prove the perpetual
+    scope glow is disabled while transient action feedback remains available, then restored on
+    every terminal path and worker recovery.
 19. Call `browser_diagnose {}` before tracking, reproduce console and request problems, then read
     bounded problems from both sources. Exercise console-only, network-only, all-detail, literal
     match, cursor continuation, eviction, host filtering, expiry, browser loss, and tab closure.

@@ -49,6 +49,9 @@ test("presentation preserves the established Ghostlight palette and motion", () 
   const chrome = readFileSync(join(root, "ui.css"), "utf8");
   assert.match(renderer, /M0 0 L0 19 L5 14\.5 L8\.2 22/);
   assert.match(renderer, /ghostlight-capframe 1500ms cubic-bezier\(\.5,0,\.2,1\)/);
+  assert.match(renderer, /managed && runtimeReachable && !recordingActive/);
+  assert.match(renderer, /function setRecording\(value\)/);
+  assert.match(renderer, /host\.style\.display = hiddenForTool \? "none" : "block"/);
   assert.match(renderer, /role", "status"/);
   assert.match(renderer, /aria-live", "polite"/);
   assert.match(renderer, /aria-atomic", "true"/);
@@ -176,6 +179,9 @@ test("adapter protocol two wires the new physical mechanisms at the Chrome seam"
   assert.match(worker, /Page\.screencastFrameAck/);
   assert.match(worker, /GhostlightRecording\.MAX_WIDTH \/ visual\.clientWidth/);
   assert.match(worker, /quality: globalThis\.GhostlightRecording\.JPEG_QUALITY/);
+  assert.match(worker, /await setRecordingPresentation\(command\.tab_id, true\)/);
+  assert.match(worker, /setRecordingPresentation\(tabId, false\)/);
+  assert.match(worker, /syncPresentationState\(tabId\)/);
   assert.match(worker, /recording_tabs: recording\.count\(\)/);
   assert.match(worker, /stateApi\.badge\(\{ \.\.\.liveState, recording_tabs: recording\.count\(\) \}\)/);
   assert.match(worker, /frame\.kind === "backend_unavailable"[\s\S]*?settleServiceBoundaryState\(\)/);

@@ -15,7 +15,9 @@
   const MAX_FRAME_BYTES = 2 * 1024 * 1024;
   const MAX_RECORDING_BYTES = 5 * 1024 * 1024;
   const MAX_GLOBAL_BYTES = 16 * 1024 * 1024;
-  const MAX_FRAMES = 100;
+  // This is a defensive ceiling derived from the hard duration and sampling cadence,
+  // not an ordinary recording limit. Exact duplicate frames are folded before it.
+  const MAX_FRAMES = Math.ceil(HARD_DURATION_MS / MIN_FRAME_INTERVAL_MS) + 2;
   const MAX_RECORDINGS = 16;
   const MAX_SOURCE_URLS = 32;
   const MAX_FRAME_BASE64_CHARS = 4 * Math.ceil(MAX_FRAME_BYTES / 3);
@@ -94,31 +96,48 @@
 
     function erase(state) {
       if (recordings.get(state.id) !== state) return false;
+      const wasActive = activeByTab.get(state.tabId) === state.id;
       disarm(state);
       recordings.delete(state.id);
-      if (activeByTab.get(state.tabId) === state.id) activeByTab.delete(state.tabId);
+      if (wasActive) activeByTab.delete(state.tabId);
       globalBytes = Math.max(0, globalBytes - state.bytesHeld);
       state.frames.length = 0;
       state.bytesHeld = 0;
       state.sourceUrls.clear();
+      if (wasActive) {
+        try { onStop(state.tabId, state.id, "discarded"); } catch (_error) {}
+      }
       return true;
+    }
+
+    function extendLastFrame(state, timestampMs) {
+      if (state.lastSampleAt === null) {
+        state.lastSampleAt = timestampMs;
+        return;
+      }
+      const nextSampleAt = Math.max(state.lastSampleAt, timestampMs);
+      const elapsed = nextSampleAt - state.lastSampleAt;
+      const last = state.frames.at(-1);
+      if (last) last.duration_ms = Math.min(HARD_DURATION_MS, last.duration_ms + elapsed);
+      state.lastSampleAt = nextSampleAt;
     }
 
     function freeze(state, reason, current = currentTime()) {
       if (state.state !== "recording") return summary(state, current);
+      extendLastFrame(state, current);
       activeByTab.delete(state.tabId);
       state.state = reason === "explicit" ? "frozen" : "interrupted";
       state.stopReason = reason;
       state.stoppedAt = current;
       state.retentionExpiresAt = current + RETENTION_MS;
       arm(state);
+      try { onStop(state.tabId, state.id, reason); } catch (_error) {}
       return summary(state, current);
     }
 
     function expireIfDue(state, current = currentTime()) {
       if (recordings.get(state.id) !== state) return true;
       if (state.state === "recording" && current >= state.hardExpiresAt) {
-        try { onStop(state.tabId, state.id, "hard_timeout"); } catch (_error) {}
         freeze(state, "hard_timeout", current);
         return false;
       }
@@ -180,7 +199,7 @@
       const state = {
         id, workspace, tabId, state: "recording", frames: [], bytesHeld: 0,
         startedAt: current, stoppedAt: null, hardExpiresAt: current + HARD_DURATION_MS,
-        retentionExpiresAt: null, stopReason: null, lastFrameAt: 0, finalizing: false,
+        retentionExpiresAt: null, stopReason: null, lastSampleAt: null, finalizing: false,
         sourceUrls: new Set(), timer: null
       };
       const url = sanitizeSourceUrl(sourceUrl);
@@ -206,25 +225,27 @@
         : currentTime();
       const state = activeForTab(tabId);
       if (!state || (state.finalizing && frameKind === "screencast")) return false;
-      if (frameKind === "screencast" && timestampMs - state.lastFrameAt < MIN_FRAME_INTERVAL_MS) return false;
+      if (frameKind === "screencast"
+        && state.lastSampleAt !== null
+        && timestampMs - state.lastSampleAt < MIN_FRAME_INTERVAL_MS) return false;
+      extendLastFrame(state, timestampMs);
       const size = decodedBytes(data);
       if (size < 1 || size > MAX_FRAME_BYTES) {
-        try { onStop(tabId, state.id, "frame_too_large"); } catch (_error) {}
         freeze(state, "frame_too_large", timestampMs);
         return false;
       }
+      const last = state.frames.at(-1);
+      if (last?.data === data) return false;
       const fits = state.frames.length < MAX_FRAMES
         && state.bytesHeld + size <= MAX_RECORDING_BYTES
         && globalBytes + size <= MAX_GLOBAL_BYTES;
       if (!fits) {
-        try { onStop(tabId, state.id, "memory_limit"); } catch (_error) {}
         freeze(state, "memory_limit", timestampMs);
         return false;
       }
-      state.frames.push({ frame_kind: frameKind, timestamp_ms: timestampMs, mime_type: "image/jpeg", data });
+      state.frames.push({ frame_kind: frameKind, duration_ms: 0, mime_type: "image/jpeg", data });
       state.bytesHeld += size;
       globalBytes += size;
-      state.lastFrameAt = timestampMs;
       return true;
     }
 

@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-11 (eighth pass).
+Last updated: 2026-08-12 (ninth pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -11,11 +11,12 @@ Distances below are measured against the local remote-tracking refs, which are o
 last fetch.
 
 - `ghostlight-1.0` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`.
-- `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and again on 2026-08-11 to
-  `89bcbe6b`, which carries per-action observation, the language-owned outcome voice, demand-start,
-  and this documentation pass. `ghostlight-1.0` and `origin/dev` match exactly. Before the first
-  fast-forward `origin/dev` sat at the 0.8 line (`3fb093eb`, 2026-08-07).
-- `origin/main` still carries the 0.8 line at `95468758`, now 32 commits behind `origin/dev`.
+- `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and again on 2026-08-12 to
+  `58c737d9`, which carries the terse 22-tool language and the extension-owned recording
+  architecture. `ghostlight-1.0` and `origin/dev` match exactly before the current uncommitted
+  visual-span work. Before the first fast-forward `origin/dev` sat at the 0.8 line (`3fb093eb`,
+  2026-08-07).
+- `origin/main` still carries the 0.8 line at `95468758`, now 43 commits behind `origin/dev`.
   Promoting it is a deliberate release decision, not routine sync. (An earlier pass recorded the
   distance as 24 when `git rev-list --count origin/main..origin/dev` said 26. Re-measure rather
   than carry the number forward.)
@@ -35,10 +36,13 @@ last fetch.
   Ghostlight window placement, and the established visual language and product identity.
 - Recording now has one owner (ADR-0108). The extension keeps a plural, workspace-namespaced,
   memory-only registry; owns capture ids, frames, fixed bounds, autonomous stop, five-minute
-  retention, and erase; and exposes only start/status/stop/read/discard physical requests. The
-  orchestrator authorizes before requesting bytes, renders the current bounded GIF output, and
-  owns client or page delivery truth. The old service coordinator, renewal loop, unsolicited frame
-  events, and duplicate deadlines are gone.
+  retention, and erase; and exposes only start/status/stop/read/discard physical requests. It folds
+  byte-identical successive JPEGs into one retained visual span with an accumulated duration, so
+  capture time and compressed bytes are the ordinary limits. During recording, presentation
+  disables only the perpetual controlled-scope glow and keeps transient action feedback available.
+  The orchestrator authorizes before requesting bytes, renders the current bounded GIF output from
+  those durations, and owns client or page delivery truth. The old service coordinator, renewal
+  loop, unsolicited frame events, and duplicate deadlines are gone.
 - Model-driven tab close is admitted by service authority and then checked by the extension's
   default-on preserve-tabs interlock. A refusal stays visible and returns a blocked no-effect
   result.
@@ -128,9 +132,9 @@ Re-run on 2026-08-12 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 132 Rust tests -- 106 in the orchestrator library, its launch-mode
-  binary test, 21 in the shared bridge, and 4 in the MCP connector.
-- `npm test --prefix extension`: 76 extension tests.
+- `cargo test --workspace`: 133 Rust tests -- 106 in the orchestrator library, its launch-mode
+  binary test, 22 in the shared bridge, and 4 in the MCP connector.
+- `npm test --prefix extension`: 79 extension tests.
 - `node tests/cli-powershell-journey.mjs`: the shipped PowerShell script drives a real service and a
   scripted browser adapter through open/list/read/capture/close, exits zero, writes real JPEG bytes,
   and every step is audited as `cli` with the landing host and no page text. It then proves the
@@ -148,6 +152,12 @@ Re-run on 2026-08-12 against the current tree:
   count, and no page text.
 - `cargo build --workspace --target-dir .target-ghostlight-1.0`.
 - `node --check` on both journeys, the bundled workbench script, and the preview server.
+- A live 35-second static Example Domain recording with the scope glow suppressed retained 15
+  frames and 121,293 JPEG bytes. Its 211,458-byte GIF was valid GIF89a, carried 35,320 milliseconds
+  of playback with a 33,720-millisecond folded static span, and repeated save was byte-identical.
+- A live Foundry hover, click, and type sequence retained six distinct frames across 670
+  milliseconds. Its 595,861-byte GIF saved twice with the same SHA-256 digest, after which the demo
+  state and recording bytes were cleared.
 - Live isolated demand-start proofs began with no service. The MCP connector started one exact
   sibling authority and completed MCP initialization. In a separate run, the browser connector
   reported `backend_unavailable`, started one exact sibling authority, and completed its adapter
@@ -239,6 +249,11 @@ Re-run on 2026-08-12 against the current tree:
   browser job." could name the host the seam already recorded.
 - The extension stylesheet could move to its own module now that it is static. Lowest value of the
   maintainability steps; needs about eight test assertions reworked.
+- Enhanced GIF composition remains deferred. The basic renderer handles the bounded dynamic proof,
+  but a 116-frame Foundry recording held 3,328,297 JPEG bytes and encoded beyond the 5 MiB output
+  ceiling. A longer 189-frame run stopped itself at the recording memory limit as designed. Long,
+  highly animated replays need a deliberate GIF-quality and output-budget pass rather than changes
+  to extension recording ownership.
 - The 13 open Dependabot pull requests target the 0.8 line and need reconciling against the 1.0
   rebuild before they can land.
 - `origin/main` still carries 0.8. Deciding when the 1.0 line is promoted is a release decision.

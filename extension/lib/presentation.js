@@ -105,6 +105,7 @@
   let managed = false;
   let runtimeReachable = true;
   let hiddenForTool = false;
+  let recordingActive = false;
   let lastPointer = null;
 
   const chevron =
@@ -254,7 +255,7 @@
   function syncVisibility() {
     if (!host) return;
     host.style.display = hiddenForTool ? "none" : "block";
-    scope.classList.toggle("on", managed && runtimeReachable);
+    scope.classList.toggle("on", managed && runtimeReachable && !recordingActive);
   }
 
   function addEffect(className, styles) {
@@ -564,6 +565,12 @@
     if (hiddenForTool) clearTransient();
   }
 
+  function setRecording(value) {
+    recordingActive = Boolean(value);
+    mount();
+    syncVisibility();
+  }
+
   function setRuntimeState(value) {
     mount();
     runtimeReachable = !["ended", "disconnected"].includes(value);
@@ -576,6 +583,7 @@
     clearTransient,
     setManaged,
     setHidden,
+    setRecording,
     setRuntimeState,
     visualIdentity
   });
