@@ -27,7 +27,7 @@ Keep a 0.8 package and a 1.0 source build apart; they are not interchangeable.
 
 ## What you get
 
-- **24 browser tools** covering tabs, navigation, reading a page, screenshots, semantic clicks and
+- **22 browser tools** covering tabs, navigation, reading a page, screenshots, semantic clicks and
   hovers, form input, file upload, scripts, waits, short sequences, and dialogs. One call carries
   the intent; Ghostlight performs the browser steps behind it.
 - **One truthful answer per call**: what happened, what changed in the browser, what is ready, and
@@ -51,10 +51,10 @@ Open the tray icon and you get three places:
   Every row says what happened in Ghostlight's own words, never the page's: "Opened example.com.",
   "Read 1,240 words.", "Filled 3 fields and submitted the form.", "Stopped at step 3 of 5." The
   site an action landed on is named; nothing from inside the page is.
-- **MCP integrations** connects Ghostlight to the coding clients you have installed: Claude Code,
-  Claude Desktop, Codex, Crush, Cursor, OpenCode, Visual Studio Code, Windsurf, and Zed. It merges
-  into their configuration with a backup, keeps your comments intact, and leaves any entry it does
-  not own untouched.
+- **MCP integrations** manages direct registrations for the coding clients you have installed:
+  Claude Code, Claude Desktop, Codex, Crush, Cursor, OpenCode, Visual Studio Code, Windsurf, and
+  Zed. It merges into their configuration with a backup, keeps your comments intact, and leaves
+  any entry it does not own untouched. Agent Plugin connections stay owned by their client.
 - **Status** answers whether Ghostlight is healthy, shows which authority sources apply, and ends
   the runtime session when you want that.
 
@@ -81,8 +81,13 @@ target/debug/ghostlight
 ```
 
 That shows the workbench, or focuses the one already running. Then open **MCP integrations**,
-connect the client you want, and restart or reconnect it. [`docs/DEV-LOOP.md`](docs/DEV-LOOP.md)
-covers browser registration and the full validation loop.
+register the client you want directly, and restart or reconnect it.
+[`docs/DEV-LOOP.md`](docs/DEV-LOOP.md) covers browser registration and the full validation loop.
+
+The repository root is also an MCP-only Agent Plugins v1 package. A compatible client can load
+that declaration instead of creating a direct registration. It still requires the separately
+installed, version-matched Ghostlight executables and browser extension; the manifests do not
+install or download another runtime. Signed-package and real-client proof remain release gates.
 
 After that first setup there is no startup ritual: launching a connected MCP client or Chromium
 demand-starts Ghostlight when it is not already running. The normal desktop authority always owns

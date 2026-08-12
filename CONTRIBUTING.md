@@ -69,10 +69,13 @@ and isolated process journey.
 
 ### Running tests locally
 
-The suite has three useful layers:
+The suite has these useful layers:
 
 - **In-process Rust contracts:** `cargo test --workspace`.
 - **Policy-free extension mechanisms:** `npm test --prefix extension`.
+- **Agent Plugin package contract:** `node tests/agent-plugin-contract.mjs`.
+- **Agent Plugin installed-command topology:** after the isolated workspace build, run
+  `node tests/agent-plugin-journey.mjs`.
 - **Real process topology:** build into `.target-ghostlight-1.0`, then run
   `node tests/process-journey.mjs`. It keeps both relay processes alive through an orchestrator
   interruption and proves they renegotiate without replaying the interrupted effect. The journey

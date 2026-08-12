@@ -552,31 +552,33 @@ function paintConnections(snapshot) {
 }
 
 function paintIntegrations(snapshot) {
-  const order = { installed: 0, needs_attention: 1, available: 2, not_detected: 3 };
+  const order = { installed: 0, client_managed: 1, needs_attention: 2, available: 3, not_detected: 4 };
   const harnesses = [...snapshot.harnesses].sort((left, right) =>
     (order[left.state] ?? 9) - (order[right.state] ?? 9) || left.name.localeCompare(right.name));
 
   if (!harnesses.length) {
-    el["integration-grid"].innerHTML = '<div class="empty">No supported MCP client was found for this user.</div>';
+    el["integration-grid"].innerHTML = '<div class="empty">No supported direct-registration target was found for this user.</div>';
     return;
   }
 
   el["integration-grid"].innerHTML = harnesses.map(harness => {
-    const installed = harness.state === "installed";
+    const registered = harness.state === "installed";
+    const clientManaged = harness.state === "client_managed";
     const pending = state.pendingHarnesses.has(harness.id);
-    const allowed = installed ? harness.can_uninstall : harness.can_install;
-    const tone = installed ? " connected" : harness.state === "needs_attention" ? " attention" : "";
-    const label = pending ? "Working" : installed ? "Connected" : words(harness.state);
-    const action = installed ? "uninstall" : "install";
-    const verb = installed ? "Disconnect" : "Connect";
-    const button = installed ? "danger-button" : "ghost-button";
+    const allowed = registered ? harness.can_uninstall : harness.can_install;
+    const tone = registered ? " connected" : harness.state === "needs_attention" ? " attention" : "";
+    const label = pending ? "Working" : registered ? "Direct registration" : clientManaged ? "Managed in client" : words(harness.state);
+    const action = registered ? "uninstall" : "install";
+    const verb = registered ? "Remove registration" : "Register directly";
+    const button = registered ? "danger-button" : "ghost-button";
+    const actionControl = clientManaged ? "" : `<button class="${button}" type="button" data-harness-action="${action}"`
+      + ` data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}"`
+      + `${pending || !allowed ? " disabled" : ""}>${pending ? "Working..." : verb}</button>`;
     return `<article class="tile${tone}">`
       + `<div class="tile-top"><h2>${escapeHtml(harness.name)}</h2>`
       + `<span class="tile-state">${escapeHtml(label)}</span></div>`
       + `<p>${escapeHtml(harness.detail)}</p>`
-      + `<div class="tile-actions"><button class="${button}" type="button" data-harness-action="${action}"`
-      + ` data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}"`
-      + `${pending || !allowed ? " disabled" : ""}>${pending ? "Working..." : verb}</button></div>`
+      + `<div class="tile-actions">${actionControl}</div>`
       + `</article>`;
   }).join("");
 }
@@ -761,8 +763,8 @@ async function search(query) {
 
 function confirmRemoval(name) {
   if (state.confirmation) return Promise.resolve(false);
-  el["confirm-title"].textContent = `Disconnect Ghostlight from ${name}?`;
-  el["confirm-detail"].textContent = "Only the entry Ghostlight owns will be removed.";
+  el["confirm-title"].textContent = `Remove Ghostlight's direct registration from ${name}?`;
+  el["confirm-detail"].textContent = "Only the configuration entry Ghostlight owns will be removed. Client-managed Agent Plugins stay installed.";
   return new Promise(resolve => {
     const finish = confirmed => {
       el["confirm-dialog"].hidden = true;

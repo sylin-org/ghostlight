@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-12 (twelfth pass).
+Last updated: 2026-08-12 (thirteenth pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -13,9 +13,9 @@ last fetch.
 - `ghostlight-1.0` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`.
 - `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and again on 2026-08-12 to
   `adb9f413`, which carries the terse 22-tool language, extension-owned recording architecture,
-  and static-frame folding. `ghostlight-1.0` is three commits ahead at `9f4d3dfd` before the
-  current uncommitted browser-owned GIF encoding and human outcome-language work. Before the first
-  fast-forward `origin/dev` sat at the 0.8 line (`3fb093eb`, 2026-08-07).
+  and static-frame folding. This Agent Plugins compatibility pass builds on `6337e834`, five
+  commits ahead of that `origin/dev`. Before the first fast-forward `origin/dev` sat at the 0.8
+  line (`3fb093eb`, 2026-08-07).
 - `origin/main` still carries the 0.8 line at `95468758`, now 44 commits behind `origin/dev`.
   Promoting it is a deliberate release decision, not routine sync. (An earlier pass recorded the
   distance as 24 when `git rev-list --count origin/main..origin/dev` said 26. Re-measure rather
@@ -65,7 +65,8 @@ last fetch.
     then settles and drops into a newest-first queue as the next one rises. Connected sessions and
     browser instances sit alongside it, and the last completed action stays on screen while
     nothing is running.
-  - **MCP integrations**, which checks, connects, and disconnects Ghostlight's owned registration.
+  - **MCP integrations**, which checks, adds, and removes Ghostlight's owned direct registration
+    while sending client-owned Agent Plugin connections back to their client.
   - **Status**, which carries diagnostics, authority sources, and the end-session intent.
 
   Pause and resume live in the persistent header beside the connection state and match the tray.
@@ -83,10 +84,19 @@ last fetch.
   `--a`/`--al`/`--argb`, the night-garden ground, and the five-step ink ramp. The in-page renderer
   deliberately keeps its trained sky signal. The two surfaces still share the spring curve and the
   ADR-0083 medallion vocabulary.
-- Supported MCP client registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
-  Code, Windsurf, Zed, OpenCode, and Crush. Re-check is read-only. Connect and disconnect are
-  explicit, serialized, ownership-checked, backed up, and preserve unrelated JSONC/TOML comments
-  and configuration.
+- Supported direct MCP client registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual
+  Studio Code, Windsurf, Zed, OpenCode, and Crush. Re-check is read-only. Register directly and
+  Remove registration are explicit, serialized, ownership-checked, backed up, and preserve
+  unrelated JSONC/TOML comments and configuration.
+- A portable bare Ghostlight connector entry is reported as **Managed in client**, has no
+  Workbench mutation, and is not mistaken for a direct registration. Direct entries use the
+  absolute sibling connector path.
+- The repository root is a thin MCP-only Agent Plugins v1 package. `plugin.json` identifies
+  Ghostlight, and `mcp.json` declares one stdio server using the bare
+  `ghostlight-mcp-connector` command. It declares no Skill, client extension, remote transport,
+  credentials, launcher, or second runtime. The client owns plugin lifecycle; the separately
+  installed Ghostlight sibling set and matching browser extension remain prerequisites
+  (ADR-0113).
 - `ghostlight --headless` retains the service-only execution path. Recoverable desktop startup and
   event-loop failures leave that service running.
 - The shared bridge owns one demand-start seam used by both connectors after a failed service
@@ -146,9 +156,16 @@ Re-run on 2026-08-12 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 144 Rust tests -- 113 in the orchestrator library, its launch-mode
+- `cargo test --workspace`: 147 Rust tests -- 116 in the orchestrator library, its launch-mode
   binary test, 26 in the shared bridge, and 4 in the MCP connector.
 - `npm test --prefix extension`: 94 extension tests.
+- `node tests/agent-plugin-contract.mjs`: the root Agent Plugins v1 documents agree on version,
+  declare only the bare local stdio connector, match the workspace version, and carry no unknown
+  fields, secret-bearing fields, Skill, client extension, remote transport, or package-local
+  runtime configuration.
+- `node tests/agent-plugin-journey.mjs`: an isolated installer-shaped copy of the real sibling set
+  resolves the bare command from `mcp.json`, reaches one lifetime-leased authority, and returns the
+  exact 22-tool catalog with output schemas and annotations.
 - Lifecycle tests prove demand-start supplies no application arguments and the executable has one
   normal desktop mode beside explicit headless and scripted intake. The real process journey still
   passes across service restart and connector renegotiation.
@@ -288,6 +305,11 @@ Re-run on 2026-08-12 against the current tree:
 - `origin/main` still carries 0.8. Deciding when the 1.0 line is promoted is a release decision.
 - ADR-0084's complete browser-window attention routing remains deferred; only the narrow Chromium
   slice is implemented.
+- Agent Plugins source compatibility does not yet establish a released client journey. The signed
+  platform installers must make the bare connector name reliably discoverable to supported GUI
+  and terminal clients without breaking exact-sibling startup. Real-client testing must also cover
+  missing prerequisites, duplicate direct and plugin routes, disable, update, and uninstall before
+  any marketplace or supported-compatibility claim.
 
 ## Release gates still requiring an owner or release environment
 
@@ -298,6 +320,10 @@ Re-run on 2026-08-12 against the current tree:
   desktop to the test runner.
 - Verify demand-start, direct workbench activation, and deploy quiesce from each clean signed
   platform installation.
+- Run the Agent Plugin matrix from each clean signed installation: resolve the bare connector in
+  every named client, reach the exact catalog and first useful browser result, distinguish
+  client-owned plugin state from direct registration, converge multiple clients on one authority,
+  and verify disable, update, and uninstall boundaries.
 - Run the accepted browser-job matrix against visible supported Chromium browsers, including
   screenshots, file upload, form input, dialogs, governed denial, reconnect, and local close
   interlock journeys.
@@ -319,3 +345,5 @@ Re-run on 2026-08-12 against the current tree:
   [`adr/0104-demand-start-single-engine-and-workbench-activation.md`](adr/0104-demand-start-single-engine-and-workbench-activation.md).
 - One minimized desktop-startup decision:
   [`adr/0112-one-minimized-desktop-startup.md`](adr/0112-one-minimized-desktop-startup.md).
+- Agent Plugin connection decision:
+  [`adr/0113-agent-plugin-connection-pack.md`](adr/0113-agent-plugin-connection-pack.md).

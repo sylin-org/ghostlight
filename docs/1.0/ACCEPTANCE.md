@@ -205,12 +205,15 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
    per invocation. Notification failure cannot change governance, audit, or completion truth.
 6. Workbench runtime controls use the existing governance facade and publish the resulting state
    through the existing browser port. The desktop adapter cannot dispatch a browser primitive.
-7. MCP integrations explicitly check, connect, and disconnect Codex, Claude Code, Claude Desktop,
-   Cursor, Visual Studio Code, Windsurf, Zed, OpenCode, and Crush registrations. Mutations are
-   serialized, idempotent, backed up, preserve unrelated entries, and touch only an entry whose
-   command identifies Ghostlight's connector.
+7. MCP integrations explicitly check, register, and remove direct Codex, Claude Code, Claude
+   Desktop, Cursor, Visual Studio Code, Windsurf, Zed, OpenCode, and Crush registrations. Mutations
+   are serialized, idempotent, backed up, preserve unrelated entries, and touch only an entry whose
+   command identifies Ghostlight's connector. The surface calls these direct registrations and
+   sends users of a client-owned Agent Plugin back to that client for lifecycle changes.
+   A portable bare connector entry reads **Managed in client**, exposes no mutation, and is never
+   classified as a Workbench-owned direct registration.
 8. JSONC and Codex TOML comments, trailing commas, formatting, and unrelated values survive
-   install and uninstall. Malformed configuration, unreadable files, and foreign `ghostlight`
+   registration and removal. Malformed configuration, unreadable files, and foreign `ghostlight`
    entries are left untouched with an actionable result.
 9. The WebView loads bundled assets under a restrictive CSP and has no shell, arbitrary file,
    remote-navigation, or network capability. File mutation terminates in the explicit harness
@@ -223,6 +226,25 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 12. Clear view removes completed actions from the current Monitor surface, preserves running work,
     issues no orchestrator mutation, and leaves the durable audit unchanged. A later action appears
     normally, and a fresh desktop process may reconstruct the cleared history from audit.
+
+## Agent Plugin gates
+
+1. Root `plugin.json` and `mcp.json` carry the pinned Agent Plugins v1.0.0 schema URLs and pass a
+   local semantic contract that rejects unknown fields, version disagreement, secrets, remote
+   transport, declared Skills, and client extensions.
+2. The package declares exactly one MCP server named `ghostlight`, using stdio and the exact bare
+   command `ghostlight-mcp-connector`, with no alternate transport or package-local runtime.
+3. A real process test reads `mcp.json`, resolves the declared bare command through an isolated
+   installer-like executable search path containing the version-matched sibling set, initializes
+   MCP, and observes the exact catalog from `LANGUAGE.md`.
+4. The Agent Plugin changes only discovery and connector ownership. It adds no remote or localhost
+   listener, runtime download, second engine, Skill, client extension, policy, product state, or
+   alternate tool language.
+5. A released compatibility claim additionally requires signed clean-machine proof that each
+   named client and platform can resolve the installed connector, report missing prerequisites
+   truthfully, avoid a misleading direct-registration state, converge multiple clients on one
+   authority, and disable, update, and remove the plugin without removing Ghostlight. Source proof
+   alone does not satisfy this gate.
 
 ## Integration and release-readiness gates
 

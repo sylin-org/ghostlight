@@ -42,6 +42,7 @@ window hides it; the tray Quit action ends the whole process.
 | Browser connector relay lifecycle | `cargo build -p ghostlight-browser-connector` | Reload the extension so Chromium respawns the native host |
 | Extension mechanism or presentation | none for JavaScript | Reload the unpacked extension explicitly |
 | Shared bridge contract | `cargo build --workspace` | Restart only consumers affected by that versioned boundary |
+| Agent Plugin manifests | none | Reinstall or reload the plugin in the client, then run both Agent Plugin tests |
 
 Do not restart a shore merely because an orchestrator feature changed. That is the fringe-stability
 contract, not an optimization.
@@ -80,7 +81,9 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 npm test --prefix extension
+node tests/agent-plugin-contract.mjs
 cargo build --workspace --target-dir .target-ghostlight-1.0
+node tests/agent-plugin-journey.mjs
 node tests/process-journey.mjs
 node --check crates/orchestrator/ui/app.js
 node --check tests/workbench-preview-server.mjs
@@ -94,6 +97,12 @@ It places the deployment lock to isolate the established reconnect proof, starts
 executables, interrupts an in-flight operation by stopping the service, proves both relays stay
 alive and renegotiate, then completes new open/read/close work. Bridge and orchestrator tests cover
 demand-start admission; the live journey starts from no service and proves adapter demand-start.
+
+`agent-plugin-contract.mjs` keeps the root package on the closed Agent Plugins 1.0.0 MCP-only
+shape. `agent-plugin-journey.mjs` copies the freshly built sibling executables into an isolated
+installer-shaped directory, resolves the manifest's bare connector command from that directory,
+and proves the exact orchestrator-owned tool catalog. It does not prove a signed production
+installer or any client's marketplace behavior; those remain release evidence.
 
 The workbench preview server supplies only representative local test facts to the exact bundled
 HTML, CSS, JavaScript, and artwork:
