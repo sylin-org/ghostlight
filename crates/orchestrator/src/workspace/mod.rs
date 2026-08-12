@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ghostlight_bridge::browser::{
     BrowserReadiness, ObservedTarget, PhysicalPoint, PhysicalTab, ViewportGeometry,
 };
-use ghostlight_bridge::service::IntakeChannel;
+use ghostlight_bridge::service::{IntakeChannel, SessionMarker};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -156,6 +156,8 @@ struct TabState {
 struct WorkspaceState {
     client_label: String,
     channel: IntakeChannel,
+    /// What owns this workspace, when it outlives the connection that opened it (ADR-0106).
+    session: Option<SessionMarker>,
     leased: bool,
     tabs: HashMap<TabHandle, TabState>,
     targets: HashMap<TargetHandle, TargetState>,
@@ -194,14 +196,95 @@ impl WorkspaceStore {
         summaries
     }
 
-    /// Admit one edge connection as an isolated workspace.
+    /// Admit one edge connection as an isolated workspace bound to that connection.
     pub fn admit(&self, client_label: String, channel: IntakeChannel) -> WorkspaceId {
+        self.open(client_label, channel, None)
+    }
+
+    /// Resume the workspace this session already owns, or open one for it.
+    ///
+    /// Two calls from the same caller reach the same tabs. That is the whole point: handles belong
+    /// to a session, and a session is the caller rather than the socket.
+    pub fn resume_or_admit(
+        &self,
+        client_label: String,
+        channel: IntakeChannel,
+        marker: SessionMarker,
+    ) -> WorkspaceId {
+        let key = marker.key();
+        let existing = self
+            .lock()
+            .workspaces
+            .iter()
+            .find(|(_, state)| {
+                state
+                    .session
+                    .as_ref()
+                    .is_some_and(|owner| owner.key() == key)
+            })
+            .map(|(id, _)| id.clone());
+        existing.unwrap_or_else(|| self.open(client_label, channel, Some(marker)))
+    }
+
+    /// Workspaces whose owner is gone, with the physical tabs they still hold.
+    ///
+    /// Liveness is supplied by the caller rather than observed here: the aggregate owns handles and
+    /// ownership, not the operating system.
+    pub fn reap(&self, alive: &dyn Fn(&SessionMarker) -> bool) -> Vec<u64> {
+        let mut state = self.lock();
+        let dead: Vec<WorkspaceId> = state
+            .workspaces
+            .iter()
+            .filter(|(_, workspace)| {
+                !workspace.leased
+                    && workspace
+                        .session
+                        .as_ref()
+                        .is_some_and(|owner| !alive(owner))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut tabs = Vec::new();
+        for id in dead {
+            if let Some(workspace) = state.workspaces.remove(&id) {
+                tabs.extend(workspace.tabs.into_values().map(|tab| tab.physical_id));
+            }
+        }
+        tabs
+    }
+
+    /// Every session marker currently owning a workspace.
+    #[must_use]
+    pub fn owners(&self) -> Vec<SessionMarker> {
+        self.lock()
+            .workspaces
+            .values()
+            .filter_map(|workspace| workspace.session.clone())
+            .collect()
+    }
+
+    /// Whether this workspace outlives its connection.
+    #[must_use]
+    pub fn is_owned(&self, workspace: &WorkspaceId) -> bool {
+        self.lock()
+            .workspaces
+            .get(workspace)
+            .is_some_and(|state| state.session.is_some())
+    }
+
+    fn open(
+        &self,
+        client_label: String,
+        channel: IntakeChannel,
+        session: Option<SessionMarker>,
+    ) -> WorkspaceId {
         let id = WorkspaceId(format!("workspace_{}", Uuid::new_v4().simple()));
         self.lock().workspaces.insert(
             id.clone(),
             WorkspaceState {
                 client_label,
                 channel,
+                session,
                 leased: false,
                 tabs: HashMap::new(),
                 targets: HashMap::new(),
@@ -853,7 +936,7 @@ mod tests {
     use ghostlight_bridge::browser::{
         BrowserReadiness, CaptureScope, ObservedTarget, PhysicalTab, ViewportGeometry,
     };
-    use ghostlight_bridge::service::IntakeChannel;
+    use ghostlight_bridge::service::{IntakeChannel, SessionMarker};
 
     use super::{WorkspaceError, WorkspaceStore};
 
@@ -865,6 +948,74 @@ mod tests {
             active: true,
             readiness: BrowserReadiness::Complete,
         }
+    }
+
+    fn marker(pid: u32, started_at: u64) -> SessionMarker {
+        SessionMarker::Process {
+            pid,
+            started_at,
+            name: "pwsh.exe".into(),
+        }
+    }
+
+    #[test]
+    fn one_caller_resumes_its_own_workspace_and_a_recycled_pid_does_not() {
+        let store = WorkspaceStore::default();
+        let first = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100));
+        let again = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100));
+        assert_eq!(
+            first, again,
+            "the same caller must reach the same workspace"
+        );
+
+        // The negative control, and the reason identity is not pid plus name: a recycled pid
+        // running the same program must not inherit the dead session's tabs.
+        let recycled = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 200));
+        assert_ne!(first, recycled);
+
+        // A connection with no marker is bound to that connection, as the MCP edge expects.
+        let bound = store.admit("codex".into(), IntakeChannel::Mcp);
+        assert!(!store.is_owned(&bound));
+        assert!(store.is_owned(&first));
+    }
+
+    #[test]
+    fn a_workspace_outlives_its_connection_and_dies_with_its_owner() {
+        let store = WorkspaceStore::default();
+        let owned = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100));
+        let lease = store.acquire(&owned).unwrap();
+        let tab = lease
+            .add_tab(&physical(41, "https://example.com/"))
+            .unwrap();
+        lease
+            .apply_landing(&tab.handle, &physical(41, "https://example.com/"))
+            .unwrap();
+        drop(lease);
+
+        // While the owner lives, nothing is reaped, so the next command still finds the tab.
+        assert!(store.reap(&|_| true).is_empty());
+        assert!(store.is_owned(&owned));
+
+        // When the owner is gone the workspace goes with it, and hands back the tabs it held so
+        // the caller's browser does not keep them forever.
+        let abandoned = store.reap(&|_| false);
+        assert_eq!(abandoned, vec![41]);
+        assert!(!store.is_owned(&owned));
+        assert_eq!(store.summaries().len(), 0);
+    }
+
+    #[test]
+    fn work_in_flight_is_never_reaped_underneath_itself() {
+        let store = WorkspaceStore::default();
+        let owned = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100));
+        let lease = store.acquire(&owned).unwrap();
+        assert!(
+            store.reap(&|_| false).is_empty(),
+            "a leased workspace is mid-invocation; releasing it would pull the tabs out from under it"
+        );
+        drop(lease);
+        assert_eq!(store.reap(&|_| false).len(), 0);
+        assert!(!store.is_owned(&owned));
     }
 
     #[test]

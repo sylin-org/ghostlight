@@ -4,6 +4,8 @@
 //! parsing, rendering, and exit codes, and makes no product decision: every call crosses the same
 //! service bridge, executor, governance facade, and completion path a model's call does.
 
+pub mod session;
+
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -122,11 +124,15 @@ pub fn parse(arguments: &[String]) -> Result<Command> {
 
 /// Run one command against the local service and return the process exit code.
 pub fn run(command: Command, runtime_file: &Path, out: &mut impl Write) -> i32 {
-    let mut client =
-        match ServiceClient::connect(runtime_file, CLI_CLIENT_LABEL, IntakeChannel::Cli) {
-            Ok(client) => client,
-            Err(error) => return report_transport(&error),
-        };
+    let mut client = match ServiceClient::connect(
+        runtime_file,
+        CLI_CLIENT_LABEL,
+        IntakeChannel::Cli,
+        session::marker(),
+    ) {
+        Ok(client) => client,
+        Err(error) => return report_transport(&error),
+    };
     match command {
         Command::Catalog => match client.catalog() {
             Ok(tools) => {

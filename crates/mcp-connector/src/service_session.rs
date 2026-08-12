@@ -175,6 +175,9 @@ fn connect(
             token: endpoint.token,
             client_label: client_label.into(),
             channel: IntakeChannel::Mcp,
+            // The MCP edge keeps its workspace bound to the connection: a client that goes away
+            // has no later call to gather.
+            session: None,
         },
     )
     .context("send service hello")?;

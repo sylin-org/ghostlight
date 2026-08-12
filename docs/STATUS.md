@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-11 (seventh pass).
+Last updated: 2026-08-11 (eighth pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -90,6 +90,16 @@ last fetch.
   managed refusal cannot be undone locally, and an unknown channel name is a typo that fails closed.
   The refusal lands at admission with the stable `channel_denied` reason, before a workspace exists,
   so nothing is invoked and nothing is audited (ADR-0105 amendment).
+- A command-line session is its caller, not its connection (ADR-0106). Every `ghostlight call` from
+  one terminal, or from one program that shells out repeatedly, reaches the same workspace and the
+  same tabs. Identity is the caller's process id plus start time, so a recycled pid running the same
+  program does not inherit a dead session; the executable name rides along for attribution only.
+  `GHOSTLIGHT_SESSION` pins a session explicitly for a caller whose own children are ephemeral, and
+  is a claim rather than an observation, so it never reaches an authority decision.
+- An owned workspace outlives its connection and is released, with its tabs closed, when its owner
+  is gone. Liveness is observed rather than guessed at, sweeping on admission so the cost follows
+  use. Work in flight is never reaped, and a connection that sends no marker keeps the previous
+  connection-bound behavior, which is what the MCP edge does.
 - [`scripts/browser-journey.ps1`](../scripts/browser-journey.ps1) is a complete PowerShell journey
   over the CLI: open, list, read, capture to a file, close, with a non-zero exit if any step fails.
   It holds one `--stdin` session open and writes a line at a time, so each step uses the handle the
@@ -105,12 +115,13 @@ Re-run on 2026-08-11 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 107 Rust tests -- 89 in the orchestrator including its launch-mode
+- `cargo test --workspace`: 113 Rust tests -- 95 in the orchestrator including its launch-mode
   binary test, 15 in the shared bridge, and 3 in the MCP connector.
 - `npm test --prefix extension`: 39 extension tests.
 - `node tests/cli-powershell-journey.mjs`: the shipped PowerShell script drives a real service and a
   scripted browser adapter through open/list/read/capture/close, exits zero, writes real JPEG bytes,
-  and every step is audited as `cli` with the landing host and no page text.
+  and every step is audited as `cli` with the landing host and no page text. It then proves the
+  session marker across processes: one `ghostlight call` opens a tab and a separate one lists it.
 - `node tests/cli-journey.mjs`: the real executable's command line reaches a real service, returns a
   governed result, exits non-zero on refusal, is attributed to the `cli` channel in the audit file
   the service wrote, and keeps one workspace across a `--stdin` batch while separate processes get

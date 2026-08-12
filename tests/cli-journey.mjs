@@ -89,10 +89,12 @@ try {
     1,
     "a batch must hold one workspace across its calls"
   );
+  // Every call here came from this one node process, so the session marker gathers all of them --
+  // the separate processes and the batch alike -- into a single workspace (ADR-0106).
   assert.equal(
-    new Set(written.slice(0, 3).map((record) => record.workspace)).size,
-    3,
-    "separate processes are separate workspaces, which is why batch mode exists"
+    new Set(written.map((record) => record.workspace)).size,
+    1,
+    "calls from one caller must reach one workspace, whatever process each ran in"
   );
 
   // An authority layer may decline the intake outright. Governance belongs to the service, so

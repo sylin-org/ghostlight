@@ -17,7 +17,8 @@ use ghostlight_bridge::lifecycle::ServiceLease;
 use ghostlight_bridge::relay::{BrowserRelayRequest, BrowserRelayResponse, BROWSER_RELAY_MAJOR};
 use ghostlight_bridge::runtime::{read_runtime, runtime_file, write_runtime, RuntimeEndpoint};
 use ghostlight_bridge::service::{
-    IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR,
+    IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, SessionMarker,
+    SERVICE_BRIDGE_MAJOR,
 };
 use uuid::Uuid;
 
@@ -45,6 +46,7 @@ enum ServiceOpening {
     Workspace {
         client_label: String,
         channel: IntakeChannel,
+        session: Option<SessionMarker>,
     },
     WorkbenchActivation,
 }
@@ -353,12 +355,14 @@ fn serve_session(
             token,
             client_label,
             channel,
+            session,
         } => (
             major,
             token,
             ServiceOpening::Workspace {
                 client_label,
                 channel,
+                session,
             },
         ),
         _ => {
@@ -397,7 +401,7 @@ fn serve_session(
         );
         return Ok(());
     }
-    let (client_label, channel) = match opening {
+    let (client_label, channel, session) = match opening {
         ServiceOpening::WorkbenchActivation => {
             write_response(
                 &writer,
@@ -410,7 +414,8 @@ fn serve_session(
         ServiceOpening::Workspace {
             client_label,
             channel,
-        } => (client_label, channel),
+            session,
+        } => (client_label, channel, session),
     };
     // Admission, before any workspace exists: an authority layer may decline an intake entirely.
     let admission = governance.admits_channel(channel);
@@ -428,7 +433,13 @@ fn serve_session(
         );
         return Ok(());
     }
-    let workspace = workspaces.admit(client_label, channel);
+    // Before opening anything, release workspaces whose owner is gone and close the tabs they
+    // still hold. Sweeping here rather than on a timer keeps the cost proportional to use.
+    reap_finished_sessions(&workspaces, browser.as_ref());
+    let workspace = match session {
+        Some(marker) => workspaces.resume_or_admit(client_label, channel, marker),
+        None => workspaces.admit(client_label, channel),
+    };
     write_response(
         &writer,
         &ServiceResponse::HelloAccepted {
@@ -503,6 +514,11 @@ fn serve_session(
     for cancellation in lock(&active).values() {
         cancellation.cancel();
     }
+    // A workspace with an owner outlives this connection: the caller is still there and its next
+    // call must reach the same tabs. It is released when its owner is gone, not when a socket is.
+    if workspaces.is_owned(&workspace) {
+        return Ok(());
+    }
     let physical_tabs = workspaces.release(&workspace);
     let cancelled = AtomicBool::new(false);
     for tab_id in physical_tabs {
@@ -514,6 +530,46 @@ fn serve_session(
         );
     }
     Ok(())
+}
+
+/// Close the tabs of every session whose owning process is gone.
+fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort) {
+    let abandoned = workspaces.reap(&owner_alive);
+    let cancelled = AtomicBool::new(false);
+    for tab_id in abandoned {
+        let _ = browser.call(
+            "reaped",
+            BrowserCommand::CloseTab { tab_id },
+            Instant::now() + Duration::from_secs(2),
+            &cancelled,
+        );
+    }
+}
+
+/// Whether the process that owns a session is still running.
+///
+/// A declared key names no process, so it lives until the service does. That bound is the service's
+/// own lifetime rather than an invented idle policy, and the workspace registry is in memory.
+fn owner_alive(marker: &SessionMarker) -> bool {
+    let SessionMarker::Process {
+        pid, started_at, ..
+    } = marker
+    else {
+        return true;
+    };
+    let Ok(pid) = usize::try_from(*pid).map(sysinfo::Pid::from) else {
+        return false;
+    };
+    let mut system = sysinfo::System::new();
+    system.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::Some(&[pid]),
+        true,
+        sysinfo::ProcessRefreshKind::nothing(),
+    );
+    // The start time is the half that matters: a recycled pid is a different owner.
+    system
+        .process(pid)
+        .is_some_and(|process| process.start_time() == *started_at)
 }
 
 fn write_response(writer: &Mutex<TcpStream>, response: &ServiceResponse) {
@@ -638,6 +694,7 @@ mod tests {
                 token: host.endpoint.token.clone(),
                 client_label: "test".into(),
                 channel: IntakeChannel::Mcp,
+                session: None,
             },
         )
         .unwrap();

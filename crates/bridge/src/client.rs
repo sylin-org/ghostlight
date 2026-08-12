@@ -13,8 +13,8 @@ use thiserror::Error;
 use crate::framing::{read_json_line, write_json_line};
 use crate::runtime::read_runtime;
 use crate::service::{
-    IntakeChannel, ServerProfile, ServiceContent, ServiceRequest, ServiceResponse, ToolDefinition,
-    SERVICE_BRIDGE_MAJOR,
+    IntakeChannel, ServerProfile, ServiceContent, ServiceRequest, ServiceResponse, SessionMarker,
+    ToolDefinition, SERVICE_BRIDGE_MAJOR,
 };
 
 /// A live authenticated session with the local service.
@@ -33,6 +33,7 @@ impl ServiceClient {
         runtime_file: &Path,
         client_label: &str,
         channel: IntakeChannel,
+        session: Option<SessionMarker>,
     ) -> Result<Self, ClientError> {
         let endpoint = read_runtime(runtime_file).map_err(|_| ClientError::NoService)?;
         let stream = TcpStream::connect(("127.0.0.1", endpoint.service_port))
@@ -51,6 +52,7 @@ impl ServiceClient {
             token: endpoint.token,
             client_label: client_label.into(),
             channel,
+            session,
         };
         match client.exchange(&hello)? {
             ServiceResponse::HelloAccepted {

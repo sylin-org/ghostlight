@@ -72,6 +72,59 @@ impl IntakeChannel {
     }
 }
 
+/// What owns a session, so a workspace can outlive the connection that opened it (ADR-0106).
+///
+/// Handles belong to a session. Keying that session on the caller rather than on the socket is what
+/// lets a person type one command after another, and an application shell out repeatedly, and have
+/// every call land in the same workspace.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SessionMarker {
+    /// The calling process. The session lives exactly as long as that process does.
+    ///
+    /// Identity is the pair the operating system actually keeps unique. A pid alone is recycled,
+    /// and a pid with a name matches a recycled pid whenever the replacement is the same kind of
+    /// program, which is the common case rather than the rare one.
+    Process {
+        /// Operating-system process id of the caller.
+        pid: u32,
+        /// Process start time, which disambiguates a recycled pid.
+        started_at: u64,
+        /// Executable file name, for attribution only. Never identity.
+        name: String,
+    },
+    /// An explicit key, for a caller whose own children are ephemeral.
+    ///
+    /// Environment is inherited through intermediaries, so a program that shells out through a
+    /// throwaway shell can still gather its calls into one session.
+    Declared {
+        /// Opaque caller-supplied key.
+        key: String,
+    },
+}
+
+impl SessionMarker {
+    /// The stable string a workspace is filed under.
+    #[must_use]
+    pub fn key(&self) -> String {
+        match self {
+            Self::Process {
+                pid, started_at, ..
+            } => format!("process:{pid}:{started_at}"),
+            Self::Declared { key } => format!("declared:{key}"),
+        }
+    }
+
+    /// The caller's file name, when one was observed.
+    #[must_use]
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::Process { name, .. } => Some(name),
+            Self::Declared { .. } => None,
+        }
+    }
+}
+
 /// A request sent from the generic MCP edge to the orchestrator.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -94,6 +147,10 @@ pub enum ServiceRequest {
         /// Which intake this session arrived on. Attribution only, never authority (ADR-0105).
         #[serde(default)]
         channel: IntakeChannel,
+        /// What owns this session, when the edge can say. Absent keeps the workspace bound to the
+        /// connection, which is what the MCP edge wants.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<SessionMarker>,
     },
     /// Retrieve the orchestrator-owned catalog.
     Catalog,
@@ -165,7 +222,7 @@ pub enum ServiceResponse {
 mod tests {
     use super::{
         IntakeChannel, ServerProfile, ServiceContent, ServiceRequest, ServiceResponse,
-        ToolDefinition, SERVICE_BRIDGE_MAJOR,
+        SessionMarker, ToolDefinition, SERVICE_BRIDGE_MAJOR,
     };
     use serde_json::json;
 
@@ -181,6 +238,11 @@ mod tests {
                 token: "token".into(),
                 client_label: "test".into(),
                 channel: IntakeChannel::Cli,
+                session: Some(SessionMarker::Process {
+                    pid: 4312,
+                    started_at: 1_700_000_000,
+                    name: "pwsh.exe".into(),
+                }),
             },
             ServiceRequest::Catalog,
             ServiceRequest::Invoke {

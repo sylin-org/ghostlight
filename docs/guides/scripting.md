@@ -42,11 +42,33 @@ nobody. In a batch, later captures gain an index rather than overwriting the fir
 
 ## Several calls, one session
 
-Tab, target, and view handles belong to a session, and a session lasts as long as the process. Two
-separate `ghostlight call` commands are two sessions, so a handle from the first will not resolve in
-the second.
+**The session is your terminal.** Every `ghostlight call` you type in one shell reaches the same
+tabs, so you can work a step at a time:
 
-For multi-step work, use `--stdin` and give one `<tool> <json>` per line:
+```sh
+ghostlight call browser_open_page '{"url":"https://example.com"}'   # returns tab_a1b2
+ghostlight call browser_read_page '{"tab":"tab_a1b2"}'
+ghostlight call browser_close_tab '{"tab":"tab_a1b2"}'
+```
+
+Ghostlight keys the session on the process that called it, identified by its process id and start
+time. A program that spawns `ghostlight call` repeatedly gets the same treatment: one session for as
+long as that program runs.
+
+Tabs live as long as their session. **Close the terminal and the tabs it opened close with it** --
+which also means a tab you open in one shell is not visible from another.
+
+If your program shells out *through* a shell, the parent is a throwaway `cmd.exe` that differs on
+every call, and you would get a new session each time. Set `GHOSTLIGHT_SESSION` to any string once,
+and every descendant lands in the same session no matter how many shells deep:
+
+```sh
+$env:GHOSTLIGHT_SESSION = "acme-deploy-$PID"
+```
+
+That key is a convenience, not a credential: it identifies a session, never a permission.
+
+For a fixed list of calls, `--stdin` still takes one `<tool> <json>` per line:
 
 ```sh
 printf '%s\n' \
