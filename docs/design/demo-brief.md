@@ -1,5 +1,14 @@
 # Ghostlight launch-brief demo
 
+> **Built as a script, not a subcommand (2026-08-11).** This note specifies `ghostlight demo-brief`
+> as a Rust subcommand with pacing flags. It never shipped, and it no longer needs to: the command
+> line reaches the same catalog through the same governance, so the story lives in
+> [`scripts/demo-brief.ps1`](../../scripts/demo-brief.ps1), where whoever records the capture can
+> retime it without rebuilding a binary. The story, values, pacing defaults, and reliability
+> boundary below are what that script implements. Its tool names are the 0.8 catalog; the script
+> uses the 1.0 equivalents (`browser_read_page`, `browser_inspect_page`, `browser_type_text`,
+> `browser_click`, `browser_wait`).
+
 ## Purpose
 
 `ghostlight demo-brief` is the short recording story for the GitHub README hero. It is not a

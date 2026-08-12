@@ -101,6 +101,12 @@ last fetch.
   so with the default-on preserve-tabs setting those tabs are released but stay visible. Liveness is observed rather than guessed at, sweeping on admission so the cost follows
   use. Work in flight is never reaped, and a connection that sends no marker keeps the previous
   connection-bound behavior, which is what the MCP edge does.
+- [`scripts/demo-brief.ps1`](../scripts/demo-brief.ps1) drives the ADR-0069-era launch-brief demo
+  story entirely through the command line: open, scan, inventory controls once, three separately
+  paced field writes, two checkbox clicks, submit, and a wait for the exact completion sentence.
+  Verified live against the published Sylin stage: ten steps, one session, read/write/action
+  capabilities classified per tool, and no typed value in the audit. `docs/design/demo-brief.md`
+  specified this as a Rust subcommand; it does not need to be one, and the note now says so.
 - [`scripts/browser-journey.ps1`](../scripts/browser-journey.ps1) is a complete PowerShell journey
   over the CLI: open, list, read, capture to a file, close, with a non-zero exit if any step fails.
   It holds one `--stdin` session open and writes a line at a time, so each step uses the handle the

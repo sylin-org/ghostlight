@@ -117,7 +117,7 @@ An organization that wants agent work but not scripted work closes the channel i
 invoked or audited. The full rules, including how layers compose, are in
 [governance-configuration.md](governance-configuration.md#turning-an-intake-channel-off).
 
-## A worked example
+## Worked examples
 
 [`scripts/browser-journey.ps1`](../../scripts/browser-journey.ps1) is a complete PowerShell journey:
 open a page, list tabs, read it, capture it to a file, and close the tab. Every step is a plain
@@ -127,6 +127,19 @@ how the last step closes exactly the tab the first one opened.
 It exits with Ghostlight's own code rather than inventing one, so a refusal stays distinguishable
 from a breakage. On a default install the close step is refused by the browser's preserve-tabs
 setting and the script exits 2, which is governance working rather than the journey failing.
+
+[`scripts/demo-brief.ps1`](../../scripts/demo-brief.ps1) is the longer one: read a page, inventory
+its controls once, fill three fields as separately paced writes, tick two boxes, submit, and wait
+for an exact completion sentence. It is the story from
+[`design/demo-brief.md`](../design/demo-brief.md), which specified a Rust subcommand that never
+shipped and no longer needs to. Pacing is parameters, so a recording operator retimes it by editing
+a script:
+
+```powershell
+./scripts/demo-brief.ps1 -Beat 0.4 -CompletionHold 5
+```
+
+Ten steps, three capability classes, one session, and no typed value anywhere in the audit.
 
 ```
 STEP         STATUS     WHAT HAPPENED
