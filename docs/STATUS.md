@@ -96,8 +96,9 @@ last fetch.
   program does not inherit a dead session; the executable name rides along for attribution only.
   `GHOSTLIGHT_SESSION` pins a session explicitly for a caller whose own children are ephemeral, and
   is a claim rather than an observation, so it never reaches an authority decision.
-- An owned workspace outlives its connection and is released, with its tabs closed, when its owner
-  is gone. Liveness is observed rather than guessed at, sweeping on admission so the cost follows
+- An owned workspace outlives its connection and is released when its owner is gone, handing back
+  the tabs it held. The close it then asks for goes through the same interlock a model's close does,
+  so with the default-on preserve-tabs setting those tabs are released but stay visible. Liveness is observed rather than guessed at, sweeping on admission so the cost follows
   use. Work in flight is never reaped, and a connection that sends no marker keeps the previous
   connection-bound behavior, which is what the MCP edge does.
 - [`scripts/browser-journey.ps1`](../scripts/browser-journey.ps1) is a complete PowerShell journey

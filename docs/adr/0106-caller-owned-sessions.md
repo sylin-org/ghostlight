@@ -93,6 +93,22 @@ Unlike the signer gating deferred in ADR-0105, this is not a security control, s
 is fit for purpose here: the worst outcome of a wrong answer is a caller that loses session
 continuity, not one that gains authority.
 
+## Amendment 2026-08-11 (releasing a session is not the same as closing its tabs)
+
+Observed on the first live deployment. Decision 4 says an abandoned workspace is released "and the
+tabs it holds are closed". The release is unconditional; the close is not.
+
+The reaper closes tabs through the same browser command a model uses, so the extension's
+preserve-tabs interlock applies to it, and that setting is on by default. On an ordinary install the
+tabs of a finished session are therefore **released but not closed**: Ghostlight stops controlling
+them, and they stay visible in the browser.
+
+That is the correct outcome rather than a defect -- ADR-0060's interlock exists precisely so that a
+local human setting outranks any decision the service makes, and keeping visual evidence is a
+standing product directive. The error was in the wording. "Close your terminal and its tabs close"
+should read: closing the terminal ends the session and hands its tabs back to you, and whether they
+close is the browser's setting to decide.
+
 ## Consequences
 
 - **Tabs now outlive the command.** `ghostlight call browser_open_page` leaves a real, owned tab

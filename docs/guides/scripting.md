@@ -55,8 +55,11 @@ Ghostlight keys the session on the process that called it, identified by its pro
 time. A program that spawns `ghostlight call` repeatedly gets the same treatment: one session for as
 long as that program runs.
 
-Tabs live as long as their session. **Close the terminal and the tabs it opened close with it** --
-which also means a tab you open in one shell is not visible from another.
+Tabs live as long as their session, and a tab you open in one shell is not visible from another.
+When the terminal exits, Ghostlight releases its tabs and asks the browser to close them -- but the
+extension's **Preserve controlled tabs** setting is on by default and refuses that, so in practice
+the tabs stop being controlled and stay visible for you to deal with. Turn that setting off if you
+want a terminal to clean up after itself.
 
 If your program shells out *through* a shell, the parent is a throwaway `cmd.exe` that differs on
 every call, and you would get a new session each time. Set `GHOSTLIGHT_SESSION` to any string once,
