@@ -120,10 +120,13 @@ invoked or audited. The full rules, including how layers compose, are in
 ## A worked example
 
 [`scripts/browser-journey.ps1`](../../scripts/browser-journey.ps1) is a complete PowerShell journey:
-open a page, list tabs, read it, capture it to a file, close the tab, and exit non-zero if any step
-did not succeed. It is worth reading for one detail in particular -- it keeps a single
-`ghostlight call --stdin` process open and writes a line at a time, so each step can use the handle
-the previous step returned. That is how it closes exactly the tab it opened and nothing else.
+open a page, list tabs, read it, capture it to a file, and close the tab. Every step is a plain
+`ghostlight call` in its own process, and they share a session because they share a shell, which is
+how the last step closes exactly the tab the first one opened.
+
+It exits with Ghostlight's own code rather than inventing one, so a refusal stays distinguishable
+from a breakage. On a default install the close step is refused by the browser's preserve-tabs
+setting and the script exits 2, which is governance working rather than the journey failing.
 
 ```
 STEP         STATUS     WHAT HAPPENED

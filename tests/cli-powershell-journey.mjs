@@ -227,29 +227,15 @@ try {
   assert.equal(encoded.includes("This domain is for use"), false, "page text reached the audit");
   assert.ok(encoded.includes('"host":"example.com"'), "the landing host was not recorded");
 
-  // Separate processes, one caller: the whole point of a session marker (ADR-0106). Both spawns
-  // share this node process as their parent, so the second must reach what the first opened.
-  const call = (args) => new Promise((resolvePromise) => {
-    const child = spawn(executable("ghostlight"), ["call", ...args], {
-      env: environment,
-      windowsHide: true
-    });
-    let stdout = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.on("close", (status) => resolvePromise({ status, stdout: stdout.trim() }));
-  });
+  // Every step of that journey was its own process, so one workspace across all of them is the
+  // session marker working (ADR-0106). Before it, this number was five.
+  assert.equal(
+    new Set(records.map((record) => record.workspace)).size,
+    1,
+    "steps from one caller must share a workspace, whatever process each ran in"
+  );
 
-  const opened = await call(["browser_open_page", JSON.stringify({ url: "https://example.com" })]);
-  assert.equal(opened.status, 0, opened.stdout);
-  const listed = await call(["browser_list_tabs", "{}", "--json"]);
-  assert.equal(listed.status, 0, listed.stdout);
-  const tabs = JSON.parse(listed.stdout).facts.tabs;
-  assert.equal(tabs.length, 1, "a later command must reach the tab an earlier command opened");
-  const closed = await call(["browser_close_tab", JSON.stringify({ tab: tabs[0].tab })]);
-  assert.equal(closed.status, 0, closed.stdout);
-
-  console.log("\npowershell journey ok: a script drove open/list/read/capture/close through the CLI");
-  console.log("session marker ok: separate processes from one caller shared a workspace");
+  console.log("\npowershell journey ok: separate processes, one session, open/list/read/capture/close");
 } finally {
   for (const child of children.reverse()) if (!child.killed) child.kill();
   for (const file of [runtimeFile, leaseFile, auditFile, shotFile]) rmSync(file, { force: true });
