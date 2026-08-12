@@ -5,35 +5,39 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 
 ## Contract gates
 
-1. Catalog schemas are typo-closed and match every decoder default in `LANGUAGE.md`.
-2. The MCP edge retrieves the catalog and generically forwards every tool without per-tool code.
-3. The browser connector relays every primitive without model-facing names or product defaults.
-4. Incompatible service or browser bridge majors fail before work is accepted.
-5. MCP and native-message framing survive split reads, coalesced reads, and disconnects.
-6. Adding a product feature composed from advertised browser capabilities changes only the
+1. The catalog contains exactly the 22 tools in `LANGUAGE.md`, in documented order, with no
+   simultaneously advertised legacy dialect or client-selected profile.
+2. Catalog schemas are typo-closed at every object level and match every decoder requirement,
+   conditional branch, bound, and default in `LANGUAGE.md`. Every declaration has field guidance,
+   a shortest valid example, a truthful output schema, and standard MCP annotations.
+3. The MCP edge retrieves the catalog and generically forwards every tool without per-tool code.
+4. The browser connector relays every primitive without model-facing names or product defaults.
+5. Incompatible service or browser bridge majors fail before work is accepted.
+6. MCP and native-message framing survive split reads, coalesced reads, and disconnects.
+7. Adding a product feature composed from advertised browser capabilities changes only the
    orchestrator. The MCP connector, browser connector, adapter protocol, and extension stay byte
    unchanged.
-7. The browser connector does not deserialize adapter commands, receipts, events, workspace ids,
+8. The browser connector does not deserialize adapter commands, receipts, events, workspace ids,
    or presentation signals. Unknown bounded adapter payloads round-trip unchanged.
-8. MCP revision, service bridge, browser relay, and adapter protocol compatibility are independent.
+9. MCP revision, service bridge, browser relay, and adapter protocol compatibility are independent.
    A change to one does not bump or reject an unrelated boundary.
-9. The MCP and browser relays keep their consumer-facing streams alive across a service restart,
+10. The MCP and browser relays keep their consumer-facing streams alive across a service restart,
    reauthenticate to the new runtime endpoint, and never replay an uncertain application effect.
-10. The browser engine suppresses duplicate operation ids, retains a content-free disposition
-    across service-worker suspension, and reports uncertainty rather than repeating an effect when
-    its prior dispatch cannot be disproved.
-11. A real process test starts both relays without the service, interrupts an in-flight browser
-    effect by stopping the service, restarts it, and proves the same MCP stdio and native-message
-    processes renegotiate and complete new work without replaying the interrupted effect.
-12. After either connector fails to find the service, it uses the one shared lifecycle seam to
-    start only the exact sibling `ghostlight --background` executable and continues its existing
-    reconnect loop.
-13. A fresh deployment lock suppresses demand-start. A stale deployment lock cannot suppress it
-    indefinitely.
-14. Concurrent demand-start requests converge on one lifetime-leased service authority before
-    runtime publication or desktop initialization.
-15. A direct/default launch reveals the existing authenticated authority's workbench without a
-    new listener or workspace. A headless authority refuses that presentation request clearly.
+11. The browser engine suppresses duplicate operation ids, retains a content-free disposition
+     across service-worker suspension, and reports uncertainty rather than repeating an effect when
+     its prior dispatch cannot be disproved.
+12. A real process test starts both relays without the service, interrupts an in-flight browser
+     effect by stopping the service, restarts it, and proves the same MCP stdio and native-message
+     processes renegotiate and complete new work without replaying the interrupted effect.
+13. After either connector fails to find the service, it uses the one shared lifecycle seam to
+     start only the exact sibling `ghostlight --background` executable and continues its existing
+     reconnect loop.
+14. A fresh deployment lock suppresses demand-start. A stale deployment lock cannot suppress it
+     indefinitely.
+15. Concurrent demand-start requests converge on one lifetime-leased service authority before
+     runtime publication or desktop initialization.
+16. A direct/default launch reveals the existing authenticated authority's workbench without a
+     new listener or workspace. A headless authority refuses that presentation request clearly.
 
 ## Executor and truth gates
 
@@ -43,11 +47,17 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 4. Disconnect or cancellation after uncertain dispatch reports unknown effect and no replay advice.
 5. A partial sequence reports completed steps and no replay advice.
 6. Stale tab and target handles fail before browser dispatch and suggest obtaining current handles.
-7. Lower-capability-model fixtures succeed with the documented shortest calls.
+7. Lower-capability-model fixtures succeed with every documented shortest call, choose the correct
+   sibling among related tools, and recover from deliberately stale and ambiguous handles.
 8. A screenshot view handle resolves image coordinates only while its tab, document generation,
    viewport, and zoom still match; stale views fail before pointer dispatch.
 9. File paths are validated and bounded before reading, and no file bytes cross the browser bridge
    until governance and credential preflight succeed.
+10. The extension alone owns recording identity, frame acceptance, deadlines, memory bounds, stop,
+    retention, and erase. The orchestrator checks source authority before start and disclosure.
+    Status, stop, and discard remain available without new browser authority.
+11. Diagnostic reads are cursor-based and non-destructive. Enabling, filtering, sanitization, host
+    authority, bounds, expiry, and eviction are enforced before model-visible results.
 
 ## Governance gates
 
@@ -60,8 +70,9 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 7. Initial, redirected, and script-caused committed landings are governed before text or readiness
    is accepted.
 8. A denied landing returns truthful committed-effect and compensation facts.
-9. Audit records contain no URL, page text, target name, selector, form value, screenshot, or
-   dialog text.
+9. Audit records contain no URL, page text, target name, selector, form value, screenshot,
+   recording frame or GIF, dialog text, console text, request URL, header, body, or diagnostic
+   entry.
 10. Hold, attention, end-session, and cancellation stop later effects at the runtime boundary.
 11. Model-driven close dispatches only when the action capability and monotonic tab-close policy
     constraint both permit it. A denying local or managed layer cannot be expanded later.
@@ -74,7 +85,7 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
    physical primitive and never creates a blank tab before navigation.
 2. List tabs, navigate one, inspect controls, find a target, activate it, and recover from the old
    target becoming stale after a document commit.
-3. Capture a screenshot only through `browser_take_screenshot`, verify bounded dimensions and one
+3. Capture a screenshot only through `browser_screenshot`, verify bounded dimensions and one
    MCP image content block, and verify base64 image data is absent from structured facts.
 4. Fill multiple ordinary fields, but stop before dispatch and request user handoff when any
    described target is credential-class.
@@ -97,12 +108,26 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
     landing, and never audit source or result.
 15. Open a child tab from a controlled page, adopt it into the same workspace, and preserve
     ownership after moving the tab group to another window.
+16. Resize a controlled tab's window within the documented bounds, observe the resulting geometry,
+    and prove resize affects no unrelated window while invalidating stale view geometry.
+17. Start a recording, perform ordinary browser work, save without an explicit stop, verify the
+    extension's final-frame stop and one bounded GIF content block, save the result again, then
+    discard it. Repeat with semantic target delivery and distinguish dispatched-unverified from
+    outcome-unknown.
+18. Prove recordings are plural and workspace-isolated; hard timeout, frozen retention,
+    browser-loss, service disconnect, runtime hold, memory-limit, oversized-frame, discard, and MV3
+    worker-loss paths stop or erase as ADR-0108 requires, without persistent pixel bytes.
+19. Call `browser_diagnose {}` before tracking, reproduce console and request problems, then read
+    bounded problems from both sources. Exercise console-only, network-only, all-detail, literal
+    match, cursor continuation, eviction, host filtering, expiry, browser loss, and tab closure.
+20. Prove diagnostics never return headers, bodies, cookies, authorization, post data, query
+    strings, fragments, or another workspace's entries, and that a read cannot clear history.
 
 ## Presentation gates
 
 1. Established controlled-scope, cursor, target, click, drag, field, key, scroll, read, find,
-   navigation, screenshot, zoom, signature, denial, attention, and caption treatments are visible
-   for applicable 1.0 jobs.
+   navigation, screenshot, zoom, recording, signature, denial, attention, and caption treatments
+   are visible for applicable 1.0 jobs. Diagnostics remain visually quiet.
 2. Presentation frames contain only ids, closed event and activity kinds, phase, detail, and fixed
    Ghostlight-authored labels.
 3. Injected presentation failure does not change permission, browser receipts, or terminal result.
@@ -144,7 +169,8 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 9. The popup and options pages have useful empty, disconnected, error, and incompatible-version
    states and are keyboard accessible.
 10. No extension storage key contains URL, title, page text, target name, locator, form value,
-   script, file path, file bytes, screenshot, dialog text, or policy.
+   script, file path, file bytes, screenshot, recording frame, GIF, dialog text, console entry,
+   network entry, or policy.
 
 ## Desktop workbench gates
 
@@ -186,7 +212,7 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 4. The full Rust workspace and extension test suites pass in isolated build output.
 5. Real MCP stdio, service IPC, browser relay, native messaging, and visible Chromium complete the
    open, read, close journey.
-6. The repo-built stack starts, the MCP client sees the exact catalog, and the directly loaded
+6. The repo-built stack starts, the MCP client sees the exact 22-tool catalog, and the directly loaded
    unpacked extension reports a compatible adapter connection.
 7. Every defect found in visible-browser use has a focused regression proof and is reverified.
 8. The unpacked extension renders the correct toolbar icon, opens a usable popup, opens settings,

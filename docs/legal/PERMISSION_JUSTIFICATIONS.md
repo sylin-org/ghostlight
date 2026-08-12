@@ -62,5 +62,5 @@ HTTP and HTTPS host permissions are required because a user may ask Ghostlight t
 ## Page-context JavaScript
 
 ```text
-All extension logic ships in the reviewed package. When the MCP client explicitly requests browser_run_script, bounded script text arrives from the local Ghostlight application and is evaluated through the documented Debugger API only in the attached web page. It is not retained, installed, or executed in the extension origin.
+All extension logic ships in the reviewed package. When the MCP client explicitly requests browser_evaluate, bounded script text arrives from the local Ghostlight application and is evaluated through the documented Debugger API only in the attached web page. It is not retained, installed, or executed in the extension origin.
 ```

@@ -85,10 +85,10 @@ The row already has columns for the tool, the elapsed time, the client, and the 
 renders the Ghostlight-authored sentence directly and adds only a readiness note when useful:
 
 ```
-[nav]  browser_open_page   Opened example.com.             claude-code  action  2.5s  7h
-[scan] browser_read_page   Read 1,240 words.                claude-code  read    0.4s  7h
+[nav]  browser_navigate    Opened example.com.             claude-code  action  2.5s  7h
+[scan] browser_read        Read 1,240 words.                claude-code  read    0.4s  7h
 [key]  browser_fill_form   Filled 3 fields.                 codex        write   1.1s  6h
-[cam]  browser_take_screenshot  Captured the viewport at 1280x720.  codex  read  0.9s  6h
+[cam]  browser_screenshot  Captured the viewport at 1280x720.  codex     read    0.9s  6h
 ```
 
 The hero also keeps the sentence and carries host, capability, status, and readiness as separate

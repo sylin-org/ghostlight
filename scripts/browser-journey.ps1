@@ -67,16 +67,16 @@ Write-Host ''
 Write-Host ('{0,-12} {1,-10} {2}' -f 'STEP', 'STATUS', 'WHAT HAPPENED')
 Write-Host ('{0,-12} {1,-10} {2}' -f '----', '------', '-------------')
 
-$opened = Step 'open' 'browser_open_page' @{ url = $Url }
+$opened = Step 'open' 'browser_navigate' @{ url = $Url }
 if ($opened.status -ne 'succeeded') { throw "Could not open $Url : $($opened.summary)" }
 $tab = $opened.facts.tab
 
 # Every step from here names the tab this journey opened, so it never touches anything else of
 # yours. A separate process each time, and the handle still resolves.
-$null = Step 'list'       'browser_list_tabs'
-$null = Step 'read'       'browser_read_page'       @{ tab = $tab }
-$null = Step 'screenshot' 'browser_take_screenshot' @{ tab = $tab } @('--output', $OutputPath)
-$null = Step 'close'      'browser_close_tab'       @{ tab = $tab }
+$null = Step 'list'       'browser_tabs'       @{ action = 'list' }
+$null = Step 'read'       'browser_read'       @{ tab = $tab }
+$null = Step 'screenshot' 'browser_screenshot' @{ tab = $tab } @('--output', $OutputPath)
+$null = Step 'close'      'browser_tabs'       @{ action = 'close'; tab = $tab }
 
 Write-Host ''
 if (Test-Path -LiteralPath $OutputPath) {

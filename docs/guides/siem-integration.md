@@ -20,7 +20,7 @@ this file.
   "timestamp_ms": 1786334400000,
   "invocation": "invocation_opaque",
   "workspace": "workspace_opaque",
-  "tool": "browser_read_page",
+  "tool": "browser_read",
   "capability": "read",
   "authority": "authority_opaque",
   "allowed": true,

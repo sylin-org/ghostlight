@@ -358,7 +358,7 @@ mod tests {
         let operation = OperationSummary {
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
-            tool: "browser_read_page".into(),
+            tool: "browser_read".into(),
             activity: "Reading page".into(),
             capability: Capability::Read,
             started_at_ms: Some(0),
@@ -368,7 +368,7 @@ mod tests {
             timestamp_ms: 0,
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
-            tool: "browser_read_page".into(),
+            tool: "browser_read".into(),
             capability: "read".into(),
             allowed: true,
             reason: "permitted".into(),

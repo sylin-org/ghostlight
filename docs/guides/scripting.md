@@ -7,8 +7,8 @@ model in them: a deploy check, a smoke test, a scheduled report.
 ## One call
 
 ```sh
-ghostlight call browser_list_tabs
-ghostlight call browser_open_page '{"url":"https://example.com"}'
+ghostlight call browser_tabs '{"action":"list"}'
+ghostlight call browser_navigate '{"url":"https://example.com"}'
 ```
 
 The command prints Ghostlight's sentence for what happened, and exits with the terminal status:
@@ -30,7 +30,7 @@ script must not retry it blindly. That is why it has its own code rather than sh
 facts:
 
 ```sh
-ghostlight call browser_read_page '{"tab":"tab_a1b2"}' --json | jq -r .facts.text
+ghostlight call browser_read '{"tab":"tab_a1b2"}' --json | jq -r .facts.text
 ```
 
 `--output <file>` writes bounded content, which today means a screenshot's image bytes. Without it
@@ -46,9 +46,9 @@ nobody. In a batch, later captures gain an index rather than overwriting the fir
 tabs, so you can work a step at a time:
 
 ```sh
-ghostlight call browser_open_page '{"url":"https://example.com"}'   # returns tab_a1b2
-ghostlight call browser_read_page '{"tab":"tab_a1b2"}'
-ghostlight call browser_close_tab '{"tab":"tab_a1b2"}'
+ghostlight call browser_navigate '{"url":"https://example.com"}'   # returns tab_a1b2
+ghostlight call browser_read '{"tab":"tab_a1b2"}'
+ghostlight call browser_tabs '{"action":"close","tab":"tab_a1b2"}'
 ```
 
 Ghostlight keys the session on the process that called it, identified by its process id and start
@@ -75,13 +75,13 @@ For a fixed list of calls, `--stdin` still takes one `<tool> <json>` per line:
 
 ```sh
 printf '%s\n' \
-  'browser_open_page {"url":"https://example.com"}' \
-  'browser_list_tabs' \
+  'browser_navigate {"url":"https://example.com"}' \
+  'browser_tabs {"action":"list"}' \
   | ghostlight call --stdin --json
 ```
 
 Because it reads a line at a time, a caller can read a handle out of one result and write the next
-line using it. For a fixed sequence with no handle passing, `browser_run_sequence` does the whole
+line using it. For a fixed sequence with no handle passing, `browser_sequence` does the whole
 thing in one call.
 
 ## What governance sees
@@ -94,7 +94,7 @@ thing that executes.
 Every record says which intake the work arrived on:
 
 ```json
-{ "tool": "browser_open_page", "channel": "cli", "capability": "action", "allowed": true }
+{ "tool": "browser_navigate", "channel": "cli", "capability": "action", "allowed": true }
 ```
 
 The workbench shows it too, and scripted tabs group under their own name in the browser, so a script

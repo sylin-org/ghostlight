@@ -21,7 +21,8 @@
           attached: false,
           attaching: null,
           detaching: null,
-          dialog: null
+          dialog: null,
+          domains: new Set()
         };
         tabs.set(tabId, state);
       }
@@ -43,6 +44,7 @@
           state.attached = true;
           try {
             await debuggerApi.sendCommand({ tabId }, "Page.enable");
+            state.domains.add("Page");
           } catch (error) {
             try { await debuggerApi.detach({ tabId }); } catch (_detachError) { /* already detached */ }
             state.attached = false;
@@ -64,6 +66,7 @@
         state.detaching = (async () => {
           try { await debuggerApi.detach({ tabId }); } catch (_error) { /* already detached */ }
           state.attached = false;
+          state.domains.clear();
         })();
       }
       try {
@@ -115,10 +118,30 @@
       return dialog ? { ...dialog } : null;
     }
 
+    async function enableDomain(tabId, domain) {
+      const state = tabState(tabId);
+      await ensureAttached(tabId, state);
+      if (state.domains.has(domain)) return false;
+      await debuggerApi.sendCommand({ tabId }, `${domain}.enable`);
+      state.domains.add(domain);
+      return true;
+    }
+
+    async function disableDomain(tabId, domain) {
+      const state = tabs.get(tabId);
+      if (!state?.attached || !state.domains.has(domain) || domain === "Page") return;
+      try {
+        await debuggerApi.sendCommand({ tabId }, `${domain}.disable`);
+      } finally {
+        state.domains.delete(domain);
+      }
+    }
+
     function detached(tabId) {
       const state = tabs.get(tabId);
       if (!state) return;
       state.attached = false;
+      state.domains.clear();
       prune(tabId, state);
     }
 
@@ -138,6 +161,7 @@
         if (state.attached) {
           try { await debuggerApi.detach({ tabId }); } catch (_error) { /* already detached */ }
           state.attached = false;
+          state.domains.clear();
         }
       }));
       tabs.clear();
@@ -154,6 +178,8 @@
       openDialog,
       closeDialog,
       currentDialog,
+      enableDomain,
+      disableDomain,
       detached,
       forget,
       detachAll,

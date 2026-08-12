@@ -89,8 +89,8 @@ use an older adapter for every capability that adapter advertises.
 
 The service bridge has generic messages for hello, catalog, invoke, cancel, result, and error.
 Invocation carries a tool name and JSON input. Catalog and result payloads are opaque to the MCP
-edge. A small typed content vocabulary lets the edge render bounded images without knowing which
-tool produced them. MCP request ids and protocol revisions do not cross this bridge.
+edge. One small typed content vocabulary lets the edge render bounded screenshots and GIFs without
+knowing which tool produced them. MCP request ids and protocol revisions do not cross this bridge.
 
 The browser bridge has generic messages for hello, primitive request, receipt, browser event,
 cancel, and presentation. It carries a closed primitive vocabulary but no model-facing tool
@@ -115,8 +115,10 @@ a new active runtime session.
 
 ### Language
 
-Owns the catalog, JSON schemas, descriptions, decoder defaults, validation, typed operations,
-and mapping of domain outcomes to language facts. Nothing outside this context defines a tool.
+Owns the one 22-tool catalog, JSON schemas, descriptions, examples, MCP annotations, decoder
+defaults, validation, typed operations, output schemas, and mapping of domain outcomes to language
+facts. Nothing outside this context defines a tool or an alternate client dialect. Conditional
+requirements are present in the advertised schema rather than left only to runtime validation.
 
 ### Work
 
@@ -129,6 +131,12 @@ Owns MCP sessions, controlled tabs, opaque tab and target handles, document gene
 view handles and viewport transforms, selection, ownership, leases, child-tab adoption, stale
 detection, and release on disconnect.
 
+### Recording
+
+Owns the model-facing record actions, start and disclosure authorization, basic GIF rendering, and
+delivery truth. It has no recording registry or capture maintenance loop. ADR-0108 places recording
+identity, frames, bounds, deadlines, stop, retention, and erase in the extension.
+
 ### Governance
 
 Owns authority loading, immutable snapshots, request restriction, capabilities, protected-host
@@ -137,9 +145,12 @@ Operation handlers see only the governance facade.
 
 ### Browser
 
-Defines the physical primitive port and observed facts: tabs, navigation commits, readiness,
-semantic targets, text, screenshots, input metadata, dialogs, and effect receipts. Transport and
-Chrome details implement this port outside the context.
+Defines the physical primitive port and observed facts: tabs, windows, navigation commits,
+readiness, semantic targets, text, screenshots, input metadata, dialogs, recording requests and
+receipts, bounded console and network entries, and effect receipts. Transport and Chrome details
+implement this port outside the context. Diagnostic product defaults, authorization, host filtering,
+and model-facing results remain in the orchestrator. Bounded problem/all projection, literal
+matching, opaque cursors, and URL sanitization terminate in the extension at the Chromium shore.
 
 ### Presentation
 
@@ -205,13 +216,14 @@ client success. Reactions are direct typed function calls over the closed enum, 
 
 ## Browser primitives
 
-The closed adapter vocabulary is: list tabs, focus tab, atomically open and group a URL, navigate, traverse history,
-reload, close tab, read text, inspect, find, screenshot, describe targets, activate a locator or
-physical point, scroll, set zoom, hover, fill, type text, press key, drag, upload supplied bytes,
-evaluate script, observe condition, inspect dialog, handle dialog, cancel, and present. Receipts
-state whether no effect, a committed effect, or an uncertain effect was observed. Browser events
-report document commits, readiness, dialog state, child-tab creation, tab close, control intent,
-and disconnect.
+The closed adapter vocabulary is: list tabs, focus tab, atomically open and group a URL, navigate,
+traverse history, reload, close tab, read text, inspect, find, screenshot, describe targets,
+activate a locator or physical point, scroll, set zoom, resize a window, hover, fill, type text,
+press key, drag, upload supplied bytes, evaluate script, observe condition, inspect dialog, handle
+dialog, start and stop screencast capture, observe bounded console and network entries, cancel, and
+present. Receipts state whether no effect, a committed effect, or an uncertain effect was observed.
+Browser events report document commits, readiness, dialog state, child-tab creation, tab close,
+bounded diagnostic entries, control intent, and disconnect.
 
 Ordinary product features compose these primitives only in the orchestrator. A bridge or adapter
 change requires a new physical Chromium capability or a bridge protocol requirement.
@@ -226,6 +238,20 @@ File upload is a cross-boundary capability with explicit owners. The language ac
 absolute paths. The orchestrator validates and reads only those files after governance admission,
 then sends bounded names, media types, and bytes through the physical bridge. The extension creates
 browser `File` objects for the already selected file input. The relay never reads paths or files.
+
+Recording follows one-owner semantics. The extension's plural registry owns Chrome screencast
+start, frame acknowledgement, identity, compressed frames, fixed bounds, autonomous stop, frozen
+retention, erase, and the truthful recording indicator. The orchestrator sends only start, status,
+stop, read, and discard requests. A read receipt carries bounded JPEG frames only after governance;
+the orchestrator renders the basic GIF and owns client or page delivery truth. Relays remain opaque.
+No recording bytes enter extension storage, service storage, logs, audit, or restart state.
+
+Diagnostics are off until an authorized `browser_diagnose` call enables bounded volatile rings for
+one owned tab. The extension captures only the Chrome event facts that must originate there, owns
+the bounded problem/all projection, literal matching, opaque cursor, and URL-sanitization
+mechanisms, and never writes them to extension storage. The orchestrator owns authorization and
+applies cross-origin authority plus final filtering before any model disclosure. Reads are
+non-destructive and visually quiet. Diagnostic payloads never enter audit or presentation.
 
 ## Governance
 

@@ -1,6 +1,7 @@
 //! The physical browser port and authenticated relay-backed adapter implementation.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -8,13 +9,20 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use ghostlight_bridge::browser::{
-    AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame, BrowserOutcome, BrowserRequest,
-    RuntimeControlState, ADAPTER_PROTOCOL_MAJOR,
+    adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
+    BrowserOutcome, BrowserRequest, RuntimeControlState, ADAPTER_PROTOCOL_MAJOR,
+    COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
 };
-use ghostlight_bridge::framing::{read_native, write_native};
+use ghostlight_bridge::framing::{read_native, write_length_frame, write_native, FrameError};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
+
+// Chromium accepts at most 1 MiB from a native host. Keep both direct frames
+// and base64-wrapped chunks comfortably below that physical boundary.
+const DIRECT_NATIVE_MESSAGE_BYTES: usize = 768 * 1024;
 
 /// A synchronous physical primitive port used only by the orchestrator executor.
 pub trait BrowserPort: Send + Sync {
@@ -180,10 +188,8 @@ impl RelayBrowserPort {
             .map_err(|error| BrowserError::Protocol(error.to_string()))?;
         Ok(())
     }
-}
 
-impl BrowserPort for RelayBrowserPort {
-    fn call(
+    fn call_inner(
         &self,
         workspace: &str,
         command: BrowserCommand,
@@ -199,7 +205,7 @@ impl BrowserPort for RelayBrowserPort {
         let correlation = format!("physical_{}", Uuid::new_v4().simple());
         let (sender, receiver) = mpsc::channel();
         let required_capability = command.required_capability();
-        let (writer, pending) = {
+        let (writer, pending, chunked_commands) = {
             let connection = lock(&self.connection);
             let Some(connection) = connection.as_ref() else {
                 return Err(BrowserError::DisconnectedBeforeDispatch);
@@ -218,9 +224,14 @@ impl BrowserPort for RelayBrowserPort {
             (
                 Arc::clone(&connection.writer),
                 Arc::clone(&connection.pending),
+                connection
+                    .capabilities
+                    .get(adapter_capability::CHUNKED_COMMANDS)
+                    .copied()
+                    .unwrap_or_default()
+                    >= 1,
             )
         };
-        lock(&pending).insert(correlation.clone(), sender);
         let frame = BrowserFrame::Request {
             request: BrowserRequest {
                 correlation: correlation.clone(),
@@ -228,7 +239,20 @@ impl BrowserPort for RelayBrowserPort {
                 command,
             },
         };
-        if write_native(&mut *lock(&writer), &frame).is_err() {
+        let payload = serde_json::to_vec(&frame)
+            .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+        if payload.len() > COMMAND_TRANSFER_MAX_BYTES {
+            return Err(BrowserError::Primitive(format!(
+                "browser request exceeds the {COMMAND_TRANSFER_MAX_BYTES}-byte transfer bound"
+            )));
+        }
+        if payload.len() > DIRECT_NATIVE_MESSAGE_BYTES && !chunked_commands {
+            return Err(BrowserError::Primitive(
+                "adapter does not support chunked command transfers".into(),
+            ));
+        }
+        lock(&pending).insert(correlation.clone(), sender);
+        if write_request_payload(&mut *lock(&writer), &payload, &correlation).is_err() {
             lock(&pending).remove(&correlation);
             return Err(BrowserError::DisconnectedAfterDispatch);
         }
@@ -240,6 +264,18 @@ impl BrowserPort for RelayBrowserPort {
             deadline,
             cancelled,
         )
+    }
+}
+
+impl BrowserPort for RelayBrowserPort {
+    fn call(
+        &self,
+        workspace: &str,
+        command: BrowserCommand,
+        deadline: Instant,
+        cancelled: &AtomicBool,
+    ) -> Result<BrowserOutcome, BrowserError> {
+        self.call_inner(workspace, command, deadline, cancelled)
     }
 
     fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {
@@ -253,6 +289,45 @@ impl BrowserPort for RelayBrowserPort {
         }
         Ok(())
     }
+}
+
+fn write_request_payload(
+    writer: &mut impl std::io::Write,
+    payload: &[u8],
+    correlation: &str,
+) -> Result<(), FrameError> {
+    if payload.len() <= DIRECT_NATIVE_MESSAGE_BYTES {
+        return write_length_frame(writer, payload);
+    }
+    if payload.len() > COMMAND_TRANSFER_MAX_BYTES {
+        return Err(FrameError::TooLarge);
+    }
+
+    let count = payload.len().div_ceil(COMMAND_CHUNK_PAYLOAD_BYTES);
+    let count = u16::try_from(count).map_err(|_| FrameError::TooLarge)?;
+    if count > COMMAND_TRANSFER_MAX_CHUNKS {
+        return Err(FrameError::TooLarge);
+    }
+    let total_bytes = u32::try_from(payload.len()).map_err(|_| FrameError::TooLarge)?;
+    let transfer_id = format!("transfer_{}", Uuid::new_v4().simple());
+    let mut sha256 = String::with_capacity(64);
+    for byte in Sha256::digest(payload) {
+        write!(&mut sha256, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+
+    for (index, chunk) in payload.chunks(COMMAND_CHUNK_PAYLOAD_BYTES).enumerate() {
+        let chunk_frame = BrowserFrame::CommandChunk {
+            transfer_id: transfer_id.clone(),
+            correlation: correlation.into(),
+            index: u16::try_from(index).map_err(|_| FrameError::TooLarge)?,
+            count,
+            total_bytes,
+            sha256: sha256.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(chunk),
+        };
+        write_native(writer, &chunk_frame)?;
+    }
+    Ok(())
 }
 
 fn await_receipt(

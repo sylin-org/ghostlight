@@ -99,16 +99,16 @@ Write-Host ''
 Write-Host ('{0,-14} {1,-10} {2}' -f 'STEP', 'STATUS', 'WHAT HAPPENED')
 Write-Host ('{0,-14} {1,-10} {2}' -f '----', '------', '-------------')
 
-$opened = Step 'open' 'browser_open_page' @{ url = $Url }
+$opened = Step 'open' 'browser_navigate' @{ url = $Url }
 $tab = $opened.facts.tab
 Start-Sleep -Seconds $SetupHold
 
 # One read establishes that the agent understands the surface before it touches anything.
-$null = Step 'scan' 'browser_read_page' @{ tab = $tab }
+$null = Step 'scan' 'browser_read' @{ tab = $tab }
 Start-Sleep -Seconds $ScanHold
 
 # One inventory, then reuse: the handles stay good while the document does.
-$controls = (Step 'inventory' 'browser_inspect_page' @{ tab = $tab; kind = 'controls' }).facts.items
+$controls = (Step 'inventory' 'browser_inspect' @{ tab = $tab; scope = 'controls' }).facts.items
 $fields = @{
     project = Find-Target $controls 'textbox' 'Project'
     owner   = Find-Target $controls 'textbox' 'Owner'

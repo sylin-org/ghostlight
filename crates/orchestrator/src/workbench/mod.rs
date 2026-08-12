@@ -1184,7 +1184,7 @@ mod tests {
         projection.react(&DomainEvent::WorkStarted {
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
-            tool: "browser_read_page".into(),
+            tool: "browser_read".into(),
             activity: PresentationActivity::Read,
             capability: Capability::Read,
         });
@@ -1197,7 +1197,7 @@ mod tests {
         let record = AuditRecord::now(
             "invocation_1",
             "workspace_1",
-            "browser_read_page",
+            "browser_read",
             Capability::Read,
             snapshot.id(),
             Decision {
@@ -1217,7 +1217,7 @@ mod tests {
         sink.record(&record).unwrap();
 
         assert!(projection.operations().is_empty());
-        assert_eq!(projection.history()[0].tool, "browser_read_page");
+        assert_eq!(projection.history()[0].tool, "browser_read");
         assert_eq!(
             projection.history()[0].observed.host.as_deref(),
             Some("example.com"),
@@ -1296,7 +1296,7 @@ mod tests {
         projection.react(&DomainEvent::WorkStarted {
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
-            tool: "browser_run_script".into(),
+            tool: "browser_evaluate".into(),
             activity: PresentationActivity::Script,
             capability: Capability::Execute,
         });
@@ -1306,7 +1306,7 @@ mod tests {
                 AuditRecord::now(
                     "invocation_1",
                     "workspace_1",
-                    "browser_run_script",
+                    "browser_evaluate",
                     Capability::Execute,
                     "authority_1",
                     Decision {
@@ -1347,7 +1347,7 @@ mod tests {
         projection.react(&DomainEvent::WorkStarted {
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
-            tool: "browser_read_page".into(),
+            tool: "browser_read".into(),
             activity: PresentationActivity::Read,
             capability: Capability::Read,
         });
@@ -1403,7 +1403,7 @@ mod tests {
         projection.react(&DomainEvent::WorkStarted {
             invocation: "invocation_2".into(),
             workspace: "workspace_1".into(),
-            tool: "browser_list_tabs".into(),
+            tool: "browser_tabs".into(),
             activity: PresentationActivity::Read,
             capability: Capability::Read,
         });

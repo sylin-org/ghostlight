@@ -63,22 +63,26 @@ Sources: [Playwright MCP](https://github.com/microsoft/playwright-mcp) and the
 ### Chrome DevTools MCP
 
 Chrome DevTools MCP focuses on automation plus browser debugging and performance analysis. It can
-connect to a running Chrome instance and is the natural choice when traces, DevTools diagnostics,
-or performance evidence are the result you need. Its documentation also explains its usage
-statistics and performance-data controls; review those settings against your environment.
+connect to a running Chrome instance and is the natural choice when performance traces, request
+bodies and headers, or full DevTools evidence are the result you need. Its documentation also
+explains its usage statistics and performance-data controls; review those settings against your
+environment.
 
 Choose Ghostlight when the central job is a visible user-session workflow with optional local
-capability/host policy, payload-free audit, and explicit recovery. Ghostlight 1.0 does not expose
-console traces, network capture, or performance tooling.
+capability/host policy, payload-free audit, and explicit recovery. Ghostlight 1.0 includes one
+opt-in bounded diagnostic read for console problems and sanitized request metadata. It deliberately
+omits request and response bodies, headers, cookies, authorization, post data, and performance
+tracing, so it is not a DevTools replacement.
 
 Source: [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp).
 
 ### Claude in Chrome
 
 Anthropic's first-party integration works in a signed-in visible browser and supports forms,
-debugging, and GIF capture from supported Claude surfaces. It is the simplest choice when Claude
-is the only assistant, its plan and platform requirements fit, and its browser permission model is
-enough.
+debugging, and GIF capture from supported Claude surfaces. Ghostlight also provides bounded
+memory-only GIF recording, but neither product should be chosen on that feature alone. Claude in
+Chrome is the simplest choice when Claude is the only assistant, its plan and platform requirements
+fit, and its browser permission model is enough.
 
 Choose Ghostlight when the same browser capability must work through compatible non-Anthropic MCP
 clients, or when local capability/host authority and payload-free audit are part of the operating

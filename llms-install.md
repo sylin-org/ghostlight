@@ -28,8 +28,8 @@ MCP client; it negotiates with the persistent orchestrator.
 
 Use only the catalog returned by the client. For the first proof:
 
-1. Call `browser_open_page` with `{"url":"https://example.com"}`.
-2. Call `browser_read_page` with the returned `tab`.
+1. Call `browser_navigate` with `{"url":"https://example.com"}`.
+2. Call `browser_read` with the returned `tab`.
 3. Report the heading and the opaque tab handle.
 4. Do not click, type, submit, upload, or run a script during this proof.
 
@@ -39,19 +39,21 @@ extension, and visible browser path. On failure, ask the user to open **Status**
 
 ## 3. Choose the narrowest tool
 
-- Use `browser_list_tabs` to see controlled tabs and `browser_activate_tab` to bring one into view.
-- Use `browser_open_page`, `browser_navigate_page`, `browser_navigate_history`, and
-  `browser_reload_page` for distinct navigation intents.
-- Read with `browser_read_page`; inspect structure with `browser_inspect_page`; obtain a semantic
+- Use `browser_tabs` with `list`, `focus`, or `close` for controlled tab state.
+- Use `browser_navigate` for a URL and `browser_history` for back, forward, or reload.
+- Use `browser_window` for zoom and physical window size.
+- Read with `browser_read`; inspect structure with `browser_inspect`; obtain a semantic
   target with `browser_find`.
 - Prefer a semantic target for click, hover, scroll, fill, type, drag, and upload. Use screenshot
-  coordinates only with the current `view` returned by `browser_take_screenshot`.
-- Use `browser_run_sequence` only for a short, fully specified sequence whose later inputs do not
+  coordinates only with the current `view` returned by `browser_screenshot`.
+- Use `browser_sequence` only for a short, fully specified sequence whose later inputs do not
   depend on earlier page results.
-- Use `browser_run_script` only when explicit execute authority and page JavaScript are genuinely
+- Use `browser_evaluate` only when explicit execute authority and page JavaScript are genuinely
   required.
-- Use `browser_wait` for an explicit observable condition and `browser_handle_dialog` for the
+- Use `browser_wait` for an explicit observable condition and `browser_dialog` for the
   currently visible browser dialog.
+- Use `browser_record` for a bounded memory-only recording and `browser_diagnose` for opt-in,
+  problem-focused console or network evidence.
 
 The complete schemas, defaults, capabilities, and terminal result envelope are in
 [`docs/1.0/LANGUAGE.md`](docs/1.0/LANGUAGE.md).
@@ -62,7 +64,7 @@ The complete schemas, defaults, capabilities, and terminal result envelope are i
   prove its connector is alive.
 - **Browser unavailable:** ask the user to open Status, enable the matching extension, and keep
   Ghostlight running in the tray.
-- **Ambiguous tab:** call `browser_list_tabs`, then pass the exact `tab`.
+- **Ambiguous tab:** call `browser_tabs` with `{"action":"list"}`, then pass the exact `tab`.
 - **Stale target or view:** inspect, find, or capture again. Handles are tied to current document
   and viewport state.
 - **Transport loss during an effectful call:** inspect current browser state before deciding

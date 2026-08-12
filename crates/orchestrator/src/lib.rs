@@ -4,6 +4,7 @@ pub mod browser;
 pub mod cli;
 pub mod desktop;
 pub mod events;
+mod gif_output;
 pub mod governance;
 pub mod install;
 pub mod language;

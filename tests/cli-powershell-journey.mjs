@@ -213,8 +213,7 @@ try {
     .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const tools = records.map((record) => record.tool);
   for (const tool of [
-    "browser_open_page", "browser_list_tabs", "browser_read_page",
-    "browser_take_screenshot", "browser_close_tab"
+    "browser_navigate", "browser_tabs", "browser_read", "browser_screenshot"
   ]) {
     assert.ok(tools.includes(tool), `${tool} never reached the executor`);
   }

@@ -842,6 +842,28 @@ impl WorkspaceLease {
         workspace.views.retain(|_, view| &view.tab != tab);
         Ok(())
     }
+
+    /// Invalidate every view whose physical tab belongs to a resized browser window.
+    pub fn invalidate_views_for_physical(
+        &self,
+        physical_ids: &[u64],
+    ) -> Result<(), WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let affected: Vec<_> = workspace
+            .tabs
+            .iter()
+            .filter(|(_, tab)| physical_ids.contains(&tab.physical_id))
+            .map(|(handle, _)| handle.clone())
+            .collect();
+        workspace
+            .views
+            .retain(|_, view| !affected.contains(&view.tab));
+        Ok(())
+    }
 }
 
 impl Drop for WorkspaceLease {

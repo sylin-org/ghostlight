@@ -98,8 +98,9 @@ test("a new service epoch clears stale operation recovery state", async () => {
     records: [{ id: "physical_old", phase: "dispatched" }]
   });
   const engine = engineApi.create(store);
-  await engine.activate("service_new");
+  assert.equal(await engine.activate("service_new"), true);
   assert.deepEqual(store.value(), { epoch: "service_new", records: [] });
+  assert.equal(await engine.activate("service_new"), false);
 });
 
 test("the recovery ledger is bounded without evicting unacknowledged effects", async () => {

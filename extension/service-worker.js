@@ -1,4 +1,4 @@
-importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/debugger.js", "lib/presentation-queue.js");
+importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/debugger.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js");
 
 const shared = globalThis.GhostlightShared;
 const stateApi = globalThis.GhostlightState;
@@ -9,6 +9,19 @@ const operationEngine = globalThis.GhostlightOperationEngine.create({
   save: async (value) => chrome.storage.session.set({ [stateApi.OPERATIONS_KEY]: value })
 });
 const debuggerLifecycle = globalThis.GhostlightDebuggerLifecycle.create(chrome.debugger);
+const diagnostics = globalThis.GhostlightDiagnostics.create({
+  onExpired: (tabId) => {
+    disableDiagnosticCapture([tabId]).catch(() => {});
+  }
+});
+const commandChunks = globalThis.GhostlightCommandChunks.create({
+  decodeBase64: (value) => Uint8Array.from(atob(value), (character) => character.charCodeAt(0)),
+  decodeUtf8: (bytes) => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+  sha256Hex: async (bytes) => {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+});
 const navigationWatchers = new Map();
 const cancelled = new Set();
 const activity = new Map();
@@ -25,6 +38,13 @@ let liveState = {
   control_state: "active",
   last_error: null
 };
+
+const recording = globalThis.GhostlightRecording.create({
+  onStop: (tabId) => {
+    chrome.debugger.sendCommand({ tabId }, "Page.stopScreencast").catch(() => {});
+    publishUiState();
+  }
+});
 
 function send(frame) {
   if (!nativePort) return false;
@@ -73,7 +93,7 @@ function uiSnapshot() {
     adapter_version: chrome.runtime.getManifest().version,
     browser_id: browserId,
     attached_tabs: debuggerLifecycle.attachedCount(),
-    recording_tabs: 0,
+    recording_tabs: recording.count(),
     unseen_denials: presentationQueue.size(),
     activity: Array.from(activity.values()).slice(-8),
     last_error: preferences.diagnostics ? liveState.last_error : liveState.last_error ? "The local Ghostlight service is unavailable." : null
@@ -82,7 +102,9 @@ function uiSnapshot() {
 
 function updateBadge() {
   const unseen = presentationQueue.size();
-  const badge = unseen > 0 ? { text: "!", color: "#ef4444" } : stateApi.badge(liveState);
+  const badge = unseen > 0
+    ? { text: "!", color: "#ef4444" }
+    : stateApi.badge({ ...liveState, recording_tabs: recording.count() });
   chrome.action.setBadgeBackgroundColor({ color: badge.color });
   chrome.action.setBadgeText({ text: badge.text });
   chrome.action.setTitle({ title: unseen > 0 ? "Ghostlight has an unseen guardrail notice" : "Ghostlight in Browser" });
@@ -112,10 +134,16 @@ async function connectNative() {
     if (!browserId) await initializeLocalState();
     const port = chrome.runtime.connectNative(HOST_NAME);
     nativePort = port;
-    port.onMessage.addListener(onNativeMessage);
+    port.onMessage.addListener((frame) => {
+      if (nativePort !== port) return;
+      onNativeMessage(frame, port).catch((error) => {
+        setConnection({ last_error: shared.bounded(error?.message ?? error, 500) });
+      });
+    });
     port.onDisconnect.addListener(() => {
       if (nativePort !== port) return;
       nativePort = null;
+      settleServiceBoundaryState().catch(() => {});
       setConnection({ connected: false, service_version: null, last_error: chrome.runtime.lastError?.message || "Native connection ended." });
       broadcastRuntimeState("disconnected").catch(() => {});
       chrome.alarms.create("ghostlight-reconnect", { delayInMinutes: 0.05 });
@@ -141,6 +169,7 @@ chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "ghostlight-re
 
 chrome.webNavigation.onCommitted.addListener((details) => {
   if (details.frameId !== 0) return;
+  recording.noteUrl(details.tabId, details.url);
   const watcher = navigationWatchers.get(details.tabId);
   watcher?.commits.push(details.url);
   send(shared.browserEventFrame({ event: "document_committed", tab_id: details.tabId, url: details.url, correlation: watcher?.correlation }));
@@ -186,16 +215,57 @@ chrome.tabs.onAttached.addListener((tabId) => {
     .catch((error) => setConnection({ last_error: shared.bounded(error?.message ?? error, 500) }));
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
+  const activeRecording = recording.interruptTab(tabId, "browser_detached");
+  diagnostics.forget(tabId);
   debuggerLifecycle.forget(tabId);
   topology.forget(tabId).catch(() => {});
   if (presentationQueue.forget(tabId)) {
     persistPresentationQueue().then(publishUiState).catch(() => {});
   }
+  if (activeRecording) publishUiState();
   send(shared.browserEventFrame({ event: "tab_closed", tab_id: tabId }));
 });
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId) return;
+  if (method === "Page.screencastFrame") {
+    handleScreencastFrame(source.tabId, params).catch((error) => {
+      setConnection({ last_error: shared.bounded(error?.message ?? error, 500) });
+    });
+    return;
+  }
+  if (method === "Runtime.executionContextCreated") {
+    diagnostics.executionContextCreated(source.tabId, params);
+    return;
+  }
+  if (method === "Runtime.executionContextDestroyed") {
+    diagnostics.executionContextDestroyed(source.tabId, params);
+    return;
+  }
+  if (method === "Runtime.executionContextsCleared") {
+    diagnostics.executionContextsCleared(source.tabId);
+    return;
+  }
+  if (method === "Runtime.consoleAPICalled") {
+    diagnostics.consoleAPICalled(source.tabId, params);
+    return;
+  }
+  if (method === "Runtime.exceptionThrown") {
+    diagnostics.exceptionThrown(source.tabId, params);
+    return;
+  }
+  if (method === "Network.requestWillBeSent") {
+    diagnostics.requestWillBeSent(source.tabId, params);
+    return;
+  }
+  if (method === "Network.responseReceived") {
+    diagnostics.responseReceived(source.tabId, params);
+    return;
+  }
+  if (method === "Network.loadingFailed") {
+    diagnostics.loadingFailed(source.tabId, params);
+    return;
+  }
   if (method === "Page.javascriptDialogOpening") {
     debuggerLifecycle.openDialog(source.tabId, params.type);
     send(shared.browserEventFrame({ event: "dialog_changed", tab_id: source.tabId, present: true, dialog_type: params.type || "unknown" }));
@@ -205,17 +275,106 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     send(shared.browserEventFrame({ event: "dialog_changed", tab_id: source.tabId, present: false, dialog_type: "unknown" }));
   }
 });
-chrome.debugger.onDetach.addListener((source) => { if (source.tabId) debuggerLifecycle.detached(source.tabId); });
+chrome.debugger.onDetach.addListener((source) => {
+  if (!source.tabId) return;
+  const activeRecording = recording.interruptTab(source.tabId, "browser_detached");
+  diagnostics.forget(source.tabId);
+  debuggerLifecycle.detached(source.tabId);
+  publishUiState();
+});
 
-async function onNativeMessage(frame) {
+async function handleScreencastFrame(tabId, params) {
+  try {
+    await chrome.debugger.sendCommand({ tabId }, "Page.screencastFrameAck", { sessionId: params.sessionId });
+  } catch (_error) {
+    // A detached target has no compositor flow left to unblock.
+  }
+  recording.append(tabId, params.data, "screencast", Date.now());
+}
+
+async function disableDiagnosticCapture(tabIds) {
+  await Promise.all((tabIds ?? []).flatMap((tabId) => ["Runtime", "Network"]
+    .map((domain) => debuggerLifecycle.disableDomain(tabId, domain).catch(() => {}))));
+}
+
+async function settleServiceBoundaryState() {
+  commandChunks.clear();
+  await interruptAllRecordings("service_disconnected");
+  await disableDiagnosticCapture(diagnostics.clearAll());
+}
+
+async function readDiagnostics(command) {
+  if (!Number.isSafeInteger(command.limit) || command.limit < 1 || command.limit > 200) {
+    throw new RangeError("diagnostic limit must be from 1 through 200");
+  }
+  const captureStarted = diagnostics.enable(command.tab_id);
+  let sourceStarted = false;
+  try {
+    if (command.source === "both" || command.source === "console") {
+      sourceStarted = await debuggerLifecycle.enableDomain(command.tab_id, "Runtime") || sourceStarted;
+    }
+    if (command.source === "both" || command.source === "network") {
+      sourceStarted = await debuggerLifecycle.enableDomain(command.tab_id, "Network") || sourceStarted;
+    }
+  } catch (error) {
+    if (captureStarted) {
+      diagnostics.forget(command.tab_id);
+      await disableDiagnosticCapture([command.tab_id]).catch(() => {});
+    }
+    throw error;
+  }
+  const result = diagnostics.read(command.tab_id, {
+    source: command.source,
+    detail: command.detail,
+    match_text: command.match_text,
+    after: command.after,
+    limit: command.limit
+  });
+  result.capture_started = result.capture_started || sourceStarted;
+  return { outcome: "diagnostics_read", tab_id: command.tab_id, ...result };
+}
+
+async function clearDiagnostics(command) {
+  const clearedCount = diagnostics.forgetMany(command.tab_ids);
+  await disableDiagnosticCapture(command.tab_ids);
+  return { outcome: "diagnostics_cleared", cleared_count: clearedCount };
+}
+
+async function onNativeMessage(frame, sourcePort = nativePort) {
+  if (sourcePort && nativePort !== sourcePort) return;
+  if (frame.kind === "command_chunk") {
+    await browserNegotiation;
+    if (sourcePort && nativePort !== sourcePort) return;
+    commandChunks.accept(
+      frame,
+      (requestFrame) => {
+        onNativeMessage(requestFrame, sourcePort).catch((error) => {
+          setConnection({ last_error: shared.bounded(error?.message ?? error, 500) });
+        });
+      },
+      (correlation, reason) => send({
+        kind: "error",
+        correlation,
+        code: "command_chunk_rejected",
+        message: shared.bounded(reason, 500),
+        effect_unknown: false
+      })
+    );
+    return;
+  }
   if (frame.kind === "backend_unavailable") {
+    await settleServiceBoundaryState();
     setConnection({ connected: false, service_version: null, last_error: "The local Ghostlight service is unavailable." });
     await broadcastRuntimeState("disconnected");
     return;
   }
   if (frame.kind === "hello_accepted") {
-    browserNegotiation = operationEngine.activate(frame.service_epoch);
+    browserNegotiation = (async () => {
+      const changed = await operationEngine.activate(frame.service_epoch);
+      if (changed) await settleServiceBoundaryState();
+    })();
     await browserNegotiation;
+    if (sourcePort && nativePort !== sourcePort) return;
     setConnection({
       connected: true,
       compatible: frame.major === shared.ADAPTER_PROTOCOL_MAJOR,
@@ -243,6 +402,7 @@ async function onNativeMessage(frame) {
   const request = frame.request;
   try {
     await browserNegotiation;
+    if (sourcePort && nativePort !== sourcePort) return;
     const result = await operationEngine.execute(request.correlation, () => dispatch(request));
     send({ kind: "receipt", receipt: { correlation: request.correlation, result } });
   } catch (error) {
@@ -305,6 +465,7 @@ async function dispatch(request) {
     await chrome.tabs.setZoom(command.tab_id, command.zoom);
     return { outcome: "zoomed", tab_id: command.tab_id, zoom: await chrome.tabs.getZoom(command.tab_id) };
   }
+  if (command.command === "resize_window") return resizeWindow(command);
   if (command.command === "hover") return hoverLocator(command);
   if (command.command === "hover_point") return hoverPoint(command);
   if (command.command === "fill") return fill(request.correlation, command);
@@ -323,6 +484,13 @@ async function dispatch(request) {
   }
   if (command.command === "inspect_dialog") return inspectDialog(command.tab_id);
   if (command.command === "handle_dialog") return handleDialog(command);
+  if (command.command === "read_diagnostics") return readDiagnostics(command);
+  if (command.command === "clear_diagnostics") return clearDiagnostics(command);
+  if (command.command === "start_recording") return startRecording(request.workspace, command);
+  if (command.command === "status_recording") return recordingResult("recording_status", recording.status(request.workspace, command.recording_id));
+  if (command.command === "stop_recording") return stopRecording(request.workspace, command);
+  if (command.command === "read_recording") return recordingResult("recording_read", recording.read(request.workspace, command.recording_id));
+  if (command.command === "discard_recording") return discardRecording(request.workspace, command);
   if (command.command === "present") {
     updateActivity(command.signal, request.workspace);
     return { outcome: "presented", rendered: await deliverPresentation(request.workspace, command.signal) };
@@ -410,6 +578,139 @@ function physicalTab(tab) {
   };
 }
 
+async function resizeWindow(command) {
+  if (!Number.isSafeInteger(command.width) || command.width < 320 || command.width > 7680) {
+    throw new RangeError("window width must be from 320 through 7680");
+  }
+  if (!Number.isSafeInteger(command.height) || command.height < 240 || command.height > 4320) {
+    throw new RangeError("window height must be from 240 through 4320");
+  }
+  const tab = await chrome.tabs.get(command.tab_id);
+  let resized;
+  try {
+    resized = await chrome.windows.update(tab.windowId, { width: command.width, height: command.height });
+    const affected = (await chrome.tabs.query({ windowId: tab.windowId }))
+      .map((item) => item.id)
+      .filter(Number.isSafeInteger)
+      .sort((left, right) => left - right);
+    if (!affected.includes(command.tab_id)) affected.push(command.tab_id);
+    affected.sort((left, right) => left - right);
+    return {
+      outcome: "window_resized",
+      tab_id: command.tab_id,
+      width: Number.isSafeInteger(resized?.width) ? resized.width : command.width,
+      height: Number.isSafeInteger(resized?.height) ? resized.height : command.height,
+      affected_tab_ids: affected
+    };
+  } catch (error) {
+    if (resized) error.effectUnknown = true;
+    throw error;
+  }
+}
+
+async function interruptAllRecordings(reason) {
+  const summaries = recording.interruptAll(reason);
+  await Promise.all(summaries.map((summary) =>
+    chrome.debugger.sendCommand({ tabId: summary.tab_id }, "Page.stopScreencast").catch(() => {})));
+  publishUiState();
+}
+
+async function captureRecordingFrame(state, frameKind) {
+  await ensureDebugger(state.tabId);
+  await content(state.tabId, { kind: "presentation_visibility", hidden: true }, true);
+  try {
+    const metrics = await chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.getLayoutMetrics");
+    const visual = metrics.cssVisualViewport || metrics.visualViewport;
+    const clip = {
+      x: visual.pageX ?? 0,
+      y: visual.pageY ?? 0,
+      width: Math.max(1, visual.clientWidth),
+      height: Math.max(1, visual.clientHeight),
+      scale: Math.max(0.05, Math.min(1, globalThis.GhostlightRecording.MAX_WIDTH / visual.clientWidth, globalThis.GhostlightRecording.MAX_HEIGHT / visual.clientHeight))
+    };
+    const capture = await chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.captureScreenshot", {
+      format: "jpeg",
+      quality: globalThis.GhostlightRecording.JPEG_QUALITY,
+      clip,
+      captureBeyondViewport: true,
+      fromSurface: true
+    });
+    const dimensions = await imageDimensions(capture.data, clip);
+    if (dimensions.width > globalThis.GhostlightRecording.MAX_WIDTH || dimensions.height > globalThis.GhostlightRecording.MAX_HEIGHT) {
+      throw new Error("recording frame exceeded its negotiated dimensions");
+    }
+    return recording.append(state.tabId, capture.data, frameKind, Date.now());
+  } finally {
+    await content(state.tabId, { kind: "presentation_visibility", hidden: false }, true);
+    await detachDebugger(state.tabId);
+  }
+}
+
+async function startRecording(workspace, command) {
+  const tab = await chrome.tabs.get(command.tab_id);
+  const started = recording.start(workspace, command.tab_id, tab.url);
+  if (started.existing) return { outcome: "recording_started", summary: started.existing, existing: true };
+  const state = recording.activeForTab(command.tab_id);
+  let screencastAttempted = false;
+  try {
+    await captureRecordingFrame(state, "seed").catch(() => false);
+    if (!recording.activeForTab(command.tab_id)) throw new Error("recording ended during startup");
+    await debuggerLifecycle.enableDomain(command.tab_id, "Page");
+    screencastAttempted = true;
+    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.startScreencast", {
+      format: "jpeg",
+      quality: globalThis.GhostlightRecording.JPEG_QUALITY,
+      maxWidth: globalThis.GhostlightRecording.MAX_WIDTH,
+      maxHeight: globalThis.GhostlightRecording.MAX_HEIGHT,
+      everyNthFrame: 1
+    });
+    publishUiState();
+    return { outcome: "recording_started", summary: recording.status(workspace, state.id).summary, existing: false };
+  } catch (error) {
+    recording.discard(workspace, state.id);
+    if (screencastAttempted) chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.stopScreencast").catch(() => {});
+    publishUiState();
+    throw error;
+  }
+}
+
+function recordingResult(outcome, result) {
+  if (result.notFound) return { outcome: "recording_not_found" };
+  if (result.ambiguous) return { outcome: "recording_ambiguous", recording_ids: result.ambiguous };
+  return { outcome, ...result };
+}
+
+async function stopRecording(workspace, command) {
+  const selected = recording.beginStop(workspace, command.recording_id);
+  if (!selected.state) return recordingResult("recording_stopped", selected);
+  const state = selected.state;
+  if (state.state !== "recording") {
+    return { outcome: "recording_stopped", summary: selected.summary, changed: false };
+  }
+  try {
+    await captureRecordingFrame(state, "final").catch(() => false);
+    await chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.stopScreencast");
+    const summary = recording.finishStop(state, "explicit");
+    publishUiState();
+    return { outcome: "recording_stopped", summary, changed: true };
+  } catch (error) {
+    recording.interruptTab(state.tabId, "browser_detached");
+    chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.stopScreencast").catch(() => {});
+    publishUiState();
+    throw error;
+  }
+}
+
+async function discardRecording(workspace, command) {
+  const result = recording.discard(workspace, command.recording_id);
+  if (result.notFound || result.ambiguous) return recordingResult("recording_discarded", result);
+  if (result.active) {
+    await chrome.debugger.sendCommand({ tabId: result.tabId }, "Page.stopScreencast").catch(() => {});
+  }
+  publishUiState();
+  return { outcome: "recording_discarded", recording_id: result.recordingId, released_bytes: result.releasedBytes };
+}
+
 async function content(tabId, message, optional = false) {
   if (!tabId) {
     if (optional) return { presented: false };
@@ -434,6 +735,10 @@ async function broadcastRuntimeState(controlState) {
 
 async function applyRuntimeState(controlState) {
   setConnection({ control_state: controlState });
+  if (controlState !== "active") {
+    await interruptAllRecordings("runtime_held");
+    await disableDiagnosticCapture(diagnostics.clearAll());
+  }
   if (controlState === "ended") {
     await debuggerLifecycle.detachAll();
   }

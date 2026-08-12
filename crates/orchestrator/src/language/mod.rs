@@ -1,14 +1,16 @@
 //! The complete model-facing catalog, typo-closed decoding, and executable defaults.
 
 pub mod outcome;
+#[path = "catalog.rs"]
+mod tool_catalog;
 
-use std::collections::BTreeMap;
+pub use tool_catalog::catalog;
+
 use std::path::Path;
 
-use ghostlight_bridge::service::ToolDefinition;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
@@ -79,6 +81,8 @@ pub enum Operation {
     ScrollPage(ScrollPage),
     /// Set visible tab zoom.
     SetZoom(SetZoom),
+    /// Resize a browser window through one controlled tab.
+    ResizeWindow(ResizeWindow),
     /// Hover a target or governed view point.
     Hover(Hover),
     /// Fill ordinary form fields.
@@ -99,6 +103,10 @@ pub enum Operation {
     RunSequence(RunSequence),
     /// Resolve a browser dialog.
     HandleDialog(HandleDialog),
+    /// Control one memory-only browser recording.
+    Record(Record),
+    /// Read bounded opt-in browser diagnostics.
+    Diagnose(Diagnose),
 }
 
 impl Operation {
@@ -120,6 +128,7 @@ impl Operation {
             Self::Click(value) => &value.restrictions,
             Self::ScrollPage(value) => &value.restrictions,
             Self::SetZoom(value) => &value.restrictions,
+            Self::ResizeWindow(value) => &value.restrictions,
             Self::Hover(value) => &value.restrictions,
             Self::FillForm(value) => &value.restrictions,
             Self::TypeText(value) => &value.restrictions,
@@ -130,6 +139,8 @@ impl Operation {
             Self::Wait(value) => &value.restrictions,
             Self::RunSequence(value) => &value.restrictions,
             Self::HandleDialog(value) => &value.restrictions,
+            Self::Record(value) => &value.restrictions,
+            Self::Diagnose(value) => &value.restrictions,
         }
     }
 
@@ -137,32 +148,84 @@ impl Operation {
     #[must_use]
     pub const fn name(&self) -> &'static str {
         match self {
-            Self::ListTabs(_) => "browser_list_tabs",
-            Self::ActivateTab(_) => "browser_activate_tab",
-            Self::OpenPage(_) => "browser_open_page",
-            Self::NavigatePage(_) => "browser_navigate_page",
-            Self::NavigateHistory(_) => "browser_navigate_history",
-            Self::ReloadPage(_) => "browser_reload_page",
-            Self::CloseTab(_) => "browser_close_tab",
-            Self::ReadPage(_) => "browser_read_page",
-            Self::InspectPage(_) => "browser_inspect_page",
+            Self::ListTabs(_) | Self::ActivateTab(_) | Self::CloseTab(_) => "browser_tabs",
+            Self::OpenPage(_) | Self::NavigatePage(_) => "browser_navigate",
+            Self::NavigateHistory(_) | Self::ReloadPage(_) => "browser_history",
+            Self::ReadPage(_) => "browser_read",
+            Self::InspectPage(_) => "browser_inspect",
             Self::Find(_) => "browser_find",
-            Self::TakeScreenshot(_) => "browser_take_screenshot",
+            Self::TakeScreenshot(_) => "browser_screenshot",
             Self::Click(_) => "browser_click",
-            Self::ScrollPage(_) => "browser_scroll_page",
-            Self::SetZoom(_) => "browser_set_zoom",
+            Self::ScrollPage(_) => "browser_scroll",
+            Self::SetZoom(_) | Self::ResizeWindow(_) => "browser_window",
             Self::Hover(_) => "browser_hover",
             Self::FillForm(_) => "browser_fill_form",
             Self::TypeText(_) => "browser_type_text",
             Self::PressKey(_) => "browser_press_key",
             Self::Drag(_) => "browser_drag",
-            Self::UploadFiles(_) => "browser_upload_files",
-            Self::RunScript(_) => "browser_run_script",
+            Self::UploadFiles(_) => "browser_upload",
+            Self::RunScript(_) => "browser_evaluate",
             Self::Wait(_) => "browser_wait",
-            Self::RunSequence(_) => "browser_run_sequence",
-            Self::HandleDialog(_) => "browser_handle_dialog",
+            Self::RunSequence(_) => "browser_sequence",
+            Self::HandleDialog(_) => "browser_dialog",
+            Self::Record(_) => "browser_record",
+            Self::Diagnose(_) => "browser_diagnose",
         }
     }
+}
+
+/// Model input for the cohesive tab controller.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct TabsRequest {
+    pub action: String,
+    #[serde(default)]
+    pub tab: Option<String>,
+    #[serde(flatten)]
+    pub restrictions: RequestRestrictions,
+}
+
+/// Model input for the cohesive history controller.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct HistoryRequest {
+    pub action: String,
+    #[serde(default)]
+    pub tab: Option<String>,
+    #[serde(default)]
+    pub bypass_cache: bool,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
+    #[serde(flatten)]
+    pub restrictions: RequestRestrictions,
+}
+
+/// Model input for opening or reusing a controlled browser tab.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct NavigateRequest {
+    pub url: String,
+    #[serde(default)]
+    pub tab: Option<String>,
+    #[serde(default)]
+    pub new_tab: bool,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
+    #[serde(flatten)]
+    pub restrictions: RequestRestrictions,
+}
+
+/// Model input for the cohesive browser-window controller.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct WindowRequest {
+    pub action: String,
+    #[serde(default)]
+    pub tab: Option<String>,
+    #[serde(default)]
+    pub percent: Option<u16>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(flatten)]
+    pub restrictions: RequestRestrictions,
 }
 
 /// Input for listing controlled tabs.
@@ -254,7 +317,7 @@ pub struct InspectPage {
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_inspect_kind")]
-    pub kind: String,
+    pub scope: String,
     #[serde(default = "default_max_items")]
     pub max_items: usize,
     #[serde(flatten)]
@@ -268,7 +331,7 @@ pub struct Find {
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_find_kind")]
-    pub kind: String,
+    pub scope: String,
     #[serde(default = "default_max_results")]
     pub max_results: usize,
     #[serde(flatten)]
@@ -334,6 +397,17 @@ pub struct ScrollPage {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct SetZoom {
     pub percent: u16,
+    #[serde(default)]
+    pub tab: Option<String>,
+    #[serde(flatten)]
+    pub restrictions: RequestRestrictions,
+}
+
+/// Input for resizing the browser window that contains a controlled tab.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ResizeWindow {
+    pub width: u32,
+    pub height: u32,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(flatten)]
@@ -543,11 +617,44 @@ pub struct RunSequence {
 /// Input for dialog handling.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct HandleDialog {
-    pub accept: bool,
+    pub action: String,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
     pub text: Option<String>,
+    #[serde(flatten)]
+    pub restrictions: RequestRestrictions,
+}
+
+/// Input for the memory-only recording lifecycle.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Record {
+    pub action: String,
+    #[serde(default)]
+    pub recording: Option<String>,
+    #[serde(default)]
+    pub tab: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(flatten)]
+    pub restrictions: RequestRestrictions,
+}
+
+/// Input for bounded opt-in browser diagnostics.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Diagnose {
+    #[serde(default)]
+    pub tab: Option<String>,
+    #[serde(default = "default_diagnostic_source")]
+    pub source: String,
+    #[serde(default = "default_diagnostic_detail")]
+    pub detail: String,
+    #[serde(default)]
+    pub r#match: Option<String>,
+    #[serde(default)]
+    pub after: Option<String>,
+    #[serde(default = "default_diagnostic_limit")]
+    pub limit: usize,
     #[serde(flatten)]
     pub restrictions: RequestRestrictions,
 }
@@ -563,385 +670,14 @@ pub enum LanguageError {
     Invalid(String),
 }
 
-/// Return the complete, deterministic 1.0 model-facing catalog.
-#[must_use]
-pub fn catalog() -> Vec<ToolDefinition> {
-    vec![
-        tool(
-            "browser_list_tabs",
-            "List the tabs Ghostlight currently controls.",
-            object_schema(vec![], vec![]),
-        ),
-        tool(
-            "browser_activate_tab",
-            "Bring one exact controlled tab and its window into view.",
-            object_schema(vec![("tab", handle_schema("tab_"))], vec!["tab"]),
-        ),
-        tool(
-            "browser_open_page",
-            "Open a governed URL in a controlled tab and return the landed page.",
-            object_schema(
-                vec![("url", url_schema()), ("timeout_ms", timeout_schema())],
-                vec!["url"],
-            ),
-        ),
-        tool(
-            "browser_navigate_page",
-            "Navigate a controlled tab to a governed URL and return the landing.",
-            object_schema(
-                vec![
-                    ("url", url_schema()),
-                    ("tab", handle_schema("tab_")),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec!["url"],
-            ),
-        ),
-        tool(
-            "browser_navigate_history",
-            "Move a controlled tab backward or forward through browser history.",
-            object_schema(
-                vec![
-                    ("direction", enum_only_schema(&["back", "forward"])),
-                    ("tab", handle_schema("tab_")),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec!["direction"],
-            ),
-        ),
-        tool(
-            "browser_reload_page",
-            "Reload a controlled page and govern the resulting landing.",
-            object_schema(
-                vec![
-                    ("tab", handle_schema("tab_")),
-                    ("bypass_cache", json!({"type":"boolean","default":false})),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec![],
-            ),
-        ),
-        tool(
-            "browser_close_tab",
-            "Close one exact controlled tab.",
-            object_schema(vec![("tab", handle_schema("tab_"))], vec!["tab"]),
-        ),
-        tool(
-            "browser_read_page",
-            "Read useful bounded text from a controlled page or target.",
-            object_schema(
-                vec![
-                    ("tab", handle_schema("tab_")),
-                    ("target", handle_schema("target_")),
-                    ("max_chars", integer_schema(500, 20_000, 8_000)),
-                ],
-                vec![],
-            ),
-        ),
-        tool(
-            "browser_inspect_page",
-            "Inspect semantic controls and structure on a controlled page.",
-            object_schema(
-                vec![
-                    ("tab", handle_schema("tab_")),
-                    (
-                        "kind",
-                        enum_schema(&["controls", "structure", "all"], "controls"),
-                    ),
-                    ("max_items", integer_schema(1, 200, 80)),
-                ],
-                vec![],
-            ),
-        ),
-        tool(
-            "browser_find",
-            "Find current semantic targets by visible or accessible text.",
-            object_schema(
-                vec![
-                    ("text", nonempty_string_schema(500)),
-                    ("tab", handle_schema("tab_")),
-                    ("kind", enum_schema(&["any", "control", "text"], "any")),
-                    ("max_results", integer_schema(1, 50, 20)),
-                ],
-                vec!["text"],
-            ),
-        ),
-        tool(
-            "browser_take_screenshot",
-            "Capture a viewport, full page, or semantic target screenshot.",
-            object_schema(
-                vec![
-                    ("tab", handle_schema("tab_")),
-                    ("target", handle_schema("target_")),
-                    ("full_page", json!({"type":"boolean","default":false})),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec![],
-            ),
-        ),
-        tool(
-            "browser_click",
-            "Activate a current semantic target or a point in a current screenshot.",
-            object_schema(
-                vec![
-                    ("target", handle_schema("target_")),
-                    ("view", handle_schema("view_")),
-                    ("x", coordinate_schema()),
-                    ("y", coordinate_schema()),
-                    ("tab", handle_schema("tab_")),
-                    (
-                        "button",
-                        enum_schema(&["primary", "middle", "secondary"], "primary"),
-                    ),
-                    ("click_count", integer_schema(1, 2, 1)),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec![],
-            ),
-        ),
-        tool(
-            "browser_scroll_page",
-            "Scroll a page in a direction or reveal one semantic target.",
-            object_schema(
-                vec![
-                    ("tab", handle_schema("tab_")),
-                    ("target", handle_schema("target_")),
-                    (
-                        "direction",
-                        enum_only_schema(&["up", "down", "left", "right"]),
-                    ),
-                    (
-                        "amount",
-                        enum_only_schema(&["small", "medium", "large", "page"]),
-                    ),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec![],
-            ),
-        ),
-        tool(
-            "browser_set_zoom",
-            "Set the visible zoom of a controlled tab.",
-            object_schema(
-                vec![
-                    ("percent", integer_schema_no_default(25, 500)),
-                    ("tab", handle_schema("tab_")),
-                ],
-                vec!["percent"],
-            ),
-        ),
-        tool(
-            "browser_hover",
-            "Hover a semantic target or a point in a current screenshot.",
-            object_schema(
-                vec![
-                    ("target", handle_schema("target_")),
-                    ("view", handle_schema("view_")),
-                    ("x", coordinate_schema()),
-                    ("y", coordinate_schema()),
-                    ("tab", handle_schema("tab_")),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec![],
-            ),
-        ),
-        tool(
-            "browser_fill_form",
-            "Fill ordinary form controls, with credential fields handed to the user.",
-            object_schema(
-                vec![
-                    (
-                        "fields",
-                        json!({"type":"array","minItems":1,"maxItems":30,"items":{"type":"object","additionalProperties":false,"properties":{"target":handle_schema("target_"),"value":{"type":"string","maxLength":8000}},"required":["target","value"]}}),
-                    ),
-                    ("tab", handle_schema("tab_")),
-                    ("submit_target", handle_schema("target_")),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec!["fields"],
-            ),
-        ),
-        tool(
-            "browser_type_text",
-            "Type ordinary text through browser input events after credential preflight.",
-            object_schema(
-                vec![
-                    ("target", handle_schema("target_")),
-                    ("text", json!({"type":"string","maxLength":8000})),
-                    ("tab", handle_schema("tab_")),
-                    ("clear_first", json!({"type":"boolean","default":false})),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec!["target", "text"],
-            ),
-        ),
-        tool(
-            "browser_press_key",
-            "Send one explicit keyboard action to a controlled page or target.",
-            object_schema(
-                vec![
-                    ("key", key_schema()),
-                    ("tab", handle_schema("tab_")),
-                    ("target", handle_schema("target_")),
-                    (
-                        "modifiers",
-                        json!({"type":"array","uniqueItems":true,"items":{"enum":["Alt","Control","Meta","Shift"]},"default":[]}),
-                    ),
-                ],
-                vec!["key"],
-            ),
-        ),
-        tool(
-            "browser_drag",
-            "Drag between semantic targets or two points in a current screenshot.",
-            object_schema(
-                vec![
-                    ("source_target", handle_schema("target_")),
-                    ("destination_target", handle_schema("target_")),
-                    ("view", handle_schema("view_")),
-                    ("start_x", coordinate_schema()),
-                    ("start_y", coordinate_schema()),
-                    ("end_x", coordinate_schema()),
-                    ("end_y", coordinate_schema()),
-                    ("tab", handle_schema("tab_")),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec![],
-            ),
-        ),
-        tool(
-            "browser_upload_files",
-            "Upload explicitly named bounded local files to one ordinary file input.",
-            object_schema(
-                vec![
-                    ("target", handle_schema("target_")),
-                    (
-                        "paths",
-                        json!({"type":"array","minItems":1,"maxItems":5,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":4096}}),
-                    ),
-                    ("tab", handle_schema("tab_")),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec!["target", "paths"],
-            ),
-        ),
-        tool(
-            "browser_run_script",
-            "Evaluate an explicit bounded script in a controlled page.",
-            object_schema(
-                vec![
-                    ("script", nonempty_string_schema(20_000)),
-                    ("tab", handle_schema("tab_")),
-                    ("max_result_chars", integer_schema(100, 20_000, 8_000)),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec!["script"],
-            ),
-        ),
-        tool(
-            "browser_wait",
-            "Wait for one explicit observable page condition.",
-            object_schema(
-                vec![
-                    (
-                        "condition",
-                        enum_only_schema(&[
-                            "load_ready",
-                            "url_contains",
-                            "text_present",
-                            "text_absent",
-                            "target_present",
-                            "target_absent",
-                        ]),
-                    ),
-                    ("tab", handle_schema("tab_")),
-                    ("value", nonempty_string_schema(2_000)),
-                    ("target", handle_schema("target_")),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec!["condition"],
-            ),
-        ),
-        tool(
-            "browser_run_sequence",
-            "Run two to eight fully specified actions on one controlled tab.",
-            object_schema(
-                vec![
-                    ("steps", sequence_schema()),
-                    ("tab", handle_schema("tab_")),
-                    ("timeout_ms", timeout_schema()),
-                ],
-                vec!["steps"],
-            ),
-        ),
-        tool(
-            "browser_handle_dialog",
-            "Accept or dismiss the current JavaScript dialog.",
-            object_schema(
-                vec![
-                    ("accept", json!({"type":"boolean"})),
-                    ("tab", handle_schema("tab_")),
-                    ("text", json!({"type":"string","maxLength":2000})),
-                ],
-                vec!["accept"],
-            ),
-        ),
-    ]
-}
-
 /// Decode and validate one catalog invocation.
 pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
-    let operation = match name {
-        "browser_list_tabs" => Operation::ListTabs(parse(input, &[], |value: &ListTabs| {
-            validate_restrictions(&value.restrictions)
-        })?),
-        "browser_activate_tab" => {
-            Operation::ActivateTab(parse(input, &["tab"], |value: &ActivateTab| {
-                validate_handle(&value.tab, "tab_")?;
-                validate_restrictions(&value.restrictions)
-            })?)
-        }
-        "browser_open_page" => {
-            Operation::OpenPage(parse(input, &["url", "timeout_ms"], |value: &OpenPage| {
-                validate_url(&value.url)?;
-                validate_timeout(value.timeout_ms)?;
-                validate_restrictions(&value.restrictions)
-            })?)
-        }
-        "browser_navigate_page" => Operation::NavigatePage(parse(
-            input,
-            &["url", "tab", "timeout_ms"],
-            |value: &NavigatePage| {
-                validate_url(&value.url)?;
-                validate_optional_handle(value.tab.as_deref(), "tab_")?;
-                validate_timeout(value.timeout_ms)?;
-                validate_restrictions(&value.restrictions)
-            },
-        )?),
-        "browser_navigate_history" => Operation::NavigateHistory(parse(
-            input,
-            &["direction", "tab", "timeout_ms"],
-            |value: &NavigateHistory| {
-                validate_choice(&value.direction, &["back", "forward"], "direction")?;
-                validate_optional_handle(value.tab.as_deref(), "tab_")?;
-                validate_timeout(value.timeout_ms)?;
-                validate_restrictions(&value.restrictions)
-            },
-        )?),
-        "browser_reload_page" => Operation::ReloadPage(parse(
-            input,
-            &["tab", "bypass_cache", "timeout_ms"],
-            |value: &ReloadPage| {
-                validate_optional_handle(value.tab.as_deref(), "tab_")?;
-                validate_timeout(value.timeout_ms)?;
-                validate_restrictions(&value.restrictions)
-            },
-        )?),
-        "browser_close_tab" => Operation::CloseTab(parse(input, &["tab"], |value: &CloseTab| {
-            validate_handle(&value.tab, "tab_")?;
-            validate_restrictions(&value.restrictions)
-        })?),
-        "browser_read_page" => Operation::ReadPage(parse(
+    match name {
+        "browser_tabs" => decode_tabs(input),
+        "browser_navigate" => decode_navigate(input),
+        "browser_history" => decode_history(input),
+        "browser_window" => decode_window(input),
+        "browser_read" => Operation::ReadPage(parse(
             input,
             &["tab", "target", "max_chars"],
             |value: &ReadPage| {
@@ -950,29 +686,32 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_range(value.max_chars, 500, 20_000, "max_chars")?;
                 validate_restrictions(&value.restrictions)
             },
-        )?),
-        "browser_inspect_page" => Operation::InspectPage(parse(
+        )?)
+        .into_ok(),
+        "browser_inspect" => Operation::InspectPage(parse(
             input,
-            &["tab", "kind", "max_items"],
+            &["tab", "scope", "max_items"],
             |value: &InspectPage| {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
-                validate_choice(&value.kind, &["controls", "structure", "all"], "kind")?;
+                validate_choice(&value.scope, &["controls", "structure", "all"], "scope")?;
                 validate_range(value.max_items, 1, 200, "max_items")?;
                 validate_restrictions(&value.restrictions)
             },
-        )?),
+        )?)
+        .into_ok(),
         "browser_find" => Operation::Find(parse(
             input,
-            &["text", "tab", "kind", "max_results"],
+            &["text", "tab", "scope", "max_results"],
             |value: &Find| {
                 validate_text(&value.text, 500, "text")?;
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
-                validate_choice(&value.kind, &["any", "control", "text"], "kind")?;
+                validate_choice(&value.scope, &["any", "control", "text"], "scope")?;
                 validate_range(value.max_results, 1, 50, "max_results")?;
                 validate_restrictions(&value.restrictions)
             },
-        )?),
-        "browser_take_screenshot" => Operation::TakeScreenshot(parse(
+        )?)
+        .into_ok(),
+        "browser_screenshot" => Operation::TakeScreenshot(parse(
             input,
             &["tab", "target", "full_page", "timeout_ms"],
             |value: &TakeScreenshot| {
@@ -986,7 +725,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_timeout(value.timeout_ms)?;
                 validate_restrictions(&value.restrictions)
             },
-        )?),
+        )?)
+        .into_ok(),
         "browser_click" => Operation::Click(parse(
             input,
             &[
@@ -1000,39 +740,38 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_click,
-        )?),
-        "browser_scroll_page" => Operation::ScrollPage(parse(
+        )?)
+        .into_ok(),
+        "browser_scroll" => Operation::ScrollPage(parse(
             input,
             &["tab", "target", "direction", "amount", "timeout_ms"],
             validate_scroll,
-        )?),
-        "browser_set_zoom" => {
-            Operation::SetZoom(parse(input, &["percent", "tab"], |value: &SetZoom| {
-                validate_range(usize::from(value.percent), 25, 500, "percent")?;
-                validate_optional_handle(value.tab.as_deref(), "tab_")?;
-                validate_restrictions(&value.restrictions)
-            })?)
-        }
+        )?)
+        .into_ok(),
         "browser_hover" => Operation::Hover(parse(
             input,
             &["target", "view", "x", "y", "tab", "timeout_ms"],
             validate_hover,
-        )?),
+        )?)
+        .into_ok(),
         "browser_fill_form" => Operation::FillForm(parse(
             input,
             &["fields", "tab", "submit_target", "timeout_ms"],
             validate_fill,
-        )?),
+        )?)
+        .into_ok(),
         "browser_type_text" => Operation::TypeText(parse(
             input,
             &["target", "text", "tab", "clear_first", "timeout_ms"],
             validate_type_text,
-        )?),
+        )?)
+        .into_ok(),
         "browser_press_key" => Operation::PressKey(parse(
             input,
             &["key", "tab", "target", "modifiers"],
             validate_press_key,
-        )?),
+        )?)
+        .into_ok(),
         "browser_drag" => Operation::Drag(parse(
             input,
             &[
@@ -1047,13 +786,15 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_drag,
-        )?),
-        "browser_upload_files" => Operation::UploadFiles(parse(
+        )?)
+        .into_ok(),
+        "browser_upload" => Operation::UploadFiles(parse(
             input,
             &["target", "paths", "tab", "timeout_ms"],
             validate_upload,
-        )?),
-        "browser_run_script" => Operation::RunScript(parse(
+        )?)
+        .into_ok(),
+        "browser_evaluate" => Operation::RunScript(parse(
             input,
             &["script", "tab", "max_result_chars", "timeout_ms"],
             |value: &RunScript| {
@@ -1063,36 +804,286 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_timeout(value.timeout_ms)?;
                 validate_restrictions(&value.restrictions)
             },
-        )?),
+        )?)
+        .into_ok(),
         "browser_wait" => Operation::Wait(parse(
             input,
             &["condition", "tab", "value", "target", "timeout_ms"],
             validate_wait,
-        )?),
-        "browser_run_sequence" => Operation::RunSequence(parse(
+        )?)
+        .into_ok(),
+        "browser_sequence" => Operation::RunSequence(parse(
             input,
             &["steps", "tab", "timeout_ms"],
             validate_sequence,
-        )?),
-        "browser_handle_dialog" => Operation::HandleDialog(parse(
-            input,
-            &["accept", "tab", "text"],
-            |value: &HandleDialog| {
-                validate_optional_handle(value.tab.as_deref(), "tab_")?;
-                if let Some(text) = &value.text {
-                    validate_text_allow_empty(text, 2_000, "text")?;
-                    if !value.accept {
-                        return Err(LanguageError::Invalid("text requires accept: true".into()));
-                    }
-                }
-                validate_restrictions(&value.restrictions)
-            },
-        )?),
-        other => return Err(LanguageError::UnknownTool(other.into())),
-    };
-    Ok(operation)
+        )?)
+        .into_ok(),
+        "browser_dialog" => decode_dialog(input),
+        "browser_record" => decode_record(input),
+        "browser_diagnose" => decode_diagnose(input),
+        other => Err(LanguageError::UnknownTool(other.into())),
+    }
 }
 
+trait OperationResult {
+    fn into_ok(self) -> Result<Operation, LanguageError>;
+}
+
+impl OperationResult for Operation {
+    fn into_ok(self) -> Result<Operation, LanguageError> {
+        Ok(self)
+    }
+}
+
+fn decode_tabs(input: Value) -> Result<Operation, LanguageError> {
+    let value: TabsRequest = parse(input, &["action", "tab"], |value: &TabsRequest| {
+        validate_choice(&value.action, &["list", "focus", "close"], "action")?;
+        match value.action.as_str() {
+            "list" if value.tab.is_some() => {
+                return Err(LanguageError::Invalid(
+                    "tab is not valid when action is list".into(),
+                ))
+            }
+            "focus" | "close" => validate_handle(
+                value
+                    .tab
+                    .as_deref()
+                    .ok_or_else(|| LanguageError::Invalid("tab is required".into()))?,
+                "tab_",
+            )?,
+            _ => {}
+        }
+        validate_restrictions(&value.restrictions)
+    })?;
+    let restrictions = value.restrictions;
+    Ok(match value.action.as_str() {
+        "list" => Operation::ListTabs(ListTabs { restrictions }),
+        "focus" => Operation::ActivateTab(ActivateTab {
+            tab: value.tab.expect("validated tab"),
+            restrictions,
+        }),
+        "close" => Operation::CloseTab(CloseTab {
+            tab: value.tab.expect("validated tab"),
+            restrictions,
+        }),
+        _ => unreachable!("validated action"),
+    })
+}
+
+fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
+    let value: NavigateRequest = parse(
+        input,
+        &["url", "tab", "new_tab", "timeout_ms"],
+        |value: &NavigateRequest| {
+            validate_url(&value.url)?;
+            validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            if value.new_tab && value.tab.is_some() {
+                return Err(LanguageError::Invalid(
+                    "tab and new_tab cannot be combined".into(),
+                ));
+            }
+            validate_timeout(value.timeout_ms)?;
+            validate_restrictions(&value.restrictions)
+        },
+    )?;
+    Ok(if value.new_tab {
+        Operation::OpenPage(OpenPage {
+            url: value.url,
+            timeout_ms: value.timeout_ms,
+            restrictions: value.restrictions,
+        })
+    } else {
+        Operation::NavigatePage(NavigatePage {
+            url: value.url,
+            tab: value.tab,
+            timeout_ms: value.timeout_ms,
+            restrictions: value.restrictions,
+        })
+    })
+}
+
+fn decode_history(input: Value) -> Result<Operation, LanguageError> {
+    let bypass_present = has_field(&input, "bypass_cache");
+    let value: HistoryRequest = parse(
+        input,
+        &["action", "tab", "bypass_cache", "timeout_ms"],
+        |value: &HistoryRequest| {
+            validate_choice(&value.action, &["back", "forward", "reload"], "action")?;
+            validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            if value.action != "reload" && bypass_present {
+                return Err(LanguageError::Invalid(
+                    "bypass_cache is only valid when action is reload".into(),
+                ));
+            }
+            validate_timeout(value.timeout_ms)?;
+            validate_restrictions(&value.restrictions)
+        },
+    )?;
+    Ok(if value.action == "reload" {
+        Operation::ReloadPage(ReloadPage {
+            tab: value.tab,
+            bypass_cache: value.bypass_cache,
+            timeout_ms: value.timeout_ms,
+            restrictions: value.restrictions,
+        })
+    } else {
+        Operation::NavigateHistory(NavigateHistory {
+            direction: value.action,
+            tab: value.tab,
+            timeout_ms: value.timeout_ms,
+            restrictions: value.restrictions,
+        })
+    })
+}
+
+fn decode_window(input: Value) -> Result<Operation, LanguageError> {
+    let value: WindowRequest = parse(
+        input,
+        &["action", "tab", "percent", "width", "height"],
+        |value: &WindowRequest| {
+            validate_choice(&value.action, &["zoom", "resize"], "action")?;
+            validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            match value.action.as_str() {
+                "zoom" => {
+                    let percent = value
+                        .percent
+                        .ok_or_else(|| LanguageError::Invalid("percent is required".into()))?;
+                    validate_range(usize::from(percent), 25, 500, "percent")?;
+                    if value.width.is_some() || value.height.is_some() {
+                        return Err(LanguageError::Invalid(
+                            "width and height are only valid when action is resize".into(),
+                        ));
+                    }
+                }
+                "resize" => {
+                    let width = value
+                        .width
+                        .ok_or_else(|| LanguageError::Invalid("width is required".into()))?;
+                    let height = value
+                        .height
+                        .ok_or_else(|| LanguageError::Invalid("height is required".into()))?;
+                    validate_range(width as usize, 320, 7_680, "width")?;
+                    validate_range(height as usize, 240, 4_320, "height")?;
+                    if value.percent.is_some() {
+                        return Err(LanguageError::Invalid(
+                            "percent is only valid when action is zoom".into(),
+                        ));
+                    }
+                }
+                _ => unreachable!("validated action"),
+            }
+            validate_restrictions(&value.restrictions)
+        },
+    )?;
+    Ok(if value.action == "zoom" {
+        Operation::SetZoom(SetZoom {
+            percent: value.percent.expect("validated percent"),
+            tab: value.tab,
+            restrictions: value.restrictions,
+        })
+    } else {
+        Operation::ResizeWindow(ResizeWindow {
+            width: value.width.expect("validated width"),
+            height: value.height.expect("validated height"),
+            tab: value.tab,
+            restrictions: value.restrictions,
+        })
+    })
+}
+
+fn decode_dialog(input: Value) -> Result<Operation, LanguageError> {
+    let text_present = has_field(&input, "text");
+    let value: HandleDialog = parse(input, &["action", "tab", "text"], |value: &HandleDialog| {
+        validate_choice(
+            &value.action,
+            &["status", "accept", "dismiss", "respond"],
+            "action",
+        )?;
+        validate_optional_handle(value.tab.as_deref(), "tab_")?;
+        match value.action.as_str() {
+            "respond" => validate_text_allow_empty(
+                value
+                    .text
+                    .as_deref()
+                    .ok_or_else(|| LanguageError::Invalid("text is required".into()))?,
+                2_000,
+                "text",
+            )?,
+            _ if text_present => {
+                return Err(LanguageError::Invalid(
+                    "text is only valid when action is respond".into(),
+                ))
+            }
+            _ => {}
+        }
+        validate_restrictions(&value.restrictions)
+    })?;
+    Ok(Operation::HandleDialog(value))
+}
+
+fn decode_record(input: Value) -> Result<Operation, LanguageError> {
+    let value: Record = parse(
+        input,
+        &["action", "recording", "tab", "target"],
+        |value: &Record| {
+            validate_choice(
+                &value.action,
+                &["start", "status", "stop", "save", "discard"],
+                "action",
+            )?;
+            validate_optional_handle(value.recording.as_deref(), "recording_")?;
+            validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            validate_optional_handle(value.target.as_deref(), "target_")?;
+            match value.action.as_str() {
+                "start" if value.recording.is_some() || value.target.is_some() => {
+                    return Err(LanguageError::Invalid(
+                        "start accepts tab but not recording or target".into(),
+                    ))
+                }
+                "start" => {}
+                "save" if value.tab.is_some() => {
+                    return Err(LanguageError::Invalid(
+                        "tab is only valid when action is start".into(),
+                    ))
+                }
+                "save" => {}
+                _ if value.tab.is_some() || value.target.is_some() => {
+                    return Err(LanguageError::Invalid(
+                        "tab is only valid for start and target is only valid for save".into(),
+                    ))
+                }
+                _ => {}
+            }
+            validate_restrictions(&value.restrictions)
+        },
+    )?;
+    Ok(Operation::Record(value))
+}
+
+fn decode_diagnose(input: Value) -> Result<Operation, LanguageError> {
+    let value: Diagnose = parse(
+        input,
+        &["tab", "source", "detail", "match", "after", "limit"],
+        |value: &Diagnose| {
+            validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            validate_choice(&value.source, &["both", "console", "network"], "source")?;
+            validate_choice(&value.detail, &["problems", "all"], "detail")?;
+            if let Some(pattern) = &value.r#match {
+                validate_text(pattern, 500, "match")?;
+            }
+            validate_optional_handle(value.after.as_deref(), "diag_")?;
+            validate_range(value.limit, 1, 200, "limit")?;
+            validate_restrictions(&value.restrictions)
+        },
+    )?;
+    Ok(Operation::Diagnose(value))
+}
+
+fn has_field(input: &Value, field: &str) -> bool {
+    input
+        .as_object()
+        .is_some_and(|object| object.contains_key(field))
+}
 fn parse<T: DeserializeOwned>(
     input: Value,
     fields: &[&str],
@@ -1511,7 +1502,7 @@ fn validate_choice(value: &str, choices: &[&str], field: &str) -> Result<(), Lan
 }
 
 fn validate_handle(value: &str, prefix: &str) -> Result<(), LanguageError> {
-    if value.starts_with(prefix) && value.len() > prefix.len() && value.len() <= 80 {
+    if value.starts_with(prefix) && value.len() > prefix.len() && value.len() <= 160 {
         Ok(())
     } else {
         Err(LanguageError::Invalid(format!(
@@ -1598,68 +1589,14 @@ fn default_button() -> String {
 fn default_click_count() -> u8 {
     1
 }
-
-fn tool(name: &str, description: &str, input_schema: Value) -> ToolDefinition {
-    ToolDefinition {
-        name: name.into(),
-        description: description.into(),
-        input_schema,
-    }
+fn default_diagnostic_source() -> String {
+    "both".into()
 }
-
-fn object_schema(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
-    let mut properties = BTreeMap::new();
-    properties.insert(
-        "restrict_capabilities",
-        json!({"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":CAPABILITIES}}),
-    );
-    properties.insert("restrict_hosts", json!({"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":253,"pattern":"^(\\*\\.)?[^/:*]+$"}}));
-    for (name, schema) in fields {
-        properties.insert(name, schema);
-    }
-    json!({"type":"object","additionalProperties":false,"properties":properties,"required":required})
+fn default_diagnostic_detail() -> String {
+    "problems".into()
 }
-
-fn url_schema() -> Value {
-    json!({"type":"string","format":"uri","pattern":"^https?://","maxLength":4096})
-}
-fn handle_schema(prefix: &str) -> Value {
-    json!({"type":"string","pattern":format!("^{prefix}"),"maxLength":80})
-}
-fn nonempty_string_schema(maximum: usize) -> Value {
-    json!({"type":"string","minLength":1,"maxLength":maximum,"pattern":"\\S"})
-}
-fn integer_schema(minimum: usize, maximum: usize, default: usize) -> Value {
-    json!({"type":"integer","minimum":minimum,"maximum":maximum,"default":default})
-}
-fn integer_schema_no_default(minimum: usize, maximum: usize) -> Value {
-    json!({"type":"integer","minimum":minimum,"maximum":maximum})
-}
-fn coordinate_schema() -> Value {
-    json!({"type":"number","minimum":0,"maximum":1_000_000})
-}
-fn timeout_schema() -> Value {
-    json!({"type":"integer","minimum":MIN_TIMEOUT_MS,"maximum":MAX_TIMEOUT_MS,"default":DEFAULT_TIMEOUT_MS})
-}
-fn enum_schema(values: &[&str], default: &str) -> Value {
-    json!({"type":"string","enum":values,"default":default})
-}
-fn enum_only_schema(values: &[&str]) -> Value {
-    json!({"type":"string","enum":values})
-}
-fn key_schema() -> Value {
-    json!({"oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]})
-}
-
-fn sequence_schema() -> Value {
-    let click = json!({"type":"object","additionalProperties":false,"properties":{"action":{"const":"click"},"target":handle_schema("target_"),"button":enum_schema(&["primary","middle","secondary"],"primary"),"click_count":integer_schema(1,2,1)},"required":["action","target"]});
-    let fill = json!({"type":"object","additionalProperties":false,"properties":{"action":{"const":"fill"},"target":handle_schema("target_"),"value":{"type":"string","maxLength":8000}},"required":["action","target","value"]});
-    let type_text = json!({"type":"object","additionalProperties":false,"properties":{"action":{"const":"type_text"},"target":handle_schema("target_"),"text":{"type":"string","maxLength":8000},"clear_first":{"type":"boolean","default":false}},"required":["action","target","text"]});
-    let key = json!({"type":"object","additionalProperties":false,"properties":{"action":{"const":"press_key"},"key":key_schema(),"target":handle_schema("target_"),"modifiers":{"type":"array","uniqueItems":true,"items":{"enum":["Alt","Control","Meta","Shift"]},"default":[]}},"required":["action","key"]});
-    let scroll = json!({"type":"object","additionalProperties":false,"properties":{"action":{"const":"scroll"},"target":handle_schema("target_"),"direction":{"enum":["up","down","left","right"]},"amount":{"enum":["small","medium","large","page"]}},"required":["action"]});
-    let hover = json!({"type":"object","additionalProperties":false,"properties":{"action":{"const":"hover"},"target":handle_schema("target_")},"required":["action","target"]});
-    let wait = json!({"type":"object","additionalProperties":false,"properties":{"action":{"const":"wait"},"condition":{"enum":["load_ready","url_contains","text_present","text_absent","target_present","target_absent"]},"value":nonempty_string_schema(2000),"target":handle_schema("target_")},"required":["action","condition"]});
-    json!({"type":"array","minItems":2,"maxItems":8,"items":{"oneOf":[click,fill,type_text,key,scroll,hover,wait]}})
+fn default_diagnostic_limit() -> usize {
+    50
 }
 
 #[cfg(test)]
@@ -1671,40 +1608,40 @@ mod tests {
     #[test]
     fn catalog_has_unique_exact_tools_and_typo_closed_schemas() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 24);
+        assert_eq!(catalog.len(), 22);
         let mut names: Vec<_> = catalog.iter().map(|tool| tool.name.as_str()).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 24);
+        assert_eq!(names.len(), 22);
         for tool in catalog {
-            assert_eq!(tool.input_schema["additionalProperties"], false);
+            assert!(tool.input_schema.is_object());
+            assert!(tool.output_schema.is_some());
+            assert!(tool.annotations.is_some());
         }
     }
 
     #[test]
     fn shortest_calls_receive_executable_defaults() {
-        let Operation::OpenPage(open) =
-            decode("browser_open_page", json!({"url":"https://example.com"})).unwrap()
+        let Operation::NavigatePage(navigate) =
+            decode("browser_navigate", json!({"url":"https://example.com"})).unwrap()
         else {
             panic!("wrong operation")
         };
-        assert_eq!(open.timeout_ms, 8_000);
-        let Operation::ReadPage(read) = decode("browser_read_page", json!({})).unwrap() else {
+        assert_eq!(navigate.timeout_ms, 8_000);
+        let Operation::ReadPage(read) = decode("browser_read", json!({})).unwrap() else {
             panic!("wrong operation")
         };
         assert_eq!(read.max_chars, 8_000);
-        let Operation::InspectPage(inspect) = decode("browser_inspect_page", json!({})).unwrap()
-        else {
+        let Operation::InspectPage(inspect) = decode("browser_inspect", json!({})).unwrap() else {
             panic!("wrong operation")
         };
-        assert_eq!(inspect.kind, "controls");
+        assert_eq!(inspect.scope, "controls");
         assert_eq!(inspect.max_items, 80);
     }
 
     #[test]
     fn unknown_fields_and_ambiguous_waits_fail() {
-        let error =
-            decode("browser_read_page", json!({"max_chars":8000,"max_char":1})).unwrap_err();
+        let error = decode("browser_read", json!({"max_chars":8000,"max_char":1})).unwrap_err();
         assert!(matches!(error, LanguageError::Invalid(message) if message.contains("max_char")));
         assert!(decode("browser_wait", json!({"condition":"text_present"})).is_err());
         assert!(decode(
@@ -1717,7 +1654,7 @@ mod tests {
     #[test]
     fn screenshot_target_and_full_page_are_mutually_exclusive() {
         assert!(decode(
-            "browser_take_screenshot",
+            "browser_screenshot",
             json!({"target":"target_x","full_page":true})
         )
         .is_err());
@@ -1741,20 +1678,40 @@ mod tests {
 
     #[test]
     fn scroll_defaults_are_contextual_and_upload_paths_are_absolute() {
-        let Operation::ScrollPage(scroll) = decode("browser_scroll_page", json!({})).unwrap()
-        else {
+        let Operation::ScrollPage(scroll) = decode("browser_scroll", json!({})).unwrap() else {
             panic!("wrong operation")
         };
         assert!(scroll.direction.is_none());
         assert!(scroll.amount.is_none());
         assert!(decode(
-            "browser_scroll_page",
+            "browser_scroll",
             json!({"target":"target_x","direction":"down"})
         )
         .is_err());
         assert!(decode(
-            "browser_upload_files",
+            "browser_upload",
             json!({"target":"target_x","paths":["relative.txt"]})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn action_families_reject_impossible_shapes() {
+        assert!(decode("browser_tabs", json!({"action":"list","tab":"tab_x"})).is_err());
+        assert!(decode(
+            "browser_history",
+            json!({"action":"back","bypass_cache":true})
+        )
+        .is_err());
+        assert!(decode(
+            "browser_window",
+            json!({"action":"zoom","width":800,"height":600})
+        )
+        .is_err());
+        assert!(decode("browser_dialog", json!({"action":"accept","text":"yes"})).is_err());
+        assert!(decode(
+            "browser_record",
+            json!({"action":"stop","target":"target_x"})
         )
         .is_err());
     }

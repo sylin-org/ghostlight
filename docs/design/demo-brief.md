@@ -1,13 +1,14 @@
 # Ghostlight launch-brief demo
 
-> **Built as a script, not a subcommand (2026-08-11).** This note specifies `ghostlight demo-brief`
-> as a Rust subcommand with pacing flags. It never shipped, and it no longer needs to: the command
-> line reaches the same catalog through the same governance, so the story lives in
-> [`scripts/demo-brief.ps1`](../../scripts/demo-brief.ps1), where whoever records the capture can
+> **Rebuilt as a script after the 1.0 clean-room rewrite (2026-08-11).** This note specifies
+> `ghostlight demo-brief` as a Rust subcommand with pacing flags. That subcommand shipped on the 0.8
+> line, then left the tree with the old internals during the 1.0 clean-room rebuild. It does not need
+> to return: the command line reaches the same catalog through the same governance, so the story
+> lives in [`scripts/demo-brief.ps1`](../../scripts/demo-brief.ps1). Whoever records the capture can
 > retime it without rebuilding a binary. The story, values, pacing defaults, and reliability
 > boundary below are what that script implements. Its tool names are the 0.8 catalog; the script
-> uses the 1.0 equivalents (`browser_read_page`, `browser_inspect_page`, `browser_type_text`,
-> `browser_click`, `browser_wait`).
+> uses the 1.0 equivalents (`browser_navigate`, `browser_read`, `browser_inspect`,
+> `browser_type_text`, `browser_click`, `browser_wait`).
 
 ## Purpose
 
@@ -79,11 +80,11 @@ rhythms are CLI options. The setup hold is preparation time; editors may trim it
 
 - The command is an ordinary MCP client and never calls extension internals.
 - The existing tighten-only demo policy grants only the Sylin stage and explicit loopback preview.
-- One interactive `read_page` call inventories every later click target. Refs are reused while the
+- One interactive `browser_read` call inventories every later click target. Handles are reused while the
   document remains stable.
-- The command inventories exact refs once, then uses top-level `form_input` writes so each visible
+- The command inventories exact handles once, then uses top-level `browser_type_text` writes so each visible
   field phrase has a unique command identity and deliberate beat. Agents using the same page should
-  still prefer one compact `form_fill` call when they do not need capture pacing.
+  still prefer one compact `browser_fill_form` call when they do not need capture pacing.
 - Submission stays separate so its intent remains visible to the viewer.
 - The command waits for the exact completion sentence before holding the final frame.
 - No screenshot or GIF recorder runs inside the command. Record the visible Chrome window with the

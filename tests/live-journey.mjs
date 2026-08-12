@@ -62,11 +62,11 @@ try {
   notify("notifications/initialized");
 
   const listed = await request("tools/list");
-  assert.equal(listed.result.tools.length, 24);
-  assert.equal(listed.result.tools.every((tool) => tool.inputSchema.additionalProperties === false), true);
+  assert.equal(listed.result.tools.length, 22);
+  assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
 
   const opened = structured(await request("tools/call", {
-    name: "browser_open_page",
+    name: "browser_navigate",
     arguments: { url: "https://example.com" }
   }));
   assert.equal(opened.status, "succeeded", JSON.stringify(opened));
@@ -74,14 +74,14 @@ try {
   assert.match(tab, /^tab_/);
 
   const read = structured(await request("tools/call", {
-    name: "browser_read_page",
+    name: "browser_read",
     arguments: { tab }
   }));
   assert.equal(read.status, "succeeded", JSON.stringify(read));
   assert.match(read.facts.text, /Example Domain/i);
 
   const screenshotResponse = await request("tools/call", {
-    name: "browser_take_screenshot",
+    name: "browser_screenshot",
     arguments: { tab }
   });
   const screenshot = structured(screenshotResponse);
@@ -95,8 +95,8 @@ try {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 1600));
 
   const closed = structured(await request("tools/call", {
-    name: "browser_close_tab",
-    arguments: { tab }
+    name: "browser_tabs",
+    arguments: { action: "close", tab }
   }));
   assert.equal(closed.status, "succeeded", JSON.stringify(closed));
   assert.equal(closed.facts.closed, true);

@@ -114,6 +114,22 @@ impl InvocationResult {
         self.content.push(content);
         self
     }
+
+    /// Render the concise authored text that precedes structured MCP facts.
+    #[must_use]
+    pub fn model_text(&self) -> String {
+        if self.next_steps.is_empty() {
+            self.summary.clone()
+        } else {
+            format!("{} Next: {}", self.summary, self.next_steps.join(" "))
+        }
+    }
+
+    /// Whether the terminal result should carry MCP's tool-execution error signal.
+    #[must_use]
+    pub const fn is_error(&self) -> bool {
+        !matches!(self.status, Status::Succeeded)
+    }
 }
 
 /// Enforces exactly one terminal construction path for an invocation.

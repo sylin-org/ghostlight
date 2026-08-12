@@ -306,7 +306,7 @@ mod tests {
         reactor.react(&DomainEvent::WorkStarted {
             invocation: "invocation_x".into(),
             workspace: "workspace_x".into(),
-            tool: "browser_read_page".into(),
+            tool: "browser_read".into(),
             activity: PresentationActivity::Read,
             capability: Capability::Read,
         });
@@ -383,7 +383,7 @@ mod tests {
         reactor.react(&DomainEvent::WorkStarted {
             invocation: "invocation_x".into(),
             workspace: "workspace_x".into(),
-            tool: "browser_close_tab".into(),
+            tool: "browser_tabs".into(),
             activity: PresentationActivity::Quiet,
             capability: Capability::Action,
         });

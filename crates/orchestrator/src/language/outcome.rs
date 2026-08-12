@@ -53,6 +53,8 @@ pub enum Outcome {
     TargetRevealed { host: Option<String> },
     /// Visible tab zoom was set.
     ZoomSet { percent: u16, host: Option<String> },
+    /// The browser window was resized.
+    WindowResized { width: u32, height: u32 },
     /// A semantic target or current screenshot point was hovered.
     Hovered { host: Option<String> },
     /// Ordinary form controls were filled.
@@ -77,6 +79,24 @@ pub enum Outcome {
     SequenceRan { completed: usize, total: usize },
     /// A browser dialog was resolved.
     DialogHandled { accepted: bool },
+    /// Current JavaScript-dialog state was observed.
+    DialogObserved { present: bool },
+    /// Bounded console and network diagnostics were read.
+    DiagnosticsRead { count: usize, capture_started: bool },
+    /// A memory-only recording began.
+    RecordingStarted,
+    /// Memory-only recording state was read.
+    RecordingObserved { frames: usize },
+    /// An active memory-only recording stopped.
+    RecordingStopped { frames: usize },
+    /// A recording was encoded as an animated GIF.
+    RecordingSaved {
+        frames: usize,
+        bytes: usize,
+        attached: bool,
+    },
+    /// Captured recording bytes were erased.
+    RecordingDiscarded,
 }
 
 impl Outcome {
@@ -141,6 +161,9 @@ impl Outcome {
             Self::ZoomSet { percent, host } => {
                 format!("Set zoom to {percent}% on {}.", place(host, "the page"))
             }
+            Self::WindowResized { width, height } => {
+                format!("Resized the browser window to {width}x{height}.")
+            }
             Self::Hovered { host } => {
                 format!("Hovered a target on {}.", place(host, "the page"))
             }
@@ -189,6 +212,42 @@ impl Outcome {
             }
             Self::DialogHandled { accepted: true } => "Accepted the browser dialog.".into(),
             Self::DialogHandled { accepted: false } => "Dismissed the browser dialog.".into(),
+            Self::DialogObserved { present: true } => {
+                "A JavaScript dialog is currently visible.".into()
+            }
+            Self::DialogObserved { present: false } => {
+                "No JavaScript dialog is currently visible.".into()
+            }
+            Self::DiagnosticsRead { count, .. } => format!(
+                "Read {}.",
+                counted(*count, "diagnostic observation", "diagnostic observations")
+            ),
+            Self::RecordingStarted => "Started a memory-only browser recording.".into(),
+            Self::RecordingObserved { frames } => format!(
+                "The memory-only recording currently holds {}.",
+                counted(*frames, "frame", "frames")
+            ),
+            Self::RecordingStopped { frames } => format!(
+                "Stopped the browser recording with {}.",
+                counted(*frames, "frame", "frames")
+            ),
+            Self::RecordingSaved {
+                frames,
+                bytes,
+                attached: false,
+            } => format!(
+                "Saved {frames} recorded {} as an animated GIF of {bytes} bytes.",
+                if *frames == 1 { "frame" } else { "frames" }
+            ),
+            Self::RecordingSaved {
+                frames,
+                bytes,
+                attached: true,
+            } => format!(
+                "Prepared {frames} recorded {} as an animated GIF of {bytes} bytes and dispatched it to the page target without verified acceptance.",
+                if *frames == 1 { "frame" } else { "frames" }
+            ),
+            Self::RecordingDiscarded => "Discarded the memory-only recording bytes.".into(),
         }
     }
 
@@ -199,6 +258,13 @@ impl Outcome {
             Self::Waited {
                 satisfied: false, ..
             } => vec!["Inspect the current page before choosing another action.".into()],
+            Self::DiagnosticsRead {
+                count: 0,
+                capture_started: true,
+            } => vec![
+                "Reproduce the problem or reload the page, then call browser_diagnose again."
+                    .into(),
+            ],
             _ => vec![],
         }
     }
@@ -211,6 +277,9 @@ impl Outcome {
             | Self::TextRead { words: count }
             | Self::TargetsListed { count, .. }
             | Self::FilesUploaded { count }
+            | Self::DiagnosticsRead { count, .. }
+            | Self::RecordingObserved { frames: count }
+            | Self::RecordingStopped { frames: count }
             | Self::SequenceRan {
                 completed: count, ..
             } => Observed {
@@ -228,6 +297,15 @@ impl Outcome {
             Self::Captured { width, height, .. } => Observed {
                 width: Some(*width),
                 height: Some(*height),
+                ..Observed::default()
+            },
+            Self::WindowResized { width, height } => Observed {
+                width: Some(*width),
+                height: Some(*height),
+                ..Observed::default()
+            },
+            Self::RecordingSaved { frames, .. } => Observed {
+                count: measured(*frames),
                 ..Observed::default()
             },
             Self::TabActivated { host }
@@ -248,7 +326,11 @@ impl Outcome {
                 host: host.clone(),
                 ..Observed::default()
             },
-            Self::TabClosed | Self::DialogHandled { .. } => Observed::default(),
+            Self::TabClosed
+            | Self::DialogHandled { .. }
+            | Self::DialogObserved { .. }
+            | Self::RecordingStarted
+            | Self::RecordingDiscarded => Observed::default(),
         }
     }
 }
@@ -286,6 +368,10 @@ pub enum Refusal {
     CaptureTooLarge,
     /// No JavaScript dialog was visible.
     NoDialogVisible,
+    /// A recording handle was absent, ambiguous, or in a conflicting transition.
+    RecordingUnavailable,
+    /// Retained recording frames could not produce a bounded GIF.
+    RecordingExportFailed,
 }
 
 impl Refusal {
@@ -320,6 +406,12 @@ impl Refusal {
             Self::FilesUnreadable => "The selected local files could not be prepared safely.",
             Self::CaptureTooLarge => "Screenshot exceeded the product result bound.",
             Self::NoDialogVisible => "No JavaScript dialog is currently visible.",
+            Self::RecordingUnavailable => {
+                "The requested memory-only recording is not currently available."
+            }
+            Self::RecordingExportFailed => {
+                "The retained browser frames could not produce a bounded animated GIF."
+            }
         }
         .into()
     }
@@ -343,6 +435,14 @@ impl Refusal {
                 vec!["Reconnect the Ghostlight browser adapter.".into()]
             }
             Self::WorkspaceUnusable { reason } => reason.next_steps(),
+            Self::RecordingUnavailable => vec![
+                "Use browser_record with action status and an explicit recording handle when more than one exists."
+                    .into(),
+            ],
+            Self::RecordingExportFailed => vec![
+                "Inspect recording status, then discard it or start a shorter recording."
+                    .into(),
+            ],
             _ => vec![],
         }
     }
@@ -387,14 +487,13 @@ impl WorkspaceReason {
     pub fn next_steps(self) -> Vec<String> {
         match self {
             Self::TabUnavailable => {
-                vec!["Call browser_list_tabs to obtain current controlled tab handles.".into()]
+                vec!["Call browser_tabs with action list to obtain current tab handles.".into()]
             }
             Self::StaleTarget => vec![
-                "Call browser_inspect_page or browser_find to obtain current target handles."
-                    .into(),
+                "Call browser_inspect or browser_find to obtain current target handles.".into(),
             ],
             Self::StaleView => {
-                vec!["Call browser_take_screenshot to obtain a current view handle.".into()]
+                vec!["Call browser_screenshot to obtain a current view handle.".into()]
             }
             Self::WorkspaceBusy => {
                 vec!["Wait for the active Ghostlight invocation to finish.".into()]

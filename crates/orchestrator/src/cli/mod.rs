@@ -294,22 +294,22 @@ mod tests {
     #[test]
     fn a_call_takes_one_tool_and_an_optional_input() {
         assert_eq!(
-            parse(&arguments(&["browser_list_tabs"])).unwrap(),
+            parse(&arguments(&["browser_tabs"])).unwrap(),
             Command::Call {
-                tool: "browser_list_tabs".into(),
+                tool: "browser_tabs".into(),
                 input: "{}".into(),
                 rendering: Rendering::default()
             }
         );
         assert_eq!(
             parse(&arguments(&[
-                "browser_open_page",
+                "browser_navigate",
                 "{\"url\":\"x\"}",
                 "--json"
             ]))
             .unwrap(),
             Command::Call {
-                tool: "browser_open_page".into(),
+                tool: "browser_navigate".into(),
                 input: "{\"url\":\"x\"}".into(),
                 rendering: Rendering {
                     json: true,
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(parse(&arguments(&["--catalog"])).unwrap(), Command::Catalog);
         assert!(parse(&arguments(&[])).is_err());
         assert!(parse(&arguments(&["a", "b", "c"])).is_err());
-        assert!(parse(&arguments(&["browser_list_tabs", "--nonsense"])).is_err());
+        assert!(parse(&arguments(&["browser_tabs", "--nonsense"])).is_err());
     }
 
     #[test]
@@ -337,13 +337,9 @@ mod tests {
             }
         );
         assert_eq!(
-            parse(&arguments(&[
-                "browser_take_screenshot",
-                "--output=shot.jpg"
-            ]))
-            .unwrap(),
+            parse(&arguments(&["browser_screenshot", "--output=shot.jpg"])).unwrap(),
             Command::Call {
-                tool: "browser_take_screenshot".into(),
+                tool: "browser_screenshot".into(),
                 input: "{}".into(),
                 rendering: Rendering {
                     json: false,
@@ -351,7 +347,7 @@ mod tests {
                 }
             }
         );
-        assert!(parse(&arguments(&["browser_take_screenshot", "--output"])).is_err());
+        assert!(parse(&arguments(&["browser_screenshot", "--output"])).is_err());
     }
 
     #[test]

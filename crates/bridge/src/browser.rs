@@ -3,7 +3,14 @@
 use serde::{Deserialize, Serialize};
 
 /// Adapter protocol major negotiated end to end by the extension and orchestrator.
-pub const ADAPTER_PROTOCOL_MAJOR: u16 = 1;
+pub const ADAPTER_PROTOCOL_MAJOR: u16 = 2;
+
+/// Maximum decoded bytes carried by one host-to-extension command chunk.
+pub const COMMAND_CHUNK_PAYLOAD_BYTES: usize = 512 * 1024;
+/// Maximum serialized request bytes accepted by one chunked command transfer.
+pub const COMMAND_TRANSFER_MAX_BYTES: usize = 8 * 1024 * 1024;
+/// Maximum parts accepted for one chunked command transfer.
+pub const COMMAND_TRANSFER_MAX_CHUNKS: u16 = 64;
 
 /// Stable names for independently negotiable physical browser capabilities.
 pub mod adapter_capability {
@@ -33,6 +40,14 @@ pub mod adapter_capability {
     pub const OPERATION_RECOVERY: &str = "operation_recovery";
     /// Content-free Ghostlight presentation.
     pub const PRESENTATION: &str = "presentation";
+    /// Physical browser-window geometry changes.
+    pub const WINDOW_GEOMETRY: &str = "window_geometry";
+    /// Opt-in bounded browser console and network observation.
+    pub const DIAGNOSTICS: &str = "diagnostics";
+    /// Extension-owned bounded browser recording lifecycle.
+    pub const RECORDING: &str = "recording";
+    /// Bounded host-to-adapter command reassembly.
+    pub const CHUNKED_COMMANDS: &str = "chunked_commands";
 }
 
 /// One physical capability and the highest compatible revision implemented by the adapter.
@@ -166,6 +181,153 @@ pub struct PhysicalFile {
     pub data: String,
     /// Decoded byte count for receipt validation.
     pub size: u64,
+}
+
+/// Browser diagnostic sources selected at the physical adapter boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticSource {
+    /// Return console and network evidence.
+    Both,
+    /// Return console evidence only.
+    Console,
+    /// Return network evidence only.
+    Network,
+}
+
+/// Browser diagnostic detail selected at the physical adapter boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticDetail {
+    /// Return warnings, errors, exceptions, and failed HTTP activity.
+    Problems,
+    /// Return every retained bounded diagnostic entry.
+    All,
+}
+
+/// One bounded volatile diagnostic observation from Chromium.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "entry", rename_all = "snake_case")]
+pub enum DiagnosticEntry {
+    /// One console call or uncaught exception.
+    Console {
+        /// Opaque cursor for this retained observation.
+        cursor: String,
+        /// Adapter-wall-clock observation time.
+        timestamp_ms: u64,
+        /// Bounded Chromium console level.
+        level: String,
+        /// Bounded untrusted console text.
+        text: String,
+        /// Sanitized source origin and path, or `invalid:` when Chromium cannot prove provenance.
+        url: String,
+    },
+    /// One sanitized network request observation.
+    Network {
+        /// Opaque cursor for this retained observation.
+        cursor: String,
+        /// Adapter-wall-clock observation time.
+        timestamp_ms: u64,
+        /// Bounded HTTP method.
+        method: String,
+        /// URL reduced to origin and path, without userinfo, query, or fragment.
+        url: String,
+        /// Bounded Chromium resource kind.
+        resource_type: String,
+        /// HTTP response status when observed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<u16>,
+        /// Bounded physical failure category when loading failed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<String>,
+    },
+}
+
+/// The role of one JPEG delivered by the recording mechanism.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingFrameKind {
+    /// Transactional screenshot captured before compositor streaming begins.
+    Seed,
+    /// Change-driven compositor frame emitted by Chromium.
+    Screencast,
+    /// Final screenshot captured before stop acknowledgement.
+    Final,
+}
+
+/// Extension-owned recording lifecycle.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingState {
+    /// Chromium capture is active.
+    Recording,
+    /// Capture stopped normally and frames remain temporarily available.
+    Frozen,
+    /// Capture stopped through a physical safety path and retained partial frames.
+    Interrupted,
+}
+
+/// Why an extension-owned recording stopped.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingStopReason {
+    /// The caller explicitly stopped capture.
+    Explicit,
+    /// The extension-owned absolute deadline elapsed.
+    HardTimeout,
+    /// The extension-owned recording memory ceiling was reached.
+    MemoryLimit,
+    /// The browser target or debugger attachment disappeared.
+    BrowserDetached,
+    /// A local runtime hold revoked ongoing capture.
+    RuntimeHeld,
+    /// The service connection disappeared while capture was active.
+    ServiceDisconnected,
+    /// One encoded JPEG exceeded the extension's per-frame ceiling.
+    FrameTooLarge,
+}
+
+/// Content-free physical facts about one extension-owned recording.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicalRecordingSummary {
+    /// Opaque extension-minted recording identity.
+    pub recording_id: String,
+    /// Physical Chromium tab captured by this recording.
+    pub tab_id: u64,
+    /// Current extension-owned lifecycle.
+    pub state: RecordingState,
+    /// Number of retained compressed JPEG frames.
+    pub frame_count: usize,
+    /// Total decoded JPEG bytes retained by the extension.
+    pub bytes_held: usize,
+    /// Elapsed time since capture started.
+    pub duration_ms: u64,
+    /// Absolute capture deadline while capture is active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hard_expires_unix_ms: Option<u64>,
+    /// Absolute memory-erasure deadline after capture stops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_expires_unix_ms: Option<u64>,
+    /// Physical stop reason after capture ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<RecordingStopReason>,
+    /// Bounded HTTP(S) document URLs encountered during capture for disclosure authorization.
+    pub source_urls: Vec<String>,
+}
+
+/// One compressed frame read from an extension-owned recording.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicalRecordingFrame {
+    /// Capture role of this frame.
+    pub frame_kind: RecordingFrameKind,
+    /// Adapter-wall-clock capture time.
+    pub timestamp_ms: u64,
+    /// Exact media type. Version two supports JPEG only.
+    pub mime_type: String,
+    /// Base64-encoded compressed bytes.
+    pub data: String,
 }
 
 /// Human intent originating from the local extension toolbar.
@@ -368,6 +530,12 @@ pub enum BrowserCommand {
     },
     /// Set tab zoom as a browser scale factor.
     SetZoom { tab_id: u64, zoom: f64 },
+    /// Resize the normal browser window containing a physical tab.
+    ResizeWindow {
+        tab_id: u64,
+        width: u32,
+        height: u32,
+    },
     /// Hover one browser-local locator.
     Hover { tab_id: u64, locator: String },
     /// Hover one page point resolved from a governed view handle.
@@ -442,6 +610,29 @@ pub enum BrowserCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
     },
+    /// Enable and read bounded volatile browser diagnostics.
+    ReadDiagnostics {
+        tab_id: u64,
+        source: DiagnosticSource,
+        detail: DiagnosticDetail,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        match_text: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<String>,
+        limit: u16,
+    },
+    /// Erase volatile diagnostics for tabs released by the owning workspace.
+    ClearDiagnostics { tab_ids: Vec<u64> },
+    /// Start one extension-owned bounded recording on a physical tab.
+    StartRecording { tab_id: u64 },
+    /// Return one extension-owned recording summary.
+    StatusRecording { recording_id: Option<String> },
+    /// Capture a final screenshot and freeze one extension-owned recording.
+    StopRecording { recording_id: Option<String> },
+    /// Read retained compressed frames without consuming them.
+    ReadRecording { recording_id: Option<String> },
+    /// Erase one extension-owned recording immediately.
+    DiscardRecording { recording_id: Option<String> },
     /// Forward cancellation to the adapter.
     Cancel { correlation: String },
     /// Render content-free feedback.
@@ -458,6 +649,7 @@ impl BrowserCommand {
             | Self::FocusTab { .. }
             | Self::CloseTab { .. }
             | Self::SetZoom { .. } => capability::TABS,
+            Self::ResizeWindow { .. } => capability::WINDOW_GEOMETRY,
             Self::OpenTab { .. } => capability::ATOMIC_TAB_OPEN,
             Self::Navigate { .. } | Self::TraverseHistory { .. } | Self::Reload { .. } => {
                 capability::NAVIGATION
@@ -481,6 +673,12 @@ impl BrowserCommand {
             Self::EvaluateScript { .. } => capability::SCRIPT,
             Self::Observe { .. } => capability::OBSERVATION,
             Self::InspectDialog { .. } | Self::HandleDialog { .. } => capability::DIALOGS,
+            Self::ReadDiagnostics { .. } | Self::ClearDiagnostics { .. } => capability::DIAGNOSTICS,
+            Self::StartRecording { .. }
+            | Self::StatusRecording { .. }
+            | Self::StopRecording { .. }
+            | Self::ReadRecording { .. }
+            | Self::DiscardRecording { .. } => capability::RECORDING,
             Self::Cancel { .. } => capability::OPERATION_RECOVERY,
             Self::Present { .. } => capability::PRESENTATION,
         }
@@ -563,6 +761,14 @@ pub enum BrowserOutcome {
     Scrolled { tab_id: u64, x: f64, y: f64 },
     /// Zoom receipt.
     Zoomed { tab_id: u64, zoom: f64 },
+    /// Browser-window resize receipt with Chromium's observed dimensions.
+    WindowResized {
+        tab_id: u64,
+        width: u32,
+        height: u32,
+        /// Every physical tab whose viewport transform may have changed.
+        affected_tab_ids: Vec<u64>,
+    },
     /// Hover receipt.
     Hovered { tab_id: u64 },
     /// Form fill receipt.
@@ -626,6 +832,46 @@ pub enum BrowserOutcome {
         dialog_type: String,
         accepted: bool,
     },
+    /// Bounded, non-destructive diagnostic read.
+    DiagnosticsRead {
+        tab_id: u64,
+        entries: Vec<DiagnosticEntry>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<String>,
+        truncated: bool,
+        evicted: bool,
+        capture_started: bool,
+        omitted_count: usize,
+    },
+    /// Volatile diagnostics were erased for the reported number of tabs.
+    DiagnosticsCleared { cleared_count: usize },
+    /// Chromium started one extension-owned recording.
+    RecordingStarted {
+        summary: PhysicalRecordingSummary,
+        existing: bool,
+    },
+    /// Current extension-owned recording state.
+    RecordingStatus { summary: PhysicalRecordingSummary },
+    /// Chromium stopped one extension-owned recording after its final-frame barrier.
+    RecordingStopped {
+        summary: PhysicalRecordingSummary,
+        /// True only when this request changed active capture into a stopped state.
+        changed: bool,
+    },
+    /// Retained compressed frames crossed from the extension for orchestrator-owned saving.
+    RecordingRead {
+        summary: PhysicalRecordingSummary,
+        frames: Vec<PhysicalRecordingFrame>,
+    },
+    /// Extension memory was decisively erased.
+    RecordingDiscarded {
+        recording_id: String,
+        released_bytes: usize,
+    },
+    /// Omission selected more than one recording in the caller's opaque namespace.
+    RecordingAmbiguous { recording_ids: Vec<String> },
+    /// No recording in the caller's opaque namespace matched the request.
+    RecordingNotFound,
     /// Presentation was attempted without affecting product work.
     Presented { rendered: bool },
     /// The adapter received cancellation.
@@ -705,6 +951,16 @@ pub enum BrowserFrame {
     },
     /// Service sends a primitive request.
     Request { request: BrowserRequest },
+    /// One bounded part of a serialized service-to-adapter request frame.
+    CommandChunk {
+        transfer_id: String,
+        correlation: String,
+        index: u16,
+        count: u16,
+        total_bytes: u32,
+        sha256: String,
+        data: String,
+    },
     /// Adapter returns a receipt.
     Receipt { receipt: BrowserReceipt },
     /// Service confirms that a correlated terminal response is safely received.
@@ -726,8 +982,12 @@ pub enum BrowserFrame {
 #[cfg(test)]
 mod tests {
     use super::{
-        adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserRequest,
-        PresentationActivity, PresentationKind, PresentationSignal, ADAPTER_PROTOCOL_MAJOR,
+        adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserOutcome,
+        BrowserReceipt, BrowserRequest, DiagnosticDetail, DiagnosticEntry, DiagnosticSource,
+        PhysicalRecordingFrame, PhysicalRecordingSummary, PresentationActivity, PresentationKind,
+        PresentationSignal, RecordingFrameKind, RecordingState, RecordingStopReason,
+        ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES,
+        COMMAND_TRANSFER_MAX_CHUNKS,
     };
 
     #[test]
@@ -789,5 +1049,156 @@ mod tests {
             serde_json::from_slice::<BrowserFrame>(&encoded).unwrap(),
             frame
         );
+    }
+
+    #[test]
+    fn protocol_two_mechanisms_round_trip() {
+        let frames = [
+            BrowserFrame::Request {
+                request: BrowserRequest {
+                    correlation: "physical-diagnostics".into(),
+                    workspace: "workspace-1".into(),
+                    command: BrowserCommand::ReadDiagnostics {
+                        tab_id: 7,
+                        source: DiagnosticSource::Both,
+                        detail: DiagnosticDetail::Problems,
+                        match_text: Some("failed".into()),
+                        after: Some("diag_4".into()),
+                        limit: 50,
+                    },
+                },
+            },
+            BrowserFrame::Receipt {
+                receipt: BrowserReceipt {
+                    correlation: "physical-diagnostics".into(),
+                    result: BrowserOutcome::DiagnosticsRead {
+                        tab_id: 7,
+                        entries: vec![
+                            DiagnosticEntry::Console {
+                                cursor: "diag_4".into(),
+                                timestamp_ms: 4,
+                                level: "error".into(),
+                                text: "request failed".into(),
+                                url: "https://example.com/app.js".into(),
+                            },
+                            DiagnosticEntry::Network {
+                                cursor: "diag_5".into(),
+                                timestamp_ms: 5,
+                                method: "GET".into(),
+                                url: "https://example.com/path".into(),
+                                resource_type: "fetch".into(),
+                                status: Some(503),
+                                failure: None,
+                            },
+                        ],
+                        cursor: Some("diag_5".into()),
+                        truncated: false,
+                        evicted: false,
+                        capture_started: false,
+                        omitted_count: 0,
+                    },
+                },
+            },
+            BrowserFrame::Request {
+                request: BrowserRequest {
+                    correlation: "physical-diagnostics-clear".into(),
+                    workspace: "workspace-1".into(),
+                    command: BrowserCommand::ClearDiagnostics {
+                        tab_ids: vec![7, 11],
+                    },
+                },
+            },
+            BrowserFrame::Receipt {
+                receipt: BrowserReceipt {
+                    correlation: "physical-diagnostics-clear".into(),
+                    result: BrowserOutcome::DiagnosticsCleared { cleared_count: 2 },
+                },
+            },
+            BrowserFrame::Receipt {
+                receipt: BrowserReceipt {
+                    correlation: "physical-recording-read".into(),
+                    result: BrowserOutcome::RecordingRead {
+                        summary: PhysicalRecordingSummary {
+                            recording_id: "recording_1".into(),
+                            tab_id: 7,
+                            state: RecordingState::Interrupted,
+                            frame_count: 1,
+                            bytes_held: 1,
+                            duration_ms: 1_000,
+                            hard_expires_unix_ms: None,
+                            retention_expires_unix_ms: Some(10_000),
+                            stop_reason: Some(RecordingStopReason::HardTimeout),
+                            source_urls: vec!["https://example.com/path".into()],
+                        },
+                        frames: vec![PhysicalRecordingFrame {
+                            frame_kind: RecordingFrameKind::Final,
+                            timestamp_ms: 6,
+                            mime_type: "image/jpeg".into(),
+                            data: "AA==".into(),
+                        }],
+                    },
+                },
+            },
+            BrowserFrame::CommandChunk {
+                transfer_id: "chunk_1".into(),
+                correlation: "physical-upload".into(),
+                index: 0,
+                count: 2,
+                total_bytes: 1_000_000,
+                sha256: "0".repeat(64),
+                data: "AA==".into(),
+            },
+        ];
+
+        for frame in frames {
+            let encoded = serde_json::to_vec(&frame).expect("frame serializes");
+            let decoded: BrowserFrame =
+                serde_json::from_slice(&encoded).expect("frame deserializes");
+            assert_eq!(decoded, frame);
+        }
+    }
+
+    #[test]
+    fn new_commands_require_independent_physical_capabilities() {
+        assert_eq!(
+            BrowserCommand::ResizeWindow {
+                tab_id: 1,
+                width: 1280,
+                height: 720,
+            }
+            .required_capability(),
+            adapter_capability::WINDOW_GEOMETRY
+        );
+        assert_eq!(
+            BrowserCommand::StartRecording { tab_id: 1 }.required_capability(),
+            adapter_capability::RECORDING
+        );
+        assert_eq!(
+            BrowserCommand::ClearDiagnostics {
+                tab_ids: vec![1, 2]
+            }
+            .required_capability(),
+            adapter_capability::DIAGNOSTICS
+        );
+    }
+
+    #[test]
+    fn command_chunk_bounds_fit_the_directional_chrome_boundary() {
+        assert_eq!(COMMAND_CHUNK_PAYLOAD_BYTES, 512 * 1024);
+        assert_eq!(COMMAND_TRANSFER_MAX_BYTES, 8 * 1024 * 1024);
+        assert_eq!(COMMAND_TRANSFER_MAX_CHUNKS, 64);
+        assert!(4 * COMMAND_CHUNK_PAYLOAD_BYTES.div_ceil(3) < 1024 * 1024);
+    }
+
+    #[test]
+    fn console_diagnostics_require_source_provenance() {
+        let missing_url = serde_json::json!({
+            "entry": "console",
+            "cursor": "diag_1_deadbeef",
+            "timestamp_ms": 1,
+            "level": "error",
+            "text": "failed"
+        });
+        assert!(serde_json::from_value::<DiagnosticEntry>(missing_url).is_err());
     }
 }

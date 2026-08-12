@@ -30,6 +30,8 @@ use crate::work::{ActiveAuthorityRegistry, ApplicationExecutor, CancellationToke
 use crate::workbench::{ProjectingAuditSink, WorkbenchFacade, WorkbenchProjection};
 use crate::workspace::WorkspaceStore;
 
+const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
+
 /// A running local service host. Dropping it requests listener shutdown.
 pub struct ServiceHost {
     /// Published authenticated endpoint.
@@ -126,7 +128,7 @@ impl ServiceHost {
             Arc::clone(&stop),
             executor,
             workspaces,
-            browser_port,
+            browser_port.clone(),
             workbench.clone(),
             governance.clone(),
             endpoint.token.clone(),
@@ -488,9 +490,11 @@ fn serve_session(
                 let _ = thread::Builder::new().name("ghostlight-invocation".into()).spawn(move || {
                     let mut result = executor.execute(&workspace, &tool, input, deadline_ms, &cancellation);
                     lock(&active).remove(&id);
+                    let text = result.model_text();
+                    let is_error = result.is_error();
                     let content = std::mem::take(&mut result.content);
-                    let value = serde_json::to_value(result).unwrap_or_else(|_| serde_json::json!({"status":"unknown","effect":"unknown","repeat_safe":false,"summary":"Result serialization failed.","facts":{},"next_steps":[]}));
-                    write_response(&writer, &ServiceResponse::Result { id, result: value, content });
+                    let value = serde_json::to_value(&result).unwrap_or_else(|_| serde_json::json!({"status":"unknown","effect":"unknown","repeat_safe":false,"summary":"Result serialization failed.","facts":{},"next_steps":[]}));
+                    write_response(&writer, &ServiceResponse::Result { id, text, result: value, is_error, content });
                 });
             }
             ServiceRequest::Cancel { id } => {
@@ -520,25 +524,32 @@ fn serve_session(
         return Ok(());
     }
     let physical_tabs = workspaces.release(&workspace);
-    let cancelled = AtomicBool::new(false);
-    for tab_id in physical_tabs {
-        let _ = browser.call(
-            workspace.as_str(),
-            BrowserCommand::CloseTab { tab_id },
-            Instant::now() + Duration::from_secs(2),
-            &cancelled,
-        );
-    }
+    cleanup_released_tabs(workspace.as_str(), &physical_tabs, browser.as_ref());
     Ok(())
 }
 
 /// Close the tabs of every session whose owning process is gone.
 fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort) {
     let abandoned = workspaces.reap(&owner_alive);
+    cleanup_released_tabs("reaped", &abandoned, browser);
+}
+
+/// Erase service-owned browser diagnostics before released tabs are offered to the close interlock.
+fn cleanup_released_tabs(workspace: &str, physical_tabs: &[u64], browser: &dyn BrowserPort) {
     let cancelled = AtomicBool::new(false);
-    for tab_id in abandoned {
+    for tab_ids in physical_tabs.chunks(DIAGNOSTIC_CLEAR_BATCH_SIZE) {
         let _ = browser.call(
-            "reaped",
+            workspace,
+            BrowserCommand::ClearDiagnostics {
+                tab_ids: tab_ids.to_vec(),
+            },
+            Instant::now() + Duration::from_secs(2),
+            &cancelled,
+        );
+    }
+    for &tab_id in physical_tabs {
+        let _ = browser.call(
+            workspace,
             BrowserCommand::CloseTab { tab_id },
             Instant::now() + Duration::from_secs(2),
             &cancelled,
@@ -649,7 +660,8 @@ impl BrowserEventSink for ServiceBrowserEvents {
                 let _ = self.browser.publish_control_state(state);
             }
             BrowserEvent::TabClosed { tab_id } => self.workspaces.apply_browser_close(tab_id),
-            BrowserEvent::DialogChanged { .. } | BrowserEvent::Disconnected => {}
+            BrowserEvent::Disconnected => {}
+            BrowserEvent::DialogChanged { .. } => {}
         }
     }
 }
@@ -661,16 +673,18 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
+    use ghostlight_bridge::browser::BrowserCommand;
     use ghostlight_bridge::framing::{read_json_line, write_json_line};
     use ghostlight_bridge::service::{
         IntakeChannel, ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR,
     };
 
+    use crate::browser::testing::FakeBrowser;
     use crate::workbench::{
         WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
     };
 
-    use super::{request_workbench_activation, ServiceHost};
+    use super::{cleanup_released_tabs, request_workbench_activation, ServiceHost};
 
     fn runtime_path(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let directory = std::env::temp_dir().join(format!(
@@ -753,5 +767,30 @@ mod tests {
         assert_eq!(reveals.0.load(Ordering::SeqCst), 1);
         drop(host);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn released_tabs_clear_diagnostics_in_bounded_batches_before_close_attempts() {
+        let browser = FakeBrowser::default();
+        let tabs = (1..=257).collect::<Vec<u64>>();
+
+        cleanup_released_tabs("workspace-1", &tabs, &browser);
+
+        let calls = browser.calls();
+        assert_eq!(
+            calls[0],
+            BrowserCommand::ClearDiagnostics {
+                tab_ids: (1..=256).collect()
+            }
+        );
+        assert_eq!(
+            calls[1],
+            BrowserCommand::ClearDiagnostics { tab_ids: vec![257] }
+        );
+        assert_eq!(calls[2], BrowserCommand::CloseTab { tab_id: 1 });
+        assert_eq!(
+            calls.last(),
+            Some(&BrowserCommand::CloseTab { tab_id: 257 })
+        );
     }
 }

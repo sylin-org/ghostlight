@@ -52,11 +52,11 @@ try {
   for (let attempt = 0; attempt < 80 && !existsSync(runtimeFile); attempt += 1) await sleep(50);
   assert.equal(existsSync(runtimeFile), true, "the service never published runtime discovery");
 
-  const listed = call(["browser_list_tabs"]);
+  const listed = call(["browser_tabs", '{"action":"list"}']);
   assert.equal(listed.status, 0, listed.stderr);
   assert.equal(listed.stdout.trim(), "Listed 0 controlled tabs.");
 
-  const rendered = call(["browser_list_tabs", "{}", "--json"]);
+  const rendered = call(["browser_tabs", '{"action":"list"}', "--json"]);
   assert.equal(rendered.status, 0);
   const result = JSON.parse(rendered.stdout.trim());
   assert.equal(result.status, "succeeded");
@@ -64,15 +64,15 @@ try {
 
   const catalog = call(["--catalog"]);
   assert.equal(catalog.status, 0);
-  assert.equal(catalog.stdout.trim().split("\n").length, 24, "the CLI sees the whole catalog");
+  assert.equal(catalog.stdout.trim().split("\n").length, 22, "the CLI sees the whole catalog");
 
   // A refusal must not look like success to a shell.
-  const rejected = call(["browser_open_page", "{}"]);
+  const rejected = call(["browser_navigate", "{}"]);
   assert.notEqual(rejected.status, 0);
   assert.equal(rejected.stdout.trim(), "The call does not match the Ghostlight catalog.");
 
   // One process, one session: handles from an earlier line are usable on a later one.
-  const batch = call(["--stdin"], "browser_list_tabs\nbrowser_list_tabs {}\n\nbrowser_list_tabs\n");
+  const batch = call(["--stdin"], 'browser_tabs {"action":"list"}\nbrowser_tabs {"action":"list"}\n\nbrowser_tabs {"action":"list"}\n');
   assert.equal(batch.status, 0, batch.stderr);
   assert.equal(batch.stdout.trim().split("\n").length, 3);
 
@@ -117,7 +117,7 @@ try {
   for (let attempt = 0; attempt < 80 && !existsSync(governedRuntime); attempt += 1) await sleep(50);
   assert.equal(existsSync(governedRuntime), true, "the governed service never started");
 
-  const refused = spawnSync(ghostlight, ["call", "browser_list_tabs"], {
+  const refused = spawnSync(ghostlight, ["call", "browser_tabs", '{"action":"list"}'], {
     env: governedEnvironment,
     encoding: "utf8"
   });
@@ -137,7 +137,7 @@ try {
   // naming this channel rather than the authority being broken.
   assert.equal(
     JSON.parse(readFileSync(governedRuntime, "utf8")).service_bridge_major,
-    1,
+    2,
     "the governed service is otherwise healthy"
   );
 

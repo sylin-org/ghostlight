@@ -208,14 +208,19 @@ fn handle_service_response(
     match response {
         ServiceResponse::Result {
             id,
+            text,
             result,
+            is_error,
             content,
         } => {
             if let Some(call) = lock(pending).remove(&id) {
                 lock(reverse).remove(&call.mcp_key);
                 write_mcp(
                     output,
-                    mcp_2025_11_25::success(call.mcp_id, render_result(result, content)),
+                    mcp_2025_11_25::success(
+                        call.mcp_id,
+                        render_result(text, result, is_error, content),
+                    ),
                 );
             }
         }
@@ -255,9 +260,12 @@ fn fail_pending(
     }
 }
 
-fn render_result(result: Value, content: Vec<ServiceContent>) -> Value {
-    let text = serde_json::to_string_pretty(&result)
-        .unwrap_or_else(|_| "Ghostlight result could not be rendered.".into());
+fn render_result(
+    text: String,
+    result: Value,
+    is_error: bool,
+    content: Vec<ServiceContent>,
+) -> Value {
     let mut rendered = vec![json!({"type":"text","text":text})];
     for item in content {
         match item {
@@ -266,7 +274,7 @@ fn render_result(result: Value, content: Vec<ServiceContent>) -> Value {
             }
         }
     }
-    json!({"content":rendered,"structuredContent":result,"isError":false})
+    json!({"content":rendered,"structuredContent":result,"isError":is_error})
 }
 
 fn write_mcp(output: &Mutex<io::Stdout>, value: Value) {
@@ -284,7 +292,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use ghostlight_bridge::service::{ServiceContent, ToolDefinition};
+    use ghostlight_bridge::service::{ServiceContent, ToolAnnotations, ToolDefinition};
     use serde_json::json;
 
     use super::render_result;
@@ -295,16 +303,28 @@ mod tests {
             name: "future_orchestrator_tool".into(),
             description: "Future job.".into(),
             input_schema: json!({"type":"object"}),
+            output_schema: Some(json!({"type":"object","required":["status"]})),
+            annotations: Some(ToolAnnotations {
+                title: Some("Future job".into()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
         }];
         let response = json!({"tools":tools});
         assert_eq!(response["tools"][0]["name"], "future_orchestrator_tool");
+        assert_eq!(response["tools"][0]["outputSchema"]["type"], "object");
+        assert_eq!(response["tools"][0]["annotations"]["readOnlyHint"], true);
     }
 
     #[test]
     fn service_content_is_rendered_without_tool_specific_dispatch() {
         let structured = json!({"status":"succeeded","facts":{"view":"view_1"}});
         let rendered = render_result(
+            "Opened the page.".into(),
             structured.clone(),
+            false,
             vec![ServiceContent::Image {
                 mime_type: "image/jpeg".into(),
                 data: "base64-image".into(),
@@ -312,8 +332,27 @@ mod tests {
         );
         assert_eq!(rendered["structuredContent"], structured);
         assert_eq!(rendered["content"][0]["type"], "text");
+        assert_eq!(rendered["content"][0]["text"], "Opened the page.");
         assert_eq!(rendered["content"][1]["type"], "image");
         assert_eq!(rendered["content"][1]["mimeType"], "image/jpeg");
         assert_eq!(rendered["content"][1]["data"], "base64-image");
+        assert_eq!(rendered["isError"], false);
+    }
+
+    #[test]
+    fn authored_failure_is_rendered_as_a_tool_error() {
+        let structured = json!({"status":"refused","reason":"host_not_allowed"});
+        let rendered = render_result(
+            "Refused navigation because the host is not allowed.".into(),
+            structured.clone(),
+            true,
+            vec![],
+        );
+        assert_eq!(rendered["structuredContent"], structured);
+        assert_eq!(
+            rendered["content"][0]["text"],
+            "Refused navigation because the host is not allowed."
+        );
+        assert_eq!(rendered["isError"], true);
     }
 }

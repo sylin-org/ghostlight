@@ -27,12 +27,18 @@ last fetch.
 
 - One Rust 2021 workspace builds four roles: the shared typed bridge, `ghostlight` orchestrator,
   generic MCP connector, and opaque browser connector.
-- The orchestrator owns the 24-tool model-facing catalog, workspace aggregate, one executor and
+- The orchestrator owns the 22-tool model-facing catalog, workspace aggregate, one executor and
   completion path, immutable authority snapshots, runtime controls, payload-free audit, browser
   port, and content-free presentation decisions.
 - The stable browser fringe includes a policy-free Manifest V3 extension, durable native relay,
   operation-disposition recovery, one browser-wide exact-title group per client label, dedicated
   Ghostlight window placement, and the established visual language and product identity.
+- Recording now has one owner (ADR-0108). The extension keeps a plural, workspace-namespaced,
+  memory-only registry; owns capture ids, frames, fixed bounds, autonomous stop, five-minute
+  retention, and erase; and exposes only start/status/stop/read/discard physical requests. The
+  orchestrator authorizes before requesting bytes, renders the current bounded GIF output, and
+  owns client or page delivery truth. The old service coordinator, renewal loop, unsolicited frame
+  events, and duplicate deadlines are gone.
 - Model-driven tab close is admitted by service authority and then checked by the extension's
   default-on preserve-tabs interlock. A refusal stays visible and returns a blocked no-effect
   result.
@@ -118,13 +124,13 @@ last fetch.
 
 ## Verified in this workspace
 
-Re-run on 2026-08-11 against the current tree:
+Re-run on 2026-08-12 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 113 Rust tests -- 95 in the orchestrator including its launch-mode
-  binary test, 15 in the shared bridge, and 3 in the MCP connector.
-- `npm test --prefix extension`: 39 extension tests.
+- `cargo test --workspace`: 132 Rust tests -- 106 in the orchestrator library, its launch-mode
+  binary test, 21 in the shared bridge, and 4 in the MCP connector.
+- `npm test --prefix extension`: 76 extension tests.
 - `node tests/cli-powershell-journey.mjs`: the shipped PowerShell script drives a real service and a
   scripted browser adapter through open/list/read/capture/close, exits zero, writes real JPEG bytes,
   and every step is audited as `cli` with the landing host and no page text. It then proves the
@@ -135,7 +141,8 @@ Re-run on 2026-08-11 against the current tree:
   separate workspaces. A second service started with `{"channels":{"cli":{}}}` refuses the intake
   with `channel_denied`, exits non-zero, and writes no audit record.
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
-  restart without replaying an interrupted effect, then complete open/read/close. The journey uses
+  restart without replaying an interrupted effect, then complete open/read, an extension-owned
+  recording start/save/discard with a real GIF content block, and close. The journey uses
   a fresh deployment lock to isolate explicit restart recovery from demand-start. It also reads
   the audit file the real executable wrote and checks that the read records a host and a word
   count, and no page text.

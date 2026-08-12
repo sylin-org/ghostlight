@@ -146,3 +146,25 @@ test("failed Page enablement leaves no attached lifecycle state", async () => {
   assert.equal(lifecycle.attachedCount(), 0);
   assert.deepEqual(calls, [["attach", 13, "1.3"], ["detach", 13]]);
 });
+
+test("optional CDP domains share the existing attachment", async () => {
+  const chromeDebugger = fakeDebugger();
+  const lifecycle = debuggerApi.create(chromeDebugger);
+
+  await lifecycle.retain(14);
+  assert.equal(await lifecycle.enableDomain(14, "Runtime"), true);
+  assert.equal(await lifecycle.enableDomain(14, "Runtime"), false);
+  assert.equal(await lifecycle.enableDomain(14, "Network"), true);
+  await lifecycle.disableDomain(14, "Network");
+
+  assert.deepEqual(chromeDebugger.calls.filter(([kind]) => kind === "attach"), [["attach", 14, "1.3"]]);
+  assert.deepEqual(chromeDebugger.calls.filter(([, , method]) => method === "Runtime.enable"), [
+    ["command", 14, "Runtime.enable"]
+  ]);
+  assert.deepEqual(chromeDebugger.calls.filter(([, , method]) => method === "Network.enable"), [
+    ["command", 14, "Network.enable"]
+  ]);
+  assert.deepEqual(chromeDebugger.calls.filter(([, , method]) => method === "Network.disable"), [
+    ["command", 14, "Network.disable"]
+  ]);
+});

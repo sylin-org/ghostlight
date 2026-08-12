@@ -124,7 +124,7 @@ test("browser events use the nested typed bridge envelope", () => {
 });
 
 test("the adapter advertises stable versioned physical capabilities", () => {
-  assert.equal(shared.ADAPTER_PROTOCOL_MAJOR, 1);
+  assert.equal(shared.ADAPTER_PROTOCOL_MAJOR, 2);
   assert.deepEqual(shared.ADAPTER_CAPABILITIES, [
     "tabs",
     "atomic_tab_open",
@@ -138,7 +138,11 @@ test("the adapter advertises stable versioned physical capabilities", () => {
     "observation",
     "dialogs",
     "operation_recovery",
-    "presentation"
+    "presentation",
+    "window_geometry",
+    "diagnostics",
+    "recording",
+    "chunked_commands"
   ].map((name) => ({ name, revision: 1 })));
 });
 
@@ -155,6 +159,51 @@ test("debugger attachment lifetime follows controlled tab ownership", () => {
   assert.match(source, /await debuggerLifecycle\.retain\(tabId\);/);
   assert.match(source, /chrome\.tabs\.onRemoved[\s\S]*?debuggerLifecycle\.forget\(tabId\);/);
   assert.match(source, /controlState === "ended"[\s\S]*?debuggerLifecycle\.detachAll\(\);/);
+});
+
+test("adapter protocol two wires the new physical mechanisms at the Chrome seam", () => {
+  const root = join(__dirname, "..");
+  const worker = readFileSync(join(root, "service-worker.js"), "utf8");
+  assert.match(worker, /command\.command === "resize_window"/);
+  assert.match(worker, /command\.command === "read_diagnostics"/);
+  assert.match(worker, /command\.command === "clear_diagnostics"/);
+  assert.match(worker, /command\.command === "start_recording"/);
+  assert.match(worker, /command\.command === "status_recording"/);
+  assert.match(worker, /command\.command === "stop_recording"/);
+  assert.match(worker, /command\.command === "read_recording"/);
+  assert.match(worker, /command\.command === "discard_recording"/);
+  assert.match(worker, /frame\.kind === "command_chunk"/);
+  assert.match(worker, /Page\.screencastFrameAck/);
+  assert.match(worker, /GhostlightRecording\.MAX_WIDTH \/ visual\.clientWidth/);
+  assert.match(worker, /quality: globalThis\.GhostlightRecording\.JPEG_QUALITY/);
+  assert.match(worker, /recording_tabs: recording\.count\(\)/);
+  assert.match(worker, /stateApi\.badge\(\{ \.\.\.liveState, recording_tabs: recording\.count\(\) \}\)/);
+  assert.match(worker, /frame\.kind === "backend_unavailable"[\s\S]*?settleServiceBoundaryState\(\)/);
+  assert.match(worker, /chrome\.tabs\.query\(\{ windowId: tab\.windowId \}\)/);
+});
+
+test("service epochs and browser loss share one volatile-state teardown seam", () => {
+  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  const cleanup = worker.match(/async function settleServiceBoundaryState[\s\S]*?\n}\n/)[0];
+  assert.match(cleanup, /commandChunks\.clear\(\)[\s\S]*?interruptAllRecordings\("service_disconnected"\)[\s\S]*?diagnostics\.clearAll\(\)/);
+  assert.match(worker, /onDisconnect[\s\S]*?settleServiceBoundaryState\(\)/);
+  assert.match(worker, /operationEngine\.activate\(frame\.service_epoch\)[\s\S]*?if \(changed\) await settleServiceBoundaryState\(\)/);
+  assert.match(worker, /frame\.kind === "command_chunk"[\s\S]*?await browserNegotiation[\s\S]*?commandChunks\.accept/);
+  assert.match(worker, /onNativeMessage\(frame, port\)/);
+});
+
+test("console diagnostics receive execution-context provenance before disclosure", () => {
+  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  assert.match(worker, /Runtime\.executionContextCreated[\s\S]*?diagnostics\.executionContextCreated/);
+  assert.match(worker, /Runtime\.executionContextDestroyed[\s\S]*?diagnostics\.executionContextDestroyed/);
+  assert.match(worker, /Runtime\.executionContextsCleared[\s\S]*?diagnostics\.executionContextsCleared/);
+});
+
+test("diagnostic teardown forgets volatile rings before disabling optional CDP domains", () => {
+  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  const cleanup = worker.match(/async function clearDiagnostics[\s\S]*?\n}\n/)[0];
+  assert.match(cleanup, /diagnostics\.forgetMany\(command\.tab_ids\)[\s\S]*?disableDiagnosticCapture\(command\.tab_ids\)/);
+  assert.match(cleanup, /outcome: "diagnostics_cleared", cleared_count: clearedCount/);
 });
 
 test("the unpacked rewrite preserves the established extension and host identity", () => {

@@ -13,8 +13,10 @@ use std::time::{Duration, Instant};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use ghostlight_bridge::browser::{
-    BrowserCommand, BrowserOutcome, BrowserReadiness, ClickShape, PhysicalField, PhysicalFile,
-    PhysicalPoint, PhysicalTab, PresentationActivity,
+    BrowserCommand, BrowserOutcome, BrowserReadiness, ClickShape, DiagnosticDetail,
+    DiagnosticEntry, DiagnosticSource, PhysicalField, PhysicalFile, PhysicalPoint,
+    PhysicalRecordingSummary, PhysicalTab, PresentationActivity, RecordingState,
+    RecordingStopReason,
 };
 use ghostlight_bridge::service::ServiceContent;
 use serde_json::{json, Value};
@@ -25,14 +27,15 @@ use crate::browser::{BrowserError, BrowserPort};
 use crate::events::{DenialPresentation, DomainEvent};
 use ghostlight_bridge::service::IntakeChannel;
 
+use crate::gif_output as recording_gif;
 use crate::governance::{
     AuditRecord, AuditSink, AuthoritySnapshot, Capability, Decision, GovernanceFacade, ReasonCode,
 };
 use crate::language::{
     self,
     outcome::{Observed, Outcome, Refusal, TargetNoun, WorkspaceReason},
-    Click, Drag, FillForm, FormField, Hover, Operation, PressKey, RunScript, RunSequence,
-    ScrollPage, SequenceStep, TypeText, UploadFiles, Wait,
+    Click, Diagnose, Drag, FillForm, FormField, HandleDialog, Hover, Operation, PressKey, Record,
+    RunScript, RunSequence, ScrollPage, SequenceStep, TypeText, UploadFiles, Wait,
 };
 use crate::presentation::PresentationReactor;
 use crate::workbench::WorkbenchProjection;
@@ -173,16 +176,21 @@ impl ApplicationExecutor {
             .unwrap_or_else(|| operation_timeout(&operation))
             .clamp(100, 30_000);
         let deadline = Instant::now() + Duration::from_millis(deadline_ms);
-        let lease = loop {
-            match self.workspaces.acquire(workspace) {
-                Ok(lease) => break Some(lease),
-                Err(WorkspaceError::Busy)
-                    if !cancellation.is_cancelled() && Instant::now() < deadline =>
-                {
-                    std::thread::sleep(Duration::from_millis(5))
+        let requires_lease = operation_requires_workspace_lease(&operation);
+        let lease = if requires_lease {
+            loop {
+                match self.workspaces.acquire(workspace) {
+                    Ok(lease) => break Some(lease),
+                    Err(WorkspaceError::Busy)
+                        if !cancellation.is_cancelled() && Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(Duration::from_millis(5))
+                    }
+                    Err(_) => break None,
                 }
-                Err(_) => break None,
             }
+        } else {
+            None
         };
         let snapshot = self.governance.snapshot(operation.restrictions());
         let context = InvocationContext {
@@ -192,7 +200,7 @@ impl ApplicationExecutor {
             deadline,
             cancellation,
         };
-        let terminal = if let Some(lease) = lease {
+        let terminal = if !requires_lease || lease.is_some() {
             self.emit(DomainEvent::WorkStarted {
                 invocation: invocation.clone(),
                 workspace: workspace.as_str().into(),
@@ -204,7 +212,11 @@ impl ApplicationExecutor {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .insert(workspace.as_str().into(), snapshot.clone());
-            let terminal = self.run(&context, &lease, &operation);
+            let terminal = if let Some(lease) = lease.as_ref() {
+                self.run(&context, lease, &operation)
+            } else {
+                self.run_without_workspace_lease(&context, &operation)
+            };
             self.active_authority
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -364,7 +376,7 @@ impl ApplicationExecutor {
                 context,
                 lease,
                 value.tab.as_deref(),
-                &value.kind,
+                &value.scope,
                 value.max_items,
             ),
             Operation::Find(value) => self.find(
@@ -372,7 +384,7 @@ impl ApplicationExecutor {
                 lease,
                 value.tab.as_deref(),
                 &value.text,
-                &value.kind,
+                &value.scope,
                 value.max_results,
             ),
             Operation::TakeScreenshot(value) => self.screenshot(
@@ -387,6 +399,13 @@ impl ApplicationExecutor {
             Operation::SetZoom(value) => {
                 self.set_zoom(context, lease, value.tab.as_deref(), value.percent)
             }
+            Operation::ResizeWindow(value) => self.resize_window(
+                context,
+                lease,
+                value.tab.as_deref(),
+                value.width,
+                value.height,
+            ),
             Operation::Hover(value) => self.perform_hover(context, lease, value),
             Operation::FillForm(value) => self.perform_fill(context, lease, value),
             Operation::TypeText(value) => self.perform_type_text(context, lease, value),
@@ -396,13 +415,22 @@ impl ApplicationExecutor {
             Operation::RunScript(value) => self.run_script(context, lease, value),
             Operation::Wait(value) => self.perform_wait(context, lease, value),
             Operation::RunSequence(value) => self.sequence(context, lease, value),
-            Operation::HandleDialog(value) => self.handle_dialog(
-                context,
-                lease,
-                value.tab.as_deref(),
-                value.accept,
-                value.text.as_deref(),
-            ),
+            Operation::HandleDialog(value) => self.handle_dialog(context, lease, value),
+            Operation::Diagnose(value) => self.diagnose(context, lease, value),
+            Operation::Record(value) => self.perform_record(context, Some(lease), value),
+        }
+    }
+
+    fn run_without_workspace_lease(
+        &self,
+        context: &InvocationContext<'_>,
+        operation: &Operation,
+    ) -> Terminal {
+        match operation {
+            Operation::Record(value) => self.perform_record(context, None, value),
+            _ => {
+                unreachable!("only recording cleanup and client export bypass the workspace lease")
+            }
         }
     }
 
@@ -599,6 +627,9 @@ impl ApplicationExecutor {
         }
         let selected = match lease.select_tab(requested_tab) {
             Ok(tab) => tab,
+            Err(WorkspaceError::NoTab) if requested_tab.is_none() => {
+                return self.open_page(context, lease, url)
+            }
             Err(error) => return self.workspace_failure(context, error),
         };
         match self.dispatch(
@@ -633,7 +664,7 @@ impl ApplicationExecutor {
                     tab: governed.handle.clone(),
                     physical_id: governed.physical_id,
                 });
-                self.succeeded(context, landing, Some(governed.physical_id), Effect::Applied, readiness(governed.readiness), false, Outcome::PageNavigated { host: observed_host(&governed.url) }, json!({"tab":governed.handle.as_str(),"url":governed.url,"title":governed.title,"document_generation":governed.generation}))
+                self.succeeded(context, landing, Some(governed.physical_id), Effect::Applied, readiness(governed.readiness), false, Outcome::PageNavigated { host: observed_host(&governed.url) }, json!({"tab":governed.handle.as_str(),"url":governed.url,"title":governed.title,"created":false,"document_generation":governed.generation}))
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
@@ -681,7 +712,7 @@ impl ApplicationExecutor {
                 direction: direction.into(),
                 host,
             },
-            json!({"direction":direction}),
+            json!({"action":direction}),
         )
     }
 
@@ -721,7 +752,7 @@ impl ApplicationExecutor {
             decision,
             outcome,
             |host| Outcome::PageReloaded { host },
-            json!({"bypass_cache":bypass_cache}),
+            json!({"action":"reload","bypass_cache":bypass_cache}),
         )
     }
 
@@ -1310,7 +1341,68 @@ impl ApplicationExecutor {
                         percent: actual_percent,
                         host: observed_host(&selected.url),
                     },
-                    json!({"tab":selected.handle.as_str(),"percent":actual_percent,"zoomed":true}),
+                    json!({"tab":selected.handle.as_str(),"action":"zoom","requested_percent":percent,"percent":actual_percent,"zoomed":true}),
+                )
+            }
+            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+            Err(error) => {
+                self.browser_failure(context, decision, error, Some(selected.physical_id))
+            }
+        }
+    }
+
+    fn resize_window(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        requested_tab: Option<&str>,
+        width: u32,
+        height: u32,
+    ) -> Terminal {
+        let selected = match lease.select_tab(requested_tab) {
+            Ok(tab) => tab,
+            Err(error) => return self.workspace_failure(context, error),
+        };
+        let decision = self.authorize(context, Capability::Action, current_url(&selected));
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Effect::None,
+                true,
+                json!({"reason":decision.reason.as_str()}),
+            );
+        }
+        match self.dispatch(
+            context,
+            BrowserCommand::ResizeWindow {
+                tab_id: selected.physical_id,
+                width,
+                height,
+            },
+        ) {
+            Ok(BrowserOutcome::WindowResized {
+                tab_id,
+                width: observed_width,
+                height: observed_height,
+                affected_tab_ids,
+            }) if tab_id == selected.physical_id => {
+                if let Err(error) = lease.invalidate_views_for_physical(&affected_tab_ids) {
+                    return self.workspace_failure(context, error);
+                }
+                self.succeeded(
+                    context,
+                    decision,
+                    Some(tab_id),
+                    Effect::Applied,
+                    readiness(selected.readiness),
+                    true,
+                    Outcome::WindowResized {
+                        width: observed_width,
+                        height: observed_height,
+                    },
+                    json!({"tab":selected.handle.as_str(),"action":"resize","requested_width":width,"requested_height":height,"width":observed_width,"height":observed_height,"resized":true}),
                 )
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -2014,7 +2106,7 @@ impl ApplicationExecutor {
                         readiness(browser_readiness),
                         true,
                         &summary,
-                        json!({"tab":selected.handle.as_str(),"condition":value.condition,"satisfied":satisfied,"elapsed_ms":elapsed_ms}),
+                        json!({"tab":selected.handle.as_str(),"condition":value.condition,"satisfied":satisfied,"elapsed_ms":elapsed_ms,"readiness":readiness(browser_readiness)}),
                         next_steps,
                     ),
                     decision,
@@ -2214,15 +2306,15 @@ impl ApplicationExecutor {
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
-        requested_tab: Option<&str>,
-        accept: bool,
-        text: Option<&str>,
+        value: &HandleDialog,
     ) -> Terminal {
-        let selected = match lease.select_tab(requested_tab) {
+        let selected = match lease.select_tab(value.tab.as_deref()) {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let capability = if text.is_some() {
+        let capability = if value.action == "status" {
+            Capability::Read
+        } else if value.action == "respond" {
             Capability::Write
         } else {
             Capability::Action
@@ -2238,7 +2330,7 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        let dialog_type = match self.dispatch(
+        let observed = match self.dispatch(
             context,
             BrowserCommand::InspectDialog {
                 tab_id: selected.physical_id,
@@ -2246,28 +2338,560 @@ impl ApplicationExecutor {
         ) {
             Ok(BrowserOutcome::Dialog {
                 tab_id,
-                present: true,
+                present,
                 dialog_type,
-            }) if tab_id == selected.physical_id => dialog_type,
-            Ok(BrowserOutcome::Dialog { present: false, .. }) => {
-                return self.failed(
-                    context,
-                    decision,
-                    Some(selected.physical_id),
-                    Refusal::NoDialogVisible,
-                    json!({"tab":selected.handle.as_str(),"handled":false}),
-                )
-            }
+            }) if tab_id == selected.physical_id => (present, dialog_type),
             Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 return self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
         };
-        match self.dispatch(context, BrowserCommand::HandleDialog { tab_id: selected.physical_id, accept, text: text.map(str::to_owned) }) {
-            Ok(BrowserOutcome::DialogHandled { tab_id, dialog_type: handled_type, accepted }) if tab_id == selected.physical_id => self.succeeded(context, decision, Some(tab_id), Effect::Applied, readiness(selected.readiness), false, Outcome::DialogHandled { accepted }, json!({"tab":selected.handle.as_str(),"dialog_type":if handled_type.is_empty(){dialog_type}else{handled_type},"accepted":accepted,"handled":true})),
+        if value.action == "status" {
+            return self.succeeded(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Effect::None,
+                readiness(selected.readiness),
+                true,
+                Outcome::DialogObserved {
+                    present: observed.0,
+                },
+                json!({"tab":selected.handle.as_str(),"present":observed.0,"dialog_type":observed.1}),
+            );
+        }
+        if !observed.0 {
+            return self.failed(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Refusal::NoDialogVisible,
+                json!({"tab":selected.handle.as_str(),"handled":false}),
+            );
+        }
+        let accept = value.action != "dismiss";
+        let text = (value.action == "respond")
+            .then(|| value.text.clone())
+            .flatten();
+        match self.dispatch(context, BrowserCommand::HandleDialog { tab_id: selected.physical_id, accept, text }) {
+            Ok(BrowserOutcome::DialogHandled { tab_id, dialog_type: handled_type, accepted }) if tab_id == selected.physical_id => self.succeeded(context, decision, Some(tab_id), Effect::Applied, readiness(selected.readiness), false, Outcome::DialogHandled { accepted }, json!({"tab":selected.handle.as_str(),"dialog_type":if handled_type.is_empty(){observed.1}else{handled_type},"accepted":accepted,"handled":true})),
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => self.browser_failure(context, decision, error, Some(selected.physical_id)),
         }
+    }
+
+    fn diagnose(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        value: &Diagnose,
+    ) -> Terminal {
+        let selected = match lease.select_tab(value.tab.as_deref()) {
+            Ok(tab) => tab,
+            Err(error) => return self.workspace_failure(context, error),
+        };
+        let decision = self.authorize(context, Capability::Read, current_url(&selected));
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Effect::None,
+                true,
+                json!({"reason":decision.reason.as_str()}),
+            );
+        }
+        let source = match value.source.as_str() {
+            "console" => DiagnosticSource::Console,
+            "network" => DiagnosticSource::Network,
+            _ => DiagnosticSource::Both,
+        };
+        let detail = if value.detail == "all" {
+            DiagnosticDetail::All
+        } else {
+            DiagnosticDetail::Problems
+        };
+        match self.dispatch(
+            context,
+            BrowserCommand::ReadDiagnostics {
+                tab_id: selected.physical_id,
+                source,
+                detail,
+                match_text: value.r#match.clone(),
+                after: value.after.clone(),
+                limit: u16::try_from(value.limit).expect("validated diagnostic limit"),
+            },
+        ) {
+            Ok(BrowserOutcome::DiagnosticsRead {
+                tab_id,
+                entries,
+                cursor,
+                truncated,
+                evicted,
+                capture_started,
+                omitted_count,
+            }) if tab_id == selected.physical_id => {
+                let mut authority_omitted = 0_usize;
+                let entries: Vec<_> = entries
+                    .into_iter()
+                    .filter(|entry| match entry {
+                        DiagnosticEntry::Console { url, .. }
+                        | DiagnosticEntry::Network { url, .. } => {
+                            let allowed = context
+                                .snapshot
+                                .authorize_landing(Capability::Read, url)
+                                .allowed;
+                            if !allowed {
+                                authority_omitted += 1;
+                            }
+                            allowed
+                        }
+                    })
+                    .collect();
+                let count = entries.len();
+                let omitted_count = omitted_count.saturating_add(authority_omitted);
+                self.succeeded(
+                    context,
+                    decision,
+                    Some(tab_id),
+                    Effect::None,
+                    readiness(selected.readiness),
+                    true,
+                    Outcome::DiagnosticsRead {
+                        count,
+                        capture_started,
+                    },
+                    json!({
+                        "tab":selected.handle.as_str(),
+                        "source":value.source,
+                        "detail":value.detail,
+                        "entries":entries,
+                        "cursor":cursor,
+                        "truncated":truncated,
+                        "evicted":evicted,
+                        "capture_started":capture_started,
+                        "omitted_count":omitted_count
+                    }),
+                )
+            }
+            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+            Err(error) => {
+                self.browser_failure(context, decision, error, Some(selected.physical_id))
+            }
+        }
+    }
+
+    fn perform_record(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: Option<&WorkspaceLease>,
+        value: &Record,
+    ) -> Terminal {
+        match value.action.as_str() {
+            "start" => self.start_recording(
+                context,
+                lease.expect("recording start holds the workspace lease"),
+                value,
+            ),
+            "status" => match self.dispatch(
+                context,
+                BrowserCommand::StatusRecording {
+                    recording_id: value.recording.clone(),
+                },
+            ) {
+                Ok(BrowserOutcome::RecordingStatus { summary }) => {
+                    self.recording_observed(context, &summary)
+                }
+                Ok(outcome) => self.recording_selection_failure(context, outcome),
+                Err(error) => self.browser_failure(context, permitted(), error, None),
+            },
+            "stop" => self.stop_recording(context, value.recording.as_deref()),
+            "save" => self.save_recording(context, lease, value),
+            "discard" => self.discard_recording(context, value.recording.as_deref()),
+            _ => unreachable!("recording action was validated"),
+        }
+    }
+
+    fn start_recording(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        value: &Record,
+    ) -> Terminal {
+        let selected = match lease.select_tab(value.tab.as_deref()) {
+            Ok(tab) => tab,
+            Err(error) => return self.workspace_failure(context, error),
+        };
+        let decision = self.authorize(context, Capability::Read, current_url(&selected));
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Effect::None,
+                true,
+                json!({"reason":decision.reason.as_str()}),
+            );
+        }
+        match self.dispatch(
+            context,
+            BrowserCommand::StartRecording {
+                tab_id: selected.physical_id,
+            },
+        ) {
+            Ok(BrowserOutcome::RecordingStarted { summary, existing })
+                if summary.tab_id == selected.physical_id =>
+            {
+                let mut facts = recording_facts(&summary);
+                if let Some(object) = facts.as_object_mut() {
+                    object.insert("tab".into(), json!(selected.handle.as_str()));
+                }
+                self.succeeded(
+                    context,
+                    decision,
+                    Some(selected.physical_id),
+                    if existing {
+                        Effect::None
+                    } else {
+                        Effect::Applied
+                    },
+                    readiness(selected.readiness),
+                    existing,
+                    Outcome::RecordingStarted,
+                    facts,
+                )
+            }
+            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+            Err(error) => {
+                self.browser_failure(context, decision, error, Some(selected.physical_id))
+            }
+        }
+    }
+
+    fn stop_recording(&self, context: &InvocationContext<'_>, requested: Option<&str>) -> Terminal {
+        match self.dispatch(
+            context,
+            BrowserCommand::StopRecording {
+                recording_id: requested.map(str::to_owned),
+            },
+        ) {
+            Ok(BrowserOutcome::RecordingStopped { summary, changed }) => self.succeeded(
+                context,
+                permitted(),
+                Some(summary.tab_id),
+                if changed {
+                    Effect::Applied
+                } else {
+                    Effect::None
+                },
+                Readiness::NotApplicable,
+                true,
+                Outcome::RecordingStopped {
+                    frames: summary.frame_count,
+                },
+                recording_facts(&summary),
+            ),
+            Ok(outcome) => self.recording_selection_failure(context, outcome),
+            Err(error) => self.browser_failure(context, permitted(), error, None),
+        }
+    }
+
+    fn ensure_recording_stopped(
+        &self,
+        context: &InvocationContext<'_>,
+        requested: Option<&str>,
+    ) -> Result<PhysicalRecordingSummary, Box<Terminal>> {
+        match self.dispatch(
+            context,
+            BrowserCommand::StopRecording {
+                recording_id: requested.map(str::to_owned),
+            },
+        ) {
+            Ok(BrowserOutcome::RecordingStopped { summary, .. }) => Ok(summary),
+            Ok(outcome) => Err(Box::new(self.recording_selection_failure(context, outcome))),
+            Err(error) => Err(Box::new(self.browser_failure(
+                context,
+                permitted(),
+                error,
+                None,
+            ))),
+        }
+    }
+
+    fn save_recording(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: Option<&WorkspaceLease>,
+        value: &Record,
+    ) -> Terminal {
+        let stopped = match self.ensure_recording_stopped(context, value.recording.as_deref()) {
+            Ok(summary) => summary,
+            Err(terminal) => return *terminal,
+        };
+        let read_decision = value.target.is_none().then(|| {
+            let denied = stopped.source_urls.iter().find_map(|url| {
+                let decision = context.snapshot.authorize_landing(Capability::Read, url);
+                (!decision.allowed).then_some(decision)
+            });
+            denied.unwrap_or_else(permitted)
+        });
+
+        let target = if let Some(requested_target) = value.target.as_deref() {
+            let lease = lease.expect("recording target save holds the workspace lease");
+            let (selected, target) = match self.resolve_target(lease, None, requested_target) {
+                Ok(value) => value,
+                Err(error) => return self.workspace_failure(context, error),
+            };
+            let write_decision = self.authorize(context, Capability::Write, current_url(&selected));
+            if !write_decision.allowed {
+                return self.blocked(
+                    context,
+                    write_decision,
+                    Some(selected.physical_id),
+                    Effect::None,
+                    true,
+                    json!({"reason":write_decision.reason.as_str()}),
+                );
+            }
+            match self.dispatch(
+                context,
+                BrowserCommand::DescribeTargets {
+                    tab_id: selected.physical_id,
+                    locators: vec![target.locator.clone()],
+                },
+            ) {
+                Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
+                    if tab_id == selected.physical_id && targets.len() == 1 =>
+                {
+                    if targets[0].credential_class {
+                        return self.credential_handoff(context, write_decision, &selected);
+                    }
+                }
+                Ok(_) => {
+                    return self.protocol_failure(
+                        context,
+                        write_decision,
+                        Some(selected.physical_id),
+                    )
+                }
+                Err(error) => {
+                    return self.browser_failure(
+                        context,
+                        write_decision,
+                        error,
+                        Some(selected.physical_id),
+                    )
+                }
+            }
+            Some((selected, target, write_decision))
+        } else {
+            let read_decision = read_decision.expect("client save has a read decision");
+            if !read_decision.allowed {
+                return self.blocked(
+                    context,
+                    read_decision,
+                    Some(stopped.tab_id),
+                    Effect::None,
+                    true,
+                    json!({"reason":read_decision.reason.as_str()}),
+                );
+            }
+            None
+        };
+
+        let (summary, frames) = match self.dispatch(
+            context,
+            BrowserCommand::ReadRecording {
+                recording_id: Some(stopped.recording_id.clone()),
+            },
+        ) {
+            Ok(BrowserOutcome::RecordingRead { summary, frames })
+                if summary.recording_id == stopped.recording_id
+                    && summary.tab_id == stopped.tab_id
+                    && summary.state != RecordingState::Recording =>
+            {
+                (summary, frames)
+            }
+            Ok(_) => return self.protocol_failure(context, permitted(), Some(stopped.tab_id)),
+            Err(error) => {
+                return self.browser_failure(context, permitted(), error, Some(stopped.tab_id))
+            }
+        };
+
+        let gif = match recording_gif::encode(&frames) {
+            Ok(bytes) => bytes,
+            Err(error) => return self.recording_export_failure(context, &error.to_string()),
+        };
+        let frame_count = frames.len();
+        let byte_count = gif.len();
+        if let Some((selected, target, write_decision)) = target {
+            let size = u64::try_from(byte_count).expect("bounded GIF length fits u64");
+            let file = PhysicalFile {
+                name: "ghostlight-recording.gif".into(),
+                media_type: "image/gif".into(),
+                data: BASE64.encode(gif.as_slice()),
+                size,
+            };
+            match self.dispatch(
+                context,
+                BrowserCommand::UploadFiles {
+                    tab_id: selected.physical_id,
+                    locator: target.locator,
+                    files: vec![file],
+                },
+            ) {
+                Ok(BrowserOutcome::FilesUploaded {
+                    tab_id,
+                    uploaded_count: 1,
+                    uploaded_bytes,
+                }) if tab_id == selected.physical_id && uploaded_bytes == size => self.succeeded(
+                    context,
+                    write_decision,
+                    Some(tab_id),
+                    Effect::Applied,
+                    readiness(selected.readiness),
+                    false,
+                    Outcome::RecordingSaved {
+                        frames: frame_count,
+                        bytes: byte_count,
+                        attached: true,
+                    },
+                    json!({
+                        "recording":summary.recording_id,
+                        "state":recording_state_name(summary.state),
+                        "frame_count":frame_count,
+                        "gif_bytes":byte_count,
+                        "target":target.handle.as_str(),
+                        "delivery":"dispatched_unverified"
+                    }),
+                ),
+                Ok(_) => self.unknown(
+                    context,
+                    write_decision,
+                    Some(selected.physical_id),
+                    Refusal::EffectUnknown,
+                    json!({
+                        "recording":summary.recording_id,
+                        "target":target.handle.as_str(),
+                        "delivery":"outcome_unknown"
+                    }),
+                ),
+                Err(error) => {
+                    self.browser_failure(context, write_decision, error, Some(selected.physical_id))
+                }
+            }
+        } else {
+            let data = BASE64.encode(gif.as_slice());
+            let read_decision = read_decision.expect("client save has a read decision");
+            let mut terminal = self.succeeded(
+                context,
+                read_decision,
+                Some(summary.tab_id),
+                Effect::None,
+                Readiness::NotApplicable,
+                true,
+                Outcome::RecordingSaved {
+                    frames: frame_count,
+                    bytes: byte_count,
+                    attached: false,
+                },
+                json!({
+                    "recording":summary.recording_id,
+                    "state":recording_state_name(summary.state),
+                    "frame_count":frame_count,
+                    "gif_bytes":byte_count,
+                    "delivery":"prepared_for_client"
+                }),
+            );
+            terminal.result = terminal.result.with_content(ServiceContent::Image {
+                mime_type: "image/gif".into(),
+                data,
+            });
+            terminal
+        }
+    }
+
+    fn discard_recording(
+        &self,
+        context: &InvocationContext<'_>,
+        requested: Option<&str>,
+    ) -> Terminal {
+        match self.dispatch(
+            context,
+            BrowserCommand::DiscardRecording {
+                recording_id: requested.map(str::to_owned),
+            },
+        ) {
+            Ok(BrowserOutcome::RecordingDiscarded {
+                recording_id,
+                released_bytes,
+            }) => self.succeeded(
+                context,
+                permitted(),
+                None,
+                Effect::Applied,
+                Readiness::NotApplicable,
+                true,
+                Outcome::RecordingDiscarded,
+                json!({
+                    "recording":recording_id,
+                    "discarded":true,
+                    "released_bytes":released_bytes
+                }),
+            ),
+            Ok(outcome) => self.recording_selection_failure(context, outcome),
+            Err(error) => self.browser_failure(context, permitted(), error, None),
+        }
+    }
+
+    fn recording_observed(
+        &self,
+        context: &InvocationContext<'_>,
+        summary: &PhysicalRecordingSummary,
+    ) -> Terminal {
+        self.succeeded(
+            context,
+            permitted(),
+            None,
+            Effect::None,
+            Readiness::NotApplicable,
+            true,
+            Outcome::RecordingObserved {
+                frames: summary.frame_count,
+            },
+            recording_facts(summary),
+        )
+    }
+
+    fn recording_selection_failure(
+        &self,
+        context: &InvocationContext<'_>,
+        outcome: BrowserOutcome,
+    ) -> Terminal {
+        let facts = match outcome {
+            BrowserOutcome::RecordingAmbiguous { recording_ids } => {
+                json!({"reason":"ambiguous","recordings":recording_ids})
+            }
+            BrowserOutcome::RecordingNotFound => json!({"reason":"not_found"}),
+            _ => return self.protocol_failure(context, permitted(), None),
+        };
+        self.failed(
+            context,
+            permitted(),
+            None,
+            Refusal::RecordingUnavailable,
+            facts,
+        )
+    }
+
+    fn recording_export_failure(&self, context: &InvocationContext<'_>, reason: &str) -> Terminal {
+        self.failed(
+            context,
+            permitted(),
+            None,
+            Refusal::RecordingExportFailed,
+            json!({"reason":bounded(reason, 160)}),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2767,7 +3391,7 @@ impl ApplicationExecutor {
 }
 
 fn denial_presentation(tool: &str, result: &InvocationResult) -> DenialPresentation {
-    if tool == "browser_close_tab" {
+    if tool == "browser_tabs" {
         return match result.facts.get("reason").and_then(Value::as_str) {
             Some("tab_close_denied") => DenialPresentation::TabKeptOpenByPolicy,
             Some("browser_local_interlock") => DenialPresentation::TabKeptOpenBySetting,
@@ -2849,7 +3473,8 @@ fn operation_capability(operation: &Operation) -> Capability {
         | Operation::ScrollPage(_)
         | Operation::SetZoom(_)
         | Operation::Hover(_)
-        | Operation::Wait(_) => Capability::Read,
+        | Operation::Wait(_)
+        | Operation::Diagnose(_) => Capability::Read,
         Operation::ActivateTab(_)
         | Operation::OpenPage(_)
         | Operation::NavigatePage(_)
@@ -2858,6 +3483,7 @@ fn operation_capability(operation: &Operation) -> Capability {
         | Operation::CloseTab(_)
         | Operation::Click(_)
         | Operation::Drag(_)
+        | Operation::ResizeWindow(_)
         | Operation::PressKey(_) => Capability::Action,
         Operation::TypeText(_) | Operation::UploadFiles(_) => Capability::Write,
         Operation::RunScript(_) => Capability::Execute,
@@ -2875,12 +3501,72 @@ fn operation_capability(operation: &Operation) -> Capability {
             .max()
             .unwrap_or(Capability::Read),
         Operation::HandleDialog(value) => {
-            if value.text.is_some() {
+            if value.action == "status" {
+                Capability::Read
+            } else if value.action == "respond" {
                 Capability::Write
             } else {
                 Capability::Action
             }
         }
+        Operation::Record(value) => {
+            if value.action == "save" && value.target.is_some() {
+                Capability::Write
+            } else {
+                Capability::Read
+            }
+        }
+    }
+}
+
+fn operation_requires_workspace_lease(operation: &Operation) -> bool {
+    !matches!(
+        operation,
+        Operation::Record(Record {
+            action,
+            target: None,
+            ..
+        }) if matches!(action.as_str(), "status" | "stop" | "save" | "discard")
+    )
+}
+
+fn permitted() -> Decision {
+    Decision {
+        allowed: true,
+        reason: ReasonCode::Permitted,
+    }
+}
+
+fn recording_facts(summary: &PhysicalRecordingSummary) -> Value {
+    json!({
+        "recording":summary.recording_id,
+        "state":recording_state_name(summary.state),
+        "frame_count":summary.frame_count,
+        "bytes_held":summary.bytes_held,
+        "duration_ms":summary.duration_ms,
+        "hard_expires_unix_ms":summary.hard_expires_unix_ms,
+        "retention_expires_unix_ms":summary.retention_expires_unix_ms,
+        "stop_reason":summary.stop_reason.map(recording_stop_reason_name)
+    })
+}
+
+const fn recording_state_name(state: RecordingState) -> &'static str {
+    match state {
+        RecordingState::Recording => "recording",
+        RecordingState::Frozen => "frozen",
+        RecordingState::Interrupted => "interrupted",
+    }
+}
+
+const fn recording_stop_reason_name(reason: RecordingStopReason) -> &'static str {
+    match reason {
+        RecordingStopReason::Explicit => "explicit",
+        RecordingStopReason::HardTimeout => "hard_timeout",
+        RecordingStopReason::MemoryLimit => "memory_limit",
+        RecordingStopReason::BrowserDetached => "browser_detached",
+        RecordingStopReason::RuntimeHeld => "runtime_held",
+        RecordingStopReason::ServiceDisconnected => "service_disconnected",
+        RecordingStopReason::FrameTooLarge => "frame_too_large",
     }
 }
 
@@ -2898,7 +3584,7 @@ fn operation_activity(operation: &Operation) -> PresentationActivity {
         Operation::TakeScreenshot(_) => PresentationActivity::Screenshot,
         Operation::Click(_) => PresentationActivity::Click,
         Operation::ScrollPage(_) => PresentationActivity::Scroll,
-        Operation::SetZoom(_) => PresentationActivity::Zoom,
+        Operation::SetZoom(_) | Operation::ResizeWindow(_) => PresentationActivity::Zoom,
         Operation::Hover(_) => PresentationActivity::Hover,
         Operation::FillForm(_) => PresentationActivity::Fill,
         Operation::TypeText(_) => PresentationActivity::Type,
@@ -2909,6 +3595,9 @@ fn operation_activity(operation: &Operation) -> PresentationActivity {
         Operation::Wait(_) => PresentationActivity::Wait,
         Operation::RunSequence(_) => PresentationActivity::Quiet,
         Operation::HandleDialog(_) => PresentationActivity::Dialog,
+        Operation::Diagnose(_) => PresentationActivity::Quiet,
+        Operation::Record(value) if value.action == "start" => PresentationActivity::Screenshot,
+        Operation::Record(_) => PresentationActivity::Quiet,
     }
 }
 
@@ -2951,6 +3640,7 @@ fn operation_timeout(operation: &Operation) -> u64 {
         Operation::RunScript(value) => value.timeout_ms,
         Operation::Wait(value) => value.timeout_ms,
         Operation::RunSequence(value) => value.timeout_ms,
+        Operation::Record(_) => 30_000,
         _ => 8_000,
     }
 }
@@ -3101,9 +3791,19 @@ fn observed_from(outcome: &BrowserOutcome) -> Observed {
         | BrowserOutcome::TargetsDescribed { .. }
         | BrowserOutcome::Scrolled { .. }
         | BrowserOutcome::Zoomed { .. }
+        | BrowserOutcome::WindowResized { .. }
         | BrowserOutcome::Hovered { .. }
         | BrowserOutcome::Dialog { .. }
         | BrowserOutcome::DialogHandled { .. }
+        | BrowserOutcome::DiagnosticsRead { .. }
+        | BrowserOutcome::DiagnosticsCleared { .. }
+        | BrowserOutcome::RecordingStarted { .. }
+        | BrowserOutcome::RecordingStatus { .. }
+        | BrowserOutcome::RecordingStopped { .. }
+        | BrowserOutcome::RecordingRead { .. }
+        | BrowserOutcome::RecordingDiscarded { .. }
+        | BrowserOutcome::RecordingAmbiguous { .. }
+        | BrowserOutcome::RecordingNotFound
         | BrowserOutcome::Presented { .. }
         | BrowserOutcome::Cancelled
         | BrowserOutcome::EffectUnknown { .. } => Observed::default(),
@@ -3171,7 +3871,8 @@ mod tests {
 
     use ghostlight_bridge::browser::{
         BrowserCommand, BrowserOutcome, BrowserReadiness, CaptureScope, ObservedTarget,
-        PhysicalTab, ViewportGeometry,
+        PhysicalRecordingSummary, PhysicalTab, RecordingState, RecordingStopReason,
+        ViewportGeometry,
     };
     use ghostlight_bridge::service::ServiceContent;
     use serde_json::json;
@@ -3217,6 +3918,22 @@ mod tests {
             url: url.into(),
             active: true,
             readiness: BrowserReadiness::Complete,
+        }
+    }
+
+    fn recording_summary(state: RecordingState, source_url: &str) -> PhysicalRecordingSummary {
+        PhysicalRecordingSummary {
+            recording_id: "recording_one".into(),
+            tab_id: 7,
+            state,
+            frame_count: usize::from(state != RecordingState::Recording),
+            bytes_held: usize::from(state != RecordingState::Recording),
+            duration_ms: 500,
+            hard_expires_unix_ms: (state == RecordingState::Recording).then_some(121_000),
+            retention_expires_unix_ms: (state != RecordingState::Recording).then_some(301_000),
+            stop_reason: (state != RecordingState::Recording)
+                .then_some(RecordingStopReason::Explicit),
+            source_urls: vec![source_url.into()],
         }
     }
 
@@ -3275,6 +3992,110 @@ mod tests {
     }
 
     #[test]
+    fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com"}),
+            None,
+            &CancellationToken::default(),
+        );
+        let handle = opened.facts["tab"].as_str().unwrap().to_owned();
+
+        browser.push(Ok(BrowserOutcome::RecordingStarted {
+            summary: recording_summary(RecordingState::Recording, "https://example.com/"),
+            existing: false,
+        }));
+        assert_eq!(
+            executor
+                .execute(
+                    &workspace,
+                    "browser_record",
+                    json!({"action":"start","tab":handle}),
+                    None,
+                    &CancellationToken::default(),
+                )
+                .status,
+            Status::Succeeded
+        );
+
+        browser.push(Ok(BrowserOutcome::RecordingStatus {
+            summary: recording_summary(RecordingState::Recording, "https://example.com/"),
+        }));
+        executor.execute(
+            &workspace,
+            "browser_record",
+            json!({"action":"status"}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        browser.push(Ok(BrowserOutcome::RecordingStopped {
+            summary: recording_summary(RecordingState::Frozen, "https://example.com/"),
+            changed: true,
+        }));
+        executor.execute(
+            &workspace,
+            "browser_record",
+            json!({"action":"stop"}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        browser.push(Ok(BrowserOutcome::RecordingDiscarded {
+            recording_id: "recording_one".into(),
+            released_bytes: 1,
+        }));
+        executor.execute(
+            &workspace,
+            "browser_record",
+            json!({"action":"discard"}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        let calls = browser.calls();
+        assert!(matches!(
+            calls[1],
+            BrowserCommand::StartRecording { tab_id: 7 }
+        ));
+        assert!(matches!(calls[2], BrowserCommand::StatusRecording { .. }));
+        assert!(matches!(calls[3], BrowserCommand::StopRecording { .. }));
+        assert!(matches!(calls[4], BrowserCommand::DiscardRecording { .. }));
+        assert!(!calls
+            .iter()
+            .any(|call| matches!(call, BrowserCommand::ReadRecording { .. })));
+    }
+
+    #[test]
+    fn client_save_authorizes_source_before_recording_bytes_cross() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.push(Ok(BrowserOutcome::RecordingStopped {
+            summary: recording_summary(RecordingState::Frozen, "http://127.0.0.1/private"),
+            changed: true,
+        }));
+
+        let result = executor.execute(
+            &workspace,
+            "browser_record",
+            json!({"action":"save","recording":"recording_one"}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(result.status, Status::Blocked);
+        assert!(matches!(
+            browser.calls().as_slice(),
+            [BrowserCommand::StopRecording { .. }]
+        ));
+    }
+
+    #[test]
     fn unsatisfied_wait_is_decisive_before_the_invocation_deadline() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
@@ -3283,7 +4104,7 @@ mod tests {
         }));
         let opened = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3334,7 +4155,7 @@ mod tests {
         }));
         let opened = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3350,7 +4171,7 @@ mod tests {
         }));
         let read = executor.execute(
             &workspace,
-            "browser_read_page",
+            "browser_read",
             json!({"tab":handle}),
             None,
             &CancellationToken::default(),
@@ -3359,8 +4180,8 @@ mod tests {
         browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 7 }));
         let closed = executor.execute(
             &workspace,
-            "browser_close_tab",
-            json!({"tab":handle}),
+            "browser_tabs",
+            json!({"action":"close","tab":handle}),
             None,
             &CancellationToken::default(),
         );
@@ -3429,7 +4250,7 @@ mod tests {
         }));
         let opened = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com/patients/48219?ssn=1#note"}),
             None,
             &CancellationToken::default(),
@@ -3446,7 +4267,7 @@ mod tests {
         }));
         let read = executor.execute(
             &workspace,
-            "browser_read_page",
+            "browser_read",
             json!({"tab":handle}),
             None,
             &CancellationToken::default(),
@@ -3483,7 +4304,7 @@ mod tests {
         }));
         executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3491,7 +4312,7 @@ mod tests {
         // A failure before any browser crossing must not leave a key behind either.
         executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"nonsense":true}),
             None,
             &CancellationToken::default(),
@@ -3511,7 +4332,7 @@ mod tests {
         }));
         let opened = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3540,7 +4361,7 @@ mod tests {
         }));
         let captured = executor.execute(
             &workspace,
-            "browser_take_screenshot",
+            "browser_screenshot",
             json!({"tab":handle}),
             None,
             &CancellationToken::default(),
@@ -3588,7 +4409,7 @@ mod tests {
         }));
         let opened = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3596,8 +4417,8 @@ mod tests {
         let handle = opened.facts["tab"].as_str().unwrap();
         let closed = executor.execute(
             &workspace,
-            "browser_close_tab",
-            json!({"tab":handle}),
+            "browser_tabs",
+            json!({"action":"close","tab":handle}),
             None,
             &CancellationToken::default(),
         );
@@ -3617,7 +4438,7 @@ mod tests {
         }));
         let opened = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3628,8 +4449,8 @@ mod tests {
         )));
         let closed = executor.execute(
             &workspace,
-            "browser_close_tab",
-            json!({"tab":handle}),
+            "browser_tabs",
+            json!({"action":"close","tab":handle}),
             None,
             &CancellationToken::default(),
         );
@@ -3646,7 +4467,7 @@ mod tests {
         browser.push(Err(crate::browser::BrowserError::DisconnectedAfterDispatch));
         let result = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3666,7 +4487,7 @@ mod tests {
         }));
         let opened = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3684,7 +4505,7 @@ mod tests {
         }));
         let inspected = executor.execute(
             &workspace,
-            "browser_inspect_page",
+            "browser_inspect",
             json!({"tab":tab_handle}),
             None,
             &CancellationToken::default(),
@@ -3717,7 +4538,7 @@ mod tests {
             elapsed_ms: 5,
             readiness: BrowserReadiness::Complete,
         }));
-        let sequence = executor.execute(&workspace, "browser_run_sequence", json!({"tab":tab_handle,"steps":[{"action":"click","target":target},{"action":"wait","condition":"load_ready"}]}), None, &CancellationToken::default());
+        let sequence = executor.execute(&workspace, "browser_sequence", json!({"tab":tab_handle,"steps":[{"action":"click","target":target},{"action":"wait","condition":"load_ready"}]}), None, &CancellationToken::default());
         assert_eq!(sequence.status, Status::Succeeded);
         let calls = browser.calls();
         assert_eq!(
@@ -3745,7 +4566,7 @@ mod tests {
         }));
         let opened = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3764,7 +4585,7 @@ mod tests {
         }));
         let inspected = executor.execute(
             &workspace,
-            "browser_inspect_page",
+            "browser_inspect",
             json!({"tab":tab_handle}),
             None,
             &CancellationToken::default(),
@@ -3809,7 +4630,7 @@ mod tests {
         browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 7 }));
         let result = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3835,7 +4656,7 @@ mod tests {
         }));
         let result = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3864,7 +4685,7 @@ mod tests {
         )));
         let result = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3886,7 +4707,7 @@ mod tests {
         }));
         let opened = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3904,7 +4725,7 @@ mod tests {
         }));
         let inspected = executor.execute(
             &workspace,
-            "browser_inspect_page",
+            "browser_inspect",
             json!({"tab":tab_handle}),
             None,
             &CancellationToken::default(),
@@ -3919,7 +4740,7 @@ mod tests {
         }));
         let navigated = executor.execute(
             &workspace,
-            "browser_navigate_page",
+            "browser_navigate",
             json!({"tab":tab_handle,"url":"https://example.org"}),
             None,
             &CancellationToken::default(),
@@ -3947,7 +4768,7 @@ mod tests {
         }));
         let opened = executor.execute(
             &workspace,
-            "browser_open_page",
+            "browser_navigate",
             json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
@@ -3977,7 +4798,7 @@ mod tests {
         }));
         let screenshot = executor.execute(
             &workspace,
-            "browser_take_screenshot",
+            "browser_screenshot",
             json!({"tab":tab_handle}),
             None,
             &CancellationToken::default(),
@@ -4013,7 +4834,7 @@ mod tests {
         }));
         let _ = executor.execute(
             &workspace,
-            "browser_navigate_page",
+            "browser_navigate",
             json!({"tab":tab_handle,"url":"https://example.org"}),
             None,
             &CancellationToken::default(),

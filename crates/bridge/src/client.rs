@@ -110,9 +110,16 @@ impl ServiceClient {
         match self.exchange(&request)? {
             ServiceResponse::Result {
                 id: returned,
+                text,
                 result,
+                is_error,
                 content,
-            } if returned == id => Ok(Invocation { result, content }),
+            } if returned == id => Ok(Invocation {
+                text,
+                result,
+                is_error,
+                content,
+            }),
             ServiceResponse::Error { code, message, .. } => {
                 Err(ClientError::Refused { code, message })
             }
@@ -132,8 +139,12 @@ impl ServiceClient {
 /// One terminal result and any protocol-neutral content beside it.
 #[derive(Clone, Debug)]
 pub struct Invocation {
+    /// Concise model-facing outcome authored by the orchestrator.
+    pub text: String,
     /// The orchestrator's terminal product result.
     pub result: Value,
+    /// Whether the product result reports an invocation failure.
+    pub is_error: bool,
     /// Bounded content the edge renders itself.
     pub content: Vec<ServiceContent>,
 }

@@ -17,7 +17,7 @@ const snapshot = {
     { id: "workspace_script", client_label: "ghostlight call", channel: "cli", leased: false, tab_count: 1, held_tab_count: 0, active_operations: 0 }
   ],
   operations: [
-    { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read_page", activity: "Reading page", capability: "read", started_at_ms: Date.now() - 12000, phase: "running" },
+    { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: Date.now() - 12000, phase: "running" },
     { invocation: "invocation_fill", workspace: "workspace_claude", tool: "browser_fill_form", activity: "Filling form", capability: "write", started_at_ms: Date.now() - 35000, phase: "attention" }
   ],
   browsers: [
@@ -25,8 +25,8 @@ const snapshot = {
     { id: "browser_edge", family: "Edge", adapter_version: "1.0.0", connected: true }
   ],
   history: [
-    { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_close_tab", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp" },
-    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_codex", tool: "browser_open_page", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli" }
+    { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp" },
+    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_codex", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli" }
   ],
   diagnostics: [
     { id: "service", label: "Orchestrator", severity: "passing", detail: "Ghostlight is accepting local connections." },
@@ -43,14 +43,14 @@ const snapshot = {
 
 // Representative work the monitor can page through, so the conveyor is reviewable.
 const script = [
-  { tool: "browser_open_page", activity: "Navigating", capability: "read", ms: 1700, effect: "committed", summary: "Opened example.com.", observed: { host: "example.com", readiness: "complete" } },
-  { tool: "browser_read_page", activity: "Reading page", capability: "read", ms: 900, effect: "none", summary: "Read 1,240 words.", observed: { host: "example.com", count: 1240 } },
+  { tool: "browser_navigate", activity: "Navigating", capability: "action", ms: 1700, effect: "committed", summary: "Opened example.com.", observed: { host: "example.com", readiness: "complete" } },
+  { tool: "browser_read", activity: "Reading page", capability: "read", ms: 900, effect: "none", summary: "Read 1,240 words.", observed: { host: "example.com", count: 1240 } },
   { tool: "browser_find", activity: "Finding on page", capability: "read", ms: 700, effect: "none", summary: "Found 7 matches.", observed: { count: 7 } },
   { tool: "browser_fill_form", activity: "Filling form", capability: "write", ms: 2400, effect: "wrote", summary: "Filled 3 fields and submitted the form.", observed: { host: "example.com", readiness: "complete", count: 3 } },
-  { tool: "browser_take_screenshot", activity: "Screenshot", capability: "read", ms: 1100, effect: "none", summary: "Captured the viewport at 1280x720.", observed: { width: 1280, height: 720 } },
+  { tool: "browser_screenshot", activity: "Screenshot", capability: "read", ms: 1100, effect: "none", summary: "Captured the viewport at 1280x720.", observed: { width: 1280, height: 720 } },
   { tool: "browser_click", activity: "Clicking", capability: "action", ms: 800, effect: "clicked", summary: "Clicked a target on example.com.", observed: { host: "example.com", readiness: "interactive" } },
   { tool: "browser_wait", activity: "Waiting", capability: "read", ms: 1900, effect: "none", summary: "Wait condition target_present was satisfied after 1830 ms.", observed: { readiness: "complete", count: 1830 } },
-  { tool: "browser_run_script", activity: "Running JavaScript", capability: "execute", ms: 1500, effect: "executed", summary: "Evaluated a script on example.com.", observed: { host: "example.com", readiness: "complete" } }
+  { tool: "browser_evaluate", activity: "Running JavaScript", capability: "execute", ms: 1500, effect: "executed", summary: "Evaluated a script on example.com.", observed: { host: "example.com", readiness: "complete" } }
 ];
 
 const fixture = `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(snapshot)};
@@ -72,7 +72,7 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     counter += 1;
     const blocked = counter % 9 === 0;
     const spec = blocked
-      ? { tool: "browser_run_script", activity: "Running JavaScript", capability: "execute", ms: 900, effect: "none" }
+      ? { tool: "browser_evaluate", activity: "Running JavaScript", capability: "execute", ms: 900, effect: "none" }
       : window.__GHOSTLIGHT_SCRIPT__[step++ % window.__GHOSTLIGHT_SCRIPT__.length];
     const operation = {
       invocation: "invocation_preview_" + counter,

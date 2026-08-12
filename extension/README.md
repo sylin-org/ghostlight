@@ -13,7 +13,11 @@ copied. See [../docs/adr/](../docs/adr/) for the decisions behind it.
 - `manifest.json`: MV3 manifest (permissions, native-messaging host, background SW, content script).
 - `lib/presentation-broker.js`: bounded document-aware state/effect delivery, exact acknowledgements,
   navigation replay, and on-demand renderer activation (ADR-0081).
-- `service-worker.js`: native messaging, CDP tool execution, tab-group management, keepalive/recovery.
+- `service-worker.js`: native messaging, CDP primitive execution, tab-group management, and
+  keepalive/recovery.
+- `lib/chunks.js`: bounded SHA-256-verified reassembly for large service-to-extension commands.
+- `lib/diagnostics.js`: opt-in, memory-only console and sanitized network observation.
+- `lib/recording.js`: plural bounded volatile recording registry and capture lifecycle.
 - `content.js`: DOM reads (accessibility tree, `find`, `form_input` (shadow DOM), `get_page_text`).
 - `native-messaging-host.json`: host-manifest template (fill in the binary path + extension ID).
 
@@ -38,3 +42,27 @@ troubleshooting. Platform-specific registration details remain in the installer 
 ## Verify
 Ask the agent to *navigate to a page and take a screenshot*: the Ghostlight tab group opens
 and the screenshot returns.
+
+## Adapter protocol 2 mechanisms
+
+Protocol 2 adds independent physical capabilities for window resize, diagnostics, recording, and
+chunked commands. The native host remains an opaque byte relay. Large service-to-extension
+commands are divided below Chrome's directional message ceiling, then verified and dispatched once
+in the extension. Partial transfers are memory-only, concurrency- and byte-bounded, and erased on
+expiry or native disconnect. Raw chunks are at most 512 KiB. One transfer is at most 8 MiB and 64
+chunks; at most two transfers and 12 MiB of partial data are held for 15 seconds.
+
+Diagnostics are off until the service requests them for a controlled tab. The first read can be
+empty because earlier console and network activity was not captured. Entries are bounded and
+volatile; network URLs contain only origin and path. A tab close, runtime hold, idle expiry, worker
+loss, native disconnect, or ended session erases the capture. Each tab holds at most 1,000 entries
+or 2 MiB for five idle minutes. Reads default to 50 problem entries and cannot request more than
+200; console text is capped at 2,000 characters.
+
+Recording uses `Page.startScreencast` and acknowledges every compositor frame. The extension owns
+the plural in-memory registry, opaque recording ids, fixed frame and byte bounds, the 120-second
+hard stop, final screenshot, five-minute frozen retention, erase, and truthful REC badge. The
+service sends only start/status/stop/read/discard requests; read returns bounded JPEG frames for
+service-side GIF rendering and delivery. Browser loss, service disconnect, runtime hold, hard
+deadline, memory limit, or a JPEG larger than 2 MiB stops capture locally. No pixels enter
+extension storage.

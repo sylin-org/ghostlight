@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Service-edge bridge major understood by this build.
-pub const SERVICE_BRIDGE_MAJOR: u16 = 1;
+pub const SERVICE_BRIDGE_MAJOR: u16 = 2;
 
 /// Product metadata supplied by the orchestrator and rendered by protocol edges.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -18,6 +18,27 @@ pub struct ServerProfile {
     pub instructions: String,
 }
 
+/// Standard MCP behavior hints supplied by the orchestrator for one tool.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ToolAnnotations {
+    /// Human-readable display title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Whether the tool is expected to leave its environment unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_only_hint: Option<bool>,
+    /// Whether the tool may perform destructive updates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destructive_hint: Option<bool>,
+    /// Whether repeated calls with the same input have no additional effect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotent_hint: Option<bool>,
+    /// Whether the tool may interact with entities outside its local environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_world_hint: Option<bool>,
+}
+
 /// A model-facing tool definition owned and supplied by the orchestrator.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -29,6 +50,16 @@ pub struct ToolDefinition {
     /// JSON Schema for the input object.
     #[serde(rename = "inputSchema")]
     pub input_schema: Value,
+    /// Optional JSON Schema for the structured result object.
+    #[serde(
+        rename = "outputSchema",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub output_schema: Option<Value>,
+    /// Optional standard MCP behavior hints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ToolAnnotations>,
 }
 
 /// Generic model content rendered by the protocol edge alongside structured product facts.
@@ -200,8 +231,12 @@ pub enum ServiceResponse {
     Result {
         /// Correlation id supplied to `Invoke`.
         id: String,
-        /// Product result rendered generically by the edge.
+        /// Concise model-facing outcome authored by the orchestrator.
+        text: String,
+        /// Structured product result rendered generically by the edge.
         result: Value,
+        /// Whether the product result reports an invocation failure.
+        is_error: bool,
         /// Optional protocol-neutral content rendered generically by the edge.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         content: Vec<ServiceContent>,
@@ -222,7 +257,7 @@ pub enum ServiceResponse {
 mod tests {
     use super::{
         IntakeChannel, ServerProfile, ServiceContent, ServiceRequest, ServiceResponse,
-        SessionMarker, ToolDefinition, SERVICE_BRIDGE_MAJOR,
+        SessionMarker, ToolAnnotations, ToolDefinition, SERVICE_BRIDGE_MAJOR,
     };
     use serde_json::json;
 
@@ -230,11 +265,11 @@ mod tests {
     fn service_messages_round_trip() {
         let requests = [
             ServiceRequest::ActivateWorkbench {
-                major: 1,
+                major: SERVICE_BRIDGE_MAJOR,
                 token: "token".into(),
             },
             ServiceRequest::Hello {
-                major: 1,
+                major: SERVICE_BRIDGE_MAJOR,
                 token: "token".into(),
                 client_label: "test".into(),
                 channel: IntakeChannel::Cli,
@@ -247,7 +282,7 @@ mod tests {
             ServiceRequest::Catalog,
             ServiceRequest::Invoke {
                 id: "request-1".into(),
-                tool: "browser_list_tabs".into(),
+                tool: "browser_tabs".into(),
                 input: json!({}),
                 deadline_ms: Some(500),
             },
@@ -275,14 +310,27 @@ mod tests {
             },
             ServiceResponse::Catalog {
                 tools: vec![ToolDefinition {
-                    name: "browser_list_tabs".into(),
+                    name: "browser_tabs".into(),
                     description: "List controlled tabs.".into(),
                     input_schema: json!({"type": "object"}),
+                    output_schema: Some(json!({
+                        "type": "object",
+                        "required": ["tabs"]
+                    })),
+                    annotations: Some(ToolAnnotations {
+                        title: Some("List tabs".into()),
+                        read_only_hint: Some(true),
+                        destructive_hint: Some(false),
+                        idempotent_hint: Some(true),
+                        open_world_hint: Some(false),
+                    }),
                 }],
             },
             ServiceResponse::Result {
                 id: "request-1".into(),
+                text: "Found one tab.".into(),
                 result: json!({"status":"succeeded"}),
+                is_error: false,
                 content: vec![ServiceContent::Image {
                     mime_type: "image/jpeg".into(),
                     data: "base64-image".into(),
@@ -295,5 +343,54 @@ mod tests {
                 serde_json::from_slice(&encoded).expect("response deserializes");
             assert_eq!(decoded, response);
         }
+    }
+
+    #[test]
+    fn tool_metadata_uses_standard_mcp_wire_names_and_omits_absent_fields() {
+        let complete = ToolDefinition {
+            name: "browser_tabs".into(),
+            description: "List controlled tabs.".into(),
+            input_schema: json!({"type": "object"}),
+            output_schema: Some(json!({"type": "object"})),
+            annotations: Some(ToolAnnotations {
+                title: Some("List tabs".into()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        };
+        let encoded = serde_json::to_value(complete).expect("tool serializes");
+        assert_eq!(encoded["inputSchema"], json!({"type": "object"}));
+        assert_eq!(encoded["outputSchema"], json!({"type": "object"}));
+        assert_eq!(encoded["annotations"]["title"], "List tabs");
+        assert_eq!(encoded["annotations"]["readOnlyHint"], true);
+        assert_eq!(encoded["annotations"]["destructiveHint"], false);
+        assert_eq!(encoded["annotations"]["idempotentHint"], true);
+        assert_eq!(encoded["annotations"]["openWorldHint"], false);
+        assert!(encoded.get("input_schema").is_none());
+        assert!(encoded.get("output_schema").is_none());
+        assert!(encoded["annotations"].get("read_only_hint").is_none());
+
+        let minimal = ToolDefinition {
+            name: "browser_tabs".into(),
+            description: "List controlled tabs.".into(),
+            input_schema: json!({"type": "object"}),
+            output_schema: None,
+            annotations: None,
+        };
+        let encoded = serde_json::to_value(minimal).expect("tool serializes");
+        assert!(encoded.get("outputSchema").is_none());
+        assert!(encoded.get("annotations").is_none());
+    }
+
+    #[test]
+    fn protocol_two_requires_authored_text_and_error_status() {
+        let legacy = json!({
+            "kind": "result",
+            "id": "request-1",
+            "result": {"status": "succeeded"}
+        });
+        assert!(serde_json::from_value::<ServiceResponse>(legacy).is_err());
     }
 }

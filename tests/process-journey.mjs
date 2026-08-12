@@ -14,6 +14,7 @@ const environment = { ...process.env, GHOSTLIGHT_RUNTIME_FILE: runtimeFile, GHOS
 const children = [];
 const physicalCommands = [];
 let createdDeployLock = false;
+const ONE_PIXEL_JPEG = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==";
 
 function executable(name) {
   const path = join(binDir, `${name}${executableSuffix}`);
@@ -142,6 +143,27 @@ class McpPeer {
 
 async function runAdapter(peer) {
   let tab = { tab_id: 41, title: "", url: "about:blank", active: true, readiness: "complete" };
+  const recordings = new Map();
+  function selectedRecording(request) {
+    const requested = request.command.recording_id;
+    if (requested) return recordings.get(requested)?.workspace === request.workspace ? recordings.get(requested) : null;
+    const owned = Array.from(recordings.values()).filter((recording) => recording.workspace === request.workspace);
+    return owned.length === 1 ? owned[0] : null;
+  }
+  function recordingSummary(recording) {
+    return {
+      recording_id: recording.id,
+      tab_id: tab.tab_id,
+      state: recording.state,
+      frame_count: recording.frames.length,
+      bytes_held: recording.frames.length ? 166 : 0,
+      duration_ms: 1000,
+      ...(recording.state === "recording"
+        ? { hard_expires_unix_ms: Date.now() + 120000 }
+        : { retention_expires_unix_ms: Date.now() + 300000, stop_reason: "explicit" }),
+      source_urls: [tab.url]
+    };
+  }
   for (;;) {
     const frame = await peer.next(0);
     if (frame.kind !== "request") continue;
@@ -158,6 +180,33 @@ async function runAdapter(peer) {
     } else if (command.command === "observe") {
       setTimeout(() => peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: { outcome: "observed", tab_id: command.tab_id, satisfied: true, elapsed_ms: 1000, readiness: "complete" } } }), 1000);
       continue;
+    } else if (command.command === "start_recording") {
+      const recording = { id: `recording_${recordings.size + 1}`, workspace: request.workspace, state: "recording", frames: [] };
+      recordings.set(recording.id, recording);
+      result = { outcome: "recording_started", summary: recordingSummary(recording), existing: false };
+    } else if (command.command === "stop_recording") {
+      const recording = selectedRecording(request);
+      if (!recording) result = { outcome: "recording_not_found" };
+      else {
+        const changed = recording.state === "recording";
+        recording.state = "frozen";
+        if (recording.frames.length === 0) {
+          recording.frames.push({ frame_kind: "final", timestamp_ms: Date.now(), mime_type: "image/jpeg", data: ONE_PIXEL_JPEG });
+        }
+        result = { outcome: "recording_stopped", summary: recordingSummary(recording), changed };
+      }
+    } else if (command.command === "read_recording") {
+      const recording = selectedRecording(request);
+      result = recording
+        ? { outcome: "recording_read", summary: recordingSummary(recording), frames: recording.frames }
+        : { outcome: "recording_not_found" };
+    } else if (command.command === "discard_recording") {
+      const recording = selectedRecording(request);
+      if (!recording) result = { outcome: "recording_not_found" };
+      else {
+        recordings.delete(recording.id);
+        result = { outcome: "recording_discarded", recording_id: recording.id, released_bytes: 166 };
+      }
     } else if (command.command === "close_tab") result = { outcome: "tab_closed", tab_id: command.tab_id };
     else if (command.command === "cancel") result = { outcome: "cancelled" };
     else throw new Error(`Unexpected physical primitive ${command.command}`);
@@ -190,14 +239,15 @@ try {
   const native = new NativePeer(browserConnector);
   native.send({
     kind: "hello",
-    major: 1,
+    major: 2,
     adapter_version: "1.0.0",
     browser_id: "browser_processjourney",
     adapter_epoch: "adapter_processjourney",
     capabilities: [
       "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
       "keyboard_input", "files", "script", "observation", "dialogs",
-      "operation_recovery", "presentation"
+      "operation_recovery", "presentation", "window_geometry", "diagnostics", "recording",
+      "chunked_commands"
     ].map((name) => ({ name, revision: 1 }))
   });
   assert.deepEqual(await native.next(), { kind: "backend_unavailable" });
@@ -212,7 +262,7 @@ try {
   let service = start(executable("ghostlight"), ["--headless"]);
   await waitForFile(runtimeFile);
   const endpoint = JSON.parse(readFileSync(runtimeFile, "utf8"));
-  assert.equal(endpoint.service_bridge_major, 1);
+  assert.equal(endpoint.service_bridge_major, 2);
   assert.equal(endpoint.browser_relay_major, 1);
   const browserHello = await native.next();
   assert.equal(browserHello.kind, "hello_accepted");
@@ -230,10 +280,10 @@ try {
   mcp.notify("notifications/initialized");
 
   const listed = await mcp.request("tools/list");
-  assert.equal(listed.result.tools.length, 24);
-  assert.equal(listed.result.tools.every((tool) => tool.inputSchema.additionalProperties === false), true);
+  assert.equal(listed.result.tools.length, 22);
+  assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
 
-  const opened = structured(await mcp.request("tools/call", { name: "browser_open_page", arguments: { url: "https://example.com" } }));
+  const opened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com" } }));
   assert.equal(opened.status, "succeeded");
   const handle = opened.facts.tab;
   assert.match(handle, /^tab_/);
@@ -262,16 +312,39 @@ try {
   assert.equal(connector.exitCode, null);
   assert.equal(browserConnector.exitCode, null);
   const relisted = await waitForMcpReady(mcp);
-  assert.equal(relisted.result.tools.length, 24);
+  assert.equal(relisted.result.tools.length, 22);
 
-  const reopened = structured(await mcp.request("tools/call", { name: "browser_open_page", arguments: { url: "https://example.com" } }));
+  const reopened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com" } }));
   assert.equal(reopened.status, "succeeded");
   const restartedHandle = reopened.facts.tab;
 
-  const read = structured(await mcp.request("tools/call", { name: "browser_read_page", arguments: { tab: restartedHandle } }));
+  const read = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: restartedHandle } }));
   assert.equal(read.status, "succeeded");
   assert.equal(read.facts.text, "Example Domain");
   assert.equal(read.summary, "Read 2 words.");
+
+  const startedRecording = structured(await mcp.request("tools/call", {
+    name: "browser_record",
+    arguments: { action: "start", tab: restartedHandle }
+  }));
+  assert.equal(startedRecording.status, "succeeded");
+  assert.match(startedRecording.facts.recording, /^recording_/);
+  const savedRecordingResponse = await mcp.request("tools/call", {
+    name: "browser_record",
+    arguments: { action: "save", recording: startedRecording.facts.recording }
+  });
+  const savedRecording = structured(savedRecordingResponse);
+  assert.equal(savedRecording.status, "succeeded");
+  assert.equal(savedRecording.facts.delivery, "prepared_for_client");
+  assert.equal(
+    savedRecordingResponse.result.content.some((item) => item.type === "image" && item.mimeType === "image/gif"),
+    true
+  );
+  const discardedRecording = structured(await mcp.request("tools/call", {
+    name: "browser_record",
+    arguments: { action: "discard", recording: startedRecording.facts.recording }
+  }));
+  assert.equal(discardedRecording.status, "succeeded");
 
   const delayed = mcp.beginRequest("tools/call", { name: "browser_wait", arguments: { tab: restartedHandle, condition: "load_ready" } });
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
@@ -282,22 +355,22 @@ try {
   assert.equal(cancelled.repeat_safe, false);
   assert.deepEqual(cancelled.next_steps, []);
 
-  const closed = structured(await mcp.request("tools/call", { name: "browser_close_tab", arguments: { tab: restartedHandle } }));
+  const closed = structured(await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: restartedHandle } }));
   assert.equal(closed.status, "succeeded");
   assert.equal(closed.facts.closed, true);
   assert.equal(existsSync(auditFile), true);
 
   // The real executable's audit file, not a fixture: what an action did, and none of what it saw.
   const records = readFileSync(auditFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-  const readRecord = records.findLast((record) => record.tool === "browser_read_page");
+  const readRecord = records.findLast((record) => record.tool === "browser_read");
   assert.equal(readRecord.observed.host, "example.com");
   assert.equal(readRecord.observed.count, 2);
   assert.equal(readRecord.observed.readiness, null);
-  const openRecord = records.findLast((record) => record.tool === "browser_open_page");
+  const openRecord = records.findLast((record) => record.tool === "browser_navigate");
   assert.equal(openRecord.observed.host, "example.com");
   assert.equal(openRecord.observed.readiness, "complete");
   assert.equal(records.some((record) => JSON.stringify(record).includes("Example Domain")), false);
-  console.log("process journey ok: stable relays -> service restart -> MCP/browser reconnect -> open/read/close");
+  console.log("process journey ok: reconnect -> open/read -> extension-owned recording save/discard -> close");
 } finally {
   for (const child of children.reverse()) {
     if (!child.killed) child.kill();

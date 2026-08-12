@@ -59,10 +59,11 @@
     async function activate(nextEpoch) {
       await ready;
       if (!validOpaqueId(nextEpoch)) throw new Error("service supplied an invalid operation epoch");
-      if (epoch === nextEpoch) return;
+      if (epoch === nextEpoch) return false;
       epoch = nextEpoch;
       records.clear();
       try { await persist(); } catch (_error) { /* dispatch still verifies persistence */ }
+      return true;
     }
 
     function run(record, id, operation) {

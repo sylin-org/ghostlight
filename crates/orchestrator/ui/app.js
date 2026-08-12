@@ -148,30 +148,28 @@ function shortId(value) {
  * Without this every historical row wears the same glyph and the queue reads as one texture.
  */
 const TOOL_GLYPH = {
-  browser_open_page: "navigate",
-  browser_navigate_page: "navigate",
-  browser_navigate_history: "navigate",
-  browser_reload_page: "navigate",
-  browser_activate_tab: "navigate",
-  browser_scroll_page: "navigate",
-  browser_read_page: "scan",
-  browser_inspect_page: "scan",
+  browser_tabs: "navigate",
+  browser_navigate: "navigate",
+  browser_history: "navigate",
+  browser_window: "scan",
+  browser_read: "scan",
+  browser_inspect: "scan",
   browser_find: "scan",
-  browser_list_tabs: "scan",
-  browser_set_zoom: "scan",
+  browser_screenshot: "camera",
   browser_click: "pointer",
+  browser_scroll: "navigate",
   browser_hover: "pointer",
-  browser_drag: "pointer",
-  browser_close_tab: "pointer",
-  browser_type_text: "keyboard",
   browser_fill_form: "keyboard",
+  browser_type_text: "keyboard",
   browser_press_key: "keyboard",
-  browser_take_screenshot: "camera",
+  browser_drag: "pointer",
   browser_wait: "wait",
-  browser_handle_dialog: "wait",
-  browser_run_script: "workwheel",
-  browser_run_sequence: "workwheel",
-  browser_upload_files: "workwheel"
+  browser_dialog: "wait",
+  browser_upload: "workwheel",
+  browser_evaluate: "workwheel",
+  browser_sequence: "workwheel",
+  browser_record: "camera",
+  browser_diagnose: "scan"
 };
 
 const glyphFor = entry =>
