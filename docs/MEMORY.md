@@ -25,6 +25,10 @@ the owner wants, and what this project learned the hard way.
 - **Keep the fringes stable.** Product and journey change belongs in the orchestrator. The
   connectors negotiate and relay. The extension owns Chromium, the page, and the drawing, and makes
   no product, workspace, authority, or model-language decision.
+- **Thin means nothing bleeds through the extension, not that the extension does little.** A
+  capability that is physically the browser's belongs at the browser layer, because that is the only
+  layer that has it. Counting responsibilities is the wrong test and has moved browser capabilities
+  to the wrong side before (ADR-0053, corrected by ADR-0109).
 - **Plural by design.** Sessions, workspaces, operations, browser instances, and future browser
   families are collections. Never build a singleton assumption into a new contract.
 - **Keep browser work visible and user-placed.** Reuse the same-name Ghostlight group wherever the
@@ -41,6 +45,14 @@ the owner wants, and what this project learned the hard way.
 
 Every one of these cost something to learn.
 
+- **A capability split across a boundary grows two implementations of one policy**, and they
+  diverge. Recording thinning lived in the extension and in Rust at once; the Rust copy dropped each
+  discarded frame's duration, so a thinned replay played back faster than the work it recorded.
+- **Trade fidelity, never coverage.** A bounded recorder that stops at its limit produces a replay
+  that silently omits everything after. Whoever drops a frame folds its time into the frame before
+  it, or the artifact misreports how long the work took.
+- **Say what a person would say.** A replay is "30 seconds of page changes", not "17 of 65 frames
+  as 3804453 bytes". Mechanism belongs in the facts; the sentence is for a reader.
 - **Correctness kept by memory rots.** A hand-maintained list that each new case must join will
   eventually miss one. Derive it from a registry, or observe at the one seam every case already
   crosses.

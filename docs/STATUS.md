@@ -233,6 +233,19 @@ Re-run on 2026-08-12 against the current tree:
 
 ## Owed
 
+- **ADR-0109: move GIF encoding into the extension.** Decided, not built. Today the extension owns
+  recording lifecycle (ADR-0108) but its `read` command still returns JPEG frames, which
+  `crates/orchestrator/src/gif_output.rs` decodes and re-encodes; a page-attached replay therefore
+  round-trips out of the browser and back. The ADR removes that: three destinations (page, file,
+  client) of which only the client-return crosses, one thinning implementation in the extension, the
+  `downloads` permission for file saves, and encoding in an offscreen document rather than the
+  evictable service worker.
+- Two pieces from the 2026-08-12 session are worth keeping wherever the encoder lands, and are not
+  in the tree: a replay's sentence should report duration ("Recorded 30 seconds of page changes")
+  rather than frames and bytes, and whoever drops a frame must fold its time into the frame before
+  it. `e4e7af46` added Rust-side thinning that does neither; ADR-0109 deletes that code, so redo
+  both in the extension rather than patching Rust.
+
 - A row that never settled reads its readiness as a parenthetical. Colour would carry it better
   than words: the duration cell already has a running and a blocked treatment, and an unsettled one
   would be found while scrolling instead of read for.
