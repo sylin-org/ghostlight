@@ -1,144 +1,93 @@
 # Project memory
 
-Durable, model-agnostic memory for people and agents working on Ghostlight. Read this with
-[`AGENTS.md`](../AGENTS.md). Current mutable evidence belongs in [`STATUS.md`](STATUS.md), decisions
-belong in [`adr/`](adr/README.md), and machine-local facts belong under ignored `local/` material.
-Those sources win when they disagree with this file.
+Durable, model-agnostic memory for whoever works on Ghostlight next, read alongside
+[`AGENTS.md`](../AGENTS.md).
+
+One rule keeps this file short: **if the tree can tell you, this file does not.** State lives in
+[`STATUS.md`](STATUS.md), decisions in [`adr/`](adr/README.md), contracts in [`1.0/`](1.0/), and
+machine-local facts under ignored `local/`. What is left here is what none of those can say: what
+the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
-- **Preserve project history.** Root documentation, the full docs tree, ADRs, licenses, research,
-  trust evidence, legal copy, business records, task ledgers, and product identity survive internal
-  rewrites. Reconcile current guides; do not erase historical evidence.
-- **Preserve product identity, redesign internals deliberately.** Ghostlight's name, original icon,
-  visual language, motion character, browser controls, and user expectations are identity.
-  Model-facing tools and descriptions are mechanisms owned by the orchestrator.
-- **Prefer root architecture to spot fixes.** Use meaningful semantic implementations. Do not add
-  a wrapper, alternate id, guarded installer, recovery path, or protocol only to bypass the owning
-  abstraction.
-- **Use the fewest meaningful moving parts.** Logical boundaries do not automatically earn a
-  process, crate, service, event bus, actor system, workflow engine, CQRS split, registry, or
-  container.
-- **Keep the fringes stable.** Product and journey changes belong in the orchestrator. MCP and
-  browser connectors negotiate with their consumers and relay typed facts. The extension owns
-  Chromium, page-local DOM, observation, and visual rendering, but no product, workspace,
-  authority, recovery, or model-language decisions.
+- **Preserve history.** Docs, ADRs, licenses, research, trust and legal material, task ledgers, and
+  product identity survive internal rewrites. Reconcile active documents; never erase evidence.
+- **Preserve product identity; redesign internals deliberately.** The name, the original icon bytes,
+  the visual language, the motion character, and user expectations are identity. Model-facing tools
+  and descriptions are mechanisms the orchestrator owns and may redesign.
+- **Prefer the root fix.** No wrapper, alternate id, guarded installer, or parallel protocol added
+  to route around the abstraction that should own the change.
+- **Understand the architecture before fixing.** Several failures in one capability means stop
+  implementing. Map ownership, lifecycle, authority, state, and delivery; find the single owning
+  seam; change it there. Restore a green checkpoint before proposing the change.
+- **Fewest meaningful moving parts.** A logical boundary does not earn a process, crate, service,
+  event bus, actor system, workflow engine, CQRS split, or registry.
+- **Keep the fringes stable.** Product and journey change belongs in the orchestrator. The
+  connectors negotiate and relay. The extension owns Chromium, the page, and the drawing, and makes
+  no product, workspace, authority, or model-language decision.
+- **Plural by design.** Sessions, workspaces, operations, browser instances, and future browser
+  families are collections. Never build a singleton assumption into a new contract.
 - **Keep browser work visible and user-placed.** Reuse the same-name Ghostlight group wherever the
-  user placed it. Create a dedicated normal window only when no group exists. Never disrupt or
-  reclaim an unrelated active window.
-- **Keep visual evidence.** Model-driven close requires both orchestrator authority and the
-  extension's local preserve-tabs setting. Either denial keeps the tab visible; manual browser
-  closure remains the user's action.
-- **No phone home.** No telemetry, activation, update ping, remote policy retrieval, audit upload,
-  or vendor runtime dependency.
-- **Outward changes require approval.** Local edits, tests, and commits are normal. Pushes, merges,
-  tags, releases, store actions, external posts, and service mutations wait for the owner.
-- **Persist before handoff.** Update STATUS, relevant ADR/task evidence, and this memory when a
-  durable fact changes; commit before producing a restart prompt.
+  user put it; create a dedicated window only when none exists; never reclaim an unrelated one.
+- **Keep visual evidence.** Model-driven close needs both orchestrator authority and the extension's
+  preserve-tabs setting. Either refusal keeps the tab visible, and manual closure stays the user's.
+- **Never phone home.** No telemetry, activation, update ping, remote policy fetch, or audit upload.
+- **Outward changes wait for the owner.** Local edits, tests, and commits are normal. Pushes,
+  merges, tags, releases, store actions, and anything public are not.
+- **Persist before handoff.** Update STATUS, the relevant ADR or task evidence, and this file when a
+  durable fact changes, and commit before writing a restart prompt.
 
-## Current 1.0 architecture facts
+## Durable lessons
 
-- The canonical product contracts are [`1.0/INTENT.md`](1.0/INTENT.md),
-  [`1.0/LANGUAGE.md`](1.0/LANGUAGE.md), [`1.0/ARCHITECTURE.md`](1.0/ARCHITECTURE.md), and
-  [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md).
-- One Rust workspace builds the shared typed bridge, `ghostlight` orchestrator,
-  `ghostlight-mcp-connector`, and `ghostlight-browser-connector`.
-- The orchestrator owns the complete 24-tool catalog, workspaces, immutable authority snapshots,
-  runtime controls, one executor, one completion path, browser port, content-free presentation,
-  and payload-free audit.
-- `language/outcome.rs` owns Ghostlight's terminal voice in both registers: the sentence and safe
-  next steps a person reads, and the content-free measurements a machine queries. The exhaustive
-  browser seam supplies host/readiness; the required typed outcome supplies named counts/sizes;
-  the completion path merges them.
-- The MCP connector owns local stdio protocol lifecycle, catalog retrieval, correlation,
-  cancellation forwarding, and generic invocation rendering only.
-- The browser connector owns native-message framing, typed relay correlation, and durable
-  connection lifecycle only.
-- The extension is policy-free and free of model-facing results. Its physical-capability hello and
-  durable adapter identity support negotiation without moving product evolution to the fringe.
-- In-flight effects interrupted after dispatch become unknown and are never replayed. Both relay
-  processes can remain alive while the orchestrator restarts and renegotiate for later work.
-- Both connectors use the bridge-owned demand-start seam after a failed service connection. It
-  starts only the exact sibling `ghostlight --background`, honors deployment quiesce, and leaves
-  product and workbench decisions in the orchestrator.
-- The orchestrator holds an operating-system lifetime lease before publishing runtime discovery or
-  initializing the desktop. Direct human launch reuses the authenticated service bridge to reveal
-  the existing workbench. Default/`--show`, `--background`, and `--headless` are distinct intents.
-- Browser state is plural by design: MCP sessions, workspaces, operations, browser instances, and
-  future browser families must not be modeled as global singletons.
-- The Tauri 2 workbench is an integrated presentation adapter in the modular monolith, behind a
-  typed `WorkbenchFacade`. It owns no durable product state or browser primitive. A recoverable
-  shell failure leaves the orchestrator headless.
-- Workbench harness management is explicit and orchestrator-owned. It supports nine named
-  harnesses, preserves JSONC/TOML comments and unrelated configuration, backs up changes, and
-  refuses malformed, unreadable, or foreign-owned entries.
-- The original extension icon bytes are reused by the desktop, tray, bundle, and workbench. Do not
-  redraw, recolor, rename, or substitute the product identity.
+Every one of these cost something to learn.
 
-## Durable implementation lessons
-
-- Build and process tests in an isolated target directory when a live installed Ghostlight stack
-  may hold Windows executables open. Never kill processes by image name; verify exact executable
-  paths and stop only test-owned processes.
-- A cached MCP catalog is not a transport-liveness signal. Reconnect through the owning MCP client,
-  then inspect visible browser state before retrying an effectful call.
-- Reconnection without demand-start is not local availability. Put one idempotent recovery action
-  at the failed-connection seam, then let a service-held lifetime lease decide authority before
-  discovery or presentation state exists.
-- Chrome native messaging has directional size limits. Generic corruption ceilings and browser
+- **Correctness kept by memory rots.** A hand-maintained list that each new case must join will
+  eventually miss one. Derive it from a registry, or observe at the one seam every case already
+  crosses.
+- **A guard that parses nothing passes everything.** Check every source-scraping test against a
+  negative control. A guard can also go stale in the same commit that makes it stale: once a
+  rendered string carries a fact, asserting that the fact appears *separately* stops protecting
+  anything and starts pinning duplication in place.
+- **Replace only what changed**, decided from the per-crate source diff rather than the build
+  output. A binary that merely recompiled is not a changed fringe, and swapping it costs a killed
+  native host, an extension reload, and a browser reconnect for nothing.
+- **A delegated batch spec must say what a change makes redundant**, not only what it adds, or the
+  executor is correct and the surface is repetitive.
+- **Audit is metadata-only.** Never persist page content, results, screenshots, form values,
+  scripts, paths, or file bytes. The landed host is the one deliberate exception: it answers where
+  the agent went and is already visible in the user's own tab strip, while path, query, and fragment
+  are where identifying detail sits.
+- **Reconnection is not availability.** Put one idempotent recovery action at the failed-connection
+  seam, then let a service-held lifetime lease decide authority before discovery or presentation
+  state exists.
+- **A cached MCP catalog is not a live transport.** Reconnect through the owning client, then look
+  at the visible browser before retrying an effectful call.
+- **A native-port or service-worker restart is not a browser restart.** Hold uncertain resource
+  state until an exact generation or terminal evidence resolves it.
+- **A loaded document is not mounted presentation.** That takes a ready handshake, exact document
+  acknowledgement, and packaged reinjection.
+- **Chrome native messaging has directional size limits.** Generic corruption ceilings and browser
   chunking are different contracts.
-- A native-port or service-worker restart is not a browser restart. Preserve uncertain resource
-  state until exact generation or terminal evidence resolves it.
-- A completed document load is not proof that extension presentation is mounted. Presentation uses
-  a ready handshake, exact document acknowledgement, and packaged reinjection.
-- Persistent controlled scope and transient activity are different visual promises. The border
-  identifies controlled scope; cursor, scans, highlights, ripples, frames, ribbons, and captions
-  explain current work.
-- Browser screenshots intentionally suppress the extension's visual layer. Visual QA must observe
-  externally; a clean captured page is not evidence that feedback failed.
-- Debugging and audit remain metadata-only. Never persist MCP bodies, page content, results,
-  screenshots, form values, scripts, paths, or file bytes. The landed host is the one deliberate
-  exception, gathered at the browser seam as `Observed`: it answers where the agent went and is
-  already visible in the user's own tab strip, while path, query, and fragment are where
-  identifying detail sits. Measurements about an action are recorded; nothing the action saw is.
-- Correctness kept by memory rots. A hand-maintained list that a new case must be added to will
-  eventually miss one: the extension reduced-motion selector list silently skipped new effects.
-  Use the strongest structural owner available. Browser host/readiness belongs at the exhaustive
-  dispatch seam; counts and sizes belong on the required typed outcome that also names them.
-- Replace only what changed, and decide that from the source diff per crate rather than from the
-  build output. A fringe binary that merely recompiled because a shared crate moved is not a changed
-  fringe: stopping a live relay to swap a behaviourally identical executable costs a killed native
-  host, an extension reload, and a browser reconnect for nothing. This is the deploy analogue of the
-  restart rule already in DEV-LOOP: do not disturb a shore because the orchestrator changed.
-- A guard that parses nothing passes everything. Check every source-scraping test against a negative
-  control before trusting it. A guard can also go stale in the same commit that makes it stale:
-  when a rendered string starts carrying a fact, an assertion that the fact appears separately stops
-  protecting anything and starts pinning the duplication in place.
-- A delegated batch spec must say what a change makes redundant, not only what it adds. Pinning the
-  new sentence without naming the chrome and guards that quietly depended on the old wording leaves
-  the executor correct and the surface repetitive.
-- The public 0.8 distribution and trust records are historical truth, not a working 1.0 release
-  pipeline. Rebuild package and release automation from the current boundaries before claiming a
-  1.0 artifact exists.
+- **A clean screenshot is not evidence that feedback failed.** Capture deliberately suppresses the
+  extension's visual layer, so verify visuals externally.
+- **Persistent scope and transient activity are different visual promises.** The border says what is
+  controlled; cursors, scans, ripples, frames, and captions say what is happening now.
+- **Isolate live stacks when testing.** Build into a separate target directory, and stop processes
+  only by exact executable path, never by image name.
+- **The 0.8 distribution and trust records are history, not a working 1.0 pipeline.** Rebuild
+  package and release automation from current boundaries before claiming a 1.0 artifact exists.
 
-## Pointer index
+## Where to look
 
 | Need | Source |
 | --- | --- |
-| Repository authority and implementation rules | [`AGENTS.md`](../AGENTS.md) |
+| How to work here, and the boundaries | [`AGENTS.md`](../AGENTS.md) |
+| What is true right now | [`STATUS.md`](STATUS.md) |
 | A map of this documentation tree | [`README.md`](README.md) |
-| Mutable implementation status | [`STATUS.md`](STATUS.md) |
-| Current 1.0 contracts | [`1.0/`](1.0/) |
-| Architecture history | [`adr/`](adr/README.md) |
-| Integrated desktop decision | [`adr/0102-integrated-desktop-workbench.md`](adr/0102-integrated-desktop-workbench.md) |
-| Outcome language decision | [`adr/0103-language-owned-outcome-voice.md`](adr/0103-language-owned-outcome-voice.md) |
-| Demand-start and single-engine decision | [`adr/0104-demand-start-single-engine-and-workbench-activation.md`](adr/0104-demand-start-single-engine-and-workbench-activation.md) |
-| Visual vocabulary, both surfaces | [`design/visual-language.md`](design/visual-language.md) |
-| Where per-action facts belong | [`design/action-observations.md`](design/action-observations.md) |
-| What an audit record contains | [`guides/siem-integration.md`](guides/siem-integration.md) |
-| Driving Ghostlight without an MCP client | [`guides/scripting.md`](guides/scripting.md) |
+| Intent, language, architecture, acceptance | [`1.0/`](1.0/) |
+| Every decision, and why | [`adr/`](adr/README.md) |
+| Build, restart, deploy, validate | [`DEV-LOOP.md`](DEV-LOOP.md) |
+| Task-oriented guides for people | [`guides/README.md`](guides/README.md) |
+| Design notes, living and dated | [`design/README.md`](design/README.md) |
 | What each task batch was, and where it stopped | [`tasks/README.md`](tasks/README.md) |
-| Build, restart, and live validation | [`DEV-LOOP.md`](DEV-LOOP.md) |
-| Planned release procedure | [`RELEASE.md`](RELEASE.md) |
-| Historical deep design | [`SPEC.md`](SPEC.md) |
-| Source licensing boundary | [`../LICENSING.md`](../LICENSING.md) |
+| The source licensing boundary | [`../LICENSING.md`](../LICENSING.md) |
