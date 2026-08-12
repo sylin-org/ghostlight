@@ -35,7 +35,6 @@ const snapshot = {
   ],
   harnesses: [
     { id: "codex", name: "Codex", state: "installed", detail: "Ghostlight is registered for this user context.", can_install: false, can_uninstall: true },
-    { id: "vscode", name: "Visual Studio Code", state: "client_managed", detail: "A client-managed Ghostlight entry is present. Manage it in that client.", can_install: false, can_uninstall: false },
     { id: "claude-code", name: "Claude Code", state: "available", detail: "Detected and ready for an explicit Ghostlight registration.", can_install: true, can_uninstall: false },
     { id: "cursor", name: "Cursor", state: "not_detected", detail: "Not detected. You can prepare its user configuration before installing it.", can_install: true, can_uninstall: false }
   ],

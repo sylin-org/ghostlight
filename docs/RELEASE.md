@@ -17,8 +17,7 @@ One Ghostlight version comprises:
 - sibling `ghostlight-mcp-connector`;
 - sibling `ghostlight-browser-connector`;
 - a platform-native package that installs and removes the browser native-messaging registration;
-- the independently delivered but contract-matched `Ghostlight in Browser` adapter;
-- the root Agent Plugins v1 `plugin.json` and `mcp.json` connection declaration; and
+- the independently delivered but contract-matched `Ghostlight in Browser` adapter; and
 - checksums, signatures/attestations, SBOM, license notices, source archive, and release notes.
 
 The desktop and service are one executable. The connectors are deliberately stable independent
@@ -35,8 +34,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 npm test --prefix extension
 cargo build --workspace --target-dir .target-ghostlight-1.0
-node tests/agent-plugin-contract.mjs
-node tests/agent-plugin-journey.mjs
 node tests/process-journey.mjs
 node --check crates/orchestrator/ui/app.js
 node --check tests/workbench-preview-server.mjs
@@ -53,8 +50,8 @@ For Windows, macOS, and Linux:
 2. Verify code signature or platform attestation and published checksum.
 3. Install as an ordinary user on a clean machine.
 4. Verify tray launch, open/hide/quit, headless fallback, global search, plural snapshots, Status,
-   notifications, MCP integrations direct registration/removal, JSONC/TOML preservation, and no
-   remote WebView access.
+   notifications, MCP integrations connect/disconnect, JSONC/TOML preservation, and no remote
+   WebView access.
 5. Verify native messaging points at the packaged sibling browser connector.
 6. Upgrade from the latest supported public release without clobbering unrelated state.
 7. Uninstall and prove only Ghostlight-owned files, registrations, desktop entries, and selected
@@ -67,27 +64,6 @@ profile. Include two supported Chromium families where available and at least th
 harnesses. Exercise concurrent sessions, screenshots, semantic and coordinate input, file upload,
 dialogs, scripts, governed denial, blocked close, group reuse across windows, child-tab adoption,
 orchestrator restart, browser restart, extension reload, and unknown-effect non-replay.
-
-### Agent Plugin connection
-
-The checked-in manifests prove source-format compatibility, not a released installation journey.
-For every client and platform Ghostlight will name publicly:
-
-1. Install the signed platform package and matching store extension on a clean machine.
-2. Install or load the thin Agent Plugin in the client and prove its bare
-   `ghostlight-mcp-connector` command resolves to the signed version-matched sibling set.
-3. Prove the client sees the exact 22-tool catalog and reaches one useful visible browser result.
-4. Prove absent product, absent extension, incompatible versions, and disconnected browser produce
-   truthful states and one useful next action rather than a false ready claim.
-5. Prove direct and plugin-managed registration remain distinct, and that two client-owned plugin
-   connections converge on one lifetime-leased Ghostlight authority.
-6. Prove client disable, update, and removal do not mutate or remove the independently installed
-   Ghostlight product, and that Ghostlight's direct-registration controls do not mutate plugin
-   state.
-
-Do not bundle a second engine, add runtime downloads, or create local or hosted HTTP ingress to
-make a catalog accept the package. Marketplace eligibility remains a client-specific publication
-question.
 
 ### First success
 
@@ -103,16 +79,14 @@ After all gates are evidenced and the owner approves:
 3. Publish the matching browser adapter through deferred store publication if the store supports
    it.
 4. Publish signed platform packages and immutable source/binary release assets.
-5. Publish package-manager, MCP-registry, and client-specific Agent Plugin catalog metadata only
-   after their referenced assets and claimed real-client journeys exist.
+5. Publish package-manager and MCP-registry metadata only after their referenced assets exist.
 6. Reconcile store feeds and public compatibility from independently downloaded artifacts.
 7. Update `docs/public-status.json`, README release language, trust review stamps, website copy,
    distribution records, and changelog from observed public state.
 8. Run one public install-to-first-task smoke per platform.
 
 Never claim a platform, store, package manager, or compatibility combination before the public
-artifact is independently observable. Agent Plugins v1 conformance does not imply catalog listing
-or support in every compatible client.
+artifact is independently observable.
 
 ## Rollback
 

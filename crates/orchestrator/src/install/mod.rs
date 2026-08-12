@@ -114,8 +114,6 @@ pub enum HarnessState {
     Available,
     /// The exact or an updatable owned Ghostlight registration is present.
     Installed,
-    /// A client-owned Ghostlight connector entry is present and must be managed there.
-    ClientManaged,
     /// A malformed or foreign entry requires deliberate manual attention.
     NeedsAttention,
 }
@@ -321,7 +319,6 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         Ok(RegistrationState::Missing) if detected => HarnessState::Available,
         Ok(RegistrationState::Missing) => HarnessState::NotDetected,
         Ok(RegistrationState::Owned) => HarnessState::Installed,
-        Ok(RegistrationState::ClientManaged) => HarnessState::ClientManaged,
         Ok(RegistrationState::Foreign) | Err(_) => HarnessState::NeedsAttention,
     };
     let detail = match state {
@@ -335,9 +332,6 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         }
         HarnessState::NotDetected => {
             "Not detected, and the sibling MCP connector is missing.".into()
-        }
-        HarnessState::ClientManaged => {
-            "A client-managed Ghostlight entry is present. Manage it in that client.".into()
         }
         HarnessState::NeedsAttention => {
             "The configuration is malformed or has a foreign ghostlight entry; it was left untouched.".into()
@@ -358,7 +352,6 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
 enum RegistrationState {
     Missing,
     Owned,
-    ClientManaged,
     Foreign,
 }
 
@@ -384,8 +377,6 @@ fn inspect_json(source: &str, dialect: JsonDialect) -> Result<RegistrationState,
     };
     if json_entry_owned(entry, dialect) {
         Ok(RegistrationState::Owned)
-    } else if json_entry_client_managed(entry, dialect) {
-        Ok(RegistrationState::ClientManaged)
     } else {
         Ok(RegistrationState::Foreign)
     }
@@ -408,8 +399,6 @@ fn inspect_toml(source: &str) -> Result<RegistrationState, HarnessError> {
         .unwrap_or_default();
     Ok(if command_owned(command) {
         RegistrationState::Owned
-    } else if command_client_managed(command) {
-        RegistrationState::ClientManaged
     } else {
         RegistrationState::Foreign
     })
@@ -494,9 +483,6 @@ fn edit_json(
     let parsed = parse_jsonc(&source)?;
     let current = json_entry(&parsed, dialect);
     if let Some(entry) = current {
-        if json_entry_client_managed(entry, dialect) {
-            return Err(HarnessError::ClientManagedEntry);
-        }
         if !json_entry_owned(entry, dialect) {
             return Err(HarnessError::ForeignEntry);
         }
@@ -544,9 +530,6 @@ fn edit_toml(path: &Path, connector: &Path, install: bool) -> Result<bool, Harne
             .get("command")
             .and_then(Item::as_str)
             .unwrap_or_default();
-        if command_client_managed(command) {
-            return Err(HarnessError::ClientManagedEntry);
-        }
         if !command_owned(command) {
             return Err(HarnessError::ForeignEntry);
         }
@@ -695,14 +678,6 @@ fn escape_cst_string(value: &str) -> String {
 }
 
 fn json_entry_owned(entry: &Value, dialect: JsonDialect) -> bool {
-    json_entry_command(entry, dialect).is_some_and(command_owned)
-}
-
-fn json_entry_client_managed(entry: &Value, dialect: JsonDialect) -> bool {
-    json_entry_command(entry, dialect).is_some_and(command_client_managed)
-}
-
-fn json_entry_command(entry: &Value, dialect: JsonDialect) -> Option<&str> {
     let command = match dialect {
         JsonDialect::McpServers
         | JsonDialect::Servers
@@ -714,28 +689,14 @@ fn json_entry_command(entry: &Value, dialect: JsonDialect) -> Option<&str> {
             .and_then(|command| command.first())
             .and_then(Value::as_str),
     };
-    command
+    command.is_some_and(command_owned)
 }
 
 fn command_owned(command: &str) -> bool {
-    let command = Path::new(command);
-    // Agent Plugin clients may materialize the portable bare command in their ordinary MCP
-    // configuration. That entry belongs to the client, not this Workbench. Ghostlight's direct
-    // registration always writes the absolute sibling path, so a bare token is never ours.
-    command.is_absolute()
-        && command
-            .file_stem()
-            .and_then(OsStr::to_str)
-            .is_some_and(|name| name.eq_ignore_ascii_case("ghostlight-mcp-connector"))
-}
-
-fn command_client_managed(command: &str) -> bool {
-    let command = Path::new(command);
-    !command.is_absolute()
-        && command
-            .file_stem()
-            .and_then(OsStr::to_str)
-            .is_some_and(|name| name.eq_ignore_ascii_case("ghostlight-mcp-connector"))
+    Path::new(command)
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.eq_ignore_ascii_case("ghostlight-mcp-connector"))
 }
 
 fn opencode_dialect(context: &HarnessContext, source: &str) -> Result<JsonDialect, HarnessError> {
@@ -861,9 +822,6 @@ pub enum HarnessError {
     /// A foreign server uses Ghostlight's registration name.
     #[error("a foreign `ghostlight` entry is present; Ghostlight left it untouched")]
     ForeignEntry,
-    /// A client owns the portable or manually configured Ghostlight entry.
-    #[error("a client-managed `ghostlight` entry is present; manage it in that client")]
-    ClientManagedEntry,
     /// A path has no writable parent.
     #[error("harness configuration path has no parent: {0}")]
     InvalidPath(PathBuf),
@@ -877,8 +835,8 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        command_client_managed, command_owned, edit_json, edit_toml, inspect_json, inspect_toml,
-        HarnessError, JsonDialect, RegistrationState,
+        edit_json, edit_toml, inspect_json, inspect_toml, HarnessError, JsonDialect,
+        RegistrationState,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -899,60 +857,6 @@ mod tests {
         });
         fs::write(&connector, b"test").unwrap();
         connector
-    }
-
-    #[test]
-    fn only_an_absolute_connector_path_is_a_direct_registration() {
-        assert!(!command_owned("ghostlight-mcp-connector"));
-        assert!(!command_owned("./ghostlight-mcp-connector"));
-        assert!(!command_owned("bin/ghostlight-mcp-connector"));
-        assert!(command_client_managed("ghostlight-mcp-connector"));
-        assert!(command_client_managed("./ghostlight-mcp-connector"));
-        assert!(command_client_managed("bin/ghostlight-mcp-connector"));
-
-        let directory = temporary("ownership");
-        let connector = connector(&directory);
-        assert!(connector.is_absolute());
-        assert!(command_owned(connector.to_string_lossy().as_ref()));
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn a_materialized_agent_plugin_entry_is_never_removed_as_direct() {
-        let directory = temporary("plugin-owned");
-        let json_path = directory.join("mcp.json");
-        let connector = connector(&directory);
-        let json_source = r#"{"mcpServers":{"ghostlight":{"type":"stdio","command":"ghostlight-mcp-connector"}}}"#;
-        fs::write(&json_path, json_source).unwrap();
-
-        assert_eq!(
-            inspect_json(json_source, JsonDialect::McpServers).unwrap(),
-            RegistrationState::ClientManaged
-        );
-        for install in [true, false] {
-            assert!(matches!(
-                edit_json(&json_path, &connector, JsonDialect::McpServers, install),
-                Err(HarnessError::ClientManagedEntry)
-            ));
-        }
-        assert_eq!(fs::read_to_string(&json_path).unwrap(), json_source);
-
-        let toml_path = directory.join("config.toml");
-        let toml_source =
-            "[mcp_servers.ghostlight]\ncommand = \"ghostlight-mcp-connector\"\nargs = []\n";
-        fs::write(&toml_path, toml_source).unwrap();
-        assert_eq!(
-            inspect_toml(toml_source).unwrap(),
-            RegistrationState::ClientManaged
-        );
-        for install in [true, false] {
-            assert!(matches!(
-                edit_toml(&toml_path, &connector, install),
-                Err(HarnessError::ClientManagedEntry)
-            ));
-        }
-        assert_eq!(fs::read_to_string(&toml_path).unwrap(), toml_source);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

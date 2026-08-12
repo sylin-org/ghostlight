@@ -382,24 +382,6 @@ mod tests {
     }
 
     #[test]
-    fn integrations_distinguish_direct_registration_from_client_owned_plugins() {
-        let html = include_str!("../../ui/index.html");
-        let app = include_str!("../../ui/app.js");
-
-        assert!(html.contains("Manage direct Ghostlight registrations."));
-        assert!(html.contains("Agent Plugin connections are managed in their client."));
-        assert!(app.contains("Direct registration"));
-        assert!(app.contains("Register directly"));
-        assert!(app.contains("Remove registration"));
-        assert!(app.contains("Client-managed Agent Plugins stay installed."));
-        assert!(app.contains("clientManaged ? \"Managed in client\""));
-        assert!(
-            !app.contains("installed ? \"Connected\""),
-            "a config entry must not claim the client connection is live"
-        );
-    }
-
-    #[test]
     fn the_surface_handles_every_change_the_orchestrator_can_publish() {
         use ghostlight_bridge::browser::RuntimeControlState;
 

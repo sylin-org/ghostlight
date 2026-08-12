@@ -55,27 +55,6 @@ listener. If no authority exists, the launch starts the complete desktop authori
 tray, and shows the workbench minimized. `--headless` is the explicit service-only mode and cannot
 reveal a workbench.
 
-### Agent Plugin discovery edge
-
-The repository root is also a thin Agent Plugins v1 package. `plugin.json` identifies Ghostlight,
-and `mcp.json` declares one local stdio server named `ghostlight` with the bare command
-`ghostlight-mcp-connector`. This is discovery and client-connection metadata around the existing
-MCP shore. It adds no transport, process, model language, or authority.
-
-The package contains no declared Skill or client extension and does not bundle another connector,
-engine, browser connector, browser extension, launcher, or runtime download. A signed Ghostlight
-operating-system installation and the matching store extension remain prerequisites. The platform
-installer must make the bare connector name resolvable to supported clients while preserving the
-version-matched sibling set. After launch, the connector still finds only its exact sibling
-`ghostlight`; it does not search `PATH` for the authority.
-
-The installing client owns its plugin record and lifecycle. Ghostlight owns only the direct
-configuration entries created through its Workbench. The Workbench never edits a plugin cache or
-marketplace record. A portable bare connector entry found in a supported client is shown as
-client-managed and is not mutated; Workbench-owned direct entries use an absolute sibling path.
-A plugin grants no browser authority. Both connection paths converge on the same lifetime-leased
-orchestrator.
-
 ## Fringe stability
 
 Ghostlight's fringes are independently versioned compatibility products. Their size is not
@@ -189,12 +168,11 @@ decisions, runtime-control intents, and explicit supported-harness management. I
 closed domain-event vocabulary through direct typed reactions and reconstructs bounded terminal
 history from the existing durable audit file. The WebView owns only disposable view state.
 
-Direct harness registration is an orchestrator-owned local-human capability. Each supported
-harness has one explicit config location and schema. Check is read-only. Registration and removal
-are serialized, merge only the `ghostlight` entry, keep unrelated siblings, preserve JSONC and
-TOML comments, create a backup, and refuse malformed, unreadable, or foreign-owned configuration
-rather than guessing. A client-owned Agent Plugin connection is outside this mutation boundary
-and is managed in that client. The UI exposes no generic filesystem or process operation.
+Harness registration is an orchestrator-owned local-human capability. Each supported harness has
+one explicit config location and schema. Check is read-only. Install and uninstall are serialized,
+merge only the `ghostlight` entry, keep unrelated siblings, preserve JSONC and TOML comments,
+create a backup, and refuse malformed, unreadable, or foreign-owned configuration rather than
+guessing. The UI exposes no generic filesystem or process operation.
 
 Tauri commands form a small typed inbound adapter over `WorkbenchFacade`. File work runs outside
 the UI event loop. The native notification port is best effort and content-free. WebView, tray,

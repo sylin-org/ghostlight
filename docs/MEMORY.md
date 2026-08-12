@@ -102,9 +102,6 @@ Every one of these cost something to learn.
   controlled; cursors, scans, ripples, frames, and captions say what is happening now.
 - **Isolate live stacks when testing.** Build into a separate target directory, and stop processes
   only by exact executable path, never by image name.
-- **A portable connection declaration is not a native installer.** Keep client-owned discovery
-  separate from product-owned installation and direct registration. Do not duplicate a local
-  authority or add remote ingress to hide a standard's missing prerequisite mechanism.
 - **The 0.8 distribution and trust records are history, not a working 1.0 pipeline.** Rebuild
   package and release automation from current boundaries before claiming a 1.0 artifact exists.
 

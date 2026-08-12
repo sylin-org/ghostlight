@@ -144,10 +144,6 @@ The process and live browser journeys in `tests/` exercise the real executable b
 them when changes touch process startup, relay reconnect, installation state, or live browser
 behavior.
 
-Agent Plugin package changes also require `node tests/agent-plugin-contract.mjs`. After a fresh
-isolated workspace build, run `node tests/agent-plugin-journey.mjs` to prove the manifest's bare
-connector command against an installer-shaped sibling stack.
-
 `tests/process-journey.mjs` resolves executables from `.target-ghostlight-1.0/debug` unless
 `GHOSTLIGHT_BIN_DIR` says otherwise. If you built into any other target directory, pass it
 (`GHOSTLIGHT_BIN_DIR=.target-yours/debug node tests/process-journey.mjs`) or the journey will
