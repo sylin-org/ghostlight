@@ -1,6 +1,15 @@
 # Sylin Card Foundry demo
 
-Status: Implemented demo design.
+Status: Implemented demo design. Rebuilt for 1.0 as
+[`scripts/demo-foundry.ps1`](../../scripts/demo-foundry.ps1) rather than the `ghostlight demo`
+subcommand it shipped as on 0.8; the command line reaches the same catalog through the same
+governance. All seven beats run, verified live on 2026-08-12.
+
+One bound changed underneath the story. The 0.8 rehearsals below exported 100 frames as 21.5 MB and
+23.1 MB GIFs. The 1.0 extension retains at most 5 MB of frames per recording, and the browser
+transfer ceiling is 8 MB, so a replay of that size can no longer be produced or delivered. The
+script therefore records the revision moment rather than the whole story: 14 frames, about 3.2 MB
+encoded. Restoring a whole-story replay is a bounds decision, not a script change.
 
 ## Purpose
 
