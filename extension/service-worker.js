@@ -460,7 +460,7 @@ async function dispatch(request) {
   if (command.command === "activate_point") return activatePoint(request.correlation, command);
   if (command.command === "scroll") {
     const result = await content(command.tab_id, { kind: "scroll", locator: command.locator, direction: command.direction, amount: command.amount });
-    return { outcome: "scrolled", tab_id: command.tab_id, x: result.x, y: result.y };
+    return { outcome: "scrolled", tab_id: command.tab_id, x: result.x, y: result.y, subject: result.subject };
   }
   if (command.command === "set_zoom") {
     await chrome.tabs.setZoom(command.tab_id, command.zoom);
@@ -476,7 +476,7 @@ async function dispatch(request) {
   if (command.command === "drag_points") return dragPoints(request.correlation, command);
   if (command.command === "upload_files") {
     const result = await content(command.tab_id, { kind: "upload_files", locator: command.locator, files: command.files });
-    return { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes };
+    return { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes, subject: result.subject };
   }
   if (command.command === "evaluate_script") return evaluateScript(request.correlation, command);
   if (command.command === "observe") {
@@ -490,7 +490,7 @@ async function dispatch(request) {
   if (command.command === "start_recording") return startRecording(request.workspace, command);
   if (command.command === "status_recording") return recordingResult("recording_status", recording.status(request.workspace, command.recording_id));
   if (command.command === "stop_recording") return stopRecording(request.workspace, command);
-  if (command.command === "read_recording") return recordingResult("recording_read", recording.read(request.workspace, command.recording_id));
+  if (command.command === "export_recording") return exportRecording(request.workspace, command);
   if (command.command === "discard_recording") return discardRecording(request.workspace, command);
   if (command.command === "present") {
     updateActivity(command.signal, request.workspace);
@@ -713,6 +713,122 @@ async function discardRecording(workspace, command) {
   return { outcome: "recording_discarded", recording_id: result.recordingId, released_bytes: result.releasedBytes };
 }
 
+// The encoder lives in an offscreen document because Chrome may evict this worker mid-encode,
+// and because object URLs -- the way a GIF reaches the download mechanism without anyone reading
+// its bytes -- do not exist in a service worker at all.
+const ENCODER_DOCUMENT = "offscreen.html";
+const ENCODER_TARGET = "ghostlight-offscreen";
+const DOWNLOAD_SETTLE_MS = 30_000;
+let encoderSetup = null;
+
+async function ensureEncoder() {
+  if (await chrome.offscreen.hasDocument()) return;
+  if (!encoderSetup) {
+    encoderSetup = chrome.offscreen.createDocument({
+      url: ENCODER_DOCUMENT,
+      reasons: ["BLOBS"],
+      justification: "Decode recording frames and encode one animated GIF away from the service worker."
+    }).finally(() => { encoderSetup = null; });
+  }
+  await encoderSetup;
+}
+
+async function askEncoder(message) {
+  await ensureEncoder();
+  const response = await chrome.runtime.sendMessage({ target: ENCODER_TARGET, ...message });
+  if (!response?.ok) throw new Error(response?.reason || "recording encoding failed");
+  return response;
+}
+
+// An open offscreen document keeps this worker awake, and a worker that never sleeps never
+// forgets recording bytes. Closing it is part of the volatility promise, not tidiness.
+async function closeEncoder() {
+  try {
+    if (await chrome.offscreen.hasDocument()) await chrome.offscreen.closeDocument();
+  } catch (_error) {}
+}
+
+function downloadSettled(downloadId) {
+  return new Promise((resolve, reject) => {
+    const settle = (error) => {
+      chrome.downloads.onChanged.removeListener(watch);
+      clearTimeout(timer);
+      if (error) reject(error); else resolve();
+    };
+    const observe = (state) => {
+      if (state === "complete") settle();
+      if (state === "interrupted") settle(new Error("the browser could not write the replay"));
+    };
+    const watch = (delta) => {
+      if (delta.id === downloadId && delta.state) observe(delta.state.current);
+    };
+    const timer = setTimeout(() => settle(new Error("the browser did not finish writing the replay")), DOWNLOAD_SETTLE_MS);
+    chrome.downloads.onChanged.addListener(watch);
+    // The download can finish before the listener attaches, and then no change ever arrives.
+    chrome.downloads.search({ id: downloadId }).then(([item]) => observe(item?.state)).catch(() => {});
+  });
+}
+
+async function deliverRecording(destination, encoded) {
+  if (destination.destination === "target") {
+    const result = await content(destination.tab_id, {
+      kind: "upload_files",
+      locator: destination.locator,
+      files: [{
+        name: destination.file_name,
+        media_type: encoded.mime_type,
+        data: encoded.data,
+        size: encoded.measurements.byte_count
+      }]
+    });
+    if (result.uploaded_count !== 1) throw new Error("the page did not accept the replay");
+    return { delivery: "attached", tab_id: destination.tab_id };
+  }
+  if (destination.destination === "download") {
+    const downloadId = await chrome.downloads.download({
+      url: encoded.object_url,
+      filename: destination.file_name,
+      saveAs: false
+    });
+    await downloadSettled(downloadId);
+    return { delivery: "downloaded" };
+  }
+  return { delivery: "returned", mime_type: encoded.mime_type, data: encoded.data };
+}
+
+// One command, one artifact. The orchestrator says whether recording may happen and where the
+// result goes; the browser records, encodes, and delivers. Frames never leave (ADR-0109).
+async function exportRecording(workspace, command) {
+  const selected = recording.retained(workspace, command.recording_id);
+  if (selected.notFound || selected.ambiguous) return recordingResult("recording_exported", selected);
+  const destination = command.destination;
+  let encoded = null;
+  try {
+    encoded = await askEncoder({
+      kind: "encode_recording",
+      frames: selected.frames,
+      max_bytes: command.max_output_bytes,
+      // Bytes materialize in exactly one form, chosen by where they are going: an object URL the
+      // browser downloads without anyone reading it, or base64 for a destination that must.
+      transfer: destination.destination === "download" ? "object_url" : "base64"
+    });
+    const delivery = await deliverRecording(destination, encoded);
+    return {
+      outcome: "recording_exported",
+      summary: selected.summary,
+      encoded: encoded.measurements,
+      delivery
+    };
+  } catch (error) {
+    return { outcome: "recording_export_failed", reason: shared.bounded(error?.message ?? error, 200) };
+  } finally {
+    if (encoded?.object_url) {
+      await chrome.runtime.sendMessage({ target: ENCODER_TARGET, kind: "release_recording", object_url: encoded.object_url }).catch(() => {});
+    }
+    await closeEncoder();
+  }
+}
+
 async function content(tabId, message, optional = false) {
   if (!tabId) {
     if (optional) return { presented: false };
@@ -840,11 +956,11 @@ async function activate(correlation, command) {
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
-    await content(command.tab_id, { kind: "activate", locator: command.locator, button: command.button, click_count: command.click_count });
+    const result = await content(command.tab_id, { kind: "activate", locator: command.locator, button: command.button, click_count: command.click_count });
     await new Promise((resolve) => setTimeout(resolve, 250));
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
-    return { outcome: "activated", tab: physicalTab(tab), committed_urls: commits };
+    return { outcome: "activated", tab: physicalTab(tab), subject: result.subject, committed_urls: commits };
   } catch (error) {
     error.effectUnknown = true;
     throw error;
@@ -870,13 +986,13 @@ async function typeText(correlation, command) {
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
-    await content(command.tab_id, { kind: command.clear_first ? "clear" : "focus", locator: command.locator });
+    const target = await content(command.tab_id, { kind: command.clear_first ? "clear" : "focus", locator: command.locator });
     if (command.clear_first) await content(command.tab_id, { kind: "focus", locator: command.locator });
     await ensureDebugger(command.tab_id);
     await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
-    return { outcome: "typed", tab: physicalTab(tab), character_count: Array.from(command.text).length, committed_urls: commits };
+    return { outcome: "typed", tab: physicalTab(tab), character_count: Array.from(command.text).length, subject: target.subject, committed_urls: commits };
   } catch (error) {
     error.effectUnknown = true;
     throw error;
@@ -903,14 +1019,14 @@ async function dispatchDrag(tabId, start, end) {
   await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseReleased", x: end.x, y: end.y, button: "left", clickCount: 1 });
 }
 
-async function dragWithPoints(correlation, tabId, start, end) {
+async function dragWithPoints(correlation, tabId, start, end, sourceSubject = null, destinationSubject = null) {
   const commits = [];
   navigationWatchers.set(tabId, { correlation, commits });
   try {
     await dispatchDrag(tabId, start, end);
     const tab = await chrome.tabs.get(tabId);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
-    return { outcome: "dragged", tab: physicalTab(tab), committed_urls: commits };
+    return { outcome: "dragged", tab: physicalTab(tab), source_subject: sourceSubject, destination_subject: destinationSubject, committed_urls: commits };
   } catch (error) {
     error.effectUnknown = true;
     throw error;
@@ -931,7 +1047,9 @@ async function dragLocators(correlation, command) {
       correlation,
       command.tab_id,
       { x: geometry.source.left + geometry.source.width / 2, y: geometry.source.top + geometry.source.height / 2 },
-      { x: geometry.destination.left + geometry.destination.width / 2, y: geometry.destination.top + geometry.destination.height / 2 }
+      { x: geometry.destination.left + geometry.destination.width / 2, y: geometry.destination.top + geometry.destination.height / 2 },
+      geometry.source_subject,
+      geometry.destination_subject
     );
   } finally {
     await detachDebugger(command.tab_id);
@@ -944,7 +1062,7 @@ async function dragPoints(correlation, command) {
     await validateView(command.tab_id, command.expected_viewport);
     const start = await content(command.tab_id, { kind: "viewport_point", x: command.start.x, y: command.start.y });
     const end = await content(command.tab_id, { kind: "viewport_point", x: command.end.x, y: command.end.y });
-    return await dragWithPoints(correlation, command.tab_id, start, end);
+    return await dragWithPoints(correlation, command.tab_id, start, end, start.subject, end.subject);
   } finally {
     await detachDebugger(command.tab_id);
   }
@@ -1112,7 +1230,7 @@ async function activatePoint(correlation, command) {
     await new Promise((resolve) => setTimeout(resolve, 250));
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
-    return { outcome: "activated", tab: physicalTab(tab), committed_urls: commits };
+    return { outcome: "activated", tab: physicalTab(tab), subject: point.subject, committed_urls: commits };
   } catch (error) {
     error.effectUnknown = true;
     throw error;
@@ -1131,7 +1249,7 @@ async function hoverLocator(command) {
       x: geometry.rectangle.left + geometry.rectangle.width / 2,
       y: geometry.rectangle.top + geometry.rectangle.height / 2
     });
-    return { outcome: "hovered", tab_id: command.tab_id };
+    return { outcome: "hovered", tab_id: command.tab_id, subject: geometry.subject };
   } finally {
     await detachDebugger(command.tab_id);
   }
@@ -1143,14 +1261,14 @@ async function hoverPoint(command) {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
     await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
-    return { outcome: "hovered", tab_id: command.tab_id };
+    return { outcome: "hovered", tab_id: command.tab_id, subject: point.subject };
   } finally {
     await detachDebugger(command.tab_id);
   }
 }
 
 async function pressKey(correlation, command) {
-  if (command.locator) await content(command.tab_id, { kind: "focus", locator: command.locator });
+  const target = command.locator ? await content(command.tab_id, { kind: "focus", locator: command.locator }) : null;
   await ensureDebugger(command.tab_id);
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
@@ -1162,7 +1280,7 @@ async function pressKey(correlation, command) {
     await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp, modifiers });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
-    return { outcome: "key_pressed", tab: physicalTab(tab), key: command.key, committed_urls: commits };
+    return { outcome: "key_pressed", tab: physicalTab(tab), key: command.key, subject: target?.subject, committed_urls: commits };
   } catch (error) { error.effectUnknown = true; throw error; }
   finally { navigationWatchers.delete(command.tab_id); await detachDebugger(command.tab_id); }
 }
@@ -1209,6 +1327,9 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // Encoder traffic belongs to the offscreen document. Answering it here would race the real
+  // handler and turn a working encode into "Unknown extension message."
+  if (message?.target === "ghostlight-offscreen") return false;
   Promise.resolve().then(async () => {
     if (message?.kind === "ui_state_changed") return null;
     if (message?.kind === "ui_snapshot") return uiSnapshot();

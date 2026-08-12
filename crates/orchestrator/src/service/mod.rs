@@ -94,9 +94,9 @@ impl ServiceHost {
         let projection = WorkbenchProjection::default();
         projection
             .load_history(&audit_path)
-            .context("restore payload-free workbench history")?;
+            .context("restore content-minimized workbench history")?;
         let durable_audit =
-            Arc::new(JsonlAuditSink::open(&audit_path).context("open payload-free audit")?);
+            Arc::new(JsonlAuditSink::open(&audit_path).context("open content-minimized audit")?);
         let audit: Arc<dyn AuditSink> =
             Arc::new(ProjectingAuditSink::new(durable_audit, projection.clone()));
         let workbench = WorkbenchFacade::new(

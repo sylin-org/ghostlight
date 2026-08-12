@@ -26,17 +26,22 @@ fn dispatch(&self, context: &InvocationContext<'_>, command: BrowserCommand)
 Twenty-five call sites funnel through it, and it is the only route to the browser port apart from
 one compensating close. The seam records facts about the browser crossing:
 
-- the landed host, never the path, query, or fragment; and
+- the governed attempted or landed host, never the path, query, or fragment; and
 - the readiness the adapter reported.
 
 That match remains exhaustive over `BrowserOutcome`. A new browser outcome does not compile until
 someone decides whether it carries host or readiness.
 
-Counts and sizes are not browser-generic facts. Their meaning comes from the product sentence:
-three fields, seven matches, 1,240 words, or a 1280x720 capture. They belong to the required typed
-`Outcome` in `language/outcome.rs`. `Outcome::summary()` and `Outcome::observed()` read the same
-value, so a sentence and its measurement cannot diverge. `succeeded` cannot be called without an
-`Outcome`.
+Counts, safe target nouns, attempted navigation hosts, and sizes are not browser-generic facts.
+Their meaning comes from product language: three fields, a button, seven matches, a refused host,
+1,240 words, or a 1280x720 capture. They belong to the required typed `Outcome` or `Refusal` in
+`language/outcome.rs`. Summary and observation methods read the same value, so a sentence and its
+projection cannot diverge. `succeeded` cannot be called without an `Outcome`; a refusal passes
+through the same completion path.
+
+Raw page roles are not safe nouns. The workspace narrows each one to `TargetRole` when it registers
+the target handle. Unknown strings become `control`, and the raw string remains only in the
+model-facing inspect facts.
 
 `finish` reads and clears the seam observation, then merges the outcome observation over it. One
 completion path produces the audit record. Neither guarantee depends on a future tool remembering
@@ -48,15 +53,16 @@ Measurements and metadata about the action. Never its content.
 
 | Recorded | Not recorded |
 | --- | --- |
-| Landed **host** | Path, query, or fragment, where identifying detail lives |
+| Governed attempted or landed **host** | Path, query, or fragment, where identifying detail lives |
 | Elapsed time and reported readiness | Page text |
 | Counts: fields filled, matches found, tabs listed, steps run | Field values, matched text |
 | Screenshot dimensions and scope | Screenshot pixels |
 | Result type and size | Result value |
 | File count and total size | File names, paths, or contents |
 
-The host is the deliberate line. It answers "where did the agent go" and is already visible in the
-user's own tab strip, while the path is where a patient id or a record number would sit.
+The host is the deliberate line. It answers "where did the agent go or try to go" and is already
+visible in the user's own request or tab strip, while the path is where a patient id or a record
+number would sit.
 
 This is narrower than the model-facing `facts` on `InvocationResult`, which legitimately carries
 page text and URLs. Those must never be copied into the audit record wholesale. The observation is
@@ -86,8 +92,8 @@ renders the Ghostlight-authored sentence directly and adds only a readiness note
 
 ```
 [nav]  browser_navigate    Opened example.com.             claude-code  action  2.5s  7h
-[scan] browser_read        Read 1,240 words.                claude-code  read    0.4s  7h
-[key]  browser_fill_form   Filled 3 fields.                 codex        write   1.1s  6h
+[scan] browser_read        Read 1,240 words from example.com.  claude-code  read  0.4s  7h
+[key]  browser_fill_form   Filled 3 fields on example.com.  codex        write   1.1s  6h
 [cam]  browser_screenshot  Captured the viewport at 1280x720.  codex     read    0.9s  6h
 ```
 
@@ -99,10 +105,11 @@ row that explains why an agent looked stuck, and a bare number cannot say it.
 
 ## Current implementation
 
-1. `dispatch` records host/readiness in an invocation-keyed map through an exhaustive outcome match.
-2. `Outcome` renders the sentence, next steps, and the counts/sizes that sentence names.
-3. `finish` merges outcome measurements over seam landing facts and clears the map.
-4. The workbench renders the sentence without its former `measured()` host-or-summary guess.
+1. `dispatch` records landing host/readiness in an invocation-keyed map through an exhaustive match.
+2. `Outcome` and `Refusal` render the sentence, next steps, and the safe facts that sentence names.
+3. The workspace stores only a closed target role beside a target handle.
+4. `finish` merges language projections over seam landing facts and clears the map.
+5. The workbench renders the sentence without its former `measured()` host-or-summary guess.
 
 `duration_ms` remains measured in `execute` rather than at the seam, because it covers the whole
 invocation rather than one browser round trip.

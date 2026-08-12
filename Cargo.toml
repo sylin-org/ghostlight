@@ -16,8 +16,6 @@ rust-version = "1.82"
 [workspace.dependencies]
 anyhow = "1.0"
 base64 = "0.22"
-gif = "0.14"
-jpeg-decoder = { version = "0.3", default-features = false }
 fs2 = "=0.4.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

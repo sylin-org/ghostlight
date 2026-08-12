@@ -63,7 +63,7 @@ struct OperationState {
 }
 
 impl WorkbenchProjection {
-    /// Restore bounded payload-free history from the orchestrator-owned audit file.
+    /// Restore bounded content-minimized history from the orchestrator-owned audit file.
     pub fn load_history(&self, path: &Path) -> io::Result<()> {
         let file = match File::open(path) {
             Ok(file) => file,
@@ -294,7 +294,7 @@ impl WorkbenchFacade {
         self.projection.attach_events(sink);
     }
 
-    /// Build an immutable, content-free snapshot for a disposable UI.
+    /// Build an immutable, content-minimized snapshot for a disposable UI.
     #[must_use]
     pub fn snapshot(&self) -> WorkbenchSnapshot {
         let operations = self.projection.operations();
@@ -651,7 +651,7 @@ pub enum WorkbenchChange {
     },
     /// One operation reached its terminal record and left the live set.
     OperationSettled {
-        /// The payload-free completion record.
+        /// The content-minimized completion record.
         record: HistoryItem,
     },
     /// Authoritative runtime control state changed.
@@ -722,7 +722,7 @@ pub struct WorkbenchSnapshot {
     pub operations: Vec<OperationSummary>,
     /// Currently connected browser instances.
     pub browsers: Vec<BrowserInstanceSummary>,
-    /// Newest-first bounded payload-free history.
+    /// Newest-first bounded content-minimized history.
     pub history: Vec<HistoryItem>,
     /// Current local checkup results.
     pub diagnostics: Vec<DiagnosticItem>,
@@ -849,7 +849,7 @@ pub struct BrowserInstanceSummary {
     pub connected: bool,
 }
 
-/// One payload-free terminal history record.
+/// One content-minimized terminal history record.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct HistoryItem {
     /// Completion time.
@@ -1206,7 +1206,7 @@ mod tests {
             },
             "succeeded",
             "none",
-            "Read 1,240 words.",
+            "Read 1,240 words from example.com.",
             1200,
         )
         .with_observation(Observed {
@@ -1289,14 +1289,14 @@ mod tests {
     }
 
     #[test]
-    fn published_changes_stay_payload_free() {
+    fn published_changes_stay_content_minimized() {
         let projection = WorkbenchProjection::default();
         let events = Arc::new(Events::default());
         projection.attach_events(events.clone());
         projection.react(&DomainEvent::WorkStarted {
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
-            tool: "browser_evaluate".into(),
+            tool: "browser_execute".into(),
             activity: PresentationActivity::Script,
             capability: Capability::Execute,
         });
@@ -1306,7 +1306,7 @@ mod tests {
                 AuditRecord::now(
                     "invocation_1",
                     "workspace_1",
-                    "browser_evaluate",
+                    "browser_execute",
                     Capability::Execute,
                     "authority_1",
                     Decision {
@@ -1315,7 +1315,7 @@ mod tests {
                     },
                     "succeeded",
                     "applied",
-                    "Evaluated a script on example.com.",
+                    "Clicked the \"Save\" button on example.com.",
                     140,
                 )
                 .with_observation(Observed {
@@ -1339,6 +1339,7 @@ mod tests {
         assert!(serde_json::to_string(&settled)
             .unwrap()
             .contains("example.com"));
+        assert!(serde_json::to_string(&settled).unwrap().contains("Save"));
     }
 
     #[test]

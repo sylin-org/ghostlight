@@ -2,6 +2,7 @@
   "use strict";
 
   const shared = globalThis.GhostlightShared;
+  const ACTIONABLE_SELECTOR = "a[href],button,input,textarea,select,summary,[role],[contenteditable='true']";
   const locators = new Map();
   const reverse = new WeakMap();
   let nextLocator = 1;
@@ -32,7 +33,14 @@
     const aria = element.getAttribute("aria-label");
     if (aria) return shared.bounded(aria, 500);
     if (element.labels?.length) return shared.bounded(Array.from(element.labels).map((label) => label.textContent ?? "").join(" ").trim(), 500);
-    return shared.bounded(element.getAttribute("alt") || element.getAttribute("title") || element.getAttribute("placeholder") || element.innerText || element.textContent || element.value || "", 500).trim();
+    const tag = String(element.tagName ?? "").toLowerCase();
+    const type = String(element.getAttribute("type") ?? "").toLowerCase();
+    const buttonLikeInput = tag === "input" && ["button", "submit", "reset"].includes(type);
+    const fixed = element.getAttribute("alt") || element.getAttribute("title") || element.getAttribute("placeholder") || (buttonLikeInput ? element.getAttribute("value") : "");
+    if (fixed) return shared.bounded(fixed, 500).trim();
+    const editable = tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
+    if (editable) return "";
+    return shared.bounded(element.innerText || element.textContent || "", 500).trim();
   }
 
   function roleFor(element) {
@@ -46,7 +54,7 @@
     if (tag === "textarea") return "textbox";
     if (tag === "input" && type === "checkbox") return "checkbox";
     if (tag === "input" && type === "radio") return "radio";
-    if (tag === "input" && type === "submit") return "button";
+    if (tag === "input" && ["button", "submit", "reset"].includes(type)) return "button";
     if (tag === "input") return "textbox";
     if (/^h[1-6]$/.test(tag)) return "heading";
     return tag;
@@ -82,6 +90,19 @@
     };
   }
 
+  function actionSubject(element) {
+    return {
+      role: roleFor(element),
+      name: accessibleName(element)
+    };
+  }
+
+  function subjectAtViewportPoint(x, y) {
+    const hit = document.elementFromPoint?.(x, y);
+    if (!hit) return null;
+    return actionSubject(hit.closest?.(ACTIONABLE_SELECTOR) || hit);
+  }
+
   function roots() {
     const found = [document];
     for (let index = 0; index < found.length; index += 1) {
@@ -101,7 +122,7 @@
   }
 
   function candidates(kind) {
-    const controls = "a[href],button,input,textarea,select,summary,[role],[contenteditable='true']";
+    const controls = ACTIONABLE_SELECTOR;
     const structure = "main,nav,header,footer,form,table,ul,ol,h1,h2,h3,h4,h5,h6,section,article";
     const selector = kind === "controls" ? controls : kind === "structure" ? structure : `${controls},${structure}`;
     return queryAll(selector);
@@ -249,14 +270,15 @@
       if (message.kind === "find") return { targets: findTargets(message.text, message.find_kind, message.max_results) };
       if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
       if (message.kind === "geometry") return geometry(resolve(message.locator));
-      if (message.kind === "focus") { const element = requireActionable(resolve(message.locator), "focus"); element.scrollIntoView({ block: "center", inline: "center" }); element.focus({ preventScroll: true }); return { focused: true }; }
-      if (message.kind === "clear") { const element = requireActionable(resolve(message.locator), "type"); if (credentialClass(element)) throw new Error("credential-class target requires user handoff"); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true }; }
+      if (message.kind === "focus") { const element = requireActionable(resolve(message.locator), "focus"); const subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center" }); element.focus({ preventScroll: true }); return { focused: true, subject }; }
+      if (message.kind === "clear") { const element = requireActionable(resolve(message.locator), "type"); if (credentialClass(element)) throw new Error("credential-class target requires user handoff"); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
       if (message.kind === "activate") {
         const element = requireActionable(resolve(message.locator), "activate");
+        const subject = actionSubject(element);
         element.scrollIntoView({ block: "center", inline: "center" });
         if (message.button === "primary" && message.click_count === 1) element.click();
         else for (let count = 0; count < message.click_count; count += 1) element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, button: message.button === "middle" ? 1 : 2, detail: message.click_count }));
-        return { activated: true };
+        return { activated: true, subject };
       }
       if (message.kind === "fill") {
         for (const field of message.fields) fillElement(resolve(field.locator), field.value);
@@ -264,31 +286,34 @@
         return { filled_count: message.fields.length, submitted: Boolean(message.submit_locator) };
       }
       if (message.kind === "scroll") {
-        if (message.locator) requireActionable(resolve(message.locator), "scroll").scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        let subject = null;
+        if (message.locator) { const element = requireActionable(resolve(message.locator), "scroll"); subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); }
         else {
           const viewport = message.amount === "small" ? 0.25 : message.amount === "large" ? 0.75 : message.amount === "page" ? 0.95 : 0.5;
           const horizontal = message.direction === "left" ? -innerWidth * viewport : message.direction === "right" ? innerWidth * viewport : 0;
           const vertical = message.direction === "up" ? -innerHeight * viewport : message.direction === "down" ? innerHeight * viewport : 0;
           scrollBy({ left: horizontal, top: vertical, behavior: "instant" });
         }
-        return { x: scrollX, y: scrollY };
+        return { x: scrollX, y: scrollY, subject };
       }
       if (message.kind === "scroll_point") {
         const margin = 24;
         if (message.x < scrollX + margin || message.x > scrollX + innerWidth - margin || message.y < scrollY + margin || message.y > scrollY + innerHeight - margin) {
           scrollTo({ left: Math.max(0, message.x - innerWidth / 2), top: Math.max(0, message.y - innerHeight / 2), behavior: "instant" });
         }
-        return { x: message.x - scrollX, y: message.y - scrollY };
+        const x = message.x - scrollX;
+        const y = message.y - scrollY;
+        return { x, y, subject: subjectAtViewportPoint(x, y) };
       }
       if (message.kind === "viewport_point") {
         const x = message.x - scrollX;
         const y = message.y - scrollY;
         if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) throw new Error("drag point is outside the current viewport");
-        return { x, y };
+        return { x, y, subject: subjectAtViewportPoint(x, y) };
       }
-      if (message.kind === "hover") { const element = requireActionable(resolve(message.locator), "hover"); element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); return { rectangle: viewportRectangle(element) }; }
-      if (message.kind === "drag_geometry") { const source = requireActionable(resolve(message.source_locator), "drag"); const destination = requireActionable(resolve(message.destination_locator), "drop"); source.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); return { source: viewportRectangle(source), destination: viewportRectangle(destination) }; }
-      if (message.kind === "upload_files") return uploadFiles(resolve(message.locator), message.files);
+      if (message.kind === "hover") { const element = requireActionable(resolve(message.locator), "hover"); element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); return { rectangle: viewportRectangle(element), subject: actionSubject(element) }; }
+      if (message.kind === "drag_geometry") { const source = requireActionable(resolve(message.source_locator), "drag"); const destination = requireActionable(resolve(message.destination_locator), "drop"); source.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); return { source: viewportRectangle(source), destination: viewportRectangle(destination), source_subject: actionSubject(source), destination_subject: actionSubject(destination) }; }
+      if (message.kind === "upload_files") { const element = resolve(message.locator); const subject = actionSubject(element); return { ...uploadFiles(element, message.files), subject }; }
       if (message.kind === "observe") return observe(message);
       if (message.kind === "present") return { presented: renderPresentation(message.signal, message.preferences) };
       if (message.kind === "managed_scope") { globalThis.GhostlightPresentation.setManaged(message.active); return { managed: Boolean(message.active) }; }

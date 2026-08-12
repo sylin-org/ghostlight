@@ -146,7 +146,7 @@ STEP         STATUS     WHAT HAPPENED
 ----         ------     -------------
 open         succeeded  Opened example.com.
 list         succeeded  Listed 1 controlled tab.
-read         succeeded  Read 9 words.
+read         succeeded  Read 9 words from example.com.
 screenshot   succeeded  Captured the viewport at 1280x720.
 close        succeeded  Closed the controlled tab.
 ```

@@ -22,6 +22,33 @@
   const MAX_SOURCE_URLS = 32;
   const MAX_FRAME_BASE64_CHARS = 4 * Math.ceil(MAX_FRAME_BYTES / 3);
 
+  // Fidelity policy, and the only implementation of it. A bounded recorder trades fidelity, never
+  // coverage: dropping every other intermediate frame halves the sample rate but still spans the
+  // whole recording, where stopping at a limit would silently omit everything after it. Whoever
+  // drops a frame folds its time into the frame before it, or the replay plays back faster than
+  // the work it recorded. The encoder thins with this too, so there is one rule and one bug
+  // surface (ADR-0109 Decision 4).
+  //
+  // Fewer than three frames cannot be thinned without losing an end, so the list comes back
+  // unchanged and the caller must notice it made no progress.
+  function thinFrames(frames) {
+    if (frames.length < 3) return { kept: frames.slice(), dropped: [] };
+    const kept = [];
+    const dropped = [];
+    const last = frames.length - 1;
+    for (let index = 0; index < frames.length; index += 1) {
+      const frame = frames[index];
+      if (index % 2 === 0 || index === last) {
+        kept.push({ ...frame });
+        continue;
+      }
+      const previous = kept.at(-1);
+      previous.duration_ms += frame.duration_ms;
+      dropped.push(frame);
+    }
+    return { kept, dropped };
+  }
+
   function requireWorkspace(value) {
     if (typeof value !== "string" || value.length < 1 || value.length > 160) {
       throw new TypeError("recording requires a bounded opaque workspace");
@@ -258,23 +285,14 @@
       return true;
     }
 
-    // Drop every other intermediate frame, keeping the first and last, and fold each dropped
-    // frame's duration into the one before it so the animation still spans the same work.
+    // Make room by halving the retained sample rate, releasing the dropped frames' bytes.
     function thin(state) {
-      const kept = [];
-      for (let index = 0; index < state.frames.length; index += 1) {
-        const frame = state.frames[index];
-        const last = index === state.frames.length - 1;
-        if (index % 2 === 0 || last) {
-          kept.push(frame);
-          continue;
-        }
-        const previous = kept.at(-1);
-        if (previous) previous.duration_ms += frame.duration_ms;
-        state.bytesHeld -= decodedBytes(frame.data);
-        globalBytes -= decodedBytes(frame.data);
+      const { kept, dropped } = thinFrames(state.frames);
+      for (const frame of dropped) {
+        const size = decodedBytes(frame.data);
+        state.bytesHeld -= size;
+        globalBytes -= size;
       }
-      state.thinned = true;
       state.frames = kept;
     }
 
@@ -317,7 +335,10 @@
       return summaries;
     }
 
-    function read(workspace, requested) {
+    // Retained frames are readable inside the extension only. Nothing outside the browser ever
+    // sees them: the encoder that consumes this runs here too, and only its finished GIF can
+    // cross, and then only when a caller outside the browser asked for it (ADR-0109).
+    function retained(workspace, requested) {
       const selected = select(workspace, requested);
       if (!selected.state) return selected;
       return { summary: summary(selected.state), frames: selected.state.frames.map((frame) => ({ ...frame })) };
@@ -341,13 +362,13 @@
 
     return Object.freeze({
       start, activeForTab, append, noteUrl, status, beginStop, finishStop, interruptTab,
-      interruptAll, read, discard, count
+      interruptAll, retained, discard, count
     });
   }
 
   return Object.freeze({
     HARD_DURATION_MS, RETENTION_MS, MAX_FRAME_BYTES, MAX_RECORDING_BYTES,
     MAX_GLOBAL_BYTES, MAX_FRAMES, MAX_RECORDINGS, MAX_FRAME_BASE64_CHARS,
-    JPEG_QUALITY, MAX_WIDTH, MAX_HEIGHT, create
+    JPEG_QUALITY, MAX_WIDTH, MAX_HEIGHT, thinFrames, create
   });
 });

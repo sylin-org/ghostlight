@@ -22,6 +22,9 @@ the owner wants, and what this project learned the hard way.
   seam; change it there. Restore a green checkpoint before proposing the change.
 - **Fewest meaningful moving parts.** A logical boundary does not earn a process, crate, service,
   event bus, actor system, workflow engine, CQRS split, or registry.
+- **One normal desktop startup.** Installed Ghostlight always creates its tray and starts the
+  workbench minimized. Connectors launch that same executable with no mode flag. Only explicit
+  `--headless` omits desktop presentation.
 - **Keep the fringes stable.** Product and journey change belongs in the orchestrator. The
   connectors negotiate and relay. The extension owns Chromium, the page, and the drawing, and makes
   no product, workspace, authority, or model-language decision.
@@ -48,11 +51,20 @@ Every one of these cost something to learn.
 - **A capability split across a boundary grows two implementations of one policy**, and they
   diverge. Recording thinning lived in the extension and in Rust at once; the Rust copy dropped each
   discarded frame's duration, so a thinned replay played back faster than the work it recorded.
+  Fixed by moving the whole capability to the side that physically has it (ADR-0109), not by
+  syncing the copies.
+- **Put a rule in the shape, not in a reviewer's memory.** "Bytes never cross" survives as a
+  variant that has nowhere to put them; a field everyone agrees not to fill does not. Where a
+  budget differs by path, say so per path: one number for every path is a contradiction waiting to
+  be discovered, and raising it only moves the contradiction.
 - **Trade fidelity, never coverage.** A bounded recorder that stops at its limit produces a replay
   that silently omits everything after. Whoever drops a frame folds its time into the frame before
   it, or the artifact misreports how long the work took.
 - **Say what a person would say.** A replay is "30 seconds of page changes", not "17 of 65 frames
   as 3804453 bytes". Mechanism belongs in the facts; the sentence is for a reader.
+- **Model-facing names describe authority, not implementation APIs.** CDP calls the primitive
+  `Runtime.evaluate`, but page JavaScript can mutate and navigate, so the tool is
+  `browser_execute`. Keep physical vocabulary behind the language boundary.
 - **Correctness kept by memory rots.** A hand-maintained list that each new case must join will
   eventually miss one. Derive it from a registry, or observe at the one seam every case already
   crosses.
@@ -66,9 +78,13 @@ Every one of these cost something to learn.
 - **A delegated batch spec must say what a change makes redundant**, not only what it adds, or the
   executor is correct and the surface is repetitive.
 - **Audit is metadata-only.** Never persist page content, results, screenshots, form values,
-  scripts, paths, or file bytes. The landed host is the one deliberate exception: it answers where
-  the agent went and is already visible in the user's own tab strip, while path, query, and fragment
-  are where identifying detail sits.
+  scripts, paths, or file bytes. Governed attempted or landed hosts and normalized bounded names of
+  action targets are the deliberate exceptions: they answer where the agent went and which visible
+  control it used. Target names default on for useful history and can be removed monotonically by
+  governance. Paths, query, fragment, selectors, handles, and entered values stay out.
+- **Observe the action subject at the effect boundary.** The browser already resolves the physical
+  element. Return its role and accessible name in that same receipt. A cached inspect name or a
+  second describe call is both less truthful and more expensive.
 - **Reconnection is not availability.** Put one idempotent recovery action at the failed-connection
   seam, then let a service-held lifetime lease decide authority before discovery or presentation
   state exists.

@@ -12,7 +12,7 @@ guides rather than restating them, so a change lands in one place instead of thr
 | Publish and grow any open-source project   | [open-source-publication.md](open-source-publication.md)   |
 | Write and apply a governance policy        | [governance-configuration.md](governance-configuration.md) |
 | Roll governance out across an organization | [compliance-team.md](compliance-team.md)                   |
-| Understand the payload-free audit contract | [governance-configuration.md#payload-free-audit-and-history](governance-configuration.md#payload-free-audit-and-history) |
+| Understand the content-minimized audit contract | [governance-configuration.md#content-minimized-audit-and-history](governance-configuration.md#content-minimized-audit-and-history) |
 | Collect audit into a SIEM, field by field   | [siem-integration.md](siem-integration.md)                 |
 | Understand the source-license boundary     | [licensing.md](licensing.md)                               |
 | Review Ghostlight for procurement or security | [Trust Center (procurement and security review)](../trust/README.md) |

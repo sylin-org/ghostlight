@@ -222,6 +222,8 @@ body.runtime-offline .state-word { color: var(--muted); }
 
 /* ------------------------------- the queue ------------------------------ */
 .queue-head { display: flex; align-items: baseline; justify-content: space-between; margin: 20px 2px 6px; color: var(--faint); font: 500 9px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; }
+.queue-actions { display: flex; align-items: center; gap: 10px; }
+.queue-clear { height: 24px; padding: 0 9px; font: 500 9px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .queue { display: flex; flex-direction: column; }
 .row {
   display: grid; grid-template-columns: 24px 168px 34px minmax(0, 1fr) 132px 62px 52px 46px;

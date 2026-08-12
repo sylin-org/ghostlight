@@ -51,14 +51,20 @@ Every invocation returns one envelope:
 
 The MCP edge renders this envelope as text plus `structuredContent`. Bounded rich content crosses
 the bridge in a separate generic content vocabulary. `browser_screenshot` returns an image block.
-`browser_record` save without a target returns a GIF image block. Image bytes are not copied into
-structured facts.
+`browser_record` save returns a GIF image block only when the caller asked for the replay itself;
+a save that stays inside the browser returns none. Image bytes are not copied into structured
+facts.
 
-The language context produces `summary`, `next_steps`, and the content-free observation projection
-from one typed outcome. A sentence that names a host, count, or capture size carries the same value
-in that projection. Page content never authors `summary` or `next_steps`. A result with `effect`
-equal to `partial` or `unknown`, or with a committed effect unsafe to duplicate, has
-`repeat_safe: false` and does not suggest replay.
+The language context produces `summary`, `next_steps`, and the content-minimized observation
+projection from one typed outcome or refusal. A sentence that names a host, count, or capture size
+carries the same value in that projection. Ghostlight owns the sentence. The browser may return the
+role and accessible name of the physical element in the same action receipt, without a describe
+round trip. The role is narrowed to a closed Ghostlight noun; an unknown role becomes `control`.
+The name is normalized, bounded to 80 visible characters, and included by default, so an action can
+say `Clicked the "Save" button on example.com.` Governance may remove all target names with
+`preserve_target_names: false`, leaving `Clicked a button on example.com.` Editable values are
+never name sources. A result with `effect` equal to `partial` or `unknown`, or with a committed effect
+unsafe to duplicate, has `repeat_safe: false` and does not suggest replay.
 
 ## Catalog
 
@@ -272,9 +278,9 @@ Ghostlight rejects directories, missing files, files larger than 5,000,000 bytes
 payload larger than 5,000,000 bytes before browser dispatch. File paths, names, and contents never
 enter audit or presentation. Facts: `tab`, `target`, `uploaded_count`, and `uploaded_bytes`.
 
-### `browser_evaluate`
+### `browser_execute`
 
-Evaluate explicit bounded JavaScript in the page. It may read, mutate, or navigate, so use a
+Execute explicit bounded JavaScript in the page. It may read, mutate, or navigate, so use a
 semantic tool when one fits. Shortest call: `{"script":"document.title"}`.
 
 Inputs: required non-empty `script` up to 20000 characters; optional `tab`; optional
@@ -308,22 +314,26 @@ Actions are:
 - `start`: optional `tab`; ask the extension to start an owned recording; capability `read`.
 - `status`: optional `recording`; report state and deadlines; no new capability.
 - `stop`: optional `recording`; capture a final frame, stop, and freeze; no new capability.
-- `save`: optional `recording`; optional semantic `target`; auto-stop if active. Without target,
-  return the GIF to the client and require `read`. With target, attach it to the page and require
-  `write`.
+- `save`: optional `recording`; auto-stop if active. One replay goes to one place: with `target`,
+  the browser attaches it to that file input and Ghostlight requires `write`; with
+  `"download": true`, the browser saves it as a file and Ghostlight requires `read`; with neither,
+  the GIF is returned to the client and Ghostlight requires `read`. `target` and `download`
+  together are refused.
 - `discard`: optional `recording`; erase captured bytes; no new capability.
 
-`recording` may be omitted only when exactly one owned recording can be resolved. `target` is valid
-only for save. The extension owns recording identity, frames, bounds, deadlines, stop, retention,
-and erase. Frames and encoded bytes are volatile, owner-scoped, and never written to Ghostlight
-storage, extension storage, logs, audit, or restart state. Save is immutable and
-can be prepared repeatedly until retention expires; target delivery is a separate Write effect
-and is not thereby repeat-safe. Discard is destructive.
+`recording` may be omitted only when exactly one owned recording can be resolved. `target` and
+`download` are valid only for save. The extension owns recording identity, frames, bounds,
+deadlines, stop, retention, erase, and the encode. Frames never leave the browser, and neither
+frames nor encoded bytes are written to Ghostlight storage, extension storage, logs, audit, or
+restart state. Save can be repeated until retention expires; a target or download delivery is a
+real effect each time and is not thereby repeat-safe. A save after retention expires is a refusal,
+not an empty result. Discard is destructive.
 
-Facts include `recording`, state, deadlines, frame and byte counts, stop reason, encoded size, and
-delivery disposition as applicable. Client save returns one bounded `image/gif` content block.
-Target delivery distinguishes dispatched-unverified from outcome-unknown and never claims page or
-remote acceptance.
+A saved replay's sentence says how long it plays and where it went, because that is what someone
+who asked for a recording wants to know. How many frames survived, how many were captured, and how
+many bytes they became are real and stay in the facts, alongside `recording`, state, deadlines,
+stop reason, exact `duration_ms`, dimensions, and the delivery disposition. A client save returns one bounded
+`image/gif` content block; the other two return none, and neither claims remote acceptance.
 
 ### `browser_diagnose`
 

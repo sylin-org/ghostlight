@@ -6,7 +6,8 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 ## Contract gates
 
 1. The catalog contains exactly the 22 tools in `LANGUAGE.md`, in documented order, with no
-   simultaneously advertised legacy dialect or client-selected profile.
+   simultaneously advertised legacy dialect or client-selected profile. Page JavaScript is
+   `browser_execute`; the unreleased `browser_evaluate` name is neither advertised nor decoded.
 2. Catalog schemas are typo-closed at every object level and match every decoder requirement,
    conditional branch, bound, and default in `LANGUAGE.md`. Every declaration has field guidance,
    a shortest valid example, a truthful output schema, and standard MCP annotations.
@@ -30,8 +31,8 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
      effect by stopping the service, restarts it, and proves the same MCP stdio and native-message
      processes renegotiate and complete new work without replaying the interrupted effect.
 13. After either connector fails to find the service, it uses the one shared lifecycle seam to
-     start only the exact sibling `ghostlight --background` executable and continues its existing
-     reconnect loop.
+     start only the exact sibling `ghostlight` executable with no application arguments and
+     continues its existing reconnect loop.
 14. A fresh deployment lock suppresses demand-start. A stale deployment lock cannot suppress it
      indefinitely.
 15. Concurrent demand-start requests converge on one lifetime-leased service authority before
@@ -70,12 +71,23 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 7. Initial, redirected, and script-caused committed landings are governed before text or readiness
    is accepted.
 8. A denied landing returns truthful committed-effect and compensation facts.
-9. Audit records contain no URL, page text, target name, selector, form value, screenshot,
-   recording frame or GIF, dialog text, console text, request URL, header, body, or diagnostic
-   entry.
+9. Audit records contain no URL, arbitrary page text, selector, target handle, form value,
+   screenshot, recording frame or GIF, dialog text, console text, request URL, header, body, or
+   diagnostic entry. A successful action may retain one governed, normalized, bounded target name
+   in its Ghostlight-authored summary.
 10. Hold, attention, end-session, and cancellation stop later effects at the runtime boundary.
 11. Model-driven close dispatches only when the action capability and monotonic tab-close policy
     constraint both permit it. A denying local or managed layer cannot be expanded later.
+12. A refused explicit navigation records only the normalized attempted host. Its path, query,
+    fragment, request value, target description, and page text remain absent from summary,
+    observation, presentation, and audit.
+13. A page-authored role is narrowed to the closed Ghostlight role vocabulary before target state
+    is stored. Unknown or malicious roles become `control` and cannot write an action sentence.
+14. Action receipts carry the role and accessible name of the physical element actually used in
+    the same browser response, with no describe round trip. Names default to preserved. A local or
+    managed `preserve_target_names: false` removes them monotonically while retaining the closed
+    role. Editable values never become labels, and unobservable coordinate subjects fall back to
+    coordinates.
 
 ## Browser job journeys
 
@@ -112,8 +124,9 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
     and prove resize affects no unrelated window while invalidating stale view geometry.
 17. Start a recording, perform ordinary browser work, save without an explicit stop, verify the
     extension's final-frame stop and one bounded GIF content block, save the result again, then
-    discard it. Repeat with semantic target delivery and distinguish dispatched-unverified from
-    outcome-unknown.
+    discard it. Repeat for both browser-local destinations: a semantic target attach and a browser
+    download. Prove each returns no content block and that no recording frame ever crosses out of
+    the browser.
 18. Prove recordings are plural and workspace-isolated; hard timeout, frozen retention,
     browser-loss, service disconnect, runtime hold, memory-limit, oversized-frame, discard, and MV3
     worker-loss paths stop or erase as ADR-0108 requires, without persistent pixel bytes. Prove
@@ -178,9 +191,9 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 
 ## Desktop workbench gates
 
-1. Direct/default `ghostlight` startup starts visibly or focuses the existing workbench.
-   `--background` starts the full desktop authority hidden with a tray; `--headless` starts no
-   desktop runtime. Closing the window hides it, and only explicit quit stops the process.
+1. Normal `ghostlight` startup creates the tray and shows the workbench minimized, or restores and
+   focuses the existing workbench. `--headless` starts no desktop runtime. Closing the window hides
+   it, and only explicit quit stops the process.
 2. Home presents plural session, operation, and browser counts plus current work and system health
    at a glance. Activity, history, checkup, configuration, and installations remain separate
    focused destinations behind one compact rail.
@@ -207,6 +220,9 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 11. Recoverable Tauri setup or event-loop failure leaves the orchestrator service alive in
     headless mode. The MCP connector, browser connector, shared bridge, and extension have empty
     diffs for the complete workbench feature.
+12. Clear view removes completed actions from the current Monitor surface, preserves running work,
+    issues no orchestrator mutation, and leaves the durable audit unchanged. A later action appears
+    normally, and a fresh desktop process may reconstruct the cleared history from audit.
 
 ## Integration and release-readiness gates
 

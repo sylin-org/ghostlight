@@ -149,7 +149,8 @@ try {
   const native = new NativePeer(browserConnector);
   native.send({
     kind: "hello",
-    major: 1,
+    // The relay refuses a stale major outright, so this has to track ADAPTER_PROTOCOL_MAJOR.
+    major: 2,
     adapter_version: "1.0.0",
     browser_id: "browser_psjourney",
     adapter_epoch: "adapter_psjourney",
@@ -195,7 +196,7 @@ try {
   const output = journey.stdout ?? "";
   for (const expected of [
     "Opened example.com.",
-    "Read 9 words.",
+    "Read 9 words from example.com.",
     "Captured the viewport at 1280x720.",
     "Closed the controlled tab."
   ]) {

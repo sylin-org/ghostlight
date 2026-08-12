@@ -78,6 +78,7 @@ const state = {
   runtime: "active",
   snapshot: null,
   feed: [],
+  hiddenInvocations: new Set(),
   rowNodes: new Map(),
   pendingHarnesses: new Set(),
   painted: {},
@@ -90,7 +91,7 @@ const el = {};
 for (const id of [
   "lamp", "state-word", "state-facts", "wheel", "wheel-icon", "wheel-label",
   "main-content", "connections", "hero", "hero-med", "hero-body", "hero-right",
-  "queue", "queue-count", "integration-grid", "diagnostic-grid", "authority-grid",
+  "queue", "queue-count", "clear-monitor", "integration-grid", "diagnostic-grid", "authority-grid",
   "colophon", "palette", "palette-query", "palette-results", "toast",
   "confirm-dialog", "confirm-title", "confirm-detail"
 ]) {
@@ -166,7 +167,7 @@ const TOOL_GLYPH = {
   browser_wait: "wait",
   browser_dialog: "wait",
   browser_upload: "workwheel",
-  browser_evaluate: "workwheel",
+  browser_execute: "workwheel",
   browser_sequence: "workwheel",
   browser_record: "camera",
   browser_diagnose: "scan"
@@ -409,6 +410,18 @@ function paintRow(entry) {
 function paintQueueCount() {
   const rows = Math.max(0, state.feed.length - 1);
   el["queue-count"].textContent = rows ? `${rows} ${rows === 1 ? "action" : "actions"}` : "";
+  el["clear-monitor"].disabled = !state.feed.some(entry => !isRunning(entry));
+}
+
+function clearMonitorView() {
+  const completed = state.feed.filter(entry => !isRunning(entry));
+  if (!completed.length) return;
+  for (const entry of completed) state.hiddenInvocations.add(entry.invocation);
+  state.feed = state.feed.filter(isRunning);
+  rebuildFeedDom();
+  paintLamp();
+  const count = completed.length;
+  showToast(`Cleared ${count} ${count === 1 ? "entry" : "entries"} from this view. Audit history is unchanged.`);
 }
 
 /** Full rebuild. Only used on first paint and after a detected sequence gap. */
@@ -442,6 +455,7 @@ function promote(entry) {
 }
 
 function applyStarted(operation) {
+  if (state.hiddenInvocations.has(operation.invocation)) return;
   const entry = entryFromOperation(operation);
   const index = state.feed.findIndex(item => item.invocation === entry.invocation);
   if (index === 0) {
@@ -458,6 +472,7 @@ function applyStarted(operation) {
 }
 
 function applyChanged(operation) {
+  if (state.hiddenInvocations.has(operation.invocation)) return;
   const index = state.feed.findIndex(item => item.invocation === operation.invocation);
   if (index < 0) return applyStarted(operation);
   state.feed[index] = { ...state.feed[index], ...entryFromOperation(operation) };
@@ -466,6 +481,7 @@ function applyChanged(operation) {
 }
 
 function applySettled(record) {
+  if (state.hiddenInvocations.has(record.invocation)) return;
   const index = state.feed.findIndex(item => item.invocation === record.invocation);
   if (index < 0) {
     promote(entryFromRecord(record, null));
@@ -597,7 +613,9 @@ function seedFeed(snapshot) {
   for (const entry of [...live, ...settled]) {
     if (!byInvocation.has(entry.invocation)) byInvocation.set(entry.invocation, entry);
   }
-  state.feed = [...byInvocation.values()].sort((left, right) => entryTime(right) - entryTime(left));
+  state.feed = [...byInvocation.values()]
+    .filter(entry => !state.hiddenInvocations.has(entry.invocation))
+    .sort((left, right) => entryTime(right) - entryTime(left));
   trimFeed();
 }
 
@@ -828,6 +846,8 @@ document.addEventListener("keydown", event => {
 document.getElementById("refresh-status").addEventListener("click", () => {
   resync({ quiet: false }).then(() => showToast("Status refreshed."));
 });
+
+el["clear-monitor"].addEventListener("click", clearMonitorView);
 
 document.getElementById("refresh-integrations").addEventListener("click", async event => {
   event.currentTarget.disabled = true;

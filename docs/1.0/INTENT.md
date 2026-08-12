@@ -60,8 +60,9 @@ Internal browser commands are combined when a person experiences them as one job
 - Once its connector registration and browser extension are installed, Ghostlight needs no
   separate startup ritual. Launching an MCP client or Chromium demand-starts the local service
   when it is absent.
-- Launching Ghostlight directly shows the workbench or focuses the workbench owned by the running
-  authority. Adapter demand-start keeps the workbench hidden but leaves the tray available.
+- Every normal Ghostlight startup creates the tray and begins with the workbench minimized. A
+  second direct launch or a tray click restores and focuses the workbench owned by the running
+  authority.
 - Three destinations and one global search reach every workbench surface and user-visible record.
   The monitor carries the current action in full and the recent ones beneath it, so a glance is
   enough.
@@ -77,7 +78,11 @@ Headless operation is an explicit service-only mode, not the ordinary installed 
   beneath it, so a person can watch a session unfold and scroll back through what already happened.
   While nothing is running, the last completed action stays on screen rather than an empty panel.
   Plural MCP sessions and browser instances appear beside it.
-- The record beneath the current action is bounded, local, newest first, and payload-free.
+- The record beneath the current action is bounded, local, newest first, and content-minimized.
+  By default an action keeps the bounded visible name of the element it actually used, such as
+  `Clicked the "Save" button`; governance can remove target names without making the action vague.
+- Monitor can clear completed actions from the current view without deleting the local audit.
+  Running work remains visible, and a fresh desktop process can reconstruct history from audit.
 - MCP integrations checks, connects, and disconnects Ghostlight's owned registration for explicitly
   supported MCP clients. It never overwrites a foreign entry or exposes a generic file editor or
   command runner.

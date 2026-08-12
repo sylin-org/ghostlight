@@ -107,6 +107,19 @@ pub struct ObservedTarget {
     pub credential_class: bool,
 }
 
+/// The browser-observed identity of the element an action actually used.
+///
+/// This is deliberately smaller than [`ObservedTarget`]. It carries no locator, state, or
+/// credential metadata, and it travels only in the receipt for the action it describes.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicalActionSubject {
+    /// Semantic or accessibility role observed at the action boundary.
+    pub role: String,
+    /// Bounded accessible name observed at the action boundary.
+    pub name: String,
+}
+
 /// A physical fill value sent only after credential preflight.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -243,18 +256,6 @@ pub enum DiagnosticEntry {
     },
 }
 
-/// The role of one JPEG delivered by the recording mechanism.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RecordingFrameKind {
-    /// Transactional screenshot captured before compositor streaming begins.
-    Seed,
-    /// Change-driven compositor frame emitted by Chromium.
-    Screencast,
-    /// Final screenshot captured before stop acknowledgement.
-    Final,
-}
-
 /// Extension-owned recording lifecycle.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -316,18 +317,72 @@ pub struct PhysicalRecordingSummary {
     pub source_urls: Vec<String>,
 }
 
-/// One compressed frame read from an extension-owned recording.
+/// Output budget for a recording GIF that never leaves the browser.
+///
+/// The browser holds no more encoded bytes than it already allows itself to hold in retained
+/// frames, and nothing on this path is serialized across a process boundary.
+pub const RECORDING_LOCAL_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Output budget for a recording GIF that must cross to a caller outside the browser.
+///
+/// Base64 inflates by a third, so this is what fits inside [`COMMAND_TRANSFER_MAX_BYTES`] with
+/// room for the receipt around it. Only a client-return save is bounded by the transfer ceiling;
+/// a save that stays in the browser is not (ADR-0109 Decision 3).
+pub const RECORDING_TRANSFER_MAX_BYTES: usize = 5 * 1024 * 1024;
+
+/// Where the browser delivers a finished recording GIF.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "destination", rename_all = "snake_case")]
+pub enum RecordingDestination {
+    /// Attach the GIF to a file input in a page the browser already controls.
+    Target {
+        tab_id: u64,
+        locator: String,
+        file_name: String,
+    },
+    /// Write the GIF through the browser's own download mechanism. The browser chooses where
+    /// downloads land; no caller names a path.
+    Download { file_name: String },
+    /// Hand the GIF back once. This is the only destination whose bytes leave the browser.
+    Client,
+}
+
+/// Content-free measurements of one encoded recording GIF.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PhysicalRecordingFrame {
-    /// Capture role of this frame.
-    pub frame_kind: RecordingFrameKind,
-    /// Time this exact visual state remained current in the recording.
+pub struct EncodedRecording {
+    /// Frames kept in the animation after fidelity was traded to fit the budget.
+    pub frame_count: usize,
+    /// Frames the recording captured.
+    pub captured_frame_count: usize,
+    /// How long the animation plays.
     pub duration_ms: u64,
-    /// Exact media type. Version two supports JPEG only.
-    pub mime_type: String,
-    /// Base64-encoded compressed bytes.
-    pub data: String,
+    /// Animation width in pixels.
+    pub width: u32,
+    /// Animation height in pixels.
+    pub height: u32,
+    /// Encoded GIF size.
+    pub byte_count: usize,
+}
+
+/// How the browser delivered a finished recording GIF.
+///
+/// Bytes appear in exactly one variant. A destination that stays inside the browser cannot carry
+/// them, because there is nowhere in its shape to put them.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "delivery", rename_all = "snake_case")]
+pub enum RecordingDelivery {
+    /// The browser attached the GIF to a page file input itself.
+    Attached { tab_id: u64 },
+    /// The browser wrote the GIF through its download mechanism.
+    Downloaded,
+    /// The GIF crossed once, for a caller outside the browser.
+    Returned {
+        /// Exact media type of the returned artifact.
+        mime_type: String,
+        /// Base64-encoded GIF bytes.
+        data: String,
+    },
 }
 
 /// Human intent originating from the local extension toolbar.
@@ -629,8 +684,13 @@ pub enum BrowserCommand {
     StatusRecording { recording_id: Option<String> },
     /// Capture a final screenshot and freeze one extension-owned recording.
     StopRecording { recording_id: Option<String> },
-    /// Read retained compressed frames without consuming them.
-    ReadRecording { recording_id: Option<String> },
+    /// Encode one extension-owned recording as an animated GIF and deliver it.
+    ExportRecording {
+        recording_id: Option<String>,
+        destination: RecordingDestination,
+        /// Output budget the browser meets by trading fidelity, never coverage.
+        max_output_bytes: usize,
+    },
     /// Erase one extension-owned recording immediately.
     DiscardRecording { recording_id: Option<String> },
     /// Forward cancellation to the adapter.
@@ -677,7 +737,7 @@ impl BrowserCommand {
             Self::StartRecording { .. }
             | Self::StatusRecording { .. }
             | Self::StopRecording { .. }
-            | Self::ReadRecording { .. }
+            | Self::ExportRecording { .. }
             | Self::DiscardRecording { .. } => capability::RECORDING,
             Self::Cancel { .. } => capability::OPERATION_RECOVERY,
             Self::Present { .. } => capability::PRESENTATION,
@@ -754,11 +814,19 @@ pub enum BrowserOutcome {
     /// Target activation receipt.
     Activated {
         tab: PhysicalTab,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<PhysicalActionSubject>,
         #[serde(default)]
         committed_urls: Vec<String>,
     },
     /// Scroll or reveal receipt.
-    Scrolled { tab_id: u64, x: f64, y: f64 },
+    Scrolled {
+        tab_id: u64,
+        x: f64,
+        y: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<PhysicalActionSubject>,
+    },
     /// Zoom receipt.
     Zoomed { tab_id: u64, zoom: f64 },
     /// Browser-window resize receipt with Chromium's observed dimensions.
@@ -770,7 +838,11 @@ pub enum BrowserOutcome {
         affected_tab_ids: Vec<u64>,
     },
     /// Hover receipt.
-    Hovered { tab_id: u64 },
+    Hovered {
+        tab_id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<PhysicalActionSubject>,
+    },
     /// Form fill receipt.
     Filled {
         tab: PhysicalTab,
@@ -783,6 +855,8 @@ pub enum BrowserOutcome {
     Typed {
         tab: PhysicalTab,
         character_count: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<PhysicalActionSubject>,
         #[serde(default)]
         committed_urls: Vec<String>,
     },
@@ -790,12 +864,18 @@ pub enum BrowserOutcome {
     KeyPressed {
         tab: PhysicalTab,
         key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<PhysicalActionSubject>,
         #[serde(default)]
         committed_urls: Vec<String>,
     },
     /// Drag receipt.
     Dragged {
         tab: PhysicalTab,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_subject: Option<PhysicalActionSubject>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        destination_subject: Option<PhysicalActionSubject>,
         #[serde(default)]
         committed_urls: Vec<String>,
     },
@@ -804,6 +884,8 @@ pub enum BrowserOutcome {
         tab_id: u64,
         uploaded_count: usize,
         uploaded_bytes: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<PhysicalActionSubject>,
     },
     /// Script evaluation receipt.
     ScriptEvaluated {
@@ -858,11 +940,14 @@ pub enum BrowserOutcome {
         /// True only when this request changed active capture into a stopped state.
         changed: bool,
     },
-    /// Retained compressed frames crossed from the extension for orchestrator-owned saving.
-    RecordingRead {
+    /// The browser encoded one recording and delivered it to the requested destination.
+    RecordingExported {
         summary: PhysicalRecordingSummary,
-        frames: Vec<PhysicalRecordingFrame>,
+        encoded: EncodedRecording,
+        delivery: RecordingDelivery,
     },
+    /// The browser could not encode or deliver the recording.
+    RecordingExportFailed { reason: String },
     /// Extension memory was decisively erased.
     RecordingDiscarded {
         recording_id: String,
@@ -984,10 +1069,11 @@ mod tests {
     use super::{
         adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserOutcome,
         BrowserReceipt, BrowserRequest, DiagnosticDetail, DiagnosticEntry, DiagnosticSource,
-        PhysicalRecordingFrame, PhysicalRecordingSummary, PresentationActivity, PresentationKind,
-        PresentationSignal, RecordingFrameKind, RecordingState, RecordingStopReason,
-        ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES,
-        COMMAND_TRANSFER_MAX_CHUNKS,
+        EncodedRecording, PhysicalActionSubject, PhysicalRecordingSummary, PhysicalTab,
+        PresentationActivity, PresentationKind, PresentationSignal, RecordingDelivery,
+        RecordingDestination, RecordingState, RecordingStopReason, ADAPTER_PROTOCOL_MAJOR,
+        COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
+        RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES,
     };
 
     #[test]
@@ -1030,6 +1116,39 @@ mod tests {
         let encoded = serde_json::to_vec(&frame).expect("frame serializes");
         let decoded: BrowserFrame = serde_json::from_slice(&encoded).expect("frame deserializes");
         assert_eq!(decoded, frame);
+    }
+
+    #[test]
+    fn action_receipts_carry_the_subject_observed_at_the_effect_boundary() {
+        let frame = BrowserFrame::Receipt {
+            receipt: BrowserReceipt {
+                correlation: "physical-click".into(),
+                result: BrowserOutcome::Activated {
+                    tab: PhysicalTab {
+                        tab_id: 7,
+                        title: "Example".into(),
+                        url: "https://example.com".into(),
+                        active: true,
+                        readiness: super::BrowserReadiness::Complete,
+                    },
+                    subject: Some(PhysicalActionSubject {
+                        role: "button".into(),
+                        name: "Save".into(),
+                    }),
+                    committed_urls: vec![],
+                },
+            },
+        };
+        let encoded = serde_json::to_vec(&frame).expect("action receipt serializes");
+        let decoded: BrowserFrame =
+            serde_json::from_slice(&encoded).expect("action receipt deserializes");
+        assert_eq!(decoded, frame);
+        assert!(
+            serde_json::from_value::<PhysicalActionSubject>(serde_json::json!({
+                "role": "button"
+            }))
+            .is_err()
+        );
     }
 
     #[test]
@@ -1116,8 +1235,8 @@ mod tests {
             },
             BrowserFrame::Receipt {
                 receipt: BrowserReceipt {
-                    correlation: "physical-recording-read".into(),
-                    result: BrowserOutcome::RecordingRead {
+                    correlation: "physical-recording-export".into(),
+                    result: BrowserOutcome::RecordingExported {
                         summary: PhysicalRecordingSummary {
                             recording_id: "recording_1".into(),
                             tab_id: 7,
@@ -1130,12 +1249,30 @@ mod tests {
                             stop_reason: Some(RecordingStopReason::HardTimeout),
                             source_urls: vec!["https://example.com/path".into()],
                         },
-                        frames: vec![PhysicalRecordingFrame {
-                            frame_kind: RecordingFrameKind::Final,
-                            duration_ms: 6,
-                            mime_type: "image/jpeg".into(),
-                            data: "AA==".into(),
-                        }],
+                        encoded: EncodedRecording {
+                            frame_count: 1,
+                            captured_frame_count: 4,
+                            duration_ms: 1_000,
+                            width: 1_280,
+                            height: 720,
+                            byte_count: 4_096,
+                        },
+                        delivery: RecordingDelivery::Downloaded,
+                    },
+                },
+            },
+            BrowserFrame::Request {
+                request: BrowserRequest {
+                    correlation: "physical-recording-export".into(),
+                    workspace: "workspace-1".into(),
+                    command: BrowserCommand::ExportRecording {
+                        recording_id: Some("recording_1".into()),
+                        destination: RecordingDestination::Target {
+                            tab_id: 7,
+                            locator: "locator-1".into(),
+                            file_name: "ghostlight-recording.gif".into(),
+                        },
+                        max_output_bytes: RECORDING_LOCAL_MAX_BYTES,
                     },
                 },
             },
@@ -1203,12 +1340,50 @@ mod tests {
     }
 
     #[test]
-    fn recording_frames_require_an_authored_visual_duration() {
-        let missing_duration = serde_json::json!({
-            "frame_kind": "screencast",
-            "mime_type": "image/jpeg",
-            "data": "AA=="
+    fn only_a_client_return_can_carry_recording_bytes() {
+        // The destinations that stay inside the browser have nowhere to put bytes, so "frames
+        // never cross" is a property of the shape rather than a rule someone has to remember.
+        for delivery in [
+            RecordingDelivery::Attached { tab_id: 7 },
+            RecordingDelivery::Downloaded,
+        ] {
+            let encoded = serde_json::to_string(&delivery).expect("delivery serializes");
+            assert!(
+                !encoded.contains("data"),
+                "a browser-local delivery carried bytes: {encoded}"
+            );
+        }
+        // The negative control: the one destination outside the browser does carry them, so the
+        // assertion above is testing the shape rather than a missing field everywhere.
+        let returned = serde_json::to_string(&RecordingDelivery::Returned {
+            mime_type: "image/gif".into(),
+            data: "AA==".into(),
+        })
+        .expect("delivery serializes");
+        assert!(returned.contains("\"data\":\"AA==\""), "{returned}");
+    }
+
+    #[test]
+    fn the_transfer_ceiling_binds_only_the_destination_that_transfers() {
+        // Base64 inflates by a third, and the receipt travels with it. A returned GIF has to fit
+        // through the native boundary; one that stays in the browser never touches it.
+        const {
+            assert!(4 * RECORDING_TRANSFER_MAX_BYTES.div_ceil(3) < COMMAND_TRANSFER_MAX_BYTES);
+            assert!(RECORDING_LOCAL_MAX_BYTES > RECORDING_TRANSFER_MAX_BYTES);
+        }
+    }
+
+    #[test]
+    fn encoded_recordings_report_both_kept_and_captured_frames() {
+        // Fidelity traded to fit is a fact about the artifact, so the receipt has to state both
+        // numbers rather than let a thinned replay look like a complete one.
+        let partial = serde_json::json!({
+            "frame_count": 8,
+            "duration_ms": 30_000,
+            "width": 1_280,
+            "height": 720,
+            "byte_count": 4_096
         });
-        assert!(serde_json::from_value::<PhysicalRecordingFrame>(missing_duration).is_err());
+        assert!(serde_json::from_value::<EncodedRecording>(partial).is_err());
     }
 }

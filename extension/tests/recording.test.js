@@ -34,9 +34,9 @@ test("the registry owns plural recording identities and tab-local capture", () =
   assert.equal(h.recording.count(), 2);
   assert.equal(h.recording.append(7, FRAME, "seed", 1_000), true);
   assert.equal(h.recording.append(8, FRAME, "seed", 1_000), true);
-  assert.equal(h.recording.read("workspace_a", first.recording_id).frames[0].mime_type, "image/jpeg");
-  assert.equal(h.recording.read("workspace_a", first.recording_id).frames.length, 1);
-  assert.equal(h.recording.read("workspace_a", second.recording_id).frames.length, 1);
+  assert.equal(h.recording.retained("workspace_a", first.recording_id).frames[0].mime_type, "image/jpeg");
+  assert.equal(h.recording.retained("workspace_a", first.recording_id).frames.length, 1);
+  assert.equal(h.recording.retained("workspace_a", second.recording_id).frames.length, 1);
 });
 
 test("start is idempotent only inside the same opaque workspace", () => {
@@ -67,7 +67,7 @@ test("the extension stops autonomously at its hard deadline and later flushes by
   const frozen = h.recording.status("workspace_a", id).summary;
   assert.equal(frozen.state, "interrupted");
   assert.equal(frozen.stop_reason, "hard_timeout");
-  assert.equal(h.recording.read("workspace_a", id).frames[0].duration_ms, recordingApi.HARD_DURATION_MS);
+  assert.equal(h.recording.retained("workspace_a", id).frames[0].duration_ms, recordingApi.HARD_DURATION_MS);
   assert.deepEqual(h.stops, [{ tabId: 7, recordingId: id, reason: "hard_timeout" }]);
   h.setTime(frozen.retention_expires_unix_ms);
   Array.from(h.timers.values())[0].callback();
@@ -82,8 +82,8 @@ test("stop freezes, read is non-consuming, and discard reclaims exact bytes", ()
   const stopped = h.recording.finishStop(plan.state);
   assert.equal(stopped.state, "frozen");
   assert.equal(stopped.stop_reason, "explicit");
-  assert.equal(h.recording.read("workspace_a", id).frames.length, 1);
-  assert.equal(h.recording.read("workspace_a", id).frames.length, 1);
+  assert.equal(h.recording.retained("workspace_a", id).frames.length, 1);
+  assert.equal(h.recording.retained("workspace_a", id).frames.length, 1);
   assert.deepEqual(h.recording.discard("workspace_a", id), {
     recordingId: id, releasedBytes: 1, active: false, tabId: 7
   });
@@ -103,7 +103,7 @@ test("frame size, recording size, cadence, and finalization are extension-owned"
   h.recording.beginStop("workspace_a", id);
   assert.equal(h.recording.append(7, FRAME, "screencast", 1_200), false);
   assert.equal(h.recording.append(7, FRAME, "final", 1_200), false);
-  assert.equal(h.recording.read("workspace_a", id).frames[0].duration_ms, 200);
+  assert.equal(h.recording.retained("workspace_a", id).frames[0].duration_ms, 200);
 });
 
 test("ten identical samples fold into one frame with one second of visual time", () => {
@@ -113,7 +113,7 @@ test("ten identical samples fold into one frame with one second of visual time",
   for (let index = 1; index <= 10; index += 1) {
     assert.equal(h.recording.append(7, FRAME, "screencast", 1_000 + index * 100), false);
   }
-  const read = h.recording.read("workspace_a", id);
+  const read = h.recording.retained("workspace_a", id);
   assert.equal(read.summary.frame_count, 1);
   assert.equal(read.summary.bytes_held, 1);
   assert.equal(read.frames[0].duration_ms, 1_000);
@@ -127,7 +127,7 @@ test("a changed frame starts a new visual span", () => {
   h.setTime(1_200);
   h.recording.finishStop(h.recording.beginStop("workspace_a", id).state);
   assert.deepEqual(
-    h.recording.read("workspace_a", id).frames.map((frame) => frame.duration_ms),
+    h.recording.retained("workspace_a", id).frames.map((frame) => frame.duration_ms),
     [100, 100]
   );
 });
@@ -153,8 +153,8 @@ test("browser and service loss interrupt all active recordings but retain frozen
   assert.equal(h.recording.interruptTab(7, "browser_detached").stop_reason, "browser_detached");
   assert.equal(h.recording.interruptAll("service_disconnected")[0].recording_id, second);
   assert.equal(h.recording.count(), 0);
-  assert.equal(h.recording.read("workspace_a", first).frames.length, 1);
-  assert.equal(h.recording.read("workspace_b", second).frames.length, 1);
+  assert.equal(h.recording.retained("workspace_a", first).frames.length, 1);
+  assert.equal(h.recording.retained("workspace_b", second).frames.length, 1);
 });
 
 test("every active terminal path notifies the Chrome seam exactly once", () => {
@@ -184,7 +184,7 @@ test("the byte bound thins fidelity and never truncates the recorded span", () =
     clock += 200;
     h.recording.append(7, big(marker), "screencast", clock);
   }
-  const held = h.recording.read("workspace_a", id);
+  const held = h.recording.retained("workspace_a", id);
 
   // Coverage is what a replay promises. Freezing at the bound would have ended the recording at
   // the third frame and silently omitted everything the caller did afterwards.

@@ -17,6 +17,7 @@ documented in [`governance-configuration.md`](governance-configuration.md).
   "allow_capabilities": ["read", "action", "write"],
   "deny_capabilities": ["execute"],
   "allow_tab_close": false,
+  "preserve_target_names": false,
   "allow_hosts": ["support.example.com", "*.support.example.com"],
   "deny_hosts": ["admin.support.example.com"]
 }
@@ -56,16 +57,18 @@ The 1.0 runtime deliberately does not implement remote retrieval, signing, last-
 observe mode, config locks, or tool-catalog filtering. Those historical 0.8 designs are not 1.0
 claims.
 
-## 4. Collect payload-free evidence
+## 4. Collect content-minimized evidence
 
 Set `GHOSTLIGHT_AUDIT_FILE` to an organization-collected local path. The append-only JSONL records
-carry opaque ids, the governed decision, and content-free measurements of what each action did:
-a Ghostlight-authored sentence, a duration, the host the action landed on, and a count or capture
-size where one applies.
+carry opaque ids, the governed decision, and content-minimized facts about what each action did:
+a Ghostlight-authored sentence, a duration, the governed host the action attempted or landed on,
+and a count or capture size where one applies.
 
-The landed host is the one page-derived value, and it is what makes the trail answer "where did
-this agent go" rather than only "what was allowed". No full URL, path, query, fragment, page
-content, selector, form value, file path, script, screenshot, or dialog text is recorded.
+The governed host answers "where did this agent go or try to go" rather than only "what was
+allowed". Target names are preserved by default so ten buttons do not produce ten meaningless
+"Clicked a button" entries. A managed `preserve_target_names: false` removes those names
+monotonically. No full URL, path, query, fragment, arbitrary page content, selector, target handle,
+form value, file path, script, screenshot, or dialog text is recorded.
 
 Use the endpoint's existing file collector. Ghostlight 1.0 does not open a syslog socket or send
 audit over the network. The exact record contract and safe collection pattern are in

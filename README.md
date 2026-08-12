@@ -85,8 +85,8 @@ connect the client you want, and restart or reconnect it. [`docs/DEV-LOOP.md`](d
 covers browser registration and the full validation loop.
 
 After that first setup there is no startup ritual: launching a connected MCP client or Chromium
-demand-starts the local service when it is not already running. `--background` starts it hidden
-with its tray, and `--headless` runs the service on its own with no desktop at all.
+demand-starts Ghostlight when it is not already running. The normal desktop authority always owns
+the tray and begins with its workbench minimized. `--headless` explicitly runs without a desktop.
 
 For an end-user install, use the signed package and its matching store adapter once the gates in
 [`docs/STATUS.md`](docs/STATUS.md) are met.

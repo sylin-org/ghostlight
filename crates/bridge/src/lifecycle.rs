@@ -11,7 +11,6 @@ use fs2::FileExt;
 
 use crate::runtime::runtime_file;
 
-const BACKGROUND_ARGUMENT: &str = "--background";
 const DEPLOY_LOCK_FILE: &str = "deploy.lock";
 const DEPLOY_LOCK_MAX_AGE: Duration = Duration::from_secs(30 * 60);
 const SERVICE_LOCK_EXTENSION: &str = "lock";
@@ -81,7 +80,7 @@ pub enum StartDisposition {
     DeploymentInProgress,
 }
 
-/// Ask the trusted sibling `ghostlight` executable to start in desktop-background mode.
+/// Ask the trusted sibling `ghostlight` executable to start its desktop authority.
 ///
 /// Callers invoke this only after a connection attempt fails. The service lease makes concurrent
 /// requests harmless, and a fresh deploy lock suppresses self-heal while binaries are swapped.
@@ -122,18 +121,22 @@ fn request_orchestrator_start_from(
             ),
         ));
     }
-    let mut command = Command::new(&service_executable);
-    command
-        .arg(BACKGROUND_ARGUMENT)
-        .current_dir(service_directory)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    configure_detached(&mut command);
+    let mut command = orchestrator_command(&service_executable, service_directory);
     let child = command.spawn()?;
     let process_id = child.id();
     drop(child);
     Ok(StartDisposition::Spawned { process_id })
+}
+
+fn orchestrator_command(executable: &Path, directory: &Path) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .current_dir(directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    configure_detached(&mut command);
+    command
 }
 
 fn orchestrator_executable(current_executable: &Path) -> io::Result<PathBuf> {
@@ -193,8 +196,8 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::{
-        deploy_lock_present, lock_is_fresh, orchestrator_executable, service_lock_file,
-        ServiceLease, DEPLOY_LOCK_FILE, DEPLOY_LOCK_MAX_AGE,
+        deploy_lock_present, lock_is_fresh, orchestrator_command, orchestrator_executable,
+        service_lock_file, ServiceLease, DEPLOY_LOCK_FILE, DEPLOY_LOCK_MAX_AGE,
     };
 
     fn temporary_directory(name: &str) -> std::path::PathBuf {
@@ -251,6 +254,18 @@ mod tests {
             orchestrator_executable(&connector).expect("connector has a parent"),
             expected
         );
+    }
+
+    #[test]
+    fn demand_start_uses_the_one_normal_desktop_launch() {
+        let executable = Path::new("engine").join(if cfg!(windows) {
+            "ghostlight.exe"
+        } else {
+            "ghostlight"
+        });
+        let command = orchestrator_command(&executable, Path::new("engine"));
+        assert_eq!(command.get_program(), executable.as_os_str());
+        assert_eq!(command.get_args().count(), 0);
     }
 
     #[test]

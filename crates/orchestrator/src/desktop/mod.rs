@@ -62,8 +62,8 @@ impl WorkbenchEventSink for NativeEvents {
     }
 }
 
-/// Start the orchestrator and its disposable desktop workbench in one process.
-pub fn run(initially_visible: bool) -> Result<()> {
+/// Start the orchestrator and its initially minimized desktop workbench in one process.
+pub fn run() -> Result<()> {
     let host = ServiceHost::start(&ghostlight_bridge::runtime::runtime_file())?;
     eprintln!(
         "Ghostlight 1.0 ready on local ports {} and {}",
@@ -99,9 +99,7 @@ pub fn run(initially_visible: bool) -> Result<()> {
             if let Err(error) = build_tray(app) {
                 eprintln!("Ghostlight tray is unavailable: {error}");
             }
-            if initially_visible {
-                let _ = show_workbench(app.handle());
-            }
+            minimize_workbench(app.handle())?;
             Ok(())
         });
 
@@ -182,6 +180,18 @@ fn show_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
         WorkbenchPresentationError::Native("Ghostlight workbench window is unavailable".into())
     })?;
     show_window(&window)
+}
+
+fn minimize_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
+    let window = app.get_webview_window(MAIN_WINDOW).ok_or_else(|| {
+        WorkbenchPresentationError::Native("Ghostlight workbench window is unavailable".into())
+    })?;
+    window
+        .show()
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
+    window
+        .minimize()
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))
 }
 
 fn show_window(window: &WebviewWindow) -> Result<(), WorkbenchPresentationError> {
@@ -348,6 +358,30 @@ mod tests {
     }
 
     #[test]
+    fn clearing_the_monitor_is_disposable_view_state_not_an_audit_mutation() {
+        let html = include_str!("../../ui/index.html");
+        let app = include_str!("../../ui/app.js");
+        let desktop = include_str!("mod.rs");
+
+        assert!(html.contains("id=\"clear-monitor\""));
+        assert!(html.contains("Clear view"));
+        assert!(app.contains("hiddenInvocations: new Set()"));
+        assert!(app.contains("state.hiddenInvocations.add(entry.invocation)"));
+        assert!(app.contains("state.feed = state.feed.filter(isRunning)"));
+        assert!(app.contains("state.hiddenInvocations.has(record.invocation)"));
+        assert!(app.contains("Audit history is unchanged."));
+        let commands = desktop
+            .split_once(".invoke_handler(tauri::generate_handler![")
+            .and_then(|(_, rest)| rest.split_once("])"))
+            .map(|(commands, _)| commands)
+            .expect("the desktop keeps an explicit Tauri command allowlist");
+        assert!(
+            !commands.contains("clear"),
+            "clearing visible rows must not become a Tauri command"
+        );
+    }
+
+    #[test]
     fn the_surface_handles_every_change_the_orchestrator_can_publish() {
         use ghostlight_bridge::browser::RuntimeControlState;
 
@@ -374,7 +408,7 @@ mod tests {
             reason: "permitted".into(),
             status: "succeeded".into(),
             effect: "none".into(),
-            summary: "Read 1,240 words.".into(),
+            summary: "Read 1,240 words from example.com.".into(),
             duration_ms: 1200,
             observed: sample_observation(),
             channel: Some(ghostlight_bridge::service::IntakeChannel::Mcp),
@@ -551,25 +585,13 @@ function ",
     #[test]
     fn every_catalog_tool_has_a_medallion() {
         let app = include_str!("../../ui/app.js");
-        let language = include_str!("../language/mod.rs");
-        let mut tools: Vec<&str> = language
-            .match_indices("\"browser_")
-            .filter_map(|(index, _)| {
-                let rest = &language[index + 1..];
-                rest.find('"').map(|end| &rest[..end])
-            })
-            .collect();
-        tools.sort_unstable();
-        tools.dedup();
-        assert!(
-            tools.len() >= 20,
-            "expected the catalog, saw {}",
-            tools.len()
-        );
+        let tools = crate::language::catalog();
+        assert_eq!(tools.len(), 22, "expected the complete catalog");
         for tool in tools {
             assert!(
-                app.contains(&format!("{tool}: \"")),
-                "{tool} has no medallion, so its row would fall back to a generic glyph"
+                app.contains(&format!("{}: \"", tool.name)),
+                "{} has no medallion, so its row would fall back to a generic glyph",
+                tool.name
             );
         }
     }

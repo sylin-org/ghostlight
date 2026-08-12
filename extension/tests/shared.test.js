@@ -173,7 +173,7 @@ test("adapter protocol two wires the new physical mechanisms at the Chrome seam"
   assert.match(worker, /command\.command === "start_recording"/);
   assert.match(worker, /command\.command === "status_recording"/);
   assert.match(worker, /command\.command === "stop_recording"/);
-  assert.match(worker, /command\.command === "read_recording"/);
+  assert.match(worker, /command\.command === "export_recording"/);
   assert.match(worker, /command\.command === "discard_recording"/);
   assert.match(worker, /frame\.kind === "command_chunk"/);
   assert.match(worker, /Page\.screencastFrameAck/);
@@ -186,6 +186,49 @@ test("adapter protocol two wires the new physical mechanisms at the Chrome seam"
   assert.match(worker, /stateApi\.badge\(\{ \.\.\.liveState, recording_tabs: recording\.count\(\) \}\)/);
   assert.match(worker, /frame\.kind === "backend_unavailable"[\s\S]*?settleServiceBoundaryState\(\)/);
   assert.match(worker, /chrome\.tabs\.query\(\{ windowId: tab\.windowId \}\)/);
+});
+
+test("browser actions return the subject in the effect receipt without a describe round trip", () => {
+  const root = join(__dirname, "..");
+  const content = readFileSync(join(root, "content.js"), "utf8");
+  const worker = readFileSync(join(root, "service-worker.js"), "utf8");
+
+  assert.match(content, /return \{ activated: true, subject \}/);
+  assert.match(content, /source_subject: actionSubject\(source\)/);
+  assert.match(content, /destination_subject: actionSubject\(destination\)/);
+  assert.match(worker, /outcome: "activated"[\s\S]*?subject: result\.subject/);
+  assert.match(worker, /outcome: "typed"[\s\S]*?subject: target\.subject/);
+  assert.match(worker, /outcome: "dragged"[\s\S]*?source_subject: sourceSubject[\s\S]*?destination_subject: destinationSubject/);
+  assert.doesNotMatch(worker, /describe_targets[\s\S]*?action label/);
+});
+
+test("the browser owns the whole recording capability, encoding included", () => {
+  const root = join(__dirname, "..");
+  const worker = readFileSync(join(root, "service-worker.js"), "utf8");
+  const page = readFileSync(join(root, "offscreen.html"), "utf8");
+  const offscreen = readFileSync(join(root, "offscreen.js"), "utf8");
+
+  // The encode runs in an offscreen document, not in a worker Chrome may evict mid-encode.
+  assert.match(worker, /chrome\.offscreen\.createDocument/);
+  assert.match(page, /vendor\/gifenc\.js/);
+  assert.match(page, /lib\/gif\.js/);
+  assert.match(offscreen, /GhostlightGif\.create\(\{ decode: decodeFrame \}\)/);
+
+  const body = worker.match(/async function exportRecording[\s\S]*?\n}\n/)[0];
+  // The negative control: frames really do travel, from the registry to the encoder beside it.
+  // Without this, the assertion below would pass just as happily if nothing moved at all.
+  assert.match(body, /frames: selected\.frames/);
+  // And they stop there. What comes back is one artifact and its measurements.
+  const receipt = body.match(/return \{\n\s+outcome: "recording_exported"[\s\S]*?\n\s+\};/)[0];
+  assert.doesNotMatch(receipt, /frames/);
+  assert.match(receipt, /encoded: encoded\.measurements/);
+
+  // Bytes take one form, chosen by where they are going. A download never gets base64 and a
+  // client return never gets an object URL the caller could not read anyway.
+  assert.match(offscreen, /transfer === "object_url"/);
+  // An open offscreen document keeps this worker awake, and a worker that never sleeps never
+  // forgets recording bytes.
+  assert.match(body, /closeEncoder\(\)/);
 });
 
 test("service epochs and browser loss share one volatile-state teardown seam", () => {
@@ -234,7 +277,7 @@ test("the manifest declares the complete local product surface", () => {
   assert.equal(manifest.commands["toggle-hold"].description, "Pause or resume agent browsing (take the wheel)");
   assert.deepEqual(
     manifest.permissions,
-    ["alarms", "debugger", "nativeMessaging", "storage", "tabGroups", "tabs", "webNavigation", "windows"]
+    ["alarms", "debugger", "downloads", "nativeMessaging", "offscreen", "storage", "tabGroups", "tabs", "webNavigation", "windows"]
   );
   const iconDigests = {
     16: "95d754348d4fabfb0412e32319226dd52615864ae511b8b492bef739f555d224",

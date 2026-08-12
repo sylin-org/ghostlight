@@ -28,11 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   projection: the host an action landed on, the readiness the browser reported, a count, and a
   capture size. Never a path, query, or fragment; never page text. See
   [docs/guides/siem-integration.md](docs/guides/siem-integration.md) for the record shape.
-- **Demand-start and one local authority (ADR-0104).** Launching a connected MCP client or Chromium
+- **Demand-start and one local authority (ADRs 0104 and 0112).** Launching a connected MCP client or Chromium
   starts the local service when it is absent. A lifetime lease admits exactly one authority, so
   concurrent launches converge on one engine and one tray instead of racing. Launching Ghostlight
-  directly shows the workbench or focuses the running one; `--background` starts it hidden and
-  `--headless` remains the explicit service-only mode.
+  starts the one desktop authority with its workbench minimized. Launching it again focuses the
+  running workbench; `--headless` remains the explicit service-only mode.
 
 ### Changed
 

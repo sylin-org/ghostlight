@@ -18,9 +18,9 @@ are not interchangeable.
 4. Restart or reconnect the MCP harness, then run the bounded first proof from the README.
 
 Setup is now complete. Launching the registered MCP client or Chromium demand-starts Ghostlight if
-it is absent. The service starts in the background with its tray available. Launch Ghostlight
-directly whenever you want the workbench; a direct launch focuses the existing authority instead
-of creating another one.
+it is absent. The complete desktop authority starts with its tray available and its workbench
+minimized. Launch Ghostlight again whenever you want the workbench; the second launch focuses the
+existing authority instead of creating another one.
 
 Only signed 1.0 packages and the matching 1.0 extension satisfy this journey. Artifact signing,
 clean-machine install, upgrade, and uninstall are release gates, not claims made by this source
@@ -67,8 +67,6 @@ Start the workbench:
 ```sh
 target/debug/ghostlight
 ```
-
-`--show` is an equivalent explicit spelling. `--background` is reserved for adapter demand-start.
 
 Or start only the persistent service:
 

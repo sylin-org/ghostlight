@@ -1,6 +1,6 @@
 # Collecting Ghostlight 1.0 audit
 
-Ghostlight appends one payload-free JSON object for every terminal invocation. It does not send
+Ghostlight appends one content-minimized JSON object for every terminal invocation. It does not send
 syslog, open a network listener, or call a hosted collector. SIEM delivery belongs to the endpoint's
 existing file-collection agent.
 
@@ -27,7 +27,7 @@ this file.
   "reason": "permitted",
   "status": "succeeded",
   "effect": "none",
-  "summary": "Read 1,240 words.",
+  "summary": "Read 1,240 words from example.com.",
   "duration_ms": 412,
   "observed": {
     "host": "example.com",
@@ -53,7 +53,7 @@ Fields are typo-closed:
 | `reason` | Stable closed reason such as `permitted`, `host_denied`, or `runtime_hold`. |
 | `status` | Terminal result status. |
 | `effect` | `none`, `applied`, `partial`, or `unknown`. |
-| `summary` | Ghostlight-authored sentence naming what happened. Page content never authors it. |
+| `summary` | Ghostlight-authored sentence naming what happened. It may contain one governed, bounded action-target name. |
 | `duration_ms` | Decode to terminal outcome. For a navigation, the time to a settled landing. |
 | `observed` | Content-free landing facts and outcome measurements for the action. |
 | `channel` | Which intake the work arrived on: `mcp` or `cli`. Attribution only, never authority. |
@@ -64,7 +64,7 @@ the sentence. Every field is null when neither register can state it:
 
 | Field | Meaning |
 | --- | --- |
-| `host` | Host the action landed on, lowercased. Never the path, query, or fragment. |
+| `host` | Governed host the action attempted or landed on, lowercased. Never the path, query, or fragment. |
 | `readiness` | `not_applicable`, `loading`, `interactive`, `complete`, or `unknown`. |
 | `count` | However many things the action touched. `summary` names what was counted. |
 | `width`, `height` | Pixel size of a capture. |
@@ -72,24 +72,30 @@ the sentence. Every field is null when neither register can state it:
 Records written before 1.0 have no `summary`, `duration_ms`, or `observed`; parse them as absent
 rather than as an error.
 
-The landed host is the one piece of page-derived text in a record, and it is deliberate: it answers
-"where did the agent go", it is already visible in the user's own tab strip, and the identifying
-detail of a URL lives after it. There are deliberately no full URLs, paths, queries, fragments,
-client names, page text, target descriptions, selectors, form values, filenames, file bytes,
-scripts, screenshots, dialog text, policy rules, or model prompts.
+The governed host and an optional action-target name are the deliberate page-derived text. They
+answer "where did the agent go" and "which visible control did it actually use". The target name
+comes from the browser's effect receipt, is normalized, and is bounded to 80 characters. Set
+`preserve_target_names: false` in any authority layer to omit it and keep only a closed noun such
+as `button`. There are deliberately no full URLs, paths, queries, fragments, client names,
+arbitrary page text, selectors, target handles, form values, filenames, file bytes, scripts,
+screenshots, dialog text, policy rules, or model prompts. Page-authored accessibility roles are
+narrowed to a closed Ghostlight noun before a sentence can use them; an unknown role is only
+`control`.
 
 ## Collection
 
 Configure the endpoint collector to tail the selected JSONL file and parse one object per line.
 Use file identity and offsets so rotation does not duplicate evidence. Apply filesystem access
-controls appropriate to operational metadata even though payloads are excluded.
+controls appropriate to operational metadata. Target names may be sensitive operational metadata
+unless governance removes them.
 
 Useful high-signal queries include:
 
 - `allowed = false` grouped by `reason` and `tool`;
 - `effect in (partial, unknown)` because those outcomes are never replay-safe;
 - `status = attention_required` or `reason = runtime_attention`;
-- `observed.host` grouped by `capability`, for where write and execute authority actually went;
+- `observed.host` grouped by `allowed`, `reason`, and `capability`, for where authority went or
+  refused to go;
 - `channel = cli` grouped by `capability`, for what scripted work is doing without a model watching;
 - `observed.readiness = loading` beside a long `duration_ms`, which is work that never settled;
 - changes in managed `invalid_authority` volume; and

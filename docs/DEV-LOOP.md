@@ -22,17 +22,16 @@ Run the product with its workbench:
 target/debug/ghostlight
 ```
 
-`--show` is retained as an explicit alias for the same human launch behavior.
-
 Run only the persistent orchestrator service:
 
 ```powershell
 target/debug/ghostlight --headless
 ```
 
-A direct launch starts visibly or focuses the workbench owned by the running authority. Connectors
-demand-start the sibling executable with `--background`, which keeps the workbench hidden and the
-tray available. Closing the window hides it; the tray Quit action ends the whole process.
+The normal launch always starts the complete desktop authority with its tray and a minimized
+workbench. Connectors demand-start that same sibling executable with no application arguments. A
+second direct launch restores and focuses the workbench owned by the running authority. Closing the
+window hides it; the tray Quit action ends the whole process.
 
 ## What to restart
 
@@ -64,8 +63,8 @@ start. The order matters less than the scope.
    for 30 minutes so a connector cannot start a replacement service mid-swap.
 4. Stop only processes whose exact image path is that directory. Never stop by image name; an
    installed or user-owned stack may be running beside the build.
-5. Copy the binaries that changed, remove `deploy.lock`, then start `ghostlight --background` (tray,
-   hidden) or `ghostlight` (visible workbench).
+5. Copy the binaries that changed, remove `deploy.lock`, then start `ghostlight`. The tray appears
+   and the workbench begins minimized.
 
 Replacing `ghostlight-browser-connector` has a cost the other two do not: Chromium respawns the
 native host within a second or two while the extension's service worker is awake, so the copy needs
@@ -113,7 +112,8 @@ to that `ghostlight-browser-connector`. Load `extension/` unpacked and reload it
 extension edit. Its pinned development identity and `org.sylin.ghostlight` host name must not
 change.
 
-Run `ghostlight --show`, open Status, and verify a compatible browser instance appears. Use a
+Run `ghostlight` again to restore the minimized workbench, open Status, and verify a compatible
+browser instance appears. Use a
 supported MCP client registration from MCP integrations, reconnect that client, and execute the
 journeys in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md). Use the `sylin.org` demo forms for visible
 form, upload, dialog, navigation, policy-denial, and screenshot work.

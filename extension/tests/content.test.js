@@ -24,19 +24,25 @@ function contentHarness() {
       this.labels = [];
       this.files = [];
       this.events = [];
+      this.value = "";
+      this.attributes = new Map();
     }
 
     getAttribute(name) {
       if (name === "type") return this.type;
       if (name === "id") return this.id;
-      return null;
+      return this.attributes.get(name) ?? null;
     }
 
+    setAttribute(name, value) { this.attributes.set(name, String(value)); }
+
     getRootNode() { return document; }
-    getBoundingClientRect() { return { left: 0, top: 0, width: 0, height: 0 }; }
+    getBoundingClientRect() { return { left: 0, top: 0, width: this.hidden ? 0 : 100, height: this.hidden ? 0 : 30 }; }
     closest() { return null; }
     matches() { return true; }
     dispatchEvent(event) { this.events.push(event.type); return true; }
+    click() { this.events.push("click"); }
+    scrollIntoView() {}
   }
 
   class HTMLTextAreaElement extends HTMLElement {}
@@ -103,7 +109,11 @@ function contentHarness() {
       clock += delay;
       callback();
     },
-    getComputedStyle() { return { display: "none", visibility: "hidden", opacity: "0" }; },
+    getComputedStyle(element) {
+      return element?.hidden
+        ? { display: "none", visibility: "hidden", opacity: "0" }
+        : { display: "block", visibility: "visible", opacity: "1" };
+    },
     innerWidth: 1024,
     innerHeight: 768,
     scrollX: 0,
@@ -171,6 +181,44 @@ test("upload still rejects a disabled hidden file input", async () => {
 
   assert.equal(uploaded.ok, false);
   assert.match(uploaded.error, /disabled for upload/);
+});
+
+test("action names use labels but never the current input value", async () => {
+  const harness = contentHarness();
+  harness.input.value = "patient-secret-42";
+  let inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  assert.equal(inspected.result.targets[0].name, "");
+
+  harness.input.setAttribute("aria-label", "Upload evidence");
+  inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  assert.equal(inspected.result.targets[0].name, "Upload evidence");
+
+  harness.input.setAttribute("aria-label", "");
+  harness.input.type = "submit";
+  harness.input.value = "changed runtime value";
+  harness.input.setAttribute("value", "Save changes");
+  inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  assert.equal(inspected.result.targets[0].role, "button");
+  assert.equal(inspected.result.targets[0].name, "Save changes");
+});
+
+test("the activation receipt names the physical element it used", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "submit";
+  harness.input.setAttribute("value", "Save changes");
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+
+  const activated = await harness.send({
+    kind: "activate",
+    locator: inspected.result.targets[0].locator,
+    button: "primary",
+    click_count: 1
+  });
+
+  assert.equal(activated.result.subject.role, "button");
+  assert.equal(activated.result.subject.name, "Save changes");
+  assert.deepEqual(harness.input.events, ["click"]);
 });
 
 test("observation polling stops at its physical timeout without overshooting", async () => {

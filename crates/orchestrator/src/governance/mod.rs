@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Ghostlight-Commercial
 // See docs/licenses/LicenseRef-Ghostlight-Commercial.txt.
 
-//! Authority snapshots, final-boundary admission, runtime controls, and payload-free audit intent.
+//! Authority snapshots, final-boundary admission, runtime controls, and minimized audit intent.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -136,6 +136,7 @@ pub struct AuthoritySnapshot {
     id: String,
     capabilities: BTreeSet<Capability>,
     tab_close_allowed: bool,
+    preserve_target_names: bool,
     allow_host_layers: Vec<Vec<String>>,
     deny_hosts: Vec<String>,
     valid: bool,
@@ -172,6 +173,12 @@ impl AuthoritySnapshot {
         } else {
             Decision::deny(ReasonCode::TabCloseDenied)
         }
+    }
+
+    /// Whether browser-observed target names may be retained in action outcomes and audit.
+    #[must_use]
+    pub const fn preserves_target_names(&self) -> bool {
+        self.preserve_target_names
     }
 
     /// Decide an observed or requested landing at its final boundary.
@@ -399,6 +406,7 @@ impl GovernanceFacade {
     pub fn snapshot(&self, restrictions: &RequestRestrictions) -> AuthoritySnapshot {
         let mut capabilities = all_capabilities();
         let mut tab_close_allowed = true;
+        let mut preserve_target_names = true;
         let mut allow_host_layers = Vec::new();
         let mut deny_hosts = Vec::new();
         let mut valid = true;
@@ -409,6 +417,7 @@ impl GovernanceFacade {
                     &policy,
                     &mut capabilities,
                     &mut tab_close_allowed,
+                    &mut preserve_target_names,
                     &mut allow_host_layers,
                     &mut deny_hosts,
                 ),
@@ -421,6 +430,7 @@ impl GovernanceFacade {
                     &policy,
                     &mut capabilities,
                     &mut tab_close_allowed,
+                    &mut preserve_target_names,
                     &mut allow_host_layers,
                     &mut deny_hosts,
                 ),
@@ -442,6 +452,7 @@ impl GovernanceFacade {
             id: format!("authority_{}", Uuid::new_v4().simple()),
             capabilities,
             tab_close_allowed,
+            preserve_target_names,
             allow_host_layers,
             deny_hosts,
             valid,
@@ -478,6 +489,9 @@ struct PolicyDocument {
     deny_capabilities: Vec<Capability>,
     #[serde(default)]
     allow_tab_close: Option<bool>,
+    /// Whether action outcomes and audit retain bounded browser-observed target names.
+    #[serde(default)]
+    preserve_target_names: Option<bool>,
     #[serde(default)]
     allow_hosts: Option<Vec<String>>,
     #[serde(default)]
@@ -549,6 +563,7 @@ fn apply_policy(
     policy: &PolicyDocument,
     capabilities: &mut BTreeSet<Capability>,
     tab_close_allowed: &mut bool,
+    preserve_target_names: &mut bool,
     allow_host_layers: &mut Vec<Vec<String>>,
     deny_hosts: &mut Vec<String>,
 ) {
@@ -561,6 +576,9 @@ fn apply_policy(
     }
     if policy.allow_tab_close == Some(false) {
         *tab_close_allowed = false;
+    }
+    if policy.preserve_target_names == Some(false) {
+        *preserve_target_names = false;
     }
     if let Some(allowed) = &policy.allow_hosts {
         allow_host_layers.push(allowed.clone());
@@ -617,7 +635,7 @@ fn unix_ms() -> u64 {
     u64::try_from(millis).unwrap_or(u64::MAX)
 }
 
-/// A payload-free audit record produced after a terminal outcome.
+/// A content-minimized audit record produced after a terminal outcome.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditRecord {
@@ -641,7 +659,7 @@ pub struct AuditRecord {
     pub status: String,
     /// Terminal effect class.
     pub effect: String,
-    /// Ghostlight-authored sentence naming what happened. Page content never authors it.
+    /// Ghostlight-authored sentence naming what happened, with an optional governed target name.
     #[serde(default)]
     pub summary: String,
     /// How long the invocation took, from decode to terminal outcome.
@@ -660,7 +678,7 @@ pub struct AuditRecord {
 }
 
 impl AuditRecord {
-    /// Construct a payload-free audit record at the current time.
+    /// Construct a content-minimized audit record at the current time.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn now(
@@ -700,7 +718,7 @@ impl AuditRecord {
         self
     }
 
-    /// Attach the action's content-free observation after completion.
+    /// Attach the action's closed observation after completion.
     #[must_use]
     pub fn with_observation(mut self, observed: Observed) -> Self {
         self.observed = observed;
@@ -708,7 +726,7 @@ impl AuditRecord {
     }
 }
 
-/// Separate payload-free audit output port.
+/// Separate content-minimized audit output port.
 pub trait AuditSink: Send + Sync {
     /// Append one terminal record.
     fn record(&self, record: &AuditRecord) -> io::Result<()>;
@@ -775,6 +793,7 @@ mod tests {
     fn no_policy_allows_remote_browser_work_but_protected_hosts_remain_denied() {
         let facade = GovernanceFacade::new(None, None);
         let snapshot = facade.snapshot(&RequestRestrictions::default());
+        assert!(snapshot.preserves_target_names());
         assert!(snapshot.authorize_tab_close().allowed);
         assert!(
             snapshot
@@ -812,6 +831,35 @@ mod tests {
             ReasonCode::TabCloseDenied
         );
         assert!(snapshot.authorize_capability(Capability::Action).allowed);
+        let _ = fs::remove_file(local);
+        let _ = fs::remove_file(managed);
+    }
+
+    #[test]
+    fn target_name_preservation_is_default_on_and_monotonic_across_layers() {
+        let local = temporary("local-target-names");
+        let managed = temporary("managed-target-names");
+        fs::write(&local, br#"{"version":1,"preserve_target_names":false}"#).unwrap();
+        fs::write(
+            &managed,
+            br#"{"version":1,"managed":true,"expires_unix_ms":18446744073709551615,"preserve_target_names":true}"#,
+        )
+        .unwrap();
+
+        let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()))
+            .snapshot(&RequestRestrictions::default());
+        assert!(!snapshot.preserves_target_names());
+
+        fs::write(&local, br#"{"version":1,"preserve_target_names":true}"#).unwrap();
+        fs::write(
+            &managed,
+            br#"{"version":1,"managed":true,"expires_unix_ms":18446744073709551615,"preserve_target_names":false}"#,
+        )
+        .unwrap();
+        let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()))
+            .snapshot(&RequestRestrictions::default());
+        assert!(!snapshot.preserves_target_names());
+
         let _ = fs::remove_file(local);
         let _ = fs::remove_file(managed);
     }

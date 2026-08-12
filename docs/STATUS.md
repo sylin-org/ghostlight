@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-12 (ninth pass).
+Last updated: 2026-08-12 (twelfth pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -12,11 +12,11 @@ last fetch.
 
 - `ghostlight-1.0` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`.
 - `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and again on 2026-08-12 to
-  `58c737d9`, which carries the terse 22-tool language and the extension-owned recording
-  architecture. `ghostlight-1.0` and `origin/dev` match exactly before the current uncommitted
-  visual-span work. Before the first fast-forward `origin/dev` sat at the 0.8 line (`3fb093eb`,
-  2026-08-07).
-- `origin/main` still carries the 0.8 line at `95468758`, now 43 commits behind `origin/dev`.
+  `adb9f413`, which carries the terse 22-tool language, extension-owned recording architecture,
+  and static-frame folding. `ghostlight-1.0` is three commits ahead at `9f4d3dfd` before the
+  current uncommitted browser-owned GIF encoding and human outcome-language work. Before the first
+  fast-forward `origin/dev` sat at the 0.8 line (`3fb093eb`, 2026-08-07).
+- `origin/main` still carries the 0.8 line at `95468758`, now 44 commits behind `origin/dev`.
   Promoting it is a deliberate release decision, not routine sync. (An earlier pass recorded the
   distance as 24 when `git rev-list --count origin/main..origin/dev` said 26. Re-measure rather
   than carry the number forward.)
@@ -29,20 +29,32 @@ last fetch.
 - One Rust 2021 workspace builds four roles: the shared typed bridge, `ghostlight` orchestrator,
   generic MCP connector, and opaque browser connector.
 - The orchestrator owns the 22-tool model-facing catalog, workspace aggregate, one executor and
-  completion path, immutable authority snapshots, runtime controls, payload-free audit, browser
-  port, and content-free presentation decisions.
+  completion path, immutable authority snapshots, runtime controls, content-minimized audit,
+  browser port, and content-free presentation decisions.
+- The page-context JavaScript tool is `browser_execute`, not `browser_evaluate`. The execute name
+  states that it may read, mutate, or navigate. The unreleased old name has no alias. Internal
+  `RunScript` and `EvaluateScript` mechanism names remain behind the language boundary.
 - The stable browser fringe includes a policy-free Manifest V3 extension, durable native relay,
   operation-disposition recovery, one browser-wide exact-title group per client label, dedicated
   Ghostlight window placement, and the established visual language and product identity.
-- Recording now has one owner (ADR-0108). The extension keeps a plural, workspace-namespaced,
-  memory-only registry; owns capture ids, frames, fixed bounds, autonomous stop, five-minute
-  retention, and erase; and exposes only start/status/stop/read/discard physical requests. It folds
-  byte-identical successive JPEGs into one retained visual span with an accumulated duration, so
-  capture time and compressed bytes are the ordinary limits. During recording, presentation
-  disables only the perpetual controlled-scope glow and keeps transient action feedback available.
-  The orchestrator authorizes before requesting bytes, renders the current bounded GIF output from
-  those durations, and owns client or page delivery truth. The old service coordinator, renewal
-  loop, unsolicited frame events, and duplicate deadlines are gone.
+- Recording now has one owner (ADR-0108, extended by ADR-0109). The extension keeps a plural,
+  workspace-namespaced, memory-only registry; owns capture ids, frames, fixed bounds, autonomous
+  stop, five-minute retention, erase, and the GIF encode itself; and exposes only
+  start/status/stop/export/discard physical requests. It folds byte-identical successive JPEGs into
+  one retained visual span with an accumulated duration, so capture time and compressed bytes are
+  the ordinary limits. During recording, presentation disables only the perpetual controlled-scope
+  glow and keeps transient action feedback available. The old service coordinator, renewal loop,
+  unsolicited frame events, and duplicate deadlines are gone.
+- Recording frames no longer cross a process boundary (ADR-0109). `gif_output.rs`, the
+  frame-returning `read` command, and `PhysicalRecordingFrame` are deleted. The orchestrator
+  governs the save, names one of three destinations, and states an output budget; the extension
+  encodes in an offscreen document (pinned MIT `gifenc` under `extension/vendor/`) and delivers.
+  A page attach and a browser download finish inside Chromium; only a client return carries bytes,
+  and the shape of `RecordingDelivery` is what makes that structural rather than a rule. Thinning
+  exists once, in `extension/lib/recording.js`, and folds each dropped frame's time into the frame
+  before it, so a thinned replay still plays for as long as the work took. A saved replay's
+  sentence reports how long it plays; counts and bytes stay in the facts. The manifest gained
+  `offscreen` and `downloads`, which is a published-surface change.
 - Model-driven tab close is admitted by service authority and then checked by the extension's
   default-on preserve-tabs interlock. A refusal stays visible and returns a blocked no-effect
   result.
@@ -65,6 +77,8 @@ last fetch.
   headless runs and domain tests stay free of presentation.
 - `OperationSummary` carries the governed capability, so live work is classified as plainly as
   completed history.
+- Monitor has a presentation-only Clear view control. It hides completed actions for the current
+  desktop surface, keeps running work visible, and never mutates or deletes the durable audit.
 - The workbench follows the published sylin.org palette: Ghostlight's teal accent carried as
   `--a`/`--al`/`--argb`, the night-garden ground, and the five-step ink ramp. The in-page renderer
   deliberately keeps its trained sky signal. The two surfaces still share the spring curve and the
@@ -76,13 +90,13 @@ last fetch.
 - `ghostlight --headless` retains the service-only execution path. Recoverable desktop startup and
   event-loop failures leave that service running.
 - The shared bridge owns one demand-start seam used by both connectors after a failed service
-  connection. It starts only the exact sibling `ghostlight --background`, honors a fresh deploy
-  lock, and preserves each connector's established reconnect behavior.
+  connection. It starts only the exact sibling `ghostlight` with no application arguments, honors
+  a fresh deploy lock, and preserves each connector's established reconnect behavior.
 - The orchestrator holds an operating-system lifetime lease before publishing runtime discovery or
   initializing Tauri. Concurrent launch attempts therefore converge on one authority and one tray.
-- Direct/default launch and `--show` reveal the existing authenticated workbench or start it
-  visibly. `--background` starts the full tray authority hidden. `--headless` remains the explicit
-  presentation-free mode.
+- There is one normal desktop launch. It always creates the tray and shows its workbench minimized.
+  A second direct launch restores and focuses the existing authenticated workbench. `--headless`
+  remains the explicit presentation-free mode.
 - `ghostlight call` is a second intake for scripts and programs (ADR-0105). It invokes one tool, or
   a batch of them over one session with `--stdin`, prints the outcome sentence or `--json`, and maps
   the terminal status to distinct exit codes where an uncertain effect is never zero. It demand-
@@ -132,9 +146,15 @@ Re-run on 2026-08-12 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 133 Rust tests -- 106 in the orchestrator library, its launch-mode
-  binary test, 22 in the shared bridge, and 4 in the MCP connector.
-- `npm test --prefix extension`: 79 extension tests.
+- `cargo test --workspace`: 144 Rust tests -- 113 in the orchestrator library, its launch-mode
+  binary test, 26 in the shared bridge, and 4 in the MCP connector.
+- `npm test --prefix extension`: 94 extension tests.
+- Lifecycle tests prove demand-start supplies no application arguments and the executable has one
+  normal desktop mode beside explicit headless and scripted intake. The real process journey still
+  passes across service restart and connector renegotiation.
+- Action-subject tests prove the Chrome receipt carries the physical role and name without a
+  describe round trip, the role cannot author language, editable values cannot become names, names
+  are normalized and bounded, and either authority layer can remove them monotonically.
 - `node tests/cli-powershell-journey.mjs`: the shipped PowerShell script drives a real service and a
   scripted browser adapter through open/list/read/capture/close, exits zero, writes real JPEG bytes,
   and every step is audited as `cli` with the landing host and no page text. It then proves the
@@ -146,7 +166,8 @@ Re-run on 2026-08-12 against the current tree:
   with `channel_denied`, exits non-zero, and writes no audit record.
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
   restart without replaying an interrupted effect, then complete open/read, an extension-owned
-  recording start/save/discard with a real GIF content block, and close. The journey uses
+  recording start/save/discard with a real GIF content block, a second save to the browser's
+  download mechanism that returns no bytes at all, and close. The journey uses
   a fresh deployment lock to isolate explicit restart recovery from demand-start. It also reads
   the audit file the real executable wrote and checks that the read records a host and a word
   count, and no page text.
@@ -200,6 +221,14 @@ Re-run on 2026-08-12 against the current tree:
   `PresentationSignal`, and the renderer draws one ring per click, dashed for a secondary button.
 - Audit records and workbench history carry the Ghostlight-authored `summary` and a measured
   `duration_ms`, so every row states what happened and how long it took.
+- Outcome language now leads with the action and names the governed place. Browser action receipts
+  return the role and accessible name of the physical element in the same effect response, without
+  a describe round trip. The orchestrator narrows raw roles to a closed noun, normalizes and bounds
+  names to 80 characters, and produces sentences such as `Clicked the "Save" button on
+  example.com`. `preserve_target_names` defaults to true; false in either authority layer removes
+  names monotonically and leaves `Clicked a button on example.com`. Editable values never supply a
+  name. A refused explicit navigation adds only its normalized host to the existing observation
+  shape, never its path, query, fragment, or value.
 - Per-action observation is built, at the seam it was designed for. See
   [`design/action-observations.md`](design/action-observations.md).
   - `language/outcome.rs` owns `Outcome`, `Refusal`, `WorkspaceReason`, and
@@ -210,13 +239,14 @@ Re-run on 2026-08-12 against the current tree:
     by invocation. `Outcome::observed` supplies counts and capture sizes from the same value that
     authored their sentence. The one completion path merges the outcome over the seam and clears
     the registry.
-  - The host is the deliberate line. Never the path, query, or fragment. A capture reports its
+  - The host and optional governed action-target name are the deliberate line. Never the path,
+    query, fragment, selector, target handle, entered value, or arbitrary page text. A capture reports its
     pixel size, a wait reports how long it waited and which condition it waited on, and a read
     reports how many words it read.
   - A count is recorded only where the Ghostlight-authored sentence beside it names what was
     counted, so the count needs no per-tool wording table on the surface. Those summaries now state
-    their measurement: "Read 1,240 words.", "Filled 3 fields and submitted the form.", "Found 7
-    matches.", "Captured the viewport at 1280x720."
+    their measurement: "Read 1,240 words from example.com.", "Filled 3 fields on example.com and
+    submitted the form.", "Found 7 matches on example.com.", "Captured the viewport at 1280x720."
   - Rows always render the outcome sentence and add a readiness note where a document never
     settled. They no longer guess between host and measurement, because the orchestrator already
     chose which register the sentence uses. The hero renders the same sentence and carries no host
@@ -225,26 +255,15 @@ Re-run on 2026-08-12 against the current tree:
     guarded where it is collected, in
     [`guides/siem-integration.md`](guides/siem-integration.md), because that guide is what a
     person configuring a collector reads.
-  - The audit stays payload-free. `InvocationResult::facts` still carries page text and full URLs
-    to the model; the observation is a separate closed type so there is no shortcut between them.
+  - The audit stays content-minimized. `InvocationResult::facts` still carries page text and full
+    URLs to the model; the observation is a separate closed type so there is no shortcut between
+    them. The bounded action-target name exists only inside Ghostlight's terminal summary and may
+    be removed by governance.
     [`guides/siem-integration.md`](guides/siem-integration.md) now documents `summary`,
     `duration_ms`, and `observed`, and states the host exception where it used to claim that no
     host is ever recorded.
 
 ## Owed
-
-- **ADR-0109: move GIF encoding into the extension.** Decided, not built. Today the extension owns
-  recording lifecycle (ADR-0108) but its `read` command still returns JPEG frames, which
-  `crates/orchestrator/src/gif_output.rs` decodes and re-encodes; a page-attached replay therefore
-  round-trips out of the browser and back. The ADR removes that: three destinations (page, file,
-  client) of which only the client-return crosses, one thinning implementation in the extension, the
-  `downloads` permission for file saves, and encoding in an offscreen document rather than the
-  evictable service worker.
-- Two pieces from the 2026-08-12 session are worth keeping wherever the encoder lands, and are not
-  in the tree: a replay's sentence should report duration ("Recorded 30 seconds of page changes")
-  rather than frames and bytes, and whoever drops a frame must fold its time into the frame before
-  it. `e4e7af46` added Rust-side thinning that does neither; ADR-0109 deletes that code, so redo
-  both in the extension rather than patching Rust.
 
 - A row that never settled reads its readiness as a parenthetical. Colour would carry it better
   than words: the duration cell already has a running and a blocked treatment, and an unsettled one
@@ -257,16 +276,13 @@ Re-run on 2026-08-12 against the current tree:
   may open a session, which is a weaker claim than knowing who is calling.
 - `crates/mcp-connector` still has its own copy of the service handshake and did not adopt
   `ServiceClient`. One home exists now; the connector should move to it.
-- Refusal sentences were deliberately left unchanged when the voice moved into
-  `language/outcome.rs`, so they are the last boilerplate on the monitor. "Authority blocked the
-  browser job." could name the host the seam already recorded.
 - The extension stylesheet could move to its own module now that it is static. Lowest value of the
   maintainability steps; needs about eight test assertions reworked.
-- Enhanced GIF composition remains deferred. The basic renderer handles the bounded dynamic proof,
-  but a 116-frame Foundry recording held 3,328,297 JPEG bytes and encoded beyond the 5 MiB output
-  ceiling. A longer 189-frame run stopped itself at the recording memory limit as designed. Long,
-  highly animated replays need a deliberate GIF-quality and output-budget pass rather than changes
-  to extension recording ownership.
+- GIF quality remains deferred. The vendored encoder quantizes each frame to its own 256-colour
+  palette with no dithering, which suits flat interface pixels and not photographs. Overlays,
+  action tagging, and perceptual palettes are still unbuilt. Output size is no longer the pressure
+  it was: a browser-local save may spend 16 MiB, and anything over its budget is thinned rather
+  than refused.
 - The 13 open Dependabot pull requests target the 0.8 line and need reconciling against the 1.0
   rebuild before they can land.
 - `origin/main` still carries 0.8. Deciding when the 1.0 line is promoted is a release decision.
@@ -301,3 +317,5 @@ Re-run on 2026-08-12 against the current tree:
   [`adr/0103-language-owned-outcome-voice.md`](adr/0103-language-owned-outcome-voice.md).
 - Demand-start and single-engine decision:
   [`adr/0104-demand-start-single-engine-and-workbench-activation.md`](adr/0104-demand-start-single-engine-and-workbench-activation.md).
+- One minimized desktop-startup decision:
+  [`adr/0112-one-minimized-desktop-startup.md`](adr/0112-one-minimized-desktop-startup.md).

@@ -48,7 +48,7 @@ extension, and visible browser path. On failure, ask the user to open **Status**
   coordinates only with the current `view` returned by `browser_screenshot`.
 - Use `browser_sequence` only for a short, fully specified sequence whose later inputs do not
   depend on earlier page results.
-- Use `browser_evaluate` only when explicit execute authority and page JavaScript are genuinely
+- Use `browser_execute` only when explicit execute authority and page JavaScript are genuinely
   required.
 - Use `browser_wait` for an explicit observable condition and `browser_dialog` for the
   currently visible browser dialog.

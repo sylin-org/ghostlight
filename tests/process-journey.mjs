@@ -14,6 +14,8 @@ const environment = { ...process.env, GHOSTLIGHT_RUNTIME_FILE: runtimeFile, GHOS
 const children = [];
 const physicalCommands = [];
 let createdDeployLock = false;
+// A real one-pixel GIF89a, the shape the extension now hands over already finished.
+const ONE_PIXEL_GIF = "R0lGODlhAQABAPAAAAwiOAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAZAAAACwAAAAAAQABAAAIBAABBAQAOw==";
 const ONE_PIXEL_JPEG = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==";
 
 function executable(name) {
@@ -195,11 +197,31 @@ async function runAdapter(peer) {
         }
         result = { outcome: "recording_stopped", summary: recordingSummary(recording), changed };
       }
-    } else if (command.command === "read_recording") {
+    } else if (command.command === "export_recording") {
+      // The browser encodes and delivers. Only a client return carries bytes back; a target or
+      // download save finishes here, exactly as the extension does it.
       const recording = selectedRecording(request);
-      result = recording
-        ? { outcome: "recording_read", summary: recordingSummary(recording), frames: recording.frames }
-        : { outcome: "recording_not_found" };
+      if (!recording) result = { outcome: "recording_not_found" };
+      else {
+        const kind = command.destination.destination;
+        result = {
+          outcome: "recording_exported",
+          summary: recordingSummary(recording),
+          encoded: {
+            frame_count: recording.frames.length,
+            captured_frame_count: recording.frames.length,
+            duration_ms: 1_000,
+            width: 1,
+            height: 1,
+            byte_count: 69
+          },
+          delivery: kind === "client"
+            ? { delivery: "returned", mime_type: "image/gif", data: ONE_PIXEL_GIF }
+            : kind === "download"
+              ? { delivery: "downloaded" }
+              : { delivery: "attached", tab_id: command.destination.tab_id }
+        };
+      }
     } else if (command.command === "discard_recording") {
       const recording = selectedRecording(request);
       if (!recording) result = { outcome: "recording_not_found" };
@@ -282,6 +304,8 @@ try {
   const listed = await mcp.request("tools/list");
   assert.equal(listed.result.tools.length, 22);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
+  assert.equal(listed.result.tools.some((tool) => tool.name === "browser_execute"), true);
+  assert.equal(listed.result.tools.some((tool) => tool.name === "browser_evaluate"), false);
 
   const opened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com" } }));
   assert.equal(opened.status, "succeeded");
@@ -321,7 +345,7 @@ try {
   const read = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: restartedHandle } }));
   assert.equal(read.status, "succeeded");
   assert.equal(read.facts.text, "Example Domain");
-  assert.equal(read.summary, "Read 2 words.");
+  assert.equal(read.summary, "Read 2 words from example.com.");
 
   const startedRecording = structured(await mcp.request("tools/call", {
     name: "browser_record",
@@ -335,11 +359,24 @@ try {
   });
   const savedRecording = structured(savedRecordingResponse);
   assert.equal(savedRecording.status, "succeeded");
-  assert.equal(savedRecording.facts.delivery, "prepared_for_client");
+  assert.equal(savedRecording.facts.delivery, "returned_to_client");
+  assert.equal(savedRecording.summary, "Saved a replay of 1 second of page changes.");
   assert.equal(
     savedRecordingResponse.result.content.some((item) => item.type === "image" && item.mimeType === "image/gif"),
     true
   );
+
+  // The same recording saved to a file. This is the claim ADR-0109 exists for: a replay that
+  // stays inside the browser reaches the user without one byte crossing back through here.
+  const downloadedResponse = await mcp.request("tools/call", {
+    name: "browser_record",
+    arguments: { action: "save", recording: startedRecording.facts.recording, download: true }
+  });
+  const downloaded = structured(downloadedResponse);
+  assert.equal(downloaded.status, "succeeded");
+  assert.equal(downloaded.facts.delivery, "downloaded_by_browser");
+  assert.equal(downloaded.summary, "Downloaded a replay of 1 second of page changes.");
+  assert.deepEqual(downloadedResponse.result.content.filter((item) => item.type === "image"), []);
   const discardedRecording = structured(await mcp.request("tools/call", {
     name: "browser_record",
     arguments: { action: "discard", recording: startedRecording.facts.recording }

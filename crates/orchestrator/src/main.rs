@@ -11,8 +11,7 @@ const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LaunchMode {
     Headless,
-    Background,
-    Show,
+    Desktop,
     /// The command-line intake. A script asked for work, not for a window (ADR-0105).
     Call,
 }
@@ -27,8 +26,7 @@ enum ActivationState {
 fn main() -> anyhow::Result<()> {
     match launch_mode(std::env::args_os().skip(1)) {
         LaunchMode::Headless => ghostlight::service::run_forever(),
-        LaunchMode::Background => ghostlight::desktop::run(false),
-        LaunchMode::Show => show_or_start(),
+        LaunchMode::Desktop => start_or_activate_desktop(),
         LaunchMode::Call => run_call(),
     }
 }
@@ -69,14 +67,14 @@ fn wait_for_runtime(runtime: &Path) {
     }
 }
 
-fn show_or_start() -> anyhow::Result<()> {
+fn start_or_activate_desktop() -> anyhow::Result<()> {
     let runtime = ghostlight_bridge::runtime::runtime_file();
     match ghostlight::service::request_workbench_activation(&runtime) {
         Ok(true) => return Ok(()),
         Ok(false) => return finish_activation(wait_for_workbench_activation(&runtime), None),
         Err(_) => {}
     }
-    match ghostlight::desktop::run(true) {
+    match ghostlight::desktop::run() {
         Ok(()) => Ok(()),
         Err(start_error) => {
             finish_activation(wait_for_workbench_activation(&runtime), Some(start_error))
@@ -122,10 +120,8 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> LaunchMode {
         LaunchMode::Call
     } else if arguments.iter().any(|argument| argument == "--headless") {
         LaunchMode::Headless
-    } else if arguments.iter().any(|argument| argument == "--background") {
-        LaunchMode::Background
     } else {
-        LaunchMode::Show
+        LaunchMode::Desktop
     }
 }
 
@@ -134,14 +130,9 @@ mod tests {
     use super::{launch_mode, LaunchMode};
 
     #[test]
-    fn launch_modes_keep_human_and_adapter_intent_distinct() {
-        assert_eq!(launch_mode(Vec::new()), LaunchMode::Show);
-        assert_eq!(launch_mode(["--show".into()]), LaunchMode::Show);
-        assert_eq!(launch_mode(["--background".into()]), LaunchMode::Background);
+    fn launch_modes_keep_desktop_headless_and_call_intents_distinct() {
+        assert_eq!(launch_mode(Vec::new()), LaunchMode::Desktop);
         assert_eq!(launch_mode(["--headless".into()]), LaunchMode::Headless);
-        assert_eq!(
-            launch_mode(["--background".into(), "--headless".into()]),
-            LaunchMode::Headless
-        );
+        assert_eq!(launch_mode(["call".into()]), LaunchMode::Call);
     }
 }

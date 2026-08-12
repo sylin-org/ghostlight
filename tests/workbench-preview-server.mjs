@@ -44,13 +44,13 @@ const snapshot = {
 // Representative work the monitor can page through, so the conveyor is reviewable.
 const script = [
   { tool: "browser_navigate", activity: "Navigating", capability: "action", ms: 1700, effect: "committed", summary: "Opened example.com.", observed: { host: "example.com", readiness: "complete" } },
-  { tool: "browser_read", activity: "Reading page", capability: "read", ms: 900, effect: "none", summary: "Read 1,240 words.", observed: { host: "example.com", count: 1240 } },
+  { tool: "browser_read", activity: "Reading page", capability: "read", ms: 900, effect: "none", summary: "Read 1,240 words from example.com.", observed: { host: "example.com", count: 1240 } },
   { tool: "browser_find", activity: "Finding on page", capability: "read", ms: 700, effect: "none", summary: "Found 7 matches.", observed: { count: 7 } },
-  { tool: "browser_fill_form", activity: "Filling form", capability: "write", ms: 2400, effect: "wrote", summary: "Filled 3 fields and submitted the form.", observed: { host: "example.com", readiness: "complete", count: 3 } },
+  { tool: "browser_fill_form", activity: "Filling form", capability: "write", ms: 2400, effect: "wrote", summary: "Filled 3 fields on example.com and submitted the form.", observed: { host: "example.com", readiness: "complete", count: 3 } },
   { tool: "browser_screenshot", activity: "Screenshot", capability: "read", ms: 1100, effect: "none", summary: "Captured the viewport at 1280x720.", observed: { width: 1280, height: 720 } },
-  { tool: "browser_click", activity: "Clicking", capability: "action", ms: 800, effect: "clicked", summary: "Clicked a target on example.com.", observed: { host: "example.com", readiness: "interactive" } },
-  { tool: "browser_wait", activity: "Waiting", capability: "read", ms: 1900, effect: "none", summary: "Wait condition target_present was satisfied after 1830 ms.", observed: { readiness: "complete", count: 1830 } },
-  { tool: "browser_evaluate", activity: "Running JavaScript", capability: "execute", ms: 1500, effect: "executed", summary: "Evaluated a script on example.com.", observed: { host: "example.com", readiness: "complete" } }
+  { tool: "browser_click", activity: "Clicking", capability: "action", ms: 800, effect: "clicked", summary: "Clicked a button on example.com.", observed: { host: "example.com", readiness: "interactive" } },
+  { tool: "browser_wait", activity: "Waiting", capability: "read", ms: 1900, effect: "none", summary: "The target appeared on example.com in 2 seconds.", observed: { host: "example.com", readiness: "complete", count: 2 } },
+  { tool: "browser_execute", activity: "Running JavaScript", capability: "execute", ms: 1500, effect: "executed", summary: "Executed JavaScript on example.com.", observed: { host: "example.com", readiness: "complete" } }
 ];
 
 const fixture = `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(snapshot)};
@@ -72,7 +72,7 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     counter += 1;
     const blocked = counter % 9 === 0;
     const spec = blocked
-      ? { tool: "browser_evaluate", activity: "Running JavaScript", capability: "execute", ms: 900, effect: "none" }
+      ? { tool: "browser_execute", activity: "Running JavaScript", capability: "execute", ms: 900, effect: "none" }
       : window.__GHOSTLIGHT_SCRIPT__[step++ % window.__GHOSTLIGHT_SCRIPT__.length];
     const operation = {
       invocation: "invocation_preview_" + counter,

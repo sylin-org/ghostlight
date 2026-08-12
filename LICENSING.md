@@ -28,6 +28,19 @@ tiers, plus the hardship and outgrew-the-tier accommodations. Ghostlight 1.0 has
 activation, status command, or behavior gate; [docs/guides/licensing.md](docs/guides/licensing.md)
 explains the source boundary.
 
+## Vendored third-party code
+
+One dependency ships inside the browser extension rather than through a package manager, because
+the extension never loads remote code:
+
+| File | Component | License |
+|---|---|---|
+| `extension/vendor/gifenc.js` | [gifenc](https://github.com/mattdesl/gifenc) 1.0.3, a JavaScript animated GIF encoder | MIT ([text](extension/vendor/gifenc.LICENSE.md)) |
+
+It is pinned to an exact version and reviewed like any other dependency
+([ADR-0109](docs/adr/0109-browser-owned-gif-encoding.md)). Rust dependencies are declared in
+`Cargo.toml` and resolved normally.
+
 ## Labels, precisely
 
 - The engine is open source (OSI-approved licenses).

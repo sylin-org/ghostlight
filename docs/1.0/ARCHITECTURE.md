@@ -46,14 +46,14 @@ identity or tray.
 
 Both connectors call the same bridge-owned recovery operation after a service connection fails.
 It observes the lifetime lease, honors a fresh deployment lock, and starts only the exact sibling
-`ghostlight --background` executable with detached null standard streams. The connectors retain
-their existing reconnect behavior and learn no workbench or product semantics.
+`ghostlight` executable with no application arguments and with detached null standard streams. The
+connectors retain their existing reconnect behavior and learn no workbench or product semantics.
 
-A direct/default launch, or the compatible `--show` spelling, first asks the running authority to
-reveal its workbench through an authenticated first message on the existing service bridge. That
-request admits no workspace and adds no listener. If no authority exists, the launch starts the
-desktop visibly. `--background` starts the same desktop authority hidden with a tray;
-`--headless` is the explicit service-only mode and cannot reveal a workbench.
+A normal launch first asks the running authority to reveal its workbench through an authenticated
+first message on the existing service bridge. That request admits no workspace and adds no
+listener. If no authority exists, the launch starts the complete desktop authority, creates its
+tray, and shows the workbench minimized. `--headless` is the explicit service-only mode and cannot
+reveal a workbench.
 
 ## Fringe stability
 
@@ -133,21 +133,24 @@ detection, and release on disconnect.
 
 ### Recording
 
-Owns the model-facing record actions, start and disclosure authorization, basic GIF rendering, and
-delivery truth. It has no recording registry or capture maintenance loop. ADR-0108 places recording
-identity, frames, bounds, deadlines, stop, retention, and erase in the extension.
+Owns the model-facing record actions, start and disclosure authorization, the choice of
+destination, and the output budget. It holds no frames, no encoder, and no capture maintenance
+loop. ADR-0108 places recording identity, frames, bounds, deadlines, stop, retention, and erase in
+the extension; ADR-0109 places the GIF encode and its delivery there too.
 
 ### Governance
 
 Owns authority loading, immutable snapshots, request restriction, capabilities, protected-host
-ceiling, admission, landing decisions, runtime controls, holds, and payload-free audit intent.
+ceiling, admission, landing decisions, runtime controls, holds, and content-minimized audit intent.
 Operation handlers see only the governance facade.
 
 ### Browser
 
 Defines the physical primitive port and observed facts: tabs, windows, navigation commits,
 readiness, semantic targets, text, screenshots, input metadata, dialogs, recording requests and
-receipts, bounded console and network entries, and effect receipts. Transport and Chrome details
+receipts, bounded console and network entries, and effect receipts. Action receipts may include the
+role and accessible name of the element actually used; the extension never phrases or governs it.
+Transport and Chrome details
 implement this port outside the context. Diagnostic product defaults, authorization, host filtering,
 and model-facing results remain in the orchestrator. Bounded problem/all projection, literal
 matching, opaque cursors, and URL sanitization terminate in the extension at the Chromium shore.
@@ -160,7 +163,7 @@ recorded but cannot affect authority or completion truth.
 
 ### Workbench
 
-Owns the payload-free desktop read model, bounded global search, high-signal notification
+Owns the content-minimized desktop read model, bounded global search, high-signal notification
 decisions, runtime-control intents, and explicit supported-harness management. It projects the
 closed domain-event vocabulary through direct typed reactions and reconstructs bounded terminal
 history from the existing durable audit file. The WebView owns only disposable view state.
@@ -239,16 +242,23 @@ absolute paths. The orchestrator validates and reads only those files after gove
 then sends bounded names, media types, and bytes through the physical bridge. The extension creates
 browser `File` objects for the already selected file input. The relay never reads paths or files.
 
-Recording follows one-owner semantics. The extension's plural registry owns Chrome screencast
-start, frame acknowledgement, identity, compressed frames, fixed bounds, autonomous stop, frozen
-retention, erase, and the truthful recording indicator. The orchestrator sends only start, status,
-stop, read, and discard requests. A read receipt carries bounded JPEG frames only after governance;
-each frame carries its extension-authored visual duration. The extension folds byte-identical
-successive JPEGs into one visual span before retention, so capture time and compressed bytes are
-the ordinary limits. While recording, presentation disables only the perpetual controlled-scope
-glow; transient action feedback remains available. The orchestrator renders the basic GIF from
-those spans and owns client or page delivery truth. Relays remain opaque. No recording bytes enter
-extension storage, service storage, logs, audit, or restart state.
+Recording follows one-owner semantics, and the owner is the browser. The extension's plural
+registry owns Chrome screencast start, frame acknowledgement, identity, compressed frames, fixed
+bounds, autonomous stop, frozen retention, erase, the truthful recording indicator, and the
+animated GIF encode. The orchestrator sends only start, status, stop, export, and discard requests.
+The extension folds byte-identical successive JPEGs into one visual span before retention, so
+capture time and compressed bytes are the ordinary limits. While recording, presentation disables
+only the perpetual controlled-scope glow; transient action feedback remains available.
+
+An export names one of three destinations and one output budget. Attaching to a page target and
+writing through the browser's download mechanism both finish inside Chromium; only a client return
+carries bytes out, and only that destination is bounded by the transfer ceiling. Encoding runs in
+an offscreen document, because Chrome may evict a service worker mid-encode and because object
+URLs do not exist in one. Fidelity is traded to meet a budget, never coverage: dropping a frame
+folds its time into the frame before it, so a thinned replay still spans and plays for as long as
+the work it recorded. Relays remain opaque. Recording frames never cross a process boundary at
+all, and no recording bytes enter extension storage, service storage, logs, audit, or restart
+state.
 
 Diagnostics are off until an authorized `browser_diagnose` call enables bounded volatile rings for
 one owned tab. The extension captures only the Chrome event facts that must originate there, owns
@@ -269,11 +279,13 @@ authority denies all work.
 `GHOSTLIGHT_POLICY_FILE` selects an optional local version-1 JSON authority document.
 `GHOSTLIGHT_MANAGED_AUTHORITY_FILE` selects an optional managed version-1 document, which must
 set `managed: true` and contain a future `expires_unix_ms`. Each document can contain
-`allow_capabilities`, `deny_capabilities`, `allow_hosts`, `deny_hosts`, and the optional boolean
-`allow_tab_close`. Missing allow lists and a missing tab-close constraint mean no additional
-restriction. A false tab-close constraint is monotonic across local and managed layers; a later
-layer cannot expand it. Malformed configured layers fail closed. Host patterns are exact names or
-`*.` suffix patterns and never override the protected ceiling.
+`allow_capabilities`, `deny_capabilities`, `allow_hosts`, `deny_hosts`, and the optional booleans
+`allow_tab_close` and `preserve_target_names`. Missing allow lists and missing boolean constraints
+mean no additional restriction. False tab-close and target-name constraints are monotonic across
+local and managed layers; a later layer cannot expand either. Target names default to retained so
+action history identifies the physical element, while a false constraint leaves the closed role as
+the fallback. Malformed configured layers fail closed. Host patterns are exact names or `*.` suffix
+patterns and never override the protected ceiling.
 
 `GHOSTLIGHT_RUNTIME_CONTROL_FILE` optionally names a local text file read at every final browser
 boundary. Its exact states are `active`, `held`, `attention`, and `ended`. A missing or

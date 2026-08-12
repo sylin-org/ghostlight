@@ -80,6 +80,36 @@ some outcomes such as sequence completion are application facts rather than one 
 Rejected because presentation should render a product decision, not reconstruct one from nullable
 measurements.
 
+## Amendment: human outcome language and safe nouns (2026-08-12)
+
+The same language owner now says what a person would say. Sentences lead with the action, name the
+governed host when useful, and omit mechanism words such as target, browser job, condition, and
+physical effect. Closed caller inputs such as direction, named key, coordinates, counts, and wait
+condition may appear. Caller text and page labels may not.
+
+A page can author any string as an accessibility role. `TargetRole` is therefore a closed
+language vocabulary. The workspace narrows the raw role once, when it registers a generation-bound
+target handle, and stores only the closed value. Unknown or invented roles become `control`. Action
+sentences can say `button`, `checkbox`, or `text field` without allowing a page to write audit
+language.
+
+`Refusal::AuthorityBlocked` carries a closed denial reason and an optional sanitized host. Its
+summary and observation projection read the same typed refusal. An explicit refused navigation may
+therefore record `example.com`, but never the full URL, path, query, fragment, target description,
+or request value. This amends Decision 4: the host field is the only page-or-request-derived audit
+text and may describe either a governed attempted host or a governed landing.
+
+The `Observed` JSON shape does not change. Refusals use the same single completion merge as
+successful outcomes; the executor does not construct an independent audit account.
+
+### Amendment acceptance evidence
+
+1. Exact oracle tests cover every success and refusal sentence branch.
+2. A hostile role such as `Save my document` becomes `control` before target state is stored and
+   cannot enter the action summary or audit record.
+3. A refused URL containing a path, query, fragment, and secret records only its normalized host.
+4. Every sentence that names a host or measurement projects that same typed value.
+
 ## Acceptance evidence
 
 1. Exact oracle tests cover every `Outcome` and `Refusal` sentence.

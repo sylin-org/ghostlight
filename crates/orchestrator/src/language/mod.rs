@@ -164,7 +164,7 @@ impl Operation {
             Self::PressKey(_) => "browser_press_key",
             Self::Drag(_) => "browser_drag",
             Self::UploadFiles(_) => "browser_upload",
-            Self::RunScript(_) => "browser_evaluate",
+            Self::RunScript(_) => "browser_execute",
             Self::Wait(_) => "browser_wait",
             Self::RunSequence(_) => "browser_sequence",
             Self::HandleDialog(_) => "browser_dialog",
@@ -636,6 +636,9 @@ pub struct Record {
     pub tab: Option<String>,
     #[serde(default)]
     pub target: Option<String>,
+    /// Let the browser write the replay to a file instead of returning it.
+    #[serde(default)]
+    pub download: bool,
     #[serde(flatten)]
     pub restrictions: RequestRestrictions,
 }
@@ -794,7 +797,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             validate_upload,
         )?)
         .into_ok(),
-        "browser_evaluate" => Operation::RunScript(parse(
+        "browser_execute" => Operation::RunScript(parse(
             input,
             &["script", "tab", "max_result_chars", "timeout_ms"],
             |value: &RunScript| {
@@ -1024,7 +1027,7 @@ fn decode_dialog(input: Value) -> Result<Operation, LanguageError> {
 fn decode_record(input: Value) -> Result<Operation, LanguageError> {
     let value: Record = parse(
         input,
-        &["action", "recording", "tab", "target"],
+        &["action", "recording", "tab", "target", "download"],
         |value: &Record| {
             validate_choice(
                 &value.action,
@@ -1046,10 +1049,18 @@ fn decode_record(input: Value) -> Result<Operation, LanguageError> {
                         "tab is only valid when action is start".into(),
                     ))
                 }
-                "save" => {}
-                _ if value.tab.is_some() || value.target.is_some() => {
+                // One replay goes to one place. Asking for two is a mistake worth naming rather
+                // than a preference to resolve silently.
+                "save" if value.target.is_some() && value.download => {
                     return Err(LanguageError::Invalid(
-                        "tab is only valid for start and target is only valid for save".into(),
+                        "save accepts target or download, not both".into(),
+                    ))
+                }
+                "save" => {}
+                _ if value.tab.is_some() || value.target.is_some() || value.download => {
+                    return Err(LanguageError::Invalid(
+                        "tab is only valid for start; target and download are only valid for save"
+                            .into(),
                     ))
                 }
                 _ => {}
@@ -1637,6 +1648,20 @@ mod tests {
         };
         assert_eq!(inspect.scope, "controls");
         assert_eq!(inspect.max_items, 80);
+    }
+
+    #[test]
+    fn execute_replaces_the_unreleased_evaluate_name_without_an_alias() {
+        let Operation::RunScript(script) =
+            decode("browser_execute", json!({"script":"document.title"})).unwrap()
+        else {
+            panic!("wrong operation")
+        };
+        assert_eq!(script.script, "document.title");
+        assert!(matches!(
+            decode("browser_evaluate", json!({"script":"document.title"})),
+            Err(LanguageError::UnknownTool(name)) if name == "browser_evaluate"
+        ));
     }
 
     #[test]

@@ -29,8 +29,8 @@
     Seconds between actions, so each touched control gets a readable visual beat.
 
 .PARAMETER Width
-    Recording composition width. The design note frames the story at a 1280 x 720 page viewport, and
-    a much larger viewport produces frames the GIF encoder refuses as unbounded.
+    Recording composition width. The design note frames the story at a 1280 x 720 page viewport.
+    A larger viewport still records; it just spends its fidelity budget faster.
 
 .PARAMETER Height
     Recording composition height.
@@ -122,11 +122,11 @@ Write-Host ('{0,-16} {1,-10} {2}' -f 'BEAT', 'STATUS', 'WHAT HAPPENED')
 Write-Host ('{0,-16} {1,-10} {2}' -f '----', '------', '-------------')
 
 # 1. Open the Foundry, frame the composition, and start a memory-only recording lease.
-# The frame is not decoration: recording is bounded, and a large viewport fails to encode.
+# The frame is not decoration: a smaller viewport spends the recording's fidelity budget slower.
 $tab = (Step 'open' 'browser_navigate' @{ url = $Url; new_tab = $true }).facts.tab
 $null = Step 'frame' 'browser_window' @{ tab = $tab; action = 'resize'; width = $Width; height = $Height }
-# The whole story is recorded. Both bounds trade fidelity rather than coverage now: the extension
-# thins retained frames at its byte bound, and the encoder thins again to fit the output bound.
+# The whole story is recorded. The browser owns all of it -- capture, bounds, encoding, delivery --
+# so beat seven's replay is attached to the page without one frame leaving Chromium (ADR-0109).
 $null = Step 'record start' 'browser_record' @{ action = 'start'; tab = $tab }
 
 # 2. Inspect the workspace, hover the foil, rotate the card, zoom the defect.

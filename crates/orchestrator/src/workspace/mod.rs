@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ghostlight_bridge::browser::{
     BrowserReadiness, ObservedTarget, PhysicalPoint, PhysicalTab, ViewportGeometry,
 };
+
+use crate::language::outcome::TargetRole;
 use ghostlight_bridge::service::{IntakeChannel, SessionMarker};
 use thiserror::Error;
 use uuid::Uuid;
@@ -107,6 +109,8 @@ pub struct SelectedTarget {
     pub locator: String,
     /// Credential classification last observed by the adapter.
     pub credential_class: bool,
+    /// What kind of control this is, narrowed to Ghostlight's own closed vocabulary.
+    pub role: TargetRole,
 }
 
 /// Immutable current screenshot transform used at a pointer-effect boundary.
@@ -130,6 +134,7 @@ struct TargetState {
     generation: u64,
     locator: String,
     credential_class: bool,
+    role: TargetRole,
 }
 
 #[derive(Clone, Debug)]
@@ -687,6 +692,10 @@ impl WorkspaceLease {
                     generation: tab.generation,
                     locator: target.locator.clone(),
                     credential_class: target.credential_class,
+                    // A page authors its own role attribute, so it is narrowed here, at the one
+                    // door observed targets come through. The page's own string is never stored
+                    // and so can never reach a sentence written to the audit.
+                    role: TargetRole::classify(&target.role),
                 },
             );
             mapped.push((handle, target.clone()));
@@ -736,6 +745,7 @@ impl WorkspaceLease {
             tab: target.tab.clone(),
             locator: target.locator.clone(),
             credential_class: target.credential_class,
+            role: target.role,
         })
     }
 
@@ -960,6 +970,8 @@ mod tests {
     };
     use ghostlight_bridge::service::{IntakeChannel, SessionMarker};
 
+    use crate::language::outcome::TargetRole;
+
     use super::{WorkspaceError, WorkspaceStore};
 
     fn physical(id: u64, url: &str) -> PhysicalTab {
@@ -1063,7 +1075,8 @@ mod tests {
             )
             .unwrap();
         let handle = targets[0].0.as_str().to_owned();
-        assert!(lease.resolve_target(&handle, Some(&tab)).is_ok());
+        let resolved = lease.resolve_target(&handle, Some(&tab)).unwrap();
+        assert_eq!(resolved.role, TargetRole::Button);
         let _new = lease
             .apply_landing(&tab.handle, &physical(1, "https://example.org"))
             .unwrap();
@@ -1077,6 +1090,31 @@ mod tests {
             other.select_tab(Some(tab.handle.as_str())).unwrap_err(),
             WorkspaceError::NotOwnedTab
         );
+    }
+
+    #[test]
+    fn page_authored_roles_are_narrowed_before_target_state_is_stored() {
+        let store = WorkspaceStore::default();
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(1, "https://example.com")).unwrap();
+        let targets = lease
+            .register_targets(
+                &tab,
+                &[ObservedTarget {
+                    locator: "l1".into(),
+                    role: "Save my document".into(),
+                    name: "untrusted name".into(),
+                    state: vec![],
+                    credential_class: false,
+                }],
+            )
+            .unwrap();
+
+        let resolved = lease
+            .resolve_target(targets[0].0.as_str(), Some(&tab))
+            .unwrap();
+        assert_eq!(resolved.role, TargetRole::Control);
     }
 
     #[test]

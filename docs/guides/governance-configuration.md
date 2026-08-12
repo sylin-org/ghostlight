@@ -30,6 +30,7 @@ schema is flat and typo-closed:
   "allow_capabilities": ["read", "action", "write"],
   "deny_capabilities": ["execute"],
   "allow_tab_close": false,
+  "preserve_target_names": true,
   "allow_hosts": ["example.com", "*.example.com"],
   "deny_hosts": ["admin.example.com"]
 }
@@ -45,6 +46,7 @@ Fields:
 | `allow_capabilities` | no | Intersects the current capability set. Omission leaves it unchanged. |
 | `deny_capabilities` | no | Removes named capabilities after the allow intersection. |
 | `allow_tab_close` | no | `false` removes model-driven close. `true` cannot restore another layer's denial. |
+| `preserve_target_names` | no | Defaults to `true`. `false` removes element names from results, History, and audit summaries. `true` cannot restore another layer's denial. |
 | `allow_hosts` | no | Adds a required host allow-list layer. Every configured layer must match. |
 | `deny_hosts` | no | Denies matching hosts regardless of an allow-list match. |
 | `channels` | no | Intake channels this layer takes control of. See below. |
@@ -167,24 +169,27 @@ written. Turning `cli` off is a real boundary for an organization's own deployme
 knowing what it is not: anyone who can run `ghostlight call` on that machine can also start the MCP
 connector by hand, so this narrows a deployment rather than containing a determined local user.
 
-## Payload-free audit and history
+## Content-minimized audit and history
 
 The orchestrator appends one JSONL record per terminal invocation. By default the file is
 `audit.jsonl` beside the runtime discovery file; `GHOSTLIGHT_AUDIT_FILE` selects an explicit path.
 
 A record carries three kinds of thing: identifiers (opaque invocation, workspace, and authority
 ids), the decision (capability, allowed, stable reason, terminal status, effect class), and
-content-free measurements of what the action did (a Ghostlight-authored sentence, how long it took,
-the host it landed on, and a count or capture size).
+content-minimized facts about what the action did (a Ghostlight-authored sentence, how long it took,
+the governed host it attempted or landed on, and a count or capture size). By default an action
+sentence may include one normalized, bounded accessible name for the element actually used.
 
-The landed host is the only page-derived value, and it is deliberate: it answers where the agent
-went and is already visible in the user's own tab strip. Paths, queries, fragments, page text,
-selectors, target labels, form values, file paths, scripts, screenshots, and dialog text never
-appear. The exact field list lives in one place, [`siem-integration.md`](siem-integration.md), so
-that it cannot drift from the code in three documents at once.
+The governed host and an optional bounded action-target name are the only page-derived text. They
+answer where the agent went and which visible control it actually used. Set
+`preserve_target_names: false` in any authority layer to retain only the closed noun, such as
+`button`. Paths, queries, fragments, arbitrary page text, selectors, target handles, form values,
+file paths, scripts, screenshots, and dialog text never appear. The exact field list lives in one place,
+[`siem-integration.md`](siem-integration.md), so that it cannot drift from the code in three
+documents at once.
 
 The workbench reconstructs at most 500 newest terminal facts from this audit for History. Search
-and notifications operate on the same content-free projection. Deleting or rotating the audit is
+and notifications operate on the same content-minimized projection. Deleting or rotating the audit is
 an external retention decision; it does not alter authority.
 
 ## Validate a policy
