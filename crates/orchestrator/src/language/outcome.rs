@@ -92,6 +92,8 @@ pub enum Outcome {
     /// A recording was encoded as an animated GIF.
     RecordingSaved {
         frames: usize,
+        /// Frames the recording captured, which exceeds `frames` when fidelity was traded to fit.
+        captured: usize,
         bytes: usize,
         attached: bool,
     },
@@ -233,19 +235,21 @@ impl Outcome {
             ),
             Self::RecordingSaved {
                 frames,
+                captured,
                 bytes,
                 attached: false,
             } => format!(
-                "Saved {frames} recorded {} as an animated GIF of {bytes} bytes.",
-                if *frames == 1 { "frame" } else { "frames" }
+                "Saved {} as an animated GIF of {bytes} bytes.",
+                of_captured(*frames, *captured)
             ),
             Self::RecordingSaved {
                 frames,
+                captured,
                 bytes,
                 attached: true,
             } => format!(
-                "Prepared {frames} recorded {} as an animated GIF of {bytes} bytes and dispatched it to the page target without verified acceptance.",
-                if *frames == 1 { "frame" } else { "frames" }
+                "Prepared {} as an animated GIF of {bytes} bytes and dispatched it to the page target without verified acceptance.",
+                of_captured(*frames, *captured)
             ),
             Self::RecordingDiscarded => "Discarded the memory-only recording bytes.".into(),
         }
@@ -573,6 +577,17 @@ impl Observed {
 
 fn place<'a>(host: &'a Option<String>, fallback: &'static str) -> &'a str {
     host.as_deref().unwrap_or(fallback)
+}
+
+/// "14 frames", or "40 of 118 frames" when fidelity was traded to fit the output bound.
+///
+/// Saying only the kept count would quietly overstate the replay; saying both is how a caller
+/// learns that a long recording was thinned rather than truncated.
+fn of_captured(kept: usize, captured: usize) -> String {
+    if kept == captured {
+        return counted(kept, "frame", "frames");
+    }
+    format!("{kept} of {}", counted(captured, "frame", "frames"))
 }
 
 fn counted(count: usize, singular: &str, plural: &str) -> String {

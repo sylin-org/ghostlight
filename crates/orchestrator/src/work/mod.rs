@@ -2718,11 +2718,15 @@ impl ApplicationExecutor {
             }
         };
 
-        let gif = match recording_gif::encode(&frames) {
-            Ok(bytes) => bytes,
+        // A long recording is thinned to fit the output bound rather than refused, so a caller
+        // that has already done the work always gets a replay of it.
+        let rendered = match recording_gif::render(&frames) {
+            Ok(rendered) => rendered,
             Err(error) => return self.recording_export_failure(context, &error.to_string()),
         };
-        let frame_count = frames.len();
+        let gif = rendered.bytes;
+        let frame_count = rendered.kept;
+        let captured_count = rendered.captured;
         let byte_count = gif.len();
         if let Some((selected, target, write_decision)) = target {
             let size = u64::try_from(byte_count).expect("bounded GIF length fits u64");
@@ -2753,6 +2757,7 @@ impl ApplicationExecutor {
                     false,
                     Outcome::RecordingSaved {
                         frames: frame_count,
+                        captured: captured_count,
                         bytes: byte_count,
                         attached: true,
                     },
@@ -2792,6 +2797,7 @@ impl ApplicationExecutor {
                 true,
                 Outcome::RecordingSaved {
                     frames: frame_count,
+                    captured: captured_count,
                     bytes: byte_count,
                     attached: false,
                 },

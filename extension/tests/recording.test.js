@@ -173,3 +173,32 @@ test("every active terminal path notifies the Chrome seam exactly once", () => {
   interrupted.recording.interruptTab(9, "browser_detached");
   assert.deepEqual(interrupted.stops, [{ tabId: 9, recordingId: interruptedId, reason: "browser_detached" }]);
 });
+
+test("the byte bound thins fidelity and never truncates the recorded span", () => {
+  const h = harness();
+  const id = h.recording.start("workspace_a", 7).started.recording_id;
+  // Each distinct frame is ~1.5 MB decoded, so the fourth cannot fit the 5 MB recording bound.
+  const big = (marker) => marker.repeat(2_000_000).slice(0, 2_000_000);
+  let clock = 1_000;
+  for (const marker of ["A", "B", "C", "D", "E", "F"]) {
+    clock += 200;
+    h.recording.append(7, big(marker), "screencast", clock);
+  }
+  const held = h.recording.read("workspace_a", id);
+
+  // Coverage is what a replay promises. Freezing at the bound would have ended the recording at
+  // the third frame and silently omitted everything the caller did afterwards.
+  assert.equal(h.stops.length, 0, "hitting the byte bound must not stop the recording");
+  assert.ok(held.frames.length >= 2, "a thinned recording still has frames");
+  assert.ok(held.frames.length < 6, "a thinned recording dropped some fidelity");
+  assert.equal(
+    held.frames.at(-1).data.slice(0, 1),
+    "F",
+    "the last thing that happened must survive thinning"
+  );
+  assert.equal(
+    held.frames.reduce((total, frame) => total + frame.duration_ms, 0) >= 800,
+    true,
+    "dropped frames fold their time into the frame before them, so the span is preserved"
+  );
+});

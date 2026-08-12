@@ -125,6 +125,9 @@ Write-Host ('{0,-16} {1,-10} {2}' -f '----', '------', '-------------')
 # The frame is not decoration: recording is bounded, and a large viewport fails to encode.
 $tab = (Step 'open' 'browser_navigate' @{ url = $Url; new_tab = $true }).facts.tab
 $null = Step 'frame' 'browser_window' @{ tab = $tab; action = 'resize'; width = $Width; height = $Height }
+# The whole story is recorded. Both bounds trade fidelity rather than coverage now: the extension
+# thins retained frames at its byte bound, and the encoder thins again to fit the output bound.
+$null = Step 'record start' 'browser_record' @{ action = 'start'; tab = $tab }
 
 # 2. Inspect the workspace, hover the foil, rotate the card, zoom the defect.
 $controls = (Step 'inspect' 'browser_inspect' @{ tab = $tab; scope = 'controls'; max_items = 200 }).facts.items
@@ -135,10 +138,6 @@ $null = Step 'zoom defect' 'browser_window' @{ tab = $tab; action = 'zoom'; perc
 $null = Step 'zoom back' 'browser_window' @{ tab = $tab; action = 'zoom'; percent = 100 }
 
 # 3. Record the failed criteria, explain the rejection, and move the ticket.
-# Recording starts here rather than at the top. It is bounded to 5 MB of retained frames, and this
-# composition costs roughly 230 KB per encoded frame, so a whole-story replay cannot be produced --
-# see the note beside this script. The revision moment is the part worth replaying anyway.
-$null = Step 'record start' 'browser_record' @{ action = 'start'; tab = $tab }
 $null = Step 'qa drift' 'browser_click' @{ tab = $tab; target = (Target $controls 'checkbox' 'Foil registration drift') }
 $null = Step 'qa safe-area' 'browser_click' @{ tab = $tab; target = (Target $controls 'checkbox' 'Border safe-area collision') }
 $null = Step 'reason' 'browser_type_text' @{ tab = $tab; target = (Target $controls 'textbox' 'Rejection reason'); text = $Rejection }
@@ -151,9 +150,7 @@ $null = Step 'drag ticket' 'browser_drag' @{
 # 4. Read the page's own console and network evidence, then wait for the corrected proof.
 $null = Step 'diagnose' 'browser_diagnose' @{ tab = $tab; source = 'both'; detail = 'all'; limit = 20 }
 $null = Step 'await rev B' 'browser_wait' @{ tab = $tab; condition = 'text_present'; value = 'Revision B ready' }
-# Freeze it here. Save can be prepared repeatedly until retention expires, so beat seven still
-# attaches this replay at the end of the story.
-$null = Step 'record stop' 'browser_record' @{ action = 'stop' }
+
 
 # 5. Capture the corrected proof, attach it, finish the QA checks, and complete the packet.
 $null = Step 'capture' 'browser_screenshot' @{ tab = $tab } @('--output', $shot)

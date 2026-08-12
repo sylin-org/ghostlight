@@ -35,8 +35,57 @@ pub enum GifError {
     Encode(String),
 }
 
-/// Encode captured JPEGs into one repeatable animated GIF.
-pub fn encode(frames: &[PhysicalRecordingFrame]) -> Result<Zeroizing<Vec<u8>>, GifError> {
+/// How a recording was rendered, including any fidelity traded to fit the output bound.
+#[derive(Debug)]
+pub struct Rendered {
+    /// The encoded GIF.
+    pub bytes: Zeroizing<Vec<u8>>,
+    /// Frames kept in the encoded animation.
+    pub kept: usize,
+    /// Frames the recording actually captured.
+    pub captured: usize,
+}
+
+/// Encode captured JPEGs into one repeatable animated GIF that fits the output bound.
+///
+/// A bounded recorder trades fidelity, never coverage. Rather than refuse a long recording, this
+/// drops intermediate frames -- always keeping the first and last, so the animation still spans the
+/// work it recorded -- until the encoding fits. Returning something honest beats returning nothing
+/// after the caller has already done the work.
+pub fn render(frames: &[PhysicalRecordingFrame]) -> Result<Rendered, GifError> {
+    let captured = frames.len();
+    let mut kept: Vec<&PhysicalRecordingFrame> = frames.iter().collect();
+    loop {
+        match encode_all(&kept) {
+            Ok(bytes) => {
+                return Ok(Rendered {
+                    bytes,
+                    kept: kept.len(),
+                    captured,
+                })
+            }
+            Err(GifError::TooLarge) if kept.len() > 2 => kept = thinned(&kept),
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Halve a frame list, keeping the first and last so the span is preserved.
+fn thinned<'a>(frames: &[&'a PhysicalRecordingFrame]) -> Vec<&'a PhysicalRecordingFrame> {
+    let last = frames.len() - 1;
+    let mut kept: Vec<&PhysicalRecordingFrame> = frames
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| index % 2 == 0 || *index == last)
+        .map(|(_, frame)| *frame)
+        .collect();
+    if kept.len() == frames.len() {
+        kept.pop();
+    }
+    kept
+}
+
+fn encode_all(frames: &[&PhysicalRecordingFrame]) -> Result<Zeroizing<Vec<u8>>, GifError> {
     let Some(first) = frames.first() else {
         return Err(GifError::Empty);
     };
@@ -255,7 +304,7 @@ mod tests {
 
     use ghostlight_bridge::browser::{PhysicalRecordingFrame, RecordingFrameKind};
 
-    use super::{delay_centiseconds, encode, BoundedOutput, GifError};
+    use super::{delay_centiseconds, render, thinned, BoundedOutput, GifError};
 
     fn frame(data: &str, duration_ms: u64) -> PhysicalRecordingFrame {
         PhysicalRecordingFrame {
@@ -268,14 +317,56 @@ mod tests {
 
     #[test]
     fn empty_recording_is_decisive() {
-        assert!(matches!(encode(&[]), Err(GifError::Empty)));
+        assert!(matches!(render(&[]), Err(GifError::Empty)));
+    }
+
+    #[test]
+    fn thinning_halves_a_recording_and_always_keeps_its_ends() {
+        let frames: Vec<_> = (0..9).map(|index| frame("x", index)).collect();
+        let all: Vec<_> = frames.iter().collect();
+
+        let once = thinned(&all);
+        assert_eq!(once.len(), 5);
+        assert_eq!(
+            once.first().unwrap().duration_ms,
+            0,
+            "the start must survive"
+        );
+        assert_eq!(once.last().unwrap().duration_ms, 8, "the end must survive");
+
+        // Repeated thinning converges rather than stalling, which is what lets the encoder loop
+        // terminate instead of spinning on a list it cannot shrink.
+        let mut kept = all;
+        for _ in 0..8 {
+            let next = thinned(&kept);
+            assert!(next.len() < kept.len(), "each pass must make progress");
+            kept = next;
+            if kept.len() <= 2 {
+                break;
+            }
+        }
+        assert_eq!(kept.len(), 2);
+        assert_eq!(
+            kept.last().unwrap().duration_ms,
+            8,
+            "the end survives every pass"
+        );
+    }
+
+    #[test]
+    fn an_even_list_still_shrinks() {
+        // Keeping "every other index, plus the last" leaves an even list unchanged, which would
+        // spin forever. The floor case has to drop one deliberately.
+        let frames: Vec<_> = (0..4).map(|index| frame("x", index)).collect();
+        let all: Vec<_> = frames.iter().collect();
+        assert!(thinned(&all).len() < all.len());
     }
 
     #[test]
     fn invalid_jpeg_is_decisive() {
         let frame = frame("AQID", 1_000);
         assert!(matches!(
-            encode(&[frame]),
+            render(&[frame]),
             Err(GifError::Decode { index: 0, .. })
         ));
     }

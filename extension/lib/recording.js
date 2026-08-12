@@ -236,6 +236,15 @@
       }
       const last = state.frames.at(-1);
       if (last?.data === data) return false;
+      // A bounded recorder trades fidelity, never coverage. Freezing here would end the recording
+      // at the byte bound, so the replay would silently omit everything after it. Thinning keeps
+      // the whole span and halves the effective sample rate instead.
+      while (state.frames.length >= 3
+        && (state.frames.length >= MAX_FRAMES
+          || state.bytesHeld + size > MAX_RECORDING_BYTES
+          || globalBytes + size > MAX_GLOBAL_BYTES)) {
+        thin(state);
+      }
       const fits = state.frames.length < MAX_FRAMES
         && state.bytesHeld + size <= MAX_RECORDING_BYTES
         && globalBytes + size <= MAX_GLOBAL_BYTES;
@@ -247,6 +256,26 @@
       state.bytesHeld += size;
       globalBytes += size;
       return true;
+    }
+
+    // Drop every other intermediate frame, keeping the first and last, and fold each dropped
+    // frame's duration into the one before it so the animation still spans the same work.
+    function thin(state) {
+      const kept = [];
+      for (let index = 0; index < state.frames.length; index += 1) {
+        const frame = state.frames[index];
+        const last = index === state.frames.length - 1;
+        if (index % 2 === 0 || last) {
+          kept.push(frame);
+          continue;
+        }
+        const previous = kept.at(-1);
+        if (previous) previous.duration_ms += frame.duration_ms;
+        state.bytesHeld -= decodedBytes(frame.data);
+        globalBytes -= decodedBytes(frame.data);
+      }
+      state.thinned = true;
+      state.frames = kept;
     }
 
     function noteUrl(tabId, value) {
