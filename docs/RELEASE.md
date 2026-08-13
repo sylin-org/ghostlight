@@ -47,11 +47,22 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 npm test --prefix extension
+cargo audit
+cargo deny check licenses bans sources
 cargo build --workspace --target-dir .target-ghostlight-1.0
 node tests/process-journey.mjs
 node --check crates/orchestrator/ui/app.js
 node --check tests/workbench-preview-server.mjs
+pwsh -NoProfile -File scripts/check-public-surfaces.ps1
+pwsh -NoProfile -File scripts/package-extension.ps1
 ```
+
+CI runs the Rust, extension, and process tiers on Windows, macOS, and Linux. The extension artifact
+uses a fixed file order and timestamp, so identical input produces identical ZIP bytes. The ordinary
+public truth check is offline and deterministic. `scripts/check-public-surfaces.ps1 -Online` is a manual
+reconciliation against GitHub, npm, the Chrome update feed, the official MCP Registry, and the
+canonical website; a transient external outage does not make an otherwise valid source commit
+fail CI.
 
 The completed feature diff must remain empty under `crates/mcp-connector`,
 `crates/browser-connector`, `crates/bridge`, and `extension` for ADR-0102.

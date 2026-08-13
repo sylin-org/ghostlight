@@ -13,23 +13,18 @@ last fetch.
 The repository carries exactly two branches, `main` and `dev`, as of 2026-08-13. The topology is
 linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 
-- `dev` is the working branch and the 1.0 source candidate, at `a1be5295`. Workspace version
-  `1.0.0`. It absorbed `ghostlight-1.0`, which was a fast-forward and has been retired.
-- `main` carries the 0.8 line at `0116feca`, 58 commits behind `dev`. Promoting it is a deliberate
-  release decision, not routine sync, and it has a prerequisite: **the 1.0 rebuild (`bf4f4724`)
-  removed `.github/workflows/` and `.github/dependabot.yml`, which still exist on `main`.**
-  Fast-forwarding `main` as it stands would silently stop CI, stop the Pages job that publishes
-  `site/` (the landing and install pages the extension's first-run tab and the README link to),
-  stop tag-triggered release packaging, and stop dependency updates. The 0.8 `ci.yml` cannot be
-  copied across unchanged: it invokes `scripts/check-public-surfaces.ps1`, `tests/extension/`,
-  `tests/e2e/run-smoke.mjs`, `deny.toml`, and `cargo run -p ghostlight-lightbox`, none of which
-  exist in the 1.0 tree, though `packaging/npm` and `packaging/mcpb` survive. Port the workflows
-  onto `dev` first, then promote.
+- `dev` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`. It absorbed
+  `ghostlight-1.0`, which was a fast-forward and has been retired.
+- `main` carries the 0.8 line at `0116feca`. Promoting it is a deliberate release decision, not
+  routine sync. The 1.0 line now carries adapted three-platform source, extension, process, and
+  supply-chain CI; a manual Pages deployment; and bounded monthly dependency updates targeting
+  `dev`. The tag-triggered native-package release workflow remains owed until package lifecycle is
+  implemented and tested. Do not promote `dev` before that workflow exists.
 - No pull requests are open. Thirteen Dependabot bumps against the 0.8 line were closed as obsolete
   on 2026-08-13: the 1.0 tree either already carried the proposed version or had dropped the
   package outright (`clap`, `rustls`, `webpki-roots`, `color_quant`). Dependency updates are paused
-  on `main` with `open-pull-requests-limit: 0` rather than by deleting the configuration; restore
-  the limits when `main` moves to the 1.0 line.
+  on `main` with `open-pull-requests-limit: 0` rather than by deleting the configuration. The 1.0
+  config targets `dev`, runs monthly, groups non-major updates, and caps open work per ecosystem.
 - The pre-1.0 worktree snapshot is preserved as the annotated tag `archive/0.9-pre-1.0`
   (`f5d43768`), pushed to the remote. It replaced a local-only branch that existed on one machine.
   It is history, never implementation authority for the 1.0 tree.
@@ -38,6 +33,12 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
   1,355 ordinary test declarations and 34 source-enumerated Lightbox scenarios; and the dated
   publication observation corrects WinGet to merged while recording Glama drift. The old ledger's
   unexplained claim of 37 Lightbox scenarios is preserved as a discrepancy, not repeated as fact.
+- Release safeguards are active again on `dev`: Rust and extension CI cover all three operating
+  systems; process journeys cover all three; dependency licenses, sources, wildcards, and
+  advisories are gated; source and observed-public versions are checked separately; and the store
+  extension package is built from an explicit runtime allowlist. The online public check passed
+  against GitHub, npm, Chrome, the official MCP Registry, and sylin.org on 2026-08-13. These local
+  workflow files have not run on GitHub until they are pushed.
 
 ## Implemented
 
@@ -363,8 +364,6 @@ Re-run on 2026-08-13 against the current tree:
   action tagging, and perceptual palettes are still unbuilt. Output size is no longer the pressure
   it was: a browser-local save may spend 16 MiB, and anything over its budget is thinned rather
   than refused.
-- The 13 open Dependabot pull requests target the 0.8 line and need reconciling against the 1.0
-  rebuild before they can land.
 - `origin/main` still carries 0.8. Deciding when the 1.0 line is promoted is a release decision.
 - ADR-0084's complete browser-window attention routing remains deferred; only the narrow Chromium
   slice is implemented.

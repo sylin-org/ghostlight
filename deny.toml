@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+#
+# Advisory scanning remains a separate `cargo audit` job. This file protects the source,
+# license, wildcard, and duplicate-dependency boundaries without making expected transitive
+# duplication a release blocker.
+
+[graph]
+all-features = true
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+private = { ignore = true }
+
+[bans]
+# Tauri's cross-platform graph deliberately carries parallel GTK, TOML, and platform-support
+# generations. Reporting the full graph on every run is noise rather than an actionable gate.
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

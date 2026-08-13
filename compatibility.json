@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "chromeAdapters": [
+    {
+      "adapterVersion": "0.6.0",
+      "minimumServiceVersion": "0.6.0",
+      "maximumServiceVersion": "0.7.3"
+    },
+    {
+      "adapterVersion": "0.7.1",
+      "minimumServiceVersion": "0.7.1",
+      "maximumServiceVersion": "0.7.3"
+    },
+    {
+      "adapterVersion": "0.7.2",
+      "minimumServiceVersion": "0.7.1",
+      "maximumServiceVersion": "0.7.3"
+    },
+    {
+      "adapterVersion": "0.8.0",
+      "serviceVersionBlock": "0.8"
+    },
+    {
+      "adapterVersion": "1.0.0",
+      "serviceVersionBlock": "1.0"
+    }
+  ]
+}
