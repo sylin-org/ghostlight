@@ -968,6 +968,117 @@ pub struct ConfigurationSummary {
     pub runtime_control_file_configured: bool,
 }
 
+/// Every place the workbench is willing to send someone.
+///
+/// The surface names a destination; the orchestrator owns the address. A closed vocabulary is the
+/// difference between "the workbench can open a link" and "the workbench can open any URL": there
+/// is no free string to smuggle a destination through, so a page that is not on this list cannot
+/// be reached from here however the surface is coaxed.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkbenchDestination {
+    /// The Ghostlight project page.
+    Home,
+    /// The live demo stage.
+    Demo,
+    /// The guided "which mode fits me" aid.
+    DecisionAid,
+    /// The source repository.
+    Source,
+    /// Installing Ghostlight and connecting a client.
+    InstallGuide,
+    /// Writing and applying a governance manifest.
+    GovernanceGuide,
+    /// Driving Ghostlight from a script or shell.
+    ScriptingGuide,
+    /// Shipping the audit trail into a SIEM.
+    AuditGuide,
+    /// What the product promises, and how each claim is checked.
+    TrustCenter,
+    /// Every architectural decision, and why it was taken.
+    DecisionRecords,
+    /// The licensing split in plain language.
+    LicensingGuide,
+    /// The rest of the Sylin toolkit.
+    SylinTools,
+}
+
+impl WorkbenchDestination {
+    /// Resolve the exact address. Every one of these was checked to resolve when it was added.
+    ///
+    /// Documentation points at `dev` rather than `main` deliberately: `main` still carries the 0.8
+    /// line, so a `main` link would answer questions about a product this window is not running.
+    #[must_use]
+    pub const fn url(self) -> &'static str {
+        match self {
+            Self::Home => "https://sylin.org/ghostlight/",
+            Self::Demo => "https://sylin.org/ghostlight/demo/",
+            Self::DecisionAid => "https://sylin.org/ghostlight/decision-aid/",
+            Self::Source => "https://github.com/sylin-org/ghostlight",
+            Self::InstallGuide => {
+                "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/installation.md"
+            }
+            Self::GovernanceGuide => {
+                "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/governance-configuration.md"
+            }
+            Self::ScriptingGuide => {
+                "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/scripting.md"
+            }
+            Self::AuditGuide => {
+                "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/siem-integration.md"
+            }
+            Self::TrustCenter => {
+                "https://github.com/sylin-org/ghostlight/blob/dev/docs/trust/README.md"
+            }
+            Self::DecisionRecords => {
+                "https://github.com/sylin-org/ghostlight/blob/dev/docs/adr/README.md"
+            }
+            Self::LicensingGuide => {
+                "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/licensing.md"
+            }
+            Self::SylinTools => "https://sylin.org/tools/",
+        }
+    }
+
+    /// The full vocabulary, so a new destination cannot be added without the guards seeing it.
+    #[must_use]
+    pub const fn all() -> [Self; 12] {
+        [
+            Self::Home,
+            Self::Demo,
+            Self::DecisionAid,
+            Self::Source,
+            Self::InstallGuide,
+            Self::GovernanceGuide,
+            Self::ScriptingGuide,
+            Self::AuditGuide,
+            Self::TrustCenter,
+            Self::DecisionRecords,
+            Self::LicensingGuide,
+            Self::SylinTools,
+        ]
+    }
+
+    /// The token the surface uses to name this destination.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Home => "home",
+            Self::Demo => "demo",
+            Self::DecisionAid => "decision_aid",
+            Self::Source => "source",
+            Self::InstallGuide => "install_guide",
+            Self::GovernanceGuide => "governance_guide",
+            Self::ScriptingGuide => "scripting_guide",
+            Self::AuditGuide => "audit_guide",
+            Self::TrustCenter => "trust_center",
+            Self::DecisionRecords => "decision_records",
+            Self::LicensingGuide => "licensing_guide",
+            Self::SylinTools => "sylin_tools",
+        }
+    }
+}
+
 /// Explicit user-facing runtime actions.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]

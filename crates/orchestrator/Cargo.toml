@@ -17,6 +17,7 @@ sha2.workspace = true
 thiserror.workspace = true
 tauri = { version = "=2.11.5", features = ["image-png", "tray-icon"] }
 tauri-plugin-notification = "=2.3.3"
+tauri-plugin-opener = "=2.5.4"
 toml_edit = "=0.22.27"
 url.workspace = true
 uuid.workspace = true

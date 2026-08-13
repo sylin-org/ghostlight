@@ -8,13 +8,14 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::install::{HarnessAction, HarnessActionResult, HarnessSummary};
 use crate::service::ServiceHost;
 use crate::workbench::{
-    SearchHit, WorkbenchEvent, WorkbenchEventSink, WorkbenchFacade, WorkbenchIntentResult,
-    WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
-    WorkbenchRuntimeIntent, WorkbenchSnapshot,
+    SearchHit, WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink, WorkbenchFacade,
+    WorkbenchIntentResult, WorkbenchNotification, WorkbenchPresentationError,
+    WorkbenchPresentationPort, WorkbenchRuntimeIntent, WorkbenchSnapshot,
 };
 
 const MAIN_WINDOW: &str = "main";
@@ -73,6 +74,9 @@ pub fn run() -> Result<()> {
     let setup_workbench = workbench.clone();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        // Registered in Rust only. The capability file grants the webview no opener permission,
+        // so the surface cannot reach this except through the closed command below.
+        .plugin(tauri_plugin_opener::init())
         .manage(DesktopState { workbench })
         .invoke_handler(tauri::generate_handler![
             workbench_snapshot,
@@ -81,6 +85,7 @@ pub fn run() -> Result<()> {
             refresh_harnesses,
             manage_harness,
             test_notification,
+            open_destination,
             quit_ghostlight
         ])
         .on_window_event(|window, event| {
@@ -262,6 +267,17 @@ fn test_notification(state: State<'_, DesktopState>) -> Result<(), String> {
     state
         .workbench
         .test_notification()
+        .map_err(|error| error.to_string())
+}
+
+/// Open one of the destinations Ghostlight is willing to point at.
+///
+/// The surface sends a name from a closed vocabulary, never an address, so this cannot be talked
+/// into opening something the product did not choose.
+#[tauri::command]
+fn open_destination(destination: WorkbenchDestination, app: AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_url(destination.url(), None::<&str>)
         .map_err(|error| error.to_string())
 }
 
