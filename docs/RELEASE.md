@@ -83,6 +83,11 @@ For Windows, macOS, and Linux:
 7. Uninstall and prove only Ghostlight-owned files, registrations, desktop entries, and selected
    harness entries are removed. Record the audit-retention choice.
 
+Windows release binaries statically link the Microsoft Visual C++ runtime through
+`.cargo/config.toml`. The clean-machine proof must still start every packaged executable on a
+machine without a separately installed Visual C++ Redistributable; the build flag is a prevention,
+not a substitute for the journey.
+
 The manual `Build release candidate` workflow builds unsigned Windows NSIS, Linux Debian, and
 macOS application/disk-image candidates from one locked workspace build. It stages the two
 connectors as Tauri sidecars, inspects every native package for the exact three-executable sibling

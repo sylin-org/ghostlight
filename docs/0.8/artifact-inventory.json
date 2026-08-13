@@ -5,8 +5,8 @@
   "counts": {
     "total": 810,
     "byCurrentState": {
-      "absent": 279,
-      "retained-evolved": 86,
+      "absent": 278,
+      "retained-evolved": 87,
       "retained-identical": 445
     }
   },
@@ -17,8 +17,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "052bf075b750e339dfdee3452e3a6dba7dac0e6b",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "908ba0e2acd10297576ac4faa2ae81eac2f813d6"
     },
     {
       "path": ".gitattributes",
@@ -3042,7 +3042,7 @@
       "historicalType": "blob",
       "historicalBlob": "2e1edc340e68f383aa83e2ac3fd0690f0a1a5da6",
       "currentState": "retained-evolved",
-      "currentBlob": "afc737b2a67e886e70696f0ebc5b99e720e57c6e"
+      "currentBlob": "fb232e279bf346a31c23f56f6e908867d28b5396"
     },
     {
       "path": "docs/research/00-synthesis-and-decisions.md",

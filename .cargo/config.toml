@@ -1,0 +1,7 @@
+# Statically link the Microsoft Visual C++ runtime into Windows release binaries.
+#
+# A clean Windows machine may not have the Visual C++ Redistributable. Keeping the runtime inside
+# each Ghostlight executable prevents a first-launch VCRUNTIME140.dll failure in native packages
+# and alternative distribution channels. Other targets are unaffected.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

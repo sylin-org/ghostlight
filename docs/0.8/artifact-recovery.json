@@ -8,8 +8,8 @@
       "behavior-dispositioned": 97,
       "historical-implementation-only": 162,
       "redesign-after-signed-candidate": 11,
-      "restore-lean": 4,
-      "retained-evolved": 86,
+      "restore-lean": 3,
+      "retained-evolved": 87,
       "retained-identical": 445,
       "retired-low-value-conductor": 1,
       "reviewed-repository-history": 1,
@@ -20,9 +20,9 @@
   "entries": [
     {
       "path": ".cargo/config.toml",
-      "currentState": "absent",
-      "treatment": "restore-lean",
-      "reason": "Restore the clean-Windows static CRT lesson and prove it through package installation."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".gitattributes",
