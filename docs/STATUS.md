@@ -195,11 +195,27 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 
 Re-run on 2026-08-13 against the current tree:
 
+The complete dated evidence and explicit NOT RUN release gates are in
+[`testing/release-readiness-2026-08-13.md`](testing/release-readiness-2026-08-13.md). The result is a
+source-gate pass, not release approval.
+
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
 - `cargo test --workspace`: 184 Rust tests -- 149 in the orchestrator library, its launch-mode
   binary test, 30 in the shared bridge, and 4 in the MCP connector.
 - `npm test --prefix extension`: 99 extension tests.
+- The four executable process/workbench journeys passed from a clean isolated target directory,
+  all 105 JavaScript files parsed, dependency license/source/bans checks passed, the historical
+  inventory regenerated without drift, and the 1,389-entry recovery matrix passed.
+- The deterministic 1.0 extension ZIP has SHA-256
+  `8bc54c93e454a74fd85585af9a06e51381cd7a949f7a9dd58013b9c145dd943b`. The final local unsigned
+  Windows NSIS candidate contains the exact three sibling executables and has SHA-256
+  `9f00f60eab0aa7121b28ee223c269e6acf7e37dd0d1c40fc07e239252f4e7074`. Neither artifact is
+  published or release-approved.
+- `cargo audit` exited zero but reported 17 residual transitive warnings in the Linux Tauri/GTK3
+  and Tauri URL-pattern graphs, including the `glib` iterator unsoundness advisory. The dated audit
+  records the dependency paths and requires a recheck before Linux signing; do not call this scan
+  warning-free.
 - Plurality contracts prove two browser identities stay connected at once and each answers its own
   request, a second connection from one identity collapses onto the first with the replaced stream
   reaching end-of-stream rather than hanging open, attention moves to front without duplicates and
