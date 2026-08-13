@@ -27,15 +27,26 @@ pub struct RuntimeEndpoint {
 
 /// Resolve the runtime endpoint beside the active repo-built executable.
 pub fn runtime_file() -> PathBuf {
-    if let Some(path) = env::var_os("GHOSTLIGHT_RUNTIME_FILE") {
-        return PathBuf::from(path);
-    }
-    if let Ok(executable) = env::current_exe() {
-        if let Some(directory) = executable.parent() {
-            return directory.join("ghostlight-runtime.json");
-        }
-    }
-    env::temp_dir().join("ghostlight-runtime.json")
+    runtime_file_from(
+        env::var_os("GHOSTLIGHT_RUNTIME_FILE").map(PathBuf::from),
+        env::current_exe().ok(),
+        &env::temp_dir(),
+    )
+}
+
+fn runtime_file_from(
+    explicit: Option<PathBuf>,
+    executable: Option<PathBuf>,
+    temporary_directory: &Path,
+) -> PathBuf {
+    explicit
+        .or_else(|| {
+            executable
+                .as_deref()
+                .and_then(Path::parent)
+                .map(|directory| directory.join("ghostlight-runtime.json"))
+        })
+        .unwrap_or_else(|| temporary_directory.join("ghostlight-runtime.json"))
 }
 
 /// Read the running service endpoint.
@@ -84,7 +95,9 @@ pub fn write_runtime(path: &Path, endpoint: &RuntimeEndpoint) -> io::Result<()> 
 mod tests {
     use std::fs;
 
-    use super::{read_runtime, write_runtime, RuntimeEndpoint};
+    use std::path::{Path, PathBuf};
+
+    use super::{read_runtime, runtime_file_from, write_runtime, RuntimeEndpoint};
 
     fn endpoint(port: u16) -> RuntimeEndpoint {
         RuntimeEndpoint {
@@ -111,5 +124,29 @@ mod tests {
         write_runtime(&path, &endpoint(42000)).unwrap();
         assert_eq!(read_runtime(&path).unwrap(), endpoint(42000));
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn sibling_processes_converge_without_linux_session_environment() {
+        let installation = Path::new("/opt/ghostlight");
+        let expected = installation.join("ghostlight-runtime.json");
+        for executable in [
+            "ghostlight",
+            "ghostlight-mcp-connector",
+            "ghostlight-browser-connector",
+        ] {
+            assert_eq!(
+                runtime_file_from(None, Some(installation.join(executable)), Path::new("/tmp")),
+                expected
+            );
+        }
+        assert_eq!(
+            runtime_file_from(
+                Some(PathBuf::from("/explicit/runtime.json")),
+                None,
+                Path::new("/tmp")
+            ),
+            PathBuf::from("/explicit/runtime.json")
+        );
     }
 }

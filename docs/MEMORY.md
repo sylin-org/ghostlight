@@ -118,7 +118,9 @@ Every one of these cost something to learn.
   only by exact executable path, never by image name.
 - **The 0.8 distribution and trust records are active inputs, not a working 1.0 pipeline.** Harvest
   their tests, platform facts, public-state model, and delivery safeguards, then adapt the machinery
-  to current boundaries before claiming a 1.0 artifact exists.
+  to current boundaries before claiming a 1.0 artifact exists. Keep a machine-checked disposition
+  for every harvested behavior group and process scenario; never use a smaller raw test count as a
+  claim of equivalent coverage.
 
 ## Where to look
 

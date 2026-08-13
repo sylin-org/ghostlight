@@ -54,6 +54,7 @@ node tests/process-journey.mjs
 node --check crates/orchestrator/ui/app.js
 node --check tests/workbench-preview-server.mjs
 pwsh -NoProfile -File scripts/check-public-surfaces.ps1
+pwsh -NoProfile -File scripts/check-0.8-recovery.ps1
 pwsh -NoProfile -File scripts/package-extension.ps1
 ```
 

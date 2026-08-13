@@ -959,6 +959,18 @@ mod tests {
     }
 
     #[test]
+    fn an_unreachable_managed_authority_fails_closed_from_cold_start() {
+        let path = temporary("missing-managed");
+        let _ = fs::remove_file(&path);
+        let facade = GovernanceFacade::new(None, Some(path));
+        let snapshot = facade.snapshot(&RequestRestrictions::default());
+        assert_eq!(
+            snapshot.authorize_capability(Capability::Read).reason,
+            ReasonCode::InvalidAuthority
+        );
+    }
+
+    #[test]
     fn snapshot_does_not_change_when_policy_file_changes() {
         let path = temporary("immutable");
         fs::write(&path, br#"{"version":1,"allow_capabilities":["read"]}"#).unwrap();

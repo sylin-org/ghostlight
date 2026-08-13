@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "sourceInventory": "docs/0.8/test-inventory.json",
+  "sourceRevision": "c01cc3276102471f3e18de2ae90cb90abf98ed88",
+  "categoryCoverage": [
+    {
+      "category": "browser-e2e",
+      "historicalEntries": 4,
+      "treatment": "live-gate",
+      "currentEvidence": ["tests/cli-powershell-journey.mjs", "docs/testing/linux-live-lifecycle.md"],
+      "remainingProof": "Run the packaged visible-browser baseline on Linux and a second Chromium family."
+    },
+    {
+      "category": "browser-hub",
+      "historicalEntries": 176,
+      "treatment": "reexpressed-current-owner",
+      "currentEvidence": ["crates/orchestrator/src/browser/mod.rs", "crates/orchestrator/src/workspace/mod.rs", "tests/process-journey.mjs"],
+      "remainingProof": "Run concurrent real-browser and restart journeys from the 1.0 acceptance matrix."
+    },
+    {
+      "category": "extension",
+      "historicalEntries": 177,
+      "treatment": "reexpressed-current-owner",
+      "currentEvidence": ["extension/tests", "docs/1.0/ACCEPTANCE.md"],
+      "remainingProof": "Run extension reload, browser restart, group reuse, and store-package journeys visibly."
+    },
+    {
+      "category": "governance",
+      "historicalEntries": 344,
+      "treatment": "reexpressed-with-superseded-network-mechanisms",
+      "currentEvidence": ["crates/orchestrator/src/governance/mod.rs", "crates/orchestrator/src/work/mod.rs", "docs/1.0/ACCEPTANCE.md"],
+      "remainingProof": "Exercise managed-file expiry, redirects, runtime holds, and local close interlock in a real browser."
+    },
+    {
+      "category": "installation",
+      "historicalEntries": 62,
+      "treatment": "reexpressed-with-supervisor-retired",
+      "currentEvidence": ["crates/orchestrator/src/install/mod.rs", "crates/orchestrator/src/install/native_host.rs", "crates/orchestrator/src/install/migration.rs", "scripts/check-native-package.ps1"],
+      "remainingProof": "Complete clean install, 0.8 upgrade, reboot, and uninstall on every native package."
+    },
+    {
+      "category": "integration",
+      "historicalEntries": 150,
+      "treatment": "reexpressed-at-1.0-contract-seams",
+      "currentEvidence": ["crates/orchestrator/src", "tests/process-journey.mjs", "tests/cli-journey.mjs"],
+      "remainingProof": "Complete the visible browser, package, and three-harness release matrix."
+    },
+    {
+      "category": "lightbox",
+      "historicalEntries": 5,
+      "treatment": "runner-superseded-scenarios-retained",
+      "currentEvidence": ["tests/process-journey.mjs", "tests/cli-powershell-journey.mjs", "docs/0.8/test-recovery.json"],
+      "remainingProof": "Keep process contracts blocking in CI and record native visible-browser evidence separately."
+    },
+    {
+      "category": "mcp-edge",
+      "historicalEntries": 101,
+      "treatment": "reexpressed-2025-protocol-2026-deferred",
+      "currentEvidence": ["crates/mcp-connector/src", "crates/bridge/src/service.rs", "tests/process-journey.mjs"],
+      "remainingProof": "Verify at least three public MCP harnesses against the signed candidate."
+    },
+    {
+      "category": "process-contract",
+      "historicalEntries": 34,
+      "treatment": "scenario-by-scenario-below",
+      "currentEvidence": ["tests/process-journey.mjs", "tests/cli-journey.mjs", "docs/testing/linux-live-lifecycle.md"],
+      "remainingProof": "Resolve every live-gate row before release; deferred and superseded rows are not candidate blockers."
+    },
+    {
+      "category": "supporting-unit",
+      "historicalEntries": 105,
+      "treatment": "behavior-retained-old-service-gif-and-recording-retired",
+      "currentEvidence": ["crates/orchestrator/src", "extension/lib/recording.js", "extension/tests/recording.test.js"],
+      "remainingProof": "No old private helper is restored solely to match a test count."
+    },
+    {
+      "category": "tool-execution",
+      "historicalEntries": 137,
+      "treatment": "reexpressed-through-language-work-and-outcome",
+      "currentEvidence": ["crates/orchestrator/src/language", "crates/orchestrator/src/work", "crates/orchestrator/src/language/outcome.rs"],
+      "remainingProof": "Run every 1.0 browser job journey with the exact 22-tool catalog."
+    },
+    {
+      "category": "transport",
+      "historicalEntries": 94,
+      "treatment": "reexpressed-with-uds-instance-and-supervisor-mechanisms-retired",
+      "currentEvidence": ["crates/bridge/src", "crates/browser-connector/src", "crates/mcp-connector/src/service_session.rs"],
+      "remainingProof": "Run Linux and macOS package demand-start and reconnect journeys."
+    }
+  ],
+  "processScenarios": [
+    {"name":"legacy-read-page-redaction","status":"reexpressed","evidence":"crates/orchestrator/src/governance/mod.rs"},
+    {"name":"legacy-late-extension-wait","status":"reexpressed","evidence":"tests/process-journey.mjs"},
+    {"name":"legacy-form-fill-parent-audit","status":"reexpressed","evidence":"crates/orchestrator/src/work/mod.rs"},
+    {"name":"legacy-console-index","status":"superseded","evidence":"docs/adr/0102-integrated-desktop-workbench.md"},
+    {"name":"legacy-console-assets","status":"superseded","evidence":"docs/adr/0102-integrated-desktop-workbench.md"},
+    {"name":"legacy-console-not-found","status":"superseded","evidence":"docs/adr/0102-integrated-desktop-workbench.md"},
+    {"name":"legacy-console-method-not-allowed","status":"superseded","evidence":"docs/adr/0102-integrated-desktop-workbench.md"},
+    {"name":"legacy-console-websocket-rejected","status":"superseded","evidence":"docs/adr/0102-integrated-desktop-workbench.md"},
+    {"name":"legacy-console-config-registry","status":"reexpressed","evidence":"crates/orchestrator/src/workbench/mod.rs"},
+    {"name":"legacy-console-dns-rebind-denied","status":"superseded","evidence":"crates/orchestrator/tauri.conf.json"},
+    {"name":"legacy-console-live-sessions","status":"reexpressed","evidence":"crates/orchestrator/src/workbench/mod.rs"},
+    {"name":"mcp-edge-two-client-multiplex","status":"reexpressed","evidence":"crates/orchestrator/src/workspace/mod.rs"},
+    {"name":"legacy-hub-kill-audit-fanout","status":"reexpressed","evidence":"crates/orchestrator/src/governance/mod.rs"},
+    {"name":"mcp-edge-reconnects-future-call","status":"reexpressed","evidence":"tests/process-journey.mjs"},
+    {"name":"service-survives-mcp-edge","status":"reexpressed","evidence":"crates/bridge/src/lifecycle.rs"},
+    {"name":"mcp-edge-anti-squat","status":"superseded","evidence":"docs/adr/0104-demand-start-single-engine-and-workbench-activation.md"},
+    {"name":"mcp-2026-exact-transcript","status":"deferred","evidence":"docs/1.0/ACCEPTANCE.md"},
+    {"name":"browser-relay-restart","status":"reexpressed","evidence":"tests/process-journey.mjs"},
+    {"name":"legacy-control-status","status":"reexpressed","evidence":"crates/orchestrator/src/workbench/mod.rs"},
+    {"name":"legacy-org-policy-boot","status":"reexpressed","evidence":"crates/orchestrator/src/governance/mod.rs"},
+    {"name":"legacy-org-policy-hot-reload","status":"reexpressed","evidence":"crates/orchestrator/src/governance/mod.rs"},
+    {"name":"mechanism_wire_new_new","status":"reexpressed","evidence":"crates/bridge/src/browser.rs"},
+    {"name":"mechanism_wire_new_service_old_extension","status":"reexpressed","evidence":"crates/orchestrator/src/browser/mod.rs"},
+    {"name":"mechanism_wire_old_service_new_extension","status":"reexpressed","evidence":"crates/orchestrator/src/browser/mod.rs"},
+    {"name":"managed-activation-local","status":"superseded-invariant-retained","evidence":"crates/orchestrator/src/governance/mod.rs"},
+    {"name":"managed-activation-network","status":"superseded","evidence":"docs/1.0/INTENT.md"},
+    {"name":"fail-closed-cold-boot","status":"reexpressed","evidence":"crates/orchestrator/src/governance/mod.rs"},
+    {"name":"continuity-source-unreachable","status":"reexpressed","evidence":"crates/orchestrator/src/governance/mod.rs"},
+    {"name":"rollback-guardian","status":"superseded-invariant-retained","evidence":"crates/orchestrator/src/governance/mod.rs"},
+    {"name":"update-on-reresolve","status":"superseded","evidence":"docs/1.0/INTENT.md"},
+    {"name":"no-clobber-on-reresolve","status":"superseded","evidence":"docs/1.0/INTENT.md"},
+    {"name":"sidecar-propagation","status":"superseded","evidence":"docs/1.0/ARCHITECTURE.md"},
+    {"name":"passport-freshness","status":"superseded-invariant-retained","evidence":"crates/orchestrator/src/governance/mod.rs"},
+    {"name":"license-expiry-continuity","status":"superseded","evidence":"docs/1.0/INTENT.md"}
+  ]
+}

@@ -71,9 +71,14 @@ The historical Lightbox ledger says that two consecutive 37-scenario Windows run
 found during this harvest explains the difference. Preserve both facts and use 34 as the
 source-derived inventory until an archived runner output establishes the other three.
 
-The current 1.0 tree has 172 Rust tests and 99 extension tests. Raw counts do not measure equivalent
+The current 1.0 tree has 184 Rust tests and 99 extension tests. Raw counts do not measure equivalent
 coverage because 1.0 deliberately removed many old mechanisms. They do show why every old behavior
 needs a disposition instead of an unreviewed deletion.
+
+[`RECOVERY-MATRIX.md`](RECOVERY-MATRIX.md) and its checked
+[`test-recovery.json`](test-recovery.json) now cover all 1,389 entries in twelve reviewed behavior
+groups and give every one of the 34 Lightbox process scenarios an explicit disposition. The matrix
+is a map, not a false claim of one-for-one private implementation equivalence.
 
 ### Translation rule
 

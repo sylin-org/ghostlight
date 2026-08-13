@@ -47,6 +47,13 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
   NSIS candidate built locally and its payload inspection found exactly the three required
   executables. Linux and macOS package builds plus all clean-install, upgrade, reboot, and uninstall
   journeys remain required native-host evidence.
+- The 0.8 test recovery is now dispositioned rather than merely counted.
+  `docs/0.8/RECOVERY-MATRIX.md` maps all 1,389 entries through twelve current behavior areas;
+  `docs/0.8/test-recovery.json` gives each of the 34 Lightbox process scenarios an explicit
+  reexpressed, superseded, invariant-retained, or deferred state; and CI checks the map against the
+  source-derived inventory. Two missing high-value proofs were added: sibling runtime discovery
+  does not depend on Linux session environment, and an unreachable configured managed authority
+  fails closed from cold start.
 
 ## Implemented
 
@@ -190,8 +197,8 @@ Re-run on 2026-08-13 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 172 Rust tests -- 138 in the orchestrator library, its launch-mode
-  binary test, 29 in the shared bridge, and 4 in the MCP connector.
+- `cargo test --workspace`: 184 Rust tests -- 149 in the orchestrator library, its launch-mode
+  binary test, 30 in the shared bridge, and 4 in the MCP connector.
 - `npm test --prefix extension`: 99 extension tests.
 - Plurality contracts prove two browser identities stay connected at once and each answers its own
   request, a second connection from one identity collapses onto the first with the replaced stream
@@ -390,9 +397,8 @@ Re-run on 2026-08-13 against the current tree:
   interlock journeys.
 - Reconcile release metadata, public status, store submission, compatibility, distribution, and
   the final public documentation only when the 1.0 artifacts exist.
-- Translate the harvested 0.8 behavior inventory onto current seams. An entry may map to an existing
-  1.0 proof, a new proof, an explicitly deferred capability, or a superseded mechanism; it may not
-  disappear without a disposition.
+- Keep the checked 0.8 recovery matrix aligned as current proofs move. Its remaining live-package
+  and visible-browser rows are covered by the release gates above.
 
 ## Canonical 1.0 sources
 
@@ -413,3 +419,5 @@ Re-run on 2026-08-13 against the current tree:
   [`adr/0113-end-to-end-browser-adapter-liveness.md`](adr/0113-end-to-end-browser-adapter-liveness.md).
 - Plural browser adapters and routing decision:
   [`adr/0114-plural-browser-adapters.md`](adr/0114-plural-browser-adapters.md).
+- Packaged native-host lifecycle decision:
+  [`adr/0115-packaged-native-host-lifecycle.md`](adr/0115-packaged-native-host-lifecycle.md).
