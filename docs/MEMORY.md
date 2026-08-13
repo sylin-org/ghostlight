@@ -121,6 +121,14 @@ Every one of these cost something to learn.
   to current boundaries before claiming a 1.0 artifact exists. Keep a machine-checked disposition
   for every harvested behavior group and process scenario; never use a smaller raw test count as a
   claim of equivalent coverage.
+- **An internal rewrite does not reset the user experience.** Preserve observable commands,
+  launchers, packages, identity, tests, and accumulated platform evidence unless the owner changes
+  them explicitly. The npm launcher is a mandatory Ghostlight entry point, and 1.0 may not ship
+  with a user-experience regression from 0.8.
+- **A historical guard should protect relationships, not freeze active files.** Detect when an old
+  path disappears, returns, or changes from byte-identical to evolved. Once an active path is
+  explicitly `retained-evolved`, pinning each new blob adds ledger churn without preserving another
+  0.8 fact. That is release bureaucracy, not release safety.
 
 ## Where to look
 

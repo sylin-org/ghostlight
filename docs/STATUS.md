@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-13 (fourteenth pass).
+Last updated: 2026-08-13.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -54,6 +54,29 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
   source-derived inventory. Two missing high-value proofs were added: sibling runtime discovery
   does not depend on Linux session environment, and an unreachable configured managed authority
   fails closed from cold start.
+- The file-level harvest now names and content-addresses all 810 artifacts in the mature 0.8 tree.
+  Four high-value absences are restored on current seams: static Windows runtime policy, a narrow
+  live-swap command, Chrome OAuth recovery, and independent Chrome publication. The checked ledger
+  still detects a removed, newly restored, or identical-to-evolved path, but an already-evolved
+  active file may keep evolving without an 810-row bookkeeping rewrite.
+- Release construction is one checked 27-artifact unit: four native packages, four portable
+  archives, 12 raw binaries, the deterministic extension, four component SBOMs, the npm launcher,
+  and the Claude Desktop MCPB. Exact byte length and SHA-256 bind every item to one version and full
+  source revision. The workflow adds GitHub build provenance but remains build-only. GitHub, npm,
+  Chrome, and MCP Registry adapters each default to a non-mutating plan and require an explicit
+  named action plus owner-approved execution; there is no master conductor.
+- The 0.8 user entry points are restored on current seams. `npx -y ghostlight install` remains the
+  primary journey; a bare npm launch remains MCP stdio; the launcher verifies all three cached
+  binaries on every run. `ghostlight install`, `uninstall`, `doctor`, `doctor --fix`, `status
+  --json`, `service`, dry-run, repeated client selection, and repeated browser selection are live.
+  One-line installers, deterministic portable archives, the self-contained MCPB, and
+  candidate-derived Homebrew, Scoop, and WinGet 1.12 metadata are present and tested.
+- Release access was recovered as far as this machine permits without exposing values. GitHub and
+  npm authentication work, the MCP DNS key and official publisher binary are present, and the
+  Chrome client, secret, item id, and old refresh token were found. The Chrome token is revoked or
+  expired and the API V2 publisher id is missing. Windows and Apple signing credentials were not
+  found. The 0.8 Linux username, SSH key, and known-host identity survive, but `test-host-01` no
+  longer resolves.
 
 ## Implemented
 
@@ -201,16 +224,32 @@ source-gate pass, not release approval.
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 184 Rust tests -- 149 in the orchestrator library, its launch-mode
-  binary test, 30 in the shared bridge, and 4 in the MCP connector.
+- `cargo test --workspace`: 187 Rust tests -- 151 in the orchestrator library, 2 in its launch-mode
+  binary, 30 in the shared bridge, and 4 in the MCP connector.
 - `npm test --prefix extension`: 99 extension tests.
+- `npm test --prefix packaging/npm`: 8 launcher tests. The MCPB launcher has 5 Node tests.
 - The four executable process/workbench journeys passed from a clean isolated target directory,
-  all 105 JavaScript files parsed, dependency license/source/bans checks passed, the historical
-  inventory regenerated without drift, and the 1,389-entry recovery matrix passed.
+  all 41 tracked JavaScript and module files parsed, dependency license/source/bans checks passed,
+  the 1,389-entry recovery matrix passed, and every one of 681 tracked files was readable with all
+  local documentation links valid. The artifact guard covers all 810 mature 0.8 paths.
+- The restored development loop found the running repository service only by its exact
+  `target/release/ghostlight.exe` path in plan mode. Its isolated smoke then built one selected
+  package, enclosed the swap in `deploy.lock`, copied into a disposable repository-local live
+  directory, removed the lock, and performed no launch under `-NoStart`. The real stack was not
+  disturbed.
+- Four real CycloneDX component SBOMs were generated with pinned `cargo-cyclonedx` 0.5.9. Synthetic
+  cross-platform input exercised the exact 27-artifact assembly, npm hash embedding, deterministic
+  MCPB, portable packaging, and package-manager metadata paths. That proves the construction code,
+  not the missing native Linux/macOS artifacts or their signatures.
+- Chrome, GitHub, and MCP publication plans made no mutation. Chrome correctly named the missing
+  publisher id. GitHub refused the unsigned candidate. MCP Registry planning found the recovered
+  key and publisher but refused the current 0.8 `server.json` and npm coordinate for a 1.0
+  candidate.
 - The deterministic 1.0 extension ZIP has SHA-256
-  `8bc54c93e454a74fd85585af9a06e51381cd7a949f7a9dd58013b9c145dd943b`. The final local unsigned
-  Windows NSIS candidate contains the exact three sibling executables and has SHA-256
-  `9f00f60eab0aa7121b28ee223c269e6acf7e37dd0d1c40fc07e239252f4e7074`. Neither artifact is
+  `47a7cb7b715d14de991266f3602ecf6f166fd967623c4e7980f58a2afc3c47c3` and contains the exact
+  Apache and MIT texts. The final local unsigned Windows NSIS candidate contains the exact three
+  sibling executables and all four exact legal files; its SHA-256 is
+  `3d694ea78ee0dcf9589654b48223a32ba60d619dda544c69746d432178f1352c`. Neither artifact is
   published or release-approved.
 - `cargo audit` exited zero but reported 17 residual transitive warnings in the Linux Tauri/GTK3
   and Tauri URL-pattern graphs, including the `glib` iterator unsoundness advisory. The dated audit
@@ -401,6 +440,9 @@ source-gate pass, not release approval.
 
 ## Release gates still requiring an owner or release environment
 
+- Push the local 1.0 recovery commits only when the owner approves, then run the manual candidate
+  workflow on GitHub. Its four native builders and provenance step have not executed for this
+  source revision.
 - Produce and sign platform bundles, install the native-messaging registration, and verify upgrade
   and uninstall from a clean machine on Windows, macOS, and Linux.
 - Complete interactive native-window, tray, and notification smoke tests on each platform. The
@@ -413,6 +455,14 @@ source-gate pass, not release approval.
   interlock journeys.
 - Reconcile release metadata, public status, store submission, compatibility, distribution, and
   the final public documentation only when the 1.0 artifacts exist.
+- Recover Chrome Web Store API access by completing desktop OAuth and recording the API V2
+  publisher id. Choose and provision Windows and Apple platform-signing identities.
+- Bring `test-host-01` back onto reachable DNS/mDNS or provide its current address, then record a
+  stable SSH alias and execute the checked Linux lifecycle matrix. The SSH identity itself is not
+  lost.
+- Publish the candidate-bound `ghostlight@1.0.0` tarball only after its 12 raw GitHub assets are
+  observable. Then update `server.json` and publish the MCP Registry record; it must never point a
+  1.0 record at the public 0.8 launcher.
 - Keep the checked 0.8 recovery matrix aligned as current proofs move. Its remaining live-package
   and visible-browser rows are covered by the release gates above.
 

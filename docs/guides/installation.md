@@ -1,7 +1,7 @@
 # Installing Ghostlight 1.0
 
 Ghostlight installs as one local product: three sibling executables, a tray workbench, and a
-matching Chromium extension. No account, no launcher runtime, no admin rights.
+matching Chromium extension. No account, no resident launcher service, no admin rights.
 
 This guide covers the planned signed 1.0 package and the source-development path you can follow
 today. The published 0.8 package and its Chrome adapter are documented in
@@ -10,12 +10,14 @@ are not interchangeable.
 
 ## Release installation journey
 
-1. Install the signed Ghostlight package for the operating system. Packaging places
-   `ghostlight`, `ghostlight-mcp-connector`, and `ghostlight-browser-connector` side by side and
-   registers the browser connector as the `org.sylin.ghostlight` native host for the current user.
+1. Run `npx -y ghostlight@1.0.0 install`. The checksum-bound launcher downloads one exact sibling
+   set, registers the browser connector for the current user, and connects detected MCP clients.
+   A signed native package, Homebrew, Scoop, WinGet, the one-line installer, or the Claude Desktop
+   MCPB may provide the same binaries instead.
 2. Install the matching `Ghostlight in Browser` 1.0 extension from its release listing.
-3. Launch Ghostlight, open **MCP integrations**, find your client, and choose **Connect**.
-4. Restart or reconnect the MCP harness, then run the bounded first proof from the README.
+3. Run `npx -y ghostlight@1.0.0 doctor`. Fix any named missing or stale part.
+4. Restart or reconnect the MCP harness, then run the bounded first proof from the README. Launch
+   Ghostlight whenever you want the tray workbench.
 
 Setup is now complete. Launching the registered MCP client or Chromium demand-starts Ghostlight if
 it is absent. The complete desktop authority starts with its tray available and its workbench
@@ -25,6 +27,10 @@ existing authority instead of creating another one.
 Only signed 1.0 packages and the matching 1.0 extension satisfy this journey. Artifact signing,
 clean-machine install, upgrade, and uninstall are release gates, not claims made by this source
 tree.
+
+The npm process is a download and launch edge, not the product authority. Supported-client
+registrations point directly at the cached native MCP connector. A bare `npx -y ghostlight@1.0.0`
+remains the stdio command for another compatible MCP client.
 
 ## Workbench installation behavior
 
@@ -97,6 +103,9 @@ Open **Status**. A useful report distinguishes:
 - audit/history readiness; and
 - native notification availability through an explicit test.
 
+The terminal equivalent is `ghostlight doctor`; `ghostlight doctor --fix` applies only
+ownership-safe repairs. Use `ghostlight install --dry-run` before a scripted rollout.
+
 Open **MCP integrations** and confirm your client reads Connected. Then ask it:
 
 > Open https://example.com in a new Ghostlight tab, summarize the page, and tell me which tab you
@@ -130,7 +139,8 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 A 1.0 updater replaces the three version-matched sibling executables and desktop assets as one
 package. It does not silently edit harness registrations or extension settings.
 
-Before removing Ghostlight, use **MCP integrations** to Disconnect each registration it owns.
+Before removing Ghostlight, run `ghostlight uninstall` or use **MCP integrations** to Disconnect
+each registration it owns.
 Then remove the matching browser extension and use the operating system's package uninstall. A
 release package must remove only its own native-messaging registration and files; clean-machine
 verification of that behavior is required before publication.

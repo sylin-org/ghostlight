@@ -1,53 +1,84 @@
-Ghostlight ${VERSION} -- governed browser automation for AI agents.
+# Ghostlight ${VERSION}
 
-A native Rust service, protocol-versioned MCP edge, and thin Chromium adapter that give an AI
-agent controlled access to your real, authenticated browser session, with an opt-in governance
-layer (capability grants, sacred domains, audit). See the README and docs/guides/ for the
-full walkthrough.
+Ghostlight gives an AI agent governed access to the Chromium session where you are already signed
+in. The 1.0 release is a native desktop product: one persistent Rust authority, a stable MCP stdio
+connector, a browser-only native connector, a thin Chromium adapter, and a local tray workbench.
 
-## What's changed
+## What changed
 
 ${CHANGELOG}
 
 ## Install
 
-1. Install the service and register detected MCP clients: `npx -y ghostlight install`.
-2. Install [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
-   from the Chrome Web Store.
-3. Restart your MCP client, then verify the whole chain with `npx ghostlight doctor`.
+The shortest path is the npm launcher:
 
-Each platform archive contains the persistent `ghostlight` service, the protocol-versioned
-`ghostlight-mcp-connector` stdio edge, and the browser-only `ghostlight-browser-connector` native host. MCP clients
-must start `ghostlight-mcp-connector`; the removed `ghostlight-relay --role agent` path is not a fallback.
+```sh
+npx -y ghostlight@${VERSION} install
+npx -y ghostlight@${VERSION} doctor
+```
 
-End-to-end verified on Windows and Linux. macOS builds and passes the full test suite in CI;
-live-browser verification there is still owed.
+Then install `Ghostlight in Browser` ${ADAPTER_VERSION} from the Chrome Web Store and reconnect
+your MCP client. The installer connects detected clients directly to the cached native connector;
+Node is not a resident service.
+
+The signed Windows setup, macOS disk image, and Debian package below are equivalent native-package
+routes. Start Ghostlight, open **MCP integrations** to connect a client, and use **Status** to check
+the whole chain.
+
+Use the Windows setup executable, open the macOS disk image, or install the Debian package with
+`sudo apt install ./ghostlight-v${VERSION}-x86_64-unknown-linux-gnu.deb`. The package owns the three
+Ghostlight executables, native-messaging registration, and exact license texts. It does not install
+a resident supervisor or phone home; either connector demand-starts the one local authority.
+
+If you are upgrading from 0.8, rerun `npx -y ghostlight@${VERSION} install` or install the native
+package. Ghostlight recognizes owned old registrations and preserves unrelated client
+configuration. The removed `ghostlight-relay --role agent` command is not a compatibility fallback.
+
+## Platform evidence
+
+${PLATFORM_EVIDENCE}
+
+This section must name only clean-install, upgrade, demand-start, visible-browser, and uninstall
+journeys actually completed with these signed artifacts. Do not turn a CI build into a live-platform
+claim.
 
 ## Verify
 
-Every archive carries a signed build-provenance attestation (GitHub Artifact
-Attestations / Sigstore). Prove an artifact was built by this repo's release workflow,
-not a mirror or a tampered copy:
+`SHA256SUMS` binds every uploaded artifact. GitHub build provenance binds those bytes to this
+repository's release workflow and source revision:
 
-```
-gh attestation verify <archive> --repo sylin-org/ghostlight
+```sh
+gh attestation verify <downloaded-file> \
+  --repo sylin-org/ghostlight \
+  --signer-workflow sylin-org/ghostlight/.github/workflows/release.yml
 ```
 
-The SHA-256 checksums are below (the attestation is the stronger, signed check).
+${SIGNATURE_NOTES}
 
 ## Downloads
 
-| Platform | Architecture | Download |
-|---|---|---|
-| Windows | x86_64 | `ghostlight-${VERSION}-x86_64-pc-windows-msvc.zip` |
-| macOS | Apple Silicon | `ghostlight-${VERSION}-aarch64-apple-darwin.tar.gz` |
-| macOS | Intel | `ghostlight-${VERSION}-x86_64-apple-darwin.tar.gz` |
-| Linux | x86_64 | `ghostlight-${VERSION}-x86_64-unknown-linux-gnu.tar.gz` |
-| Chrome adapter | any | `ghostlight-extension-v${ADAPTER_VERSION}.zip` |
-| Claude Desktop MCPB | Windows/macOS | `ghostlight-${VERSION}.mcpb` |
+| Platform or evidence | Architecture | Asset |
+| --- | --- | --- |
+| Windows setup | x86_64 | `ghostlight-v${VERSION}-x86_64-pc-windows-msvc-setup.exe` |
+| macOS disk image | Apple silicon | `ghostlight-v${VERSION}-aarch64-apple-darwin.dmg` |
+| macOS disk image | Intel | `ghostlight-v${VERSION}-x86_64-apple-darwin.dmg` |
+| Debian package | x86_64 | `ghostlight-v${VERSION}-x86_64-unknown-linux-gnu.deb` |
+| Portable archive | Windows x86_64 | `ghostlight-v${VERSION}-x86_64-pc-windows-msvc.zip` |
+| Portable archive | Linux x86_64 | `ghostlight-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz` |
+| Portable archive | macOS | `ghostlight-v${VERSION}-*-apple-darwin.tar.gz` |
+| Claude Desktop MCPB | Windows and macOS | `ghostlight-v${VERSION}.mcpb` |
+| npm launcher source tarball | Supported desktops | `ghostlight-${VERSION}.tgz` |
+| Raw launcher binaries | Four target triples | `ghostlight*-<target>[.exe]` |
+| Chromium adapter | Any supported desktop | `ghostlight-extension-v${ADAPTER_VERSION}.zip` |
+| Component SBOMs | All | `ghostlight-v${VERSION}-sbom-*.cyclonedx.json` |
+| Checksums | All | `SHA256SUMS` |
 
-## Checksums (SHA-256)
+GitHub also provides source archives for the exact release tag. Ghostlight is open-core; see
+`LICENSING.md` in the source archive and the exact license texts installed with each native
+package.
 
-```
+## Checksums
+
+```text
 ${CHECKSUMS}
 ```

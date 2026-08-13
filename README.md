@@ -88,8 +88,16 @@ After that first setup there is no startup ritual: launching a connected MCP cli
 demand-starts Ghostlight when it is not already running. The normal desktop authority always owns
 the tray and begins with its workbench minimized. `--headless` explicitly runs without a desktop.
 
-For an end-user install, use the signed package and its matching store adapter once the gates in
-[`docs/STATUS.md`](docs/STATUS.md) are met.
+For an end-user install, the 1.0 release keeps the 0.8 one-command journey:
+
+```sh
+npx -y ghostlight@1.0.0 install
+npx -y ghostlight@1.0.0 doctor
+```
+
+That coordinate is not public until the gates in [`docs/STATUS.md`](docs/STATUS.md) are met. Signed
+native packages, portable archives, and a self-contained Claude Desktop MCPB are equivalent release
+routes. Every route uses the matching store adapter and the same three native executables.
 
 ## Your first proof
 

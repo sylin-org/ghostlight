@@ -9,12 +9,12 @@ substitutes for a 1.0 source build.
 
 ## 1. Complete the user-visible installation
 
-1. Ask the user to install and launch the matching Ghostlight 1.0 platform package.
-2. Ask them to open Ghostlight from the tray and choose **MCP integrations**.
-3. Use **Check** for the current harness, then let the user choose **Install**. Ghostlight changes
-   only its owned entry, creates a backup, and preserves unrelated JSONC or TOML content.
-4. Ask the user to install the matching `Ghostlight in Browser` 1.0 store adapter.
-5. Reconnect or restart the MCP client if it does not refresh its tool catalog.
+1. Ask the user to run `npx -y ghostlight@1.0.0 install`, or install the matching signed native
+   package. Never substitute public 0.8 binaries for a 1.0 adapter.
+2. Ask the user to install the matching `Ghostlight in Browser` 1.0 store adapter.
+3. Ask them to run `npx -y ghostlight@1.0.0 doctor`. Ghostlight changes only owned entries,
+   creates a backup before client-config replacement, and preserves unrelated JSONC or TOML.
+4. Reconnect or restart the MCP client if it does not refresh its tool catalog.
 
 Supported workbench registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
 Code, Windsurf, Zed, OpenCode, and Crush. Another compatible local stdio MCP client can point
@@ -75,4 +75,5 @@ The complete schemas, defaults, capabilities, and terminal result envelope are i
 - **Unknown or partial effect:** do not replay the call automatically.
 
 Ghostlight 1.0 uses local stdio MCP at the client edge and typed local IPC behind it. It exposes no
-remote MCP endpoint and requires no Node.js launcher.
+remote MCP endpoint. The npm launcher is a supported install and generic-stdio entry point; the
+orchestrator and both connectors remain native Rust processes.

@@ -30,7 +30,11 @@ One Ghostlight version comprises:
 - `ghostlight`, including the orchestrator, tray, native shell, and bundled workbench;
 - sibling `ghostlight-mcp-connector`;
 - sibling `ghostlight-browser-connector`;
+- the mandatory checksum-bound `ghostlight` npm launcher, whose bare command remains an MCP stdio
+  edge and whose subcommands reach the native orchestrator;
 - a platform-native package that installs and removes the browser native-messaging registration;
+- four portable archives, one-line installers, a self-contained Claude Desktop MCPB, and
+  candidate-derived Homebrew, Scoop, and WinGet metadata;
 - the independently delivered but contract-matched `Ghostlight in Browser` adapter; and
 - checksums, signatures/attestations, SBOM, license notices, source archive, and release notes.
 
@@ -60,6 +64,8 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 npm test --prefix extension
+npm test --prefix packaging/npm
+node --test packaging/mcpb/test/launcher.test.js
 cargo audit
 cargo deny check licenses bans sources
 cargo build --workspace --target-dir .target-ghostlight-1.0
@@ -86,7 +92,8 @@ The completed feature diff must remain empty under `crates/mcp-connector`,
 For Windows, macOS, and Linux:
 
 1. Build a native release bundle with the original Ghostlight icon and bundled local UI.
-2. Verify code signature or platform attestation and published checksum.
+2. Verify the package contains byte-exact Apache, MIT, commercial-module, and plain-language
+   licensing files, then verify code signature or platform attestation and published checksum.
 3. Install as an ordinary user on a clean machine.
 4. Verify tray launch, open/hide/quit, headless fallback, global search, plural snapshots, Status,
    notifications, MCP integrations connect/disconnect, JSONC/TOML preservation, and no remote
@@ -104,8 +111,19 @@ not a substitute for the journey.
 The manual `Build release candidate` workflow builds unsigned Windows NSIS, Linux Debian, and
 macOS application/disk-image candidates from one locked workspace build. It stages the two
 connectors as Tauri sidecars, inspects every native package for the exact three-executable sibling
-set, builds the deterministic extension archive and one pinned CycloneDX SBOM for each of the four
-workspace components, then assembles one nine-artifact candidate unit. `release-candidate.json`
+set, builds deterministic portable archives, prepares the checksum-bound npm tarball and
+self-contained MCPB, builds the deterministic extension archive and one pinned CycloneDX SBOM for
+each of the four workspace components, then assembles one 27-artifact candidate unit:
+
+- four native packages;
+- four portable archives;
+- 12 versioned raw binaries;
+- the Chromium adapter;
+- four component SBOMs;
+- the npm launcher tarball; and
+- the Claude Desktop MCPB.
+
+`release-candidate.json`
 binds normalized artifact names,
 byte lengths, SHA-256 values, version, and the full source revision; `SHA256SUMS` is independently
 recomputed by `scripts/check-release-candidate.ps1`. GitHub Actions creates build-provenance
@@ -140,11 +158,13 @@ at a time:
 3. Publish the matching browser adapter through deferred store publication if the store supports
    it.
 4. Publish signed platform packages and immutable source/binary release assets.
-5. Publish package-manager and MCP-registry metadata only after their referenced assets exist.
-6. Reconcile store feeds and public compatibility from independently downloaded artifacts.
-7. Update `docs/public-status.json`, README release language, trust review stamps, website copy,
+5. Publish the exact candidate-bound npm tarball. Then publish candidate-derived Homebrew, Scoop,
+   and WinGet metadata only after their referenced portable assets are observable.
+6. Publish MCP Registry metadata only after the exact npm coordinate is observable.
+7. Reconcile store feeds and public compatibility from independently downloaded artifacts.
+8. Update `docs/public-status.json`, README release language, trust review stamps, website copy,
    distribution records, and changelog from observed public state.
-8. Run one public install-to-first-task smoke per platform.
+9. Run one public install-to-first-task smoke per platform.
 
 Never claim a platform, store, package manager, or compatibility combination before the public
 artifact is independently observable.
@@ -161,6 +181,12 @@ candidate, requires an existing remote `v<version>` tag at the candidate source 
 every GitHub provenance attestation against this repository and the release workflow, and
 re-downloads every draft asset for an exact hash comparison before publication. It never creates a
 tag.
+
+`scripts/publish-npm.ps1` defaults to `Plan`. Publication requires `Publish -Execute`, the exact
+tarball SHA-256, and a signed candidate that contains that same npm asset. The launcher carries
+all 12 raw-binary hashes, rechecks cached binaries on every invocation, and refuses downloads
+outside the fixed GitHub release host chain. npm publication is mandatory for 1.0; MCP Registry
+publication remains downstream of it.
 
 The MCP Registry is downstream of the public npm coordinate in `server.json`.
 `scripts/publish-mcp-registry.ps1` defaults to an offline `Plan` and reports why the current

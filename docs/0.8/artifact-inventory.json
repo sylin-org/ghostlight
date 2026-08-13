@@ -5,9 +5,9 @@
   "counts": {
     "total": 810,
     "byCurrentState": {
-      "absent": 275,
-      "retained-evolved": 90,
-      "retained-identical": 445
+      "absent": 262,
+      "retained-evolved": 104,
+      "retained-identical": 444
     }
   },
   "entries": [
@@ -80,8 +80,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "db01dec35ea7c728ed4c5104cd99d5e4a50352c6",
-      "currentState": "retained-identical",
-      "currentBlob": "db01dec35ea7c728ed4c5104cd99d5e4a50352c6"
+      "currentState": "retained-evolved",
+      "currentBlob": "422d7b8e4d5e4b6edb126f7629c60bc7ef80fbe7"
     },
     {
       "path": ".github/workflows/ci.yml",
@@ -90,7 +90,7 @@
       "historicalType": "blob",
       "historicalBlob": "7c9842d6b04ef4d86b87f244f0bd39030d8d2667",
       "currentState": "retained-evolved",
-      "currentBlob": "93b306df067fb527d4b76254a355767bd85810cc"
+      "currentBlob": "d884794d85e5e5555f082b51125e46ec94ed2592"
     },
     {
       "path": ".github/workflows/pages.yml",
@@ -108,7 +108,7 @@
       "historicalType": "blob",
       "historicalBlob": "2249445a1a6803d152d3a24861e6b3145b9f335c",
       "currentState": "retained-evolved",
-      "currentBlob": "556e81f1dc14abe289d3a0dde1a2cba516e2e8aa"
+      "currentBlob": "227f0fdef8dec9a9472e142baa5bb032d37f8825"
     },
     {
       "path": ".gitignore",
@@ -2925,7 +2925,7 @@
       "historicalType": "blob",
       "historicalBlob": "92899027be3f0cbeceabea0cb9bca13a4844232f",
       "currentState": "retained-evolved",
-      "currentBlob": "57868fd86e85e9a1842df65df39eab1a6f6b91c8"
+      "currentBlob": "3624da0b3045798334cb5ce94f5623cfdca73fb2"
     },
     {
       "path": "docs/guides/licensing.md",
@@ -3024,7 +3024,7 @@
       "historicalType": "blob",
       "historicalBlob": "891ab7a4da78ea50d6b8f67da8228e56b9897f19",
       "currentState": "retained-evolved",
-      "currentBlob": "e4d97988360474f99790aba1e06870e2b9fc899a"
+      "currentBlob": "d3266bb24550a4f6147ea2387ec2b24b1c159bf9"
     },
     {
       "path": "docs/public-status.json",
@@ -3042,7 +3042,7 @@
       "historicalType": "blob",
       "historicalBlob": "2e1edc340e68f383aa83e2ac3fd0690f0a1a5da6",
       "currentState": "retained-evolved",
-      "currentBlob": "1be620f6b6c65a903f51af67cfa2ca76ecdb25d1"
+      "currentBlob": "83a06554d39f90877b6624a25ab772d86d2bb6a6"
     },
     {
       "path": "docs/research/00-synthesis-and-decisions.md",
@@ -3357,7 +3357,7 @@
       "historicalType": "blob",
       "historicalBlob": "9eabb624c54f70fa3c5f7f424c15f7723eeebc8e",
       "currentState": "retained-evolved",
-      "currentBlob": "d20c7469d5f6c2eb15288046e11080c698ef6e72"
+      "currentBlob": "a6ef821ea04d0f857c94b632d238a444e086911c"
     },
     {
       "path": "docs/tasks/browser-kernel/BOOTSTRAP.md",
@@ -6111,7 +6111,7 @@
       "historicalType": "blob",
       "historicalBlob": "4b344ae768311d2eceb1241784e860dd8db21883",
       "currentState": "retained-evolved",
-      "currentBlob": "57706029d07b064761786ce105e549e9edd8c6b8"
+      "currentBlob": "3ae494838ab0e6b7718118d5024a1301e52e25bb"
     },
     {
       "path": "local/README.md",
@@ -6164,8 +6164,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "666a304c0b45c1bf1239a5a089de03b11318dbe3",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "0da43b310722a6de87da7852b8e50ce21cc3de32"
     },
     {
       "path": "packaging/mcpb/icon.png",
@@ -6182,8 +6182,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "89c88294f36245169ff44aeeefc57b54ac0fea33",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "94bd56070ecf74ecebf56b0d2b9bc2528a865e5d"
     },
     {
       "path": "packaging/mcpb/README.md",
@@ -6192,7 +6192,7 @@
       "historicalType": "blob",
       "historicalBlob": "b8cf33fcd6f1a460d29209225a41f6a4eaabdaef",
       "currentState": "retained-evolved",
-      "currentBlob": "e79dea49aa7ad94c513ffe6d4de159328b2e3e10"
+      "currentBlob": "d780dbc8a201347c804c6475da51aa8ea1e78830"
     },
     {
       "path": "packaging/mcpb/server/launch.js",
@@ -6200,8 +6200,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "9a8bf0ec0a79baa95d12662dd95c1ba93ad07e9e",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "76986d48b791eacaea9d2edf8bb1de4d27894569"
     },
     {
       "path": "packaging/mcpb/test/launcher.test.js",
@@ -6209,8 +6209,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "606f25249d40bbd5d00acbf02f3c62b26ee61626",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "135062144a4a3e284a59ac32c398a96e45da95e2"
     },
     {
       "path": "packaging/npm/bin/ghostlight.js",
@@ -6218,8 +6218,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "449ea421883859e154545a743556f80987e9f6e2",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "fe2c535071b870d6200680835b533018c82db9f7"
     },
     {
       "path": "packaging/npm/checksums.json",
@@ -6227,8 +6227,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "59171cca97cc4532622c6e501a6ccd015365325d",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "c731aa98733b7d46929622abe43e4958d1e15caa"
     },
     {
       "path": "packaging/npm/package.json",
@@ -6236,8 +6236,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "dcae20ffeab753ecda9735de4c4e3fc0a659b445",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "842da174a537522a9a9dc6017600f432a6706b12"
     },
     {
       "path": "packaging/npm/README.md",
@@ -6246,7 +6246,7 @@
       "historicalType": "blob",
       "historicalBlob": "f676c0ff12dbbaad88ec1caf927ea841ebb60ca0",
       "currentState": "retained-evolved",
-      "currentBlob": "0d6aa5aa9fcf5cb8065eba7505eeee5c60cc46fb"
+      "currentBlob": "800e3cb7eca517b28ed4b422fdc3e041d7a715f9"
     },
     {
       "path": "packaging/npm/test/launcher.test.js",
@@ -6254,8 +6254,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "cb03dc9dab0fd0efc26bc633582ea44c83c9204e",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "689ab7acac6b29b806596f7ff9b241ce1ca1161d"
     },
     {
       "path": "packaging/scoop/ghostlight.json",
@@ -6263,8 +6263,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "9814efbb5fe19454a1ec7675e2fab547e6a8bc16",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "ed9ea03d9b05cbaaa48c15eee8b7df757beb7739"
     },
     {
       "path": "packaging/winget/Sylin.Ghostlight.yaml",
@@ -6272,8 +6272,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "f6e045a90848a93f6ec3ab024c6fb5a92fef5152",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "146c8948d52790262cb9d3d733971d099712cda4"
     },
     {
       "path": "PRICING.md",
@@ -6291,7 +6291,7 @@
       "historicalType": "blob",
       "historicalBlob": "29f1cbbda0cf22cd1a521cb9fd1631253c37ecad",
       "currentState": "retained-evolved",
-      "currentBlob": "6b89123905d239b5bea28247ecb54d0f1c064421"
+      "currentBlob": "49270de7a8bb5a0d308b66404bc698dfc2047d97"
     },
     {
       "path": "ROADMAP.md",
@@ -6362,8 +6362,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "d601d84c4d00c71dcde4d2943b3289c2d3f77317",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "9a76dc693080550de27dec53e461d9689fcc5913"
     },
     {
       "path": "scripts/get.sh",
@@ -6371,8 +6371,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "6a7df61c5094b050749e6d194ea485e4368e4c07",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "6112a2ad6af5d0f937b0f202de043697514f6046"
     },
     {
       "path": "scripts/package-extension.ps1",
@@ -6381,7 +6381,7 @@
       "historicalType": "blob",
       "historicalBlob": "d56e326c50fc18fbe37f7722ca8ffa704670071b",
       "currentState": "retained-evolved",
-      "currentBlob": "5537b2761f37eec8dd262e0ccdd7ccb20ae61064"
+      "currentBlob": "51823b07be516d02611bb4e4bd2aea0acc812356"
     },
     {
       "path": "scripts/package-mcpb.ps1",
@@ -6389,8 +6389,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "20e4b09beaa27a2441eb2f97bc82b3d439d9250b",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "6fdcd0dd5c887e6d3fb7be05a70f0f7828af1471"
     },
     {
       "path": "scripts/prepare-winget.ps1",

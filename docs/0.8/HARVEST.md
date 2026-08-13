@@ -209,7 +209,7 @@ immutable account of what was known on 2026-08-07.
 | Publication copy and channel recovery | Adapt for 1.0 after public artifacts exist. |
 | Old core, hub, transport, and extension implementation | Git history only. Do not copy into 1.0 internals. |
 | Old always-ready supervisor and named-instance model | Superseded; migration cleanup only. |
-| Raw-binary npm, MCPB, Homebrew formula, Scoop, and WinGet shapes | Historical 0.8 packages. Redesign around the 1.0 desktop package. |
+| Raw-binary npm, MCPB, Homebrew, Scoop, and WinGet entry points | Restored on current seams. All are generated from the same checked 1.0 candidate and exact raw or portable hashes. |
 | Giant release conductor and mechanical trust restamping | Retire. |
 | Directory submission sweeps and reception monitoring | Independent, optional post-release work. Never a candidate gate. |
 

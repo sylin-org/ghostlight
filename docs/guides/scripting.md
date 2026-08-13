@@ -131,9 +131,9 @@ setting and the script exits 2, which is governance working rather than the jour
 [`scripts/demo-brief.ps1`](../../scripts/demo-brief.ps1) is the longer one: read a page, inventory
 its controls once, fill three fields as separately paced writes, tick two boxes, submit, and wait
 for an exact completion sentence. It is the story from
-[`design/demo-brief.md`](../design/demo-brief.md), which specified a Rust subcommand that never
-shipped and no longer needs to. Pacing is parameters, so a recording operator retimes it by editing
-a script:
+[`design/demo-brief.md`](../design/demo-brief.md), which shipped as a Rust subcommand on the 0.8
+line and no longer needs to stay in the binary. Pacing is parameters, so a recording operator
+retimes it by editing a script:
 
 ```powershell
 ./scripts/demo-brief.ps1 -Beat 0.4 -CompletionHold 5

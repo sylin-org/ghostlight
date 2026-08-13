@@ -5,14 +5,14 @@
   "counts": {
     "total": 810,
     "byTreatment": {
-      "behavior-dispositioned": 97,
+      "behavior-dispositioned": 95,
       "historical-implementation-only": 162,
-      "redesign-after-signed-candidate": 11,
-      "retained-evolved": 90,
-      "retained-identical": 445,
+      "redesign-after-signed-candidate": 1,
+      "retained-evolved": 104,
+      "retained-identical": 444,
       "retired-low-value-conductor": 1,
       "reviewed-repository-history": 1,
-      "reviewed-tooling-history": 2,
+      "reviewed-tooling-history": 1,
       "superseded-by-current-workflow": 1
     }
   },
@@ -61,9 +61,9 @@
     },
     {
       "path": ".github/release-template.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".github/workflows/ci.yml",
@@ -4117,9 +4117,9 @@
     },
     {
       "path": "packaging/homebrew/ghostlight.rb",
-      "currentState": "absent",
-      "treatment": "redesign-after-signed-candidate",
-      "reason": "The raw-binary 0.8 distribution shape cannot be relabeled as the 1.0 native desktop package."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "packaging/mcpb/icon.png",
@@ -4129,9 +4129,9 @@
     },
     {
       "path": "packaging/mcpb/manifest.json",
-      "currentState": "absent",
-      "treatment": "redesign-after-signed-candidate",
-      "reason": "The raw-binary 0.8 distribution shape cannot be relabeled as the 1.0 native desktop package."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "packaging/mcpb/README.md",
@@ -4141,33 +4141,33 @@
     },
     {
       "path": "packaging/mcpb/server/launch.js",
-      "currentState": "absent",
-      "treatment": "redesign-after-signed-candidate",
-      "reason": "The raw-binary 0.8 distribution shape cannot be relabeled as the 1.0 native desktop package."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "packaging/mcpb/test/launcher.test.js",
-      "currentState": "absent",
-      "treatment": "behavior-dispositioned",
-      "reason": "The assertion belongs to the checked 0.8 behavior inventory and current recovery matrix."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "packaging/npm/bin/ghostlight.js",
-      "currentState": "absent",
-      "treatment": "redesign-after-signed-candidate",
-      "reason": "The raw-binary 0.8 distribution shape cannot be relabeled as the 1.0 native desktop package."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "packaging/npm/checksums.json",
-      "currentState": "absent",
-      "treatment": "redesign-after-signed-candidate",
-      "reason": "The raw-binary 0.8 distribution shape cannot be relabeled as the 1.0 native desktop package."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "packaging/npm/package.json",
-      "currentState": "absent",
-      "treatment": "redesign-after-signed-candidate",
-      "reason": "The raw-binary 0.8 distribution shape cannot be relabeled as the 1.0 native desktop package."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "packaging/npm/README.md",
@@ -4177,21 +4177,21 @@
     },
     {
       "path": "packaging/npm/test/launcher.test.js",
-      "currentState": "absent",
-      "treatment": "behavior-dispositioned",
-      "reason": "The assertion belongs to the checked 0.8 behavior inventory and current recovery matrix."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "packaging/scoop/ghostlight.json",
-      "currentState": "absent",
-      "treatment": "redesign-after-signed-candidate",
-      "reason": "The raw-binary 0.8 distribution shape cannot be relabeled as the 1.0 native desktop package."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "packaging/winget/Sylin.Ghostlight.yaml",
-      "currentState": "absent",
-      "treatment": "redesign-after-signed-candidate",
-      "reason": "The raw-binary 0.8 distribution shape cannot be relabeled as the 1.0 native desktop package."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "PRICING.md",
@@ -4249,15 +4249,15 @@
     },
     {
       "path": "scripts/get.ps1",
-      "currentState": "absent",
-      "treatment": "redesign-after-signed-candidate",
-      "reason": "The raw-binary 0.8 distribution shape cannot be relabeled as the 1.0 native desktop package."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "scripts/get.sh",
-      "currentState": "absent",
-      "treatment": "redesign-after-signed-candidate",
-      "reason": "The raw-binary 0.8 distribution shape cannot be relabeled as the 1.0 native desktop package."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "scripts/package-extension.ps1",
@@ -4267,9 +4267,9 @@
     },
     {
       "path": "scripts/package-mcpb.ps1",
-      "currentState": "absent",
-      "treatment": "reviewed-tooling-history",
-      "reason": "The tool remains recoverable from Git and is restored only where it serves the current release unit."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "scripts/prepare-winget.ps1",
