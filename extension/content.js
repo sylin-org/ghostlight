@@ -23,16 +23,22 @@
     return element;
   }
 
+  function renderedText(element) {
+    const rendered = typeof element?.innerText === "string" ? element.innerText : "";
+    const fallback = typeof element?.textContent === "string" ? element.textContent : "";
+    return (rendered || fallback).replace(/\s+/g, " ").trim();
+  }
+
   function accessibleName(element) {
     const labelledBy = element.getAttribute("aria-labelledby");
     if (labelledBy) {
       const root = element.getRootNode();
-      const text = labelledBy.split(/\s+/).map((id) => root.getElementById?.(id)?.textContent ?? "").join(" ").trim();
+      const text = labelledBy.split(/\s+/).map((id) => renderedText(root.getElementById?.(id))).join(" ").trim();
       if (text) return shared.bounded(text, 500);
     }
     const aria = element.getAttribute("aria-label");
     if (aria) return shared.bounded(aria, 500);
-    if (element.labels?.length) return shared.bounded(Array.from(element.labels).map((label) => label.textContent ?? "").join(" ").trim(), 500);
+    if (element.labels?.length) return shared.bounded(Array.from(element.labels).map(renderedText).join(" ").trim(), 500);
     const tag = String(element.tagName ?? "").toLowerCase();
     const type = String(element.getAttribute("type") ?? "").toLowerCase();
     const buttonLikeInput = tag === "input" && ["button", "submit", "reset"].includes(type);
@@ -40,7 +46,7 @@
     if (fixed) return shared.bounded(fixed, 500).trim();
     const editable = tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
     if (editable) return "";
-    return shared.bounded(element.innerText || element.textContent || "", 500).trim();
+    return shared.bounded(renderedText(element), 500);
   }
 
   function roleFor(element) {

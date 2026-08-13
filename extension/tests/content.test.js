@@ -202,6 +202,21 @@ test("action names use labels but never the current input value", async () => {
   assert.equal(inspected.result.targets[0].name, "Save changes");
 });
 
+test("action names preserve rendered spacing inside a label", async () => {
+  const harness = contentHarness();
+  harness.input.labels = [{
+    innerText: "Sylin back stamp verified\nSet seal and proof number match",
+    textContent: "Sylin back stamp verifiedSet seal and proof number match"
+  }];
+
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+
+  assert.equal(
+    inspected.result.targets[0].name,
+    "Sylin back stamp verified Set seal and proof number match"
+  );
+});
+
 test("the activation receipt names the physical element it used", async () => {
   const harness = contentHarness();
   harness.input.hidden = false;
