@@ -1,17 +1,29 @@
 version: 2
+
+# Dependency updates are paused while main still carries the 0.8 line.
+#
+# The 1.0 rebuild changed the dependency set underneath this file: it dropped clap, rustls,
+# webpki-roots, and color_quant entirely, moved to a four-crate workspace, and removed the
+# tests/e2e npm project this npm entry watches. Every update Dependabot raised against 0.8 was
+# therefore either already satisfied on the 1.0 line or aimed at a package the product no longer
+# uses, so the pull requests cost review attention and returned nothing.
+#
+# A limit of zero is the documented pause: the configuration stays visible and reviewable rather
+# than being deleted and forgotten. Restore the limits below, and correct the npm directory, when
+# main moves to the 1.0 line and the workflows are ported with it.
 updates:
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
   - package-ecosystem: "npm"
     directory: "/tests/e2e"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
