@@ -40,6 +40,19 @@ name, store identity, artwork, settings, and permissions.
 
 ## Candidate gates
 
+Before spending a candidate build, inspect release access without exposing credential values:
+
+```powershell
+pwsh -File scripts/check-release-access.ps1 -Online
+```
+
+The command is read-only. Chrome Web Store API V2 requires `CWS_CLIENT_ID`,
+`CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`, `CWS_ITEM_ID`, and `CWS_PUBLISHER_ID`. The publisher id
+is displayed under Publisher -> Settings in the developer dashboard. A revoked refresh token is
+recovered through the desktop loopback OAuth flow with `scripts/get-cws-refresh-token.ps1`; the
+helper validates OAuth state and PKCE, stores the new token in the machine-local credential file,
+and never prints it.
+
 ### Source
 
 ```sh
@@ -134,6 +147,12 @@ at a time:
 
 Never claim a platform, store, package manager, or compatibility combination before the public
 artifact is independently observable.
+
+Chrome upload and submission are separate explicit operations. `scripts/publish-extension.ps1`
+defaults to `Plan` and makes no request. `Upload` and `Submit` each require both the named action
+and `-Execute`; submission defaults to `STAGED_PUBLISH` so review approval does not silently make
+the adapter public. The script uses Chrome Web Store API V2, validates the package version and hash,
+and refuses warned or taken-down items before submission.
 
 ## Rollback
 

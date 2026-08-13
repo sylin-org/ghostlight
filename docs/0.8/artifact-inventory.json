@@ -5,8 +5,8 @@
   "counts": {
     "total": 810,
     "byCurrentState": {
-      "absent": 278,
-      "retained-evolved": 87,
+      "absent": 276,
+      "retained-evolved": 89,
       "retained-identical": 445
     }
   },
@@ -3042,7 +3042,7 @@
       "historicalType": "blob",
       "historicalBlob": "2e1edc340e68f383aa83e2ac3fd0690f0a1a5da6",
       "currentState": "retained-evolved",
-      "currentBlob": "3e7f7ca091af3f38d0040da8f909b38a3c76ea35"
+      "currentBlob": "afdec32012fbab861de8efa19583ba69049d3031"
     },
     {
       "path": "docs/research/00-synthesis-and-decisions.md",
@@ -6353,8 +6353,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "a183456433a2ca26e57756060180d7438a2de07d",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "1431315861ec5e713c93b274b376220368978bbb"
     },
     {
       "path": "scripts/get.ps1",
@@ -6407,8 +6407,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "03e944037d16aa43781010559ef64694ceb702bc",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "00f9636d31bbce04abc3e1581131c4e7c9b66997"
     },
     {
       "path": "scripts/publish-website.ps1",

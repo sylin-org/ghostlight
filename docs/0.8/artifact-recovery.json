@@ -8,8 +8,8 @@
       "behavior-dispositioned": 97,
       "historical-implementation-only": 162,
       "redesign-after-signed-candidate": 11,
-      "restore-lean": 3,
-      "retained-evolved": 87,
+      "restore-lean": 1,
+      "retained-evolved": 89,
       "retained-identical": 445,
       "retired-low-value-conductor": 1,
       "reviewed-repository-history": 1,
@@ -4244,9 +4244,9 @@
     },
     {
       "path": "scripts/get-cws-refresh-token.ps1",
-      "currentState": "absent",
-      "treatment": "restore-lean",
-      "reason": "Restore the one-time Chrome OAuth recovery helper independently of publication."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "scripts/get.ps1",
@@ -4280,9 +4280,9 @@
     },
     {
       "path": "scripts/publish-extension.ps1",
-      "currentState": "absent",
-      "treatment": "restore-lean",
-      "reason": "Restore Chrome publication as an independent explicit command with a non-mutating default."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "scripts/publish-website.ps1",
