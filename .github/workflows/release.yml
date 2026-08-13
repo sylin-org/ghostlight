@@ -36,6 +36,7 @@ jobs:
       - run: cargo build --workspace --locked
       - run: cargo test --workspace --locked --no-fail-fast
       - run: npm test --prefix extension
+      - run: npm test --prefix packaging/npm
       - run: node tests/process-journey.mjs
       - run: node tests/cli-journey.mjs
       - run: node tests/cli-powershell-journey.mjs
@@ -90,6 +91,15 @@ jobs:
         run: cargo install tauri-cli --version 2.11.0 --locked
       - name: Build all three executable shores once
         run: cargo build --workspace --release --locked --target ${{ matrix.target }}
+      - name: Stage version-matched raw binaries for launchers
+        shell: pwsh
+        run: |
+          $extension = if ('${{ runner.os }}' -eq 'Windows') { '.exe' } else { '' }
+          $output = "dist/raw-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          foreach ($name in @('ghostlight', 'ghostlight-mcp-connector', 'ghostlight-browser-connector')) {
+            Copy-Item -LiteralPath "target/${{ matrix.target }}/release/$name$extension" -Destination "$output/$name-${{ matrix.target }}$extension"
+          }
       - name: Stage exact Tauri sidecars
         shell: pwsh
         run: ./scripts/stage-tauri-sidecars.ps1 -TargetTriple ${{ matrix.target }}
@@ -117,7 +127,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/bundle/
+          path: |
+            target/${{ matrix.target }}/release/bundle/
+            dist/raw-${{ matrix.target }}/
           if-no-files-found: error
           retention-days: 7
 
@@ -148,6 +160,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: "1.95.0"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
       - uses: actions/download-artifact@v8
         with:
           pattern: native-*
@@ -185,9 +200,18 @@ jobs:
             dist/release-candidate/assets/*
             dist/release-candidate/release-candidate.json
             dist/release-candidate/SHA256SUMS
+      - name: Prepare the checksum-bound npm launcher
+        shell: pwsh
+        run: ./scripts/prepare-npm-package.ps1 -CandidateDirectory dist/release-candidate
       - uses: actions/upload-artifact@v7
         with:
           name: release-candidate
           path: dist/release-candidate/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-package
+          path: dist/npm-package/*.tgz
           if-no-files-found: error
           retention-days: 14

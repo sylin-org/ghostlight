@@ -126,6 +126,29 @@ $specifications = @(
     }
 )
 
+$rawTargets = @(
+    [ordered]@{ target = "x86_64-pc-windows-msvc"; extension = ".exe" },
+    [ordered]@{ target = "x86_64-unknown-linux-gnu"; extension = "" },
+    [ordered]@{ target = "aarch64-apple-darwin"; extension = "" },
+    [ordered]@{ target = "x86_64-apple-darwin"; extension = "" }
+)
+foreach ($rawTarget in $rawTargets) {
+    foreach ($component in @(
+        "ghostlight",
+        "ghostlight-mcp-connector",
+        "ghostlight-browser-connector"
+    )) {
+        $name = "$component-$($rawTarget.target)$($rawTarget.extension)"
+        $specifications += [ordered]@{
+            kind = "raw-binary"
+            target = "$component@$($rawTarget.target)"
+            directory = "native-$($rawTarget.target)"
+            pattern = $name
+            name = $name
+        }
+    }
+}
+
 $artifacts = [System.Collections.Generic.List[object]]::new()
 foreach ($specification in $specifications) {
     $source = Resolve-OneArtifact `
@@ -201,8 +224,5 @@ $sumLines = @($orderedArtifacts | ForEach-Object { "$($_.sha256)  $($_.name)" })
 )
 
 & (Join-Path $PSScriptRoot "check-release-candidate.ps1") -CandidateDirectory $OutputDirectory
-if ($LASTEXITCODE -ne 0) {
-    throw "Assembled release candidate did not verify"
-}
 
 Write-Output "Release candidate assembled at $OutputDirectory"

@@ -89,6 +89,7 @@ jobs:
         with:
           node-version: "22"
       - run: npm test --prefix extension
+      - run: npm test --prefix packaging/npm
       - name: Check runtime JavaScript syntax
         run: |
           node --check extension/content.js

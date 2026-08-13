@@ -1,0 +1,45 @@
+{
+  "name": "ghostlight",
+  "version": "1.0.0",
+  "mcpName": "org.sylin/ghostlight",
+  "description": "Launcher for visible local browser automation in your signed-in Chromium profile, with optional policy and audit.",
+  "type": "module",
+  "bin": {
+    "ghostlight": "bin/ghostlight.js"
+  },
+  "files": [
+    "bin/ghostlight.js",
+    "checksums.json",
+    "README.md",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    "LICENSE-COMMERCIAL",
+    "LICENSING.md"
+  ],
+  "scripts": {
+    "test": "node --test test/launcher.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "browser",
+    "automation",
+    "chrome",
+    "governance",
+    "audit",
+    "ai-agent"
+  ],
+  "homepage": "https://sylin.org/ghostlight/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sylin-org/ghostlight.git",
+    "directory": "packaging/npm"
+  },
+  "bugs": {
+    "url": "https://github.com/sylin-org/ghostlight/issues"
+  },
+  "license": "(Apache-2.0 OR MIT)"
+}

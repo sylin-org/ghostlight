@@ -34,9 +34,6 @@ if ($allowedStatuses -notcontains $candidate.status) {
 & (Join-Path $PSScriptRoot "check-release-candidate.ps1") `
     -CandidateDirectory $CandidateDirectory `
     -ExpectedStatus $candidate.status
-if ($LASTEXITCODE -ne 0) {
-    throw "Release candidate verification failed"
-}
 
 $tag = "v$($candidate.version)"
 $releaseFiles = @(
