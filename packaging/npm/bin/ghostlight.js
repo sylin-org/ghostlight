@@ -43,6 +43,12 @@ export function assetNames(platform = process.platform, architecture = process.a
   return EXECUTABLES.map((name) => `${name}-${target}${extension}`);
 }
 
+export function executableNames(platform = process.platform, architecture = process.arch) {
+  releaseTarget(platform, architecture);
+  const extension = platform === "win32" ? ".exe" : "";
+  return EXECUTABLES.map((name) => `${name}${extension}`);
+}
+
 export function publishedAssetNames() {
   return [
     ...assetNames("win32", "x64"),
@@ -53,7 +59,7 @@ export function publishedAssetNames() {
 }
 
 export function selectedExecutable(arguments_, platform = process.platform, architecture = process.arch) {
-  const [orchestrator, mcpConnector] = assetNames(platform, architecture);
+  const [orchestrator, mcpConnector] = executableNames(platform, architecture);
   return arguments_.length === 0 ? mcpConnector : orchestrator;
 }
 
@@ -147,15 +153,16 @@ export async function prepareLaunch({
 } = {}) {
   const packageJson = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8"));
   const manifest = JSON.parse(await readFile(join(PACKAGE_ROOT, "checksums.json"), "utf8"));
-  const names = assetNames(platform, architecture);
+  const assets = assetNames(platform, architecture);
+  const executables = executableNames(platform, architecture);
   validateChecksums(manifest, packageJson.version, publishedAssetNames());
   const directory = join(cacheRoot, "bin", `v${packageJson.version}`);
-  for (const name of names) {
-    const url = `${RELEASE_ROOT}/v${packageJson.version}/${name}`;
+  for (const [index, asset] of assets.entries()) {
+    const url = `${RELEASE_ROOT}/v${packageJson.version}/${asset}`;
     await ensureBinary({
-      path: join(directory, name),
+      path: join(directory, executables[index]),
       url,
-      expectedHash: manifest.binaries[name],
+      expectedHash: manifest.binaries[asset],
       fetchImpl,
     });
   }

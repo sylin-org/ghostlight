@@ -10,6 +10,7 @@ import {
   assertAllowedDownload,
   assetNames,
   ensureBinary,
+  executableNames,
   isMain,
   publishedAssetNames,
   releaseTarget,
@@ -47,11 +48,24 @@ test("every platform downloads the complete three-process unit", () => {
   assert.ok(assetNames("win32", "x64").every((name) => name.endsWith(".exe")));
 });
 
+test("verified assets are cached under exact trusted sibling names", () => {
+  assert.deepEqual(executableNames("linux", "x64"), [
+    "ghostlight",
+    "ghostlight-mcp-connector",
+    "ghostlight-browser-connector",
+  ]);
+  assert.deepEqual(executableNames("win32", "x64"), [
+    "ghostlight.exe",
+    "ghostlight-mcp-connector.exe",
+    "ghostlight-browser-connector.exe",
+  ]);
+});
+
 test("a bare launch is MCP stdio and every CLI request reaches the orchestrator", () => {
   assert.match(selectedExecutable([], "linux", "x64"), /mcp-connector/);
   assert.equal(
     selectedExecutable(["install"], "linux", "x64"),
-    "ghostlight-x86_64-unknown-linux-gnu",
+    "ghostlight",
   );
 });
 
