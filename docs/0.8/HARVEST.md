@@ -80,6 +80,11 @@ needs a disposition instead of an unreviewed deletion.
 groups and give every one of the 34 Lightbox process scenarios an explicit disposition. The matrix
 is a map, not a false claim of one-for-one private implementation equivalence.
 
+[`ARTIFACT-RECOVERY.md`](ARTIFACT-RECOVERY.md) adds the file-level half of the harvest. Its generated
+inventory content-addresses every path in the 810-file mature 0.8 tree, and its checked recovery
+ledger gives each artifact an explicit treatment. A later rewrite may change a treatment, but it
+cannot make a file disappear from project memory without the drift gate noticing.
+
 ### Translation rule
 
 For each inventory group, choose one of four outcomes:
