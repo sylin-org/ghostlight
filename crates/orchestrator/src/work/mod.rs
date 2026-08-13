@@ -24,7 +24,7 @@ use serde_json::{json, Value};
 use url::Url;
 use uuid::Uuid;
 
-use crate::browser::{BrowserError, BrowserPort};
+use crate::browser::{choose_browser, BrowserError, BrowserPort};
 use crate::events::{DenialPresentation, DomainEvent};
 use ghostlight_bridge::service::IntakeChannel;
 
@@ -199,6 +199,7 @@ impl ApplicationExecutor {
         let context = InvocationContext {
             invocation: &invocation,
             workspace,
+            requested_browser: operation_browser(&operation),
             snapshot: &snapshot,
             deadline,
             cancellation,
@@ -453,6 +454,17 @@ impl ApplicationExecutor {
             Ok(tabs) => {
                 let facts: Vec<_> = tabs.into_iter().map(|tab| json!({"tab":tab.handle.as_str(),"title":tab.title,"url":tab.url,"active":tab.active,"readiness":readiness(tab.readiness)})).collect();
                 let outcome = Outcome::TabsListed { count: facts.len() };
+                // Listing tabs is also how a caller discovers where tabs can be opened. A model
+                // asked to choose a browser needs the choices in front of it, and this is the one
+                // read that already answers "what is there".
+                let browsers: Vec<_> = self
+                    .browser
+                    .browsers()
+                    .into_iter()
+                    .map(|browser| {
+                        json!({"browser":browser.id,"name":browser.name,"attended":browser.attended})
+                    })
+                    .collect();
                 self.succeeded(
                     context,
                     decision,
@@ -461,7 +473,7 @@ impl ApplicationExecutor {
                     Readiness::NotApplicable,
                     true,
                     outcome,
-                    json!({"tabs":facts}),
+                    json!({"tabs":facts,"browsers":browsers}),
                 )
             }
             Err(error) => self.workspace_failure(context, error),
@@ -3174,7 +3186,9 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
+        let browser = self.target_browser(context)?;
         let outcome = self.browser.call(
+            &browser,
             context.workspace.as_str(),
             command,
             context.deadline,
@@ -3184,6 +3198,33 @@ impl ApplicationExecutor {
             self.observe(context.invocation, observed_from(outcome));
         }
         outcome
+    }
+
+    /// Decide which browser this invocation belongs to, and bind the workspace to it.
+    ///
+    /// Resolution happens at the seam rather than at admission because a call that never reaches
+    /// a browser must not need one: listing this workspace's tabs answers truthfully with no
+    /// browser connected at all.
+    ///
+    /// The binding is what makes the choice stable. It is taken once, on the first crossing, and
+    /// every later crossing in this workspace reads it back instead of choosing again.
+    fn target_browser(&self, context: &InvocationContext<'_>) -> Result<String, BrowserError> {
+        let pinned = self.workspaces.browser_of(context.workspace.as_str());
+        let chosen = choose_browser(
+            context.requested_browser,
+            pinned.as_deref(),
+            &self.browser.browsers(),
+        )?;
+        match self
+            .workspaces
+            .pin_browser(context.workspace.as_str(), &chosen)
+        {
+            Ok(()) => Ok(chosen),
+            Err(WorkspaceError::BrowserPinned) => Err(BrowserError::BrowserPinned),
+            // The workspace vanished between admission and dispatch. Nothing physical should
+            // happen for a workspace that no longer exists.
+            Err(_) => Err(BrowserError::CancelledBeforeDispatch),
+        }
     }
 
     /// Record what one crossing saw, on top of what the invocation already observed.
@@ -3221,7 +3262,13 @@ impl ApplicationExecutor {
         }
         let cancelled = AtomicBool::new(false);
         let deadline = Instant::now() + Duration::from_secs(2);
+        // The tab exists, so the workspace is already bound to the browser holding it. Undoing an
+        // effect is never the moment to choose a browser.
+        let Some(browser) = self.workspaces.browser_of(context.workspace.as_str()) else {
+            return CloseCompensation::Unknown;
+        };
         match self.browser.call(
+            &browser,
             context.workspace.as_str(),
             BrowserCommand::CloseTab {
                 tab_id: tab.physical_id,
@@ -3431,6 +3478,27 @@ impl ApplicationExecutor {
                 observed: Observed::default(),
             };
         }
+        // Routing refusals are decisive and physical-effect-free: nothing was dispatched, because
+        // nothing could be dispatched anywhere in particular. They name the browsers the caller
+        // can choose between rather than picking one on the caller's behalf.
+        if let Some((refusal, facts)) = routing_refusal(&error) {
+            let summary = refusal.summary();
+            return Terminal {
+                result: InvocationResult::new(
+                    context.invocation,
+                    Status::Failed,
+                    Effect::None,
+                    Readiness::NotApplicable,
+                    true,
+                    &summary,
+                    facts,
+                    refusal.next_steps(),
+                ),
+                decision,
+                physical_id,
+                observed: Observed::default(),
+            };
+        }
         if error.effect_unknown() {
             return self.unknown(
                 context,
@@ -3543,6 +3611,11 @@ fn elapsed_ms(started: std::time::Instant) -> u64 {
 struct InvocationContext<'a> {
     invocation: &'a str,
     workspace: &'a WorkspaceId,
+    /// The browser this call named, when it named one.
+    ///
+    /// Only a call that can open the first tab of a workspace can carry one. Every other call
+    /// reaches the browser through a handle that already belongs to it.
+    requested_browser: Option<&'a str>,
     snapshot: &'a AuthoritySnapshot,
     deadline: Instant,
     cancellation: &'a CancellationToken,
@@ -3751,6 +3824,38 @@ fn step_capability(step: &SequenceStep) -> Capability {
         }
         SequenceStep::Fill { .. } | SequenceStep::TypeText { .. } => Capability::Write,
         SequenceStep::Click { .. } | SequenceStep::PressKey { .. } => Capability::Action,
+    }
+}
+
+/// The refusal for a browser choice that could not be made, and the facts that explain it.
+///
+/// Returning candidates rather than a choice is the point: two connected browsers are two
+/// different signed-in contexts, and guessing between them would put the person's work somewhere
+/// they did not ask for.
+fn routing_refusal(error: &BrowserError) -> Option<(Refusal, Value)> {
+    match error {
+        BrowserError::AmbiguousBrowser(candidates) => Some((
+            Refusal::BrowserAmbiguous,
+            json!({"reason":"browser_ambiguous","browsers":candidates}),
+        )),
+        BrowserError::UnknownBrowser(_) => {
+            Some((Refusal::BrowserUnknown, json!({"reason":"browser_unknown"})))
+        }
+        BrowserError::BrowserPinned => {
+            Some((Refusal::BrowserPinned, json!({"reason":"browser_pinned"})))
+        }
+        _ => None,
+    }
+}
+
+/// The browser one operation named, if its shape can name one.
+///
+/// Only opening a page can carry a selection, because only opening a page can be the first work a
+/// workspace ever does. Everything else arrives holding a handle that already names its browser.
+fn operation_browser(operation: &Operation) -> Option<&str> {
+    match operation {
+        Operation::OpenPage(value) => value.browser.as_deref(),
+        _ => None,
     }
 }
 
@@ -4062,7 +4167,7 @@ mod tests {
     use ghostlight_bridge::service::ServiceContent;
     use serde_json::json;
 
-    use crate::browser::testing::FakeBrowser;
+    use crate::browser::testing::{summary, FakeBrowser, FAKE_BROWSER};
     use ghostlight_bridge::service::IntakeChannel;
 
     use crate::governance::{AuditRecord, AuditSink, GovernanceFacade};
@@ -4161,6 +4266,150 @@ mod tests {
             "ghostlight-1.0-work-{name}-{}.json",
             uuid::Uuid::new_v4()
         ))
+    }
+
+    #[test]
+    fn work_follows_the_attended_browser_and_then_stays_where_it_started() {
+        let (executor, browser, workspaces, workspace, _) = fixture();
+        browser.connect(vec![
+            summary("browser_chrome", false),
+            summary("browser_edge", true),
+        ]);
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+
+        // Nothing named a browser, so the work goes where the person last was.
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(opened.status, Status::Succeeded);
+        assert_eq!(browser.routed(), vec!["browser_edge"]);
+        assert_eq!(
+            workspaces.browser_of(workspace.as_str()).as_deref(),
+            Some("browser_edge")
+        );
+
+        // The person turns to Chrome. Established work does not follow them there.
+        browser.connect(vec![
+            summary("browser_chrome", true),
+            summary("browser_edge", false),
+        ]);
+        browser.push(Ok(BrowserOutcome::Navigated {
+            tab: tab(7, "https://example.com/next"),
+            committed_urls: vec!["https://example.com/next".into()],
+        }));
+        let followed = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/next"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(followed.status, Status::Succeeded);
+        assert_eq!(browser.routed(), vec!["browser_edge", "browser_edge"]);
+    }
+
+    #[test]
+    fn an_ambiguous_bootstrap_names_the_choices_and_touches_no_browser() {
+        let (executor, browser, workspaces, workspace, _) = fixture();
+        browser.connect(vec![
+            summary("browser_chrome", false),
+            summary("browser_edge", false),
+        ]);
+
+        let refused = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(refused.status, Status::Failed);
+        assert_eq!(refused.effect, Effect::None);
+        assert_eq!(refused.facts["reason"], json!("browser_ambiguous"));
+        assert_eq!(
+            refused.facts["browsers"],
+            json!(["browser_chrome", "browser_edge"])
+        );
+        assert!(refused.repeat_safe);
+        // Nothing was dispatched and nothing was bound, so naming a browser next still works.
+        assert!(browser.routed().is_empty());
+        assert_eq!(workspaces.browser_of(workspace.as_str()), None);
+    }
+
+    #[test]
+    fn a_named_browser_opens_there_and_a_named_stranger_is_refused() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.connect(vec![
+            summary("browser_chrome", false),
+            summary("browser_edge", true),
+        ]);
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true,"browser":"browser_chrome"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(opened.status, Status::Succeeded);
+        assert_eq!(browser.routed(), vec!["browser_chrome"]);
+
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.connect(vec![summary("browser_edge", true)]);
+        let refused = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true,"browser":"browser_absent"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(refused.status, Status::Failed);
+        assert_eq!(refused.facts["reason"], json!("browser_unknown"));
+        assert!(browser.routed().is_empty());
+    }
+
+    #[test]
+    fn listing_tabs_answers_with_no_browser_connected_and_shows_the_ones_there_are() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.connect(vec![]);
+
+        let listed = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        // A read about this workspace's own tabs never needs a browser to answer truthfully.
+        assert_eq!(listed.status, Status::Succeeded);
+        assert_eq!(listed.facts["tabs"], json!([]));
+        assert_eq!(listed.facts["browsers"], json!([]));
+
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
+        let listed = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(
+            listed.facts["browsers"],
+            json!([{"browser":FAKE_BROWSER,"name":null,"attended":true}])
+        );
     }
 
     #[test]

@@ -50,6 +50,8 @@ pub mod adapter_capability {
     pub const CHUNKED_COMMANDS: &str = "chunked_commands";
     /// End-to-end adapter availability probes independent of browser work.
     pub const ADAPTER_LIVENESS: &str = "adapter_liveness";
+    /// Reported browser-level attention, so bootstrap routing never guesses.
+    pub const ADAPTER_ATTENTION: &str = "adapter_attention";
 }
 
 /// One physical capability and the highest compatible revision implemented by the adapter.
@@ -1005,6 +1007,12 @@ pub enum BrowserEvent {
         tab: PhysicalTab,
         opener_tab_id: u64,
     },
+    /// A window of this browser gained attention.
+    ///
+    /// Only the gain is reported. Losing attention tells the resolver nothing that recency order
+    /// does not already say, and no adapter can prove the gain came from a human rather than from
+    /// the browser or a page, so this is an ergonomic hint and never an authorization fact.
+    Attended,
     /// A local human requested a runtime-control change.
     RuntimeControlRequested { intent: RuntimeControlIntent },
     /// A tab closed outside an invocation.
@@ -1025,6 +1033,19 @@ pub enum BrowserFrame {
         browser_id: String,
         /// Restart-local browser engine epoch.
         adapter_epoch: String,
+        /// Bounded product name the person would recognize, such as `Chrome` or `Edge`.
+        ///
+        /// Absent from an adapter that predates browser plurality. Routing never depends on it;
+        /// it exists so a human or a model can tell two connected browsers apart.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        browser_name: Option<String>,
+        /// Whether this browser holds a focused window at the moment it connects.
+        ///
+        /// Attention is reported, never inferred from connection order (ADR-0084 D2). A browser
+        /// that is already in front when it attaches says so here; every other browser attaches
+        /// without disturbing established attention order.
+        #[serde(default)]
+        attended: bool,
         /// Versioned physical capabilities implemented by the adapter.
         capabilities: Vec<AdapterCapability>,
     },
@@ -1073,10 +1094,10 @@ pub enum BrowserFrame {
 #[cfg(test)]
 mod tests {
     use super::{
-        adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserOutcome,
-        BrowserReceipt, BrowserRequest, DiagnosticDetail, DiagnosticEntry, DiagnosticSource,
-        EncodedRecording, PhysicalActionSubject, PhysicalRecordingSummary, PhysicalTab,
-        PresentationActivity, PresentationKind, PresentationSignal, RecordingDelivery,
+        adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
+        BrowserOutcome, BrowserReceipt, BrowserRequest, DiagnosticDetail, DiagnosticEntry,
+        DiagnosticSource, EncodedRecording, PhysicalActionSubject, PhysicalRecordingSummary,
+        PhysicalTab, PresentationActivity, PresentationKind, PresentationSignal, RecordingDelivery,
         RecordingDestination, RecordingState, RecordingStopReason, ADAPTER_PROTOCOL_MAJOR,
         COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
         RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES,
@@ -1164,6 +1185,8 @@ mod tests {
             adapter_version: "1.0.0".into(),
             browser_id: "browser_test".into(),
             adapter_epoch: "adapter_test".into(),
+            browser_name: Some("Chrome".into()),
+            attended: true,
             capabilities: vec![AdapterCapability {
                 name: adapter_capability::OPERATION_RECOVERY.into(),
                 revision: 1,
@@ -1172,6 +1195,42 @@ mod tests {
         let encoded = serde_json::to_vec(&frame).unwrap();
         assert_eq!(
             serde_json::from_slice::<BrowserFrame>(&encoded).unwrap(),
+            frame
+        );
+    }
+
+    #[test]
+    fn adapter_hello_without_plurality_fields_still_negotiates() {
+        let hello = serde_json::json!({
+            "kind": "hello",
+            "major": ADAPTER_PROTOCOL_MAJOR,
+            "adapter_version": "1.0.0",
+            "browser_id": "browser_test",
+            "adapter_epoch": "adapter_test",
+            "capabilities": []
+        });
+        assert_eq!(
+            serde_json::from_value::<BrowserFrame>(hello).expect("older hello deserializes"),
+            BrowserFrame::Hello {
+                major: ADAPTER_PROTOCOL_MAJOR,
+                adapter_version: "1.0.0".into(),
+                browser_id: "browser_test".into(),
+                adapter_epoch: "adapter_test".into(),
+                browser_name: None,
+                attended: false,
+                capabilities: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn attention_event_round_trips() {
+        let frame = BrowserFrame::Event {
+            event: BrowserEvent::Attended,
+        };
+        let encoded = serde_json::to_vec(&frame).expect("attention event serializes");
+        assert_eq!(
+            serde_json::from_slice::<BrowserFrame>(&encoded).expect("attention event deserializes"),
             frame
         );
     }

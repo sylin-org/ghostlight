@@ -46,10 +46,21 @@ and the screenshot returns.
 ## Adapter protocol 2 mechanisms
 
 Protocol 2 adds independent physical capabilities for window resize, diagnostics, recording,
-chunked commands, and end-to-end adapter liveness. The native host remains an opaque byte relay.
+chunked commands, end-to-end adapter liveness, and reported attention. The native host remains an
+opaque byte relay.
 The extension answers a content-free heartbeat independently of browser work; the service sends
 one every 20 seconds and stops treating the adapter as available after 45 seconds without an
-acknowledgement. Large service-to-extension
+acknowledgement.
+
+The hello carries this installation's persistent browser id, and now also the browser's own product
+name and whether it currently holds a focused window. The service keeps one connection per browser
+id, so several browsers can be connected at once, and a second connection from this installation
+replaces and closes the first rather than leaving two live ports. When a browser window gains focus
+the extension reports attention, which is how the service decides where new work goes when a call
+does not name a browser. Only the gain is reported, it carries no page or window content, and it is
+an ergonomic hint rather than proof that a person did anything.
+
+Large service-to-extension
 commands are divided below Chrome's directional message ceiling, then verified and dispatched once
 in the extension. Partial transfers are memory-only, concurrency- and byte-bounded, and erased on
 expiry or native disconnect. Raw chunks are at most 512 KiB. One transfer is at most 8 MiB and 64

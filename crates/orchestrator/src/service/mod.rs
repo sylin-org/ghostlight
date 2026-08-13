@@ -28,7 +28,7 @@ use crate::language::{catalog, RequestRestrictions, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::work::{ActiveAuthorityRegistry, ApplicationExecutor, CancellationToken};
 use crate::workbench::{ProjectingAuditSink, WorkbenchFacade, WorkbenchProjection};
-use crate::workspace::WorkspaceStore;
+use crate::workspace::{ReleasedTabs, WorkspaceStore};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
 
@@ -86,8 +86,10 @@ impl ServiceHost {
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
         let _ = governance.runtime_decision();
         let _ = browser_port.publish_control_state(governance.runtime_state());
-        let presentation =
-            PresentationReactor::new(Arc::new(BrowserPresentation::new(browser_port.clone())));
+        let presentation = PresentationReactor::new(Arc::new(BrowserPresentation::new(
+            browser_port.clone(),
+            workspaces.clone(),
+        )));
         let audit_path = env::var_os("GHOSTLIGHT_AUDIT_FILE")
             .map(PathBuf::from)
             .unwrap_or_else(|| path.with_file_name("audit.jsonl"));
@@ -529,23 +531,31 @@ fn serve_session(
     // A workspace with an owner outlives this connection: the caller is still there and its next
     // call must reach the same tabs. It is released when its owner is gone, not when a socket is.
     if !workspaces.is_owned(&workspace) {
-        let physical_tabs = workspaces.release(&workspace);
-        cleanup_released_tabs(workspace.as_str(), &physical_tabs, browser.as_ref());
+        let released = workspaces.release(&workspace);
+        cleanup_released_tabs(workspace.as_str(), &released, browser.as_ref());
     }
     served
 }
 
 /// Close the tabs of every session whose owning process is gone.
 fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort) {
-    let abandoned = workspaces.reap(&owner_alive);
-    cleanup_released_tabs("reaped", &abandoned, browser);
+    for released in workspaces.reap(&owner_alive) {
+        cleanup_released_tabs("reaped", &released, browser);
+    }
 }
 
 /// Erase service-owned browser diagnostics before released tabs are offered to the close interlock.
-fn cleanup_released_tabs(workspace: &str, physical_tabs: &[u64], browser: &dyn BrowserPort) {
+///
+/// Cleanup goes to the browser that holds the tabs and nowhere else. A workspace that never opened
+/// a browser has nothing to clean up.
+fn cleanup_released_tabs(workspace: &str, released: &ReleasedTabs, browser: &dyn BrowserPort) {
+    let Some(target) = released.browser.as_deref() else {
+        return;
+    };
     let cancelled = AtomicBool::new(false);
-    for tab_ids in physical_tabs.chunks(DIAGNOSTIC_CLEAR_BATCH_SIZE) {
+    for tab_ids in released.physical_ids.chunks(DIAGNOSTIC_CLEAR_BATCH_SIZE) {
         let _ = browser.call(
+            target,
             workspace,
             BrowserCommand::ClearDiagnostics {
                 tab_ids: tab_ids.to_vec(),
@@ -554,8 +564,9 @@ fn cleanup_released_tabs(workspace: &str, physical_tabs: &[u64], browser: &dyn B
             &cancelled,
         );
     }
-    for &tab_id in physical_tabs {
+    for &tab_id in &released.physical_ids {
         let _ = browser.call(
+            target,
             workspace,
             BrowserCommand::CloseTab { tab_id },
             Instant::now() + Duration::from_secs(2),
@@ -608,14 +619,14 @@ struct ServiceBrowserEvents {
 }
 
 impl BrowserEventSink for ServiceBrowserEvents {
-    fn on_event(&self, event: BrowserEvent) {
+    fn on_event(&self, browser: &str, event: BrowserEvent) {
         match event {
             BrowserEvent::DocumentCommitted {
                 tab_id,
                 url,
                 correlation,
             } => {
-                let Some(workspace) = self.workspaces.owner_of_physical(tab_id) else {
+                let Some(workspace) = self.workspaces.owner_of_physical(browser, tab_id) else {
                     return;
                 };
                 let snapshot = lock(&self.active)
@@ -630,9 +641,12 @@ impl BrowserEventSink for ServiceBrowserEvents {
                 };
                 let event_id = format!("browser_event_{}", Uuid::new_v4().simple());
                 if correlation.is_none() || !decision.allowed {
-                    let _ = self
-                        .workspaces
-                        .apply_browser_landing(tab_id, &url, decision.allowed);
+                    let _ = self.workspaces.apply_browser_landing(
+                        browser,
+                        tab_id,
+                        &url,
+                        decision.allowed,
+                    );
                 }
                 let record = AuditRecord::now(
                     &event_id,
@@ -656,18 +670,24 @@ impl BrowserEventSink for ServiceBrowserEvents {
                 );
                 let _ = self.audit.record(&record);
             }
-            BrowserEvent::ReadinessChanged { tab_id, readiness } => {
-                self.workspaces.apply_browser_readiness(tab_id, readiness)
-            }
+            BrowserEvent::ReadinessChanged { tab_id, readiness } => self
+                .workspaces
+                .apply_browser_readiness(browser, tab_id, readiness),
             BrowserEvent::ChildTabOpened { tab, opener_tab_id } => {
-                let _ = self.workspaces.apply_browser_child(opener_tab_id, &tab);
+                let _ = self
+                    .workspaces
+                    .apply_browser_child(browser, opener_tab_id, &tab);
             }
             BrowserEvent::RuntimeControlRequested { intent } => {
                 let state = self.governance.apply_runtime_intent(intent);
                 let _ = self.browser.publish_control_state(state);
             }
-            BrowserEvent::TabClosed { tab_id } => self.workspaces.apply_browser_close(tab_id),
-            BrowserEvent::Disconnected => {}
+            BrowserEvent::TabClosed { tab_id } => {
+                self.workspaces.apply_browser_close(browser, tab_id)
+            }
+            // Attention never reaches this sink: it is browser routing state, and the port that
+            // knows which connection reported it is the only thing that needs it.
+            BrowserEvent::Attended | BrowserEvent::Disconnected => {}
             BrowserEvent::DialogChanged { .. } => {}
         }
     }
@@ -688,10 +708,11 @@ mod tests {
         IntakeChannel, ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR,
     };
 
-    use crate::browser::testing::FakeBrowser;
+    use crate::browser::testing::{FakeBrowser, FAKE_BROWSER};
     use crate::workbench::{
         WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
     };
+    use crate::workspace::ReleasedTabs;
 
     use super::{cleanup_released_tabs, request_workbench_activation, ServiceHost};
 
@@ -841,9 +862,12 @@ mod tests {
     #[test]
     fn released_tabs_clear_diagnostics_in_bounded_batches_before_close_attempts() {
         let browser = FakeBrowser::default();
-        let tabs = (1..=257).collect::<Vec<u64>>();
+        let released = ReleasedTabs {
+            browser: Some(FAKE_BROWSER.into()),
+            physical_ids: (1..=257).collect(),
+        };
 
-        cleanup_released_tabs("workspace-1", &tabs, &browser);
+        cleanup_released_tabs("workspace-1", &released, &browser);
 
         let calls = browser.calls();
         assert_eq!(

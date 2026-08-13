@@ -41,6 +41,15 @@ impl WorkspaceId {
     }
 }
 
+/// Look a workspace up by the string form that crosses process boundaries.
+///
+/// The handle is exactly its string, so borrowing one is free and hashes identically.
+impl std::borrow::Borrow<str> for WorkspaceId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Opaque model-facing controlled tab handle.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TabHandle(String);
@@ -128,6 +137,31 @@ pub struct SelectedView {
     pub height: u32,
 }
 
+/// The physical tabs a released workspace leaves behind, in the browser that holds them.
+///
+/// Tab ids travel with their browser or they mean nothing: cleaning up tab 5 without saying whose
+/// tab 5 it is would close a stranger's tab in whichever browser answered.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ReleasedTabs {
+    /// The browser holding the tabs, absent when the workspace never opened one.
+    pub browser: Option<String>,
+    /// Physical tab ids the workspace owned.
+    pub physical_ids: Vec<u64>,
+}
+
+impl ReleasedTabs {
+    fn from_state(state: WorkspaceState) -> Self {
+        Self {
+            browser: state.browser,
+            physical_ids: state
+                .tabs
+                .into_values()
+                .map(|tab| tab.physical_id)
+                .collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TargetState {
     tab: TabHandle,
@@ -163,6 +197,15 @@ struct WorkspaceState {
     channel: IntakeChannel,
     /// What owns this workspace, when it outlives the connection that opened it (ADR-0106).
     session: Option<SessionMarker>,
+    /// Which browser this workspace works in, once its first work chose one.
+    ///
+    /// A workspace lives in one browser for its whole life. Its tabs, targets, and views are all
+    /// physical things inside that one browser, and physical tab ids only mean anything there, so
+    /// a workspace that could span two browsers could not name its own tabs unambiguously. When
+    /// that browser stops, the binding stays: the work belongs to a person's Chrome profile, and
+    /// silently finishing it in their Edge profile would be a different act than the one asked
+    /// for (ADR-0084 D4).
+    browser: Option<String>,
     leased: bool,
     tabs: HashMap<TabHandle, TabState>,
     targets: HashMap<TargetHandle, TargetState>,
@@ -235,7 +278,7 @@ impl WorkspaceStore {
     ///
     /// Liveness is supplied by the caller rather than observed here: the aggregate owns handles and
     /// ownership, not the operating system.
-    pub fn reap(&self, alive: &dyn Fn(&SessionMarker) -> bool) -> Vec<u64> {
+    pub fn reap(&self, alive: &dyn Fn(&SessionMarker) -> bool) -> Vec<ReleasedTabs> {
         let mut state = self.lock();
         let dead: Vec<WorkspaceId> = state
             .workspaces
@@ -249,13 +292,14 @@ impl WorkspaceStore {
             })
             .map(|(id, _)| id.clone())
             .collect();
-        let mut tabs = Vec::new();
+        let mut released = Vec::new();
         for id in dead {
             if let Some(workspace) = state.workspaces.remove(&id) {
-                tabs.extend(workspace.tabs.into_values().map(|tab| tab.physical_id));
+                released.push(ReleasedTabs::from_state(workspace));
             }
         }
-        tabs
+        released.retain(|release| !release.physical_ids.is_empty());
+        released
     }
 
     /// Every session marker currently owning a workspace.
@@ -290,6 +334,7 @@ impl WorkspaceStore {
                 client_label,
                 channel,
                 session,
+                browser: None,
                 leased: false,
                 tabs: HashMap::new(),
                 targets: HashMap::new(),
@@ -299,18 +344,12 @@ impl WorkspaceStore {
         id
     }
 
-    /// Release an MCP workspace and return physical tabs it owned.
-    pub fn release(&self, workspace: &WorkspaceId) -> Vec<u64> {
+    /// Release an MCP workspace and return the physical tabs it owned.
+    pub fn release(&self, workspace: &WorkspaceId) -> ReleasedTabs {
         self.lock()
             .workspaces
             .remove(workspace)
-            .map_or_else(Vec::new, |state| {
-                state
-                    .tabs
-                    .into_values()
-                    .map(|tab| tab.physical_id)
-                    .collect()
-            })
+            .map_or_else(ReleasedTabs::default, ReleasedTabs::from_state)
     }
 
     /// Acquire exclusive mutation ownership for one invocation.
@@ -350,14 +389,54 @@ impl WorkspaceStore {
     }
 
     /// Apply an asynchronous committed landing through the aggregate before later content use.
+    /// Which browser this workspace works in, if its first work already chose one.
+    #[must_use]
+    pub fn browser_of(&self, workspace: &str) -> Option<String> {
+        self.lock()
+            .workspaces
+            .get(workspace)
+            .and_then(|state| state.browser.clone())
+    }
+
+    /// Bind a workspace to the browser its work belongs to.
+    ///
+    /// The first binding wins for the life of the workspace. Re-binding the same browser is the
+    /// ordinary case and succeeds; naming a different one is refused rather than obeyed, because
+    /// the tabs already open would stay behind in the browser that owns them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkspaceError::UnknownWorkspace`] when the workspace is gone, and
+    /// [`WorkspaceError::BrowserPinned`] when it already works in a different browser.
+    pub fn pin_browser(&self, workspace: &str, browser: &str) -> Result<(), WorkspaceError> {
+        let mut state = self.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        match workspace.browser.as_deref() {
+            Some(pinned) if pinned == browser => Ok(()),
+            Some(_) => Err(WorkspaceError::BrowserPinned),
+            None => {
+                workspace.browser = Some(browser.into());
+                Ok(())
+            }
+        }
+    }
+
     pub fn apply_browser_landing(
         &self,
+        browser: &str,
         physical_id: u64,
         url: &str,
         allowed: bool,
     ) -> Option<(WorkspaceId, TabHandle)> {
         let mut state = self.lock();
-        for (workspace_id, workspace) in &mut state.workspaces {
+        for (workspace_id, workspace) in state
+            .workspaces
+            .iter_mut()
+            .filter(|(_, workspace)| workspace.browser.as_deref() == Some(browser))
+        {
             if let Some((handle, tab)) = workspace
                 .tabs
                 .iter_mut()
@@ -376,12 +455,18 @@ impl WorkspaceStore {
     }
 
     /// Resolve the owning workspace for an asynchronous physical browser event.
+    ///
+    /// A physical tab id is unique inside one browser and nowhere else, so the browser that
+    /// reported the event is part of the key. Without it, Chrome's tab 5 and Edge's tab 5 are the
+    /// same lookup, and one browser's navigation would be governed and audited against the
+    /// other's tab.
     #[must_use]
-    pub fn owner_of_physical(&self, physical_id: u64) -> Option<WorkspaceId> {
+    pub fn owner_of_physical(&self, browser: &str, physical_id: u64) -> Option<WorkspaceId> {
         let state = self.lock();
         state
             .workspaces
             .iter()
+            .filter(|(_, workspace)| workspace.browser.as_deref() == Some(browser))
             .find_map(|(workspace_id, workspace)| {
                 workspace
                     .tabs
@@ -392,9 +477,18 @@ impl WorkspaceStore {
     }
 
     /// Apply asynchronous readiness only to a non-held controlled document.
-    pub fn apply_browser_readiness(&self, physical_id: u64, readiness: BrowserReadiness) {
+    pub fn apply_browser_readiness(
+        &self,
+        browser: &str,
+        physical_id: u64,
+        readiness: BrowserReadiness,
+    ) {
         let mut state = self.lock();
-        for workspace in state.workspaces.values_mut() {
+        for workspace in state
+            .workspaces
+            .values_mut()
+            .filter(|workspace| workspace.browser.as_deref() == Some(browser))
+        {
             if let Some(tab) = workspace
                 .tabs
                 .values_mut()
@@ -407,9 +501,13 @@ impl WorkspaceStore {
     }
 
     /// Remove a tab closed outside an invocation.
-    pub fn apply_browser_close(&self, physical_id: u64) {
+    pub fn apply_browser_close(&self, browser: &str, physical_id: u64) {
         let mut state = self.lock();
-        for workspace in state.workspaces.values_mut() {
+        for workspace in state
+            .workspaces
+            .values_mut()
+            .filter(|workspace| workspace.browser.as_deref() == Some(browser))
+        {
             let handle = workspace
                 .tabs
                 .iter()
@@ -426,19 +524,29 @@ impl WorkspaceStore {
     /// Adopt a physical child tab only through its already-owned opener.
     pub fn apply_browser_child(
         &self,
+        browser: &str,
         opener_physical_id: u64,
         tab: &PhysicalTab,
     ) -> Option<(WorkspaceId, TabHandle)> {
         let mut state = self.lock();
-        if state.workspaces.values().any(|workspace| {
-            workspace
-                .tabs
-                .values()
-                .any(|known| known.physical_id == tab.tab_id)
-        }) {
+        if state
+            .workspaces
+            .values()
+            .filter(|workspace| workspace.browser.as_deref() == Some(browser))
+            .any(|workspace| {
+                workspace
+                    .tabs
+                    .values()
+                    .any(|known| known.physical_id == tab.tab_id)
+            })
+        {
             return None;
         }
-        for (workspace_id, workspace) in &mut state.workspaces {
+        for (workspace_id, workspace) in state
+            .workspaces
+            .iter_mut()
+            .filter(|(_, workspace)| workspace.browser.as_deref() == Some(browser))
+        {
             if !workspace
                 .tabs
                 .values()
@@ -934,6 +1042,9 @@ pub enum WorkspaceError {
     /// Tab belongs to another admitted workspace.
     #[error("tab is owned by another workspace")]
     NotOwnedTab,
+    /// The workspace already works in a different browser.
+    #[error("workspace is already working in another browser")]
+    BrowserPinned,
     /// Target handle belongs to an old document or is unknown.
     #[error("target handle is stale")]
     StaleTarget,
@@ -972,7 +1083,21 @@ mod tests {
 
     use crate::language::outcome::TargetRole;
 
-    use super::{WorkspaceError, WorkspaceStore};
+    use super::{ReleasedTabs, WorkspaceError, WorkspaceId, WorkspaceStore};
+
+    const TEST_BROWSER: &str = "browser_test";
+
+    /// Admit a workspace already working in one browser, the way real work arrives here.
+    ///
+    /// Nothing physical exists in a workspace until its first crossing binds it to a browser, so
+    /// a test that exercises physical tabs starts from the same state.
+    fn admit_in_browser(store: &WorkspaceStore) -> WorkspaceId {
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
+        store
+            .pin_browser(workspace.as_str(), TEST_BROWSER)
+            .expect("a fresh workspace binds to its first browser");
+        workspace
+    }
 
     fn physical(id: u64, url: &str) -> PhysicalTab {
         PhysicalTab {
@@ -1017,6 +1142,7 @@ mod tests {
     fn a_workspace_outlives_its_connection_and_dies_with_its_owner() {
         let store = WorkspaceStore::default();
         let owned = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100));
+        store.pin_browser(owned.as_str(), TEST_BROWSER).unwrap();
         let lease = store.acquire(&owned).unwrap();
         let tab = lease
             .add_tab(&physical(41, "https://example.com/"))
@@ -1033,7 +1159,13 @@ mod tests {
         // When the owner is gone the workspace goes with it, and hands back the tabs it held so
         // the caller's browser does not keep them forever.
         let abandoned = store.reap(&|_| false);
-        assert_eq!(abandoned, vec![41]);
+        assert_eq!(
+            abandoned,
+            vec![ReleasedTabs {
+                browser: Some(TEST_BROWSER.into()),
+                physical_ids: vec![41],
+            }]
+        );
         assert!(!store.is_owned(&owned));
         assert_eq!(store.summaries().len(), 0);
     }
@@ -1132,10 +1264,10 @@ mod tests {
     #[test]
     fn decisive_close_receipt_tolerates_an_earlier_async_close_event() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
+        let workspace = admit_in_browser(&store);
         let lease = store.acquire(&workspace).unwrap();
         let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
-        store.apply_browser_close(7);
+        store.apply_browser_close(TEST_BROWSER, 7);
         assert!(lease.confirm_tab_closed(&tab.handle).is_ok());
         assert_eq!(lease.select_tab(None).unwrap_err(), WorkspaceError::NoTab);
     }
@@ -1189,14 +1321,14 @@ mod tests {
     #[test]
     fn child_tabs_are_adopted_only_through_an_owned_opener() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
+        let workspace = admit_in_browser(&store);
         let lease = store.acquire(&workspace).unwrap();
         let _ = lease.add_tab(&physical(7, "about:blank")).unwrap();
         assert!(store
-            .apply_browser_child(7, &physical(8, "about:blank"))
+            .apply_browser_child(TEST_BROWSER, 7, &physical(8, "about:blank"))
             .is_some());
         assert!(store
-            .apply_browser_child(99, &physical(9, "about:blank"))
+            .apply_browser_child(TEST_BROWSER, 99, &physical(9, "about:blank"))
             .is_none());
         assert_eq!(lease.tabs().unwrap().len(), 2);
     }

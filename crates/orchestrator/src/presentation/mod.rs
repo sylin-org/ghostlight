@@ -12,6 +12,7 @@ use thiserror::Error;
 
 use crate::browser::{BrowserError, BrowserPort};
 use crate::events::{DenialPresentation, DomainEvent};
+use crate::workspace::WorkspaceStore;
 
 /// Content-free presentation output port.
 pub trait PresentationPort: Send + Sync {
@@ -23,25 +24,38 @@ pub trait PresentationPort: Send + Sync {
 /// Physical adapter-backed presentation port.
 pub struct BrowserPresentation {
     browser: Arc<dyn BrowserPort>,
+    workspaces: WorkspaceStore,
 }
 
 impl BrowserPresentation {
     /// Construct presentation over the physical browser port.
     #[must_use]
-    pub fn new(browser: Arc<dyn BrowserPort>) -> Self {
-        Self { browser }
+    pub fn new(browser: Arc<dyn BrowserPort>, workspaces: WorkspaceStore) -> Self {
+        Self {
+            browser,
+            workspaces,
+        }
     }
 }
 
 impl PresentationPort for BrowserPresentation {
+    /// Present into the browser the workspace already works in, and nowhere else.
+    ///
+    /// Presentation follows work; it never leads it. A workspace that has not chosen a browser has
+    /// nothing to show, and showing its signal in some other browser would put a stranger's window
+    /// under Ghostlight's badge.
     fn present(
         &self,
         workspace: &str,
         signal: PresentationSignal,
     ) -> Result<(), PresentationError> {
+        let Some(browser) = self.workspaces.browser_of(workspace) else {
+            return Ok(());
+        };
         let cancelled = AtomicBool::new(false);
         self.browser
             .call(
+                &browser,
                 workspace,
                 BrowserCommand::Present { signal },
                 Instant::now() + Duration::from_millis(500),

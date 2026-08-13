@@ -704,6 +704,12 @@ pub enum Refusal {
     IncompatibleReceipt,
     /// The browser stopped before a physical effect.
     BrowserStopped { reconnect: bool },
+    /// Several browsers are connected and the call did not say which one it meant.
+    BrowserAmbiguous,
+    /// The named browser is not connected.
+    BrowserUnknown,
+    /// This session already works in a different browser.
+    BrowserPinned,
     /// A dispatched effect cannot be determined.
     EffectUnknown,
     /// A denied new-tab landing has an unknown final state.
@@ -742,6 +748,11 @@ impl Refusal {
                 "The browser adapter returned an incompatible primitive receipt."
             }
             Self::BrowserStopped { .. } => "The browser disconnected before anything happened.",
+            Self::BrowserAmbiguous => {
+                "More than one browser is connected, so there is no single place to open this."
+            }
+            Self::BrowserUnknown => "That browser is not connected.",
+            Self::BrowserPinned => "This session is already working in a different browser.",
             Self::EffectUnknown => "Sent, but the browser never confirmed what happened.",
             Self::LandingDeniedUnknown => {
                 "Blocked the landing, but the new tab's final state is unknown."
@@ -774,6 +785,13 @@ impl Refusal {
             Self::BrowserStopped { reconnect: true } => {
                 vec!["Reconnect the Ghostlight browser adapter.".into()]
             }
+            Self::BrowserAmbiguous | Self::BrowserUnknown => vec![
+                "Call browser_tabs with action list to see the connected browsers.".into(),
+                "Repeat the call with the browser handle you want it to open in.".into(),
+            ],
+            Self::BrowserPinned => vec![
+                "Omit browser to continue in the browser this session already works in.".into(),
+            ],
             Self::WorkspaceUnusable { reason } => reason.next_steps(),
             Self::RecordingUnavailable => vec![
                 "Use browser_record with action status and an explicit recording handle when more than one exists."
@@ -885,7 +903,8 @@ impl From<WorkspaceError> for WorkspaceReason {
             | WorkspaceError::NotOwnedView
             | WorkspaceError::TargetTabMismatch
             | WorkspaceError::ViewTabMismatch
-            | WorkspaceError::PhysicalTabOwned => Self::OwnershipMismatch,
+            | WorkspaceError::PhysicalTabOwned
+            | WorkspaceError::BrowserPinned => Self::OwnershipMismatch,
             WorkspaceError::UnknownWorkspace => Self::WorkspaceClosed,
         }
     }

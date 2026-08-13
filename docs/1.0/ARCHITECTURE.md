@@ -103,13 +103,26 @@ Each bridge hello rejects incompatible major versions before accepting work. Cor
 opaque.
 
 The browser hello also carries a persistent opaque adapter installation id, a restart-local adapter
-epoch, and versioned physical capability declarations. They identify and describe one local
-extension installation for diagnostics, compatibility, and reconnect continuity. They are never
-model-facing, never grant authority, and never replace workspace ownership. Human toolbar actions
+epoch, an optional bounded product name, a reported attention fact, and versioned physical
+capability declarations. They identify and describe one local extension installation for
+diagnostics, compatibility, reconnect continuity, and routing. The installation id is the browser's
+identity: it never grants authority and never replaces workspace ownership, but it is the key the
+service routes on and the opaque handle a model may name. Human toolbar actions
 cross the browser bridge as a closed control-intent vocabulary. The service applies them to its
 authoritative runtime controls and publishes the resulting content-free control state back to the
 adapter. Ended state is terminal for hold and resume; only explicit start-new-session intent creates
 a new active runtime session.
+
+Browsers are plural (ADR-0114). The service holds one connection per browser identity, so several
+browsers are connected and worked in at once. A hello whose identity is already registered is the
+same adapter arriving twice: it replaces that entry and closes the replaced stream, so a duplicate
+connection collapses rather than lingering as a socket that silently discards work. Each workspace
+binds to one browser for its life, physical tab ids resolve as `(browser, physical_id)`, and every
+adapter event names the browser that produced it. A crossing with no binding takes an explicit
+selection, then reported attention, then the sole connected browser, and otherwise refuses while
+naming the candidates rather than choosing between two signed-in contexts. Attention is reported by
+adapters that advertise it, never inferred from connection order, and a bound browser that
+disconnects is waited for rather than replaced.
 
 An adapter that advertises end-to-end liveness acknowledges content-free service heartbeats at the
 extension shore, independently of browser operations. Relay attachment and adapter availability are

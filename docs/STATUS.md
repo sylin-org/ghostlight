@@ -12,8 +12,8 @@ last fetch.
 
 - `ghostlight-1.0` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`.
 - `origin/dev` was fast-forwarded onto the 1.0 line through `a335461d` on 2026-08-12.
-  `ghostlight-1.0` matches that revision before the current uncommitted adapter-liveness and
-  accessible-label fixes. Before the first fast-forward `origin/dev` sat at the 0.8 line
+  `ghostlight-1.0` matches that revision before the current uncommitted adapter-liveness,
+  accessible-label, and browser-plurality work. Before the first fast-forward `origin/dev` sat at the 0.8 line
   (`3fb093eb`, 2026-08-07).
 - `origin/main` still carries the 0.8 line at `95468758`, now 57 commits behind `origin/dev`.
   Promoting it is a deliberate release decision, not routine sync. (An earlier pass recorded the
@@ -43,6 +43,15 @@ last fetch.
   dispatch. A healthy silent operation stays connected when the extension answers independently.
   Older adapters retain their capability-gated attachment behavior, and the opaque browser
   connector is unchanged.
+- Browsers are plural (ADR-0114). The service keeps one adapter connection per persistent browser
+  identity, so Chrome and Edge, or two profiles, are connected and worked in at once. A hello
+  carrying an identity that is already registered replaces that entry and **closes the replaced
+  stream**, which is what makes a duplicate connection collapse instead of lingering as a silent
+  sink. Each workspace binds to one browser for its life; physical tab ids resolve as
+  `(browser, physical_id)`, so one browser's tab 5 can never be governed as another's. A crossing
+  with no binding uses an explicit `browser`, then reported attention, then the sole connected
+  browser, and otherwise refuses while naming the candidates. Runtime control publishes to every
+  connected browser.
 - Extension native-host startup is single-flight. Concurrent bootstrap, installation, startup,
   and reconnect signals share one attempt, and ownership is rechecked after local-state
   initialization. One worker epoch therefore cannot strand multiple attached relays with only one
@@ -156,9 +165,17 @@ Re-run on 2026-08-13 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 161 Rust tests -- 129 in the orchestrator library, its launch-mode
-  binary test, 27 in the shared bridge, and 4 in the MCP connector.
-- `npm test --prefix extension`: 97 extension tests.
+- `cargo test --workspace`: 172 Rust tests -- 138 in the orchestrator library, its launch-mode
+  binary test, 29 in the shared bridge, and 4 in the MCP connector.
+- `npm test --prefix extension`: 99 extension tests.
+- Plurality contracts prove two browser identities stay connected at once and each answers its own
+  request, a second connection from one identity collapses onto the first with the replaced stream
+  reaching end-of-stream rather than hanging open, attention moves to front without duplicates and
+  never routes to an absent browser, and resolution prefers selection, then binding, then attention,
+  then a sole browser. Executor contracts prove work follows the attended browser once and then
+  stays there when attention moves, an ambiguous bootstrap names both candidates with no dispatch
+  and no binding, a named stranger is refused rather than substituted, and listing tabs answers
+  truthfully with no browser connected at all.
 - Browser-port contracts prove an attached socket without heartbeat acknowledgements becomes
   unavailable, an unanswered post-dispatch probe quarantines at the operation deadline, a legacy
   adapter keeps compatible attachment semantics, and a silent operation can outlast the liveness
@@ -368,3 +385,5 @@ Re-run on 2026-08-13 against the current tree:
   [`adr/0112-one-minimized-desktop-startup.md`](adr/0112-one-minimized-desktop-startup.md).
 - End-to-end browser availability decision:
   [`adr/0113-end-to-end-browser-adapter-liveness.md`](adr/0113-end-to-end-browser-adapter-liveness.md).
+- Plural browser adapters and routing decision:
+  [`adr/0114-plural-browser-adapters.md`](adr/0114-plural-browser-adapters.md).

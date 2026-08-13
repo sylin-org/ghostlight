@@ -27,7 +27,8 @@
     "diagnostics",
     "recording",
     "chunked_commands",
-    "adapter_liveness"
+    "adapter_liveness",
+    "adapter_attention"
   ].map((name) => Object.freeze({ name, revision: 1 })));
   const CREDENTIAL_AUTOCOMPLETE = new Set([
     "current-password",
@@ -120,6 +121,21 @@
     return { kind: "event", event: { ...event } };
   }
 
+  // Chromium names its browser in the user-agent brand list. The service never routes on this
+  // string; it exists so a person or a model can tell two connected browsers apart.
+  const BROWSER_NAME_MAX = 40;
+  const GENERIC_BRANDS = /not.*a.*brand|chromium/i;
+
+  function browserName(brands) {
+    if (!Array.isArray(brands)) return null;
+    const named = brands
+      .map((entry) => entry?.brand)
+      .filter((brand) => typeof brand === "string" && brand.trim() && !GENERIC_BRANDS.test(brand));
+    // The most specific brand is last: Chromium, then Chrome, then Edge on an Edge build.
+    const chosen = named[named.length - 1];
+    return chosen ? bounded(chosen, BROWSER_NAME_MAX) : null;
+  }
+
   function heartbeatAcknowledgement(frame) {
     if (frame?.kind !== "heartbeat"
       || !Number.isSafeInteger(frame.sequence)
@@ -140,6 +156,7 @@
     presentationLabel,
     activityLabel,
     browserEventFrame,
+    browserName,
     heartbeatAcknowledgement
   });
 });

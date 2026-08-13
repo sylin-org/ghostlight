@@ -302,6 +302,13 @@ fn navigate_schema() -> Value {
                 vec![
                     ("url", url()),
                     ("new_tab", constant_bool(true, "Create a new controlled tab.")),
+                    (
+                        "browser",
+                        handle(
+                            "browser_",
+                            "Optional exact browser from browser_tabs list. Omit to use the browser the user attended most recently.",
+                        ),
+                    ),
                     ("timeout_ms", timeout()),
                 ],
                 vec!["url", "new_tab"],

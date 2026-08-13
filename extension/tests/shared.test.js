@@ -146,7 +146,8 @@ test("the adapter advertises stable versioned physical capabilities", () => {
     "diagnostics",
     "recording",
     "chunked_commands",
-    "adapter_liveness"
+    "adapter_liveness",
+    "adapter_attention"
   ].map((name) => ({ name, revision: 1 })));
 });
 
@@ -158,6 +159,31 @@ test("adapter liveness acknowledgements echo only bounded heartbeat sequences", 
   assert.equal(shared.heartbeatAcknowledgement({ kind: "request", sequence: 7 }), null);
   assert.equal(shared.heartbeatAcknowledgement({ kind: "heartbeat", sequence: 0 }), null);
   assert.equal(shared.heartbeatAcknowledgement({ kind: "heartbeat", sequence: 2 ** 32 }), null);
+});
+
+test("browser names come from the specific brand, never a generic or placeholder one", () => {
+  assert.equal(shared.browserName([
+    { brand: "Not_A Brand", version: "8" },
+    { brand: "Chromium", version: "140" },
+    { brand: "Microsoft Edge", version: "140" }
+  ]), "Microsoft Edge");
+  assert.equal(shared.browserName([
+    { brand: "Chromium", version: "140" },
+    { brand: "Google Chrome", version: "140" }
+  ]), "Google Chrome");
+  // An adapter that cannot name itself says nothing rather than guessing.
+  assert.equal(shared.browserName([{ brand: "Chromium", version: "140" }]), null);
+  assert.equal(shared.browserName(undefined), null);
+  assert.equal(shared.browserName([{ brand: "x".repeat(80) }]).length, 40);
+});
+
+test("attention is reported on focus and at connection, never inferred from connecting", () => {
+  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  // Turning to the browser reports attention.
+  assert.match(source, /chrome\.windows\.onFocusChanged\.addListener[\s\S]{0,400}?event: "attended"/);
+  // Connecting reports the truth about focus rather than claiming it.
+  assert.match(source, /attended: await holdsFocusedWindow\(\)/);
+  assert.match(source, /chrome\.windows\.getLastFocused\(\)/);
 });
 
 test("native-host startup is one connection attempt across concurrent wake signals", () => {

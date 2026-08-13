@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -27,6 +27,9 @@ const DIRECT_NATIVE_MESSAGE_BYTES: usize = 768 * 1024;
 // observable without conflating a silent browser operation with a dead adapter.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
+// A product name is a label a person reads next to a browser they already recognize, not a
+// place for an adapter to write prose.
+const BROWSER_NAME_MAX_CHARS: usize = 40;
 
 #[derive(Clone, Copy, Debug)]
 struct HeartbeatSettings {
@@ -45,25 +48,94 @@ impl Default for HeartbeatSettings {
 
 /// A synchronous physical primitive port used only by the orchestrator executor.
 pub trait BrowserPort: Send + Sync {
-    /// Dispatch one primitive and await a decisive receipt, cancellation, deadline, or disconnect.
+    /// Dispatch one primitive to one exact browser and await a decisive receipt, cancellation,
+    /// deadline, or disconnect.
+    ///
+    /// The browser is chosen before dispatch and never re-chosen here. A port that could pick a
+    /// different browser after a failure would silently move a person's work between two
+    /// different authenticated contexts.
     fn call(
         &self,
+        browser: &str,
         workspace: &str,
         command: BrowserCommand,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError>;
 
-    /// Publish authoritative content-free runtime state without awaiting a receipt.
+    /// Every connected browser, most recently attended first.
+    fn browsers(&self) -> Vec<BrowserSummary>;
+
+    /// Publish authoritative content-free runtime state to every browser without awaiting a
+    /// receipt.
     fn publish_control_state(&self, _state: RuntimeControlState) -> Result<(), BrowserError> {
         Ok(())
+    }
+}
+
+/// Choose the browser one invocation must use, or explain why no single browser is implied.
+///
+/// The order is the whole routing contract, and every step above the last is evidence rather
+/// than a guess:
+///
+/// 1. an explicit selection the caller named;
+/// 2. the browser this workspace is already pinned to;
+/// 3. the most recently attended connected browser;
+/// 4. the only connected browser;
+/// 5. otherwise nothing, because two equally plausible browsers are two different user contexts
+///    and picking one would be a coin flip with the person's session.
+///
+/// A pinned browser that is not connected never falls back to another one (ADR-0084 D4): the
+/// work waits for the browser it belongs to, and says so.
+///
+/// An explicit selection outranks the automatic default but never an established binding: a
+/// workspace with tabs open in one browser cannot be told to continue in another, because the
+/// tabs it already owns would stay where they are.
+///
+/// # Errors
+///
+/// Returns the refusal that explains an unknown selection, a workspace that already works
+/// elsewhere, a stopped browser, or an ambiguous bootstrap.
+pub fn choose_browser(
+    requested: Option<&str>,
+    pinned: Option<&str>,
+    connected: &[BrowserSummary],
+) -> Result<String, BrowserError> {
+    if let Some(requested) = requested {
+        if pinned.is_some_and(|pinned| pinned != requested) {
+            return Err(BrowserError::BrowserPinned);
+        }
+        if !connected.iter().any(|browser| browser.id == requested) {
+            return Err(BrowserError::UnknownBrowser(requested.into()));
+        }
+        return Ok(requested.into());
+    }
+    if let Some(pinned) = pinned {
+        if connected.iter().any(|browser| browser.id == pinned) {
+            return Ok(pinned.into());
+        }
+        return Err(BrowserError::DisconnectedBeforeDispatch);
+    }
+    if let Some(attended) = connected.iter().find(|browser| browser.attended) {
+        return Ok(attended.id.clone());
+    }
+    match connected {
+        [] => Err(BrowserError::DisconnectedBeforeDispatch),
+        [only] => Ok(only.id.clone()),
+        several => Err(BrowserError::AmbiguousBrowser(
+            several.iter().map(|browser| browser.id.clone()).collect(),
+        )),
     }
 }
 
 /// Sink for asynchronous physical browser facts.
 pub trait BrowserEventSink: Send + Sync {
     /// React to one adapter event without granting authority or fabricating completion.
-    fn on_event(&self, event: BrowserEvent);
+    ///
+    /// The browser that produced the event is always named. Physical tab ids are unique only
+    /// inside one browser, so an unattributed event could be applied to a different browser's
+    /// tab that happens to carry the same number.
+    fn on_event(&self, browser: &str, event: BrowserEvent);
 }
 
 type PendingResult = Result<BrowserOutcome, BrowserError>;
@@ -75,8 +147,90 @@ struct Connection {
     pending: Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
     adapter_version: String,
     browser_id: String,
+    browser_name: Option<String>,
     capabilities: HashMap<String, u16>,
     liveness: Option<Arc<Mutex<ConnectionLiveness>>>,
+}
+
+/// One connected browser as the orchestrator, the workbench, and the model see it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserSummary {
+    /// Persistent opaque browser identity, minted by the adapter and stable across reconnects.
+    ///
+    /// This doubles as the model-facing handle. It is already opaque and content-free, so a
+    /// second mapping table would add a lookup without adding a guarantee.
+    pub id: String,
+    /// Bounded product name, when the adapter reports one.
+    pub name: Option<String>,
+    /// Adapter version currently serving this browser.
+    pub adapter_version: String,
+    /// Whether this is the most recently attended connected browser.
+    pub attended: bool,
+}
+
+/// Every connected browser, and the reported order in which they were last attended.
+///
+/// Browsers are plural. One person routinely runs Chrome and Edge at once, or two profiles of
+/// one browser, and each is a different user context rather than a redundant server.
+#[derive(Debug, Default)]
+struct AdapterRegistry {
+    /// One live connection per browser identity.
+    ///
+    /// A second connection carrying an identity that is already registered is a duplicate
+    /// transport for one adapter, never a second browser: the adapter mints its identity once
+    /// and keeps it across reconnects and service-worker restarts (ADR-0061).
+    connections: HashMap<String, Connection>,
+    /// Move-to-front browser attention order, most recent first.
+    ///
+    /// Attention is reported by adapters and outlives any single connection, so a browser that
+    /// reconnects keeps the place its last reported attention earned. Connection order never
+    /// enters this list (ADR-0084 D2).
+    attention: Vec<String>,
+}
+
+impl AdapterRegistry {
+    /// Record that one browser was attended most recently.
+    fn attend(&mut self, browser: &str) {
+        self.attention.retain(|known| known != browser);
+        self.attention.insert(0, browser.into());
+    }
+
+    /// The most recently attended browser that is currently connected.
+    fn attended(&self) -> Option<&str> {
+        self.attention
+            .iter()
+            .find(|browser| self.connections.contains_key(*browser))
+            .map(String::as_str)
+    }
+
+    /// Content-free inventory of connected browsers, most recently attended first.
+    fn summaries(&self, timeout: Duration) -> Vec<BrowserSummary> {
+        let now = Instant::now();
+        let attended = self.attended().map(str::to_owned);
+        let mut summaries: Vec<_> = self
+            .connections
+            .values()
+            .filter(|connection| {
+                connection
+                    .liveness
+                    .as_ref()
+                    .is_none_or(|liveness| lock(liveness).is_available(now, timeout))
+            })
+            .map(|connection| BrowserSummary {
+                id: connection.browser_id.clone(),
+                name: connection.browser_name.clone(),
+                adapter_version: connection.adapter_version.clone(),
+                attended: attended.as_deref() == Some(connection.browser_id.as_str()),
+            })
+            .collect();
+        summaries.sort_by(|left, right| {
+            right
+                .attended
+                .cmp(&left.attended)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        summaries
+    }
 }
 
 #[derive(Debug)]
@@ -129,7 +283,7 @@ impl ConnectionLiveness {
 /// Authenticated loopback implementation of the physical browser port.
 pub struct RelayBrowserPort {
     service_epoch: String,
-    connection: Arc<Mutex<Option<Connection>>>,
+    adapters: Arc<Mutex<AdapterRegistry>>,
     event_sink: Mutex<Option<Arc<dyn BrowserEventSink>>>,
     control_state: Mutex<RuntimeControlState>,
     heartbeat: HeartbeatSettings,
@@ -150,7 +304,7 @@ impl RelayBrowserPort {
     pub fn new(service_epoch: String) -> Self {
         Self {
             service_epoch,
-            connection: Arc::new(Mutex::new(None)),
+            adapters: Arc::new(Mutex::new(AdapterRegistry::default())),
             event_sink: Mutex::new(None),
             control_state: Mutex::new(RuntimeControlState::Active),
             heartbeat: HeartbeatSettings::default(),
@@ -162,7 +316,7 @@ impl RelayBrowserPort {
         debug_assert!(heartbeat.interval < heartbeat.timeout);
         Self {
             service_epoch,
-            connection: Arc::new(Mutex::new(None)),
+            adapters: Arc::new(Mutex::new(AdapterRegistry::default())),
             event_sink: Mutex::new(None),
             control_state: Mutex::new(RuntimeControlState::Active),
             heartbeat,
@@ -174,30 +328,44 @@ impl RelayBrowserPort {
         *lock(&self.event_sink) = Some(sink);
     }
 
-    /// Whether a compatible adapter is currently connected.
+    /// Whether at least one compatible adapter is currently connected.
     #[must_use]
     pub fn is_connected(&self) -> bool {
-        lock(&self.connection).as_ref().is_some_and(|connection| {
-            connection.liveness.as_ref().is_none_or(|liveness| {
-                lock(liveness).is_available(Instant::now(), self.heartbeat.timeout)
-            })
-        })
+        !self.connected_browsers().is_empty()
     }
 
-    /// Return the connected adapter version for diagnostics.
+    /// Every connected browser, most recently attended first.
+    #[must_use]
+    pub fn connected_browsers(&self) -> Vec<BrowserSummary> {
+        lock(&self.adapters).summaries(self.heartbeat.timeout)
+    }
+
+    /// Whether one browser still holds a registered connection, available or not.
+    ///
+    /// An adapter that stops acknowledging is unavailable but still attached: its socket is open
+    /// and it may answer again. That is a different fact from being connected, and the difference
+    /// is what stops a quarantined adapter from being mistaken for a departed one.
+    #[cfg(test)]
+    fn is_registered(&self, browser: &str) -> bool {
+        lock(&self.adapters).connections.contains_key(browser)
+    }
+
+    /// Return the adapter version of the most recently attended browser for diagnostics.
     #[must_use]
     pub fn adapter_version(&self) -> Option<String> {
-        lock(&self.connection)
-            .as_ref()
-            .map(|connection| connection.adapter_version.clone())
+        self.connected_browsers()
+            .into_iter()
+            .next()
+            .map(|browser| browser.adapter_version)
     }
 
-    /// Return the connected persistent adapter installation id for diagnostics.
+    /// Return the persistent installation id of the most recently attended browser.
     #[must_use]
     pub fn browser_id(&self) -> Option<String> {
-        lock(&self.connection)
-            .as_ref()
-            .map(|connection| connection.browser_id.clone())
+        self.connected_browsers()
+            .into_iter()
+            .next()
+            .map(|browser| browser.id)
     }
 
     /// Negotiate and attach one already-authenticated browser-relay stream.
@@ -216,6 +384,8 @@ impl RelayBrowserPort {
             adapter_version,
             browser_id,
             adapter_epoch,
+            browser_name,
+            attended,
             capabilities,
         }) = read_native(&mut reader).map_err(|error| BrowserError::Protocol(error.to_string()))?
         else {
@@ -240,6 +410,12 @@ impl RelayBrowserPort {
             return Err(BrowserError::Authentication);
         }
         let capabilities = validated_capabilities(capabilities)?;
+        let browser_name = validated_browser_name(browser_name)?;
+        let reports_attention = capabilities
+            .get(adapter_capability::ADAPTER_ATTENTION)
+            .copied()
+            .unwrap_or_default()
+            >= 1;
         let liveness = (capabilities
             .get(adapter_capability::ADAPTER_LIVENESS)
             .copied()
@@ -265,16 +441,27 @@ impl RelayBrowserPort {
             writer: Arc::clone(&writer),
             pending: Arc::clone(&pending),
             adapter_version,
-            browser_id,
+            browser_id: browser_id.clone(),
+            browser_name,
             capabilities,
             liveness: liveness.clone(),
         };
-        if let Some(previous) = lock(&self.connection).replace(connection) {
-            fail_pending(&previous.pending, BrowserError::DisconnectedAfterDispatch);
+        {
+            let mut adapters = lock(&self.adapters);
+            if let Some(previous) = adapters.connections.insert(browser_id.clone(), connection) {
+                retire(&previous);
+            }
+            if reports_attention && attended {
+                adapters.attend(&browser_id);
+            }
         }
         let sink = lock(&self.event_sink).clone();
-        let reader_connections = Arc::clone(&self.connection);
-        let reader_connection_id = connection_id.clone();
+        let tag = ConnectionTag {
+            browser_id,
+            connection_id,
+        };
+        let reader_adapters = Arc::clone(&self.adapters);
+        let reader_tag = tag.clone();
         let reader_liveness = liveness.clone();
         let heartbeat_writer = Arc::clone(&writer);
         let heartbeat_pending = Arc::clone(&pending);
@@ -286,14 +473,14 @@ impl RelayBrowserPort {
                     writer,
                     pending,
                     sink,
-                    reader_connections,
-                    reader_connection_id,
+                    reader_adapters,
+                    reader_tag,
                     reader_liveness,
                 );
             })
             .map_err(|error| BrowserError::Protocol(error.to_string()))?;
         if let Some(liveness) = liveness {
-            let heartbeat_connections = Arc::clone(&self.connection);
+            let heartbeat_adapters = Arc::clone(&self.adapters);
             let settings = self.heartbeat;
             thread::Builder::new()
                 .name("ghostlight-browser-heartbeat".into())
@@ -302,8 +489,8 @@ impl RelayBrowserPort {
                         heartbeat_writer,
                         heartbeat_pending,
                         liveness,
-                        heartbeat_connections,
-                        connection_id,
+                        heartbeat_adapters,
+                        tag,
                         settings,
                     );
                 })
@@ -314,6 +501,7 @@ impl RelayBrowserPort {
 
     fn call_inner(
         &self,
+        browser: &str,
         workspace: &str,
         command: BrowserCommand,
         deadline: Instant,
@@ -329,8 +517,8 @@ impl RelayBrowserPort {
         let (sender, receiver) = mpsc::channel();
         let required_capability = command.required_capability();
         let (writer, pending, chunked_commands, liveness) = {
-            let connection = lock(&self.connection);
-            let Some(connection) = connection.as_ref() else {
+            let adapters = lock(&self.adapters);
+            let Some(connection) = adapters.connections.get(browser) else {
                 return Err(BrowserError::DisconnectedBeforeDispatch);
             };
             if connection.liveness.as_ref().is_some_and(|liveness| {
@@ -413,24 +601,36 @@ impl RelayBrowserPort {
 impl BrowserPort for RelayBrowserPort {
     fn call(
         &self,
+        browser: &str,
         workspace: &str,
         command: BrowserCommand,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError> {
-        self.call_inner(workspace, command, deadline, cancelled)
+        self.call_inner(browser, workspace, command, deadline, cancelled)
     }
 
+    fn browsers(&self) -> Vec<BrowserSummary> {
+        self.connected_browsers()
+    }
+
+    /// Runtime control is a property of Ghostlight, not of one browser, so every connected
+    /// adapter learns the new state. One unreachable browser does not hide the state from the
+    /// rest.
     fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {
         *lock(&self.control_state) = state;
-        let writer = lock(&self.connection)
-            .as_ref()
-            .map(|connection| Arc::clone(&connection.writer));
-        if let Some(writer) = writer {
-            write_native(&mut *lock(&writer), &BrowserFrame::ControlState { state })
-                .map_err(|_| BrowserError::DisconnectedAfterDispatch)?;
+        let writers: Vec<_> = lock(&self.adapters)
+            .connections
+            .values()
+            .map(|connection| Arc::clone(&connection.writer))
+            .collect();
+        let mut published = Ok(());
+        for writer in writers {
+            if write_native(&mut *lock(&writer), &BrowserFrame::ControlState { state }).is_err() {
+                published = Err(BrowserError::DisconnectedAfterDispatch);
+            }
         }
-        Ok(())
+        published
     }
 }
 
@@ -532,10 +732,11 @@ fn read_adapter(
     writer: Arc<Mutex<TcpStream>>,
     pending: Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
     sink: Option<Arc<dyn BrowserEventSink>>,
-    connections: Arc<Mutex<Option<Connection>>>,
-    connection_id: String,
+    adapters: Arc<Mutex<AdapterRegistry>>,
+    tag: ConnectionTag,
     liveness: Option<Arc<Mutex<ConnectionLiveness>>>,
 ) {
+    let ConnectionTag { browser_id, .. } = &tag;
     loop {
         match read_native::<BrowserFrame>(&mut reader) {
             Ok(Some(BrowserFrame::Receipt { receipt })) => {
@@ -558,13 +759,15 @@ fn read_adapter(
                 acknowledge(&writer, correlation);
             }
             Ok(Some(BrowserFrame::Event { event })) => {
-                let is_current = lock(&connections)
-                    .as_ref()
-                    .is_some_and(|connection| connection.id == connection_id);
-                if is_current {
-                    if let Some(sink) = &sink {
-                        sink.on_event(event);
-                    }
+                if !is_current(&adapters, &tag) {
+                    continue;
+                }
+                if matches!(event, BrowserEvent::Attended) {
+                    lock(&adapters).attend(browser_id);
+                    continue;
+                }
+                if let Some(sink) = &sink {
+                    sink.on_event(browser_id, event);
                 }
             }
             Ok(Some(BrowserFrame::HeartbeatAck { sequence })) => {
@@ -575,21 +778,23 @@ fn read_adapter(
             Ok(Some(_)) => {}
             Ok(None) | Err(_) => {
                 fail_pending(&pending, BrowserError::DisconnectedAfterDispatch);
+                // A replaced connection must not evict the connection that replaced it. Its
+                // attention place survives, so the same browser reconnecting resumes where it
+                // was rather than starting behind every other browser.
                 let was_current = {
-                    let mut connection = lock(&connections);
-                    if connection
-                        .as_ref()
-                        .is_some_and(|connection| connection.id == connection_id)
-                    {
-                        connection.take();
-                        true
-                    } else {
-                        false
+                    let mut adapters = lock(&adapters);
+                    let current = adapters
+                        .connections
+                        .get(browser_id)
+                        .is_some_and(|connection| connection.id == tag.connection_id);
+                    if current {
+                        adapters.connections.remove(browser_id);
                     }
+                    current
                 };
                 if was_current {
                     if let Some(sink) = &sink {
-                        sink.on_event(BrowserEvent::Disconnected);
+                        sink.on_event(browser_id, BrowserEvent::Disconnected);
                     }
                 }
                 return;
@@ -602,16 +807,13 @@ fn heartbeat_adapter(
     writer: Arc<Mutex<TcpStream>>,
     pending: Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
     liveness: Arc<Mutex<ConnectionLiveness>>,
-    connections: Arc<Mutex<Option<Connection>>>,
-    connection_id: String,
+    adapters: Arc<Mutex<AdapterRegistry>>,
+    tag: ConnectionTag,
     settings: HeartbeatSettings,
 ) {
     loop {
         thread::sleep(settings.interval);
-        let is_current = lock(&connections)
-            .as_ref()
-            .is_some_and(|connection| connection.id == connection_id);
-        if !is_current {
+        if !is_current(&adapters, &tag) {
             return;
         }
 
@@ -634,6 +836,50 @@ fn heartbeat_adapter(
             return;
         }
     }
+}
+
+/// Which connection, of which browser, one background thread is serving.
+///
+/// Both halves are needed together: the browser says where its work belongs, and the connection
+/// says whether this particular socket is still the one carrying it.
+#[derive(Clone, Debug)]
+struct ConnectionTag {
+    browser_id: String,
+    connection_id: String,
+}
+
+/// Whether this connection is still the one serving its browser.
+fn is_current(adapters: &Mutex<AdapterRegistry>, tag: &ConnectionTag) -> bool {
+    lock(adapters)
+        .connections
+        .get(&tag.browser_id)
+        .is_some_and(|connection| connection.id == tag.connection_id)
+}
+
+/// End a connection that a fresher connection from the same browser has replaced.
+///
+/// Failing its pending work is not enough. An abandoned but still-open socket keeps its relay
+/// process alive and keeps the browser's stale native port alive with it, so nothing on either
+/// shore ever learns the connection is finished, and a request written into it is dropped in
+/// silence rather than refused. Closing the stream is what makes the duplicate collapse: the
+/// relay reads end-of-stream and exits, and the browser observes its port disconnect.
+fn retire(previous: &Connection) {
+    fail_pending(&previous.pending, BrowserError::DisconnectedAfterDispatch);
+    let _ = lock(&previous.writer).shutdown(Shutdown::Both);
+}
+
+/// Validate the optional bounded product name an adapter reports for itself.
+fn validated_browser_name(name: Option<String>) -> Result<Option<String>, BrowserError> {
+    let Some(name) = name else {
+        return Ok(None);
+    };
+    let acceptable = !name.trim().is_empty()
+        && name.chars().count() <= BROWSER_NAME_MAX_CHARS
+        && !name.chars().any(char::is_control);
+    if !acceptable {
+        return Err(BrowserError::Authentication);
+    }
+    Ok(Some(name))
 }
 
 fn mark_stale(liveness: &Option<Arc<Mutex<ConnectionLiveness>>>) {
@@ -741,6 +987,15 @@ pub enum BrowserError {
     /// Adapter identity or capability negotiation was invalid.
     #[error("browser adapter negotiation failed")]
     Authentication,
+    /// The caller named a browser that is not connected.
+    #[error("browser {0} is not connected")]
+    UnknownBrowser(String),
+    /// The caller named a browser other than the one this workspace already works in.
+    #[error("workspace is already working in another browser")]
+    BrowserPinned,
+    /// Several browsers are connected and nothing implies which one the work belongs to.
+    #[error("several browsers are connected and none was selected")]
+    AmbiguousBrowser(Vec<String>),
     /// Browser adapter protocol major is incompatible.
     #[error("browser adapter protocol major {offered} is incompatible with required {required}")]
     Incompatible { offered: u16, required: u16 },
@@ -770,12 +1025,13 @@ mod contract_tests {
 
     use ghostlight_bridge::browser::{
         adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserOutcome,
-        BrowserReceipt, ADAPTER_PROTOCOL_MAJOR,
+        BrowserReadiness, BrowserReceipt, PhysicalTab, ADAPTER_PROTOCOL_MAJOR,
     };
     use ghostlight_bridge::framing::{read_native, write_native};
 
     use super::{
-        adapter_error, lock, BrowserError, BrowserPort, HeartbeatSettings, RelayBrowserPort,
+        adapter_error, choose_browser, testing, AdapterRegistry, BrowserError, BrowserPort,
+        HeartbeatSettings, RelayBrowserPort,
     };
 
     fn capability(name: &str) -> AdapterCapability {
@@ -785,14 +1041,27 @@ mod contract_tests {
         }
     }
 
+    const TEST_BROWSER: &str = "browser_test";
+
     fn announce_adapter(stream: &mut TcpStream, capabilities: Vec<AdapterCapability>) {
+        announce_browser(stream, TEST_BROWSER, false, capabilities);
+    }
+
+    fn announce_browser(
+        stream: &mut TcpStream,
+        browser_id: &str,
+        attended: bool,
+        capabilities: Vec<AdapterCapability>,
+    ) {
         write_native(
             stream,
             &BrowserFrame::Hello {
                 major: ADAPTER_PROTOCOL_MAJOR,
                 adapter_version: "1.0.0".into(),
-                browser_id: "browser_test".into(),
-                adapter_epoch: "adapter_test".into(),
+                browser_id: browser_id.into(),
+                adapter_epoch: format!("adapter_{}", browser_id.replace("browser_", "")),
+                browser_name: None,
+                attended,
                 capabilities,
             },
         )
@@ -835,6 +1104,8 @@ mod contract_tests {
                     adapter_version: "future".into(),
                     browser_id: "browser_test".into(),
                     adapter_epoch: "adapter_test".into(),
+                    browser_name: None,
+                    attended: false,
                     capabilities: vec![],
                 },
             )
@@ -881,11 +1152,12 @@ mod contract_tests {
 
         assert!(!port.is_connected());
         assert!(
-            lock(&port.connection).is_some(),
+            port.is_registered(TEST_BROWSER),
             "the relay socket is still attached"
         );
         assert_eq!(
             port.call(
+                TEST_BROWSER,
                 "workspace_test",
                 BrowserCommand::ListTabs,
                 Instant::now() + Duration::from_millis(100),
@@ -947,6 +1219,7 @@ mod contract_tests {
 
         assert_eq!(
             port.call(
+                TEST_BROWSER,
                 "workspace_test",
                 BrowserCommand::ListTabs,
                 Instant::now() + Duration::from_millis(75),
@@ -956,7 +1229,7 @@ mod contract_tests {
         );
         assert!(!port.is_connected());
         assert!(
-            lock(&port.connection).is_some(),
+            port.is_registered(TEST_BROWSER),
             "the relay socket is still attached"
         );
         release.send(()).unwrap();
@@ -1019,6 +1292,7 @@ mod contract_tests {
 
         assert_eq!(
             port.call(
+                TEST_BROWSER,
                 "workspace_test",
                 BrowserCommand::ListTabs,
                 Instant::now() + Duration::from_millis(500),
@@ -1029,6 +1303,217 @@ mod contract_tests {
         assert!(port.is_connected());
         release.send(()).unwrap();
         client.join().unwrap();
+    }
+
+    #[test]
+    fn two_browsers_are_two_adapters_and_each_keeps_its_own_work() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let port = RelayBrowserPort::new("service_test".into());
+
+        let mut adapters = Vec::new();
+        for browser in ["browser_chrome", "browser_edge"] {
+            let (ready, wait) = mpsc::channel();
+            let client = thread::spawn(move || {
+                let mut stream = TcpStream::connect(address).unwrap();
+                announce_browser(
+                    &mut stream,
+                    browser,
+                    false,
+                    vec![capability(adapter_capability::TABS)],
+                );
+                ready.send(()).unwrap();
+                // Answer exactly one request, naming which browser answered it.
+                let Some(BrowserFrame::Request { request }) =
+                    read_native::<BrowserFrame>(&mut stream).unwrap()
+                else {
+                    panic!("the adapter is asked for one primitive");
+                };
+                write_native(
+                    &mut stream,
+                    &BrowserFrame::Receipt {
+                        receipt: BrowserReceipt {
+                            correlation: request.correlation,
+                            result: BrowserOutcome::Tabs {
+                                tabs: vec![PhysicalTab {
+                                    tab_id: 5,
+                                    title: browser.into(),
+                                    url: "about:blank".into(),
+                                    active: true,
+                                    readiness: BrowserReadiness::Complete,
+                                }],
+                            },
+                        },
+                    },
+                )
+                .unwrap();
+            });
+            let (stream, _) = listener.accept().unwrap();
+            port.attach(stream).unwrap();
+            wait.recv().unwrap();
+            adapters.push(client);
+        }
+
+        // Both are connected at once. Neither replaced the other, because they are two browsers.
+        let connected: Vec<_> = port
+            .connected_browsers()
+            .into_iter()
+            .map(|browser| browser.id)
+            .collect();
+        assert_eq!(connected, vec!["browser_chrome", "browser_edge"]);
+
+        // A request reaches the browser it named, and each browser's tab 5 is its own.
+        for browser in ["browser_chrome", "browser_edge"] {
+            let Ok(BrowserOutcome::Tabs { tabs }) = port.call(
+                browser,
+                "workspace_test",
+                BrowserCommand::ListTabs,
+                Instant::now() + Duration::from_millis(500),
+                &AtomicBool::new(false),
+            ) else {
+                panic!("each browser answers its own request");
+            };
+            assert_eq!(tabs[0].title, browser);
+        }
+        for adapter in adapters {
+            adapter.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn a_second_connection_from_one_browser_collapses_onto_the_first() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let port = RelayBrowserPort::new("service_test".into());
+
+        // One browser opening two native ports is the failure this design exists to make
+        // impossible: the browser mints its identity once, so the second connection is the same
+        // adapter arriving twice, not a second browser.
+        let (closed, retired) = mpsc::channel();
+        let first = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            announce_browser(
+                &mut stream,
+                "browser_one",
+                false,
+                vec![capability(adapter_capability::TABS)],
+            );
+            let mut drained = Vec::new();
+            // Returns only when the service closes this connection.
+            let _ = std::io::Read::read_to_end(&mut stream, &mut drained);
+            closed.send(()).unwrap();
+        });
+        let (stream, _) = listener.accept().unwrap();
+        port.attach(stream).unwrap();
+
+        let (ready, holding) = mpsc::channel();
+        let (release, hold) = mpsc::channel();
+        let second = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            announce_browser(
+                &mut stream,
+                "browser_one",
+                false,
+                vec![capability(adapter_capability::TABS)],
+            );
+            ready.send(()).unwrap();
+            hold.recv().unwrap();
+        });
+        let (stream, _) = listener.accept().unwrap();
+        port.attach(stream).unwrap();
+        holding.recv().unwrap();
+
+        // One browser is still one browser, served by its newest connection.
+        assert_eq!(port.connected_browsers().len(), 1);
+
+        // The replaced connection is closed rather than abandoned. Left open, it would keep its
+        // relay process alive and the browser's stale native port with it, and every request
+        // written into it would be dropped in silence instead of refused.
+        assert!(
+            retired.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "the replaced connection reads end-of-stream instead of hanging open"
+        );
+        first.join().unwrap();
+        release.send(()).unwrap();
+        second.join().unwrap();
+    }
+
+    #[test]
+    fn attention_is_reported_move_to_front_and_never_routes_to_an_absent_browser() {
+        let mut registry = AdapterRegistry::default();
+        assert_eq!(registry.attended(), None);
+
+        registry.attend("browser_chrome");
+        registry.attend("browser_edge");
+        registry.attend("browser_chrome");
+        assert_eq!(registry.attention, ["browser_chrome", "browser_edge"]);
+
+        // Attention outlives connections, so a browser that reconnects keeps the place it earned.
+        // Until one of them is actually connected, it routes nothing.
+        assert_eq!(registry.attended(), None);
+    }
+
+    #[test]
+    fn routing_prefers_selection_then_binding_then_attention() {
+        let chrome = testing::summary("browser_chrome", false);
+        let edge = testing::summary("browser_edge", true);
+        let connected = vec![chrome.clone(), edge.clone()];
+
+        // An explicit selection wins over the attended default.
+        assert_eq!(
+            choose_browser(Some("browser_chrome"), None, &connected).unwrap(),
+            "browser_chrome"
+        );
+        // An established binding wins over the attended default, so work stays where it started.
+        assert_eq!(
+            choose_browser(None, Some("browser_chrome"), &connected).unwrap(),
+            "browser_chrome"
+        );
+        // With nothing else to go on, the browser the person last attended gets the work.
+        assert_eq!(
+            choose_browser(None, None, &connected).unwrap(),
+            "browser_edge"
+        );
+        // A sole browser needs no evidence at all.
+        assert_eq!(
+            choose_browser(None, None, &[testing::summary("browser_only", false)]).unwrap(),
+            "browser_only"
+        );
+    }
+
+    #[test]
+    fn routing_refuses_rather_than_guessing_or_failing_over() {
+        let unattended = vec![
+            testing::summary("browser_chrome", false),
+            testing::summary("browser_edge", false),
+        ];
+        // Two browsers and no evidence: name the candidates, choose nothing.
+        assert_eq!(
+            choose_browser(None, None, &unattended),
+            Err(BrowserError::AmbiguousBrowser(vec![
+                "browser_chrome".into(),
+                "browser_edge".into()
+            ]))
+        );
+        // A bound browser that stopped never fails over to the other one.
+        assert_eq!(
+            choose_browser(None, Some("browser_gone"), &unattended),
+            Err(BrowserError::DisconnectedBeforeDispatch)
+        );
+        // A workspace cannot be told to continue somewhere its tabs are not.
+        assert_eq!(
+            choose_browser(Some("browser_edge"), Some("browser_chrome"), &unattended),
+            Err(BrowserError::BrowserPinned)
+        );
+        // A selection nobody is serving is a refusal, not a substitution.
+        assert_eq!(
+            choose_browser(Some("browser_absent"), None, &unattended),
+            Err(BrowserError::UnknownBrowser("browser_absent".into()))
+        );
+        assert_eq!(
+            choose_browser(None, None, &[]),
+            Err(BrowserError::DisconnectedBeforeDispatch)
+        );
     }
 }
 
@@ -1041,14 +1526,41 @@ pub(crate) mod testing {
 
     use ghostlight_bridge::browser::{BrowserCommand, BrowserOutcome, RuntimeControlState};
 
-    use super::{BrowserError, BrowserPort};
+    use super::{BrowserError, BrowserPort, BrowserSummary};
+
+    /// The browser a fake stands in for when a test does not care which one it is.
+    pub const FAKE_BROWSER: &str = "browser_fake";
 
     /// Deterministic browser port for executor contract tests.
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub struct FakeBrowser {
         calls: Mutex<Vec<BrowserCommand>>,
+        routed: Mutex<Vec<String>>,
         outcomes: Mutex<VecDeque<Result<BrowserOutcome, BrowserError>>>,
         control_states: Mutex<Vec<RuntimeControlState>>,
+        connected: Mutex<Vec<BrowserSummary>>,
+    }
+
+    impl Default for FakeBrowser {
+        fn default() -> Self {
+            Self {
+                calls: Mutex::default(),
+                routed: Mutex::default(),
+                outcomes: Mutex::default(),
+                control_states: Mutex::default(),
+                connected: Mutex::new(vec![summary(FAKE_BROWSER, true)]),
+            }
+        }
+    }
+
+    /// One connected browser, as a test wants to describe it.
+    pub fn summary(id: &str, attended: bool) -> BrowserSummary {
+        BrowserSummary {
+            id: id.into(),
+            name: None,
+            adapter_version: "1.0.0".into(),
+            attended,
+        }
     }
 
     impl FakeBrowser {
@@ -1061,20 +1573,34 @@ pub(crate) mod testing {
         pub fn control_states(&self) -> Vec<RuntimeControlState> {
             lock(&self.control_states).clone()
         }
+        /// Which browser each dispatch was routed to, in order.
+        pub fn routed(&self) -> Vec<String> {
+            lock(&self.routed).clone()
+        }
+        /// Replace the connected inventory this port reports.
+        pub fn connect(&self, browsers: Vec<BrowserSummary>) {
+            *lock(&self.connected) = browsers;
+        }
     }
 
     impl BrowserPort for FakeBrowser {
         fn call(
             &self,
+            browser: &str,
             _workspace: &str,
             command: BrowserCommand,
             _deadline: Instant,
             _cancelled: &AtomicBool,
         ) -> Result<BrowserOutcome, BrowserError> {
+            lock(&self.routed).push(browser.into());
             lock(&self.calls).push(command);
             lock(&self.outcomes)
                 .pop_front()
                 .unwrap_or_else(|| Err(BrowserError::Primitive("no fake outcome".into())))
+        }
+
+        fn browsers(&self) -> Vec<BrowserSummary> {
+            lock(&self.connected).clone()
         }
 
         fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {

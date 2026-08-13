@@ -205,6 +205,8 @@ pub struct NavigateRequest {
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
+    pub browser: Option<String>,
+    #[serde(default)]
     pub new_tab: bool,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
@@ -247,6 +249,13 @@ pub struct ActivateTab {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct OpenPage {
     pub url: String,
+    /// Which connected browser to open in.
+    ///
+    /// Opening the first tab is the one moment a workspace has no browser yet, so it is the one
+    /// call that can name one. Omitting it is the ordinary case: Ghostlight uses the browser the
+    /// person most recently attended.
+    #[serde(default)]
+    pub browser: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
@@ -876,13 +885,19 @@ fn decode_tabs(input: Value) -> Result<Operation, LanguageError> {
 fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
     let value: NavigateRequest = parse(
         input,
-        &["url", "tab", "new_tab", "timeout_ms"],
+        &["url", "tab", "browser", "new_tab", "timeout_ms"],
         |value: &NavigateRequest| {
             validate_url(&value.url)?;
             validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            validate_optional_handle(value.browser.as_deref(), "browser_")?;
             if value.new_tab && value.tab.is_some() {
                 return Err(LanguageError::Invalid(
                     "tab and new_tab cannot be combined".into(),
+                ));
+            }
+            if value.browser.is_some() && !value.new_tab {
+                return Err(LanguageError::Invalid(
+                    "browser is only valid when new_tab is true".into(),
                 ));
             }
             validate_timeout(value.timeout_ms)?;
@@ -892,6 +907,7 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
     Ok(if value.new_tab {
         Operation::OpenPage(OpenPage {
             url: value.url,
+            browser: value.browser,
             timeout_ms: value.timeout_ms,
             restrictions: value.restrictions,
         })

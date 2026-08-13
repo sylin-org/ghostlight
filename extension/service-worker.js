@@ -164,6 +164,8 @@ async function establishNativeConnection() {
       adapter_version: chrome.runtime.getManifest().version,
       browser_id: browserId,
       adapter_epoch: adapterEpoch,
+      browser_name: shared.browserName(navigator.userAgentData?.brands),
+      attended: await holdsFocusedWindow(),
       capabilities: shared.ADAPTER_CAPABILITIES
     });
   } catch (error) {
@@ -199,8 +201,25 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
   flushPendingPresentation(tabId).catch(() => {});
 });
 
+// Whether this browser currently holds a focused window.
+//
+// Reported at connection time so a browser that is already in front is routable immediately.
+// Connecting is not attention on its own: a browser that attaches while the person is working
+// elsewhere says nothing here and does not disturb the established order (ADR-0084 D2).
+async function holdsFocusedWindow() {
+  try {
+    const window = await chrome.windows.getLastFocused();
+    return Boolean(window?.focused);
+  } catch {
+    return false;
+  }
+}
+
 chrome.windows.onFocusChanged.addListener((windowId) => {
   if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  // The person just turned to this browser. Which window is a routing detail the service does
+  // not model yet; that this browser was attended is the fact it needs.
+  send(shared.browserEventFrame({ event: "attended" }));
   chrome.tabs.query({ active: true, windowId })
     .then((tabs) => tabs[0]?.id && flushPendingPresentation(tabs[0].id))
     .catch(() => {});

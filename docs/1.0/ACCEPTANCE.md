@@ -44,6 +44,15 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
     becomes unavailable, while a silent browser operation stays available when its independent
     heartbeat is acknowledged. An unanswered post-dispatch probe leaves that call unknown and makes
     the next call stop before dispatch.
+18. Two browser identities stay connected at once and each answers its own requests. A second
+    connection carrying an identity that is already registered replaces it and closes the replaced
+    stream, so the retired connection reaches end-of-stream instead of silently discarding work.
+19. A workspace binds to one browser for its life. Physical tab ids resolve only within their
+    browser, and a bound browser that disconnects is waited for rather than replaced by another.
+20. A crossing with no binding uses an explicit browser selection, then reported attention, then the
+    sole connected browser. Two connected browsers with no evidence produce a refusal naming both
+    candidates, with no dispatch and no binding. Listing a workspace's tabs succeeds with no browser
+    connected.
 
 ## Executor and truth gates
 
@@ -168,6 +177,8 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
    restart, extension reload, and native reconnect.
 3. The adapter hello advertises versioned physical capabilities and a restart-local epoch. Service
    behavior is gated by those capabilities rather than the extension version string.
+   An adapter that advertises attention reports it when a browser window gains focus and reports
+   truthfully at hello whether it already holds one. Connecting alone never claims attention.
 4. The popup distinguishes disconnected, connected-active, held, attention-required, and ended
    states without reading page content.
 5. Popup pause, resume, end-session, and start-new-session actions become authoritative service
