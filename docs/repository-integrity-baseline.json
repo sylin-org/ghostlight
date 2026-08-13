@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "nonAsciiHistoricalFiles": [
+    "docs/adr/0033-inbound-outbound-manage-zones.md",
+    "docs/adr/0034-capability-transport-registry.md",
+    "docs/adr/0064-explicit-dev-isolation.md",
+    "docs/research/00-synthesis-and-decisions.md",
+    "docs/research/01-capability-survey-stagehand-browserbase.md",
+    "docs/research/02-install-and-onboarding-friction.md",
+    "docs/research/03-governance-enterprise-prior-art.md",
+    "docs/research/04-mcp-gateway-lasso-deep-dive.md",
+    "docs/research/05-identity-xaa-idjag-rfc8693.md",
+    "docs/research/06-agentic-identity-standards.md",
+    "docs/research/07-hitl-and-stepup-auth.md",
+    "docs/research/08-cdp-origin-verification-extension-trust.md",
+    "docs/research/09-web-research-primary-sources.md",
+    "docs/research/10-forks-decided.md",
+    "docs/research/11-install-detection.md",
+    "docs/research/NORTH-STAR.md",
+    "docs/tasks/exe-split/LEDGER.md",
+    "docs/tasks/stage-4/registry/BOOTSTRAP.md",
+    "docs/tasks/stage-4/soc-split/BOOTSTRAP.md",
+    "docs/tasks/stage-4/soc-split/t01-rename-channels-axis.md",
+    "docs/tasks/stage-4/soc-split/t02-enabled-keys-and-gated-bind.md",
+    "docs/tasks/stage-4/soc-split/t03-split-webapi-and-move-browser.md",
+    "docs/tasks/stage-4/soc-split/t04-extract-manage-web-and-fix-truncation.md",
+    "docs/tasks/stage-4/soc-split/t05-fold-manage-cli-and-instrumentation.md",
+    "docs/tasks/trust-1/BOOTSTRAP.md"
+  ]
+}

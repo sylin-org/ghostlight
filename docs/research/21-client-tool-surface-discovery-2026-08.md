@@ -400,7 +400,7 @@ Before accepting a vendor profile:
 - [Stagehand v3 act](https://docs.stagehand.dev/v3/basics/act)
 - [Chrome DevTools MCP tool reference](https://raw.githubusercontent.com/ChromeDevTools/chrome-devtools-mcp/main/docs/tool-reference.md)
 - [Microsoft Browse with Copilot](https://support.microsoft.com/en-us/microsoft-copilot/browse-with-copilot)
-- [Current Ghostlight tool-surface regression fixture](../../tests/tool_schema_fidelity.rs)
+- [0.8 Ghostlight tool-surface regression fixture](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/tests/tool_schema_fidelity.rs)
 - [ADR-0069: journey-first evaluation](../adr/0069-agent-journey-evaluation-artifacts.md)
 - [ADR-0094: stable tool identity and mutable guidance](../adr/0094-agent-readable-tool-definitions.md)
 - [ADR-0096: one exact service and catalog](../adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md)

@@ -9,8 +9,8 @@
       "historical-implementation-only": 162,
       "redesign-after-signed-candidate": 11,
       "restore-lean": 4,
-      "retained-evolved": 83,
-      "retained-identical": 448,
+      "retained-evolved": 86,
+      "retained-identical": 445,
       "retired-low-value-conductor": 1,
       "reviewed-repository-history": 1,
       "reviewed-tooling-history": 2,
@@ -1892,9 +1892,9 @@
     },
     {
       "path": "docs/design/public-message-0.8.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/design/tcg-foundry-demo.md",
@@ -2168,9 +2168,9 @@
     },
     {
       "path": "docs/research/21-client-tool-surface-discovery-2026-08.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/research/22-canonical-browser-operation-primer.md",
@@ -2186,9 +2186,9 @@
     },
     {
       "path": "docs/research/public-reception-2026-08.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/research/public-reception-loop-0.8.md",

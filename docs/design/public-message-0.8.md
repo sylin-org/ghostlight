@@ -141,8 +141,8 @@ Evidence: [E1 alternatives and distinctions](../research/public-reception-2026-0
 | C1 | Ghostlight works in a Chromium profile where the person is already signed in. | Product | [E1 capability map](../research/public-reception-2026-08.md#capability-map-by-user-outcome), [data flows](../trust/data-flows.md) |
 | C2 | Work is visible in a dedicated workspace and the person can interrupt or take over. | Product | [E1 capability map](../research/public-reception-2026-08.md#capability-map-by-user-outcome), [solo-developer guide](../guides/solo-developer.md), [visual language](visual-language.md) |
 | C3 | The runtime needs no Ghostlight account, hosted control plane, telemetry, or activation service. | Product | [Continuity Promise](../trust/continuity.md), [Trust Center](../trust/README.md), [E1 canonical truth](../research/public-reception-2026-08.md#canonical-public-truth) |
-| C4 | Nine installer targets and other compatible local stdio MCP clients can connect through one protocol-neutral service. | Product | [installer definitions](../../crates/core/src/install/clients.rs), [installation guide](../guides/installation.md), [ADR-0096](../adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md) |
-| C5 | The current tool surface supports reading, interaction, forms, files, composition, recording, and browser diagnosis. | Product | [tool registry](../../crates/core/src/browser/directory.rs), [schema fidelity test](../../tests/tool_schema_fidelity.rs) |
+| C4 | Nine installer targets and other compatible local stdio MCP clients can connect through one protocol-neutral service. | Product | [0.8 installer definitions](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/crates/core/src/install/clients.rs), [installation guide](../guides/installation.md), [ADR-0096](../adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md) |
+| C5 | The current tool surface supports reading, interaction, forms, files, composition, recording, and browser diagnosis. | Product | [0.8 tool registry](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/crates/core/src/browser/directory.rs), [0.8 schema fidelity test](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/tests/tool_schema_fidelity.rs) |
 | C6 | Exact workspace identity, explicit stale-workspace recovery, supported browser-created child-tab continuity, and MCP transport recovery are implemented. | Product | [ADR-0090](../adr/0090-explicit-stale-workspace-recovery.md), [ADR-0099](../adr/0099-browser-created-tab-continuity.md), [project status](../STATUS.md) |
 | C7 | Optional governance applies capability and domain policy plus structured audit outside the policy-free extension. | Product | [governance guide](../guides/governance-configuration.md), [security overview](../trust/security-overview.md), [ADR-0013](../adr/0013-governance-overlay-all-open.md) |
 | C8 | Personal and unrestricted all-open use is complete without a policy manifest; the product is open-core. | Product | [ADR-0013](../adr/0013-governance-overlay-all-open.md), [licensing map](../../LICENSING.md) |
@@ -150,7 +150,7 @@ Evidence: [E1 alternatives and distinctions](../research/public-reception-2026-0
 | C10 | The 0.8 runtime ships an MCP connector, persistent service, and browser connector beside the extension. | Product | [ADR-0096](../adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md), [0.8 changelog](../../CHANGELOG.md) |
 | C11 | Public service, adapter, platform, and pending-review claims come only from dated public status. | Product and distribution | [`docs/public-status.json`](../public-status.json), [compatibility contract](../../compatibility.json) |
 | C12 | Windows and Linux have live-browser proof; macOS has build and full-suite CI proof with live-browser verification owed. | Product | [`docs/public-status.json`](../public-status.json) |
-| C13 | The source declares 25 additive registry tools while the original 13 trained identities remain structurally stable. | Product | [tool registry](../../crates/core/src/browser/directory.rs), [schema fidelity test](../../tests/tool_schema_fidelity.rs), [ADR-0094](../adr/0094-agent-readable-tool-definitions.md) |
+| C13 | The source declares 25 additive registry tools while the original 13 trained identities remain structurally stable. | Product | [0.8 tool registry](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/crates/core/src/browser/directory.rs), [0.8 schema fidelity test](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/tests/tool_schema_fidelity.rs), [ADR-0094](../adr/0094-agent-readable-tool-definitions.md) |
 
 Reception counters and directory grades do not appear in this matrix because they are dated
 diagnostics, not durable product claims. Use the E1 baseline when a later release packet needs
@@ -250,7 +250,7 @@ job, not all four.
 each field, one deliberate submit action, and `Moonlight Notes is ready for review.`
 
 **Success boundary:** only the synthetic public demo changes. The prompt authorizes that form
-submission and nothing outside it. Evidence: [demo-brief implementation](../../src/demo_brief.rs)
+submission and nothing outside it. Evidence: [0.8 demo-brief implementation](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/src/demo_brief.rs)
 and `C2`, `C5`.
 
 ### 2. Authenticated work: read without copying credentials
@@ -300,8 +300,8 @@ The answer separates page state, browser events, and inference. Finding no error
 when the evidence is clean.
 
 **Success boundary:** this is read-only diagnosis on the synthetic Foundry page. Console tracking
-begins when first requested, so the single reload is explicit. Evidence: [demo implementation](../../src/demo.rs),
-the [tool registry](../../crates/core/src/browser/directory.rs), and `C5`.
+begins when first requested, so the single reload is explicit. Evidence: [0.8 demo implementation](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/src/demo.rs),
+the [0.8 tool registry](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/crates/core/src/browser/directory.rs), and `C5`.
 
 ## Discovery metadata
 

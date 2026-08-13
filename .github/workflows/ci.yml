@@ -33,6 +33,12 @@ jobs:
       - name: Check every harvested behavior group has a disposition
         shell: pwsh
         run: ./scripts/check-0.8-recovery.ps1
+      - name: Check every historical artifact has a disposition
+        shell: pwsh
+        run: ./scripts/check-0.8-artifacts.ps1
+      - name: Check whole-repository integrity
+        shell: pwsh
+        run: ./scripts/check-repository-integrity.ps1
 
   format:
     runs-on: ubuntu-latest

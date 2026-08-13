@@ -6,8 +6,8 @@
     "total": 810,
     "byCurrentState": {
       "absent": 279,
-      "retained-evolved": 83,
-      "retained-identical": 448
+      "retained-evolved": 86,
+      "retained-identical": 445
     }
   },
   "entries": [
@@ -90,7 +90,7 @@
       "historicalType": "blob",
       "historicalBlob": "7c9842d6b04ef4d86b87f244f0bd39030d8d2667",
       "currentState": "retained-evolved",
-      "currentBlob": "dfa03eb0d094929850663244f841d3e182987135"
+      "currentBlob": "93b306df067fb527d4b76254a355767bd85810cc"
     },
     {
       "path": ".github/workflows/pages.yml",
@@ -108,7 +108,7 @@
       "historicalType": "blob",
       "historicalBlob": "2249445a1a6803d152d3a24861e6b3145b9f335c",
       "currentState": "retained-evolved",
-      "currentBlob": "e0b21eeba5d88e3e5aa212b3e0b22cc1b0942341"
+      "currentBlob": "c70e16c0023984af7f99222a9c1bcb1e14b1e65b"
     },
     {
       "path": ".gitignore",
@@ -2825,8 +2825,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "cb38edef1cee8af50b4edf0f10f27b9fdff9bee7",
-      "currentState": "retained-identical",
-      "currentBlob": "cb38edef1cee8af50b4edf0f10f27b9fdff9bee7"
+      "currentState": "retained-evolved",
+      "currentBlob": "dd0ecbb3ef2407ec015c578904a11538a72c0e99"
     },
     {
       "path": "docs/design/tcg-foundry-demo.md",
@@ -3239,8 +3239,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "c7eb5fffa31a4825400ca32eb22c81632efc89db",
-      "currentState": "retained-identical",
-      "currentBlob": "c7eb5fffa31a4825400ca32eb22c81632efc89db"
+      "currentState": "retained-evolved",
+      "currentBlob": "003a2eaf664e91f5c7439738bc06dc0f125cd8a8"
     },
     {
       "path": "docs/research/22-canonical-browser-operation-primer.md",
@@ -3266,8 +3266,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "e2ce5926587ca3816479450381147f4071b65cce",
-      "currentState": "retained-identical",
-      "currentBlob": "e2ce5926587ca3816479450381147f4071b65cce"
+      "currentState": "retained-evolved",
+      "currentBlob": "b982c434d85b75ce65a59633812f41044e56f33e"
     },
     {
       "path": "docs/research/public-reception-loop-0.8.md",
