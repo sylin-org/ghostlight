@@ -7,6 +7,7 @@
 /.target-*/
 /target-*/
 /crates/orchestrator/gen/
+/crates/orchestrator/binaries/
 
 # Packaged extension zip (scripts/package-extension.ps1 output)
 /dist/

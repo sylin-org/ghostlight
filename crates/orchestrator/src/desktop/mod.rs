@@ -65,6 +65,21 @@ impl WorkbenchEventSink for NativeEvents {
 
 /// Start the orchestrator and its initially minimized desktop workbench in one process.
 pub fn run() -> Result<()> {
+    match crate::install::native_host::NativeHostRegistry::discover().reconcile_packaged_launch() {
+        Ok(Some(result)) => {
+            if result.changed {
+                eprintln!("Ghostlight updated the packaged browser connector registration");
+            }
+            let migration = crate::install::migration::retire_obsolete_supervisor();
+            for warning in migration.warnings {
+                eprintln!("Ghostlight package migration warning: {warning}");
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("Ghostlight could not reconcile the packaged browser connector: {error}");
+        }
+    }
     let host = ServiceHost::start(&ghostlight_bridge::runtime::runtime_file())?;
     eprintln!(
         "Ghostlight 1.0 ready on local ports {} and {}",

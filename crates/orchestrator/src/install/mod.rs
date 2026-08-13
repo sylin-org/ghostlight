@@ -1,5 +1,8 @@
 //! Explicit, ownership-checked development-harness registration owned by the orchestrator.
 
+pub mod migration;
+pub mod native_host;
+
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
@@ -112,8 +115,10 @@ pub enum HarnessState {
     NotDetected,
     /// The harness is detected without a Ghostlight registration.
     Available,
-    /// The exact or an updatable owned Ghostlight registration is present.
+    /// The exact current Ghostlight registration is present.
     Installed,
+    /// A Ghostlight-owned registration points at an older connector location.
+    Updatable,
     /// A malformed or foreign entry requires deliberate manual attention.
     NeedsAttention,
 }
@@ -318,11 +323,16 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     let state = match registration_state(context, definition) {
         Ok(RegistrationState::Missing) if detected => HarnessState::Available,
         Ok(RegistrationState::Missing) => HarnessState::NotDetected,
-        Ok(RegistrationState::Owned) => HarnessState::Installed,
+        Ok(RegistrationState::Current) => HarnessState::Installed,
+        Ok(RegistrationState::Updatable) => HarnessState::Updatable,
         Ok(RegistrationState::Foreign) | Err(_) => HarnessState::NeedsAttention,
     };
     let detail = match state {
         HarnessState::Installed => "Ghostlight is registered for this user context.".into(),
+        HarnessState::Updatable => {
+            "Ghostlight is registered, but its connector path belongs to an older installation."
+                .into()
+        }
         HarnessState::Available if connector_ready => {
             "Detected and ready for an explicit Ghostlight registration.".into()
         }
@@ -343,7 +353,10 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         state,
         detail,
         can_install: connector_ready
-            && matches!(state, HarnessState::Available | HarnessState::NotDetected),
+            && matches!(
+                state,
+                HarnessState::Available | HarnessState::NotDetected | HarnessState::Updatable
+            ),
         can_uninstall: state == HarnessState::Installed,
     }
 }
@@ -351,7 +364,8 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RegistrationState {
     Missing,
-    Owned,
+    Current,
+    Updatable,
     Foreign,
 }
 
@@ -364,25 +378,41 @@ fn registration_state(
     }
     let source = fs::read_to_string(&definition.path).map_err(HarnessError::Read)?;
     match definition.dialect {
-        ConfigDialect::CodexToml => inspect_toml(&source),
-        ConfigDialect::Json(dialect) => inspect_json(&source, dialect),
-        ConfigDialect::OpenCode => inspect_json(&source, opencode_dialect(context, &source)?),
+        ConfigDialect::CodexToml => inspect_toml(&source, &context.connector, context.windows),
+        ConfigDialect::Json(dialect) => {
+            inspect_json(&source, dialect, &context.connector, context.windows)
+        }
+        ConfigDialect::OpenCode => inspect_json(
+            &source,
+            opencode_dialect(context, &source)?,
+            &context.connector,
+            context.windows,
+        ),
     }
 }
 
-fn inspect_json(source: &str, dialect: JsonDialect) -> Result<RegistrationState, HarnessError> {
+fn inspect_json(
+    source: &str,
+    dialect: JsonDialect,
+    connector: &Path,
+    windows: bool,
+) -> Result<RegistrationState, HarnessError> {
     let parsed = parse_jsonc(source)?;
     let Some(entry) = json_entry(&parsed, dialect) else {
         return Ok(RegistrationState::Missing);
     };
-    if json_entry_owned(entry, dialect) {
-        Ok(RegistrationState::Owned)
-    } else {
-        Ok(RegistrationState::Foreign)
-    }
+    Ok(
+        json_entry_command(entry, dialect).map_or(RegistrationState::Foreign, |command| {
+            command_registration_state(command, connector, windows)
+        }),
+    )
 }
 
-fn inspect_toml(source: &str) -> Result<RegistrationState, HarnessError> {
+fn inspect_toml(
+    source: &str,
+    connector: &Path,
+    windows: bool,
+) -> Result<RegistrationState, HarnessError> {
     let document = source
         .parse::<DocumentMut>()
         .map_err(|error| HarnessError::Malformed(error.to_string()))?;
@@ -397,11 +427,7 @@ fn inspect_toml(source: &str) -> Result<RegistrationState, HarnessError> {
         .get("command")
         .and_then(Item::as_str)
         .unwrap_or_default();
-    Ok(if command_owned(command) {
-        RegistrationState::Owned
-    } else {
-        RegistrationState::Foreign
-    })
+    Ok(command_registration_state(command, connector, windows))
 }
 
 fn apply_install(
@@ -678,7 +704,11 @@ fn escape_cst_string(value: &str) -> String {
 }
 
 fn json_entry_owned(entry: &Value, dialect: JsonDialect) -> bool {
-    let command = match dialect {
+    json_entry_command(entry, dialect).is_some_and(command_owned)
+}
+
+fn json_entry_command(entry: &Value, dialect: JsonDialect) -> Option<&str> {
+    match dialect {
         JsonDialect::McpServers
         | JsonDialect::Servers
         | JsonDialect::ContextServers
@@ -688,8 +718,7 @@ fn json_entry_owned(entry: &Value, dialect: JsonDialect) -> bool {
             .and_then(Value::as_array)
             .and_then(|command| command.first())
             .and_then(Value::as_str),
-    };
-    command.is_some_and(command_owned)
+    }
 }
 
 fn command_owned(command: &str) -> bool {
@@ -697,6 +726,26 @@ fn command_owned(command: &str) -> bool {
         .file_stem()
         .and_then(OsStr::to_str)
         .is_some_and(|name| name.eq_ignore_ascii_case("ghostlight-mcp-connector"))
+}
+
+fn command_registration_state(command: &str, connector: &Path, windows: bool) -> RegistrationState {
+    if !command_owned(command) {
+        return RegistrationState::Foreign;
+    }
+    let actual = fs::canonicalize(command).unwrap_or_else(|_| PathBuf::from(command));
+    let expected = fs::canonicalize(connector).unwrap_or_else(|_| connector.to_path_buf());
+    let actual = actual.to_string_lossy();
+    let expected = expected.to_string_lossy();
+    let current = if windows {
+        actual.eq_ignore_ascii_case(&expected)
+    } else {
+        actual == expected
+    };
+    if current {
+        RegistrationState::Current
+    } else {
+        RegistrationState::Updatable
+    }
 }
 
 fn opencode_dialect(context: &HarnessContext, source: &str) -> Result<JsonDialect, HarnessError> {
@@ -875,8 +924,14 @@ mod tests {
         assert_eq!(value["other"], 7);
         assert_eq!(value["mcpServers"]["sibling"]["command"], "sibling");
         assert_eq!(
-            inspect_json(&fs::read_to_string(&path).unwrap(), JsonDialect::McpServers).unwrap(),
-            RegistrationState::Owned
+            inspect_json(
+                &fs::read_to_string(&path).unwrap(),
+                JsonDialect::McpServers,
+                &connector,
+                cfg!(windows)
+            )
+            .unwrap(),
+            RegistrationState::Current
         );
         assert!(edit_json(&path, &connector, JsonDialect::McpServers, false).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -896,8 +951,14 @@ mod tests {
         assert!(installed.contains("// keep this thought"));
         assert!(installed.contains("\"ghostlight\""));
         assert_eq!(
-            inspect_json(&installed, JsonDialect::ContextServers).unwrap(),
-            RegistrationState::Owned
+            inspect_json(
+                &installed,
+                JsonDialect::ContextServers,
+                &connector,
+                cfg!(windows)
+            )
+            .unwrap(),
+            RegistrationState::Current
         );
         assert!(edit_json(&path, &connector, JsonDialect::ContextServers, false).unwrap());
         let removed = fs::read_to_string(&path).unwrap();
@@ -925,6 +986,32 @@ mod tests {
     }
 
     #[test]
+    fn an_owned_old_connector_path_is_updatable_not_installed() {
+        let directory = temporary("updatable");
+        let current = connector(&directory);
+        let old = directory.join("old").join(if cfg!(windows) {
+            "ghostlight-mcp-connector.exe"
+        } else {
+            "ghostlight-mcp-connector"
+        });
+        let source = serde_json::json!({
+            "mcpServers": {
+                "ghostlight": {
+                    "command": old,
+                    "args": [],
+                    "env": {}
+                }
+            }
+        })
+        .to_string();
+        assert_eq!(
+            inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows)).unwrap(),
+            RegistrationState::Updatable
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn codex_toml_edit_preserves_unrelated_comments() {
         let directory = temporary("toml");
         let path = directory.join("config.toml");
@@ -934,7 +1021,10 @@ mod tests {
         assert!(!edit_toml(&path, &connector, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         assert!(installed.contains("# keep me"));
-        assert_eq!(inspect_toml(&installed).unwrap(), RegistrationState::Owned);
+        assert_eq!(
+            inspect_toml(&installed, &connector, cfg!(windows)).unwrap(),
+            RegistrationState::Current
+        );
         assert!(edit_toml(&path, &connector, false).unwrap());
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("# keep me"));
@@ -959,8 +1049,14 @@ mod tests {
         );
         assert_eq!(value["mcp"]["ghostlight"]["enabled"], true);
         assert_eq!(
-            inspect_json(&fs::read_to_string(&path).unwrap(), JsonDialect::OpenCodeV1).unwrap(),
-            RegistrationState::Owned
+            inspect_json(
+                &fs::read_to_string(&path).unwrap(),
+                JsonDialect::OpenCodeV1,
+                &connector,
+                cfg!(windows)
+            )
+            .unwrap(),
+            RegistrationState::Current
         );
 
         fs::remove_dir_all(directory).unwrap();

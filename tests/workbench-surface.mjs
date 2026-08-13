@@ -46,7 +46,12 @@ let snapshots = 0;
 const snapshot = () => ({
   seq: ++snapshots,
   service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
-  sessions: [], operations: [], browsers: [], history: [], harnesses: [],
+  sessions: [], operations: [], browsers: [], history: [],
+  harnesses: [{
+    id: "codex", name: "Codex", state: "updatable",
+    detail: "The connector path belongs to an older installation.",
+    can_install: true, can_uninstall: false
+  }],
   diagnostics: [], configuration: {}, overview: {}
 });
 
@@ -111,6 +116,7 @@ const before = sandbox.__aboutAttempts ?? 0;
 await new Promise((r) => setTimeout(r, 60));
 
 const connections = nodes.get("connections");
+const integrations = nodes.get("integration-grid");
 const checks = [
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["heartbeat installed", heartbeat],
@@ -120,6 +126,10 @@ const checks = [
   ["snapshot still fetched", snapshots > 0],
   ["the pass continued past the broken panel", connections.innerHTML.length > 0,
     `connections: ${JSON.stringify(connections.innerHTML)}`],
+  ["an old owned harness path is offered as an update",
+    integrations.innerHTML.includes("Update")
+      && integrations.innerHTML.includes('data-harness-action="install"'),
+    `integrations: ${JSON.stringify(integrations.innerHTML)}`],
   ["failure reported", reported.some((r) => r.includes("deliberate About failure")),
     `reported: ${JSON.stringify(reported)}`],
   ["the failure names the panel", reported.some((r) => r.includes("painting about"))],

@@ -1,6 +1,10 @@
 # Linux live lifecycle verification for Ghostlight 1.0
 
-Status: planned release gate
+Status: required 1.0 release gate; not run
+
+The 0.8 line passed an earlier live Linux lifecycle, but that result is evidence, not a 1.0 pass.
+The 1.0 rewrite changed the service lifecycle, packaging, executable paths, and native-host
+registration. This entire record must be rerun against the candidate Debian package.
 
 ## Purpose
 
@@ -16,8 +20,9 @@ headless, container, Xvfb, remote-debugging, or cloud-browser test.
   harnesses.
 - Safe test identities only. Do not export or manufacture cookies or profile state.
 
-Test the signed package and matching store extension. An unpacked source extension is useful for
-development but does not satisfy this lifecycle.
+Test the candidate Debian package and matching store extension. An unpacked source extension is
+useful for development but does not satisfy this lifecycle. The build-only workflow produces an
+unsigned candidate; signing is required before the public-install pass.
 
 ## Evidence header
 
@@ -43,13 +48,16 @@ data, raw MCP payloads, or browser profiles.
 ### L1. Clean install
 
 1. Confirm no 1.0 process, package, native-host registration, harness entry, or extension exists.
-2. Verify and install the signed package as the standard user.
+2. Verify the candidate digest and install the Debian package through the normal package manager.
 3. Launch Ghostlight and open it from the tray.
-4. Install the matching extension visibly.
-5. In MCP integrations, connect one graphical MCP client.
+4. Run `ghostlight native-host check` as the graphical user. Every installed browser must point at
+   `/usr/bin/ghostlight-browser-connector`; the first launch must repair any owned user-level drift.
+5. Install the matching extension visibly.
+6. In MCP integrations, connect one graphical MCP client.
 
 Pass: all three executables are version-matched; native messaging points to the packaged browser
-connector; Status names healthy service/browser/authority state; unrelated client config remains
+connector; no `ghostlight.service`, Run key, scheduled task, or other resident supervisor was
+created; Status names healthy service/browser/authority state; unrelated client config remains
 unchanged.
 
 ### L2. Visible browser journey
@@ -62,9 +70,10 @@ receipts, payload-free audit, and workbench history agree.
 
 ### L3. Orchestrator restart
 
-Keep both relay processes, the browser, and the MCP harness open. Restart only `ghostlight`, then
-complete new work without restarting the shores. Interrupt one effect during a separate run and
-verify its outcome is unknown and never replayed.
+Keep both connector processes, the browser, and the MCP harness open. Stop only `ghostlight`.
+Verify a connector demand-starts its trusted packaged sibling, then complete new work without
+restarting the shores. Interrupt one effect during a separate run and verify its outcome is unknown
+and never replayed.
 
 ### L4. Browser and extension restart
 
@@ -73,8 +82,9 @@ installation identity, group reuse, native-host recovery, and a new bounded call
 
 ### L5. Login and reboot
 
-Log out and back in, then reboot. Verify the package's autostart/tray behavior, harness connection,
-browser connection, history continuity, and one new call after each transition.
+Log out and back in, then reboot. Verify no resident service was added. Start from the browser or an
+MCP harness and prove demand-start, tray recovery, history continuity, and one new call after each
+transition.
 
 ### L6. Concurrent harnesses
 
@@ -84,9 +94,11 @@ into the user's unrelated active window.
 
 ### L7. Upgrade
 
-Upgrade a published supported version to the candidate without deleting the browser profile,
-harness configuration, audit, or extension settings. Verify all sibling paths, native messaging,
-tray identity, and the journeys affected by the release.
+Install public 0.8.0 first and record its per-user manifest, client connector path, and supervisor
+artifact. Upgrade to the candidate without deleting the browser profile, harness configuration,
+audit, or extension settings. Launch the 1.0 package once. Verify the user manifest and every owned
+client entry become explicitly updatable and then current, the recognized 0.8 supervisor is retired,
+all three sibling paths point at the package, and affected journeys pass.
 
 ### L8. Recovery and diagnostics
 
@@ -97,9 +109,11 @@ authority or changes terminal truth.
 
 ### L9. Uninstall
 
-Use MCP integrations to remove owned client entries. Remove the extension and package through their
-normal UI. Confirm only Ghostlight-owned native registration, binaries, desktop entries, and
-configured harness entries are removed. Document the retention decision for audit/history.
+Use MCP integrations to remove owned client entries, then run `ghostlight native-host uninstall` as
+the graphical user before removing the package. Remove the extension and Debian package through
+their normal UI. Confirm the package manager removes the system manifests and binaries, the command
+removed only Ghostlight-owned user manifests, and unrelated configuration remains. Document the
+retention decision for audit/history.
 
 ## Result
 

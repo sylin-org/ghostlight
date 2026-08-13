@@ -1,0 +1,24 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/ghostlight-mcp-connector",
+      "binaries/ghostlight-browser-connector"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "packaging/windows/hooks.nsh"
+      }
+    },
+    "linux": {
+      "deb": {
+        "files": {
+          "/etc/opt/chrome/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json",
+          "/etc/opt/edge/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json",
+          "/etc/brave/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json",
+          "/etc/chromium/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json"
+        }
+      }
+    }
+  }
+}

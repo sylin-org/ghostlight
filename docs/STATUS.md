@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-13 (thirteenth pass).
+Last updated: 2026-08-13 (fourteenth pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -18,8 +18,9 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 - `main` carries the 0.8 line at `0116feca`. Promoting it is a deliberate release decision, not
   routine sync. The 1.0 line now carries adapted three-platform source, extension, process, and
   supply-chain CI; a manual Pages deployment; and bounded monthly dependency updates targeting
-  `dev`. The tag-triggered native-package release workflow remains owed until package lifecycle is
-  implemented and tested. Do not promote `dev` before that workflow exists.
+  `dev`. A manual build-only workflow now creates and inspects unsigned native-package candidates
+  without publishing them. Signing, native operating-system validation, and publication remain
+  owed. Do not promote `dev` before those live gates pass.
 - No pull requests are open. Thirteen Dependabot bumps against the 0.8 line were closed as obsolete
   on 2026-08-13: the 1.0 tree either already carried the proposed version or had dropped the
   package outright (`clap`, `rustls`, `webpki-roots`, `color_quant`). Dependency updates are paused
@@ -39,6 +40,13 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
   extension package is built from an explicit runtime allowlist. The online public check passed
   against GitHub, npm, Chrome, the official MCP Registry, and sylin.org on 2026-08-13. These local
   workflow files have not run on GitHub until they are pushed.
+- Packaged native-host lifecycle is restored without restoring the 0.8 resident supervisors
+  (ADR-0115). The orchestrator now checks, installs, updates, and safely removes Chrome, Edge,
+  Brave, and Chromium registrations; packages carry both connector sidecars; and narrow migration
+  retires only recognized pre-1.0 Run/task, launchd, or systemd artifacts. The unsigned Windows
+  NSIS candidate built locally and its payload inspection found exactly the three required
+  executables. Linux and macOS package builds plus all clean-install, upgrade, reboot, and uninstall
+  journeys remain required native-host evidence.
 
 ## Implemented
 

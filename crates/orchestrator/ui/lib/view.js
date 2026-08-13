@@ -355,7 +355,7 @@
     }
 
     function integrations(snapshot, pending) {
-      const order = { installed: 0, needs_attention: 1, available: 2, not_detected: 3 };
+      const order = { installed: 0, updatable: 1, needs_attention: 2, available: 3, not_detected: 4 };
       const harnesses = [...snapshot.harnesses].sort((left, right) =>
         (order[left.state] ?? 9) - (order[right.state] ?? 9) || left.name.localeCompare(right.name));
 
@@ -367,12 +367,13 @@
 
       el["integration-grid"].innerHTML = harnesses.map((harness) => {
         const installed = harness.state === "installed";
+        const updatable = harness.state === "updatable";
         const waiting = pending.has(harness.id);
         const allowed = installed ? harness.can_uninstall : harness.can_install;
         const tone = installed ? " connected" : harness.state === "needs_attention" ? " attention" : "";
         const label = waiting ? "Working" : installed ? "Connected" : words(harness.state);
         const action = installed ? "uninstall" : "install";
-        const verb = installed ? "Disconnect" : "Connect";
+        const verb = installed ? "Disconnect" : updatable ? "Update" : "Connect";
         const button = installed ? "danger-button" : "ghost-button";
         return `<article class="tile${tone}">`
           + `<div class="tile-top"><h2>${escapeHtml(harness.name)}</h2>`

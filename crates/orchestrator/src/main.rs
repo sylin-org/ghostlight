@@ -1,6 +1,6 @@
 //! Ghostlight 1.0 orchestrator and integrated desktop workbench process.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
@@ -14,6 +14,15 @@ enum LaunchMode {
     Desktop,
     /// The command-line intake. A script asked for work, not for a window (ADR-0105).
     Call,
+    /// The narrow package-facing Chromium registration seam (ADR-0115).
+    NativeHost(NativeHostCommand),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeHostCommand {
+    Check,
+    Install,
+    Uninstall,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,11 +33,54 @@ enum ActivationState {
 }
 
 fn main() -> anyhow::Result<()> {
-    match launch_mode(std::env::args_os().skip(1)) {
+    match launch_mode(std::env::args_os().skip(1))? {
         LaunchMode::Headless => ghostlight::service::run_forever(),
         LaunchMode::Desktop => start_or_activate_desktop(),
         LaunchMode::Call => run_call(),
+        LaunchMode::NativeHost(command) => run_native_host(command),
     }
+}
+
+fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
+    use ghostlight::install::native_host::{NativeHostRegistry, NativeHostState};
+
+    let registry = NativeHostRegistry::discover();
+    let (verb, changed, report, migration) = match command {
+        NativeHostCommand::Check => ("checked", false, registry.check()?, None),
+        NativeHostCommand::Install => {
+            let result = registry.install();
+            let migration = ghostlight::install::migration::retire_obsolete_supervisor();
+            let result = result?;
+            ("installed", result.changed, result.report, Some(migration))
+        }
+        NativeHostCommand::Uninstall => {
+            let result = registry.uninstall()?;
+            ("uninstalled", result.changed, result.report, None)
+        }
+    };
+    println!("Ghostlight native host {verb}; changed: {changed}");
+    println!("Connector: {}", report.connector.display());
+    for browser in report.browsers {
+        let state = match browser.state {
+            NativeHostState::Missing => "missing",
+            NativeHostState::Current => "current",
+            NativeHostState::Updatable => "updatable",
+            NativeHostState::NeedsAttention => "needs attention",
+        };
+        println!("{}: {state} -- {}", browser.name, browser.detail);
+    }
+    if let Some(migration) = migration {
+        for removed in migration.removed {
+            println!("Retired: {removed}");
+        }
+        for preserved in migration.preserved {
+            println!("Preserved: {preserved}");
+        }
+        for warning in migration.warnings {
+            eprintln!("Migration warning: {warning}");
+        }
+    }
+    Ok(())
 }
 
 /// Invoke one tool, or a batch of them, against the local authority.
@@ -114,25 +166,50 @@ fn finish_activation(
     }
 }
 
-fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> LaunchMode {
+fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<LaunchMode> {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
-    if arguments.iter().any(|argument| argument == "call") {
-        LaunchMode::Call
+    if arguments
+        .first()
+        .is_some_and(|argument| argument == "native-host")
+    {
+        let command = match arguments.get(1).and_then(|argument| argument.to_str()) {
+            Some("check") => NativeHostCommand::Check,
+            Some("install") => NativeHostCommand::Install,
+            Some("uninstall") => NativeHostCommand::Uninstall,
+            _ => anyhow::bail!("usage: ghostlight native-host <check|install|uninstall>"),
+        };
+        if arguments.len() != 2 {
+            anyhow::bail!("usage: ghostlight native-host <check|install|uninstall>");
+        }
+        Ok(LaunchMode::NativeHost(command))
+    } else if arguments
+        .iter()
+        .any(|argument| argument == OsStr::new("call"))
+    {
+        Ok(LaunchMode::Call)
     } else if arguments.iter().any(|argument| argument == "--headless") {
-        LaunchMode::Headless
+        Ok(LaunchMode::Headless)
     } else {
-        LaunchMode::Desktop
+        Ok(LaunchMode::Desktop)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{launch_mode, LaunchMode};
+    use super::{launch_mode, LaunchMode, NativeHostCommand};
 
     #[test]
     fn launch_modes_keep_desktop_headless_and_call_intents_distinct() {
-        assert_eq!(launch_mode(Vec::new()), LaunchMode::Desktop);
-        assert_eq!(launch_mode(["--headless".into()]), LaunchMode::Headless);
-        assert_eq!(launch_mode(["call".into()]), LaunchMode::Call);
+        assert_eq!(launch_mode(Vec::new()).unwrap(), LaunchMode::Desktop);
+        assert_eq!(
+            launch_mode(["--headless".into()]).unwrap(),
+            LaunchMode::Headless
+        );
+        assert_eq!(launch_mode(["call".into()]).unwrap(), LaunchMode::Call);
+        assert_eq!(
+            launch_mode(["native-host".into(), "check".into()]).unwrap(),
+            LaunchMode::NativeHost(NativeHostCommand::Check)
+        );
+        assert!(launch_mode(["native-host".into(), "guess".into()]).is_err());
     }
 }

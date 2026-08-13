@@ -82,6 +82,16 @@ For Windows, macOS, and Linux:
 7. Uninstall and prove only Ghostlight-owned files, registrations, desktop entries, and selected
    harness entries are removed. Record the audit-retention choice.
 
+The manual `Build release candidate` workflow builds unsigned Windows NSIS, Linux Debian, and
+macOS application/disk-image candidates from one locked workspace build. It stages the two
+connectors as Tauri sidecars, inspects every native package for the exact three-executable sibling
+set, and uploads short-lived workflow artifacts. It does not tag, sign, publish, or mutate a store.
+
+`ghostlight native-host check|install|uninstall` is the package-facing registration seam. It covers
+Chrome, Edge, Brave, and Chromium; repairs missing or Ghostlight-owned stale state; and leaves
+malformed or foreign state untouched. The 1.0 package installs no Run key, scheduled task,
+launchd agent, or systemd user service. The connectors demand-start the orchestrator.
+
 ### Browser and MCP journeys
 
 Run the accepted matrix in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md) with a visible ordinary browser
