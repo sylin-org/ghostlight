@@ -73,6 +73,32 @@ a short kill-and-retry loop, and afterwards the extension must be reloaded expli
 not reconnect on its own. That is the reason step 2 matters: if the connector did not change, none
 of this happens.
 
+The repository script makes that narrow swap repeatable. It defaults to planning an orchestrator
+replacement and makes no changes:
+
+```powershell
+pwsh scripts/dev-loop.ps1
+```
+
+Run the one-command build and exact-path swap after reviewing that plan:
+
+```powershell
+pwsh scripts/dev-loop.ps1 -Action Deploy
+```
+
+Name connector replacements only when their source or shared contract changed. Native-host
+registration is also explicit because it changes browser registration on the current machine:
+
+```powershell
+pwsh scripts/dev-loop.ps1 -Action Deploy -Component orchestrator,mcp-connector
+pwsh scripts/dev-loop.ps1 -Action Deploy -Component browser-connector -RegisterNativeHost -NoStart
+```
+
+The script builds selected packages in `.target-dev-loop`, creates `deploy.lock`, stops only exact
+destination image paths under `target/release`, copies with a bounded retry, removes the lock, and
+starts the orchestrator only when it was selected. Both directories must stay inside this
+repository. A browser-connector replacement still requires an explicit extension reload.
+
 ## Automated gates
 
 ```powershell
