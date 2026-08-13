@@ -107,20 +107,22 @@ h1, h2, h3 { margin: 0; font-weight: 400; }
   background: radial-gradient(circle, rgba(var(--argb), .3), transparent 66%);
   transition: opacity .9s var(--calm), background .9s var(--calm);
 }
-.lamp-ghost {
-  position: relative; width: 30px; height: 30px; image-rendering: pixelated;
-  filter: drop-shadow(0 0 7px rgba(var(--argb), .28));
-  transition: filter .9s var(--calm);
+.lamp-core {
+  position: relative; width: 11px; height: 11px; border-radius: 50%;
+  background: rgb(var(--argb)); box-shadow: 0 0 9px rgba(var(--argb), .5);
+  transition: background .9s var(--calm), box-shadow .9s var(--calm);
 }
 body.runtime-working .lamp-halo { opacity: 1; animation: halo-breathe var(--beat-breathe) ease-in-out infinite; }
-body.runtime-working .lamp-ghost { filter: drop-shadow(0 0 13px rgba(var(--argb), .75)); }
+body.runtime-working .lamp-core { box-shadow: 0 0 16px rgba(var(--argb), .85); }
 @keyframes halo-breathe { 0%, 100% { opacity: .55; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.1); } }
 body.runtime-held .lamp-halo { opacity: .9; background: radial-gradient(circle, rgba(251, 191, 36, .32), transparent 66%); }
-body.runtime-held .lamp-ghost { filter: drop-shadow(0 0 11px rgba(251, 191, 36, .5)); }
+body.runtime-held .lamp-core { background: #fbbf24; box-shadow: 0 0 12px rgba(251, 191, 36, .55); }
 body.runtime-attention .lamp-halo,
 body.runtime-blocked .lamp-halo { opacity: 1; background: radial-gradient(circle, rgba(248, 113, 113, .38), transparent 66%); }
 body.runtime-offline .lamp-halo { opacity: .12; background: radial-gradient(circle, rgba(113, 113, 122, .35), transparent 66%); }
-body.runtime-offline .lamp-ghost { filter: grayscale(1) drop-shadow(0 0 5px rgba(0, 0, 0, .6)); opacity: .55; }
+body.runtime-attention .lamp-core,
+body.runtime-blocked .lamp-core { background: #f87171; box-shadow: 0 0 12px rgba(248, 113, 113, .6); }
+body.runtime-offline .lamp-core { background: var(--faint); box-shadow: none; }
 
 .state { display: flex; min-width: 0; align-items: baseline; gap: 12px; }
 .state-word { flex: none; color: var(--ink); font-size: 15px; font-weight: 300; letter-spacing: -.01em; }
@@ -178,6 +180,11 @@ body.runtime-offline .state-word { color: var(--muted); }
 .chip.on .dot { background: var(--ok); }
 .chip.busy .dot { background: var(--a); box-shadow: 0 0 8px rgba(var(--argb), .8); }
 .chip small { color: var(--muted); font: 400 10.5px/1 var(--mono); }
+/* How many connections one client is holding. Reads as a badge on the name, not as a tab count. */
+.chip .tally {
+  margin-left: -3px; padding: 1px 5px; border-radius: 999px;
+  background: var(--line); color: var(--ink-3); font: 500 10px/1.3 var(--mono);
+}
 
 /* ------------------------------ hero action ----------------------------- */
 .hero {
@@ -365,4 +372,130 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition-duration: .001ms !important; }
+}
+
+/* ------------------------------- about page ----------------------------- */
+
+.about {
+  display: flex; flex-wrap: wrap; gap: 42px; align-items: flex-start;
+  padding: 34px 4px 40px 8px;
+}
+.about-copy { flex: 1 1 340px; min-width: 0; max-width: 560px; }
+.about-copy h1 { margin: 0 0 10px; font-size: 27px; font-weight: 600; letter-spacing: -.01em; }
+.about-lede { margin: 0 0 22px; font-size: 14.5px; line-height: 1.7; color: var(--ink-2); max-width: 48ch; }
+.about-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 18px; margin: 0 0 22px; }
+.about-facts dt { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.about-facts dd { margin: 0; font: 400 12.5px/1.5 var(--mono); color: var(--ink-3); }
+.about-note { margin: 0 0 20px; font-size: 12.5px; line-height: 1.7; color: var(--muted); max-width: 52ch; }
+
+/* Three short groups rather than one long list: a reader scanning for "how do I install this"
+   should not have to read past the licensing. */
+.about-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 22px 26px; }
+.about-group h2 {
+  margin: 0 0 9px; font-size: 10.5px; font-weight: 500;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+}
+.about-group > div { display: flex; flex-direction: column; gap: 2px; }
+.about-link {
+  display: block; width: 100%; padding: 7px 9px; margin-left: -9px;
+  border-radius: 8px; text-align: left;
+  transition: background .18s var(--calm);
+}
+.about-link:hover { background: rgba(255, 255, 255, .04); }
+.about-link:focus-visible { outline: 1px solid var(--a); outline-offset: 1px; }
+.about-link-title { display: block; font-size: 13px; color: var(--ink-2); }
+.about-link:hover .about-link-title { color: var(--a); }
+.about-link-blurb { display: block; margin-top: 1px; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+
+/* The card is a button now, so it needs a button's affordances and none of its chrome. */
+.tcg { padding: 0; text-align: left; cursor: pointer; }
+.tcg:focus-visible { outline: 2px solid var(--a); outline-offset: 3px; }
+
+/* The Ghostlight trading card, ported from sylin.org so the product looks the same wherever
+   someone meets it. The tokens it needs -- accent, ink ramp, line, mono -- are already this
+   surface's own, so only the card's own geometry travels. */
+.tcg {
+  position: relative; width: 300px; height: 478px; flex: none;
+  border-radius: 18px; overflow: hidden;
+  background: #0e0e11; border: 1px solid var(--line-2);
+  box-shadow: 0 20px 46px -22px rgba(0, 0, 0, .9);
+  display: block; color: inherit; text-decoration: none;
+  transition: transform .25s ease, box-shadow .25s ease;
+}
+.tcg:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 0 34px -10px rgba(var(--argb), .4), 0 26px 52px -22px rgba(0, 0, 0, .95);
+}
+.tcg .card-art {
+  position: relative; height: 272px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse 90% 82% at 50% 32%, rgba(var(--argb), .22) 0%, rgba(var(--argb), .06) 58%, #0d0d11 100%);
+}
+.tcg .card-art .mascot-halo {
+  position: absolute; width: 256px; height: 256px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--argb), .3), transparent 64%);
+  animation: card-halo 5s ease-in-out infinite;
+}
+@keyframes card-halo { 0%, 100% { opacity: .7; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.06); } }
+/* Exactly twice the 128px sprite. Any other size splits source pixels unevenly across screen
+   pixels, which is what reads as aliasing however hard `pixelated` tries. */
+.tcg .card-art .mascot { position: relative; z-index: 1; width: 256px; height: 256px; }
+.tcg .card-art .mascot-echo {
+  position: absolute; top: 50%; left: 50%; width: 384px; height: 384px;
+  transform: translate(-50%, -50%) translate(var(--gx, 0), var(--gy, 0));
+  filter: blur(7px) saturate(1.3); opacity: calc(var(--holo, 0) * .3);
+  transition: opacity .4s ease, transform .2s ease-out; pointer-events: none; z-index: 0;
+  image-rendering: pixelated;
+}
+.tcg img.px { image-rendering: pixelated; }
+.tcg .card-divider { display: block; position: relative; height: 4px; background: var(--a); }
+.tcg .card-disc {
+  position: absolute; left: 20px; top: 274px; transform: translateY(-50%); z-index: 6;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: #0e0e11; border: 2px solid var(--a);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 14px rgba(var(--argb), .4);
+}
+.tcg .card-disc span { font: 600 15px var(--mono); color: var(--al); }
+.tcg .card-notch {
+  position: absolute; right: 18px; top: 274px; transform: translateY(-50%) rotate(45deg);
+  z-index: 6; width: 11px; height: 11px; background: var(--a);
+}
+.tcg .card-pane {
+  padding: 22px 18px 0; height: 202px; display: flex; flex-direction: column;
+  position: relative; z-index: 5;
+  background: linear-gradient(180deg, rgba(20, 20, 26, .6), rgba(9, 9, 13, .78));
+  backdrop-filter: blur(13px) saturate(1.15);
+}
+.tcg .card-title { display: flex; align-items: baseline; gap: 9px; }
+.tcg .card-title .name { font-size: 21px; font-weight: 700; color: var(--ink); }
+.tcg .card-title .role { font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.tcg .card-body { display: flex; gap: 12px; margin-top: 11px; flex: 1; }
+.tcg .orbs { flex: none; display: flex; flex-direction: column; gap: 7px; }
+.tcg .orb {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px solid currentColor;
+}
+.tcg .card-rules { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.tcg .card-foot { border-top: 1px solid var(--line-2); padding: 7px 0 9px; display: flex; align-items: center; gap: 8px; }
+.tcg .card-foot .flavor { font-size: 9.5px; font-style: italic; color: #6a6f80; }
+/* Sheen and foil. Both ride --mx/--my/--holo, which the pointer sets and releases. */
+.tcg .holo, .tcg .holo2 {
+  position: absolute; inset: 0; z-index: 4; border-radius: 18px;
+  pointer-events: none; transition: opacity .3s;
+}
+.tcg .holo {
+  background: radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255, 255, 255, .3), rgba(255, 255, 255, 0) 44%);
+  mix-blend-mode: soft-light; opacity: calc(var(--holo, 0) * .55);
+}
+.tcg .holo2 {
+  background: linear-gradient(115deg, transparent 18%, rgba(255, 70, 150, .4), rgba(255, 214, 0, .4), rgba(0, 255, 170, .4), rgba(0, 170, 255, .4), rgba(170, 60, 255, .4), transparent 82%);
+  background-size: 220% 220%; background-position: var(--mx, 50%) var(--my, 50%);
+  mix-blend-mode: color-dodge; opacity: calc(var(--holo, 0) * .2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tcg, .tcg .card-art .mascot-halo, .tcg .holo, .tcg .holo2, .tcg .card-art .mascot-echo { animation: none; transition: none; }
+  .tcg:hover { transform: none; }
 }

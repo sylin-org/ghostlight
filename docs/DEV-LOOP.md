@@ -82,6 +82,7 @@ cargo test --workspace
 npm test --prefix extension
 cargo build --workspace --target-dir .target-ghostlight-1.0
 node tests/process-journey.mjs
+node tests/workbench-surface.mjs
 node --check crates/orchestrator/ui/app.js
 node --check tests/workbench-preview-server.mjs
 ```

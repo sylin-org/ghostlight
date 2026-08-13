@@ -11,7 +11,7 @@
     <header class="lampband">
       <div class="lamp" id="lamp">
         <span class="lamp-halo" aria-hidden="true"></span>
-        <img class="lamp-ghost" src="ghostlight.png" alt="Ghostlight">
+        <span class="lamp-core" aria-hidden="true"></span>
       </div>
 
       <div class="state">
@@ -23,6 +23,7 @@
         <button class="tab active" type="button" data-view="monitor" aria-current="page">Monitor</button>
         <button class="tab" type="button" data-view="integrations">Integrations</button>
         <button class="tab" type="button" data-view="status">Status</button>
+        <button class="tab" type="button" data-view="about">About</button>
       </nav>
 
       <button class="wheel" type="button" id="wheel" data-intent="hold" disabled>
@@ -92,6 +93,45 @@
         </section>
         <p class="colophon" id="colophon"></p>
       </section>
+      <section class="view" id="view-about" data-page="about" aria-label="About">
+        <div class="about">
+          <button class="tcg" id="about-card" type="button" data-destination="home"
+                  aria-label="Open the Ghostlight page on sylin.org">
+            <span class="card-art">
+              <span class="mascot-halo" aria-hidden="true"></span>
+              <img class="mascot-echo" src="ghostlight.png" alt="" aria-hidden="true" width="384" height="384">
+              <img class="px mascot" src="ghostlight.png" alt="Ghostlight mascot" width="256" height="256">
+            </span>
+            <span class="card-divider"></span>
+            <span class="card-disc"><span class="ver" id="about-version">1.0</span></span>
+            <span class="card-notch"></span>
+            <span class="card-pane">
+              <span class="card-title"><span class="name">Ghostlight</span><span class="role">&middot; the guardian</span></span>
+              <span class="card-body">
+                <span class="orbs">
+                  <span class="orb" title="Agent-native" style="color:#4ade80"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="16" height="11" rx="3"></rect><path d="M12 9V5"></path><circle cx="12" cy="4" r="1.2"></circle><path d="M9.6 14h.01M14.4 14h.01"></path><path d="M3 13v3M21 13v3"></path></svg></span>
+                  <span class="orb" title="Trust" style="color:#5eead4"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"></path><path d="M9.4 12l1.9 1.9L15 10"></path></svg></span>
+                </span>
+                <span class="card-rules">Let AI agents work in your signed-in Chromium browser while you watch and stay in control. Ghostlight MCP runs locally with compatible MCP clients.</span>
+              </span>
+              <span class="card-foot"><span class="flavor">"A light left burning, so the halls stay safe."</span></span>
+            </span>
+            <span class="holo" aria-hidden="true"></span>
+            <span class="holo2" aria-hidden="true"></span>
+          </button>
+
+          <div class="about-copy">
+            <h1>Ghostlight</h1>
+            <p class="about-lede">A governed bridge between an AI agent and the browser you are already signed in to.
+              It runs on this machine, under your eye, and stops where you tell it to.</p>
+            <dl class="about-facts" id="about-facts"></dl>
+            <p class="about-note">Ghostlight never phones home. No telemetry, no activation check, no update ping.
+              Everything on this page was assembled on this device from work this device did.</p>
+            <div class="about-links" id="about-links"></div>
+          </div>
+        </div>
+      </section>
+
     </main>
   </div>
 

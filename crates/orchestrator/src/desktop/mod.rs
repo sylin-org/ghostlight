@@ -461,6 +461,352 @@ mod tests {
     }
 
     #[test]
+    fn the_band_latches_working_instead_of_tracking_each_operation() {
+        let app = include_str!("../../ui/app.js");
+        // Most calls settle in well under a second. A word tied to them strobes, so it latches
+        // and every new action pushes the deadline back.
+        assert!(app.contains("const WORKING_LATCH_MS = 10_000;"));
+        assert!(
+            app.contains("Date.now() - state.interactionAt < WORKING_LATCH_MS"),
+            "the band no longer latches on recent interaction"
+        );
+        assert!(
+            !app.contains(r#"state.feed.some(isRunning) ? "runtime-working""#),
+            "the band still reads its word straight off the live operations"
+        );
+        // Nothing else wakes the band once the last operation settles, so the latch has to
+        // schedule its own expiry or the word stays lit until an unrelated repaint.
+        assert!(
+            app.contains("state.latchTimer = setTimeout(paintLamp, WORKING_LATCH_MS"),
+            "the latch never expires on its own"
+        );
+        // The negative control: every operation event still refreshes it, so the latch is fed by
+        // real work rather than by one arbitrary moment at startup.
+        for event in [
+            "case \"operation_started\": touchInteraction();",
+            "case \"operation_changed\": touchInteraction();",
+            "case \"operation_settled\": touchInteraction();",
+        ] {
+            assert!(
+                app.contains(event),
+                "an operation event does not refresh the latch: {event}"
+            );
+        }
+    }
+
+    #[test]
+    fn about_wears_the_published_card_and_the_products_own_artwork() {
+        let markup = include_str!("../../ui/index.html");
+        let styles = include_str!("../../ui/styles.css");
+
+        assert!(
+            markup.contains(r#"data-view="about""#),
+            "About is not reachable from the band"
+        );
+        assert!(markup.contains(r#"id="view-about""#), "About has no view");
+
+        // The card is the sylin.org card: same anatomy, same holo layers.
+        for part in [
+            "card-art",
+            "card-divider",
+            "card-disc",
+            "card-notch",
+            "card-pane",
+            "card-title",
+            "card-rules",
+            "card-foot",
+            "holo2",
+        ] {
+            assert!(markup.contains(part), "the About card is missing {part}");
+        }
+        assert!(
+            styles.contains("mix-blend-mode: color-dodge"),
+            "the foil layer lost its blend"
+        );
+        // The surface already owns .card for its diagnostic panels. The ported card keeps its own
+        // root so restyling one never restyles the other.
+        assert!(
+            markup.contains(r#"<button class="tcg" id="about-card""#),
+            "the About card is not scoped away from the diagnostic cards"
+        );
+        assert!(
+            styles.contains(".card { padding: 16px;"),
+            "the diagnostic card rule was overwritten by the About card"
+        );
+
+        // One artwork. The card wears the same bytes the extension ships as its icon, so the
+        // character cannot drift between the two places a person meets it.
+        assert!(
+            markup.contains(r#"class="px mascot" src="ghostlight.png""#),
+            "the card does not wear the product's own artwork"
+        );
+        // The band no longer does: a 100px sprite resampled to 30px read as a smudge.
+        assert!(
+            !markup.contains("lamp-ghost"),
+            "the crunched mascot is still in the band"
+        );
+        assert!(markup.contains("lamp-core"), "the band lost its lamp");
+    }
+
+    #[test]
+    fn every_element_the_surface_reaches_for_exists_in_the_markup() {
+        let app = include_str!("../../ui/app.js");
+        let markup = include_str!("../../ui/index.html");
+
+        let ids: Vec<&str> = markup
+            .match_indices("id=\"")
+            .filter_map(|(at, _)| {
+                let rest = &markup[at + 4..];
+                rest.find('"').map(|end| &rest[..end])
+            })
+            .collect();
+        // The negative control: a scrape that finds nothing would let every assertion below pass
+        // while proving nothing at all.
+        assert!(ids.len() > 20, "the id scrape found only {} ids", ids.len());
+
+        let mut referenced = Vec::new();
+        for (at, _) in app.match_indices("el[\"") {
+            let rest = &app[at + 4..];
+            if let Some(end) = rest.find('"') {
+                referenced.push(&rest[..end]);
+            }
+        }
+        assert!(
+            referenced.len() > 10,
+            "the reference scrape found only {} lookups",
+            referenced.len()
+        );
+
+        // A node the surface reaches for but the markup never defines reads as undefined and
+        // throws on first use. One of those took the whole window down: the boot sequence
+        // abandoned the snapshot, the change subscription, and the heartbeat behind it.
+        for name in referenced {
+            assert!(
+                ids.contains(&name),
+                "the surface reaches for #{name}, which the markup does not define"
+            );
+        }
+    }
+
+    #[test]
+    fn the_live_surface_boots_before_anything_decorative() {
+        let app = include_str!("../../ui/app.js");
+        let boot = app
+            .split_once("function boot() {")
+            .expect("the surface has no boot sequence")
+            .1
+            .split_once(
+                "
+}",
+            )
+            .expect("the boot sequence never closes")
+            .0;
+        let heartbeat = boot
+            .find("HEARTBEAT_MS")
+            .expect("boot never starts the heartbeat");
+        let subscribe = boot.find("CHANGE_EVENT").expect("boot never subscribes");
+        let resync = boot
+            .find("resync({ rebuildFeed: true })")
+            .expect("boot never resyncs");
+        let decoration = boot
+            .find("armAboutCard")
+            .expect("boot never arms the About card");
+
+        // The heartbeat is the surface's own recovery. Installed first, a bad subscription or a
+        // bad first snapshot costs one cycle; installed last, it costs the window.
+        assert!(
+            heartbeat < subscribe && heartbeat < resync,
+            "recovery is installed after the things it exists to recover from"
+        );
+        assert!(
+            resync < decoration,
+            "a decorative step runs before the window is connected to the truth"
+        );
+        // Every fallible boot step is isolated, or one of them takes the rest with it.
+        for step in ["subscribing to changes", "first snapshot", "about card"] {
+            assert!(
+                boot.contains(&format!("attempt(\"{step}\"")),
+                "the {step} step is not isolated"
+            );
+        }
+    }
+
+    #[test]
+    fn a_surface_that_cannot_draw_is_not_reported_as_a_lost_connection() {
+        let app = include_str!("../../ui/app.js");
+        // One catch around both the fetch and the render said "Not connected" for either, which
+        // sends whoever is reading it to look at the orchestrator when the fault is in here.
+        assert!(
+            app.contains(r#"attempt("rendering the snapshot", () =>"#),
+            "a render failure is still indistinguishable from a lost connection"
+        );
+        // Every wiring statement was at module scope ahead of boot, where one failure to attach
+        // took the snapshot and the heartbeat with it.
+        assert!(app.contains("function wire() {"));
+        assert!(
+            !app.contains("document.getElementById(\"refresh-status\")"),
+            "a listener still reaches around the derived table at module scope"
+        );
+    }
+
+    #[test]
+    fn a_failed_paint_is_retried_rather_than_remembered_as_done() {
+        let app = include_str!("../../ui/app.js");
+        // The signature must be recorded only after the paint succeeded. Recording first, with a
+        // memo that is never cleared, remembers a panel that threw as finished and leaves it
+        // blank for the life of the window.
+        assert!(
+            app.contains("if (attempt(`painting ${key}`, paint)) state.painted[key] = signature;"),
+            "a failed paint is still memoised as a completed one"
+        );
+        // And nothing may fail where only a console would notice.
+        assert!(app.contains(r#"window.addEventListener("error""#));
+        assert!(app.contains(r#"window.addEventListener("unhandledrejection""#));
+        assert!(
+            app.contains("if (el.toast) showToast(detail, true);"),
+            "failures never reach the person using the window"
+        );
+    }
+
+    #[test]
+    fn the_about_page_can_reach_only_the_destinations_the_product_chose() {
+        use crate::workbench::WorkbenchDestination;
+
+        let markup = include_str!("../../ui/index.html");
+        let app = include_str!("../../ui/app.js");
+
+        // The surface holds no addresses at all. Without this, "closed vocabulary" would be a
+        // convention rather than a property, and one hand-written anchor would quietly undo it.
+        assert!(
+            !markup.contains("href=\"http"),
+            "the About markup still carries a raw URL"
+        );
+        assert!(
+            !app.contains("https://"),
+            "the surface script still carries a raw URL"
+        );
+        assert!(app.contains(r#"invoke("open_destination", { destination })"#));
+
+        // Every destination the orchestrator will open is offered, and every name the surface
+        // offers is one the orchestrator knows. Either half alone lets the two drift.
+        for destination in WorkbenchDestination::all() {
+            let key = destination.key();
+            assert!(
+                app.contains(&format!("[\"{key}\", \""))
+                    || markup.contains(&format!(r#"data-destination="{key}""#)),
+                "{key} is a destination nobody can reach"
+            );
+            let url = destination.url();
+            assert!(
+                url.starts_with("https://sylin.org/")
+                    || url.starts_with("https://github.com/sylin-org/"),
+                "{key} points outside the product's own surfaces: {url}"
+            );
+        }
+
+        // Documentation deliberately points at dev: main still carries the 0.8 line, so a main
+        // link would answer questions about a product this window is not running.
+        for destination in WorkbenchDestination::all() {
+            let url = destination.url();
+            assert!(
+                !url.contains("/blob/main/") && !url.contains("/tree/main/"),
+                "{} points at main, which is still the 0.8 line: {url}",
+                destination.key()
+            );
+        }
+    }
+
+    #[test]
+    fn the_workbench_grants_its_surface_no_permission_to_open_anything() {
+        let capability = include_str!("../../capabilities/main.json");
+        // The opener plugin is registered in Rust so the closed command can use it. The webview
+        // must not be handed it directly, or the vocabulary above stops being the only way out.
+        assert!(
+            !capability.contains("opener:"),
+            "the surface was granted the opener directly, bypassing the closed destinations"
+        );
+        let desktop = include_str!("mod.rs");
+        assert!(desktop.contains("tauri_plugin_opener::init()"));
+        assert!(desktop.contains("fn open_destination(destination: WorkbenchDestination"));
+    }
+
+    #[test]
+    fn the_card_mascot_renders_at_a_whole_multiple_of_its_sprite() {
+        // The expectation is read off the artwork, not written down beside it. Swap the sprite
+        // for one of a different size and this fails until the card is resized to match.
+        let sprite = include_bytes!("../../ui/ghostlight.png");
+        assert_eq!(&sprite[1..4], b"PNG", "the mascot is not a PNG");
+        let native = u32::from_be_bytes([sprite[16], sprite[17], sprite[18], sprite[19]]);
+        let tall = u32::from_be_bytes([sprite[20], sprite[21], sprite[22], sprite[23]]);
+        assert_eq!(native, tall, "a square sprite is assumed by the card art");
+
+        let styles = include_str!("../../ui/styles.css");
+        let rule = styles
+            .split_once(".tcg .card-art .mascot {")
+            .expect("the card has no mascot rule")
+            .1
+            .split_once('}')
+            .expect("the mascot rule never closes")
+            .0;
+        let rendered: u32 = rule
+            .split_once("width:")
+            .expect("the mascot has no width")
+            .1
+            .trim_start()
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .expect("the mascot width is not a plain pixel count");
+
+        assert!(
+            rendered >= native,
+            "the sprite is rendered below its native size"
+        );
+        assert_eq!(
+            rendered % native,
+            0,
+            "the mascot renders at {rendered}px from a {native}px sprite, so source pixels split              unevenly across screen pixels and the art aliases however it is filtered"
+        );
+        assert!(
+            styles.contains(".tcg img.px { image-rendering: pixelated; }"),
+            "the sprite is being smoothed"
+        );
+        // The negative control: the echo behind the sprite is deliberately blurred and scaled off
+        // the grid, so "everything must be pixel-exact" would be the wrong rule to write here.
+        assert!(
+            styles.contains("filter: blur(7px) saturate(1.3)"),
+            "the blurred echo lost its treatment"
+        );
+    }
+
+    #[test]
+    fn the_connections_bar_groups_by_client_rather_than_by_connection() {
+        let app = include_str!("../../ui/app.js");
+        // One chip per client. A client that opens a session per request otherwise fills the bar
+        // with identical names that tell the user nothing.
+        assert!(
+            app.contains("function connectionGroups(sessions)"),
+            "the connections bar does not group its sessions"
+        );
+        assert!(
+            app.contains("connectionGroups(snapshot.sessions).map"),
+            "the connections bar is not painted from the grouped sessions"
+        );
+        assert!(
+            !app.contains("snapshot.sessions.map(session =>"),
+            "the connections bar still paints one chip per connection"
+        );
+        // The negative control: grouping is a rendering choice for one bar, not a change to the
+        // data. History attribution still resolves a single workspace to the client that owns it,
+        // and that lookup breaks the moment someone collapses the sessions array itself.
+        assert!(
+            app.contains("state.snapshot?.sessions.find((item) => item.id === workspace)"),
+            "per-session attribution was lost when the bar was grouped"
+        );
+    }
+
+    #[test]
     fn surface_renders_seam_facts_and_trusts_outcome_language_for_measurements() {
         let app = include_str!("../../ui/app.js");
         // Readiness is the only observed fact no sentence states, so it is the only one the

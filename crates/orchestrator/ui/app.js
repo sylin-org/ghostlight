@@ -19,7 +19,17 @@ const HEARTBEAT_MS = 10000;
 const FEED_LIMIT = 200;
 
 /** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
-const VIEWS = { monitor: "Monitor", integrations: "MCP integrations", status: "Status" };
+const VIEWS = { monitor: "Monitor", integrations: "MCP integrations", status: "Status", about: "About" };
+
+/**
+ * How long the band keeps saying "Working" after the last thing happened.
+ *
+ * Per-operation truth flickers: most calls settle in well under a second, so a label tied to
+ * them strobes between two words and reads as a fault. What a person wants from that corner is
+ * coarser and more useful -- whether anything is currently working through Ghostlight -- so the
+ * word latches, and every new action pushes the deadline back.
+ */
+const WORKING_LATCH_MS = 10_000;
 const SEARCH_VIEWS = {
   home: "monitor",
   activity: "monitor",
@@ -84,19 +94,21 @@ const state = {
   painted: {},
   confirmation: null,
   toastTimer: null,
-  searchTimer: null
+  searchTimer: null,
+  interactionAt: 0,
+  latchTimer: null,
+  lastFailure: null
 };
 
-const el = {};
-for (const id of [
-  "lamp", "state-word", "state-facts", "wheel", "wheel-icon", "wheel-label",
-  "main-content", "connections", "hero", "hero-med", "hero-body", "hero-right",
-  "queue", "queue-count", "clear-monitor", "integration-grid", "diagnostic-grid", "authority-grid",
-  "colophon", "palette", "palette-query", "palette-results", "toast",
-  "confirm-dialog", "confirm-title", "confirm-detail"
-]) {
-  el[id] = document.getElementById(id);
-}
+/*
+ * Every element with an id, looked up once.
+ *
+ * This was a hand-maintained list, and a node added to the markup without being added here read
+ * as undefined and threw on first use. Deriving it from the document means a new id cannot be
+ * forgotten, because there is nothing left to remember.
+ */
+const el = Object.create(null);
+for (const node of document.querySelectorAll("[id]")) el[node.id] = node;
 
 /* ------------------------------ formatting ------------------------------ */
 
@@ -494,11 +506,28 @@ function applySettled(record) {
 
 /* ------------------------------- lamp band ------------------------------ */
 
+function working() {
+  if (state.feed.some(isRunning)) return true;
+  return Date.now() - state.interactionAt < WORKING_LATCH_MS;
+}
+
+/**
+ * Mark that something interacted with Ghostlight, and arrange to notice when that stops.
+ *
+ * Nothing else will wake the band once the last operation settles, so the latch has to schedule
+ * its own expiry or the word would stay lit until the next unrelated repaint.
+ */
+function touchInteraction() {
+  state.interactionAt = Date.now();
+  clearTimeout(state.latchTimer);
+  state.latchTimer = setTimeout(paintLamp, WORKING_LATCH_MS + 60);
+}
+
 function runtimeClass() {
   if (!state.connected) return "runtime-offline";
   if (state.runtime === "held" || state.runtime === "ended") return "runtime-held";
   if (state.runtime === "attention") return "runtime-attention";
-  return state.feed.some(isRunning) ? "runtime-working" : "runtime-quiet";
+  return working() ? "runtime-working" : "runtime-quiet";
 }
 
 function runtimeWord(name) {
@@ -536,11 +565,32 @@ function paintLamp() {
 
 /* ------------------------------ collections ----------------------------- */
 
+/**
+ * One chip per client, not per connection.
+ *
+ * A client that reconnects often -- an editor that starts a session per request, a shell running
+ * `ghostlight call` in a loop -- is one thing the user recognizes, and a row of identical names
+ * tells them nothing they did not already know. The sessions themselves stay separate everywhere
+ * that matters: each keeps its own workspace, its own tabs, and its own history attribution.
+ */
+function connectionGroups(sessions) {
+  const groups = new Map();
+  for (const session of sessions) {
+    const group = groups.get(session.client_label) ?? { label: session.client_label, count: 0, tabs: 0, busy: false };
+    group.count += 1;
+    group.tabs += session.tab_count;
+    group.busy = group.busy || session.active_operations > 0;
+    groups.set(session.client_label, group);
+  }
+  return [...groups.values()].sort((left, right) => right.tabs - left.tabs || left.label.localeCompare(right.label));
+}
+
 function paintConnections(snapshot) {
-  const chips = snapshot.sessions.map(session => {
-    const busy = session.active_operations > 0;
-    return `<span class="chip ${busy ? "busy" : "on"}"><span class="dot"></span>${escapeHtml(session.client_label)}`
-      + `<small>${session.tab_count} tabs</small></span>`;
+  const chips = connectionGroups(snapshot.sessions).map(group => {
+    // The count earns its place only when there is more than one, so the common case stays quiet.
+    const many = group.count > 1 ? ` <span class="tally">${group.count}</span>` : "";
+    return `<span class="chip ${group.busy ? "busy" : "on"}"><span class="dot"></span>${escapeHtml(group.label)}${many}`
+      + `<small>${group.tabs} tabs</small></span>`;
   });
   chips.push(...snapshot.browsers.map(browser =>
     `<span class="chip on"><span class="dot"></span>${escapeHtml(browser.family)}`
@@ -549,6 +599,101 @@ function paintConnections(snapshot) {
     chips.push('<span class="chip"><span class="dot"></span>Waiting for a client or a browser</span>');
   }
   el.connections.innerHTML = chips.join("");
+}
+
+/* --------------------------------- about -------------------------------- */
+
+/**
+ * Where the About page will send you, in the orchestrator's own closed vocabulary.
+ *
+ * Each row names a destination rather than an address: the surface has no URLs in it at all, so
+ * this list cannot grow a link the product did not choose. The sentences are the point -- a bare
+ * list of names makes a reader guess, and a guess is a worse experience than a plain sentence.
+ */
+const DESTINATIONS = [
+  ["Ghostlight", [
+    ["home", "Project page", "What it is, who it is for, and how it behaves."],
+    ["demo", "Watch a run", "A recorded browser job you can follow end to end."],
+    ["decision_aid", "Which mode fits you", "Ungoverned, governed, or somewhere between."],
+    ["source", "Source", "Every line of the engine, and the governance module beside it."]
+  ]],
+  ["Get it working", [
+    ["install_guide", "Install and connect", "Set up the browser side and point a client at it."],
+    ["scripting_guide", "Drive it from a script", "The command line reaches the same catalog a client does."],
+    ["governance_guide", "Write a policy", "Hosts, capabilities, and the runtime controls around them."],
+    ["audit_guide", "Ship the audit", "The record's exact shape, and what it deliberately omits."]
+  ]],
+  ["Read the reasoning", [
+    ["trust_center", "What it promises", "Each public claim, and where the code keeps it."],
+    ["decision_records", "Why it is built this way", "Every architectural decision, kept as written."],
+    ["licensing_guide", "What you may do with it", "The open engine and the source-available governance split."],
+    ["sylin_tools", "The rest of the toolkit", "The other Sylin tools this one grew up beside."]
+  ]]
+];
+
+function paintLinks() {
+  el["about-links"].innerHTML = DESTINATIONS.map(([heading, rows]) => {
+    const items = rows.map(([destination, title, blurb]) =>
+      `<button class="about-link" type="button" data-destination="${escapeHtml(destination)}">`
+      + `<span class="about-link-title">${escapeHtml(title)}</span>`
+      + `<span class="about-link-blurb">${escapeHtml(blurb)}</span></button>`).join("");
+    return `<section class="about-group"><h2>${escapeHtml(heading)}</h2><div>${items}</div></section>`;
+  }).join("");
+}
+
+/** Every destination opens in the browser you already use, which is the one Ghostlight drives. */
+async function openDestination(destination) {
+  try {
+    await invoke("open_destination", { destination });
+  } catch (error) {
+    showToast(String(error), true);
+  }
+}
+
+
+function paintAbout(snapshot) {
+  const service = snapshot.service ?? {};
+  const version = String(service.version ?? "");
+  // The disc wears the short form the portfolio card wears; the exact build is in the facts.
+  el["about-version"].textContent = version.split(".").slice(0, 2).join(".") || "1.0";
+  const facts = [
+    ["Version", version || "unknown"],
+    ["Sessions", `${snapshot.sessions.length} connected`],
+    ["Browsers", `${snapshot.browsers.length} attached`],
+    ["Recorded", `${snapshot.history.length} actions on this device`],
+    ["Engine", "Apache-2.0 OR MIT"],
+    ["Governance", "Ghostlight Commercial License, source-available"]
+  ];
+  el["about-facts"].innerHTML = facts
+    .map(([term, value]) => `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(value)}</dd>`)
+    .join("");
+}
+
+/**
+ * The card's sheen and foil follow the pointer, and let go when it leaves.
+ *
+ * Everything the effect needs is a custom property, so the work here is two numbers per move and
+ * the compositor does the rest.
+ */
+function armAboutCard() {
+  const card = el["about-card"];
+  if (!card) return;
+  paintLinks();
+  document.addEventListener("click", event => {
+    const target = event.target.closest("[data-destination]");
+    if (target) openDestination(target.dataset.destination);
+  });
+  card.addEventListener("pointermove", event => {
+    const box = card.getBoundingClientRect();
+    const x = ((event.clientX - box.left) / box.width) * 100;
+    const y = ((event.clientY - box.top) / box.height) * 100;
+    card.style.setProperty("--mx", `${x.toFixed(1)}%`);
+    card.style.setProperty("--my", `${y.toFixed(1)}%`);
+    card.style.setProperty("--gx", `${((50 - x) / 6).toFixed(1)}px`);
+    card.style.setProperty("--gy", `${((50 - y) / 6).toFixed(1)}px`);
+    card.style.setProperty("--holo", "1");
+  });
+  card.addEventListener("pointerleave", () => card.style.setProperty("--holo", "0"));
 }
 
 function paintIntegrations(snapshot) {
@@ -623,11 +768,46 @@ function seedFeed(snapshot) {
  * Repaint a section only when its own facts changed, so the safety pull never
  * rewrites a surface the user is pointing at.
  */
+/*
+ * Nothing in this window is allowed to fail quietly.
+ *
+ * A surface that throws where nobody is looking is indistinguishable from a surface that is
+ * merely slow, and the person waiting has no way to tell which. Every failure gets a visible
+ * notice; identical failures are stated once so a repeating fault does not bury the screen.
+ */
+function reportFailure(what, error) {
+  const detail = `${what}: ${error?.message ?? error}`;
+  if (state.lastFailure === detail) return;
+  state.lastFailure = detail;
+  // The console is the last channel that still works when the surface itself is broken, so a
+  // failure goes there whether or not there is anything left to render a notice with.
+  console.error(detail, error);
+  if (el.toast) showToast(detail, true);
+}
+
+/** Run one fallible step. Report what went wrong, and tell the caller it did not happen. */
+function attempt(what, step) {
+  try {
+    step();
+    return true;
+  } catch (error) {
+    reportFailure(what, error);
+    return false;
+  }
+}
+
+/**
+ * Paint one panel when its facts changed, and never record a paint that did not happen.
+ *
+ * The signature used to be stored before the paint ran, and `painted` is never cleared, so a
+ * panel that threw was remembered as finished and stayed blank for the life of the window.
+ * Recording afterwards turns a failure into something the next change retries. Isolating the
+ * paint keeps one bad panel from abandoning the rest of the pass.
+ */
 function paintIfChanged(key, facts, paint) {
   const signature = JSON.stringify(facts);
   if (state.painted[key] === signature) return;
-  state.painted[key] = signature;
-  paint();
+  if (attempt(`painting ${key}`, paint)) state.painted[key] = signature;
 }
 
 function applySnapshot(snapshot, rebuildFeed) {
@@ -639,26 +819,33 @@ function applySnapshot(snapshot, rebuildFeed) {
     rebuildFeedDom();
   }
   paintIfChanged("connections", [snapshot.sessions, snapshot.browsers], () => paintConnections(snapshot));
+  paintIfChanged("about", [snapshot.service, snapshot.sessions.length, snapshot.browsers.length, snapshot.history.length], () => paintAbout(snapshot));
   paintIfChanged("integrations", [snapshot.harnesses, [...state.pendingHarnesses]], () => paintIntegrations(snapshot));
   paintIfChanged("status", [snapshot.diagnostics, snapshot.configuration, snapshot.service], () => paintStatus(snapshot));
-  paintLamp();
+  attempt("painting the band", paintLamp);
 }
 
 async function resync({ rebuildFeed = false, quiet = true } = {}) {
   if (!invoke) {
     state.connected = false;
-    paintLamp();
+    attempt("painting the band", paintLamp);
     return;
   }
+  let snapshot;
   try {
-    const snapshot = await invoke("workbench_snapshot");
-    state.connected = true;
-    applySnapshot(snapshot, rebuildFeed || snapshot.seq !== state.seq || !state.snapshot);
+    snapshot = await invoke("workbench_snapshot");
   } catch (error) {
+    // Losing the orchestrator is an ordinary condition with a state of its own to show.
     state.connected = false;
-    paintLamp();
+    attempt("painting the band", paintLamp);
     if (!quiet) showToast(String(error), true);
+    return;
   }
+  state.connected = true;
+  // A surface that failed to draw is not a surface that lost its connection. One catch around
+  // both said "Not connected" for either, which sends the reader looking at the wrong thing.
+  attempt("rendering the snapshot", () =>
+    applySnapshot(snapshot, rebuildFeed || snapshot.seq !== state.seq || !state.snapshot));
 }
 
 function applyChange(event) {
@@ -671,9 +858,9 @@ function applyChange(event) {
   state.seq = event.seq;
   const change = event.change;
   switch (change.kind) {
-    case "operation_started": applyStarted(change.operation); break;
-    case "operation_changed": applyChanged(change.operation); break;
-    case "operation_settled": applySettled(change.record); break;
+    case "operation_started": touchInteraction(); applyStarted(change.operation); break;
+    case "operation_changed": touchInteraction(); applyChanged(change.operation); break;
+    case "operation_settled": touchInteraction(); applySettled(change.record); break;
     case "runtime_changed": state.runtime = change.runtime_state; break;
     default: return;
   }
@@ -808,79 +995,112 @@ async function applyIntent(intent) {
 
 /* -------------------------------- wiring -------------------------------- */
 
-document.addEventListener("click", event => {
-  const confirmation = event.target.closest("[data-confirm]");
-  if (confirmation && state.confirmation) {
-    state.confirmation(confirmation.dataset.confirm === "remove");
-    return;
+/**
+ * Attach every listener the surface needs.
+ *
+ * These ran as loose top-level statements, which put them ahead of boot: one listener failing to
+ * attach took the first snapshot, the change subscription and the heartbeat down with it, because
+ * nothing after the throw ever ran. They are one isolated step now, and they reach nodes through
+ * the derived table so a missing id fails the build rather than the window.
+ */
+function wire() {
+  document.addEventListener("click", event => {
+    const confirmation = event.target.closest("[data-confirm]");
+    if (confirmation && state.confirmation) {
+      state.confirmation(confirmation.dataset.confirm === "remove");
+      return;
+    }
+    const tab = event.target.closest("[data-view]");
+    if (tab) navigate(tab.dataset.view);
+    const intent = event.target.closest("[data-intent]");
+    if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
+    const harness = event.target.closest("[data-harness-action]");
+    if (harness) handleHarnessAction(harness);
+    const hit = event.target.closest("[data-search-view]");
+    if (hit) {
+      navigate(SEARCH_VIEWS[hit.dataset.searchView] ?? "monitor");
+      closePalette();
+    }
+    if (event.target === el.palette) closePalette();
+  });
+
+  el["palette-query"].addEventListener("input", () => {
+    clearTimeout(state.searchTimer);
+    state.searchTimer = setTimeout(() => search(el["palette-query"].value), 140);
+  });
+
+  document.addEventListener("keydown", event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      if (el.palette.hidden) openPalette();
+      else closePalette();
+      return;
+    }
+    if (event.key === "Escape" && !el.palette.hidden) closePalette();
+  });
+
+  el["refresh-status"].addEventListener("click", () => {
+    resync({ quiet: false }).then(() => showToast("Status refreshed."));
+  });
+
+  el["clear-monitor"].addEventListener("click", clearMonitorView);
+
+  el["refresh-integrations"].addEventListener("click", async event => {
+    event.currentTarget.disabled = true;
+    try {
+      await invoke("refresh_harnesses");
+      await resync();
+      showToast("MCP clients re-checked.");
+    } catch (error) {
+      showToast(String(error), true);
+    } finally {
+      event.currentTarget.disabled = false;
+    }
+  });
+
+  el["test-notification"].addEventListener("click", async event => {
+    event.currentTarget.disabled = true;
+    try {
+      await invoke("test_notification");
+      showToast("Test notification sent.");
+    } catch (error) {
+      showToast(String(error), true);
+    } finally {
+      event.currentTarget.disabled = false;
+    }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) resync();
+  });
+}
+
+/*
+ * Start the window, in the order that matters.
+ *
+ * These were loose top-level statements, so a throw in any one of them silently abandoned every
+ * statement after it -- which is how one missing element id left the band reading "Starting"
+ * forever with no snapshot, no change subscription, and no heartbeat to recover with.
+ *
+ * The rule now: the live surface is brought up first, and anything decorative goes last, where
+ * failing cannot cost the window its connection to the truth.
+ */
+function boot() {
+  // The heartbeat is this surface's own recovery, so it is installed before anything that can
+  // fail. A bad subscription or a bad first snapshot then costs one cycle rather than the window.
+  setInterval(() => {
+    if (!document.hidden) resync();
+  }, HEARTBEAT_MS);
+  attempt("wiring the surface", wire);
+  if (listen) {
+    attempt("subscribing to changes", () => listen(CHANGE_EVENT, message => applyChange(message.payload)));
   }
-  const tab = event.target.closest("[data-view]");
-  if (tab) navigate(tab.dataset.view);
-  const intent = event.target.closest("[data-intent]");
-  if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
-  const harness = event.target.closest("[data-harness-action]");
-  if (harness) handleHarnessAction(harness);
-  const hit = event.target.closest("[data-search-view]");
-  if (hit) {
-    navigate(SEARCH_VIEWS[hit.dataset.searchView] ?? "monitor");
-    closePalette();
-  }
-  if (event.target === el.palette) closePalette();
-});
+  attempt("first snapshot", () => resync({ rebuildFeed: true }));
+  attempt("about card", armAboutCard);
+}
 
-el["palette-query"].addEventListener("input", () => {
-  clearTimeout(state.searchTimer);
-  state.searchTimer = setTimeout(() => search(el["palette-query"].value), 140);
-});
+// Anything that escapes a listener or a promise still has to reach the person using the window.
+window.addEventListener("error", event => reportFailure("surface", event.error ?? event.message));
+window.addEventListener("unhandledrejection", event => reportFailure("surface", event.reason));
 
-document.addEventListener("keydown", event => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-    event.preventDefault();
-    if (el.palette.hidden) openPalette();
-    else closePalette();
-    return;
-  }
-  if (event.key === "Escape" && !el.palette.hidden) closePalette();
-});
-
-document.getElementById("refresh-status").addEventListener("click", () => {
-  resync({ quiet: false }).then(() => showToast("Status refreshed."));
-});
-
-el["clear-monitor"].addEventListener("click", clearMonitorView);
-
-document.getElementById("refresh-integrations").addEventListener("click", async event => {
-  event.currentTarget.disabled = true;
-  try {
-    await invoke("refresh_harnesses");
-    await resync();
-    showToast("MCP clients re-checked.");
-  } catch (error) {
-    showToast(String(error), true);
-  } finally {
-    event.currentTarget.disabled = false;
-  }
-});
-
-document.getElementById("test-notification").addEventListener("click", async event => {
-  event.currentTarget.disabled = true;
-  try {
-    await invoke("test_notification");
-    showToast("Test notification sent.");
-  } catch (error) {
-    showToast(String(error), true);
-  } finally {
-    event.currentTarget.disabled = false;
-  }
-});
-
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) resync();
-});
-
-if (listen) listen(CHANGE_EVENT, message => applyChange(message.payload));
-
-resync({ rebuildFeed: true });
-setInterval(() => {
-  if (!document.hidden) resync();
-}, HEARTBEAT_MS);
+boot();
