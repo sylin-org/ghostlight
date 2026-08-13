@@ -149,7 +149,8 @@ createServer(async (request, response) => {
       return;
     }
     const name = pathname === "/" ? "index.html" : pathname.slice(1);
-    if (!new Set(["index.html", "styles.css", "app.js", "ghostlight.png"]).has(name)) {
+    const served = new Set(["index.html", "styles.css", "app.js", "ghostlight.png"]);
+    if (!served.has(name) && !/^lib\/[a-z]+\.js$/.test(name)) {
       response.writeHead(404).end();
       return;
     }

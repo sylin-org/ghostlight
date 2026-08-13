@@ -1,0 +1,206 @@
+// Ghostlight workbench -- the fixed vocabulary this window speaks, and how it renders a number.
+(function installGhostlightWords(root, factory) {
+  const api = factory();
+  root.GhostlightWords = api;
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+})(globalThis, function createGhostlightWords() {
+  "use strict";
+
+  /** Single channel the orchestrator publishes sequenced changes on. */
+  const CHANGE_EVENT = "ghostlight://change";
+  /** Slow safety pull for collections that have no change event of their own. */
+  const HEARTBEAT_MS = 10000;
+  /** Bound on the retained feed, matching the orchestrator's own bounded history. */
+  const FEED_LIMIT = 200;
+
+  /** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
+  const VIEWS = { monitor: "Monitor", integrations: "MCP integrations", status: "Status", about: "About" };
+
+  /**
+   * How long the band keeps saying "Working" after the last thing happened.
+   *
+   * Per-operation truth flickers: most calls settle in well under a second, so a label tied to
+   * them strobes between two words and reads as a fault. What a person wants from that corner is
+   * coarser and more useful -- whether anything is currently working through Ghostlight -- so the
+   * word latches, and every new action pushes the deadline back.
+   */
+  const WORKING_LATCH_MS = 10_000;
+  const SEARCH_VIEWS = {
+    home: "monitor",
+    activity: "monitor",
+    history: "monitor",
+    checkup: "status",
+    configuration: "status",
+    install: "integrations"
+  };
+
+  /* --------------------------------------------------------------------------
+   * The medallion vocabulary, keyed by the orchestrator's fixed activity labels.
+   * These are the same four shapes the renderer draws inside the page, so the
+   * window and the browser tell the same story.
+   * ----------------------------------------------------------------------- */
+  const GLYPHS = {
+    scan: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><g class="scanline"><path d="M7 12h10"/></g></svg>',
+    navigate: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M15.5 8.5 10.6 10.6 8.5 15.5l4.9-2.1z"/></svg>',
+    pointer: '<svg viewBox="0 0 24 24"><path d="M6 3.5 18.5 12 13 13.2l-2.2 5.6z"/><path d="M13.2 13.4 17.5 18"/></svg>',
+    keyboard: '<svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="19" height="11" rx="2"/><g class="keylight"><path d="M6.5 10.5h.01"/></g><g class="keylight"><path d="M10.5 10.5h.01"/></g><g class="keylight"><path d="M14.5 10.5h.01"/></g><path d="M8 14h8"/></svg>',
+    workwheel: '<svg viewBox="0 0 24 24"><g class="spin"><circle cx="12" cy="12" r="7.5" stroke-dasharray="5 4"/></g><circle class="particle" cx="12" cy="3.4" r="1.25" fill="currentColor" stroke="none"/><circle class="particle" cx="19.4" cy="16" r="1.25" fill="currentColor" stroke="none"/><circle class="particle" cx="4.6" cy="16" r="1.25" fill="currentColor" stroke="none"/></svg>',
+    camera: '<svg viewBox="0 0 24 24"><path d="M3.5 8.5h4l1.5-2.5h6L16.5 8.5h4v11h-17z"/><circle cx="12" cy="13.5" r="3.4"/><g class="glint"><path d="M9.8 11.4 11 10.4"/></g></svg>',
+    wait: '<svg viewBox="0 0 24 24"><circle class="waitdot" cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle class="waitdot" cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle class="waitdot" cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>'
+  };
+
+  const ACTIVITY_GLYPH = {
+    "Ghostlight": "scan",
+    "Navigating": "navigate",
+    "Clicking": "pointer",
+    "Hovering": "pointer",
+    "Dragging": "pointer",
+    "Typing": "keyboard",
+    "Keyboard": "keyboard",
+    "Scrolling": "navigate",
+    "Reading page": "scan",
+    "Finding on page": "scan",
+    "Screenshot": "camera",
+    "Zooming": "scan",
+    "Filling form": "keyboard",
+    "Uploading file": "workwheel",
+    "Running JavaScript": "workwheel",
+    "Waiting": "wait",
+    "Browser dialog": "wait"
+  };
+
+  const CAPABILITY_CLASS = {
+    read: "cap-read",
+    action: "cap-action",
+    write: "cap-write",
+    execute: "cap-execute"
+  };
+
+  /* ------------------------------ formatting ------------------------------ */
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function words(value) {
+    return String(value ?? "").replaceAll("_", " ");
+  }
+
+  function duration(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    const seconds = ms / 1000;
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}m ${String(Math.floor(seconds % 60)).padStart(2, "0")}s`;
+  }
+
+  function stopwatch(ms) {
+    const seconds = Math.max(0, ms) / 1000;
+    if (seconds < 60) return seconds.toFixed(1).padStart(4, "0");
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+  }
+
+  function ago(timestamp) {
+    if (!timestamp) return "";
+    const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    return `${Math.floor(hours / 24)}d`;
+  }
+
+  function shortId(value) {
+    const text = String(value ?? "");
+    return text.length <= 20 ? text : `${text.slice(0, 10)}...${text.slice(-6)}`;
+  }
+
+  /**
+   * A settled record has no presentation activity, so its medallion comes from the tool.
+   * Without this every historical row wears the same glyph and the queue reads as one texture.
+   */
+  const TOOL_GLYPH = {
+    browser_tabs: "navigate",
+    browser_navigate: "navigate",
+    browser_history: "navigate",
+    browser_window: "scan",
+    browser_read: "scan",
+    browser_inspect: "scan",
+    browser_find: "scan",
+    browser_screenshot: "camera",
+    browser_click: "pointer",
+    browser_scroll: "navigate",
+    browser_hover: "pointer",
+    browser_fill_form: "keyboard",
+    browser_type_text: "keyboard",
+    browser_press_key: "keyboard",
+    browser_drag: "pointer",
+    browser_wait: "wait",
+    browser_dialog: "wait",
+    browser_upload: "workwheel",
+    browser_execute: "workwheel",
+    browser_sequence: "workwheel",
+    browser_record: "camera",
+    browser_diagnose: "scan"
+  };
+
+  const glyphFor = entry =>
+    GLYPHS[ACTIVITY_GLYPH[entry.activity] ?? TOOL_GLYPH[entry.tool] ?? "scan"];
+  const capabilityClass = entry => CAPABILITY_CLASS[entry.capability] ?? "cap-read";
+
+  /** What the audit can honestly say happened to the page, with no payload to draw on. */
+  const EFFECT_STORY = {
+    none: "left the page unchanged",
+    applied: "changed the page",
+    partial: "changed the page in part",
+    unknown: "outcome could not be confirmed"
+  };
+
+  const READINESS_NOTE = {
+    not_applicable: "",
+    complete: "",
+    interactive: "interactive",
+    loading: "never settled",
+    unknown: "readiness unknown"
+  };
+
+  /**
+   * Where the About page will send you, in the orchestrator's own closed vocabulary.
+   *
+   * Each row names a destination rather than an address: the surface has no URLs in it at all, so
+   * this list cannot grow a link the product did not choose. The sentences are the point -- a bare
+   * list of names makes a reader guess, and a guess is a worse experience than a plain sentence.
+   */
+  const DESTINATIONS = [
+    ["Ghostlight", [
+      ["home", "Project page", "What it is, who it is for, and how it behaves."],
+      ["demo", "Watch a run", "A recorded browser job you can follow end to end."],
+      ["decision_aid", "Which mode fits you", "Ungoverned, governed, or somewhere between."],
+      ["source", "Source", "Every line of the engine, and the governance module beside it."]
+    ]],
+    ["Get it working", [
+      ["install_guide", "Install and connect", "Set up the browser side and point a client at it."],
+      ["scripting_guide", "Drive it from a script", "The command line reaches the same catalog a client does."],
+      ["governance_guide", "Write a policy", "Hosts, capabilities, and the runtime controls around them."],
+      ["audit_guide", "Ship the audit", "The record's exact shape, and what it deliberately omits."]
+    ]],
+    ["Read the reasoning", [
+      ["trust_center", "What it promises", "Each public claim, and where the code keeps it."],
+      ["decision_records", "Why it is built this way", "Every architectural decision, kept as written."],
+      ["licensing_guide", "What you may do with it", "The open engine and the source-available governance split."],
+      ["sylin_tools", "The rest of the toolkit", "The other Sylin tools this one grew up beside."]
+    ]]
+  ];
+
+  return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
+    GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
+    DESTINATIONS, glyphFor, capabilityClass,
+    escapeHtml, words, duration, stopwatch, ago, shortId });
+});

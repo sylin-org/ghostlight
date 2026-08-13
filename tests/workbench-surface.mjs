@@ -16,8 +16,12 @@ import { join, resolve } from "node:path";
 
 const repository = resolve(import.meta.dirname, "..");
 const ui = join(repository, "crates", "orchestrator", "ui");
-const source = readFileSync(join(ui, "app.js"), "utf8");
 const markup = readFileSync(join(ui, "index.html"), "utf8");
+
+// The page loads its modules in a deliberate order, and so must this. Reading that order out of
+// the markup rather than repeating it here keeps the two from drifting when a module is added.
+const ORDER = [...markup.matchAll(/<script src="([^"]+)"><\/script>/g)].map(([, src]) => src);
+const source = ORDER.map((name) => readFileSync(join(ui, name), "utf8")).join("\n");
 
 // Ids come from the markup, the same way the surface derives them. Hand-listing them here would
 // repeat the exact mistake this harness exists to check.

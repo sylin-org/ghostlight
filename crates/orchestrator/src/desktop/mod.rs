@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn clearing_the_monitor_is_disposable_view_state_not_an_audit_mutation() {
         let html = include_str!("../../ui/index.html");
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         let desktop = include_str!("mod.rs");
 
         assert!(html.contains("id=\"clear-monitor\""));
@@ -404,7 +404,7 @@ mod tests {
         use crate::governance::Capability;
         use crate::workbench::{HistoryItem, OperationPhase, OperationSummary, WorkbenchChange};
 
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         let operation = OperationSummary {
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn the_band_latches_working_instead_of_tracking_each_operation() {
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         // Most calls settle in well under a second. A word tied to them strobes, so it latches
         // and every new action pushes the deadline back.
         assert!(app.contains("const WORKING_LATCH_MS = 10_000;"));
@@ -546,6 +546,62 @@ mod tests {
             "the crunched mascot is still in the band"
         );
         assert!(markup.contains("lamp-core"), "the band lost its lamp");
+    }
+
+    /// Every script the window loads, in the order the page loads it.
+    ///
+    /// A guard should care what the surface does, not which module a line happens to live in.
+    /// Reading one file made every assertion quietly depend on the file layout, so splitting the
+    /// surface broke guards that were still perfectly true.
+    fn surface_source() -> String {
+        [
+            include_str!("../../ui/lib/words.js"),
+            include_str!("../../ui/lib/entries.js"),
+            include_str!("../../ui/app.js"),
+        ]
+        .join(
+            "
+",
+        )
+    }
+
+    #[test]
+    fn the_pure_layers_of_the_surface_hold_no_state_and_no_document() {
+        let words = include_str!("../../ui/lib/words.js");
+        let entries = include_str!("../../ui/lib/entries.js");
+        let markup = include_str!("../../ui/index.html");
+
+        // These two exist to be readable and testable without a browser. The moment either
+        // reaches for the document or keeps state of its own, that stops being true and the
+        // seam has quietly moved back.
+        for (name, module) in [("words", words), ("entries", entries)] {
+            for forbidden in ["document.", "window.", "el[", "state."] {
+                assert!(
+                    !module.contains(forbidden),
+                    "{name} reaches for {forbidden}, so it is no longer a pure layer"
+                );
+            }
+        }
+
+        // The negative control: the composition root is where the document belongs, so a rule
+        // that held everywhere would be measuring nothing.
+        let app = include_str!("../../ui/app.js");
+        assert!(app.contains("document.querySelectorAll"));
+
+        // Load order is the page's, and the surface test reads it from here rather than
+        // repeating it, so both move together.
+        let order: Vec<&str> = markup
+            .match_indices("<script src=\"")
+            .filter_map(|(at, _)| {
+                let rest = &markup[at + 13..];
+                rest.find('"').map(|end| &rest[..end])
+            })
+            .collect();
+        assert_eq!(
+            order,
+            vec!["lib/words.js", "lib/entries.js", "app.js"],
+            "the composition root must load after everything it composes"
+        );
     }
 
     #[test]
@@ -633,7 +689,7 @@ mod tests {
 
     #[test]
     fn a_surface_that_cannot_draw_is_not_reported_as_a_lost_connection() {
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         // One catch around both the fetch and the render said "Not connected" for either, which
         // sends whoever is reading it to look at the orchestrator when the fault is in here.
         assert!(
@@ -651,7 +707,7 @@ mod tests {
 
     #[test]
     fn a_failed_paint_is_retried_rather_than_remembered_as_done() {
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         // The signature must be recorded only after the paint succeeded. Recording first, with a
         // memo that is never cleared, remembers a panel that threw as finished and leaves it
         // blank for the life of the window.
@@ -673,7 +729,7 @@ mod tests {
         use crate::workbench::WorkbenchDestination;
 
         let markup = include_str!("../../ui/index.html");
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
 
         // The surface holds no addresses at all. Without this, "closed vocabulary" would be a
         // convention rather than a property, and one hand-written anchor would quietly undo it.
@@ -782,7 +838,7 @@ mod tests {
 
     #[test]
     fn the_connections_bar_groups_by_client_rather_than_by_connection() {
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         // One chip per client. A client that opens a session per request otherwise fills the bar
         // with identical names that tell the user nothing.
         assert!(
@@ -808,7 +864,7 @@ mod tests {
 
     #[test]
     fn surface_renders_seam_facts_and_trusts_outcome_language_for_measurements() {
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         // Readiness is the only observed fact no sentence states, so it is the only one the
         // surface must read structurally. The host is guarded where it is collected instead: an
         // assertion that the surface renders it separately would only pin a second rendering of
@@ -918,7 +974,7 @@ function ",
     fn every_readiness_the_surface_can_receive_has_a_note() {
         use crate::work::result::Readiness;
 
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         // Read the table itself rather than the whole file: several of these words appear in the
         // effect story too, and a guard that matches anywhere would pass without the table.
         let notes = app
@@ -946,7 +1002,7 @@ function ",
 
     #[test]
     fn every_catalog_tool_has_a_medallion() {
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         let tools = crate::language::catalog();
         assert_eq!(tools.len(), 22, "expected the complete catalog");
         for tool in tools {
@@ -962,9 +1018,10 @@ function ",
     fn every_runtime_intent_stays_reachable_from_the_surface() {
         use crate::workbench::WorkbenchRuntimeIntent;
 
-        let surface = concat!(
+        let surface = format!(
+            "{}{}",
             include_str!("../../ui/index.html"),
-            include_str!("../../ui/app.js")
+            surface_source()
         );
         // This match is exhaustive on purpose: a new runtime intent must not compile until
         // someone decides where the workbench offers it.
@@ -997,7 +1054,7 @@ function ",
     fn every_capability_class_the_surface_can_receive_has_a_visual_treatment() {
         use crate::governance::Capability;
 
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         let styles = include_str!("../../ui/styles.css");
         for capability in [
             Capability::Read,
