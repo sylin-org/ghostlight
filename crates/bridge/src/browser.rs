@@ -48,6 +48,8 @@ pub mod adapter_capability {
     pub const RECORDING: &str = "recording";
     /// Bounded host-to-adapter command reassembly.
     pub const CHUNKED_COMMANDS: &str = "chunked_commands";
+    /// End-to-end adapter availability probes independent of browser work.
+    pub const ADAPTER_LIVENESS: &str = "adapter_liveness";
 }
 
 /// One physical capability and the highest compatible revision implemented by the adapter.
@@ -1034,6 +1036,10 @@ pub enum BrowserFrame {
         service_epoch: String,
         control_state: RuntimeControlState,
     },
+    /// Service asks the adapter to prove that Chrome is consuming native messages.
+    Heartbeat { sequence: u32 },
+    /// Adapter confirms receipt of one service heartbeat.
+    HeartbeatAck { sequence: u32 },
     /// Service sends a primitive request.
     Request { request: BrowserRequest },
     /// One bounded part of a serialized service-to-adapter request frame.
@@ -1168,6 +1174,22 @@ mod tests {
             serde_json::from_slice::<BrowserFrame>(&encoded).unwrap(),
             frame
         );
+    }
+
+    #[test]
+    fn adapter_liveness_frames_round_trip() {
+        let frames = [
+            BrowserFrame::Heartbeat { sequence: 7 },
+            BrowserFrame::HeartbeatAck { sequence: 7 },
+        ];
+        for frame in frames {
+            let encoded = serde_json::to_vec(&frame).expect("liveness frame serializes");
+            assert_eq!(
+                serde_json::from_slice::<BrowserFrame>(&encoded)
+                    .expect("liveness frame deserializes"),
+                frame
+            );
+        }
     }
 
     #[test]

@@ -168,6 +168,10 @@ async function runAdapter(peer) {
   }
   for (;;) {
     const frame = await peer.next(0);
+    if (frame.kind === "heartbeat") {
+      peer.send({ kind: "heartbeat_ack", sequence: frame.sequence });
+      continue;
+    }
     if (frame.kind !== "request") continue;
     const request = frame.request;
     const command = request.command;
@@ -269,7 +273,7 @@ try {
       "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
       "keyboard_input", "files", "script", "observation", "dialogs",
       "operation_recovery", "presentation", "window_geometry", "diagnostics", "recording",
-      "chunked_commands"
+      "chunked_commands", "adapter_liveness"
     ].map((name) => ({ name, revision: 1 }))
   });
   assert.deepEqual(await native.next(), { kind: "backend_unavailable" });

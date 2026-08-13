@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-12 (twelfth pass).
+Last updated: 2026-08-13 (thirteenth pass).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -11,12 +11,11 @@ Distances below are measured against the local remote-tracking refs, which are o
 last fetch.
 
 - `ghostlight-1.0` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`.
-- `origin/dev` was fast-forwarded onto the 1.0 line on 2026-08-11 and again on 2026-08-12 to
-  `adb9f413`, which carries the terse 22-tool language, extension-owned recording architecture,
-  and static-frame folding. `ghostlight-1.0` is three commits ahead at `9f4d3dfd` before the
-  current uncommitted browser-owned GIF encoding and human outcome-language work. Before the first
-  fast-forward `origin/dev` sat at the 0.8 line (`3fb093eb`, 2026-08-07).
-- `origin/main` still carries the 0.8 line at `95468758`, now 44 commits behind `origin/dev`.
+- `origin/dev` was fast-forwarded onto the 1.0 line through `a335461d` on 2026-08-12.
+  `ghostlight-1.0` matches that revision before the current uncommitted adapter-liveness and
+  accessible-label fixes. Before the first fast-forward `origin/dev` sat at the 0.8 line
+  (`3fb093eb`, 2026-08-07).
+- `origin/main` still carries the 0.8 line at `95468758`, now 57 commits behind `origin/dev`.
   Promoting it is a deliberate release decision, not routine sync. (An earlier pass recorded the
   distance as 24 when `git rev-list --count origin/main..origin/dev` said 26. Re-measure rather
   than carry the number forward.)
@@ -37,6 +36,17 @@ last fetch.
 - The stable browser fringe includes a policy-free Manifest V3 extension, durable native relay,
   operation-disposition recovery, one browser-wide exact-title group per client label, dedicated
   Ghostlight window placement, and the established visual language and product identity.
+- Adapter 1.0.0 advertises end-to-end liveness (ADR-0113). The service sends a content-free
+  heartbeat every 20 seconds and follows every physical dispatch with its own probe. Forty-five
+  seconds without an acknowledgement makes an attached relay unavailable; an operation deadline
+  with no post-dispatch acknowledgement quarantines it immediately, so the next call stops before
+  dispatch. A healthy silent operation stays connected when the extension answers independently.
+  Older adapters retain their capability-gated attachment behavior, and the opaque browser
+  connector is unchanged.
+- Extension native-host startup is single-flight. Concurrent bootstrap, installation, startup,
+  and reconnect signals share one attempt, and ownership is rechecked after local-state
+  initialization. One worker epoch therefore cannot strand multiple attached relays with only one
+  active extension listener.
 - Recording now has one owner (ADR-0108, extended by ADR-0109). The extension keeps a plural,
   workspace-namespaced, memory-only registry; owns capture ids, frames, fixed bounds, autonomous
   stop, five-minute retention, erase, and the GIF encode itself; and exposes only
@@ -142,13 +152,17 @@ last fetch.
 
 ## Verified in this workspace
 
-Re-run on 2026-08-12 against the current tree:
+Re-run on 2026-08-13 against the current tree:
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 144 Rust tests -- 113 in the orchestrator library, its launch-mode
-  binary test, 26 in the shared bridge, and 4 in the MCP connector.
-- `npm test --prefix extension`: 94 extension tests.
+- `cargo test --workspace`: 161 Rust tests -- 129 in the orchestrator library, its launch-mode
+  binary test, 27 in the shared bridge, and 4 in the MCP connector.
+- `npm test --prefix extension`: 97 extension tests.
+- Browser-port contracts prove an attached socket without heartbeat acknowledgements becomes
+  unavailable, an unanswered post-dispatch probe quarantines at the operation deadline, a legacy
+  adapter keeps compatible attachment semantics, and a silent operation can outlast the liveness
+  timeout while independent acknowledgements keep it available.
 - Lifecycle tests prove demand-start supplies no application arguments and the executable has one
   normal desktop mode beside explicit headless and scripted intake. The real process journey still
   passes across service restart and connector renegotiation.
@@ -167,7 +181,8 @@ Re-run on 2026-08-12 against the current tree:
 - `node tests/process-journey.mjs`: stable MCP and browser relays reconnect through a service
   restart without replaying an interrupted effect, then complete open/read, an extension-owned
   recording start/save/discard with a real GIF content block, a second save to the browser's
-  download mechanism that returns no bytes at all, and close. The journey uses
+  download mechanism that returns no bytes at all, and close. Its adapter advertises liveness and
+  acknowledges every dispatch probe through the unchanged opaque browser connector. The journey uses
   a fresh deployment lock to isolate explicit restart recovery from demand-start. It also reads
   the audit file the real executable wrote and checks that the read records a host and a word
   count, and no page text.
@@ -228,7 +243,8 @@ Re-run on 2026-08-12 against the current tree:
   example.com`. `preserve_target_names` defaults to true; false in either authority layer removes
   names monotonically and leaves `Clicked a button on example.com`. Editable values never supply a
   name. A refused explicit navigation adds only its normalized host to the existing observation
-  shape, never its path, query, fragment, or value.
+  shape, never its path, query, fragment, or value. Rendered label whitespace is normalized before
+  the name is retained, so visually separate label fragments cannot collapse in the audit sentence.
 - Per-action observation is built, at the seam it was designed for. See
   [`design/action-observations.md`](design/action-observations.md).
   - `language/outcome.rs` owns `Outcome`, `Refusal`, `WorkspaceReason`, and
@@ -350,3 +366,5 @@ Re-run on 2026-08-12 against the current tree:
   [`adr/0104-demand-start-single-engine-and-workbench-activation.md`](adr/0104-demand-start-single-engine-and-workbench-activation.md).
 - One minimized desktop-startup decision:
   [`adr/0112-one-minimized-desktop-startup.md`](adr/0112-one-minimized-desktop-startup.md).
+- End-to-end browser availability decision:
+  [`adr/0113-end-to-end-browser-adapter-liveness.md`](adr/0113-end-to-end-browser-adapter-liveness.md).

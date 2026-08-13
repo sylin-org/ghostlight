@@ -38,7 +38,12 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 15. Concurrent demand-start requests converge on one lifetime-leased service authority before
      runtime publication or desktop initialization.
 16. A direct/default launch reveals the existing authenticated authority's workbench without a
-     new listener or workspace. A headless authority refuses that presentation request clearly.
+    new listener or workspace. A headless authority refuses that presentation request clearly.
+17. An adapter that advertises end-to-end liveness acknowledges content-free heartbeats through the
+    unchanged opaque browser connector. A relay socket that stays attached without acknowledgements
+    becomes unavailable, while a silent browser operation stays available when its independent
+    heartbeat is acknowledged. An unanswered post-dispatch probe leaves that call unknown and makes
+    the next call stop before dispatch.
 
 ## Executor and truth gates
 

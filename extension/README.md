@@ -45,8 +45,11 @@ and the screenshot returns.
 
 ## Adapter protocol 2 mechanisms
 
-Protocol 2 adds independent physical capabilities for window resize, diagnostics, recording, and
-chunked commands. The native host remains an opaque byte relay. Large service-to-extension
+Protocol 2 adds independent physical capabilities for window resize, diagnostics, recording,
+chunked commands, and end-to-end adapter liveness. The native host remains an opaque byte relay.
+The extension answers a content-free heartbeat independently of browser work; the service sends
+one every 20 seconds and stops treating the adapter as available after 45 seconds without an
+acknowledgement. Large service-to-extension
 commands are divided below Chrome's directional message ceiling, then verified and dispatched once
 in the extension. Partial transfers are memory-only, concurrency- and byte-bounded, and erased on
 expiry or native disconnect. Raw chunks are at most 512 KiB. One transfer is at most 8 MiB and 64
@@ -64,7 +67,8 @@ the plural in-memory registry, opaque recording ids, compressed-byte bounds, the
 stop, final screenshot, five-minute frozen retention, erase, and truthful REC badge. Before
 retention it folds each byte-identical JPEG sample into the preceding frame and extends that
 frame's visual duration. While recording it disables only the perpetual controlled-scope glow;
-transient action feedback remains available. The service sends only start/status/stop/read/discard
-requests; read returns bounded JPEG frames and their durations for service-side GIF rendering and
-delivery. Browser loss, service disconnect, runtime hold, hard deadline, memory limit, or a JPEG
-larger than 2 MiB stops capture locally. No pixels enter extension storage.
+transient action feedback remains available. The service sends only
+start/status/stop/export/discard requests. The extension encodes the GIF in an offscreen document
+and delivers it to the client, a page target, or a browser download as requested. Browser loss,
+service disconnect, runtime hold, hard deadline, memory limit, or a JPEG larger than 2 MiB stops
+capture locally. No frame crosses a process boundary, and no pixels enter extension storage.

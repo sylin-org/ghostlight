@@ -85,9 +85,16 @@ Every one of these cost something to learn.
 - **Observe the action subject at the effect boundary.** The browser already resolves the physical
   element. Return its role and accessible name in that same receipt. A cached inspect name or a
   second describe call is both less truthful and more expensive.
-- **Reconnection is not availability.** Put one idempotent recovery action at the failed-connection
-  seam, then let a service-held lifetime lease decide authority before discovery or presentation
-  state exists.
+- **Reconnection is not availability, and attachment is not availability.** Put one idempotent
+  recovery action at the failed-connection seam, then let a service-held lifetime lease decide
+  authority before discovery or presentation state exists. At the browser shore, only an
+  end-to-end acknowledgement proves that the extension consumes the attached relay stream;
+  operation silence cannot prove the opposite because healthy browser work may be quiet.
+- **Async connection entry points must be single-flight.** A guard checked only before an `await`
+  does not establish exclusive ownership. Startup, installation, and retry signals can all pass it,
+  create competing native hosts, and leave two structurally live pipes with only one active
+  listener. Give connection creation one shared in-progress attempt and recheck ownership after
+  every asynchronous initialization boundary.
 - **A cached MCP catalog is not a live transport.** Reconnect through the owning client, then look
   at the visible browser before retrying an effectful call.
 - **A native-port or service-worker restart is not a browser restart.** Hold uncertain resource

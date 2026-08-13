@@ -145,8 +145,28 @@ test("the adapter advertises stable versioned physical capabilities", () => {
     "window_geometry",
     "diagnostics",
     "recording",
-    "chunked_commands"
+    "chunked_commands",
+    "adapter_liveness"
   ].map((name) => ({ name, revision: 1 })));
+});
+
+test("adapter liveness acknowledgements echo only bounded heartbeat sequences", () => {
+  assert.deepEqual(shared.heartbeatAcknowledgement({ kind: "heartbeat", sequence: 7 }), {
+    kind: "heartbeat_ack",
+    sequence: 7
+  });
+  assert.equal(shared.heartbeatAcknowledgement({ kind: "request", sequence: 7 }), null);
+  assert.equal(shared.heartbeatAcknowledgement({ kind: "heartbeat", sequence: 0 }), null);
+  assert.equal(shared.heartbeatAcknowledgement({ kind: "heartbeat", sequence: 2 ** 32 }), null);
+});
+
+test("native-host startup is one connection attempt across concurrent wake signals", () => {
+  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  assert.match(source, /let nativeConnectionAttempt = null;/);
+  assert.match(source, /if \(nativeConnectionAttempt\) return nativeConnectionAttempt;/);
+  assert.match(source, /nativeConnectionAttempt = establishNativeConnection\(\)/);
+  assert.match(source, /if \(!browserId\) await initializeLocalState\(\);\s+if \(nativePort\) return;/);
+  assert.doesNotMatch(source, /initializeLocalState\(\)\s*\.then\(connectNative\)/);
 });
 
 test("page opening is one atomic physical primitive", () => {

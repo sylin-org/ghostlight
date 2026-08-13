@@ -28,6 +28,7 @@ const activity = new Map();
 const topology = globalThis.GhostlightTopology.create(chrome, stateApi.TOPOLOGY_KEY);
 const presentationQueue = globalThis.GhostlightPresentationQueue.create();
 let nativePort = null;
+let nativeConnectionAttempt = null;
 let browserId = null;
 let preferences = { ...stateApi.DEFAULT_PREFERENCES };
 let browserNegotiation = Promise.resolve();
@@ -129,10 +130,18 @@ async function retainManagedDebugger(tabId) {
   }
 }
 
-async function connectNative() {
-  if (nativePort) return;
+function connectNative() {
+  if (nativePort) return Promise.resolve();
+  if (nativeConnectionAttempt) return nativeConnectionAttempt;
+  nativeConnectionAttempt = establishNativeConnection()
+    .finally(() => { nativeConnectionAttempt = null; });
+  return nativeConnectionAttempt;
+}
+
+async function establishNativeConnection() {
   try {
     if (!browserId) await initializeLocalState();
+    if (nativePort) return;
     const port = chrome.runtime.connectNative(HOST_NAME);
     nativePort = port;
     port.onMessage.addListener((frame) => {
@@ -343,6 +352,11 @@ async function clearDiagnostics(command) {
 
 async function onNativeMessage(frame, sourcePort = nativePort) {
   if (sourcePort && nativePort !== sourcePort) return;
+  const heartbeat = shared.heartbeatAcknowledgement(frame);
+  if (heartbeat) {
+    send(heartbeat);
+    return;
+  }
   if (frame.kind === "command_chunk") {
     await browserNegotiation;
     if (sourcePort && nativePort !== sourcePort) return;
@@ -1360,6 +1374,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-initializeLocalState()
-  .then(connectNative)
-  .catch((error) => setConnection({ last_error: shared.bounded(error?.message ?? error, 500) }));
+connectNative();

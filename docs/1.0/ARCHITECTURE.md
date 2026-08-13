@@ -111,6 +111,13 @@ authoritative runtime controls and publishes the resulting content-free control 
 adapter. Ended state is terminal for hold and resume; only explicit start-new-session intent creates
 a new active runtime session.
 
+An adapter that advertises end-to-end liveness acknowledges content-free service heartbeats at the
+extension shore, independently of browser operations. Relay attachment and adapter availability are
+separate facts: a missed liveness window stops new dispatch while leaving the opaque connector and
+socket available for a later acknowledgement. Every physical dispatch is followed by its own
+probe, so a deadline with no acknowledgement quarantines that adapter while a silent operation
+whose heartbeat was acknowledged does not. The browser connector remains unaware of both frames.
+
 ## Orchestrator contexts
 
 ### Language
@@ -314,6 +321,10 @@ Stale tabs and targets fail before dispatch. Sequence failure reports completed 
 never replays completed steps. Recovery suggestions come from typed reason codes and effect class,
 not page content.
 
+An unanswered post-dispatch liveness probe does not revise that invocation's unknown effect. It
+changes only the availability fact used by later invocations, which then stop before dispatch until
+the extension acknowledges a new probe or reconnects.
+
 ## Extension product architecture
 
 The extension has four small responsibilities with explicit boundaries:
@@ -345,9 +356,11 @@ The service worker persists only the installation id, adapter-local preferences,
 topology to recover after worker suspension, and a bounded content-free operation disposition
 journal. URLs, page content, form values, scripts, file data, screenshots, receipts, and policy are
 never stored. Popup status is derived from live native connection state, relay availability, and
-service-published control state. The native relay owns ordinary backend reconnection; the
-alarm-backed extension loop is the fallback when the native host itself ends. Both paths repeat the
-same adapter identity and capability declaration.
+service-published control state. The service's negotiated heartbeat supplies the end-to-end
+availability fact and ordinary local traffic that keeps the idle adapter shore observable. The
+native relay owns ordinary backend reconnection; the alarm-backed extension loop is the fallback
+when the native host itself ends. Both paths repeat the same adapter identity and capability
+declaration.
 
 Model-driven close is dual gated. The orchestrator first admits the action capability and the
 monotonic tab-close policy constraint. The extension then checks its default-on preserve-tabs

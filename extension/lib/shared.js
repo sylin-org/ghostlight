@@ -26,7 +26,8 @@
     "window_geometry",
     "diagnostics",
     "recording",
-    "chunked_commands"
+    "chunked_commands",
+    "adapter_liveness"
   ].map((name) => Object.freeze({ name, revision: 1 })));
   const CREDENTIAL_AUTOCOMPLETE = new Set([
     "current-password",
@@ -119,6 +120,14 @@
     return { kind: "event", event: { ...event } };
   }
 
+  function heartbeatAcknowledgement(frame) {
+    if (frame?.kind !== "heartbeat"
+      || !Number.isSafeInteger(frame.sequence)
+      || frame.sequence < 1
+      || frame.sequence > 0xffffffff) return null;
+    return { kind: "heartbeat_ack", sequence: frame.sequence };
+  }
+
   return Object.freeze({
     NATIVE_HOST_NAME,
     ADAPTER_PROTOCOL_MAJOR,
@@ -130,6 +139,7 @@
     keyDescriptor,
     presentationLabel,
     activityLabel,
-    browserEventFrame
+    browserEventFrame,
+    heartbeatAcknowledgement
   });
 });
