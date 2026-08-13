@@ -139,6 +139,10 @@ jobs:
   candidate-bundle:
     needs: [quality-gate, native-packages, extension-artifact]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
@@ -174,6 +178,13 @@ jobs:
             -OutputDirectory dist/release-candidate `
             -Version $env:GHOSTLIGHT_VERSION `
             -SourceRevision $env:GITHUB_SHA
+      - name: Attest every candidate file
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/release-candidate/assets/*
+            dist/release-candidate/release-candidate.json
+            dist/release-candidate/SHA256SUMS
       - uses: actions/upload-artifact@v7
         with:
           name: release-candidate

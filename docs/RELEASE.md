@@ -108,8 +108,9 @@ set, builds the deterministic extension archive and one pinned CycloneDX SBOM fo
 workspace components, then assembles one nine-artifact candidate unit. `release-candidate.json`
 binds normalized artifact names,
 byte lengths, SHA-256 values, version, and the full source revision; `SHA256SUMS` is independently
-recomputed by `scripts/check-release-candidate.ps1`. The workflow uploads the unit for fourteen
-days. It does not tag, sign, publish, or mutate a store.
+recomputed by `scripts/check-release-candidate.ps1`. GitHub Actions creates build-provenance
+attestations for every file in the candidate unit. The workflow uploads the unit for fourteen days.
+It does not tag, platform-sign, publish, or mutate a store.
 
 `ghostlight native-host check|install|uninstall` is the package-facing registration seam. It covers
 Chrome, Edge, Brave, and Chromium; repairs missing or Ghostlight-owned stale state; and leaves
@@ -153,6 +154,20 @@ defaults to `Plan` and makes no request. `Upload` and `Submit` each require both
 and `-Execute`; submission defaults to `STAGED_PUBLISH` so review approval does not silently make
 the adapter public. The script uses Chrome Web Store API V2, validates the package version and hash,
 and refuses warned or taken-down items before submission.
+
+GitHub release creation and publication are also separate. `scripts/publish-github-release.ps1`
+defaults to `Plan`; `CreateDraft` and `PublishDraft` each require `-Execute`. It refuses an unsigned
+candidate, requires an existing remote `v<version>` tag at the candidate source revision, verifies
+every GitHub provenance attestation against this repository and the release workflow, and
+re-downloads every draft asset for an exact hash comparison before publication. It never creates a
+tag.
+
+The MCP Registry is downstream of the public npm coordinate in `server.json`.
+`scripts/publish-mcp-registry.ps1` defaults to an offline `Plan` and reports why the current
+metadata is not publishable. `Publish` requires `-Execute`, a signed candidate with matching
+versions, a publicly observable npm package at that exact version, successful official publisher
+validation, and the recovered DNS credential. It logs out in a `finally` block. Registry failure
+cannot hold up or roll back any other publication channel.
 
 ## Rollback
 
