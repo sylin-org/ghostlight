@@ -32,19 +32,6 @@ function Get-HistoricalEntries {
     }
 }
 
-function Get-CurrentBlob {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return $null
-    }
-    $blob = (& git hash-object -- $Path).Trim()
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($blob)) {
-        throw "Could not hash current file: $Path"
-    }
-    return $blob
-}
-
 function Get-Area {
     param([string]$Path)
 
@@ -144,11 +131,30 @@ function Get-MissingDisposition {
 }
 
 $historical = @(Get-HistoricalEntries | Sort-Object path)
+$existingPaths = @(
+    $historical.path |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+)
+$currentHashes = @($existingPaths | & git hash-object --stdin-paths)
+if ($LASTEXITCODE -ne 0 -or $currentHashes.Count -ne $existingPaths.Count) {
+    throw "Could not batch-hash the current historical paths"
+}
+$currentBlobs = [System.Collections.Generic.Dictionary[string, string]]::new(
+    [System.StringComparer]::Ordinal
+)
+for ($index = 0; $index -lt $existingPaths.Count; $index += 1) {
+    $currentBlobs.Add($existingPaths[$index], $currentHashes[$index])
+}
 $inventoryEntries = [System.Collections.Generic.List[object]]::new()
 $recoveryEntries = [System.Collections.Generic.List[object]]::new()
 
 foreach ($entry in $historical) {
-    $currentBlob = Get-CurrentBlob -Path $entry.path
+    $currentBlob = if ($currentBlobs.ContainsKey($entry.path)) {
+        $currentBlobs[$entry.path]
+    }
+    else {
+        $null
+    }
     $state = if ($null -eq $currentBlob) {
         "absent"
     }

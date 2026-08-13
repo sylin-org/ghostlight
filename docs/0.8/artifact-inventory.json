@@ -108,7 +108,7 @@
       "historicalType": "blob",
       "historicalBlob": "2249445a1a6803d152d3a24861e6b3145b9f335c",
       "currentState": "retained-evolved",
-      "currentBlob": "c70e16c0023984af7f99222a9c1bcb1e14b1e65b"
+      "currentBlob": "d432f8ba8c01bb846ec4e61638eac8dd83ff8c20"
     },
     {
       "path": ".gitignore",
@@ -3042,7 +3042,7 @@
       "historicalType": "blob",
       "historicalBlob": "2e1edc340e68f383aa83e2ac3fd0690f0a1a5da6",
       "currentState": "retained-evolved",
-      "currentBlob": "fb232e279bf346a31c23f56f6e908867d28b5396"
+      "currentBlob": "3e7f7ca091af3f38d0040da8f909b38a3c76ea35"
     },
     {
       "path": "docs/research/00-synthesis-and-decisions.md",

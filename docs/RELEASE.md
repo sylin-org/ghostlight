@@ -91,7 +91,12 @@ not a substitute for the journey.
 The manual `Build release candidate` workflow builds unsigned Windows NSIS, Linux Debian, and
 macOS application/disk-image candidates from one locked workspace build. It stages the two
 connectors as Tauri sidecars, inspects every native package for the exact three-executable sibling
-set, and uploads short-lived workflow artifacts. It does not tag, sign, publish, or mutate a store.
+set, builds the deterministic extension archive and one pinned CycloneDX SBOM for each of the four
+workspace components, then assembles one nine-artifact candidate unit. `release-candidate.json`
+binds normalized artifact names,
+byte lengths, SHA-256 values, version, and the full source revision; `SHA256SUMS` is independently
+recomputed by `scripts/check-release-candidate.ps1`. The workflow uploads the unit for fourteen
+days. It does not tag, sign, publish, or mutate a store.
 
 `ghostlight native-host check|install|uninstall` is the package-facing registration seam. It covers
 Chrome, Edge, Brave, and Chromium; repairs missing or Ghostlight-owned stale state; and leaves

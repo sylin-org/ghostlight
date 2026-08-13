@@ -135,3 +135,48 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
           retention-days: 7
+
+  candidate-bundle:
+    needs: [quality-gate, native-packages, extension-artifact]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: "1.95.0"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: candidate-input
+      - uses: actions/download-artifact@v8
+        with:
+          name: chrome-extension
+          path: candidate-input/chrome-extension
+      - name: Generate the pinned CycloneDX workspace SBOM
+        shell: pwsh
+        run: |
+          $cargo = Get-Content -LiteralPath Cargo.toml -Raw
+          $version = [regex]::Match($cargo, '(?ms)^\[workspace\.package\].*?^version\s*=\s*"(?<version>[^"]+)"').Groups['version'].Value
+          if (-not $version) { throw 'Cargo.toml has no workspace package version' }
+          cargo install cargo-cyclonedx --version 0.5.9 --locked
+          $env:SOURCE_DATE_EPOCH = (git show -s --format=%ct HEAD).Trim()
+          cargo cyclonedx --format json --spec-version 1.5 --override-filename "ghostlight-v$version-sbom.cyclonedx"
+          $sboms = @(Get-ChildItem -LiteralPath crates -Recurse -File -Filter "ghostlight-v$version-sbom.cyclonedx.json")
+          if ($sboms.Count -ne 4) { throw "cargo-cyclonedx produced $($sboms.Count) component SBOMs, expected 4" }
+          "GHOSTLIGHT_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Assemble and verify one immutable candidate unit
+        shell: pwsh
+        run: |
+          $sboms = @(Get-ChildItem -LiteralPath crates -Recurse -File -Filter "ghostlight-v$env:GHOSTLIGHT_VERSION-sbom.cyclonedx.json")
+          ./scripts/assemble-release-candidate.ps1 `
+            -ArtifactRoot candidate-input `
+            -SbomPath $sboms.FullName `
+            -OutputDirectory dist/release-candidate `
+            -Version $env:GHOSTLIGHT_VERSION `
+            -SourceRevision $env:GITHUB_SHA
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-candidate
+          path: dist/release-candidate/
+          if-no-files-found: error
+          retention-days: 14
