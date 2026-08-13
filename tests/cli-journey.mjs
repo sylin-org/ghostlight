@@ -65,6 +65,14 @@ try {
 
   for (let attempt = 0; attempt < 80 && !existsSync(runtimeFile); attempt += 1) await sleep(50);
   assert.equal(existsSync(runtimeFile), true, "the service never published runtime discovery");
+  const status = spawnSync(ghostlight, ["status", "--json"], {
+    env: environment,
+    encoding: "utf8"
+  });
+  assert.equal(status.status, 0, status.stderr);
+  const statusJson = JSON.parse(status.stdout);
+  assert.equal(statusJson.running, true);
+  assert.equal("token" in statusJson, false, "status must never reveal local authentication material");
 
   const listed = call(["browser_tabs", '{"action":"list"}']);
   assert.equal(listed.status, 0, listed.stderr);

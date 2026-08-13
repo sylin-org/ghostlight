@@ -27,7 +27,9 @@ enum LaunchMode {
         fix: bool,
     },
     /// Report the local engine endpoint without starting it.
-    Status,
+    Status {
+        json: bool,
+    },
     /// Render stable command-line help.
     Help,
     /// Render the exact package version.
@@ -37,6 +39,8 @@ enum LaunchMode {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct SetupOptions {
     dry_run: bool,
+    all_browsers: bool,
+    browser_ids: Vec<String>,
     all_clients: bool,
     no_clients: bool,
     no_open: bool,
@@ -66,7 +70,7 @@ fn main() -> anyhow::Result<()> {
         LaunchMode::Install(options) => run_setup(true, &options),
         LaunchMode::Uninstall(options) => run_setup(false, &options),
         LaunchMode::Doctor { fix } => run_doctor(fix),
-        LaunchMode::Status => run_status(),
+        LaunchMode::Status { json } => run_status(json),
         LaunchMode::Help => {
             print_help();
             Ok(())
@@ -83,6 +87,14 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     use ghostlight::install::{HarnessAction, HarnessRegistry};
 
     let native_hosts = NativeHostRegistry::discover();
+    if !options.browser_ids.is_empty() {
+        let report = native_hosts.check()?;
+        for id in &options.browser_ids {
+            if !report.browsers.iter().any(|browser| browser.id == *id) {
+                anyhow::bail!("unknown browser '{id}'; expected chrome, edge, brave, or chromium");
+            }
+        }
+    }
     if options.dry_run {
         println!(
             "Ghostlight {} dry run -- no machine state will change.",
@@ -90,7 +102,11 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         );
         print_native_host_report(&native_hosts.check()?);
     } else if install {
-        let result = native_hosts.install()?;
+        let result = if options.browser_ids.is_empty() {
+            native_hosts.install()?
+        } else {
+            native_hosts.install_selected(&options.browser_ids)?
+        };
         println!("Browser connection installed; changed: {}", result.changed);
         print_native_host_report(&result.report);
         let migration = ghostlight::install::migration::retire_obsolete_supervisor();
@@ -104,7 +120,11 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
             eprintln!("Migration warning: {warning}");
         }
     } else {
-        let result = native_hosts.uninstall()?;
+        let result = if options.browser_ids.is_empty() {
+            native_hosts.uninstall()?
+        } else {
+            native_hosts.uninstall_selected(&options.browser_ids)?
+        };
         println!("Browser connection removed; changed: {}", result.changed);
         print_native_host_report(&result.report);
     }
@@ -248,7 +268,7 @@ fn run_doctor(fix: bool) -> anyhow::Result<()> {
             harness.name, harness.state, harness.detail
         );
     }
-    print_runtime_status();
+    print_runtime_status(false);
     if fix {
         println!("Applying ownership-safe repairs.");
         run_setup(true, &SetupOptions::default())?;
@@ -256,13 +276,15 @@ fn run_doctor(fix: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_status() -> anyhow::Result<()> {
-    println!("Ghostlight {}", env!("CARGO_PKG_VERSION"));
-    print_runtime_status();
+fn run_status(json: bool) -> anyhow::Result<()> {
+    if !json {
+        println!("Ghostlight {}", env!("CARGO_PKG_VERSION"));
+    }
+    print_runtime_status(json);
     Ok(())
 }
 
-fn print_runtime_status() {
+fn print_runtime_status(json: bool) {
     let runtime_path = ghostlight_bridge::runtime::runtime_file();
     match ghostlight_bridge::runtime::read_runtime(&runtime_path) {
         Ok(runtime) => {
@@ -271,18 +293,31 @@ fn print_runtime_status() {
                 Duration::from_millis(250),
             )
             .is_ok();
-            println!(
-                "Service: {} -- version {} -- bridge {} -- {}",
-                runtime_path.display(),
-                runtime.service_version,
-                runtime.service_bridge_major,
-                if reachable {
-                    "running"
-                } else {
-                    "not reachable"
-                }
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "version": runtime.service_version,
+                        "service_bridge_major": runtime.service_bridge_major,
+                        "browser_relay_major": runtime.browser_relay_major,
+                        "running": reachable,
+                    })
+                );
+            } else {
+                println!(
+                    "Service: {} -- version {} -- bridge {} -- {}",
+                    runtime_path.display(),
+                    runtime.service_version,
+                    runtime.service_bridge_major,
+                    if reachable {
+                        "running"
+                    } else {
+                        "not reachable"
+                    }
+                );
+            }
         }
+        Err(_) if json => println!("{}", serde_json::json!({ "running": false })),
         Err(_) => println!(
             "Service: not running (no readable endpoint at {})",
             runtime_path.display()
@@ -310,7 +345,7 @@ fn executable_name(name: &str) -> String {
 
 fn print_help() {
     println!(
-        "Ghostlight {version}\n\nUsage:\n  ghostlight                         Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor                  Check the complete local installation\n  ghostlight status                  Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        "Ghostlight {version}\n\nUsage:\n  ghostlight                         Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor                  Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight service                 Run the local authority without a window\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
         version = env!("CARGO_PKG_VERSION")
     );
 }
@@ -497,12 +532,21 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
             }
         }
         Ok(LaunchMode::Doctor { fix })
+    } else if arguments
+        .first()
+        .is_some_and(|argument| argument == "status")
+    {
+        match arguments.as_slice() {
+            [_] => Ok(LaunchMode::Status { json: false }),
+            [_, option] if option == "--json" => Ok(LaunchMode::Status { json: true }),
+            _ => anyhow::bail!("usage: ghostlight status [--json]"),
+        }
     } else if arguments.len() == 1
         && arguments
             .first()
-            .is_some_and(|argument| argument == "status")
+            .is_some_and(|argument| argument == "service")
     {
-        Ok(LaunchMode::Status)
+        Ok(LaunchMode::Headless)
     } else if arguments.first().is_some_and(|argument| argument == "call") {
         Ok(LaunchMode::Call)
     } else if arguments.len() == 1
@@ -525,10 +569,24 @@ fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOptions> {
             .ok_or_else(|| anyhow::anyhow!("Ghostlight command options must be valid UTF-8"))?;
         match argument {
             "--dry-run" => options.dry_run = true,
+            "--all-browsers" => options.all_browsers = true,
             "--all-clients" => options.all_clients = true,
             "--no-clients" => options.no_clients = true,
             "--no-open" => options.no_open = true,
-            "--all-browsers" => {}
+            "--browser" => {
+                let id = remaining
+                    .next()
+                    .and_then(|value| value.to_str())
+                    .ok_or_else(|| anyhow::anyhow!("--browser needs a browser id"))?;
+                options.browser_ids.push(id.into());
+            }
+            value if value.starts_with("--browser=") => {
+                let id = &value["--browser=".len()..];
+                if id.is_empty() {
+                    anyhow::bail!("--browser needs a browser id");
+                }
+                options.browser_ids.push(id.into());
+            }
             "--client" => {
                 let id = remaining
                     .next()
@@ -548,6 +606,9 @@ fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOptions> {
     }
     if options.no_clients && (options.all_clients || !options.client_ids.is_empty()) {
         anyhow::bail!("--no-clients cannot be combined with a client selection");
+    }
+    if options.all_browsers && !options.browser_ids.is_empty() {
+        anyhow::bail!("--all-browsers cannot be combined with a browser selection");
     }
     Ok(options)
 }
@@ -572,7 +633,18 @@ mod tests {
             launch_mode(["doctor".into(), "--verbose".into(), "--fix".into()]).unwrap(),
             LaunchMode::Doctor { fix: true }
         );
-        assert_eq!(launch_mode(["status".into()]).unwrap(), LaunchMode::Status);
+        assert_eq!(
+            launch_mode(["status".into()]).unwrap(),
+            LaunchMode::Status { json: false }
+        );
+        assert_eq!(
+            launch_mode(["status".into(), "--json".into()]).unwrap(),
+            LaunchMode::Status { json: true }
+        );
+        assert_eq!(
+            launch_mode(["service".into()]).unwrap(),
+            LaunchMode::Headless
+        );
         assert_eq!(launch_mode(["--help".into()]).unwrap(), LaunchMode::Help);
         assert_eq!(
             launch_mode(["--version".into()]).unwrap(),
@@ -599,6 +671,8 @@ mod tests {
             .unwrap(),
             LaunchMode::Install(SetupOptions {
                 dry_run: true,
+                all_browsers: false,
+                browser_ids: Vec::new(),
                 all_clients: false,
                 no_clients: false,
                 no_open: true,
@@ -608,11 +682,12 @@ mod tests {
         assert_eq!(
             launch_mode([
                 "uninstall".into(),
+                "--browser=brave".into(),
                 "--all-clients".into(),
-                "--all-browsers".into(),
             ])
             .unwrap(),
             LaunchMode::Uninstall(SetupOptions {
+                browser_ids: vec!["brave".into()],
                 all_clients: true,
                 ..SetupOptions::default()
             })

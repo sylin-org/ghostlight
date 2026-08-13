@@ -112,9 +112,27 @@ impl NativeHostRegistry {
         apply_install(&self.context, &SystemRegistrationIo)
     }
 
+    /// Install or update only the named browser registrations.
+    pub fn install_selected(
+        &self,
+        browser_ids: &[String],
+    ) -> Result<NativeHostActionResult, NativeHostError> {
+        let browsers = select_browsers(browser_ids)?;
+        apply_install_for(&self.context, &SystemRegistrationIo, &browsers)
+    }
+
     /// Remove only registrations whose manifest proves Ghostlight ownership.
     pub fn uninstall(&self) -> Result<NativeHostActionResult, NativeHostError> {
         apply_uninstall(&self.context, &SystemRegistrationIo)
+    }
+
+    /// Remove only owned registrations for the named browsers.
+    pub fn uninstall_selected(
+        &self,
+        browser_ids: &[String],
+    ) -> Result<NativeHostActionResult, NativeHostError> {
+        let browsers = select_browsers(browser_ids)?;
+        apply_uninstall_for(&self.context, &SystemRegistrationIo, &browsers)
     }
 
     /// Reconcile a package whose ordinary desktop launch runs in an identifiable final location.
@@ -215,6 +233,24 @@ const BROWSERS: &[BrowserSpec] = &[
         linux_directory: "chromium/NativeMessagingHosts",
     },
 ];
+
+fn select_browsers(ids: &[String]) -> Result<Vec<BrowserSpec>, NativeHostError> {
+    let mut selected = Vec::new();
+    for id in ids {
+        let browser = BROWSERS
+            .iter()
+            .find(|browser| browser.id == id)
+            .copied()
+            .ok_or_else(|| NativeHostError::UnknownBrowser(id.clone()))?;
+        if !selected
+            .iter()
+            .any(|selected: &BrowserSpec| selected.id == browser.id)
+        {
+            selected.push(browser);
+        }
+    }
+    Ok(selected)
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct HostManifest {
@@ -406,13 +442,26 @@ fn apply_install(
     context: &NativeHostContext,
     registration_io: &dyn RegistrationIo,
 ) -> Result<NativeHostActionResult, NativeHostError> {
+    apply_install_for(context, registration_io, BROWSERS)
+}
+
+fn apply_install_for(
+    context: &NativeHostContext,
+    registration_io: &dyn RegistrationIo,
+    browsers: &[BrowserSpec],
+) -> Result<NativeHostActionResult, NativeHostError> {
     if !context.connector.is_file() {
         return Err(NativeHostError::ConnectorMissing(context.connector.clone()));
     }
     let before = inspect(context, registration_io)?;
-    if before.browsers.iter().all(|browser| {
+    if browsers.iter().all(|browser| {
+        let observed = before
+            .browsers
+            .iter()
+            .find(|observed| observed.id == browser.id)
+            .expect("every browser specification has an inspection result");
         matches!(
-            browser.state,
+            observed.state,
             NativeHostState::Current | NativeHostState::NeedsAttention
         )
     }) {
@@ -424,9 +473,14 @@ fn apply_install(
 
     let expected = HostManifest::expected(&context.connector);
     let contents = expected.to_json()?;
-    let changed = before.browsers.iter().any(|browser| {
+    let changed = browsers.iter().any(|browser| {
+        let observed = before
+            .browsers
+            .iter()
+            .find(|observed| observed.id == browser.id)
+            .expect("every browser specification has an inspection result");
         matches!(
-            browser.state,
+            observed.state,
             NativeHostState::Missing | NativeHostState::Updatable
         )
     });
@@ -441,7 +495,12 @@ fn apply_install(
             }
             registration_io.write_file(&manifest_path, &contents)?;
             let manifest_value = manifest_path.to_string_lossy();
-            for (browser, observed) in BROWSERS.iter().zip(&before.browsers) {
+            for browser in browsers {
+                let observed = before
+                    .browsers
+                    .iter()
+                    .find(|observed| observed.id == browser.id)
+                    .expect("every browser specification has an inspection result");
                 if observed.state != NativeHostState::NeedsAttention {
                     registration_io
                         .write_registry(&windows_registry_key(browser), manifest_value.as_ref())?;
@@ -449,7 +508,12 @@ fn apply_install(
             }
         }
         NativeHostPlatform::MacOs | NativeHostPlatform::Linux => {
-            for (browser, observed) in BROWSERS.iter().zip(&before.browsers) {
+            for browser in browsers {
+                let observed = before
+                    .browsers
+                    .iter()
+                    .find(|observed| observed.id == browser.id)
+                    .expect("every browser specification has an inspection result");
                 if observed.state != NativeHostState::NeedsAttention {
                     registration_io
                         .write_file(&browser_manifest_path(context, browser), &contents)?;
@@ -458,9 +522,14 @@ fn apply_install(
         }
     }
     let report = inspect(context, registration_io)?;
-    if report.browsers.iter().any(|browser| {
+    if browsers.iter().any(|browser| {
+        let observed = report
+            .browsers
+            .iter()
+            .find(|observed| observed.id == browser.id)
+            .expect("every browser specification has an inspection result");
         matches!(
-            browser.state,
+            observed.state,
             NativeHostState::Missing | NativeHostState::Updatable
         )
     }) {
@@ -473,11 +542,19 @@ fn apply_uninstall(
     context: &NativeHostContext,
     registration_io: &dyn RegistrationIo,
 ) -> Result<NativeHostActionResult, NativeHostError> {
+    apply_uninstall_for(context, registration_io, BROWSERS)
+}
+
+fn apply_uninstall_for(
+    context: &NativeHostContext,
+    registration_io: &dyn RegistrationIo,
+    browsers: &[BrowserSpec],
+) -> Result<NativeHostActionResult, NativeHostError> {
     let mut changed = false;
     let mut owned_manifests = HashSet::new();
     match context.platform {
         NativeHostPlatform::Windows => {
-            for browser in BROWSERS {
+            for browser in browsers {
                 let key = windows_registry_key(browser);
                 let Some(value) = registration_io.read_registry(&key)? else {
                     continue;
@@ -493,18 +570,10 @@ fn apply_uninstall(
                     changed = true;
                 }
             }
-            let manifest_path = windows_manifest_path(context);
-            let owned = registration_io
-                .read_file(&manifest_path)?
-                .and_then(|contents| serde_json::from_str::<HostManifest>(&contents).ok())
-                .is_some_and(|manifest| manifest.owned());
-            if owned {
-                registration_io.remove_file(&manifest_path)?;
-                changed = true;
-            }
+            owned_manifests.insert(windows_manifest_path(context));
         }
         NativeHostPlatform::MacOs | NativeHostPlatform::Linux => {
-            for browser in BROWSERS {
+            for browser in browsers {
                 let path = browser_manifest_path(context, browser);
                 let owned = registration_io
                     .read_file(&path)?
@@ -518,7 +587,26 @@ fn apply_uninstall(
         }
     }
     for path in owned_manifests {
-        registration_io.remove_file(&path)?;
+        let mut still_referenced = false;
+        for browser in BROWSERS {
+            if registration_io
+                .read_registry(&windows_registry_key(browser))?
+                .is_some_and(|value| {
+                    same_path(&PathBuf::from(value), &path, NativeHostPlatform::Windows)
+                })
+            {
+                still_referenced = true;
+                break;
+            }
+        }
+        let owned = registration_io
+            .read_file(&path)?
+            .and_then(|contents| serde_json::from_str::<HostManifest>(&contents).ok())
+            .is_some_and(|manifest| manifest.owned());
+        if !still_referenced && owned {
+            registration_io.remove_file(&path)?;
+            changed = true;
+        }
     }
     Ok(NativeHostActionResult {
         changed,
@@ -717,6 +805,9 @@ fn remove_registry_key(_key: &str) -> Result<(), NativeHostError> {
 /// Safe native-host lifecycle failure.
 #[derive(Debug, Error)]
 pub enum NativeHostError {
+    /// A command named a browser outside the closed supported set.
+    #[error("unknown browser '{0}'; expected chrome, edge, brave, or chromium")]
+    UnknownBrowser(String),
     /// The packaged sibling browser connector is unavailable.
     #[error("the sibling Ghostlight browser connector is missing: {0}")]
     ConnectorMissing(PathBuf),
@@ -1012,6 +1103,46 @@ mod tests {
             .browsers
             .iter()
             .all(|browser| browser.state == NativeHostState::Missing));
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn selected_unix_install_and_uninstall_touch_only_named_browsers() {
+        let context = context(NativeHostPlatform::Linux);
+        let registration_io = MemoryIo::default();
+        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+        fs::write(&context.connector, b"connector").unwrap();
+
+        let installed = apply_install_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
+        assert_eq!(installed.report.browsers[0].state, NativeHostState::Current);
+        assert!(installed.report.browsers[1..]
+            .iter()
+            .all(|browser| browser.state == NativeHostState::Missing));
+
+        apply_install_for(&context, &registration_io, &[BROWSERS[1]]).unwrap();
+        let removed = apply_uninstall_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
+        assert_eq!(removed.report.browsers[0].state, NativeHostState::Missing);
+        assert_eq!(removed.report.browsers[1].state, NativeHostState::Current);
+        assert!(select_browsers(&["firefox".into()]).is_err());
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn selected_windows_uninstall_preserves_a_shared_manifest_still_in_use() {
+        let context = context(NativeHostPlatform::Windows);
+        let registration_io = MemoryIo::default();
+        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+        fs::write(&context.connector, b"connector").unwrap();
+        apply_install_for(&context, &registration_io, &BROWSERS[..2]).unwrap();
+
+        let removed = apply_uninstall_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
+        assert_eq!(removed.report.browsers[0].state, NativeHostState::Missing);
+        assert_eq!(removed.report.browsers[1].state, NativeHostState::Current);
+        assert!(registration_io
+            .files()
+            .contains_key(&windows_manifest_path(&context)));
 
         let _ = fs::remove_dir_all(context.home);
     }
