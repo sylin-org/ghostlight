@@ -4,6 +4,12 @@
       "binaries/ghostlight-mcp-connector",
       "binaries/ghostlight-browser-connector"
     ],
+    "resources": {
+      "../../LICENSE": "licenses/Apache-2.0.txt",
+      "../../docs/licenses/MIT.txt": "licenses/MIT.txt",
+      "../../docs/licenses/LicenseRef-Ghostlight-Commercial.txt": "licenses/LicenseRef-Ghostlight-Commercial.txt",
+      "../../LICENSING.md": "LICENSING.md"
+    },
     "windows": {
       "nsis": {
         "installMode": "currentUser",

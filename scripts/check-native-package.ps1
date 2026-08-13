@@ -21,6 +21,64 @@ $binaries = @(
     "ghostlight-mcp-connector",
     "ghostlight-browser-connector"
 )
+$repo = Split-Path -Parent $PSScriptRoot
+$legalFiles = @(
+    [pscustomobject]@{
+        name = "Apache-2.0.txt"
+        source = Join-Path $repo "LICENSE"
+    },
+    [pscustomobject]@{
+        name = "MIT.txt"
+        source = Join-Path $repo "docs/licenses/MIT.txt"
+    },
+    [pscustomobject]@{
+        name = "LicenseRef-Ghostlight-Commercial.txt"
+        source = Join-Path $repo "docs/licenses/LicenseRef-Ghostlight-Commercial.txt"
+    },
+    [pscustomobject]@{
+        name = "LICENSING.md"
+        source = Join-Path $repo "LICENSING.md"
+    }
+)
+
+function Assert-LegalPayload {
+    param([string]$Root)
+
+    foreach ($legal in $legalFiles) {
+        $matches = @(Get-ChildItem -LiteralPath $Root -File -Recurse -Filter $legal.name)
+        if ($matches.Count -ne 1) {
+            throw "Native package must contain one $($legal.name), found $($matches.Count)"
+        }
+        $sourceHash = (Get-FileHash -LiteralPath $legal.source -Algorithm SHA256).Hash
+        $packageHash = (Get-FileHash -LiteralPath $matches[0].FullName -Algorithm SHA256).Hash
+        if ($sourceHash -ne $packageHash) {
+            throw "Native package contains the wrong bytes for $($legal.name)"
+        }
+    }
+}
+
+function New-CheckedTemporaryDirectory {
+    param([string]$Prefix)
+
+    $base = [System.IO.Path]::GetTempPath()
+    $path = Join-Path $base ($Prefix + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $path | Out-Null
+    return $path
+}
+
+function Remove-CheckedTemporaryDirectory {
+    param([string]$Path, [string]$Prefix)
+
+    $base = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+    $resolved = [System.IO.Path]::GetFullPath($Path)
+    if (-not $resolved.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not ([System.IO.Path]::GetFileName($resolved)).StartsWith($Prefix)) {
+        throw "Refusing to clean unexpected package-check path: $resolved"
+    }
+    if (Test-Path -LiteralPath $resolved) {
+        Remove-Item -LiteralPath $resolved -Recurse -Force
+    }
+}
 
 switch ($Platform) {
     "windows" {
@@ -35,6 +93,19 @@ switch ($Platform) {
         }
         if ($listing -match 'ghostlight-(mcp|browser)-connector-[a-z0-9_.-]+\.exe') {
             throw "NSIS package exposed a Tauri target-triple staging name"
+        }
+        $tempRoot = New-CheckedTemporaryDirectory -Prefix "ghostlight-nsis-check-"
+        try {
+            & 7z x $Artifact "-o$tempRoot" -y *> $null
+            if ($LASTEXITCODE -ne 0) {
+                throw "7z could not extract the NSIS artifact"
+            }
+            Assert-LegalPayload -Root $tempRoot
+        }
+        finally {
+            Remove-CheckedTemporaryDirectory `
+                -Path $tempRoot `
+                -Prefix "ghostlight-nsis-check-"
         }
     }
     "linux" {
@@ -59,9 +130,7 @@ switch ($Platform) {
             }
         }
 
-        $tempBase = [System.IO.Path]::GetTempPath()
-        $tempRoot = Join-Path $tempBase ("ghostlight-deb-check-" + [guid]::NewGuid().ToString("N"))
-        New-Item -ItemType Directory -Path $tempRoot | Out-Null
+        $tempRoot = New-CheckedTemporaryDirectory -Prefix "ghostlight-deb-check-"
         try {
             & dpkg-deb --extract $Artifact $tempRoot
             if ($LASTEXITCODE -ne 0) {
@@ -79,16 +148,12 @@ switch ($Platform) {
                     throw "Debian native-host manifest does not carry both fixed extension identities"
                 }
             }
+            Assert-LegalPayload -Root $tempRoot
         }
         finally {
-            $resolved = [System.IO.Path]::GetFullPath($tempRoot)
-            if (-not $resolved.StartsWith([System.IO.Path]::GetFullPath($tempBase), [System.StringComparison]::OrdinalIgnoreCase) -or
-                -not ([System.IO.Path]::GetFileName($resolved)).StartsWith("ghostlight-deb-check-")) {
-                throw "Refusing to clean unexpected package-check path: $resolved"
-            }
-            if (Test-Path -LiteralPath $resolved) {
-                Remove-Item -LiteralPath $resolved -Recurse -Force
-            }
+            Remove-CheckedTemporaryDirectory `
+                -Path $tempRoot `
+                -Prefix "ghostlight-deb-check-"
         }
     }
     "macos" {
@@ -98,6 +163,7 @@ switch ($Platform) {
                 throw "macOS application bundle is missing Contents/MacOS/$binary"
             }
         }
+        Assert-LegalPayload -Root $Artifact
     }
 }
 

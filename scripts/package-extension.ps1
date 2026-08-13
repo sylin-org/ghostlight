@@ -60,6 +60,12 @@ try {
     foreach ($directory in @("icons", "lib", "vendor")) {
         Copy-Item -LiteralPath (Join-Path $source $directory) -Destination $stage -Recurse
     }
+    $licenseDirectory = Join-Path $stage "licenses"
+    New-Item -ItemType Directory -Path $licenseDirectory | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repo "LICENSE") `
+        -Destination (Join-Path $licenseDirectory "Apache-2.0.txt")
+    Copy-Item -LiteralPath (Join-Path $repo "docs/licenses/MIT.txt") `
+        -Destination (Join-Path $licenseDirectory "MIT.txt")
 
     if (-not $KeepDevelopmentKey) {
         $stagedManifestPath = Join-Path $stage "manifest.json"
@@ -107,6 +113,11 @@ try {
         $names = @($zip.Entries | ForEach-Object { $_.FullName.Replace("\", "/") })
         if ($names -notcontains "manifest.json") {
             throw "extension ZIP does not contain manifest.json at its root"
+        }
+        foreach ($license in @("licenses/Apache-2.0.txt", "licenses/MIT.txt")) {
+            if ($names -notcontains $license) {
+                throw "extension ZIP does not contain $license"
+            }
         }
         $forbidden = @($names | Where-Object {
             $_ -match '(^|/)(tests?|node_modules)(/|$)' -or
