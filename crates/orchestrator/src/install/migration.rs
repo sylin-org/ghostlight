@@ -6,10 +6,8 @@ use std::env;
 use std::ffi::OsStr;
 #[cfg(unix)]
 use std::fs;
-#[cfg(target_os = "macos")]
-use std::path::Path;
 #[cfg(unix)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
 use std::process::Command;
 
@@ -198,10 +196,28 @@ fn retire_windows() -> MigrationReport {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn retire_linux() -> MigrationReport {
-    let mut report = MigrationReport::default();
     let config = env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home_directory().join(".config"));
+    retire_linux_at(&config, |arguments| {
+        let status = Command::new("systemctl")
+            .args(arguments)
+            .status()
+            .map_err(|error| format!("could not invoke systemctl: {error}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("systemctl exited {:?}", status.code()))
+        }
+    })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn retire_linux_at(
+    config: &Path,
+    mut systemctl: impl FnMut(&[&str]) -> Result<(), String>,
+) -> MigrationReport {
+    let mut report = MigrationReport::default();
     let unit = config.join("systemd/user").join(LINUX_UNIT_NAME);
     let link = config
         .join("systemd/user/default.target.wants")
@@ -213,33 +229,30 @@ fn retire_linux() -> MigrationReport {
                 "Description=Ghostlight Hub service",
             ) =>
         {
+            if let Err(error) = systemctl(&["--user", "stop", LINUX_UNIT_NAME]) {
+                report
+                    .warnings
+                    .push(format!("could not stop the old systemd user unit: {error}"));
+            }
+            if fs::symlink_metadata(&link).is_ok() {
+                match fs::remove_file(&link) {
+                    Ok(()) => report
+                        .removed
+                        .push("obsolete systemd user enablement for ghostlight.service".into()),
+                    Err(error) => report.warnings.push(format!(
+                        "could not remove the old systemd enablement: {error}"
+                    )),
+                }
+            }
             match fs::remove_file(&unit) {
                 Ok(()) => {
                     report
                         .removed
                         .push("obsolete systemd user unit ghostlight.service".into());
-                    if link.exists() {
-                        match fs::remove_file(&link) {
-                            Ok(()) => report.removed.push(
-                                "obsolete systemd user enablement for ghostlight.service".into(),
-                            ),
-                            Err(error) => report.warnings.push(format!(
-                                "could not remove the old systemd enablement: {error}"
-                            )),
-                        }
-                    }
-                    match Command::new("systemctl")
-                        .args(["--user", "daemon-reload"])
-                        .status()
-                    {
-                        Ok(status) if status.success() => {}
-                        Ok(status) => report.warnings.push(format!(
-                            "systemctl --user daemon-reload exited {:?}",
-                            status.code()
-                        )),
-                        Err(error) => report.warnings.push(format!(
+                    if let Err(error) = systemctl(&["--user", "daemon-reload"]) {
+                        report.warnings.push(format!(
                             "could not refresh the systemd user manager: {error}"
-                        )),
+                        ));
                     }
                 }
                 Err(error) => report.warnings.push(format!(
@@ -300,6 +313,13 @@ fn retire_macos() -> MigrationReport {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    use std::fs;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    use std::os::unix::fs::symlink;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    use std::time::SystemTime;
+
     use super::*;
 
     #[test]
@@ -345,5 +365,49 @@ mod tests {
             &owned.replace("Ghostlight Hub service", "Another service"),
             "Description=Ghostlight Hub service"
         ));
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn linux_retirement_stops_the_service_and_removes_its_enablement() {
+        let config = std::env::temp_dir().join(format!(
+            "ghostlight-migration-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let unit = config.join("systemd/user").join(LINUX_UNIT_NAME);
+        let link = config
+            .join("systemd/user/default.target.wants")
+            .join(LINUX_UNIT_NAME);
+        fs::create_dir_all(unit.parent().unwrap()).unwrap();
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        fs::write(
+            &unit,
+            "[Unit]\nDescription=Ghostlight Hub service\n[Service]\nExecStart=/home/u/.ghostlight/bin/v0.8.0/ghostlight service\n",
+        )
+        .unwrap();
+        symlink(&unit, &link).unwrap();
+        let mut commands: Vec<Vec<String>> = Vec::new();
+
+        let report = retire_linux_at(&config, |arguments| {
+            commands.push(arguments.iter().map(|value| (*value).to_owned()).collect());
+            Ok(())
+        });
+
+        assert_eq!(
+            commands,
+            vec![
+                vec!["--user", "stop", LINUX_UNIT_NAME],
+                vec!["--user", "daemon-reload"],
+            ]
+        );
+        assert!(!unit.exists());
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert!(report.warnings.is_empty());
+        assert_eq!(report.removed.len(), 2);
+        fs::remove_dir_all(config).unwrap();
     }
 }
