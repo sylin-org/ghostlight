@@ -1,19 +1,34 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   assertAllowedDownload,
   assetNames,
   ensureBinary,
+  isMain,
   publishedAssetNames,
   releaseTarget,
   selectedExecutable,
   validateChecksums,
 } from "../bin/ghostlight.js";
+
+test("an installed npm bin symlink still invokes the launcher", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ghostlight-npm-bin-"));
+  const module = join(directory, "ghostlight.js");
+  const command = join(directory, "ghostlight");
+  await writeFile(module, "launcher");
+  await symlink(module, command);
+  try {
+    assert.equal(isMain(command, pathToFileURL(module)), true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("the four published platforms resolve to exact release targets", () => {
   assert.equal(releaseTarget("win32", "x64"), "x86_64-pc-windows-msvc");

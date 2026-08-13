@@ -2,11 +2,11 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, realpathSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const RELEASE_ROOT = "https://github.com/sylin-org/ghostlight/releases/download";
@@ -180,7 +180,18 @@ async function main() {
   });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+export function isMain(argument = process.argv[1], moduleUrl = import.meta.url) {
+  if (!argument) {
+    return false;
+  }
+  try {
+    return realpathSync(argument) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
   main().catch((error) => {
     console.error(`ghostlight: ${error.message}`);
     process.exitCode = 1;
