@@ -2,9 +2,11 @@
 
 #[cfg(unix)]
 use std::env;
+#[cfg(target_os = "macos")]
 use std::ffi::OsStr;
 #[cfg(unix)]
 use std::fs;
+#[cfg(target_os = "macos")]
 use std::path::Path;
 #[cfg(unix)]
 use std::path::PathBuf;
@@ -88,10 +90,9 @@ fn command_is_old_ghostlight_service(command: &str) -> bool {
         };
         (program, arguments.trim())
     };
-    let owned_program = Path::new(program)
-        .file_stem()
-        .and_then(OsStr::to_str)
-        .is_some_and(|stem| stem.eq_ignore_ascii_case("ghostlight"));
+    let program_name = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let owned_program = program_name.eq_ignore_ascii_case("ghostlight")
+        || program_name.eq_ignore_ascii_case("ghostlight.exe");
     let arguments = arguments.split_whitespace().collect::<Vec<_>>();
     let owned_arguments = arguments == ["service"]
         || arguments.len() == 3
@@ -309,11 +310,23 @@ mod tests {
         assert!(command_is_old_ghostlight_service(
             "/home/u/.ghostlight/bin/ghostlight --instance qa service"
         ));
+        assert!(command_is_old_ghostlight_service(
+            r#""C:\Users\u\.ghostlight\bin\0.8.0\GhOsTlIgHt.ExE" service"#
+        ));
+        assert!(!command_is_old_ghostlight_service(
+            r#""C:\Ghostlight\ghostlight.cmd" service"#
+        ));
+        assert!(!command_is_old_ghostlight_service(
+            r#""C:\Ghostlight\ghostlight-old.exe" service"#
+        ));
         assert!(!command_is_old_ghostlight_service(
             r#""C:\other\runner.exe" service"#
         ));
         assert!(!command_is_old_ghostlight_service(
             r#""C:\Ghostlight\ghostlight.exe" --headless"#
+        ));
+        assert!(!command_is_old_ghostlight_service(
+            r#""C:\Ghostlight\ghostlight.exe" service extra"#
         ));
     }
 
