@@ -263,6 +263,26 @@ Re-run on 2026-08-12 against the current tree:
     `duration_ms`, and `observed`, and states the host exception where it used to claim that no
     host is ever recorded.
 
+- A service session used to outlive its connection whenever that connection ended badly. The
+  request loop propagated read errors, oversized frames, and malformed lines out of the handler
+  before the release ran, and an unowned workspace has no owning process for the reaper to check,
+  so nothing could collect it afterwards: the workspace and every tab it held survived until the
+  service restarted. A live workbench showed 17 sessions against 5 connectors. The teardown now
+  runs on every exit path, guarded by a test that fails when the old early return is put back.
+- The workbench connections bar groups its chips by client label, with a tally when one client
+  holds more than one session. The sessions array itself is untouched, because history attribution
+  resolves a single workspace to its client by id.
+
+- The workbench surface is hardened and, for the first time, actually executed by a test.
+  `node tests/workbench-surface.mjs` runs `app.js` against a minimal DOM with one panel broken on
+  purpose and asserts the window still comes up, the failure is visible, the rest of the pass
+  continues, and the broken panel is retried rather than memoised as done. Every other guard over
+  this window reads its source as text, and none of them could tell that the window never started.
+- Four fragilities behind that failure are fixed: the element table is derived from the document
+  instead of hand-listed; boot is one ordered sequence that installs its own recovery first;
+  wiring is an isolated step rather than loose statements ahead of boot; and a render failure is
+  reported as itself instead of as a lost connection.
+
 ## Owed
 
 - A row that never settled reads its readiness as a parenthetical. Colour would carry it better
