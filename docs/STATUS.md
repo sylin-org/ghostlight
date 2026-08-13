@@ -283,6 +283,17 @@ Re-run on 2026-08-12 against the current tree:
   wiring is an isolated step rather than loose statements ahead of boot; and a render failure is
   reported as itself instead of as a lost connection.
 
+- The workbench surface is rebuilt around its seams. It was one 1045-line file where vocabulary,
+  cache, rendering, transport and wiring were the same thing; it is now `ui/lib/words.js` and
+  `ui/lib/entries.js` (pure), `ui/lib/transport.js` (the only caller of the orchestrator),
+  `ui/lib/store.js` (the cache and its only writer, announcing a closed set of seven change
+  kinds), `ui/lib/view.js` (the only thing that touches the document), and `ui/app.js` as a
+  296-line composition root. Data flows one way: transport brings a snapshot, the store folds it
+  in and announces, the view draws what it is handed. A view that cannot fetch cannot fail on a
+  missing snapshot; a store that never sees the document cannot be corrupted by a paint.
+  Guards hold the seam: words, entries, store and transport fail the build if they contain
+  `document.`, `window.` or `el[`, with the view as the negative control.
+
 ## Owed
 
 - A row that never settled reads its readiness as a parenthetical. Colour would carry it better

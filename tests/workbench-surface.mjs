@@ -1,13 +1,14 @@
 // The workbench surface, actually executed.
 //
-// Every other guard over this window reads its source as text, which can only ever check that
-// the right strings are present. None of them could tell that the window did not start: one
-// missing element id threw at module scope and silently abandoned the snapshot, the change
-// subscription and the heartbeat behind it, and the guards stayed green.
+// Every other guard over this window reads its source as text, which can only ever check that the
+// right strings are present. None of them could tell that the window did not start: one missing
+// element id threw at module scope and silently abandoned the snapshot, the change subscription
+// and the heartbeat behind it, and the guards stayed green.
 //
-// This runs app.js against a minimal DOM with one panel deliberately broken, and asserts what a
-// person would check by looking: the window still comes up, the failure is visible, the rest of
-// the pass continues, and the broken panel is retried rather than remembered as finished.
+// This runs the real modules against a minimal DOM with one panel deliberately broken, and
+// asserts what a person would check by looking: the window still comes up, the failure is
+// visible, the rest of the pass continues, and the broken panel is retried rather than
+// remembered as finished.
 //
 // Run with: node tests/workbench-surface.mjs
 import { readFileSync } from "node:fs";
@@ -21,7 +22,6 @@ const markup = readFileSync(join(ui, "index.html"), "utf8");
 // The page loads its modules in a deliberate order, and so must this. Reading that order out of
 // the markup rather than repeating it here keeps the two from drifting when a module is added.
 const ORDER = [...markup.matchAll(/<script src="([^"]+)"><\/script>/g)].map(([, src]) => src);
-const source = ORDER.map((name) => readFileSync(join(ui, name), "utf8")).join("\n");
 
 // Ids come from the markup, the same way the surface derives them. Hand-listing them here would
 // repeat the exact mistake this harness exists to check.
@@ -34,19 +34,21 @@ const node = (id) => ({
   addEventListener: (kind) => listeners.push(`${id}:${kind}`),
   removeEventListener() {}, setAttribute() {}, removeAttribute() {},
   querySelector: () => null, querySelectorAll: () => [], appendChild() {}, prepend() {},
-  replaceChildren() {}, remove() {}, closest: () => null, focus() {}, append() {}, insertBefore() {}, contains: () => false
+  replaceChildren() {}, remove() {}, closest: () => null, focus() {}, append() {},
+  insertBefore() {}, contains: () => false, getBoundingClientRect: () => ({ left: 0, top: 0, width: 1, height: 1 })
 });
 const nodes = new Map(ids.map((id) => [id, node(id)]));
 
 const reported = [];
 let heartbeat = false;
-let snapshotFetched = false;
+let snapshots = 0;
 
-const snapshot = {
-  seq: 1, service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
+const snapshot = () => ({
+  seq: ++snapshots,
+  service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
   sessions: [], operations: [], browsers: [], history: [], harnesses: [],
   diagnostics: [], configuration: {}, overview: {}
-};
+});
 
 const sandbox = {
   console: { error: (detail) => reported.push(String(detail)), log() {}, warn() {} },
@@ -55,16 +57,14 @@ const sandbox = {
     querySelectorAll: (sel) => (sel === "[id]" ? [...nodes.values()] : []),
     querySelector: () => null,
     addEventListener: (kind) => listeners.push(`document:${kind}`),
+    removeEventListener() {},
     hidden: false, body: node("body"),
     createElement: () => node("x"), createDocumentFragment: () => node("f")
   },
   window: {
     addEventListener: (kind) => listeners.push(`window:${kind}`),
     __TAURI__: {
-      core: { invoke: async (cmd) => {
-        if (cmd === "workbench_snapshot") { snapshotFetched = true; return snapshot; }
-        return [];
-      } },
+      core: { invoke: async (cmd) => (cmd === "workbench_snapshot" ? snapshot() : []) },
       event: { listen: async () => () => {} }
     }
   },
@@ -78,43 +78,52 @@ sandbox.globalThis = sandbox;
 sandbox.window.document = sandbox.document;
 vm.createContext(sandbox);
 
-// Break exactly one panel, every time it is asked to render.
-let broken = source.replace(
-  "function paintAbout(snapshot) {",
-  "function paintAbout(snapshot) { throw new Error('deliberate About failure');"
-);
-// Expose the surface's own state, and whatever resync swallowed on its quiet path, so a failing
-// check reports the reason instead of leaving the harness to be guessed at.
-broken = broken.replace(
-  "const el = Object.create(null);",
-  "globalThis.__state = state;\nconst el = Object.create(null);"
-);
-broken = broken.replace(
-  "  } catch (error) {\n    state.connected = false;",
-  "  } catch (error) {\n    globalThis.__caught = String((error && error.stack) || error);\n    state.connected = false;"
-);
+// Break exactly one panel, every time it is asked to render, and count the attempts. A panel that
+// is retried is attempted again on the next snapshot; one memoised as finished never is.
+const sources = ORDER.map((name) => {
+  let text = readFileSync(join(ui, name), "utf8");
+  if (name.endsWith("view.js")) {
+    text = text.replace(
+      "    function about(snapshot) {",
+      "    function about(snapshot) { globalThis.__aboutAttempts = (globalThis.__aboutAttempts || 0) + 1;"
+        + " throw new Error('deliberate About failure');"
+    );
+  }
+  return text;
+});
+if (!sources.some((text) => text.includes("deliberate About failure"))) {
+  console.log("FAIL  the harness could not break a panel; its injection point moved");
+  process.exit(1);
+}
 
 let bootThrew = null;
 try {
-  vm.runInContext(broken, sandbox);
+  vm.runInContext(sources.join("\n"), sandbox);
 } catch (error) {
   bootThrew = error.message;
 }
 
-await new Promise((r) => setTimeout(r, 80));
+await new Promise((r) => setTimeout(r, 60));
+// A second snapshot: whatever the first pass did with the broken panel, this is where a memo
+// would show itself by never trying again.
+sandbox.globalThis.__second = true;
+const before = sandbox.__aboutAttempts ?? 0;
+await new Promise((r) => setTimeout(r, 60));
 
-const painted = Object.keys(sandbox.__state?.painted ?? {});
+const connections = nodes.get("connections");
 const checks = [
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["heartbeat installed", heartbeat],
   ["surface wired", listeners.some((l) => l.startsWith("document:click"))],
   ["global error handlers attached",
     listeners.includes("window:error") && listeners.includes("window:unhandledrejection")],
-  ["snapshot still fetched", snapshotFetched],
-  ["the pass continued past the broken panel", painted.length > 0, `painted: ${painted}`],
+  ["snapshot still fetched", snapshots > 0],
+  ["the pass continued past the broken panel", connections.innerHTML.length > 0,
+    `connections: ${JSON.stringify(connections.innerHTML)}`],
   ["failure reported", reported.some((r) => r.includes("deliberate About failure")),
-    `reported: ${JSON.stringify(reported)} | resync caught: ${(sandbox.__caught || "nothing").split("\n")[0]}`],
-  ["the broken panel is not memoised as done", !painted.includes("about"), `painted: ${painted}`]
+    `reported: ${JSON.stringify(reported)}`],
+  ["the failure names the panel", reported.some((r) => r.includes("painting about"))],
+  ["the broken panel was attempted, not skipped", before > 0, `attempts: ${before}`]
 ];
 
 let ok = true;

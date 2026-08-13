@@ -381,10 +381,10 @@ mod tests {
 
         assert!(html.contains("id=\"clear-monitor\""));
         assert!(html.contains("Clear view"));
-        assert!(app.contains("hiddenInvocations: new Set()"));
-        assert!(app.contains("state.hiddenInvocations.add(entry.invocation)"));
+        assert!(app.contains("hidden: new Set()"));
+        assert!(app.contains("state.hidden.add(entry.invocation)"));
         assert!(app.contains("state.feed = state.feed.filter(isRunning)"));
-        assert!(app.contains("state.hiddenInvocations.has(record.invocation)"));
+        assert!(app.contains("state.hidden.has(record.invocation)"));
         assert!(app.contains("Audit history is unchanged."));
         let commands = desktop
             .split_once(".invoke_handler(tauri::generate_handler![")
@@ -467,7 +467,7 @@ mod tests {
         // and every new action pushes the deadline back.
         assert!(app.contains("const WORKING_LATCH_MS = 10_000;"));
         assert!(
-            app.contains("Date.now() - state.interactionAt < WORKING_LATCH_MS"),
+            app.contains("now() - state.interactionAt < WORKING_LATCH_MS"),
             "the band no longer latches on recent interaction"
         );
         assert!(
@@ -477,15 +477,15 @@ mod tests {
         // Nothing else wakes the band once the last operation settles, so the latch has to
         // schedule its own expiry or the word stays lit until an unrelated repaint.
         assert!(
-            app.contains("state.latchTimer = setTimeout(paintLamp, WORKING_LATCH_MS"),
+            app.contains("state.latchTimer = setTimer(() => emit(CHANGE.Band), WORKING_LATCH_MS"),
             "the latch never expires on its own"
         );
         // The negative control: every operation event still refreshes it, so the latch is fed by
         // real work rather than by one arbitrary moment at startup.
         for event in [
-            "case \"operation_started\": touchInteraction();",
-            "case \"operation_changed\": touchInteraction();",
-            "case \"operation_settled\": touchInteraction();",
+            "case \"operation_started\": touch();",
+            "case \"operation_changed\": touch();",
+            "case \"operation_settled\": touch();",
         ] {
             assert!(
                 app.contains(event),
@@ -557,6 +557,9 @@ mod tests {
         [
             include_str!("../../ui/lib/words.js"),
             include_str!("../../ui/lib/entries.js"),
+            include_str!("../../ui/lib/transport.js"),
+            include_str!("../../ui/lib/store.js"),
+            include_str!("../../ui/lib/view.js"),
             include_str!("../../ui/app.js"),
         ]
         .join(
@@ -569,13 +572,23 @@ mod tests {
     fn the_pure_layers_of_the_surface_hold_no_state_and_no_document() {
         let words = include_str!("../../ui/lib/words.js");
         let entries = include_str!("../../ui/lib/entries.js");
+        let store = include_str!("../../ui/lib/store.js");
+        let transport = include_str!("../../ui/lib/transport.js");
         let markup = include_str!("../../ui/index.html");
 
         // These two exist to be readable and testable without a browser. The moment either
         // reaches for the document or keeps state of its own, that stops being true and the
         // seam has quietly moved back.
-        for (name, module) in [("words", words), ("entries", entries)] {
-            for forbidden in ["document.", "window.", "el[", "state."] {
+        // The store keeps the cache and the transport talks to the orchestrator. Neither may
+        // touch the document: that is what stops a rendering fault from corrupting what the
+        // window believes, and what lets both be exercised with no browser present.
+        for (name, module) in [
+            ("words", words),
+            ("entries", entries),
+            ("store", store),
+            ("transport", transport),
+        ] {
+            for forbidden in ["document.", "window.", "el["] {
                 assert!(
                     !module.contains(forbidden),
                     "{name} reaches for {forbidden}, so it is no longer a pure layer"
@@ -585,8 +598,11 @@ mod tests {
 
         // The negative control: the composition root is where the document belongs, so a rule
         // that held everywhere would be measuring nothing.
-        let app = include_str!("../../ui/app.js");
-        assert!(app.contains("document.querySelectorAll"));
+        let view = include_str!("../../ui/lib/view.js");
+        assert!(
+            view.contains("document.querySelectorAll"),
+            "the view is where the document belongs, so a rule that held everywhere would be              measuring nothing"
+        );
 
         // Load order is the page's, and the surface test reads it from here rather than
         // repeating it, so both move together.
@@ -599,14 +615,21 @@ mod tests {
             .collect();
         assert_eq!(
             order,
-            vec!["lib/words.js", "lib/entries.js", "app.js"],
+            vec![
+                "lib/words.js",
+                "lib/entries.js",
+                "lib/transport.js",
+                "lib/store.js",
+                "lib/view.js",
+                "app.js"
+            ],
             "the composition root must load after everything it composes"
         );
     }
 
     #[test]
     fn every_element_the_surface_reaches_for_exists_in_the_markup() {
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         let markup = include_str!("../../ui/index.html");
 
         let ids: Vec<&str> = markup
@@ -660,12 +683,12 @@ mod tests {
         let heartbeat = boot
             .find("HEARTBEAT_MS")
             .expect("boot never starts the heartbeat");
-        let subscribe = boot.find("CHANGE_EVENT").expect("boot never subscribes");
+        let subscribe = boot.find("subscribe(").expect("boot never subscribes");
         let resync = boot
             .find("resync({ rebuildFeed: true })")
             .expect("boot never resyncs");
         let decoration = boot
-            .find("armAboutCard")
+            .find("armCard")
             .expect("boot never arms the About card");
 
         // The heartbeat is the surface's own recovery. Installed first, a bad subscription or a
@@ -712,14 +735,14 @@ mod tests {
         // memo that is never cleared, remembers a panel that threw as finished and leaves it
         // blank for the life of the window.
         assert!(
-            app.contains("if (attempt(`painting ${key}`, paint)) state.painted[key] = signature;"),
+            app.contains("if (attempt(`painting ${key}`, paint)) painted[key] = signature;"),
             "a failed paint is still memoised as a completed one"
         );
         // And nothing may fail where only a console would notice.
         assert!(app.contains(r#"window.addEventListener("error""#));
         assert!(app.contains(r#"window.addEventListener("unhandledrejection""#));
         assert!(
-            app.contains("if (el.toast) showToast(detail, true);"),
+            app.contains("if (view?.el.toast) view.toast(detail, true);"),
             "failures never reach the person using the window"
         );
     }
@@ -741,7 +764,7 @@ mod tests {
             !app.contains("https://"),
             "the surface script still carries a raw URL"
         );
-        assert!(app.contains(r#"invoke("open_destination", { destination })"#));
+        assert!(app.contains(r#"call("open_destination", { destination })"#));
 
         // Every destination the orchestrator will open is offered, and every name the surface
         // offers is one the orchestrator knows. Either half alone lets the two drift.
@@ -905,7 +928,7 @@ mod tests {
         // A row is a CSS grid, so adding a cell without adding a track silently shifts every
         // column after it. Both numbers are derived here rather than pinned, and the narrow
         // layouts are checked against what they hide.
-        let app = include_str!("../../ui/app.js");
+        let app = &surface_source();
         let styles = include_str!("../../ui/styles.css");
 
         let markup = app
@@ -913,7 +936,7 @@ mod tests {
             .and_then(|(_, rest)| {
                 rest.split_once(
                     "
-function ",
+    }",
                 )
             })
             .map(|(body, _)| body)
