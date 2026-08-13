@@ -34,10 +34,10 @@ esac
 release_root=${resolved%/SHA256SUMS}
 tag=${release_root##*/}
 version=${tag#v}
-case "$version" in
-  [0-9]*.[0-9]*.[0-9]*) ;;
-  *) echo "ghostlight: latest release tag is not a three-part version" >&2; exit 1 ;;
-esac
+if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "ghostlight: latest release tag is not a three-part version" >&2
+  exit 1
+fi
 if [ -n "${GHOSTLIGHT_VERSION:-}" ] && [ "$GHOSTLIGHT_VERSION" != "$version" ]; then
   echo "ghostlight: latest release is ${version}, not requested ${GHOSTLIGHT_VERSION}" >&2
   exit 1

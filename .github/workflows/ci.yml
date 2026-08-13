@@ -91,6 +91,9 @@ jobs:
       - run: npm test --prefix extension
       - run: npm test --prefix packaging/npm
       - run: node --test packaging/mcpb/test/launcher.test.js
+      - name: Check one-line installer syntax
+        if: runner.os != 'Windows'
+        run: sh -n scripts/get.sh
       - name: Check runtime JavaScript syntax
         run: |
           node --check extension/content.js
