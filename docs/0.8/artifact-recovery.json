@@ -8,8 +8,7 @@
       "behavior-dispositioned": 97,
       "historical-implementation-only": 162,
       "redesign-after-signed-candidate": 11,
-      "restore-lean": 1,
-      "retained-evolved": 89,
+      "retained-evolved": 90,
       "retained-identical": 445,
       "retired-low-value-conductor": 1,
       "reviewed-repository-history": 1,
@@ -4232,9 +4231,9 @@
     },
     {
       "path": "scripts/dev-loop.ps1",
-      "currentState": "absent",
-      "treatment": "restore-lean",
-      "reason": "Restore one checked live-stack replacement command around the current demand-start topology."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "scripts/gen-icons.py",

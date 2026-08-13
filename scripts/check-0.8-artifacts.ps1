@@ -68,14 +68,31 @@ try {
         throw "Artifact harvest failed"
     }
 
-    foreach ($pair in @(
-        @{ Expected = $inventoryFile; Actual = $freshInventory },
-        @{ Expected = $recoveryFile; Actual = $freshRecovery }
-    )) {
-        $expectedHash = (Get-FileHash -LiteralPath $pair.Expected -Algorithm SHA256).Hash
-        $actualHash = (Get-FileHash -LiteralPath $pair.Actual -Algorithm SHA256).Hash
-        if ($expectedHash -ne $actualHash) {
-            throw "Generated artifact ledger has drifted: $($pair.Expected)"
+    $freshInventoryDocument = Get-Content -LiteralPath $freshInventory -Raw | ConvertFrom-Json
+    $freshRecoveryDocument = Get-Content -LiteralPath $freshRecovery -Raw | ConvertFrom-Json
+    $freshInventoryEntries = @($freshInventoryDocument.entries | Sort-Object path)
+    $freshRecoveryEntries = @($freshRecoveryDocument.entries | Sort-Object path)
+    if ($freshInventoryEntries.Count -ne $inventoryEntries.Count -or
+        $freshRecoveryEntries.Count -ne $recoveryEntries.Count) {
+        throw "Historical artifact path set has drifted"
+    }
+
+    for ($index = 0; $index -lt $inventoryEntries.Count; $index += 1) {
+        $expectedInventory = $inventoryEntries[$index]
+        $actualInventory = $freshInventoryEntries[$index]
+        $expectedRecovery = $recoveryEntries[$index]
+        $actualRecovery = $freshRecoveryEntries[$index]
+        foreach ($property in @(
+            "path", "area", "historicalMode", "historicalType", "historicalBlob", "currentState"
+        )) {
+            if ($expectedInventory.$property -ne $actualInventory.$property) {
+                throw "Historical artifact relationship drifted for $($expectedInventory.path): $property"
+            }
+        }
+        foreach ($property in @("path", "currentState", "treatment", "reason")) {
+            if ($expectedRecovery.$property -ne $actualRecovery.$property) {
+                throw "Historical artifact disposition drifted for $($expectedRecovery.path): $property"
+            }
         }
     }
 }
@@ -94,4 +111,4 @@ finally {
 }
 
 Write-Output "All $($inventoryEntries.Count) historical artifacts have an explicit checked disposition."
-
+Write-Output "Evolved current files may keep evolving without rewriting historical bookkeeping."

@@ -5,8 +5,8 @@
   "counts": {
     "total": 810,
     "byCurrentState": {
-      "absent": 276,
-      "retained-evolved": 89,
+      "absent": 275,
+      "retained-evolved": 90,
       "retained-identical": 445
     }
   },
@@ -108,7 +108,7 @@
       "historicalType": "blob",
       "historicalBlob": "2249445a1a6803d152d3a24861e6b3145b9f335c",
       "currentState": "retained-evolved",
-      "currentBlob": "d432f8ba8c01bb846ec4e61638eac8dd83ff8c20"
+      "currentBlob": "556e81f1dc14abe289d3a0dde1a2cba516e2e8aa"
     },
     {
       "path": ".gitignore",
@@ -2898,7 +2898,7 @@
       "historicalType": "blob",
       "historicalBlob": "35b57908872084339c6b0070d360baa872e5d324",
       "currentState": "retained-evolved",
-      "currentBlob": "a1ef240bc5f6ae8f6f2531af26a23224aed53071"
+      "currentBlob": "a22cb3893683505aa9167b216ec86324a3670266"
     },
     {
       "path": "docs/guides/compliance-team.md",
@@ -3042,7 +3042,7 @@
       "historicalType": "blob",
       "historicalBlob": "2e1edc340e68f383aa83e2ac3fd0690f0a1a5da6",
       "currentState": "retained-evolved",
-      "currentBlob": "afdec32012fbab861de8efa19583ba69049d3031"
+      "currentBlob": "1be620f6b6c65a903f51af67cfa2ca76ecdb25d1"
     },
     {
       "path": "docs/research/00-synthesis-and-decisions.md",
@@ -6335,8 +6335,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "8a875b5dd2c8995101c4e19bb66b062809e78e14",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "4ba0adba4a556c46976a66aca82e266af0fcdc5b"
     },
     {
       "path": "scripts/gen-icons.py",
