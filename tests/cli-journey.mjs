@@ -49,6 +49,20 @@ services.push(service);
 service.stderr.on("data", (chunk) => process.stderr.write(`[ghostlight] ${chunk}`));
 
 try {
+  const version = spawnSync(ghostlight, ["--version"], { env: environment, encoding: "utf8" });
+  assert.equal(version.status, 0, version.stderr);
+  assert.equal(version.stdout.trim(), "ghostlight 1.0.0");
+  const help = spawnSync(ghostlight, ["--help"], { env: environment, encoding: "utf8" });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /ghostlight install/);
+  assert.match(help.stdout, /ghostlight doctor/);
+  const dryRun = spawnSync(ghostlight, ["install", "--dry-run", "--no-clients"], {
+    env: environment,
+    encoding: "utf8"
+  });
+  assert.equal(dryRun.status, 0, dryRun.stderr);
+  assert.match(dryRun.stdout, /no machine state will change/);
+
   for (let attempt = 0; attempt < 80 && !existsSync(runtimeFile); attempt += 1) await sleep(50);
   assert.equal(existsSync(runtimeFile), true, "the service never published runtime discovery");
 

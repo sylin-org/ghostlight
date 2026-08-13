@@ -1,14 +1,16 @@
 //! Ghostlight 1.0 orchestrator and integrated desktop workbench process.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
+use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
 const ACTIVATION_RETRY_COUNT: usize = 20;
 const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum LaunchMode {
     Headless,
     Desktop,
@@ -16,6 +18,29 @@ enum LaunchMode {
     Call,
     /// The narrow package-facing Chromium registration seam (ADR-0115).
     NativeHost(NativeHostCommand),
+    /// Install the browser and selected MCP-client integrations.
+    Install(SetupOptions),
+    /// Remove only Ghostlight-owned browser and MCP-client integrations.
+    Uninstall(SetupOptions),
+    /// Inspect the complete local connection chain without changing it.
+    Doctor {
+        fix: bool,
+    },
+    /// Report the local engine endpoint without starting it.
+    Status,
+    /// Render stable command-line help.
+    Help,
+    /// Render the exact package version.
+    Version,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct SetupOptions {
+    dry_run: bool,
+    all_clients: bool,
+    no_clients: bool,
+    no_open: bool,
+    client_ids: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,7 +63,256 @@ fn main() -> anyhow::Result<()> {
         LaunchMode::Desktop => start_or_activate_desktop(),
         LaunchMode::Call => run_call(),
         LaunchMode::NativeHost(command) => run_native_host(command),
+        LaunchMode::Install(options) => run_setup(true, &options),
+        LaunchMode::Uninstall(options) => run_setup(false, &options),
+        LaunchMode::Doctor { fix } => run_doctor(fix),
+        LaunchMode::Status => run_status(),
+        LaunchMode::Help => {
+            print_help();
+            Ok(())
+        }
+        LaunchMode::Version => {
+            println!("ghostlight {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
     }
+}
+
+fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
+    use ghostlight::install::native_host::NativeHostRegistry;
+    use ghostlight::install::{HarnessAction, HarnessRegistry};
+
+    let native_hosts = NativeHostRegistry::discover();
+    if options.dry_run {
+        println!(
+            "Ghostlight {} dry run -- no machine state will change.",
+            if install { "install" } else { "uninstall" }
+        );
+        print_native_host_report(&native_hosts.check()?);
+    } else if install {
+        let result = native_hosts.install()?;
+        println!("Browser connection installed; changed: {}", result.changed);
+        print_native_host_report(&result.report);
+        let migration = ghostlight::install::migration::retire_obsolete_supervisor();
+        for removed in migration.removed {
+            println!("Retired: {removed}");
+        }
+        for preserved in migration.preserved {
+            println!("Preserved: {preserved}");
+        }
+        for warning in migration.warnings {
+            eprintln!("Migration warning: {warning}");
+        }
+    } else {
+        let result = native_hosts.uninstall()?;
+        println!("Browser connection removed; changed: {}", result.changed);
+        print_native_host_report(&result.report);
+    }
+
+    if options.no_clients {
+        println!("MCP client configuration was left unchanged.");
+        return finish_setup(install, options);
+    }
+
+    let harnesses = HarnessRegistry::discover();
+    let summaries = harnesses.refresh()?;
+    let selected = select_harnesses(&summaries, options, install)?;
+    if selected.is_empty() {
+        println!("No MCP client configuration needs to change.");
+        return finish_setup(install, options);
+    }
+    let mut failures = Vec::new();
+    for summary in selected {
+        if options.dry_run {
+            println!(
+                "Would {} Ghostlight for {} ({:?}).",
+                if install { "install" } else { "remove" },
+                summary.name,
+                summary.state
+            );
+            continue;
+        }
+        let action = if install {
+            HarnessAction::Install
+        } else {
+            HarnessAction::Uninstall
+        };
+        match harnesses.apply(&summary.id, action) {
+            Ok(result) => println!("{}", result.message),
+            Err(error) => {
+                eprintln!("{}: {error}", summary.name);
+                failures.push(summary.name);
+            }
+        }
+    }
+    if !failures.is_empty() {
+        anyhow::bail!(
+            "Ghostlight could not update {} MCP client integration(s)",
+            failures.len()
+        );
+    }
+    finish_setup(install, options)
+}
+
+fn finish_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
+    if install && !options.dry_run && !options.no_open {
+        if let Err(error) = open_walkthrough() {
+            eprintln!(
+                "Could not open the browser-extension walkthrough: {error}\nOpen https://sylin.org/ghostlight/chromium-extension/post-install/"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn open_walkthrough() -> std::io::Result<()> {
+    const WALKTHROUGH: &str = "https://sylin.org/ghostlight/chromium-extension/post-install/";
+    let mut command = if cfg!(windows) {
+        let mut command = Command::new("rundll32.exe");
+        command.args(["url.dll,FileProtocolHandler", WALKTHROUGH]);
+        command
+    } else if cfg!(target_os = "macos") {
+        let mut command = Command::new("open");
+        command.arg(WALKTHROUGH);
+        command
+    } else {
+        let mut command = Command::new("xdg-open");
+        command.arg(WALKTHROUGH);
+        command
+    };
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(drop)
+}
+
+fn select_harnesses(
+    summaries: &[ghostlight::install::HarnessSummary],
+    options: &SetupOptions,
+    install: bool,
+) -> anyhow::Result<Vec<ghostlight::install::HarnessSummary>> {
+    use ghostlight::install::HarnessState;
+
+    if !options.client_ids.is_empty() {
+        let mut selected = Vec::new();
+        for id in &options.client_ids {
+            let summary = summaries
+                .iter()
+                .find(|summary| summary.id == *id)
+                .ok_or_else(|| anyhow::anyhow!("unknown MCP client '{id}'"))?;
+            selected.push(summary.clone());
+        }
+        return Ok(selected);
+    }
+    Ok(summaries
+        .iter()
+        .filter(|summary| {
+            if install {
+                summary.can_install
+                    && (options.all_clients || summary.state != HarnessState::NotDetected)
+            } else {
+                summary.can_uninstall
+            }
+        })
+        .cloned()
+        .collect())
+}
+
+fn run_doctor(fix: bool) -> anyhow::Result<()> {
+    use ghostlight::install::native_host::NativeHostRegistry;
+    use ghostlight::install::HarnessRegistry;
+
+    println!("Ghostlight {} diagnostics", env!("CARGO_PKG_VERSION"));
+    let executable = std::env::current_exe()?;
+    let directory = executable
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("the Ghostlight executable has no parent directory"))?;
+    for name in [
+        executable_name("ghostlight"),
+        executable_name("ghostlight-mcp-connector"),
+        executable_name("ghostlight-browser-connector"),
+    ] {
+        let path = directory.join(name);
+        println!(
+            "Binary: {} -- {}",
+            path.display(),
+            if path.is_file() { "ready" } else { "missing" }
+        );
+    }
+    print_native_host_report(&NativeHostRegistry::discover().check()?);
+    for harness in HarnessRegistry::discover().refresh()? {
+        println!(
+            "MCP client: {} -- {:?} -- {}",
+            harness.name, harness.state, harness.detail
+        );
+    }
+    print_runtime_status();
+    if fix {
+        println!("Applying ownership-safe repairs.");
+        run_setup(true, &SetupOptions::default())?;
+    }
+    Ok(())
+}
+
+fn run_status() -> anyhow::Result<()> {
+    println!("Ghostlight {}", env!("CARGO_PKG_VERSION"));
+    print_runtime_status();
+    Ok(())
+}
+
+fn print_runtime_status() {
+    let runtime_path = ghostlight_bridge::runtime::runtime_file();
+    match ghostlight_bridge::runtime::read_runtime(&runtime_path) {
+        Ok(runtime) => {
+            let reachable = TcpStream::connect_timeout(
+                &SocketAddrV4::new(Ipv4Addr::LOCALHOST, runtime.service_port).into(),
+                Duration::from_millis(250),
+            )
+            .is_ok();
+            println!(
+                "Service: {} -- version {} -- bridge {} -- {}",
+                runtime_path.display(),
+                runtime.service_version,
+                runtime.service_bridge_major,
+                if reachable {
+                    "running"
+                } else {
+                    "not reachable"
+                }
+            );
+        }
+        Err(_) => println!(
+            "Service: not running (no readable endpoint at {})",
+            runtime_path.display()
+        ),
+    }
+}
+
+fn print_native_host_report(report: &ghostlight::install::native_host::NativeHostReport) {
+    println!("Browser connector: {}", report.connector.display());
+    for browser in &report.browsers {
+        println!(
+            "Browser: {} -- {:?} -- {}",
+            browser.name, browser.state, browser.detail
+        );
+    }
+}
+
+fn executable_name(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.into()
+    }
+}
+
+fn print_help() {
+    println!(
+        "Ghostlight {version}\n\nUsage:\n  ghostlight                         Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor                  Check the complete local installation\n  ghostlight status                  Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        version = env!("CARGO_PKG_VERSION")
+    );
 }
 
 fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
@@ -168,6 +442,23 @@ fn finish_activation(
 
 fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<LaunchMode> {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
+    if arguments.is_empty() {
+        return Ok(LaunchMode::Desktop);
+    }
+    if arguments.len() == 1
+        && arguments
+            .first()
+            .is_some_and(|argument| argument == "--version" || argument == "-V")
+    {
+        return Ok(LaunchMode::Version);
+    }
+    if arguments.len() == 1
+        && arguments
+            .first()
+            .is_some_and(|argument| argument == "--help" || argument == "-h" || argument == "help")
+    {
+        return Ok(LaunchMode::Help);
+    }
     if arguments
         .first()
         .is_some_and(|argument| argument == "native-host")
@@ -183,20 +474,87 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
         }
         Ok(LaunchMode::NativeHost(command))
     } else if arguments
-        .iter()
-        .any(|argument| argument == OsStr::new("call"))
+        .first()
+        .is_some_and(|argument| argument == "install")
     {
+        Ok(LaunchMode::Install(parse_setup_options(&arguments[1..])?))
+    } else if arguments
+        .first()
+        .is_some_and(|argument| argument == "uninstall")
+    {
+        Ok(LaunchMode::Uninstall(parse_setup_options(&arguments[1..])?))
+    } else if arguments
+        .first()
+        .is_some_and(|argument| argument == "doctor")
+    {
+        let mut fix = false;
+        for argument in &arguments[1..] {
+            match argument.to_str() {
+                Some("--fix") => fix = true,
+                Some("--verbose") => {}
+                Some(other) => anyhow::bail!("unknown doctor option {other}"),
+                None => anyhow::bail!("Ghostlight command options must be valid UTF-8"),
+            }
+        }
+        Ok(LaunchMode::Doctor { fix })
+    } else if arguments.len() == 1
+        && arguments
+            .first()
+            .is_some_and(|argument| argument == "status")
+    {
+        Ok(LaunchMode::Status)
+    } else if arguments.first().is_some_and(|argument| argument == "call") {
         Ok(LaunchMode::Call)
-    } else if arguments.iter().any(|argument| argument == "--headless") {
+    } else if arguments.len() == 1
+        && arguments
+            .first()
+            .is_some_and(|argument| argument == "--headless")
+    {
         Ok(LaunchMode::Headless)
     } else {
-        Ok(LaunchMode::Desktop)
+        anyhow::bail!("unknown Ghostlight command; run 'ghostlight --help'")
     }
+}
+
+fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOptions> {
+    let mut options = SetupOptions::default();
+    let mut remaining = arguments.iter();
+    while let Some(argument) = remaining.next() {
+        let argument = argument
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Ghostlight command options must be valid UTF-8"))?;
+        match argument {
+            "--dry-run" => options.dry_run = true,
+            "--all-clients" => options.all_clients = true,
+            "--no-clients" => options.no_clients = true,
+            "--no-open" => options.no_open = true,
+            "--all-browsers" => {}
+            "--client" => {
+                let id = remaining
+                    .next()
+                    .and_then(|value| value.to_str())
+                    .ok_or_else(|| anyhow::anyhow!("--client needs a client id"))?;
+                options.client_ids.push(id.into());
+            }
+            value if value.starts_with("--client=") => {
+                let id = &value["--client=".len()..];
+                if id.is_empty() {
+                    anyhow::bail!("--client needs a client id");
+                }
+                options.client_ids.push(id.into());
+            }
+            other => anyhow::bail!("unknown setup option {other}"),
+        }
+    }
+    if options.no_clients && (options.all_clients || !options.client_ids.is_empty()) {
+        anyhow::bail!("--no-clients cannot be combined with a client selection");
+    }
+    Ok(options)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{launch_mode, LaunchMode, NativeHostCommand};
+    use super::{launch_mode, LaunchMode, NativeHostCommand, SetupOptions};
 
     #[test]
     fn launch_modes_keep_desktop_headless_and_call_intents_distinct() {
@@ -207,9 +565,63 @@ mod tests {
         );
         assert_eq!(launch_mode(["call".into()]).unwrap(), LaunchMode::Call);
         assert_eq!(
+            launch_mode(["doctor".into()]).unwrap(),
+            LaunchMode::Doctor { fix: false }
+        );
+        assert_eq!(
+            launch_mode(["doctor".into(), "--verbose".into(), "--fix".into()]).unwrap(),
+            LaunchMode::Doctor { fix: true }
+        );
+        assert_eq!(launch_mode(["status".into()]).unwrap(), LaunchMode::Status);
+        assert_eq!(launch_mode(["--help".into()]).unwrap(), LaunchMode::Help);
+        assert_eq!(
+            launch_mode(["--version".into()]).unwrap(),
+            LaunchMode::Version
+        );
+        assert_eq!(
             launch_mode(["native-host".into(), "check".into()]).unwrap(),
             LaunchMode::NativeHost(NativeHostCommand::Check)
         );
         assert!(launch_mode(["native-host".into(), "guess".into()]).is_err());
+        assert!(launch_mode(["nonsense".into()]).is_err());
+    }
+
+    #[test]
+    fn setup_options_preserve_safe_package_compatibility() {
+        assert_eq!(
+            launch_mode([
+                "install".into(),
+                "--dry-run".into(),
+                "--client".into(),
+                "codex".into(),
+                "--no-open".into(),
+            ])
+            .unwrap(),
+            LaunchMode::Install(SetupOptions {
+                dry_run: true,
+                all_clients: false,
+                no_clients: false,
+                no_open: true,
+                client_ids: vec!["codex".into()],
+            })
+        );
+        assert_eq!(
+            launch_mode([
+                "uninstall".into(),
+                "--all-clients".into(),
+                "--all-browsers".into(),
+            ])
+            .unwrap(),
+            LaunchMode::Uninstall(SetupOptions {
+                all_clients: true,
+                ..SetupOptions::default()
+            })
+        );
+        assert!(launch_mode([
+            "install".into(),
+            "--no-clients".into(),
+            "--client=codex".into(),
+        ])
+        .is_err());
     }
 }
