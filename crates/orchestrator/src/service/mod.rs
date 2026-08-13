@@ -457,75 +457,82 @@ fn serve_session(
     let active: Arc<Mutex<HashMap<String, CancellationToken>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
-    while let Some(request) = read_json_line::<ServiceRequest>(&mut reader)? {
-        match request {
-            ServiceRequest::Catalog => {
-                write_response(&writer, &ServiceResponse::Catalog { tools: catalog() })
-            }
-            ServiceRequest::Invoke {
-                id,
-                tool,
-                input,
-                deadline_ms,
-            } => {
-                let cancellation = CancellationToken::default();
-                if lock(&active)
-                    .insert(id.clone(), cancellation.clone())
-                    .is_some()
-                {
+    // Every way this connection can end has to reach the teardown below. A reset socket, an
+    // oversized frame, and one malformed line are all ordinary ways for a client to go away, and
+    // each of them used to leave through `?` before the release ran. The workspace and every tab
+    // it held then survived with nothing able to collect them: an unowned workspace has no owning
+    // process to look up, so the reaper cannot see it either.
+    let served = (|| -> Result<()> {
+        while let Some(request) = read_json_line::<ServiceRequest>(&mut reader)? {
+            match request {
+                ServiceRequest::Catalog => {
+                    write_response(&writer, &ServiceResponse::Catalog { tools: catalog() })
+                }
+                ServiceRequest::Invoke {
+                    id,
+                    tool,
+                    input,
+                    deadline_ms,
+                } => {
+                    let cancellation = CancellationToken::default();
+                    if lock(&active)
+                        .insert(id.clone(), cancellation.clone())
+                        .is_some()
+                    {
+                        write_response(
+                            &writer,
+                            &ServiceResponse::Error {
+                                id: Some(id),
+                                code: "duplicate_request".into(),
+                                message: "Request id is already active.".into(),
+                            },
+                        );
+                        continue;
+                    }
+                    let executor = Arc::clone(&executor);
+                    let writer = Arc::clone(&writer);
+                    let active = Arc::clone(&active);
+                    let workspace = workspace.clone();
+                    let _ = thread::Builder::new().name("ghostlight-invocation".into()).spawn(move || {
+                        let mut result = executor.execute(&workspace, &tool, input, deadline_ms, &cancellation);
+                        lock(&active).remove(&id);
+                        let text = result.model_text();
+                        let is_error = result.is_error();
+                        let content = std::mem::take(&mut result.content);
+                        let value = serde_json::to_value(&result).unwrap_or_else(|_| serde_json::json!({"status":"unknown","effect":"unknown","repeat_safe":false,"summary":"Result serialization failed.","facts":{},"next_steps":[]}));
+                        write_response(&writer, &ServiceResponse::Result { id, text, result: value, is_error, content });
+                    });
+                }
+                ServiceRequest::Cancel { id } => {
+                    if let Some(token) = lock(&active).get(&id) {
+                        token.cancel();
+                    }
+                }
+                ServiceRequest::Hello { .. } | ServiceRequest::ActivateWorkbench { .. } => {
                     write_response(
                         &writer,
                         &ServiceResponse::Error {
-                            id: Some(id),
-                            code: "duplicate_request".into(),
-                            message: "Request id is already active.".into(),
+                            id: None,
+                            code: "duplicate_hello".into(),
+                            message: "Session is already established.".into(),
                         },
-                    );
-                    continue;
+                    )
                 }
-                let executor = Arc::clone(&executor);
-                let writer = Arc::clone(&writer);
-                let active = Arc::clone(&active);
-                let workspace = workspace.clone();
-                let _ = thread::Builder::new().name("ghostlight-invocation".into()).spawn(move || {
-                    let mut result = executor.execute(&workspace, &tool, input, deadline_ms, &cancellation);
-                    lock(&active).remove(&id);
-                    let text = result.model_text();
-                    let is_error = result.is_error();
-                    let content = std::mem::take(&mut result.content);
-                    let value = serde_json::to_value(&result).unwrap_or_else(|_| serde_json::json!({"status":"unknown","effect":"unknown","repeat_safe":false,"summary":"Result serialization failed.","facts":{},"next_steps":[]}));
-                    write_response(&writer, &ServiceResponse::Result { id, text, result: value, is_error, content });
-                });
-            }
-            ServiceRequest::Cancel { id } => {
-                if let Some(token) = lock(&active).get(&id) {
-                    token.cancel();
-                }
-            }
-            ServiceRequest::Hello { .. } | ServiceRequest::ActivateWorkbench { .. } => {
-                write_response(
-                    &writer,
-                    &ServiceResponse::Error {
-                        id: None,
-                        code: "duplicate_hello".into(),
-                        message: "Session is already established.".into(),
-                    },
-                )
             }
         }
-    }
+        Ok(())
+    })();
 
     for cancellation in lock(&active).values() {
         cancellation.cancel();
     }
     // A workspace with an owner outlives this connection: the caller is still there and its next
     // call must reach the same tabs. It is released when its owner is gone, not when a socket is.
-    if workspaces.is_owned(&workspace) {
-        return Ok(());
+    if !workspaces.is_owned(&workspace) {
+        let physical_tabs = workspaces.release(&workspace);
+        cleanup_released_tabs(workspace.as_str(), &physical_tabs, browser.as_ref());
     }
-    let physical_tabs = workspaces.release(&workspace);
-    cleanup_released_tabs(workspace.as_str(), &physical_tabs, browser.as_ref());
-    Ok(())
+    served
 }
 
 /// Close the tabs of every session whose owning process is gone.
@@ -672,6 +679,8 @@ mod tests {
     use std::net::TcpStream;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use ghostlight_bridge::browser::BrowserCommand;
     use ghostlight_bridge::framing::{read_json_line, write_json_line};
@@ -719,6 +728,66 @@ mod tests {
         );
         drop(host);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// Open one MCP session, end the connection the given way, and report the sessions left.
+    fn sessions_after(name: &str, goodbye: impl FnOnce(&mut TcpStream)) -> usize {
+        let (directory, path) = runtime_path(name);
+        let host = ServiceHost::start(&path).unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", host.endpoint.service_port)).unwrap();
+        write_json_line(
+            &mut stream,
+            &ServiceRequest::Hello {
+                major: SERVICE_BRIDGE_MAJOR,
+                token: host.endpoint.token.clone(),
+                client_label: "leak-probe".into(),
+                channel: IntakeChannel::Mcp,
+                session: None,
+            },
+        )
+        .unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let accepted: ServiceResponse = read_json_line(&mut reader).unwrap().unwrap();
+        assert!(matches!(accepted, ServiceResponse::HelloAccepted { .. }));
+        assert_eq!(
+            host.workbench.snapshot().sessions.len(),
+            1,
+            "the probe session must exist before the connection ends"
+        );
+
+        goodbye(&mut stream);
+        drop(reader);
+        drop(stream);
+
+        // The session teardown runs on the connection's own thread, so give it a moment.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline && !host.workbench.snapshot().sessions.is_empty() {
+            thread::sleep(Duration::from_millis(25));
+        }
+        let remaining = host.workbench.snapshot().sessions.len();
+        drop(host);
+        let _ = std::fs::remove_dir_all(directory);
+        remaining
+    }
+
+    #[test]
+    fn a_client_that_goes_away_badly_still_releases_its_session() {
+        // The negative control: a tidy goodbye has always worked, so if this were the only case
+        // the assertion below would prove nothing about the path that actually leaked.
+        assert_eq!(sessions_after("goodbye-clean", |_| {}), 0);
+
+        // One malformed line ends the connection through the error path. Before the teardown was
+        // made unconditional this leaked the workspace and every tab it held, and nothing could
+        // collect it afterwards: an unowned workspace has no owning process for the reaper.
+        assert_eq!(
+            sessions_after("goodbye-malformed", |stream| {
+                use std::io::Write;
+                let _ = stream.write_all(b"{ not json at all\n");
+                let _ = stream.flush();
+            }),
+            0,
+            "a session must not outlive the connection that opened it"
+        );
     }
 
     #[test]
