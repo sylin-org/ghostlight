@@ -1,0 +1,49 @@
+# WinGet 1.12 multi-file template. scripts/prepare-package-manager-metadata.ps1 replaces tokens
+# and splits these three documents into the exact community-repository filenames.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
+PackageIdentifier: Sylin.Ghostlight
+PackageVersion: __VERSION__
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.12.0
+---
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+PackageIdentifier: Sylin.Ghostlight
+PackageVersion: __VERSION__
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: ghostlight-v__VERSION__-x86_64-pc-windows-msvc\ghostlight.exe
+    PortableCommandAlias: ghostlight
+  - RelativeFilePath: ghostlight-v__VERSION__-x86_64-pc-windows-msvc\ghostlight-mcp-connector.exe
+    PortableCommandAlias: ghostlight-mcp-connector
+  - RelativeFilePath: ghostlight-v__VERSION__-x86_64-pc-windows-msvc\ghostlight-browser-connector.exe
+    PortableCommandAlias: ghostlight-browser-connector
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/sylin-org/ghostlight/releases/download/v__VERSION__/ghostlight-v__VERSION__-x86_64-pc-windows-msvc.zip
+    InstallerSha256: __SHA_X86_64_PC_WINDOWS_MSVC_UPPER__
+ManifestType: installer
+ManifestVersion: 1.12.0
+---
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+PackageIdentifier: Sylin.Ghostlight
+PackageVersion: __VERSION__
+PackageLocale: en-US
+Publisher: Sylin
+PublisherUrl: https://sylin.org/
+PublisherSupportUrl: https://github.com/sylin-org/ghostlight/issues
+PackageName: Ghostlight
+PackageUrl: https://github.com/sylin-org/ghostlight
+License: Apache-2.0 OR MIT with source-available governance module
+LicenseUrl: https://github.com/sylin-org/ghostlight/blob/main/LICENSING.md
+ShortDescription: Visible local browser automation in your signed-in Chromium profile.
+Description: Ghostlight gives AI clients a governed, visible tab group in the signed-in Chromium profile you already use.
+Moniker: ghostlight
+Tags:
+  - mcp
+  - browser-automation
+  - ai-agent
+InstallationNotes: Run 'ghostlight install', add Ghostlight in Browser, then run 'ghostlight doctor'.
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0

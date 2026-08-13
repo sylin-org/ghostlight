@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
 param(
-    [Parameter(Mandatory = $true)]
     [string]$CandidateDirectory,
+    [string]$ArtifactRoot,
+    [string]$Version,
     [string]$OutputDirectory = "dist/npm-package",
     [switch]$Force
 )
@@ -11,23 +12,53 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repo = Split-Path -Parent $PSScriptRoot
-$CandidateDirectory = [System.IO.Path]::GetFullPath($CandidateDirectory)
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
-& (Join-Path $PSScriptRoot "check-release-candidate.ps1") -CandidateDirectory $CandidateDirectory
-
-$candidate = Get-Content -LiteralPath (Join-Path $CandidateDirectory "release-candidate.json") -Raw | ConvertFrom-Json
+if ([string]::IsNullOrWhiteSpace($CandidateDirectory) -eq [string]::IsNullOrWhiteSpace($ArtifactRoot)) {
+    throw "Provide exactly one of -CandidateDirectory or -ArtifactRoot"
+}
+$rawBinaries = @()
+if (-not [string]::IsNullOrWhiteSpace($CandidateDirectory)) {
+    $CandidateDirectory = [System.IO.Path]::GetFullPath($CandidateDirectory)
+    $candidate = Get-Content -LiteralPath (Join-Path $CandidateDirectory "release-candidate.json") -Raw | ConvertFrom-Json
+    & (Join-Path $PSScriptRoot "check-release-candidate.ps1") `
+        -CandidateDirectory $CandidateDirectory `
+        -ExpectedStatus $candidate.status
+    $Version = $candidate.version
+    $rawBinaries = @($candidate.artifacts | Where-Object kind -eq "raw-binary" | Sort-Object name)
+} else {
+    $ArtifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
+    if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+        throw "Artifact preparation requires a three-part -Version"
+    }
+    foreach ($target in @(
+        [ordered]@{ name = "x86_64-pc-windows-msvc"; extension = ".exe" },
+        [ordered]@{ name = "x86_64-unknown-linux-gnu"; extension = "" },
+        [ordered]@{ name = "aarch64-apple-darwin"; extension = "" },
+        [ordered]@{ name = "x86_64-apple-darwin"; extension = "" }
+    )) {
+        foreach ($component in @("ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector")) {
+            $name = "$component-$($target.name)$($target.extension)"
+            $found = @(Get-ChildItem -LiteralPath $ArtifactRoot -Recurse -File -Filter $name)
+            if ($found.Count -ne 1) { throw "Expected one raw artifact $name, found $($found.Count)" }
+            $rawBinaries += [pscustomobject]@{
+                name = $name
+                sha256 = (Get-FileHash -LiteralPath $found[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+        }
+    }
+    $rawBinaries = @($rawBinaries | Sort-Object name)
+}
 $packageSource = Join-Path $repo "packaging/npm"
 $packageJson = Get-Content -LiteralPath (Join-Path $packageSource "package.json") -Raw | ConvertFrom-Json
-if ($packageJson.name -ne "ghostlight" -or $packageJson.version -ne $candidate.version) {
-    throw "npm package identity does not match release candidate version $($candidate.version)"
+if ($packageJson.name -ne "ghostlight" -or $packageJson.version -ne $Version) {
+    throw "npm package identity does not match release version $Version"
 }
 
-$rawBinaries = @($candidate.artifacts | Where-Object kind -eq "raw-binary" | Sort-Object name)
 if ($rawBinaries.Count -ne 12) {
     throw "npm preparation requires exactly 12 raw binaries, found $($rawBinaries.Count)"
 }
 $checksums = [ordered]@{
-    version = $candidate.version
+    version = $Version
     algorithm = "sha256"
     binaries = [ordered]@{}
 }
@@ -50,8 +81,13 @@ Copy-Item -LiteralPath (Join-Path $packageSource "package.json") -Destination $s
 Copy-Item -LiteralPath (Join-Path $packageSource "README.md") -Destination $stagedPackage
 Copy-Item -LiteralPath (Join-Path $packageSource "bin") -Destination $stagedPackage -Recurse
 Copy-Item -LiteralPath (Join-Path $packageSource "test") -Destination $stagedPackage -Recurse
-foreach ($legalFile in @("LICENSE-APACHE", "LICENSE-MIT", "LICENSE-COMMERCIAL", "LICENSING.md")) {
-    Copy-Item -LiteralPath (Join-Path $repo $legalFile) -Destination $stagedPackage
+foreach ($legalFile in @(
+    [ordered]@{ source = "LICENSE"; destination = "LICENSE" },
+    [ordered]@{ source = "docs/licenses/MIT.txt"; destination = "MIT.txt" },
+    [ordered]@{ source = "docs/licenses/LicenseRef-Ghostlight-Commercial.txt"; destination = "LicenseRef-Ghostlight-Commercial.txt" },
+    [ordered]@{ source = "LICENSING.md"; destination = "LICENSING.md" }
+)) {
+    Copy-Item -LiteralPath (Join-Path $repo $legalFile.source) -Destination (Join-Path $stagedPackage $legalFile.destination)
 }
 [System.IO.File]::WriteAllText(
     (Join-Path $stagedPackage "checksums.json"),
@@ -67,7 +103,7 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
     throw "npm pack failed"
 }
-$tarballs = @(Get-ChildItem -LiteralPath $OutputDirectory -File -Filter "ghostlight-$($candidate.version).tgz")
+$tarballs = @(Get-ChildItem -LiteralPath $OutputDirectory -File -Filter "ghostlight-$Version.tgz")
 if ($tarballs.Count -ne 1) {
     throw "npm pack did not produce the exact Ghostlight tarball"
 }

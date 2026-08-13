@@ -22,6 +22,14 @@ if ([System.IO.Path]::GetFileName($Package) -ne "ghostlight-$($candidate.version
     throw "npm tarball name does not match release candidate version"
 }
 $observedHash = (Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLowerInvariant()
+$packageArtifacts = @($candidate.artifacts | Where-Object {
+    $_.kind -eq "client-launcher" -and $_.target -eq "npm"
+})
+if ($packageArtifacts.Count -ne 1 -or
+    $packageArtifacts[0].name -ne [System.IO.Path]::GetFileName($Package) -or
+    $packageArtifacts[0].sha256 -ne $observedHash) {
+    throw "npm tarball is not the exact launcher bound into the signed candidate"
+}
 
 Write-Output "npm publication plan"
 Write-Output "  package: ghostlight@$($candidate.version)"

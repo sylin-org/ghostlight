@@ -90,6 +90,20 @@ function Resolve-OneArtifact {
 
 $specifications = @(
     [ordered]@{
+        kind = "client-bundle"
+        target = "claude-desktop"
+        directory = "derived"
+        pattern = "ghostlight-v$Version.mcpb"
+        name = "ghostlight-v$Version.mcpb"
+    },
+    [ordered]@{
+        kind = "client-launcher"
+        target = "npm"
+        directory = "derived"
+        pattern = "ghostlight-$Version.tgz"
+        name = "ghostlight-$Version.tgz"
+    },
+    [ordered]@{
         kind = "native-package"
         target = "x86_64-pc-windows-msvc"
         directory = "native-x86_64-pc-windows-msvc"
@@ -146,6 +160,15 @@ foreach ($rawTarget in $rawTargets) {
             pattern = $name
             name = $name
         }
+    }
+    $portableExtension = if ($rawTarget.target -eq "x86_64-pc-windows-msvc") { ".zip" } else { ".tar.gz" }
+    $portableName = "ghostlight-v$Version-$($rawTarget.target)$portableExtension"
+    $specifications += [ordered]@{
+        kind = "portable-package"
+        target = $rawTarget.target
+        directory = "native-$($rawTarget.target)"
+        pattern = $portableName
+        name = $portableName
     }
 }
 

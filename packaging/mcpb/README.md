@@ -1,9 +1,5 @@
 # Ghostlight MCPB
 
-> Historical 0.8 package documentation. Its launcher and packaging script are not present in the
-> 1.0 tree. Preserve this record for future package-design evidence; do not claim or build a 1.0
-> MCPB until a new package contract is accepted and implemented.
-
 This directory is the source template for Ghostlight's Claude Desktop MCPB package. Release
 packaging adds the signed release binaries for Windows x64, macOS Apple Silicon, and macOS Intel.
 The package does not download code or send telemetry at runtime.
@@ -16,13 +12,13 @@ idempotent setup registers the local browser native host and service, while Clau
 the sole owner of its MCP configuration. Users must separately install Ghostlight in Browser from
 the Chrome Web Store.
 
-Build a package from downloaded raw release artifacts:
+Build a package from one checked release candidate:
 
 ```powershell
-pwsh -File scripts/package-mcpb.ps1 -Version 0.8.0 -ArtifactsDir artifacts
+pwsh -File scripts/package-mcpb.ps1 -CandidateDirectory dist/release-candidate
 ```
 
-The result is `dist/ghostlight-v0.8.0.mcpb`.
+The result is `dist/ghostlight-v1.0.0.mcpb`.
 
 ## Privacy Policy
 

@@ -33,10 +33,16 @@ if ($candidate.version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$' -or
 
 $expectedCoordinates = @(
     "browser-adapter|chromium-store",
+    "client-bundle|claude-desktop",
+    "client-launcher|npm",
     "native-package|aarch64-apple-darwin",
     "native-package|x86_64-apple-darwin",
     "native-package|x86_64-pc-windows-msvc",
     "native-package|x86_64-unknown-linux-gnu",
+    "portable-package|aarch64-apple-darwin",
+    "portable-package|x86_64-apple-darwin",
+    "portable-package|x86_64-pc-windows-msvc",
+    "portable-package|x86_64-unknown-linux-gnu",
     "raw-binary|ghostlight@aarch64-apple-darwin",
     "raw-binary|ghostlight@x86_64-apple-darwin",
     "raw-binary|ghostlight@x86_64-pc-windows-msvc",

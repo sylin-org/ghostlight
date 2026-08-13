@@ -90,6 +90,7 @@ jobs:
           node-version: "22"
       - run: npm test --prefix extension
       - run: npm test --prefix packaging/npm
+      - run: node --test packaging/mcpb/test/launcher.test.js
       - name: Check runtime JavaScript syntax
         run: |
           node --check extension/content.js

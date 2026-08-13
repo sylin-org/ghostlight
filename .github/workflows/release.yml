@@ -37,6 +37,7 @@ jobs:
       - run: cargo test --workspace --locked --no-fail-fast
       - run: npm test --prefix extension
       - run: npm test --prefix packaging/npm
+      - run: node --test packaging/mcpb/test/launcher.test.js
       - run: node tests/process-journey.mjs
       - run: node tests/cli-journey.mjs
       - run: node tests/cli-powershell-journey.mjs
@@ -100,6 +101,9 @@ jobs:
           foreach ($name in @('ghostlight', 'ghostlight-mcp-connector', 'ghostlight-browser-connector')) {
             Copy-Item -LiteralPath "target/${{ matrix.target }}/release/$name$extension" -Destination "$output/$name-${{ matrix.target }}$extension"
           }
+      - name: Build the portable package-manager archive
+        shell: pwsh
+        run: ./scripts/package-portable.ps1 -TargetTriple ${{ matrix.target }} -BinaryDirectory target/${{ matrix.target }}/release -OutputDirectory dist/portable-${{ matrix.target }}
       - name: Stage exact Tauri sidecars
         shell: pwsh
         run: ./scripts/stage-tauri-sidecars.ps1 -TargetTriple ${{ matrix.target }}
@@ -130,6 +134,7 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/bundle/
             dist/raw-${{ matrix.target }}/
+            dist/portable-${{ matrix.target }}/
           if-no-files-found: error
           retention-days: 7
 
@@ -183,6 +188,17 @@ jobs:
           $sboms = @(Get-ChildItem -LiteralPath crates -Recurse -File -Filter "ghostlight-v$version-sbom.cyclonedx.json")
           if ($sboms.Count -ne 4) { throw "cargo-cyclonedx produced $($sboms.Count) component SBOMs, expected 4" }
           "GHOSTLIGHT_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build checksum-bound client launchers from the raw candidates
+        shell: pwsh
+        run: |
+          ./scripts/prepare-npm-package.ps1 `
+            -ArtifactRoot candidate-input `
+            -Version $env:GHOSTLIGHT_VERSION `
+            -OutputDirectory candidate-input/derived/npm-package
+          ./scripts/package-mcpb.ps1 `
+            -ArtifactRoot candidate-input `
+            -Version $env:GHOSTLIGHT_VERSION `
+            -OutputPath candidate-input/derived/ghostlight-v$env:GHOSTLIGHT_VERSION.mcpb
       - name: Assemble and verify one immutable candidate unit
         shell: pwsh
         run: |
@@ -200,9 +216,9 @@ jobs:
             dist/release-candidate/assets/*
             dist/release-candidate/release-candidate.json
             dist/release-candidate/SHA256SUMS
-      - name: Prepare the checksum-bound npm launcher
+      - name: Prepare package-manager metadata from candidate hashes
         shell: pwsh
-        run: ./scripts/prepare-npm-package.ps1 -CandidateDirectory dist/release-candidate
+        run: ./scripts/prepare-package-manager-metadata.ps1 -CandidateDirectory dist/release-candidate
       - uses: actions/upload-artifact@v7
         with:
           name: release-candidate
@@ -212,6 +228,18 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: npm-package
-          path: dist/npm-package/*.tgz
+          path: dist/release-candidate/assets/*.tgz
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        with:
+          name: claude-desktop-mcpb
+          path: dist/release-candidate/assets/*.mcpb
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package-manager-metadata
+          path: dist/package-manager-metadata/
           if-no-files-found: error
           retention-days: 14

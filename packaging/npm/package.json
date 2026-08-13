@@ -11,9 +11,9 @@
     "bin/ghostlight.js",
     "checksums.json",
     "README.md",
-    "LICENSE-APACHE",
-    "LICENSE-MIT",
-    "LICENSE-COMMERCIAL",
+    "LICENSE",
+    "MIT.txt",
+    "LicenseRef-Ghostlight-Commercial.txt",
     "LICENSING.md"
   ],
   "scripts": {
