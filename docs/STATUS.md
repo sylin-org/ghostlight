@@ -33,6 +33,11 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 - The pre-1.0 worktree snapshot is preserved as the annotated tag `archive/0.9-pre-1.0`
   (`f5d43768`), pushed to the remote. It replaced a local-only branch that existed on one machine.
   It is history, never implementation authority for the 1.0 tree.
+- The 0.8 recovery is now source-backed rather than implicit. `docs/0.8/HARVEST.md` distinguishes
+  the released, reconciled, mature, and archived snapshots; `docs/0.8/test-inventory.json` records
+  1,355 ordinary test declarations and 34 source-enumerated Lightbox scenarios; and the dated
+  publication observation corrects WinGet to merged while recording Glama drift. The old ledger's
+  unexplained claim of 37 Lightbox scenarios is preserved as a discrepancy, not repeated as fact.
 
 ## Implemented
 
@@ -378,6 +383,9 @@ Re-run on 2026-08-13 against the current tree:
   interlock journeys.
 - Reconcile release metadata, public status, store submission, compatibility, distribution, and
   the final public documentation only when the 1.0 artifacts exist.
+- Translate the harvested 0.8 behavior inventory onto current seams. An entry may map to an existing
+  1.0 proof, a new proof, an explicitly deferred capability, or a superseded mechanism; it may not
+  disappear without a disposition.
 
 ## Canonical 1.0 sources
 

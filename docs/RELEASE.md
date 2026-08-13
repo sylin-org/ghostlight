@@ -1,13 +1,27 @@
 # Releasing Ghostlight 1.0
 
 This is the release plan for the current 1.0 implementation. The completed 0.8 publication record
-lives in [`business/PUBLICATION-PACKET-0.8.md`](business/PUBLICATION-PACKET-0.8.md); its scripts,
-package launchers, adapter compatibility, and registry state are historical evidence, not a 1.0
-pipeline.
+lives in [`business/PUBLICATION-PACKET-0.8.md`](business/PUBLICATION-PACKET-0.8.md), and the active
+harvest lives in [`0.8/HARVEST.md`](0.8/HARVEST.md). The old raw-binary packages and implementation
+cannot be relabeled as 1.0, but their tests, platform facts, compatibility model, release safety,
+and publication lessons are inputs to this pipeline.
 
 No release action is authorized merely by this document. Tags, pushes, packages, store
 submissions, registry mutations, website publication, and external messages require explicit owner
 approval.
+
+## Process rule
+
+A release step must do at least one of these:
+
+- prevent a failure already observed in Ghostlight or its delivery chain;
+- prove a promise a user will depend on; or
+- make a published failure safer to diagnose or recover.
+
+Keep candidate verification, immutable artifact publication, store reconciliation, and optional
+directory work independent. Do not recreate the 0.8 master release conductor, make a trust-footer
+date a build gate, commit generated checksums after tagging, or hold a release for an optional
+directory submission.
 
 ## Release unit
 
@@ -72,7 +86,8 @@ candidate and matching store adapter. Source-build success does not substitute f
 
 ## Publication sequence
 
-After all gates are evidenced and the owner approves:
+After all gates are evidenced and the owner approves, advance one independently recoverable channel
+at a time:
 
 1. Freeze versions and compatibility; build each release artifact from the approved commit.
 2. Verify artifacts independently, including exact embedded UI/icon bytes and native-host paths.

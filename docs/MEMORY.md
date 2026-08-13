@@ -12,6 +12,13 @@ the owner wants, and what this project learned the hard way.
 
 - **Preserve history.** Docs, ADRs, licenses, research, trust and legal material, task ledgers, and
   product identity survive internal rewrites. Reconcile active documents; never erase evidence.
+- **Clean-room is not a resource wipe.** Old implementation code is not authority for new
+  internals, but tests, fixtures, platform findings, CI, packaging, release evidence, and
+  publication knowledge remain project assets. Inventory and translate them before deleting a
+  working predecessor.
+- **Release work must earn its place.** Keep the checks that prevent a real failure, prove a user
+  promise, or make recovery safer. Do not turn restamping, duplicate checklists, optional directory
+  submissions, or one giant conductor into release gates.
 - **Preserve product identity; redesign internals deliberately.** The name, the original icon bytes,
   the visual language, the motion character, and user expectations are identity. Model-facing tools
   and descriptions are mechanisms the orchestrator owns and may redesign.
@@ -109,8 +116,9 @@ Every one of these cost something to learn.
   controlled; cursors, scans, ripples, frames, and captions say what is happening now.
 - **Isolate live stacks when testing.** Build into a separate target directory, and stop processes
   only by exact executable path, never by image name.
-- **The 0.8 distribution and trust records are history, not a working 1.0 pipeline.** Rebuild
-  package and release automation from current boundaries before claiming a 1.0 artifact exists.
+- **The 0.8 distribution and trust records are active inputs, not a working 1.0 pipeline.** Harvest
+  their tests, platform facts, public-state model, and delivery safeguards, then adapt the machinery
+  to current boundaries before claiming a 1.0 artifact exists.
 
 ## Where to look
 

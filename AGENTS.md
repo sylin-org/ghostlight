@@ -53,6 +53,10 @@ or quarantined during an implementation rewrite.
   deleting the history.
 - Source from older implementation commits and branches is not implementation authority for the
   1.0 clean-room rewrite. Preserve its Git history, but do not copy it into the new internals.
+- Clean-room does not make tests, fixtures, CI, packaging knowledge, platform findings, release
+  evidence, or publication history disposable. Inventory and translate those assets onto current
+  seams before retiring a working predecessor. The active 0.8 harvest is indexed from
+  `docs/0.8/HARVEST.md`.
 - Product identity is inherited. Names, icons, visual language, animation, public character, legal
   identity, and user expectations survive the rewrite unless the owner explicitly changes them.
 - Internal tools and model-facing descriptions are mechanisms, not product identity. The
@@ -126,6 +130,9 @@ live tree plus `docs/1.0/ARCHITECTURE.md` for current placement.
 - Never phone home. No telemetry, activation service, automatic update ping, or hidden network
   dependency is allowed.
 - Keep the design simple. Add architecture only when a concrete invariant requires it.
+- Keep release work equally simple. A gate must prevent a demonstrated failure, prove a user
+  promise, or make recovery safer. Optional directories, repeated restamping, and one giant release
+  conductor are not candidate gates.
 
 ## Building and testing
 
