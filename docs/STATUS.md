@@ -13,6 +13,39 @@ last fetch.
 The repository carries exactly two branches, `main` and `dev`, as of 2026-08-13. The topology is
 linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 
+## Linux 1.0 development-host result
+
+The native CachyOS lane was rerun through implementation revision `61526364` on 2026-08-13. This
+is development-host evidence, not a Debian package, signature, store-adapter, reboot, or release
+pass.
+
+- Rust 1.95.0 formatting, warnings-denied clippy, isolated build, all 188 workspace tests, all 99
+  extension tests, all 10 npm tests, all 5 MCPB tests, 41 JavaScript syntax checks, both process
+  journeys, the workbench surface journey, `cargo deny`, and `cargo audit` passed. Audit still
+  reports the 17 allowed GTK3/Tauri-chain warnings recorded in the dated readiness audit.
+- A three-sibling optimized user candidate is active at
+  `~/.ghostlight/bin/v1.0.0-dev-6152636`. Its orchestrator, MCP connector, and browser connector
+  SHA-256 values are respectively `3482ad1782c71ef16d5cad5fe0bc5fddf67fa3c6890be25d8deda8e17371787f`,
+  `73738e5d71ce6f20ad211c9b10082a5725ab32d05fe2fb9f447913c32662337d`, and
+  `a725e65a3a0ff9cfec760f064f876ebc28e1e946356b4a11875ef005095ed8b6`.
+- A fresh offline consumer installed the packed npm launcher and proved bare MCP initialization,
+  its 22-tool catalog, one safe browser call, native CLI routing, valid-cache reuse, tamper
+  replacement, and refusal to execute incomplete or unverified bytes. No npm registry was
+  contacted.
+- Public attested 0.8.0 was installed through its documented portable path, then upgraded without
+  removing the browser profile, settings, harness configuration, or any older version directory.
+  The first run exposed a surviving Linux supervisor; the corrected migration now stops the
+  positively identified unit before removing its unit and enablement. A final uninstall/reinstall
+  removed only owned entries and preserved malformed or foreign configuration byte-for-byte.
+- Ordinary-profile Chromium 151 under the active KDE Wayland session proved visible open, read,
+  screenshot, presentation, single-authority activation, connector demand-start, and browser
+  restart recovery. Local preserve-tabs correctly refused the attempted model-driven close.
+  Closing/hiding the workbench, tray open/quit, login/reboot, a second live harness, and the full
+  interactive form/drag/upload/dialog matrix remain owner-visible work.
+- The portable archive was inspected and hashed. Tauri staged a complete AppDir, but its bundled
+  `linuxdeploy` strip tool cannot parse CachyOS `.relr.dyn` sections, so no AppImage pass is
+  claimed. The Ubuntu/Debian lifecycle table remains untouched and blocking.
+
 - `dev` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`. It absorbed
   `ghostlight-1.0`, which was a fast-forward and has been retired.
 - `main` carries the 0.8 line at `0116feca`. Promoting it is a deliberate release decision, not

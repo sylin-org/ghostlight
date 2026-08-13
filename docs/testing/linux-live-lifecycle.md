@@ -131,3 +131,34 @@ retention decision for audit/history.
 
 Open one bounded defect per failed stage and rerun the affected journey after the fix. Do not turn
 a failed record into a pass by adding undocumented maintainer steps.
+
+## CachyOS development-host record - 2026-08-13
+
+This table deliberately does not change L1-L9 above. It records what the ordinary-user source and
+portable lane proved at revision `61526364` before the signed Debian and matching-store-extension
+gate exists.
+
+```text
+date_utc: 2026-08-13
+architecture: x86_64
+distribution_and_version: CachyOS rolling
+kernel: 7.1.8-1-cachyos
+desktop_and_display_protocol: KDE Plasma, Wayland
+browser_versions: Chromium 151.0.7922.137
+ghostlight_version: 1.0.0 development candidate 61526364
+package_signature_or_digest: user candidate; no native package or signature
+extension_version: 1.0.0 unpacked source adapter
+harness_versions: npm launcher 1.0.0; native Codex and Claude Code registrations
+```
+
+| Related stage | Development-host result | Evidence or remaining limit |
+| --- | --- | --- |
+| L1 | PARTIAL PASS | Exact three-sibling user candidate installed; four browser manifests plus Codex and Claude Code current; no resident supervisor. No Debian package, signature, package-manager install, or store adapter. |
+| L2 | PARTIAL PASS | Ordinary visible profile passed open, structured read, screenshot, and presentation. Preserve-tabs correctly blocked close. The full interactive form/drag/upload/dialog matrix remains incomplete. |
+| L3 | PARTIAL PASS | Browser and MCP connectors independently demand-started the trusted sibling authority. Real-process unknown-effect/no-replay passed; a separately interrupted visible effect remains incomplete. |
+| L4 | PARTIAL PASS | Normal browser shutdown removed the connector; restart recovered the native connection and a bounded call. Extension disable/re-enable remains incomplete. |
+| L5 | NOT RUN | Logout and reboot require an owner-visible machine transition. |
+| L6 | NOT RUN | A second simultaneous live harness was not exercised. |
+| L7 | DEVELOPMENT PASS | Attested public portable 0.8.0 created its real user supervisor. The corrected 1.0 migration stopped and retired it, updated all owned paths, and preserved profiles, settings, harness data, and older version directories. This is not a Debian package upgrade pass. |
+| L8 | PARTIAL PASS | Stopped authority, missing service, native registration truth, and foreign/malformed preservation were exercised. Disabled extension, expired managed authority, and notification failure remain incomplete. |
+| L9 | DEVELOPMENT PASS | User-level native and harness uninstall/reinstall changed only owned entries and restored identical current configuration. No extension UI or Debian package removal occurred. |

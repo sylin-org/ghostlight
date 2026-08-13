@@ -45,6 +45,36 @@ The local unsigned NSIS output was
 bytes, SHA-256 `3d694ea78ee0dcf9589654b48223a32ba60d619dda544c69746d432178f1352c`.
 It is build evidence, not a release artifact.
 
+## Native Linux development-host record
+
+A separate CachyOS x86_64 run tested implementation revision
+`61526364ec47ec8dcd5238e484fe683fb8e097a5` with Rust 1.95.0, Node 22.22.1, npm 10.9.4,
+Chromium 151.0.7922.137, KDE, and an ordinary visible Wayland session. This is source,
+user-candidate, and portable-distribution evidence. CachyOS cannot satisfy the clean Ubuntu/Debian
+package, signature, package-manager, login, or reboot rows.
+
+| Gate | Result |
+| --- | --- |
+| Formatting, lint, and build | Passed with one explicit fresh `.target-linux-1.0` directory and the locked graph. |
+| Rust tests | 188 passed: 152 orchestrator library, 2 launch mode, 30 bridge, and 4 MCP connector. |
+| Extension, npm, and MCPB tests | 99, 10, and 5 passed respectively. |
+| JavaScript and shell syntax | All 41 tracked JavaScript/module files parsed; `scripts/get.sh` passed `sh -n`. |
+| Process surfaces | Process reconnect/unknown-effect/recording and CLI governance/batch/refusal journeys passed; workbench surface passed. |
+| Dependency policy | `cargo deny check licenses bans sources` passed; `cargo audit` exited zero with the same 17 allowed warnings below. |
+| Candidate deployment | Exact three optimized siblings deployed under `~/.ghostlight/bin/v1.0.0-dev-6152636`; doctor found four current browser registrations plus current Codex and Claude Code entries. No user supervisor exists. |
+| Portable/raw | Exact three siblings and source-matched legal files passed inspection. Portable archive SHA-256: `a407fe22fa8e65edc7c74230267382dd489d8937e2cc72ee34222d2277183d48`. |
+| Packed npm launcher | Fresh offline install proved MCP initialization/catalog/safe call, CLI routing, cache reuse, tamper recovery, and rejection of incomplete or unverified bytes. Tarball SHA-256: `671206f1c58cb9ca14803f960310eb6ca1eef7c220d31ce2a0fa72949439e5c5`. |
+| Public 0.8 upgrade | Attested public 0.8.0 was deployed, its real supervisor was created, and 1.0 retired it. A defect found in the first run was fixed with focused coverage before the passing rerun. |
+| Ownership-safe reinstall | Owned browser and harness entries were removed and recreated identically; a malformed or foreign Visual Studio Code entry and all older version directories were unchanged. |
+| Ordinary-profile browser | Visible open/read/screenshot/presentation, single-authority activation, both connector demand-start paths, and browser restart recovery passed. Model-driven close was truthfully blocked by the enabled local preserve-tabs interlock. |
+| Linux native bundle | A complete AppDir was staged, but AppImage finalization failed because the bundled `linuxdeploy` strip tool does not understand CachyOS `.relr.dyn` sections. No `.deb`, AppImage, or package pass is claimed. |
+
+PowerShell was absent. The deterministic public-surface, 0.8 recovery, artifact, integrity, and link
+checks remain the Windows-passed results above and were not replaced by a home-grown Linux checker.
+Full interactive form, typing, shortcut, coordinate, scroll, drag, upload, dialog, execution,
+multi-harness, close/hide, tray, login, reboot, extension-disable, and notification-failure journeys
+remain incomplete.
+
 ## Residual dependency warnings
 
 RustSec reported 17 warnings in target-specific transitive dependencies:
@@ -64,18 +94,18 @@ the dependency scan as warning-free.
 | Gate | State |
 | --- | --- |
 | GitHub workflow execution | NOT RUN. The recovery commits are local and have not been pushed. |
-| Linux Debian candidate | NOT RUN in a native Linux builder. |
+| Linux Debian candidate | NOT RUN. CachyOS source/user-candidate and portable proof does not substitute for it. |
 | macOS arm64/x64 candidates | NOT RUN in native macOS builders. |
 | Windows package install | NOT RUN. Building and inspecting NSIS does not prove its hooks or lifecycle. |
 | Package signing/attestation | Platform signing NOT RUN. Workflow provenance is implemented but has not run on GitHub. |
 | SBOM and immutable release checksums | Assembly logic passed locally; a real cross-platform 1.0 publication candidate is NOT BUILT. |
 | Clean install | NOT RUN on Windows, macOS, or Linux ordinary-user machines. |
-| 0.8 -> 1.0 upgrade | NOT RUN. Stale manifest, harness, and supervisor migration still need live proof. |
+| 0.8 -> 1.0 upgrade | Development user-path proof passed on CachyOS; packaged Ubuntu/Debian upgrade remains NOT RUN. |
 | Login/reboot demand-start | NOT RUN on any packaged platform. |
-| Uninstall ownership | NOT RUN against installed native packages. |
+| Uninstall ownership | Development user-path ownership proof passed on CachyOS; native package removal remains NOT RUN. |
 | Native tray/window/notification | NOT RUN interactively. |
 | Store adapter | NOT SUBMITTED and no matching 1.0 store build exists publicly. |
-| Visible browser acceptance | NOT RUN against the package and matching store adapter. |
+| Visible browser acceptance | PARTIAL in ordinary-profile Chromium with the unpacked source adapter; package plus matching store adapter remains NOT RUN. |
 | Public MCP harness matrix | NOT RUN in three public harnesses against the signed candidate. |
 | Public reconciliation | NOT APPLICABLE until approved immutable artifacts exist. |
 
