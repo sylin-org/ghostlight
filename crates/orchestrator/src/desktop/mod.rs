@@ -166,9 +166,7 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "open" => {
-                let _ = show_workbench(app);
-            }
+            "open" => reveal_from_tray(app),
             "hold" => apply_tray_intent(app, WorkbenchRuntimeIntent::Hold),
             "resume" => apply_tray_intent(app, WorkbenchRuntimeIntent::Resume),
             "quit" => app.exit(0),
@@ -183,11 +181,17 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
                     ..
                 }
             ) {
-                let _ = show_workbench(tray.app_handle());
+                reveal_from_tray(tray.app_handle());
             }
         })
         .build(app)?;
     Ok(())
+}
+
+fn reveal_from_tray(app: &AppHandle) {
+    if let Err(error) = show_workbench(app) {
+        eprintln!("Ghostlight could not open its workbench from the tray: {error}");
+    }
 }
 
 fn apply_tray_intent(app: &AppHandle, intent: WorkbenchRuntimeIntent) {
@@ -216,11 +220,11 @@ fn minimize_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError>
 
 fn show_window(window: &WebviewWindow) -> Result<(), WorkbenchPresentationError> {
     window
-        .unminimize()
-        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
-    window
         .show()
         .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
+    // Some Linux window managers reject unminimize for a hidden window even after show has made
+    // it visible. The reveal still succeeds there, so de-minimization is a best-effort refinement.
+    let _ = window.unminimize();
     window
         .set_focus()
         .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;

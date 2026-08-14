@@ -25,9 +25,9 @@ pass.
   reports the 17 allowed GTK3/Tauri-chain warnings recorded in the dated readiness audit.
 - A three-sibling optimized user candidate is active at
   `~/.ghostlight/bin/v1.0.0-dev-6152636`. Its orchestrator, MCP connector, and browser connector
-  SHA-256 values are respectively `3482ad1782c71ef16d5cad5fe0bc5fddf67fa3c6890be25d8deda8e17371787f`,
+  SHA-256 values are respectively `7cc5cd3e3ef569c3ca537b1174f28669bb171504883c8c5602b6530b6f634cd0`,
   `73738e5d71ce6f20ad211c9b10082a5725ab32d05fe2fb9f447913c32662337d`, and
-  `a725e65a3a0ff9cfec760f064f876ebc28e1e946356b4a11875ef005095ed8b6`.
+  `1631aed13e00aa0c22a8af8cdde259bcc56c1210dc88a4291441c8025c55cb50`.
 - A fresh offline consumer installed the packed npm launcher and proved bare MCP initialization,
   its 22-tool catalog, one safe browser call, native CLI routing, valid-cache reuse, tamper
   replacement, and refusal to execute incomplete or unverified bytes. No npm registry was
@@ -205,7 +205,9 @@ pass.
   initializing Tauri. Concurrent launch attempts therefore converge on one authority and one tray.
 - There is one normal desktop launch. It always creates the tray and shows its workbench minimized.
   A second direct launch restores and focuses the existing authenticated workbench. `--headless`
-  remains the explicit presentation-free mode.
+  remains the explicit presentation-free mode. Reveal first shows the hidden window, treats
+  de-minimization as a best-effort window-manager refinement, and then focuses it, so a Linux
+  window manager cannot make the tray command fail silently by rejecting de-minimization.
 - `ghostlight call` is a second intake for scripts and programs (ADR-0105). It invokes one tool, or
   a batch of them over one session with `--stdin`, prints the outcome sentence or `--json`, and maps
   the terminal status to distinct exit codes where an uncertain effect is never zero. It demand-
@@ -271,6 +273,11 @@ source-gate pass, not release approval.
   `CODEX_HOME`, ran the built `ghostlight install --client codex`, and proved the Codex binary read
   the replacement MCP connector with empty arguments. The fixture used separate home and XDG roots
   and did not touch the active user configuration.
+- The optimized local candidate then migrated the active Codex and Visual Studio Code legacy
+  relays to the sibling MCP connector, reported both installed through doctor, and proved a second
+  install was idempotent. The installed MCP edge negotiated revision `2025-11-25` with all 22
+  tools. A fresh visible Chromium profile completed open and read against Example Domain; close
+  stopped truthfully at the default-on preserve-tabs interlock.
 - The restored development loop found the running repository service only by its exact
   `target/release/ghostlight.exe` path in plan mode. Its isolated smoke then built one selected
   package, enclosed the swap in `deploy.lock`, copied into a disposable repository-local live
