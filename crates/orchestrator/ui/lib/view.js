@@ -405,6 +405,28 @@
           + `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(detail)}</p></article>`;
       }).join("");
 
+      const passport = config.managed_policy;
+      if (passport?.configured) {
+        const organization = passport.organization || "Managed policy";
+        const freshness = words(passport.freshness);
+        const sequence = passport.sequence == null ? "No verified sequence" : `Verified sequence ${passport.sequence}`;
+        const source = passport.source_class === "https" ? "HTTPS" : words(passport.source_class);
+        const checked = passport.last_success_ms
+          ? ` Last verified ${new Date(passport.last_success_ms).toLocaleString()}.`
+          : "";
+        const contacts = (passport.contacts || []).map((contact) => {
+          const label = contact.label || words(contact.kind);
+          return `${label}: ${contact.value}`;
+        });
+        const detail = [passport.rationale, `${sequence} from ${source}. ${freshness}.${checked}`, ...contacts]
+          .filter(Boolean)
+          .join(" ");
+        const severity = passport.verified ? (passport.freshness === "fresh" ? "passing" : "") : "failing";
+        el["authority-grid"].insertAdjacentHTML("beforeend",
+          `<article class="card"><span class="severity ${severity}"><span class="dot"></span>${escapeHtml(freshness)}</span>`
+          + `<h2>${escapeHtml(organization)}</h2><p>${escapeHtml(detail)}</p></article>`);
+      }
+
       const started = snapshot.service.started_at_ms
         ? new Date(snapshot.service.started_at_ms).toLocaleString()
         : "unknown";

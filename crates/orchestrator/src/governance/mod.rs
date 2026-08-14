@@ -1011,6 +1011,36 @@ impl PolicySources {
             .as_ref()
             .and_then(managed::ManagedAuthority::sequence)
     }
+
+    fn managed_passport(&self) -> ManagedPolicyPassport {
+        if let Some(remote) = &self.managed_remote {
+            return remote.passport();
+        }
+        let configured = self.managed.configured();
+        let verified = self.managed.active.is_some();
+        ManagedPolicyPassport {
+            configured,
+            verified,
+            freshness: if !configured {
+                ManagedPolicyFreshness::NotConfigured
+            } else if verified {
+                ManagedPolicyFreshness::Fresh
+            } else {
+                ManagedPolicyFreshness::NoPolicy
+            },
+            sequence: None,
+            organization: None,
+            rationale: None,
+            contacts: Vec::new(),
+            source_class: if configured {
+                ManagedPolicySource::File
+            } else {
+                ManagedPolicySource::None
+            },
+            last_success_ms: None,
+            last_attempt_ms: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1080,6 +1110,70 @@ pub struct GovernanceDiagnostics {
     pub managed_authority_valid: bool,
     /// Whether a runtime-control file is configured.
     pub runtime_control_file_configured: bool,
+    /// User-visible provenance for the active signed managed policy.
+    pub managed_policy: ManagedPolicyPassport,
+}
+
+/// User-visible provenance for signed managed authority, without credentials or policy rules.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ManagedPolicyPassport {
+    /// Whether an administrator-provisioned managed source exists.
+    pub configured: bool,
+    /// Whether a signed policy is currently verified and active.
+    pub verified: bool,
+    /// Whether the active policy is current, last-known-good, absent, or not configured.
+    pub freshness: ManagedPolicyFreshness,
+    /// Monotonic signed publish sequence, when active.
+    pub sequence: Option<u64>,
+    /// Signed organization display name, when supplied.
+    pub organization: Option<String>,
+    /// Signed organization explanation, when supplied.
+    pub rationale: Option<String>,
+    /// Signed organization contact channels.
+    pub contacts: Vec<ManagedPolicyContact>,
+    /// Content-free source class.
+    pub source_class: ManagedPolicySource,
+    /// Last successful verification or not-modified response time.
+    pub last_success_ms: Option<u64>,
+    /// Last source attempt time.
+    pub last_attempt_ms: Option<u64>,
+}
+
+/// Current managed-policy freshness.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagedPolicyFreshness {
+    /// No administrator bootstrap is present.
+    NotConfigured,
+    /// A configured source has not supplied a valid signed policy.
+    NoPolicy,
+    /// The most recent source check succeeded.
+    Fresh,
+    /// A source failure left the last verified policy active.
+    LastKnownGood,
+}
+
+/// Managed-policy transport class without its address or credentials.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagedPolicySource {
+    /// No managed source exists.
+    None,
+    /// A local file supplies signed bundles.
+    File,
+    /// An HTTPS endpoint supplies signed bundles.
+    Https,
+}
+
+/// One signed organization contact channel.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ManagedPolicyContact {
+    /// Contact channel kind, such as email or URL.
+    pub kind: String,
+    /// Contact address.
+    pub value: String,
+    /// Optional organization-authored display label.
+    pub label: Option<String>,
 }
 
 impl GovernanceFacade {
@@ -1097,6 +1191,7 @@ impl GovernanceFacade {
             managed_authority_configured: policies.managed_configured(),
             managed_authority_valid: policies.managed_valid(),
             runtime_control_file_configured: self.runtime_control.is_some(),
+            managed_policy: policies.managed_passport(),
         }
     }
 

@@ -15,7 +15,9 @@ use thiserror::Error;
 
 use crate::browser::{BrowserPort, RelayBrowserPort};
 use crate::events::DomainEvent;
-use crate::governance::{AuditRecord, AuditSink, CapabilitySet, GovernanceFacade};
+use crate::governance::{
+    AuditRecord, AuditSink, CapabilitySet, GovernanceFacade, ManagedPolicyPassport,
+};
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSummary,
 };
@@ -381,6 +383,7 @@ impl WorkbenchFacade {
                 managed_authority_configured: governance.managed_authority_configured,
                 managed_authority_valid: governance.managed_authority_valid,
                 runtime_control_file_configured: governance.runtime_control_file_configured,
+                managed_policy: governance.managed_policy,
             },
         }
     }
@@ -964,6 +967,8 @@ pub struct ConfigurationSummary {
     pub managed_authority_valid: bool,
     /// Whether runtime control is backed by a configured file.
     pub runtime_control_file_configured: bool,
+    /// Signed managed-policy provenance suitable for the Policy Passport.
+    pub managed_policy: ManagedPolicyPassport,
 }
 
 /// Every place the workbench is willing to send someone.

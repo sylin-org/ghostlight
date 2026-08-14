@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use url::Url;
 
-use super::manifest;
+use super::{
+    manifest, ManagedPolicyContact, ManagedPolicyFreshness, ManagedPolicyPassport,
+    ManagedPolicySource,
+};
 
 const DEFAULT_POLL_SECONDS: u64 = 900;
 const MAX_POLL_SECONDS: u64 = 86_400;
@@ -103,7 +106,7 @@ struct ManagedStatus {
     v: u32,
     configured: bool,
     verified: bool,
-    freshness: String,
+    freshness: ManagedPolicyFreshness,
     #[serde(skip_serializing_if = "Option::is_none")]
     stale_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -111,8 +114,8 @@ struct ManagedStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     organization: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    contacts: Option<Vec<bundle::Contact>>,
-    source_class: String,
+    contacts: Option<Vec<ManagedPolicyContact>>,
+    source_class: ManagedPolicySource,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_success_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -243,6 +246,54 @@ impl ManagedAuthority {
 
     pub(crate) fn sequence(&self) -> Option<u64> {
         self.active.as_ref().map(|active| active.sequence)
+    }
+
+    pub(crate) fn passport(&self) -> ManagedPolicyPassport {
+        let presentation = self
+            .active
+            .as_ref()
+            .and_then(|active| active.presentation.as_ref());
+        ManagedPolicyPassport {
+            configured: self.configured,
+            verified: self.active.is_some(),
+            freshness: if !self.configured {
+                ManagedPolicyFreshness::NotConfigured
+            } else if self.active.is_none() {
+                ManagedPolicyFreshness::NoPolicy
+            } else if self.stale_reason.is_some() {
+                ManagedPolicyFreshness::LastKnownGood
+            } else {
+                ManagedPolicyFreshness::Fresh
+            },
+            sequence: self.active.as_ref().map(|active| active.sequence),
+            organization: presentation.and_then(|value| value.org_name.clone()),
+            rationale: presentation.and_then(|value| value.rationale.clone()),
+            contacts: presentation
+                .map(|value| {
+                    value
+                        .contacts
+                        .iter()
+                        .map(|contact| ManagedPolicyContact {
+                            kind: contact.kind.clone(),
+                            value: contact.value.clone(),
+                            label: contact.label.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            source_class: self
+                .bootstrap
+                .as_ref()
+                .map_or(ManagedPolicySource::None, |bootstrap| {
+                    if is_https(&bootstrap.source) {
+                        ManagedPolicySource::Https
+                    } else {
+                        ManagedPolicySource::File
+                    }
+                }),
+            last_success_ms: self.last_success_ms,
+            last_attempt_ms: self.last_attempt_ms,
+        }
     }
 
     fn accept_bootstrap(&mut self, bootstrap: Bootstrap, hash: [u8; 32]) {
@@ -431,43 +482,19 @@ impl ManagedAuthority {
         let Some(path) = &self.paths.status else {
             return;
         };
-        let presentation = self
-            .active
-            .as_ref()
-            .and_then(|active| active.presentation.as_ref());
+        let passport = self.passport();
         let status = ManagedStatus {
             v: 1,
-            configured: self.configured,
-            verified: self.active.is_some(),
-            freshness: if !self.configured {
-                "not_configured"
-            } else if self.active.is_none() {
-                "no_policy"
-            } else if self.stale_reason.is_some() {
-                "last_known_good"
-            } else {
-                "fresh"
-            }
-            .into(),
+            configured: passport.configured,
+            verified: passport.verified,
+            freshness: passport.freshness,
             stale_reason: self.stale_reason.map(str::to_owned),
-            sequence: self.active.as_ref().map(|active| active.sequence),
-            organization: presentation.and_then(|value| value.org_name.clone()),
-            contacts: presentation
-                .filter(|value| !value.contacts.is_empty())
-                .map(|value| value.contacts.clone()),
-            source_class: self
-                .bootstrap
-                .as_ref()
-                .map_or("none", |bootstrap| {
-                    if is_https(&bootstrap.source) {
-                        "https"
-                    } else {
-                        "file"
-                    }
-                })
-                .into(),
-            last_success_ms: self.last_success_ms,
-            last_attempt_ms: self.last_attempt_ms,
+            sequence: passport.sequence,
+            organization: passport.organization,
+            contacts: (!passport.contacts.is_empty()).then_some(passport.contacts),
+            source_class: passport.source_class,
+            last_success_ms: passport.last_success_ms,
+            last_attempt_ms: passport.last_attempt_ms,
             last_error: self.last_error.clone(),
         };
         if let Ok(bytes) = serde_json::to_vec_pretty(&status) {
@@ -648,7 +675,21 @@ mod tests {
         let seed = [31_u8; 32];
         fs::write(
             root.join("org.bundle"),
-            bundle::sign(&seed, None, 4, manifest("org", "read"), None),
+            bundle::sign(
+                &seed,
+                None,
+                4,
+                manifest("org", "read"),
+                Some(bundle::Presentation {
+                    org_name: Some("Example Org".into()),
+                    rationale: Some("Keeps browser work inside approved sites.".into()),
+                    contacts: vec![bundle::Contact {
+                        kind: "email".into(),
+                        value: "security@example.com".into(),
+                        label: Some("Security team".into()),
+                    }],
+                }),
+            ),
         )
         .unwrap();
         write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
@@ -660,11 +701,21 @@ mod tests {
         assert!(authority.valid());
         assert_eq!(authority.sequence(), Some(4));
         assert_eq!(authority.manifest().unwrap().name, "org");
+        let passport = authority.passport();
+        assert!(passport.verified);
+        assert_eq!(passport.organization.as_deref(), Some("Example Org"));
+        assert_eq!(
+            passport.rationale.as_deref(),
+            Some("Keeps browser work inside approved sites.")
+        );
+        assert_eq!(passport.contacts[0].value, "security@example.com");
         assert!(paths.cache.unwrap().exists());
         let status_path = paths.status.unwrap();
         assert!(status_path.exists());
         let status = fs::read_to_string(status_path).unwrap();
         assert!(status.contains("\"sequence\": 4"));
+        assert!(status.contains("Example Org"));
+        assert!(status.contains("security@example.com"));
         assert!(!status.contains("pubkey"));
         assert!(!status.contains("grants"));
         fs::remove_dir_all(root).unwrap();

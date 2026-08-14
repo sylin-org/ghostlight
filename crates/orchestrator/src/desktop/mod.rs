@@ -1156,6 +1156,25 @@ mod tests {
     }
 
     #[test]
+    fn managed_policy_passport_surfaces_every_signed_provenance_fact() {
+        let app = &surface_source();
+        for field in [
+            "organization",
+            "rationale",
+            "contacts",
+            "sequence",
+            "freshness",
+            "source_class",
+            "last_success_ms",
+        ] {
+            assert!(
+                app.contains(&format!("passport.{field}")),
+                "the Policy Passport does not render {field}"
+            );
+        }
+    }
+
+    #[test]
     fn every_observed_fact_is_documented_where_it_is_collected() {
         // The audit record's consumer is a person configuring a collector, so the guide is where
         // the vocabulary has to stay honest. A new field that nobody documents fails here.
