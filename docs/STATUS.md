@@ -26,6 +26,9 @@ or public-release evidence.
 - Formatting, warnings-denied workspace Clippy, all 194 Rust tests, all 100 extension tests, all 10
   npm launcher tests, all 4 MCPB tests, and the process, CLI, PowerShell, and workbench-surface
   journeys passed. The locked Windows build retained the Linux-only Tao patch from ADR-0120.
+- GitHub CI run `31809913114` passed all nine jobs at pushed head `de4392db`: Windows and Linux
+  Rust, Windows and Linux process journeys, both extension platforms, supply chain, release truth,
+  and formatting.
 - The mandatory npm process model preserved ordered CLI output and exit status from the optimized
   Windows application binary. A real installed MCP connector negotiated revision `2025-11-25`
   and returned Ghostlight's catalog metadata.
@@ -134,8 +137,8 @@ reboot, or public-release pass.
   Linux; dependency licenses, sources, wildcards, and
   advisories are gated; source and observed-public versions are checked separately; and the store
   extension package is built from an explicit runtime allowlist. The online public check passed
-  against GitHub, npm, Chrome, the official MCP Registry, and sylin.org on 2026-08-13. These local
-  workflow files have not run on GitHub until they are pushed.
+  against GitHub, npm, Chrome, the official MCP Registry, and sylin.org on 2026-08-13. The combined
+  CI workflow passed all nine jobs at pushed Windows-lane head `de4392db` on 2026-08-14.
 - Packaged native-host lifecycle is restored without restoring the 0.8 resident supervisors
   (ADR-0115). The orchestrator now checks, installs, updates, and safely removes Chrome, Edge,
   Brave, and Chromium registrations; packages carry both connector sidecars; and narrow migration
@@ -563,9 +566,9 @@ source-gate pass, not release approval.
 
 ## Release gates still requiring an owner or release environment
 
-- Push the local 1.0 recovery commits only when the owner approves, then run the manual candidate
-  workflow on GitHub. Its two native builders and provenance step have not executed for this
-  source revision.
+- Run the manual candidate workflow on GitHub when the owner approves. Ordinary cross-platform CI
+  passed at `de4392db`, but the candidate workflow's two native builders and provenance step have
+  not executed for this source revision.
 - Produce and sign platform bundles, then verify clean install, public-0.8 upgrade, and uninstall
   on clean Windows and Linux machines. The unsigned Windows development-host package lifecycle
   passes but does not replace those release-environment rows.

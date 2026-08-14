@@ -5,8 +5,8 @@ Status: source gate passed; release gate not yet passed
 Windows implementation revision tested: `b292bb22766686f7a07d8ffb75194867e5e94c70`.
 
 Environment: Windows x86_64, Rust/Cargo 1.95.0, Node 24.7.0, PowerShell 7.6.0, and Tauri CLI
-2.11.0. Build outputs are local and gitignored. Nothing was tagged, pushed, signed, submitted, or
-published.
+2.11.0. Build outputs are local and gitignored. The tested implementation was pushed to `dev`;
+nothing was tagged, signed, submitted, or published.
 
 ## Passed locally
 
@@ -41,6 +41,7 @@ published.
 | Candidate assembler | Four real component SBOMs plus synthetic Windows and Linux input passed exact 17-artifact assembly and verification. |
 | Distribution entry points | npm, Windows MCPB, two portable archives, one-line installers, and Scoop/WinGet metadata were constructed and checked from candidate hashes. |
 | Publication planning | Chrome, GitHub, npm, and MCP plans made no mutation and named the missing or mismatched prerequisites. |
+| GitHub CI | Push run `31809913114` passed all nine Windows, Linux, extension, process, supply-chain, release-truth, and formatting jobs at `de4392db`. |
 
 The rebuilt local unsigned NSIS output was
 `.target-windows-package/x86_64-pc-windows-msvc/release/bundle/nsis/Ghostlight_1.0.0_x64-setup.exe`,
@@ -118,7 +119,6 @@ the dependency scan as warning-free.
 
 | Gate | State |
 | --- | --- |
-| GitHub workflow execution | NOT OBSERVED for the combined Linux head in this record; inspect the triggered runs after the authorized `dev` push. |
 | Linux Debian candidate | NOT RUN. CachyOS source/user-candidate and portable proof does not substitute for it. |
 | Package signing/attestation | Platform signing NOT RUN. Workflow provenance is implemented but has not run on GitHub. |
 | SBOM and immutable release checksums | Assembly logic passed locally; a real cross-platform 1.0 publication candidate is NOT BUILT. |
