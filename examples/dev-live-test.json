@@ -1,6 +1,21 @@
 {
-  "version": 1,
-  "allow_capabilities": ["read", "action"],
-  "allow_tab_close": false,
-  "allow_hosts": ["example.org"]
+  "schema": 3,
+  "name": "Live development check",
+  "version": "1",
+  "grants": [
+    {
+      "id": "example-org",
+      "hosts": {
+        "allow": ["example.org"]
+      },
+      "allowed": ["read", "action"]
+    }
+  ],
+  "config": [
+    {
+      "key": "browser.tabs.allow_close",
+      "value": false,
+      "level": "mandatory"
+    }
+  ]
 }

@@ -667,7 +667,8 @@ impl BrowserEventSink for ServiceBrowserEvents {
                         "Authority blocked the page the browser landed on."
                     },
                     0,
-                );
+                )
+                .with_policy(&snapshot, decision);
                 let _ = self.audit.record(&record);
             }
             BrowserEvent::ReadinessChanged { tab_id, readiness } => self

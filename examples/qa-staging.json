@@ -1,8 +1,22 @@
 {
-  "version": 1,
-  "allow_capabilities": ["read", "action", "write"],
-  "deny_capabilities": ["execute"],
-  "allow_tab_close": false,
-  "allow_hosts": ["geisinger.org", "*.geisinger.org"],
-  "deny_hosts": ["admin.geisinger.org"]
+  "schema": 3,
+  "name": "QA staging",
+  "version": "1",
+  "grants": [
+    {
+      "id": "staging-sites",
+      "hosts": {
+        "allow": ["geisinger.org", "*.geisinger.org"],
+        "deny": ["admin.geisinger.org"]
+      },
+      "allowed": ["read", "action", "write"]
+    }
+  ],
+  "config": [
+    {
+      "key": "browser.tabs.allow_close",
+      "value": false,
+      "level": "mandatory"
+    }
+  ]
 }

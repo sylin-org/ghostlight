@@ -1,3 +1,14 @@
 {
-  "version": 1
+  "schema": 3,
+  "name": "Developer unrestricted",
+  "version": "1",
+  "grants": [
+    {
+      "id": "all-open",
+      "hosts": {
+        "allow": ["*"]
+      },
+      "allowed": ["read", "action", "write", "execute"]
+    }
+  ]
 }

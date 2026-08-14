@@ -1,6 +1,21 @@
 {
-  "version": 1,
-  "allow_capabilities": ["read", "action", "write", "execute"],
-  "allow_tab_close": false,
-  "allow_hosts": ["sylin.org", "*.sylin.org"]
+  "schema": 3,
+  "name": "Ghostlight site demo",
+  "version": "1",
+  "grants": [
+    {
+      "id": "ghostlight-site",
+      "hosts": {
+        "allow": ["sylin.org", "*.sylin.org"]
+      },
+      "allowed": ["read", "action", "write", "execute"]
+    }
+  ],
+  "config": [
+    {
+      "key": "browser.tabs.allow_close",
+      "value": false,
+      "level": "mandatory"
+    }
+  ]
 }

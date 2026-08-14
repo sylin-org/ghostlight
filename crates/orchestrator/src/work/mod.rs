@@ -140,10 +140,7 @@ impl ApplicationExecutor {
                 let snapshot = self
                     .governance
                     .snapshot(&language::RequestRestrictions::default());
-                let decision = Decision {
-                    allowed: false,
-                    reason: ReasonCode::InvalidRequest,
-                };
+                let decision = Decision::refused(ReasonCode::InvalidRequest);
                 let refusal = Refusal::InvalidRequest;
                 let summary = refusal.summary();
                 let result = InvocationResult::new(
@@ -241,10 +238,7 @@ impl ApplicationExecutor {
                     json!({"reason":"cancelled"}),
                     refusal.next_steps(),
                 ),
-                decision: Decision {
-                    allowed: true,
-                    reason: ReasonCode::Permitted,
-                },
+                decision: Decision::permitted(),
                 physical_id: None,
                 observed: Observed::default(),
             }
@@ -262,10 +256,7 @@ impl ApplicationExecutor {
                     json!({"reason":"deadline"}),
                     refusal.next_steps(),
                 ),
-                decision: Decision {
-                    allowed: true,
-                    reason: ReasonCode::Permitted,
-                },
+                decision: Decision::permitted(),
                 physical_id: None,
                 observed: Observed::default(),
             }
@@ -343,6 +334,7 @@ impl ApplicationExecutor {
             duration_ms,
         )
         .from_channel(channel)
+        .with_policy(snapshot, terminal.decision)
         .with_observation(observed);
         let _ = self.audit.record(&record);
         gate.complete(terminal.result)
@@ -3152,16 +3144,17 @@ impl ApplicationExecutor {
         if !runtime.allowed {
             return runtime;
         }
+        let mut observed = None;
         for url in commits.iter().chain(std::iter::once(&tab.url)) {
             let decision = context.snapshot.authorize_landing(requirements, url);
             if !decision.allowed {
                 return decision;
             }
+            if decision.observed && observed.is_none() {
+                observed = Some(decision);
+            }
         }
-        Decision {
-            allowed: true,
-            reason: ReasonCode::Permitted,
-        }
+        observed.unwrap_or_else(Decision::permitted)
     }
 
     fn authorize_tab_close(&self, context: &InvocationContext<'_>) -> Decision {
@@ -3176,7 +3169,12 @@ impl ApplicationExecutor {
         if !action.allowed {
             return action;
         }
-        context.snapshot.authorize_tab_close()
+        let close = context.snapshot.authorize_tab_close();
+        if !close.allowed || close.observed {
+            close
+        } else {
+            action
+        }
     }
 
     /// The one browser seam.
@@ -3332,9 +3330,20 @@ impl ApplicationExecutor {
         physical_id: Option<u64>,
         effect: Effect,
         repeat_safe: bool,
-        facts: Value,
+        mut facts: Value,
         blocked_host: Option<String>,
     ) -> Terminal {
+        if let Value::Object(object) = &mut facts {
+            if let Some(denial_id) = decision.denial_id() {
+                object.insert("denial_id".into(), Value::String(denial_id));
+            }
+            if let Some(rule) = decision.policy_rule() {
+                object.insert("policy_rule".into(), Value::String(rule.into()));
+            }
+            if let Some(mode) = decision.policy_mode() {
+                object.insert("policy_mode".into(), Value::String(mode.into()));
+            }
+        }
         let attention = decision.reason == ReasonCode::RuntimeAttention;
         let refusal = if attention {
             Refusal::AttentionRequired
@@ -3561,13 +3570,10 @@ impl ApplicationExecutor {
                 json!({"reason":reason.as_fact()}),
                 refusal.next_steps(),
             ),
-            decision: Decision {
-                allowed: status != Status::Blocked,
-                reason: if status == Status::Blocked {
-                    ReasonCode::RuntimeHold
-                } else {
-                    ReasonCode::Permitted
-                },
+            decision: if status == Status::Blocked {
+                Decision::refused(ReasonCode::RuntimeHold)
+            } else {
+                Decision::permitted()
             },
             physical_id: None,
             observed: Observed::default(),
@@ -3670,10 +3676,7 @@ fn operation_requires_workspace_lease(operation: &Operation) -> bool {
 }
 
 fn permitted() -> Decision {
-    Decision {
-        allowed: true,
-        reason: ReasonCode::Permitted,
-    }
+    Decision::permitted()
 }
 
 fn recording_facts(summary: &PhysicalRecordingSummary) -> Value {
@@ -4203,6 +4206,12 @@ mod tests {
             "ghostlight-1.0-work-{name}-{}.json",
             uuid::Uuid::new_v4()
         ))
+    }
+
+    fn all_open_policy_with(config: &str) -> String {
+        format!(
+            r#"{{"schema":3,"name":"work test","version":"1","grants":[{{"id":"all","hosts":{{"allow":["*"]}},"allowed":["read","action","write","execute"]}}],"config":{config}}}"#
+        )
     }
 
     #[test]
@@ -4871,7 +4880,13 @@ mod tests {
     #[test]
     fn tab_close_policy_blocks_before_browser_dispatch() {
         let policy = temporary_policy("tab-close");
-        fs::write(&policy, br#"{"version":1,"allow_tab_close":false}"#).unwrap();
+        fs::write(
+            &policy,
+            all_open_policy_with(
+                r#"[{"key":"browser.tabs.allow_close","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
         let (executor, browser, _, workspace, _) =
             fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
         browser.push(Ok(BrowserOutcome::TabOpened {
@@ -4994,7 +5009,13 @@ mod tests {
     #[test]
     fn governance_can_remove_target_names_without_losing_the_safe_role() {
         let policy = temporary_policy("hide-target-names");
-        fs::write(&policy, br#"{"version":1,"preserve_target_names":false}"#).unwrap();
+        fs::write(
+            &policy,
+            all_open_policy_with(
+                r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
         let (executor, browser, _, workspace, audit) =
             fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
         browser.push(Ok(BrowserOutcome::TabOpened {
@@ -5269,7 +5290,13 @@ mod tests {
     #[test]
     fn denied_redirect_remains_visibly_open_when_close_policy_refuses_compensation() {
         let policy = temporary_policy("retained-denied-landing");
-        fs::write(&policy, br#"{"version":1,"allow_tab_close":false}"#).unwrap();
+        fs::write(
+            &policy,
+            all_open_policy_with(
+                r#"[{"key":"browser.tabs.allow_close","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
         let (executor, browser, _, workspace, _) =
             fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
         browser.push(Ok(BrowserOutcome::TabOpened {

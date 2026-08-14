@@ -3,7 +3,8 @@
 
 //! Authority snapshots, final-boundary admission, runtime controls, and minimized audit intent.
 
-use std::collections::{BTreeMap, HashSet};
+pub mod manifest;
+
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -17,9 +18,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
 use ghostlight_bridge::service::IntakeChannel;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
-use uuid::Uuid;
 
 use crate::language::{outcome::Observed, RequestRestrictions};
 
@@ -112,6 +113,10 @@ impl CapabilitySet {
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
+    }
+
+    const fn intersects(self, other: Self) -> bool {
+        self.0 & other.0 != 0
     }
 
     /// Iterate in stable vocabulary order, never authority order.
@@ -229,6 +234,45 @@ impl ReasonCode {
     }
 }
 
+/// Stable policy rule names used for attribution and denial ids.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PolicyRule {
+    /// No grant covers the governed host.
+    UnmatchedHost,
+    /// A grant explicitly carves the host out.
+    DeniedHost,
+    /// A resolving grant lacks part of the required set.
+    Capability,
+    /// A monotonic setting prevents tab closure.
+    TabClose,
+    /// A manifest does not admit an intake channel.
+    Channel,
+}
+
+impl PolicyRule {
+    /// Stable denial and audit vocabulary.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UnmatchedHost => "unmatched_host",
+            Self::DeniedHost => "denied_host",
+            Self::Capability => "capability",
+            Self::TabClose => "tab_close",
+            Self::Channel => "channel",
+        }
+    }
+}
+
+/// Compact immutable reference into an authority snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PolicyAttribution {
+    layer: u16,
+    grant: Option<u16>,
+    rule: PolicyRule,
+    denial: [u8; 4],
+    mode: manifest::PolicyMode,
+}
+
 /// A final-boundary permission decision.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Decision {
@@ -236,6 +280,9 @@ pub struct Decision {
     pub allowed: bool,
     /// Stable reason.
     pub reason: ReasonCode,
+    /// Whether ordinary policy would deny but observe mode admitted the work.
+    pub observed: bool,
+    attribution: Option<PolicyAttribution>,
 }
 
 impl Decision {
@@ -243,13 +290,77 @@ impl Decision {
         Self {
             allowed: true,
             reason: ReasonCode::Permitted,
+            observed: false,
+            attribution: None,
         }
     }
     const fn deny(reason: ReasonCode) -> Self {
         Self {
             allowed: false,
             reason,
+            observed: false,
+            attribution: None,
         }
+    }
+
+    /// Construct a non-policy admission used by execution and runtime seams.
+    #[must_use]
+    pub const fn permitted() -> Self {
+        Self::allow()
+    }
+
+    /// Construct a non-policy refusal used by validation and runtime seams.
+    #[must_use]
+    pub const fn refused(reason: ReasonCode) -> Self {
+        Self::deny(reason)
+    }
+
+    fn policy(
+        reason: ReasonCode,
+        attribution: PolicyAttribution,
+        effective_mode: manifest::PolicyMode,
+    ) -> Self {
+        if effective_mode == manifest::PolicyMode::Observe {
+            Self {
+                allowed: true,
+                reason,
+                observed: true,
+                attribution: Some(attribution),
+            }
+        } else {
+            Self {
+                allowed: false,
+                reason,
+                observed: false,
+                attribution: Some(attribution),
+            }
+        }
+    }
+
+    /// Stable denial id when an authored policy rule decided this boundary.
+    #[must_use]
+    pub fn denial_id(self) -> Option<String> {
+        self.attribution.map(|attribution| {
+            format!(
+                "D-{:02x}{:02x}{:02x}{:02x}",
+                attribution.denial[0],
+                attribution.denial[1],
+                attribution.denial[2],
+                attribution.denial[3]
+            )
+        })
+    }
+
+    /// Stable authored rule when policy decided this boundary.
+    #[must_use]
+    pub fn policy_rule(self) -> Option<&'static str> {
+        self.attribution.map(|value| value.rule.as_str())
+    }
+
+    /// Effective mode when authored policy decided this boundary.
+    #[must_use]
+    pub fn policy_mode(self) -> Option<&'static str> {
+        self.attribution.map(|value| value.mode.as_str())
     }
 }
 
@@ -257,12 +368,49 @@ impl Decision {
 #[derive(Clone, Debug)]
 pub struct AuthoritySnapshot {
     id: String,
-    capabilities: HashSet<Capability>,
+    layers: Vec<PolicyLayer>,
+    request_capabilities: Option<CapabilitySet>,
+    request_hosts: Option<Vec<String>>,
     tab_close_allowed: bool,
+    tab_close_source: Option<u16>,
     preserve_target_names: bool,
-    allow_host_layers: Vec<Vec<String>>,
-    deny_hosts: Vec<String>,
+    sacred_hosts: Vec<String>,
     valid: bool,
+}
+
+/// Where one policy layer sits in the tighten-only authority order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AuthorityTier {
+    Managed,
+    User,
+}
+
+impl AuthorityTier {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Managed => "managed",
+            Self::User => "user",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PolicyLayer {
+    tier: AuthorityTier,
+    manifest: manifest::Manifest,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RawDenial {
+    reason: ReasonCode,
+    rule: PolicyRule,
+    grant: Option<u16>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LayerOutcome {
+    denial: Option<RawDenial>,
+    mode: manifest::PolicyMode,
 }
 
 impl AuthoritySnapshot {
@@ -284,14 +432,24 @@ impl AuthoritySnapshot {
         if !self.valid {
             return Decision::deny(ReasonCode::InvalidAuthority);
         }
-        if requirements
-            .iter()
-            .all(|capability| self.capabilities.contains(&capability))
-        {
-            Decision::allow()
-        } else {
-            Decision::deny(ReasonCode::CapabilityDenied)
+        if requirements.is_empty() {
+            return Decision::allow();
         }
+        let outcomes: Vec<_> = self
+            .layers
+            .iter()
+            .map(|layer| decide_resource_less(layer, requirements))
+            .collect();
+        if let Some(decision) = self.resolve_outcomes(&outcomes) {
+            return decision;
+        }
+        if self
+            .request_capabilities
+            .is_some_and(|allowed| !requirements.is_subset_of(allowed))
+        {
+            return self.session_denial(ReasonCode::CapabilityDenied, PolicyRule::Capability);
+        }
+        Decision::allow()
     }
 
     /// Decide whether model-driven tab closure is admitted by every authority layer.
@@ -303,7 +461,22 @@ impl AuthoritySnapshot {
         if self.tab_close_allowed {
             Decision::allow()
         } else {
-            Decision::deny(ReasonCode::TabCloseDenied)
+            let layer = self.tab_close_source.unwrap_or(0);
+            let source = self
+                .layers
+                .get(usize::from(layer))
+                .map_or(self.id.as_str(), |value| value.manifest.hash.as_str());
+            Decision::policy(
+                ReasonCode::TabCloseDenied,
+                PolicyAttribution {
+                    layer,
+                    grant: None,
+                    rule: PolicyRule::TabClose,
+                    denial: denial_bytes(source, "", PolicyRule::TabClose),
+                    mode: manifest::PolicyMode::Enforce,
+                },
+                manifest::PolicyMode::Enforce,
+            )
         }
     }
 
@@ -316,36 +489,238 @@ impl AuthoritySnapshot {
     /// Decide an observed or requested landing at its final boundary.
     #[must_use]
     pub fn authorize_landing(&self, requirements: impl Into<CapabilitySet>, url: &str) -> Decision {
-        let capability_decision = self.authorize_requirements(requirements.into());
-        if !capability_decision.allowed {
-            return capability_decision;
+        let requirements = requirements.into();
+        if !self.valid {
+            return Decision::deny(ReasonCode::InvalidAuthority);
         }
         let Ok(parsed) = Url::parse(url) else {
             return Decision::deny(ReasonCode::HostDenied);
         };
-        if protected_url(&parsed) {
+        if protected_url(&parsed) || protected_by_policy(&parsed, &self.sacred_hosts) {
             return Decision::deny(ReasonCode::ProtectedHost);
         }
         let Some(host) = parsed.host_str().map(str::to_ascii_lowercase) else {
             return Decision::deny(ReasonCode::HostDenied);
         };
-        if self
-            .deny_hosts
+        if requirements.is_empty() {
+            return Decision::allow();
+        }
+        let outcomes: Vec<_> = self
+            .layers
             .iter()
-            .any(|pattern| host_matches(&host, pattern))
-        {
-            return Decision::deny(ReasonCode::HostDenied);
+            .map(|layer| decide_for_host(layer, requirements, &host))
+            .collect();
+        if let Some(decision) = self.resolve_outcomes(&outcomes) {
+            return decision;
         }
         if self
-            .allow_host_layers
-            .iter()
-            .all(|patterns| patterns.iter().any(|pattern| host_matches(&host, pattern)))
+            .request_capabilities
+            .is_some_and(|allowed| !requirements.is_subset_of(allowed))
         {
-            Decision::allow()
-        } else {
-            Decision::deny(ReasonCode::HostDenied)
+            return self.session_denial(ReasonCode::CapabilityDenied, PolicyRule::Capability);
+        }
+        if self
+            .request_hosts
+            .as_ref()
+            .is_some_and(|patterns| !patterns.iter().any(|pattern| host_matches(&host, pattern)))
+        {
+            return self.session_denial(ReasonCode::HostDenied, PolicyRule::UnmatchedHost);
+        }
+        Decision::allow()
+    }
+
+    fn resolve_outcomes(&self, outcomes: &[LayerOutcome]) -> Option<Decision> {
+        let denial = outcomes
+            .iter()
+            .enumerate()
+            .find_map(|(index, outcome)| outcome.denial.map(|denial| (index, denial)))?;
+        let effective_mode = outcomes
+            .iter()
+            .fold(manifest::PolicyMode::Observe, |mode, outcome| {
+                mode.strictest(outcome.mode)
+            });
+        let layer = &self.layers[denial.0];
+        let grant_id = denial
+            .1
+            .grant
+            .and_then(|index| layer.manifest.grants.get(usize::from(index)))
+            .map_or("", |grant| grant.id.as_str());
+        Some(Decision::policy(
+            denial.1.reason,
+            PolicyAttribution {
+                layer: u16::try_from(denial.0).expect("policy layer count is bounded"),
+                grant: denial.1.grant,
+                rule: denial.1.rule,
+                denial: denial_bytes(&layer.manifest.hash, grant_id, denial.1.rule),
+                mode: effective_mode,
+            },
+            effective_mode,
+        ))
+    }
+
+    fn session_denial(&self, reason: ReasonCode, rule: PolicyRule) -> Decision {
+        let layer = u16::try_from(self.layers.len()).expect("policy layer count is bounded");
+        Decision::policy(
+            reason,
+            PolicyAttribution {
+                layer,
+                grant: None,
+                rule,
+                denial: denial_bytes(&self.id, "session", rule),
+                mode: manifest::PolicyMode::Enforce,
+            },
+            manifest::PolicyMode::Enforce,
+        )
+    }
+
+    /// Policy tier and grant id for one decision, when authored policy decided it.
+    #[must_use]
+    pub fn attribution(&self, decision: Decision) -> Option<(&'static str, Option<&str>)> {
+        let attribution = decision.attribution?;
+        let Some(layer) = self.layers.get(usize::from(attribution.layer)) else {
+            return Some(("session", None));
+        };
+        let grant = attribution
+            .grant
+            .and_then(|index| layer.manifest.grants.get(usize::from(index)))
+            .map(|grant| grant.id.as_str());
+        Some((layer.tier.as_str(), grant))
+    }
+}
+
+fn decide_resource_less(layer: &PolicyLayer, requirements: CapabilitySet) -> LayerOutcome {
+    let allowed = layer
+        .manifest
+        .grants
+        .iter()
+        .fold(CapabilitySet::EMPTY, |set, grant| {
+            set.union(grant.allowed_set())
+        });
+    let mode = layer
+        .manifest
+        .grants
+        .iter()
+        .filter(|grant| grant.allowed_set().intersects(requirements))
+        .map(|grant| grant.mode.or(layer.manifest.mode).unwrap_or_default())
+        .reduce(manifest::PolicyMode::strictest)
+        .unwrap_or_else(|| layer.manifest.mode.unwrap_or_default());
+    if requirements.is_subset_of(allowed) {
+        return LayerOutcome { denial: None, mode };
+    }
+    LayerOutcome {
+        denial: Some(RawDenial {
+            reason: if layer.manifest.grants.is_empty() {
+                ReasonCode::HostDenied
+            } else {
+                ReasonCode::CapabilityDenied
+            },
+            rule: if layer.manifest.grants.is_empty() {
+                PolicyRule::UnmatchedHost
+            } else {
+                PolicyRule::Capability
+            },
+            grant: None,
+        }),
+        mode,
+    }
+}
+
+fn decide_for_host(layer: &PolicyLayer, requirements: CapabilitySet, host: &str) -> LayerOutcome {
+    let mut first_denial = None;
+    let mut first_denial_mode = None;
+    for (index, grant) in layer.manifest.grants.iter().enumerate() {
+        let grant_index = u16::try_from(index).expect("grant count is bounded");
+        let mode = grant.mode.or(layer.manifest.mode).unwrap_or_default();
+        match evaluate_host(host, &grant.hosts) {
+            HostOutcome::Allowed => {
+                if requirements.is_subset_of(grant.allowed_set()) {
+                    return LayerOutcome { denial: None, mode };
+                }
+                if first_denial.is_none() {
+                    first_denial = Some(RawDenial {
+                        reason: ReasonCode::CapabilityDenied,
+                        rule: PolicyRule::Capability,
+                        grant: Some(grant_index),
+                    });
+                    first_denial_mode = Some(mode);
+                }
+            }
+            HostOutcome::Denied if first_denial.is_none() => {
+                first_denial = Some(RawDenial {
+                    reason: ReasonCode::HostDenied,
+                    rule: PolicyRule::DeniedHost,
+                    grant: Some(grant_index),
+                });
+                first_denial_mode = Some(mode);
+            }
+            HostOutcome::Denied | HostOutcome::Unmatched => {}
         }
     }
+    LayerOutcome {
+        denial: Some(first_denial.unwrap_or(RawDenial {
+            reason: ReasonCode::HostDenied,
+            rule: PolicyRule::UnmatchedHost,
+            grant: None,
+        })),
+        mode: first_denial_mode.unwrap_or_else(|| layer.manifest.mode.unwrap_or_default()),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HostOutcome {
+    Allowed,
+    Denied,
+    Unmatched,
+}
+
+fn evaluate_host(host: &str, rules: &manifest::HostRules) -> HostOutcome {
+    let allow = rules
+        .allow
+        .iter()
+        .filter_map(|pattern| pattern_specificity(host, pattern))
+        .max();
+    let deny = rules
+        .deny
+        .iter()
+        .filter_map(|pattern| pattern_specificity(host, pattern))
+        .max();
+    match (allow, deny) {
+        (None, None) => HostOutcome::Unmatched,
+        (Some(_), None) => HostOutcome::Allowed,
+        (None, Some(_)) => HostOutcome::Denied,
+        (Some(allow), Some(deny)) if deny >= allow => HostOutcome::Denied,
+        (Some(_), Some(_)) => HostOutcome::Allowed,
+    }
+}
+
+fn pattern_specificity(host: &str, pattern: &str) -> Option<(u8, usize)> {
+    let pattern = pattern.to_ascii_lowercase();
+    if pattern == host {
+        return Some((3, pattern.len()));
+    }
+    if pattern == "*" {
+        return Some((1, 0));
+    }
+    let suffix = pattern.strip_prefix("*.")?;
+    (host.len() > suffix.len()
+        && host.ends_with(suffix)
+        && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.'))
+    .then_some((2, suffix.len()))
+}
+
+fn denial_bytes(manifest_hash: &str, grant_id: &str, rule: PolicyRule) -> [u8; 4] {
+    let digest =
+        Sha256::digest(format!("{manifest_hash}\n{grant_id}\n{}", rule.as_str()).as_bytes());
+    [digest[0], digest[1], digest[2], digest[3]]
+}
+
+fn protected_by_policy(url: &Url, sacred_hosts: &[String]) -> bool {
+    url.host_str().is_some_and(|host| {
+        let host = host.to_ascii_lowercase();
+        sacred_hosts
+            .iter()
+            .any(|pattern| host_matches(&host, pattern))
+    })
 }
 
 /// Live controls checked immediately before effects and when browser events arrive.
@@ -452,12 +827,12 @@ impl GovernanceFacade {
             local_policy_valid: self
                 .local_policy
                 .as_deref()
-                .is_none_or(|path| read_policy(path, false).is_ok()),
+                .is_none_or(|path| read_policy(path).is_ok()),
             managed_authority_configured: self.managed_policy.is_some(),
             managed_authority_valid: self
                 .managed_policy
                 .as_deref()
-                .is_none_or(|path| read_policy(path, true).is_ok()),
+                .is_none_or(|path| read_policy(path).is_ok()),
             runtime_control_file_configured: self.runtime_control.is_some(),
         }
     }
@@ -509,7 +884,6 @@ impl GovernanceFacade {
         self.controls.state()
     }
 
-    /// Build one immutable snapshot and apply caller restrictions by intersection.
     /// Decide whether an intake channel may open a session at all.
     ///
     /// This is admission, not capability: an admitted channel is still bound by every ceiling the
@@ -517,16 +891,16 @@ impl GovernanceFacade {
     /// intersection, so a managed refusal cannot be undone locally, and an invalid layer denies.
     #[must_use]
     pub fn admits_channel(&self, channel: IntakeChannel) -> Decision {
-        for (path, managed) in [(&self.local_policy, false), (&self.managed_policy, true)] {
+        let key = match channel {
+            IntakeChannel::Mcp => "channels.mcp.enabled",
+            IntakeChannel::Cli => "channels.cli.enabled",
+        };
+        for path in [&self.managed_policy, &self.local_policy] {
             let Some(path) = path else { continue };
-            match read_policy(path, managed) {
+            match read_policy(path) {
                 Ok(policy) => {
-                    if let Some(channels) = &policy.channels {
-                        if let Some(rule) = channels.get(&channel) {
-                            if !rule.enabled {
-                                return Decision::deny(ReasonCode::ChannelDenied);
-                            }
-                        }
+                    if policy.boolean_setting(key) == Some(false) {
+                        return Decision::deny(ReasonCode::ChannelDenied);
                     }
                 }
                 Err(_) => return Decision::deny(ReasonCode::InvalidAuthority),
@@ -535,58 +909,80 @@ impl GovernanceFacade {
         Decision::allow()
     }
 
+    /// Build one immutable snapshot and apply caller restrictions by intersection.
+    #[must_use]
     pub fn snapshot(&self, restrictions: &RequestRestrictions) -> AuthoritySnapshot {
-        let mut capabilities = all_capabilities();
+        let mut layers = Vec::new();
         let mut tab_close_allowed = true;
+        let mut tab_close_source = None;
         let mut preserve_target_names = true;
-        let mut allow_host_layers = Vec::new();
-        let mut deny_hosts = Vec::new();
+        let mut sacred_hosts = Vec::new();
         let mut valid = true;
 
-        if let Some(path) = &self.local_policy {
-            match read_policy(path, false) {
-                Ok(policy) => apply_policy(
-                    &policy,
-                    &mut capabilities,
-                    &mut tab_close_allowed,
-                    &mut preserve_target_names,
-                    &mut allow_host_layers,
-                    &mut deny_hosts,
-                ),
+        for (path, tier) in [
+            (&self.managed_policy, AuthorityTier::Managed),
+            (&self.local_policy, AuthorityTier::User),
+        ] {
+            let Some(path) = path else { continue };
+            match read_policy(path) {
+                Ok(policy) => {
+                    let index = u16::try_from(layers.len()).expect("policy layer count is bounded");
+                    if policy.boolean_setting("browser.tabs.allow_close") == Some(false) {
+                        tab_close_allowed = false;
+                        tab_close_source.get_or_insert(index);
+                    }
+                    if policy.boolean_setting("privacy.preserve_target_names") == Some(false) {
+                        preserve_target_names = false;
+                    }
+                    if let Some(patterns) =
+                        policy.string_array_setting("content.security.sacred_domains")
+                    {
+                        sacred_hosts.extend(patterns);
+                    }
+                    layers.push(PolicyLayer {
+                        tier,
+                        manifest: policy,
+                    });
+                }
                 Err(_) => valid = false,
             }
         }
-        if let Some(path) = &self.managed_policy {
-            match read_policy(path, true) {
-                Ok(policy) => apply_policy(
-                    &policy,
-                    &mut capabilities,
-                    &mut tab_close_allowed,
-                    &mut preserve_target_names,
-                    &mut allow_host_layers,
-                    &mut deny_hosts,
-                ),
-                Err(_) => valid = false,
-            }
-        }
-        if let Some(restricted) = &restrictions.restrict_capabilities {
-            let requested: HashSet<_> = restricted
+        let request_capabilities = restrictions.restrict_capabilities.as_ref().map(|values| {
+            values.iter().fold(
+                CapabilitySet::EMPTY,
+                |set, value| match Capability::from_str(value) {
+                    Ok(capability) => set.union(capability.into()),
+                    Err(_) => {
+                        valid = false;
+                        set
+                    }
+                },
+            )
+        });
+        let request_hosts = restrictions.restrict_hosts.clone();
+        if request_hosts.as_ref().is_some_and(|patterns| {
+            patterns
                 .iter()
-                .filter_map(|value| Capability::from_str(value).ok())
-                .collect();
-            capabilities = capabilities.intersection(&requested).copied().collect();
+                .any(|pattern| !manifest::valid_host_pattern(pattern))
+        }) {
+            valid = false;
         }
-        if let Some(hosts) = &restrictions.restrict_hosts {
-            allow_host_layers.push(hosts.clone());
-        }
+        let id = authority_id(
+            &layers,
+            request_capabilities,
+            request_hosts.as_deref(),
+            valid,
+        );
 
         AuthoritySnapshot {
-            id: format!("authority_{}", Uuid::new_v4().simple()),
-            capabilities,
+            id,
+            layers,
+            request_capabilities,
+            request_hosts,
             tab_close_allowed,
+            tab_close_source,
             preserve_target_names,
-            allow_host_layers,
-            deny_hosts,
+            sacred_hosts,
             valid,
         }
     }
@@ -607,126 +1003,56 @@ impl GovernanceFacade {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PolicyDocument {
-    version: u32,
-    #[serde(default)]
-    managed: bool,
-    #[serde(default)]
-    expires_unix_ms: Option<u64>,
-    #[serde(default)]
-    allow_capabilities: Option<Vec<Capability>>,
-    #[serde(default)]
-    deny_capabilities: Vec<Capability>,
-    #[serde(default)]
-    allow_tab_close: Option<bool>,
-    /// Whether action outcomes and audit retain bounded browser-observed target names.
-    #[serde(default)]
-    preserve_target_names: Option<bool>,
-    #[serde(default)]
-    allow_hosts: Option<Vec<String>>,
-    #[serde(default)]
-    deny_hosts: Vec<String>,
-    /// Intake channels this layer takes control of.
-    ///
-    /// Absent means the layer restricts no channel, so an unconfigured Ghostlight admits every
-    /// intake and the ungoverned path stays first-class (ADR-0013). Naming a channel is how a
-    /// layer takes control of it, and taking control means saying yes explicitly.
-    #[serde(default)]
-    channels: Option<BTreeMap<IntakeChannel, ChannelRule>>,
-}
-
-/// What one authority layer says about one intake channel.
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ChannelRule {
-    /// Whether this layer admits the channel. Absent means no, so `{}` fully disables it.
-    #[serde(default)]
-    enabled: bool,
-}
-
-fn read_policy(path: &Path, must_be_managed: bool) -> Result<PolicyDocument, GovernanceError> {
-    let bytes =
-        fs::read(path).map_err(|error| GovernanceError::InvalidPolicy(error.to_string()))?;
-    let policy: PolicyDocument = serde_json::from_slice(&bytes)
+fn read_policy(path: &Path) -> Result<manifest::Manifest, GovernanceError> {
+    let text = fs::read_to_string(path)
         .map_err(|error| GovernanceError::InvalidPolicy(error.to_string()))?;
-    if policy.version != 1 {
-        return Err(GovernanceError::InvalidPolicy(
-            "unsupported policy version".into(),
-        ));
+    manifest::parse(&text, &path.display().to_string())
+        .map_err(|error| GovernanceError::InvalidPolicy(error.to_string()))
+}
+
+fn authority_id(
+    layers: &[PolicyLayer],
+    request_capabilities: Option<CapabilitySet>,
+    request_hosts: Option<&[String]>,
+    valid: bool,
+) -> String {
+    let mut identity = String::new();
+    identity.push_str(if valid { "valid\n" } else { "invalid\n" });
+    for layer in layers {
+        identity.push_str(layer.tier.as_str());
+        identity.push(':');
+        identity.push_str(&layer.manifest.hash);
+        identity.push('\n');
     }
-    if must_be_managed && !policy.managed {
-        return Err(GovernanceError::InvalidPolicy(
-            "managed marker missing".into(),
-        ));
+    if let Some(capabilities) = request_capabilities {
+        identity.push_str("capabilities:");
+        for capability in capabilities.iter() {
+            identity.push_str(capability.as_str());
+            identity.push(',');
+        }
+        identity.push('\n');
     }
-    if must_be_managed {
-        let expiry = policy
-            .expires_unix_ms
-            .ok_or_else(|| GovernanceError::InvalidPolicy("managed expiry missing".into()))?;
-        if expiry <= unix_ms() {
-            return Err(GovernanceError::InvalidPolicy(
-                "managed authority expired".into(),
-            ));
+    if let Some(hosts) = request_hosts {
+        let mut hosts = hosts.to_vec();
+        hosts.sort_unstable();
+        identity.push_str("hosts:");
+        for host in hosts {
+            identity.push_str(&host.to_ascii_lowercase());
+            identity.push(',');
         }
     }
-    validate_patterns(policy.allow_hosts.as_deref().unwrap_or_default())?;
-    validate_patterns(&policy.deny_hosts)?;
-    Ok(policy)
+    let digest = Sha256::digest(identity.as_bytes());
+    format!("authority_{}", hex_prefix(&digest, 16))
 }
 
-fn validate_patterns(patterns: &[String]) -> Result<(), GovernanceError> {
-    if patterns.iter().any(|pattern| {
-        pattern.trim().is_empty()
-            || pattern.len() > 253
-            || pattern.contains('/')
-            || pattern.contains(':')
-    }) {
-        Err(GovernanceError::InvalidPolicy(
-            "host patterns must be bounded hostnames".into(),
-        ))
-    } else {
-        Ok(())
-    }
-}
+fn hex_prefix(bytes: &[u8], count: usize) -> String {
+    use std::fmt::Write as _;
 
-fn apply_policy(
-    policy: &PolicyDocument,
-    capabilities: &mut HashSet<Capability>,
-    tab_close_allowed: &mut bool,
-    preserve_target_names: &mut bool,
-    allow_host_layers: &mut Vec<Vec<String>>,
-    deny_hosts: &mut Vec<String>,
-) {
-    if let Some(allowed) = &policy.allow_capabilities {
-        let allowed: HashSet<_> = allowed.iter().copied().collect();
-        *capabilities = capabilities.intersection(&allowed).copied().collect();
+    let mut output = String::with_capacity(count * 2);
+    for byte in bytes.iter().take(count) {
+        write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail");
     }
-    for denied in &policy.deny_capabilities {
-        capabilities.remove(denied);
-    }
-    if policy.allow_tab_close == Some(false) {
-        *tab_close_allowed = false;
-    }
-    if policy.preserve_target_names == Some(false) {
-        *preserve_target_names = false;
-    }
-    if let Some(allowed) = &policy.allow_hosts {
-        allow_host_layers.push(allowed.clone());
-    }
-    deny_hosts.extend(policy.deny_hosts.iter().cloned());
-}
-
-fn all_capabilities() -> HashSet<Capability> {
-    [
-        Capability::Read,
-        Capability::Action,
-        Capability::Write,
-        Capability::Execute,
-    ]
-    .into_iter()
-    .collect()
+    output
 }
 
 fn protected_url(url: &Url) -> bool {
@@ -750,7 +1076,9 @@ fn protected_url(url: &Url) -> bool {
 
 fn host_matches(host: &str, pattern: &str) -> bool {
     let pattern = pattern.trim().to_ascii_lowercase();
-    if let Some(suffix) = pattern.strip_prefix("*.") {
+    if pattern == "*" {
+        true
+    } else if let Some(suffix) = pattern.strip_prefix("*.") {
         host.len() > suffix.len()
             && host.ends_with(suffix)
             && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.')
@@ -791,6 +1119,24 @@ pub struct AuditRecord {
     pub allowed: bool,
     /// Stable reason code.
     pub reason: ReasonCode,
+    /// Whether policy shadowed a denial while allowing work to continue.
+    #[serde(default)]
+    pub policy_observed: bool,
+    /// Effective enforce or observe mode when policy made this decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_mode: Option<String>,
+    /// Stable authored rule when policy made this decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_rule: Option<String>,
+    /// Stable content-free correlation handle for an authored denial.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denial_id: Option<String>,
+    /// Tighten-only tier that supplied the deciding rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_tier: Option<String>,
+    /// Stable grant id that supplied the deciding rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<String>,
     /// Terminal status vocabulary.
     pub status: String,
     /// Terminal effect class.
@@ -839,6 +1185,12 @@ impl AuditRecord {
             authority: authority.into(),
             allowed: decision.allowed,
             reason: decision.reason,
+            policy_observed: false,
+            policy_mode: None,
+            policy_rule: None,
+            denial_id: None,
+            policy_tier: None,
+            grant_id: None,
             status: status.into(),
             effect: effect.into(),
             summary: summary.into(),
@@ -852,6 +1204,20 @@ impl AuditRecord {
     #[must_use]
     pub fn from_channel(mut self, channel: Option<IntakeChannel>) -> Self {
         self.channel = channel;
+        self
+    }
+
+    /// Attach content-free policy attribution from the immutable snapshot that made the decision.
+    #[must_use]
+    pub fn with_policy(mut self, snapshot: &AuthoritySnapshot, decision: Decision) -> Self {
+        self.policy_observed = decision.observed;
+        self.policy_mode = decision.policy_mode().map(str::to_owned);
+        self.policy_rule = decision.policy_rule().map(str::to_owned);
+        self.denial_id = decision.denial_id();
+        if let Some((tier, grant)) = snapshot.attribution(decision) {
+            self.policy_tier = Some(tier.into());
+            self.grant_id = grant.map(str::to_owned);
+        }
         self
     }
 
@@ -933,6 +1299,25 @@ mod tests {
         ))
     }
 
+    fn policy(name: &str, grants: &str, config: &str) -> String {
+        format!(
+            r#"{{"schema":3,"name":"{name}","version":"1","grants":{grants},"config":{config}}}"#
+        )
+    }
+
+    fn all_open_grant() -> &'static str {
+        r#"[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]"#
+    }
+
+    fn snapshot_for(name: &str, source: impl AsRef<[u8]>) -> super::AuthoritySnapshot {
+        let path = temporary(name);
+        fs::write(&path, source).unwrap();
+        let snapshot = GovernanceFacade::new(Some(path.clone()), None)
+            .snapshot(&RequestRestrictions::default());
+        let _ = fs::remove_file(path);
+        snapshot
+    }
+
     #[test]
     fn no_policy_allows_remote_browser_work_but_protected_hosts_remain_denied() {
         let facade = GovernanceFacade::new(None, None);
@@ -962,10 +1347,22 @@ mod tests {
     fn tab_close_policy_is_monotonic_across_authority_layers() {
         let local = temporary("local-tab-close");
         let managed = temporary("managed-tab-close");
-        fs::write(&local, br#"{"version":1,"allow_tab_close":false}"#).unwrap();
+        fs::write(
+            &local,
+            policy(
+                "local",
+                all_open_grant(),
+                r#"[{"key":"browser.tabs.allow_close","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
         fs::write(
             &managed,
-            br#"{"version":1,"managed":true,"expires_unix_ms":18446744073709551615,"allow_tab_close":true}"#,
+            policy(
+                "managed",
+                all_open_grant(),
+                r#"[{"key":"browser.tabs.allow_close","value":true,"level":"recommended"}]"#,
+            ),
         )
         .unwrap();
         let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()))
@@ -983,10 +1380,22 @@ mod tests {
     fn target_name_preservation_is_default_on_and_monotonic_across_layers() {
         let local = temporary("local-target-names");
         let managed = temporary("managed-target-names");
-        fs::write(&local, br#"{"version":1,"preserve_target_names":false}"#).unwrap();
+        fs::write(
+            &local,
+            policy(
+                "local",
+                all_open_grant(),
+                r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
         fs::write(
             &managed,
-            br#"{"version":1,"managed":true,"expires_unix_ms":18446744073709551615,"preserve_target_names":true}"#,
+            policy(
+                "managed",
+                all_open_grant(),
+                r#"[{"key":"privacy.preserve_target_names","value":true,"level":"recommended"}]"#,
+            ),
         )
         .unwrap();
 
@@ -994,10 +1403,22 @@ mod tests {
             .snapshot(&RequestRestrictions::default());
         assert!(!snapshot.preserves_target_names());
 
-        fs::write(&local, br#"{"version":1,"preserve_target_names":true}"#).unwrap();
+        fs::write(
+            &local,
+            policy(
+                "local",
+                all_open_grant(),
+                r#"[{"key":"privacy.preserve_target_names","value":true,"level":"recommended"}]"#,
+            ),
+        )
+        .unwrap();
         fs::write(
             &managed,
-            br#"{"version":1,"managed":true,"expires_unix_ms":18446744073709551615,"preserve_target_names":false}"#,
+            policy(
+                "managed",
+                all_open_grant(),
+                r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
+            ),
         )
         .unwrap();
         let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()))
@@ -1040,7 +1461,11 @@ mod tests {
         let path = temporary("compound-capabilities");
         fs::write(
             &path,
-            br#"{"version":1,"allow_capabilities":["read","write"]}"#,
+            policy(
+                "compound",
+                r#"[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]},{"id":"write","hosts":{"allow":["*"]},"allowed":["write"]}]"#,
+                "[]",
+            ),
         )
         .unwrap();
         let snapshot = GovernanceFacade::new(Some(path.clone()), None)
@@ -1069,53 +1494,231 @@ mod tests {
     }
 
     #[test]
-    fn maintained_policy_examples_match_the_version_one_decoder() {
-        for (name, source, managed) in [
+    fn host_specificity_denies_ties_but_more_specific_allows_win() {
+        let exact_allow = snapshot_for(
+            "exact-allow",
+            policy(
+                "exact allow",
+                r#"[{"id":"g","hosts":{"allow":["admin.example.com"],"deny":["*.example.com"]},"allowed":["read"]}]"#,
+                "[]",
+            ),
+        );
+        assert!(
+            exact_allow
+                .authorize_landing(Capability::Read, "https://admin.example.com")
+                .allowed
+        );
+
+        let exact_tie = snapshot_for(
+            "exact-tie",
+            policy(
+                "exact tie",
+                r#"[{"id":"g","hosts":{"allow":["admin.example.com"],"deny":["admin.example.com"]},"allowed":["read"]}]"#,
+                "[]",
+            ),
+        );
+        let denied = exact_tie.authorize_landing(Capability::Read, "https://admin.example.com");
+        assert!(!denied.allowed);
+        assert_eq!(denied.policy_rule(), Some("denied_host"));
+
+        let longer_deny = snapshot_for(
+            "longer-deny",
+            policy(
+                "longer deny",
+                r#"[{"id":"g","hosts":{"allow":["*.example.com"],"deny":["*.secure.example.com"]},"allowed":["read"]}]"#,
+                "[]",
+            ),
+        );
+        assert!(
+            !longer_deny
+                .authorize_landing(Capability::Read, "https://a.secure.example.com")
+                .allowed
+        );
+    }
+
+    #[test]
+    fn a_grant_deny_only_shrinks_that_grant_and_search_continues_for_an_admission() {
+        let snapshot = snapshot_for(
+            "grant-order",
+            policy(
+                "grant order",
+                r#"[{"id":"carved","hosts":{"allow":["*.example.com"],"deny":["admin.example.com"]},"allowed":["read"]},{"id":"admin","hosts":{"allow":["admin.example.com"]},"allowed":["read"]}]"#,
+                "[]",
+            ),
+        );
+        assert!(
+            snapshot
+                .authorize_landing(Capability::Read, "https://admin.example.com")
+                .allowed
+        );
+
+        let capabilities = snapshot_for(
+            "grant-capability-order",
+            policy(
+                "grant capability order",
+                r#"[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"action","hosts":{"allow":["example.com"]},"allowed":["action"]}]"#,
+                "[]",
+            ),
+        );
+        assert!(
+            capabilities
+                .authorize_landing(Capability::Action, "https://example.com")
+                .allowed,
+            "the first host match is not a refusal when a later grant admits the full set"
+        );
+    }
+
+    #[test]
+    fn first_applicable_denial_is_stably_attributed() {
+        let snapshot = snapshot_for(
+            "first-denial",
+            policy(
+                "first denial",
+                r#"[{"id":"first","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"second","hosts":{"allow":["other.example"]},"allowed":["action"]}]"#,
+                "[]",
+            ),
+        );
+        let first = snapshot.authorize_landing(Capability::Action, "https://example.com");
+        let second = snapshot.authorize_landing(Capability::Action, "https://example.com");
+        assert!(!first.allowed);
+        assert_eq!(first.policy_rule(), Some("capability"));
+        assert_eq!(snapshot.attribution(first), Some(("user", Some("first"))));
+        assert_eq!(first.denial_id(), second.denial_id());
+
+        let record = AuditRecord::now(
+            "invocation_policy",
+            "workspace_policy",
+            "browser_click",
+            Capability::Action,
+            snapshot.id(),
+            first,
+            "blocked",
+            "none",
+            "Authority blocked the action.",
+            0,
+        )
+        .with_policy(&snapshot, first);
+        assert_eq!(record.policy_tier.as_deref(), Some("user"));
+        assert_eq!(record.grant_id.as_deref(), Some("first"));
+        assert_eq!(record.policy_rule.as_deref(), Some("capability"));
+        assert_eq!(record.policy_mode.as_deref(), Some("enforce"));
+        assert_eq!(record.denial_id, first.denial_id());
+
+        let changed = snapshot_for(
+            "changed-denial",
+            policy(
+                "changed denial",
+                r#"[{"id":"renamed","hosts":{"allow":["example.com"]},"allowed":["read"]}]"#,
+                "[]",
+            ),
+        )
+        .authorize_landing(Capability::Action, "https://example.com");
+        assert_ne!(first.denial_id(), changed.denial_id());
+    }
+
+    #[test]
+    fn observe_shadows_ordinary_denials_but_never_protected_resources() {
+        let snapshot = snapshot_for(
+            "observe",
+            r#"{"schema":3,"name":"observe","version":"1","mode":"observe","grants":[]}"#,
+        );
+        let ordinary = snapshot.authorize_landing(Capability::Read, "https://example.com");
+        assert!(ordinary.allowed);
+        assert!(ordinary.observed);
+        assert_eq!(ordinary.reason, ReasonCode::HostDenied);
+        assert!(ordinary.denial_id().is_some());
+
+        let protected = snapshot.authorize_landing(Capability::Read, "http://127.0.0.1");
+        assert!(!protected.allowed);
+        assert!(!protected.observed);
+        assert_eq!(protected.reason, ReasonCode::ProtectedHost);
+
+        let sacred = snapshot_for(
+            "observe-sacred",
+            r#"{"schema":3,"name":"observe sacred","version":"1","mode":"observe","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["example.com"],"level":"mandatory"}]}"#,
+        );
+        assert!(
+            !sacred
+                .authorize_landing(Capability::Read, "https://example.com")
+                .allowed
+        );
+    }
+
+    #[test]
+    fn strictest_layer_mode_wins_and_snapshots_have_deterministic_identity() {
+        let managed = temporary("mode-managed");
+        let local = temporary("mode-local");
+        fs::write(
+            &managed,
+            r#"{"schema":3,"name":"managed","version":"1","mode":"observe","grants":[]}"#,
+        )
+        .unwrap();
+        fs::write(
+            &local,
+            r#"{"schema":3,"name":"local","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
+        )
+        .unwrap();
+        let facade = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()));
+        let first = facade.snapshot(&RequestRestrictions::default());
+        let same = facade.snapshot(&RequestRestrictions::default());
+        let denied = first.authorize_landing(Capability::Read, "https://example.com");
+        assert!(
+            !denied.allowed,
+            "the enforcing local tier prevents shadow admission"
+        );
+        assert_eq!(first.id(), same.id());
+
+        fs::write(
+            &local,
+            r#"{"schema":3,"name":"local","version":"2","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
+        )
+        .unwrap();
+        let changed = facade.snapshot(&RequestRestrictions::default());
+        assert_ne!(first.id(), changed.id());
+        let _ = fs::remove_file(managed);
+        let _ = fs::remove_file(local);
+    }
+
+    #[test]
+    fn maintained_policy_examples_match_the_schema_three_decoder() {
+        for (name, source) in [
             (
                 "research-read-only",
                 include_str!("../../../../examples/research-read-only.json"),
-                false,
             ),
             (
                 "qa-staging",
                 include_str!("../../../../examples/qa-staging.json"),
-                false,
             ),
             (
                 "enterprise-healthcare",
                 include_str!("../../../../examples/enterprise-healthcare.json"),
-                true,
             ),
             (
                 "developer-unrestricted",
                 include_str!("../../../../examples/developer-unrestricted.json"),
-                false,
             ),
             (
                 "developer-observe",
                 include_str!("../../../../examples/developer-observe.json"),
-                false,
             ),
             (
                 "dev-live-test",
                 include_str!("../../../../examples/dev-live-test.json"),
-                false,
             ),
             (
                 "demo-policy",
                 include_str!("../../../../examples/demo-policy.json"),
-                false,
             ),
             (
                 "scripting-disabled",
                 include_str!("../../../../examples/scripting-disabled.json"),
-                false,
             ),
         ] {
             let path = temporary(name);
             fs::write(&path, source).unwrap();
             assert!(
-                super::read_policy(&path, managed).is_ok(),
+                super::read_policy(&path).is_ok(),
                 "{name} must remain a valid 1.0 policy"
             );
             let _ = fs::remove_file(path);
@@ -1150,10 +1753,26 @@ mod tests {
     #[test]
     fn snapshot_does_not_change_when_policy_file_changes() {
         let path = temporary("immutable");
-        fs::write(&path, br#"{"version":1,"allow_capabilities":["read"]}"#).unwrap();
+        fs::write(
+            &path,
+            policy(
+                "read",
+                r#"[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]"#,
+                "[]",
+            ),
+        )
+        .unwrap();
         let facade = GovernanceFacade::new(Some(path.clone()), None);
         let first = facade.snapshot(&RequestRestrictions::default());
-        fs::write(&path, br#"{"version":1,"allow_capabilities":["action"]}"#).unwrap();
+        fs::write(
+            &path,
+            policy(
+                "action",
+                r#"[{"id":"action","hosts":{"allow":["*"]},"allowed":["action"]}]"#,
+                "[]",
+            ),
+        )
+        .unwrap();
         assert!(first.authorize_capability(Capability::Read).allowed);
         assert!(!first.authorize_capability(Capability::Action).allowed);
         let second = facade.snapshot(&RequestRestrictions::default());
@@ -1169,10 +1788,7 @@ mod tests {
             "browser_fill_form",
             CapabilitySet::READ.union(CapabilitySet::WRITE),
             "authority_x",
-            Decision {
-                allowed: true,
-                reason: ReasonCode::Permitted,
-            },
+            Decision::permitted(),
             "succeeded",
             "applied",
             "Page text read.",
@@ -1297,9 +1913,16 @@ mod tests {
             );
         }
 
-        // An empty rule is a refusal: taking control of a channel means saying yes explicitly.
         let path = temporary("channel-empty");
-        fs::write(&path, br#"{"version":1,"channels":{"cli":{}}}"#).unwrap();
+        fs::write(
+            &path,
+            policy(
+                "channel-off",
+                "[]",
+                r#"[{"key":"channels.cli.enabled","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
         let empty = GovernanceFacade::new(Some(path.clone()), None);
         assert_eq!(
             empty.admits_channel(IntakeChannel::Cli).reason,
@@ -1314,7 +1937,11 @@ mod tests {
         let path = temporary("channel-false");
         fs::write(
             &path,
-            br#"{"version":1,"channels":{"cli":{"enabled":false},"mcp":{"enabled":true}}}"#,
+            policy(
+                "channels",
+                "[]",
+                r#"[{"key":"channels.cli.enabled","value":false,"level":"mandatory"},{"key":"channels.mcp.enabled","value":true,"level":"recommended"}]"#,
+            ),
         )
         .unwrap();
         let explicit = GovernanceFacade::new(Some(path.clone()), None);
@@ -1330,13 +1957,21 @@ mod tests {
         let managed = temporary("channel-managed");
         fs::write(
             &managed,
-            br#"{"version":1,"managed":true,"expires_unix_ms":99999999999999,"channels":{"cli":{}}}"#,
+            policy(
+                "managed",
+                "[]",
+                r#"[{"key":"channels.cli.enabled","value":false,"level":"mandatory"}]"#,
+            ),
         )
         .unwrap();
         let local = temporary("channel-local");
         fs::write(
             &local,
-            br#"{"version":1,"channels":{"cli":{"enabled":true}}}"#,
+            policy(
+                "local",
+                "[]",
+                r#"[{"key":"channels.cli.enabled","value":true,"level":"recommended"}]"#,
+            ),
         )
         .unwrap();
 
@@ -1359,7 +1994,11 @@ mod tests {
         use ghostlight_bridge::service::IntakeChannel;
 
         let path = temporary("channel-typo");
-        fs::write(&path, br#"{"version":1,"channels":{"cli-tool":{}}}"#).unwrap();
+        fs::write(
+            &path,
+            r#"{"schema":3,"name":"typo","version":"1","grants":[],"config":[{"key":"channels.cli-tool.enabled","value":false,"level":"mandatory"}]}"#,
+        )
+        .unwrap();
         let facade = GovernanceFacade::new(Some(path.clone()), None);
         assert_eq!(
             facade.admits_channel(IntakeChannel::Cli).reason,

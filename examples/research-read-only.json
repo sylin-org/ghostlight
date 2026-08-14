@@ -1,6 +1,21 @@
 {
-  "version": 1,
-  "allow_capabilities": ["read"],
-  "allow_tab_close": false,
-  "allow_hosts": ["arxiv.org", "*.arxiv.org", "scholar.google.com"]
+  "schema": 3,
+  "name": "Research read only",
+  "version": "1",
+  "grants": [
+    {
+      "id": "research-sites",
+      "hosts": {
+        "allow": ["arxiv.org", "*.arxiv.org", "scholar.google.com"]
+      },
+      "allowed": ["read"]
+    }
+  ],
+  "config": [
+    {
+      "key": "browser.tabs.allow_close",
+      "value": false,
+      "level": "mandatory"
+    }
+  ]
 }

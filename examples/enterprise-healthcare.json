@@ -1,15 +1,28 @@
 {
-  "version": 1,
-  "managed": true,
-  "expires_unix_ms": 1893456000000,
-  "allow_capabilities": ["read", "action", "write"],
-  "deny_capabilities": ["execute"],
-  "allow_tab_close": false,
-  "allow_hosts": [
-    "servicenow.geisinger.org",
-    "epic.geisinger.org",
-    "confluence.geisinger.org",
-    "sharepoint.geisinger.org"
+  "schema": 3,
+  "name": "Healthcare workspace",
+  "version": "1",
+  "grants": [
+    {
+      "id": "approved-workspaces",
+      "description": "Ordinary work in approved organization applications.",
+      "hosts": {
+        "allow": [
+          "servicenow.geisinger.org",
+          "epic.geisinger.org",
+          "confluence.geisinger.org",
+          "sharepoint.geisinger.org"
+        ],
+        "deny": ["admin.geisinger.org"]
+      },
+      "allowed": ["read", "action", "write"]
+    }
   ],
-  "deny_hosts": ["admin.geisinger.org"]
+  "config": [
+    {
+      "key": "browser.tabs.allow_close",
+      "value": false,
+      "level": "mandatory"
+    }
+  ]
 }

@@ -1,6 +1,7 @@
 {
-  "version": 1,
-  "allow_capabilities": ["read"],
-  "allow_tab_close": false,
-  "allow_hosts": ["example.com"]
+  "schema": 3,
+  "name": "Observe policy impact",
+  "version": "1",
+  "mode": "observe",
+  "grants": []
 }

@@ -1,7 +1,21 @@
 {
-  "version": 1,
-  "allow_capabilities": ["read", "action", "write"],
-  "channels": {
-    "cli": {}
-  }
+  "schema": 3,
+  "name": "MCP only",
+  "version": "1",
+  "grants": [
+    {
+      "id": "browser-work",
+      "hosts": {
+        "allow": ["*"]
+      },
+      "allowed": ["read", "action", "write", "execute"]
+    }
+  ],
+  "config": [
+    {
+      "key": "channels.cli.enabled",
+      "value": false,
+      "level": "mandatory"
+    }
+  ]
 }
