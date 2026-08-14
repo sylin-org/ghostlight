@@ -1267,7 +1267,7 @@ mod contract_tests {
                 }
                 if pending
                     .as_ref()
-                    .is_some_and(|(_, started)| started.elapsed() >= Duration::from_millis(125))
+                    .is_some_and(|(_, started)| started.elapsed() >= Duration::from_millis(1_500))
                 {
                     let (correlation, _) = pending.take().unwrap();
                     write_native(
@@ -1286,8 +1286,13 @@ mod contract_tests {
             hold.recv().unwrap();
         });
         let (stream, _) = listener.accept().unwrap();
-        let port =
-            RelayBrowserPort::with_heartbeat_settings("service_test".into(), short_heartbeat());
+        let port = RelayBrowserPort::with_heartbeat_settings(
+            "service_test".into(),
+            HeartbeatSettings {
+                interval: Duration::from_millis(100),
+                timeout: Duration::from_secs(1),
+            },
+        );
         port.attach(stream).unwrap();
 
         assert_eq!(
@@ -1295,7 +1300,7 @@ mod contract_tests {
                 TEST_BROWSER,
                 "workspace_test",
                 BrowserCommand::ListTabs,
-                Instant::now() + Duration::from_millis(500),
+                Instant::now() + Duration::from_secs(4),
                 &AtomicBool::new(false),
             ),
             Ok(BrowserOutcome::Tabs { tabs: vec![] })
