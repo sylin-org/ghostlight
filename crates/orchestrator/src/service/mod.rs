@@ -17,7 +17,7 @@ use ghostlight_bridge::lifecycle::ServiceLease;
 use ghostlight_bridge::relay::{BrowserRelayRequest, BrowserRelayResponse, BROWSER_RELAY_MAJOR};
 use ghostlight_bridge::runtime::{read_runtime, runtime_file, write_runtime, RuntimeEndpoint};
 use ghostlight_bridge::service::{
-    IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, SessionMarker,
+    IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
     SERVICE_BRIDGE_MAJOR,
 };
 use uuid::Uuid;
@@ -458,6 +458,50 @@ fn serve_session(
     );
     let active: Arc<Mutex<HashMap<String, CancellationToken>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    let published_catalog: Arc<Mutex<Option<Vec<ToolDefinition>>>> = Arc::new(Mutex::new(None));
+    let catalog_watch_stop = Arc::new(AtomicBool::new(false));
+    let catalog_watch = (channel == IntakeChannel::Mcp).then(|| {
+        let governance = governance.clone();
+        let writer = Arc::clone(&writer);
+        let published = Arc::clone(&published_catalog);
+        let stop = Arc::clone(&catalog_watch_stop);
+        thread::Builder::new()
+            .name("ghostlight-policy-catalog".into())
+            .spawn(move || {
+                let mut generation = 1_u64;
+                while !stop.load(Ordering::SeqCst) {
+                    thread::sleep(Duration::from_millis(250));
+                    let Some(previous) = lock(&published).clone() else {
+                        continue;
+                    };
+                    let snapshot = governance.snapshot(&RequestRestrictions::default());
+                    let current = catalog_for(&snapshot);
+                    if current == previous {
+                        continue;
+                    }
+                    let changed = {
+                        let mut published = lock(&published);
+                        if published.as_ref() == Some(&current) {
+                            false
+                        } else {
+                            *published = Some(current.clone());
+                            true
+                        }
+                    };
+                    if changed {
+                        generation = generation.wrapping_add(1);
+                        write_response(
+                            &writer,
+                            &ServiceResponse::CatalogChanged {
+                                generation,
+                                tools: current,
+                            },
+                        );
+                    }
+                }
+            })
+            .expect("policy catalog watcher starts")
+    });
 
     // Every way this connection can end has to reach the teardown below. A reset socket, an
     // oversized frame, and one malformed line are all ordinary ways for a client to go away, and
@@ -469,12 +513,14 @@ fn serve_session(
             match request {
                 ServiceRequest::Catalog => {
                     let snapshot = governance.snapshot(&RequestRestrictions::default());
+                    let tools = catalog_for(&snapshot);
                     write_response(
                         &writer,
                         &ServiceResponse::Catalog {
-                            tools: catalog_for(&snapshot),
+                            tools: tools.clone(),
                         },
-                    )
+                    );
+                    *lock(&published_catalog) = Some(tools);
                 }
                 ServiceRequest::Invoke {
                     id,
@@ -531,6 +577,10 @@ fn serve_session(
         Ok(())
     })();
 
+    catalog_watch_stop.store(true, Ordering::SeqCst);
+    if let Some(watch) = catalog_watch {
+        let _ = watch.join();
+    }
     for cancellation in lock(&active).values() {
         cancellation.cancel();
     }

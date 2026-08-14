@@ -227,6 +227,13 @@ pub enum ServiceResponse {
         /// Tool definitions owned by the orchestrator.
         tools: Vec<ToolDefinition>,
     },
+    /// The policy-projected catalog changed after this session's initial projection.
+    CatalogChanged {
+        /// Monotonic generation within this service connection.
+        generation: u64,
+        /// Fresh complete projection, still owned by the orchestrator.
+        tools: Vec<ToolDefinition>,
+    },
     /// One terminal opaque product result.
     Result {
         /// Correlation id supplied to `Invoke`.
@@ -325,6 +332,10 @@ mod tests {
                         open_world_hint: Some(false),
                     }),
                 }],
+            },
+            ServiceResponse::CatalogChanged {
+                generation: 2,
+                tools: Vec::new(),
             },
             ServiceResponse::Result {
                 id: "request-1".into(),

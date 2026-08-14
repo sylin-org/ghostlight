@@ -19,6 +19,8 @@ use ghostlight_bridge::service::{
 pub enum ServiceEvent {
     /// A compatible service is ready with a current profile and catalog.
     Connected { catalog_changed: bool },
+    /// The current service changed its policy-projected catalog.
+    CatalogChanged,
     /// The current service connection ended.
     Disconnected,
     /// An opaque service response arrived after negotiation.
@@ -132,7 +134,7 @@ fn reconnect_loop(
             (generation, catalog_changed)
         };
         event_handler(ServiceEvent::Connected { catalog_changed });
-        read_until_disconnected(reader, &event_handler);
+        read_until_disconnected(reader, &state, generation, &event_handler);
         let was_current = {
             let mut locked = lock(&state.0);
             if locked
@@ -204,10 +206,30 @@ fn connect(
 
 fn read_until_disconnected(
     mut reader: BufReader<TcpStream>,
+    state: &Arc<(Mutex<SessionState>, Condvar)>,
+    generation: u64,
     event_handler: &Arc<dyn Fn(ServiceEvent) + Send + Sync>,
 ) {
     loop {
         match read_json_line::<ServiceResponse>(&mut reader) {
+            Ok(Some(ServiceResponse::CatalogChanged { tools, .. })) => {
+                let changed = {
+                    let mut locked = lock(&state.0);
+                    let Some(session) = locked.connected.as_mut() else {
+                        continue;
+                    };
+                    if session.generation != generation || session.catalog == tools {
+                        false
+                    } else {
+                        session.catalog = tools.clone();
+                        locked.previous_catalog = Some(tools);
+                        true
+                    }
+                };
+                if changed {
+                    event_handler(ServiceEvent::CatalogChanged);
+                }
+            }
             Ok(Some(response)) => event_handler(ServiceEvent::Response(response)),
             Ok(None) | Err(_) => return,
         }

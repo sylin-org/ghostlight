@@ -52,6 +52,11 @@ fn main() -> Result<()> {
                     write_mcp(&output, mcp_2025_11_25::tools_list_changed());
                 }
             }
+            ServiceEvent::CatalogChanged => {
+                if initialized.load(Ordering::SeqCst) {
+                    write_mcp(&output, mcp_2025_11_25::tools_list_changed());
+                }
+            }
         })
     };
     let service = ServiceSession::start(initialization.client_label.clone(), handler)

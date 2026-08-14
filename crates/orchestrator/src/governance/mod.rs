@@ -865,10 +865,83 @@ impl RuntimeControls {
 /// A small governance service facade used by the application executor.
 #[derive(Clone, Debug)]
 pub struct GovernanceFacade {
-    local_policy: Option<PathBuf>,
-    managed_policy: Option<PathBuf>,
+    policies: Arc<Mutex<PolicySources>>,
     runtime_control: Option<PathBuf>,
     controls: Arc<RuntimeControls>,
+}
+
+#[derive(Debug)]
+struct PolicySources {
+    managed: PolicySource,
+    user: PolicySource,
+}
+
+impl PolicySources {
+    fn new(local: Option<PathBuf>, managed: Option<PathBuf>) -> Self {
+        Self {
+            managed: PolicySource::new(managed, "managed"),
+            user: PolicySource::new(local, "user"),
+        }
+    }
+
+    fn refresh(&mut self) {
+        self.managed.refresh("managed");
+        self.user.refresh("user");
+    }
+}
+
+#[derive(Debug)]
+struct PolicySource {
+    path: Option<PathBuf>,
+    active: Option<manifest::Manifest>,
+    last_load_valid: bool,
+    last_error: Option<String>,
+}
+
+impl PolicySource {
+    fn new(path: Option<PathBuf>, tier: &str) -> Self {
+        let mut source = Self {
+            last_load_valid: path.is_none(),
+            path,
+            active: None,
+            last_error: None,
+        };
+        source.refresh(tier);
+        source
+    }
+
+    fn refresh(&mut self, tier: &str) {
+        let Some(path) = &self.path else { return };
+        match read_policy(path) {
+            Ok(policy) => {
+                self.active = Some(policy);
+                self.last_load_valid = true;
+                self.last_error = None;
+            }
+            Err(error) => {
+                let detail = error.to_string();
+                if self.last_error.as_deref() != Some(detail.as_str()) {
+                    if self.active.is_some() {
+                        eprintln!(
+                            "Ghostlight kept the last valid {tier} policy after reload failed: {detail}"
+                        );
+                    } else {
+                        eprintln!("Ghostlight {tier} policy is not valid: {detail}");
+                    }
+                }
+                self.last_load_valid = false;
+                self.last_error = Some(detail);
+            }
+        }
+    }
+
+    fn configured(&self) -> bool {
+        self.path.is_some()
+    }
+
+    fn has_authority(&self) -> bool {
+        self.path.is_none() || self.active.is_some()
+    }
 }
 
 /// Content-free configuration facts for the local workbench.
@@ -890,17 +963,16 @@ impl GovernanceFacade {
     /// Return content-free configuration health without exposing authority paths or rules.
     #[must_use]
     pub fn diagnostics(&self) -> GovernanceDiagnostics {
+        self.refresh_policies();
+        let policies = self
+            .policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         GovernanceDiagnostics {
-            local_policy_configured: self.local_policy.is_some(),
-            local_policy_valid: self
-                .local_policy
-                .as_deref()
-                .is_none_or(|path| read_policy(path).is_ok()),
-            managed_authority_configured: self.managed_policy.is_some(),
-            managed_authority_valid: self
-                .managed_policy
-                .as_deref()
-                .is_none_or(|path| read_policy(path).is_ok()),
+            local_policy_configured: policies.user.configured(),
+            local_policy_valid: policies.user.last_load_valid,
+            managed_authority_configured: policies.managed.configured(),
+            managed_authority_valid: policies.managed.last_load_valid,
             runtime_control_file_configured: self.runtime_control.is_some(),
         }
     }
@@ -909,8 +981,7 @@ impl GovernanceFacade {
     #[must_use]
     pub fn new(local_policy: Option<PathBuf>, managed_policy: Option<PathBuf>) -> Self {
         Self {
-            local_policy,
-            managed_policy,
+            policies: Arc::new(Mutex::new(PolicySources::new(local_policy, managed_policy))),
             runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
         }
@@ -959,19 +1030,27 @@ impl GovernanceFacade {
     /// intersection, so a managed refusal cannot be undone locally, and an invalid layer denies.
     #[must_use]
     pub fn admits_channel(&self, channel: IntakeChannel) -> Decision {
+        self.refresh_policies();
         let key = match channel {
             IntakeChannel::Mcp => "channels.mcp.enabled",
             IntakeChannel::Cli => "channels.cli.enabled",
         };
-        for path in [&self.managed_policy, &self.local_policy] {
-            let Some(path) = path else { continue };
-            match read_policy(path) {
-                Ok(policy) => {
-                    if policy.boolean_setting(key) == Some(false) {
-                        return Decision::deny(ReasonCode::ChannelDenied);
-                    }
-                }
-                Err(_) => return Decision::deny(ReasonCode::InvalidAuthority),
+        let policies = self
+            .policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !policies.managed.has_authority() || !policies.user.has_authority() {
+            return Decision::deny(ReasonCode::InvalidAuthority);
+        }
+        for policy in [
+            policies.managed.active.as_ref(),
+            policies.user.active.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if policy.boolean_setting(key) == Some(false) {
+                return Decision::deny(ReasonCode::ChannelDenied);
             }
         }
         Decision::allow()
@@ -980,40 +1059,43 @@ impl GovernanceFacade {
     /// Build one immutable snapshot and apply caller restrictions by intersection.
     #[must_use]
     pub fn snapshot(&self, restrictions: &RequestRestrictions) -> AuthoritySnapshot {
+        self.refresh_policies();
         let mut layers = Vec::new();
         let mut tab_close_allowed = true;
         let mut tab_close_source = None;
         let mut preserve_target_names = true;
         let mut sacred_hosts = Vec::new();
-        let mut valid = true;
+        let (sources, mut valid) = {
+            let policies = self
+                .policies
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                [
+                    (policies.managed.active.clone(), AuthorityTier::Managed),
+                    (policies.user.active.clone(), AuthorityTier::User),
+                ],
+                policies.managed.has_authority() && policies.user.has_authority(),
+            )
+        };
 
-        for (path, tier) in [
-            (&self.managed_policy, AuthorityTier::Managed),
-            (&self.local_policy, AuthorityTier::User),
-        ] {
-            let Some(path) = path else { continue };
-            match read_policy(path) {
-                Ok(policy) => {
-                    let index = u16::try_from(layers.len()).expect("policy layer count is bounded");
-                    if policy.boolean_setting("browser.tabs.allow_close") == Some(false) {
-                        tab_close_allowed = false;
-                        tab_close_source.get_or_insert(index);
-                    }
-                    if policy.boolean_setting("privacy.preserve_target_names") == Some(false) {
-                        preserve_target_names = false;
-                    }
-                    if let Some(patterns) =
-                        policy.string_array_setting("content.security.sacred_domains")
-                    {
-                        sacred_hosts.extend(patterns);
-                    }
-                    layers.push(PolicyLayer {
-                        tier,
-                        manifest: policy,
-                    });
-                }
-                Err(_) => valid = false,
+        for (policy, tier) in sources {
+            let Some(policy) = policy else { continue };
+            let index = u16::try_from(layers.len()).expect("policy layer count is bounded");
+            if policy.boolean_setting("browser.tabs.allow_close") == Some(false) {
+                tab_close_allowed = false;
+                tab_close_source.get_or_insert(index);
             }
+            if policy.boolean_setting("privacy.preserve_target_names") == Some(false) {
+                preserve_target_names = false;
+            }
+            if let Some(patterns) = policy.string_array_setting("content.security.sacred_domains") {
+                sacred_hosts.extend(patterns);
+            }
+            layers.push(PolicyLayer {
+                tier,
+                manifest: policy,
+            });
         }
         let request_capabilities = restrictions.restrict_capabilities.as_ref().map(|values| {
             values.iter().fold(
@@ -1068,6 +1150,13 @@ impl GovernanceFacade {
             }
         }
         self.controls.decision()
+    }
+
+    fn refresh_policies(&self) {
+        self.policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .refresh();
     }
 }
 
@@ -1846,6 +1935,48 @@ mod tests {
         let second = facade.snapshot(&RequestRestrictions::default());
         assert!(!second.authorize_capability(Capability::Read).allowed);
         assert!(second.authorize_capability(Capability::Action).allowed);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn invalid_reload_keeps_last_valid_authority_until_a_valid_replacement_arrives() {
+        let path = temporary("last-known-good");
+        fs::write(
+            &path,
+            policy(
+                "read",
+                r#"[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]"#,
+                "[]",
+            ),
+        )
+        .unwrap();
+        let facade = GovernanceFacade::new(Some(path.clone()), None);
+        assert!(
+            facade
+                .snapshot(&RequestRestrictions::default())
+                .authorize_capability(Capability::Read)
+                .allowed
+        );
+
+        fs::write(&path, "{half-written").unwrap();
+        let retained = facade.snapshot(&RequestRestrictions::default());
+        assert!(retained.authorize_capability(Capability::Read).allowed);
+        assert!(!retained.authorize_capability(Capability::Action).allowed);
+        assert!(!facade.diagnostics().local_policy_valid);
+
+        fs::write(
+            &path,
+            policy(
+                "action",
+                r#"[{"id":"action","hosts":{"allow":["*"]},"allowed":["action"]}]"#,
+                "[]",
+            ),
+        )
+        .unwrap();
+        let replaced = facade.snapshot(&RequestRestrictions::default());
+        assert!(!replaced.authorize_capability(Capability::Read).allowed);
+        assert!(replaced.authorize_capability(Capability::Action).allowed);
+        assert!(facade.diagnostics().local_policy_valid);
         let _ = fs::remove_file(path);
     }
 
