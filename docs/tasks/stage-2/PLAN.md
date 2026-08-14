@@ -64,12 +64,11 @@ current resolved snapshot, so "reload" is just produce-a-new-snapshot-and-swap-i
 ## Org policy loading
 
 - **A single machine-scope file at an admin-writable-only path**, per platform:
-  `%ProgramData%\browser-mcp\policy.json` (Windows), `/etc/browser-mcp/policy.json` (Linux),
-  `/Library/Application Support/browser-mcp/policy.json` (macOS). Exact names pinned in G02/G12; the
-  invariant is that only an administrator can write it.
+  `%ProgramData%\browser-mcp\policy.json` on Windows or `/etc/browser-mcp/policy.json` on Linux.
+  The invariant is that only an administrator can write it.
 - **Auto-loaded and non-bypassable.** No CLI flag or env var disables or redirects it (unlike
   `--manifest`, the user/dev manifest source). The org file always applies on top.
-- **Delivered by the org's existing channel** (GPO / Intune / Jamf / MDM writes the file). We do not
+- **Delivered by the org's existing channel** (GPO / Intune / MDM writes the file). We do not
   build a policy server.
 - **Strict parse, fail-closed.** Any malformed entry or invalid value is fatal on load, and on reload
   keeps the last-good org policy (see hot-reload rule).

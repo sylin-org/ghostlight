@@ -20,8 +20,8 @@
   config file. Under this ADR the behaviour it was protecting is tested in-process instead, so the
   env override stops being the isolation mechanism of record. It may remain as a deployment
   convenience but is no longer the reason the tests pass.
-- ALIGNS WITH ADR-0026 (release maturity): the release gate runs the test suite on Linux, macOS,
-  and Windows. This ADR is what lets that gate be honestly green on all three rather than green
+- ALIGNS the release gate with the supported platform scope: the gate runs on Linux
+  and Windows. This ADR is what lets that gate be honestly green on both rather than green
   only where an OS env var happens to redirect a fixed path.
 
 ## Context
@@ -34,11 +34,10 @@ org-mandatory key to serialise with `source: "org_mandatory"` and got `source: "
 The proximate cause is platform-specific. That test isolates an org policy by spawning a real
 `ghostlight` service with the `ProgramData` environment variable pointed at a temp directory. On
 Windows `org_policy_path()` resolves through `%ProgramData%`, so the override lands; on Linux and
-macOS `org_policy_path()` is hardcoded (`/etc/ghostlight/policy.json`,
-`/Library/Application Support/ghostlight/policy.json`), so the override is silently ignored, no org
+the fixed `/etc/opt/ghostlight/policy.json` path ignores that Windows-specific variable. No test
 policy loads, and the key falls back to its builtin default. `cargo test`'s fail-fast then stopped
 the suite at that binary, so the true cross-platform status of every alphabetically-later test
-binary was unknown -- the suite had never actually been proven green on Linux or macOS.
+was unknown. The release was not proven green on Linux.
 
 The proximate cause is one test. The architectural cause is general. Consider what that test is
 actually asserting: that a `Resolution` carrying an org-mandatory entry serialises to a particular
@@ -61,7 +60,7 @@ Every downstream pain follows from that one coupling:
 - a hard cross-platform failure, because org-policy isolation is only possible where a fixed path
   is redirectable by an OS env var;
 - `#[cfg(windows)]` gating proposed as the "fix", which is a band-aid: it hides the coupling,
-  abandons Linux/macOS coverage for the gated behaviour, and leaves the flakiness and the helper
+  abandons Linux coverage for the gated behaviour, and leaves the flakiness and the helper
   explosion untouched.
 
 The codebase already contains the counter-example. `governance::config::reload.rs`'s own unit tests
@@ -134,7 +133,7 @@ dimensions become one method, not a doubling of the helper count.
 
 ## Consequences
 
-- The behaviour assertions that blocked v0.2.0 move to pure unit tests that are green on all three
+- The behaviour assertions that blocked v0.2.0 move to pure unit tests that are green on both
   platforms. The release unblocks correctly, not by gating.
 - The suite gets dramatically faster and stops being flaky for the migrated cases: no process
   spawn, no port bind, no startup race.
@@ -149,7 +148,7 @@ dimensions become one method, not a doubling of the helper count.
 ## Provenance
 
 - Why not simply `#[cfg(windows)]`-gate the failing tests. That hides the coupling behind the
-  platform where the accident works, permanently abandons Linux/macOS coverage of that behaviour,
+  platform where the accident works, permanently abandons Linux coverage of that behaviour,
   and leaves the flakiness and the helper explosion in place. It treats the symptom.
 - Why not make `org_policy_path()` env-overridable so the existing spawned tests isolate on Linux
   too. That reintroduces a user-facing override of the org policy location, which is exactly the

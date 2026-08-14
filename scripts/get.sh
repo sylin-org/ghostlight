@@ -7,8 +7,6 @@ set -eu
 repository="sylin-org/ghostlight"
 walkthrough="https://sylin.org/ghostlight/chromium-extension/post-install/"
 case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64) target="aarch64-apple-darwin" ;;
-  Darwin-x86_64) target="x86_64-apple-darwin" ;;
   Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
   *)
     echo "ghostlight: no published binary for $(uname -s)/$(uname -m)" >&2

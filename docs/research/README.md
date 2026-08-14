@@ -49,7 +49,7 @@ re-derived the substance from primary sources (noted in-file). No track was sile
 | [07-hitl-and-stepup-auth.md](07-hitl-and-stepup-auth.md) | Security/Delight | Human-in-the-loop approval (MCP elicitation/MRTR), RFC 9470 step-up, MCP tool-annotation risk vocabulary. |
 | [08-cdp-origin-verification-extension-trust.md](08-cdp-origin-verification-extension-trust.md) | Security | **Load-bearing.** How to trust "current URL" at the CDP layer; the tampered-extension trust boundary; per-frame enforcement. |
 | [09-web-research-primary-sources.md](09-web-research-primary-sources.md) | All | Inline web-search findings: Playwright MCP, WebMCP, MCP auth spec, Claude-in-Chrome injection numbers, token bloat, Operator/Atlas, MV3. |
-| [11-install-detection.md](11-install-detection.md) | Delight / Fork 4 | Install-flow auto-detection: per-OS native-messaging registration (Windows registry / macOS + Linux dirs) for every Chromium browser, MCP-client config detection + add-server mechanics, and the deterministic-extension-ID trick. Feeds the self-registering installer. |
+| [11-install-detection.md](11-install-detection.md) | Delight / Fork 4 | Install-flow auto-detection: per-OS native-messaging registration (Windows registry / Linux dirs) for every Chromium browser, MCP-client config detection + add-server mechanics, and the deterministic-extension-ID trick. Feeds the self-registering installer. |
 
 ## Later research (post-implementation)
 

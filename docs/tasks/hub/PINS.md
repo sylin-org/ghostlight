@@ -167,13 +167,11 @@ on-demand-spawn / `CREATE_BREAKAWAY_FROM_JOB` / `IsProcessInJob` / promotion mec
 - NEW module `src/hub/supervisor.rs` (add `pub mod supervisor;` to `src/hub/mod.rs`). PINNED
   identifiers (the H9 installer registers these SAME names):
   - Windows Task Scheduler task name: `pub const SUPERVISOR_TASK_NAME: &str = "Ghostlight Service";`
-  - macOS launchd label: `pub const SUPERVISOR_LABEL: &str = "org.sylin.ghostlight.service";`
   - Linux systemd --user unit: `pub const SUPERVISOR_UNIT: &str = "ghostlight.service";`
   - `pub fn supervisor_start_command() -> Option<(String, Vec<String>)>` (PURE; `#[cfg]`-split;
     unit-tested for the exact program+args, NEVER executed in a test):
     - Windows: `Some(("schtasks".into(), vec!["/run".into(), "/tn".into(), SUPERVISOR_TASK_NAME.into()]))`
-    - macOS: `Some(("launchctl".into(), vec!["kickstart".into(), "-k".into(), format!("gui/{}/{}", unsafe { libc::getuid() }, SUPERVISOR_LABEL)]))`
-    - Linux (non-macOS unix): `Some(("systemctl".into(), vec!["--user".into(), "start".into(), SUPERVISOR_UNIT.into()]))`
+    - Linux: `Some(("systemctl".into(), vec!["--user".into(), "start".into(), SUPERVISOR_UNIT.into()]))`
   - `pub fn start_service()`: FIRST line `crate::hub::role::assert_adapter_role("start_service");`
     (SS8 seam; a SERVICE must never trigger a service start). Then best-effort run
     `supervisor_start_command()` via `std::process::Command` (spawn + wait; ignore any failure --
@@ -193,9 +191,8 @@ on-demand-spawn / `CREATE_BREAKAWAY_FROM_JOB` / `IsProcessInJob` / promotion mec
 
 - Secret: 32 random bytes (`getrandom::getrandom`) at `crate::debug::log_dir()?/hub-key`. RE-READ
   `src/debug.rs::log_dir()`: it is the PER-USER dir `dirs::data_local_dir()/ghostlight`
-  (`%LOCALAPPDATA%\ghostlight` on Windows, `~/.local/share/ghostlight` on Linux,
-  `~/Library/Application Support/ghostlight` on macOS). This CORRECTS the old SS5's `%ProgramData%`
-  (machine-wide) mismatch: the secret is PER-USER. Do NOT invent a new dir. Created lazily on the
+  (`%LOCALAPPDATA%\ghostlight` on Windows or `~/.local/share/ghostlight` on Linux). This corrects
+  the old machine-wide mismatch: the secret is PER-USER. Do NOT invent a new dir. Created lazily on the
   first `run_service` start if absent; on Unix set mode `0o600` after write; on Windows the per-user
   `%LOCALAPPDATA%` ACL suffices (NO DPAPI -- it adds no same-user defense and no dep). Threat scope:
   the secret defeats a NAIVE or CROSS-USER squatter; a determined same-user process can read any

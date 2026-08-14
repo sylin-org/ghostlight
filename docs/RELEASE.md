@@ -33,8 +33,8 @@ One Ghostlight version comprises:
 - the mandatory checksum-bound `ghostlight` npm launcher, whose bare command remains an MCP stdio
   edge and whose subcommands reach the native orchestrator;
 - a platform-native package that installs and removes the browser native-messaging registration;
-- four portable archives, one-line installers, a self-contained Claude Desktop MCPB, and
-  candidate-derived Homebrew, Scoop, and WinGet metadata;
+- two portable archives, one-line installers, a self-contained Windows Claude Desktop MCPB, and
+  candidate-derived Scoop and WinGet metadata;
 - the independently delivered but contract-matched `Ghostlight in Browser` adapter; and
 - checksums, signatures/attestations, SBOM, license notices, source archive, and release notes.
 
@@ -77,7 +77,7 @@ pwsh -NoProfile -File scripts/check-0.8-recovery.ps1
 pwsh -NoProfile -File scripts/package-extension.ps1
 ```
 
-CI runs the Rust, extension, and process tiers on Windows, macOS, and Linux. The extension artifact
+CI runs the Rust, extension, and process tiers on Windows and Linux. The extension artifact
 uses a fixed file order and timestamp, so identical input produces identical ZIP bytes. The ordinary
 public truth check is offline and deterministic. `scripts/check-public-surfaces.ps1 -Online` is a manual
 reconciliation against GitHub, npm, the Chrome update feed, the official MCP Registry, and the
@@ -89,7 +89,7 @@ The completed feature diff must remain empty under `crates/mcp-connector`,
 
 ### Desktop and package
 
-For Windows, macOS, and Linux:
+For Windows and Linux:
 
 1. Build a native release bundle with the original Ghostlight icon and bundled local UI.
 2. Verify the package contains byte-exact Apache, MIT, commercial-module, and plain-language
@@ -108,32 +108,31 @@ Windows release binaries statically link the Microsoft Visual C++ runtime throug
 machine without a separately installed Visual C++ Redistributable; the build flag is a prevention,
 not a substitute for the journey.
 
-The manual `Build release candidate` workflow builds unsigned Windows NSIS, Linux Debian, and
-macOS application/disk-image candidates from one locked workspace build. It stages the two
-connectors as Tauri sidecars, inspects every native package for the exact three-executable sibling
+The manual `Build release candidate` workflow builds unsigned Windows NSIS and Linux Debian
+candidates from one locked workspace build. It stages the two connectors as Tauri sidecars,
+inspects every native package for the exact three-executable sibling
 set, builds deterministic portable archives, prepares the checksum-bound npm tarball and
 self-contained MCPB, builds the deterministic extension archive and one pinned CycloneDX SBOM for
-each of the four workspace components, then assembles one 27-artifact candidate unit:
+each of the four workspace components, then assembles one 17-artifact candidate unit:
 
-- four native packages;
-- four portable archives;
-- 12 versioned raw binaries;
+- two native packages;
+- two portable archives;
+- six versioned raw binaries;
 - the Chromium adapter;
 - four component SBOMs;
 - the npm launcher tarball; and
 - the Claude Desktop MCPB.
 
-`release-candidate.json`
-binds normalized artifact names,
-byte lengths, SHA-256 values, version, and the full source revision; `SHA256SUMS` is independently
+`release-candidate.json` binds 17 normalized artifact coordinates, exact byte lengths, SHA-256
+values, the version, the full source revision, and release status. `SHA256SUMS` is independently
 recomputed by `scripts/check-release-candidate.ps1`. GitHub Actions creates build-provenance
 attestations for every file in the candidate unit. The workflow uploads the unit for fourteen days.
 It does not tag, platform-sign, publish, or mutate a store.
 
 `ghostlight native-host check|install|uninstall` is the package-facing registration seam. It covers
 Chrome, Edge, Brave, and Chromium; repairs missing or Ghostlight-owned stale state; and leaves
-malformed or foreign state untouched. The 1.0 package installs no Run key, scheduled task,
-launchd agent, or systemd user service. The connectors demand-start the orchestrator.
+malformed or foreign state untouched. The 1.0 package installs no Run key, scheduled task, or
+systemd user service. The connectors demand-start the orchestrator.
 
 ### Browser and MCP journeys
 
@@ -158,8 +157,8 @@ at a time:
 3. Publish the matching browser adapter through deferred store publication if the store supports
    it.
 4. Publish signed platform packages and immutable source/binary release assets.
-5. Publish the exact candidate-bound npm tarball. Then publish candidate-derived Homebrew, Scoop,
-   and WinGet metadata only after their referenced portable assets are observable.
+5. Publish the exact candidate-bound npm tarball. Then publish candidate-derived Scoop and
+   WinGet metadata only after their referenced portable assets are observable.
 6. Publish MCP Registry metadata only after the exact npm coordinate is observable.
 7. Reconcile store feeds and public compatibility from independently downloaded artifacts.
 8. Update `docs/public-status.json`, README release language, trust review stamps, website copy,
@@ -184,7 +183,7 @@ tag.
 
 `scripts/publish-npm.ps1` defaults to `Plan`. Publication requires `Publish -Execute`, the exact
 tarball SHA-256, and a signed candidate that contains that same npm asset. The launcher carries
-all 12 raw-binary hashes, rechecks cached binaries on every invocation, and refuses downloads
+all six raw-binary hashes, rechecks cached binaries on every invocation, and refuses downloads
 outside the fixed GitHub release host chain. npm publication is mandatory for 1.0; MCP Registry
 publication remains downstream of it.
 

@@ -46,7 +46,7 @@
   --ok: #4ade80;
 
   --mono: 'Cascadia Code', 'JetBrains Mono', ui-monospace, Consolas, monospace;
-  --sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --sans: 'Segoe UI', system-ui, Arial, sans-serif;
 
   /*
    * Motion. The grammar is docs/design/visual-language.md: entrances settle on the spring,

@@ -101,23 +101,23 @@ Exact shapes, verified 2026-07-13 (our entry is `command = <ghostlight-relay pat
 | Client | Config path | Detection | Dialect / format |
 | --- | --- | --- | --- |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` (all OSes) | `~/.codeium/windsurf/` dir or `windsurf` on PATH | `mcpServers`, plain JSON (existing) |
-| Zed | macOS `~/Library/Application Support/Zed/settings.json`; Linux `~/.config/zed/settings.json`; Windows `%APPDATA%\Zed\settings.json` | config dir exists or `zed` on PATH | `context_servers`, JSONC |
+| Zed | `%APPDATA%\Zed\settings.json` on Windows; `~/.config/zed/settings.json` on Linux | Zed config dir or `zed` on PATH | `context_servers`, JSONC |
 | OpenCode | global `~/.config/opencode/opencode.json` (XDG on all OSes -- PIN Windows) | `opencode` on PATH or `~/.config/opencode/` dir | `mcp` (type local, command array), JSONC |
 | Crush | `$HOME/.config/crush/crush.json` (global; also project `.crush.json`/`crush.json`) | `crush` on PATH or `~/.config/crush/` dir | `mcp` (type stdio), format PIN |
 
 Path nuances to PIN AT IMPLEMENTATION:
-- **Zed casing is not uniform**: the directory is `Zed` on macOS/Windows but `zed` (lowercase) on
+- **Zed casing is not uniform**: the directory is `Zed` on Windows but `zed` (lowercase) on
   Linux. The `config_path` arm must branch on OS, unlike VS Code's uniform `Code`.
 - **OpenCode / Crush use `~/.config/` literally on every OS** (XDG-style), NOT the OS-native config
-  base (`%APPDATA%` / `~/Library/Application Support`). Use a home-relative `.config/...` path for
-  these two, not `ctx.config`. Re-verify OpenCode's Windows location specifically.
+  base. Resolve these two from the home directory, not `ctx.config`. Re-verify OpenCode's Windows
+  location specifically.
 
 ### D5. Sequencing and non-decisions
 
 - **Ship Windsurf first** (D1) -- zero merge risk, large audience, reuses everything. Then land
   Zed + OpenCode + Crush together behind the D2 JSONC handling and D3 dialects.
-- Out of scope: Xcode 26.3 (macOS-only, brand new), native JetBrains AI Assistant (MCP unverified;
-  already reachable via the Claude Code plugin), Visual Studio, Antigravity (MCP unverified), Gemini
+- **Out of scope:** JetBrains IDEs (already reachable via the Claude Code plugin), Visual Studio,
+  Antigravity (MCP unverified), Gemini
   CLI (retired), Aider (no MCP). Revisit any of these on a named trigger, not now.
 - No change to the sacred tool surface, the relay entry we register (`--role agent`), or any client
   already supported.

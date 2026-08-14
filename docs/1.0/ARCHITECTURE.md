@@ -189,7 +189,9 @@ closed domain-event vocabulary through direct typed reactions and reconstructs b
 history from the existing durable audit file. The WebView owns only disposable view state.
 
 Harness registration is an orchestrator-owned local-human capability. Each supported harness has
-one explicit config location and schema. Check is read-only. Install and uninstall are serialized,
+one explicit config resolver and schema. The resolver applies Windows or Linux environment
+precedence before its documented fallback, including `CODEX_HOME` for Codex. Check is read-only.
+Install and uninstall are serialized,
 merge only the `ghostlight` entry, keep unrelated siblings, preserve JSONC and TOML comments,
 create a backup, and refuse malformed, unreadable, or foreign-owned configuration rather than
 guessing. The UI exposes no generic filesystem or process operation.

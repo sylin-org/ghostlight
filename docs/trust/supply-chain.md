@@ -14,8 +14,8 @@ release asset from 2026-07 onward; earlier releases attest the packaged archives
 also carry a canonical `SHA256SUMS` manifest. A read-only assembly job creates the complete
 release bundle, including the SBOM; the privileged publisher can only download that bundle,
 verify its exact file list and hashes, attest it, and create the release.
-are distributed today through GitHub Releases, npm, the MCP Registry, and the Sylin Homebrew tap,
-all resolving to artifacts from the same tagged source. Scoop and winget manifests are prepared in
+Artifacts are distributed today through GitHub Releases, npm, and the MCP Registry, all resolving
+to artifacts from the same tagged source. Scoop and winget manifests are prepared in
 the repository but are not public distribution channels until their packages ship. Fixes land on
 the latest tagged release; pre-1.0 there are no
 backport branches (see [SECURITY.md](../../SECURITY.md)). The release pipeline is defined in

@@ -51,7 +51,7 @@ this, paired with the `deploy.lock` for the service.
   `deploy.lock` gives a production installer a clean quiesce point for an in-place upgrade (drop the
   lock, stop the service, swap the binary, remove the lock -- no self-heal race).
 - The lock is a Windows-self-heal quiesce. On Unix the service is run by the OS supervisor
-  (launchd/systemd); a deploy there stops the unit (which suppresses restart) rather than relying on
+  (systemd); a deploy there stops the unit (which suppresses restart) rather than relying on
   this file. The lock check is a no-op cost on Unix.
 - The lock only governs the SERVICE self-heal. The relay respawn is governed by the rename technique
   in the deploy script, not by this file (the extension cannot read it).

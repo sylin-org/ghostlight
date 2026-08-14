@@ -2,7 +2,7 @@
 
 > Batch: Ghostlight Hub. Normative: docs/adr/0030-ghostlight-hub-orchestrator.md (Decision 8 as
 > amended 2026-07-04: "AUTO-START (the installed default)"; Migration line H9). Oracle identifiers:
-> docs/tasks/hub/PINS.md SS5.2 (`SUPERVISOR_TASK_NAME` / `SUPERVISOR_LABEL` / `SUPERVISOR_UNIT`). One
+> docs/tasks/hub/PINS.md SS5.2 (`SUPERVISOR_TASK_NAME` / `SUPERVISOR_UNIT`). One
 > task = one commit. Facts below are as-of-authoring 2026-07-04 -- RE-READ the named files first.
 
 ## Goal
@@ -15,7 +15,7 @@ adapters can start the service by the same name.
 
 This is the LAST task (after H6-H8). It is largely command/file construction wired into the existing
 `install` module. Real OS registration is verified by MANUAL SMOKE (a cargo test cannot register a
-real Task Scheduler task / launchd agent / systemd unit); the cargo gates verify the pure builders.
+real Task Scheduler task or systemd unit); the cargo gates verify the pure builders.
 
 ## Authority
 
@@ -34,15 +34,15 @@ real Task Scheduler task / launchd agent / systemd unit); the cargo gates verify
 - The installed binary's absolute path is what the supervisor must launch with the `service`
   subcommand: `"<exe-path>" service`. RE-READ how the installer already resolves its own exe path for
   the native-messaging host manifest and REUSE that resolution.
-- PINS.md SS5.2 identifiers (transcribe): Windows task `Ghostlight Service`; macOS launchd label
-  `org.sylin.ghostlight.service`; Linux systemd --user unit `ghostlight.service`.
+- PINS.md SS5.2 identifiers (transcribe): Windows task `Ghostlight Service`; Linux systemd --user
+  unit `ghostlight.service`.
 
 ## Required behavior (Decision 8 amendment; transcribe the oracles below)
 
 1. Register on install (per-user, zero-admin, LeastPrivilege), then START it once. Idempotent
    (re-install must not duplicate; re-read/replace).
 2. Unregister + stop on uninstall. Idempotent (absent supervisor -> no-op, not an error).
-3. NEVER elevate / run as SYSTEM (Decision 8). All three supervisors are per-user.
+3. NEVER elevate / run as SYSTEM (Decision 8). Both supervisors are per-user.
 4. The register/unregister/start/stop actions are best-effort ADDITIONS to the existing install flow:
    a failure to register the supervisor must WARN, not abort the whole install (the adapter self-heal
    + manual `ghostlight service` remain fallbacks). Log clearly.
@@ -53,21 +53,6 @@ PINNED oracles (transcribe verbatim; `<exe>` = the resolved installed binary pat
   - register: `schtasks /create /tn "Ghostlight Service" /tr "\"<exe>\" service" /sc onlogon /rl limited /f`
   - start now: `schtasks /run /tn "Ghostlight Service"`
   - unregister: `schtasks /delete /tn "Ghostlight Service" /f`
-- macOS (launchd LaunchAgent). Plist at `~/Library/LaunchAgents/org.sylin.ghostlight.service.plist`:
-  ```
-  <?xml version="1.0" encoding="UTF-8"?>
-  <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-  <plist version="1.0"><dict>
-    <key>Label</key><string>org.sylin.ghostlight.service</string>
-    <key>ProgramArguments</key><array><string><exe></string><string>service</string></array>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-  </dict></plist>
-  ```
-  - load + start: `launchctl bootstrap gui/<uid> <plist-path>` then
-    `launchctl kickstart -k gui/<uid>/org.sylin.ghostlight.service`
-  - unload: `launchctl bootout gui/<uid>/org.sylin.ghostlight.service` then remove the plist
-    (`<uid>` = `unsafe { libc::getuid() }`).
 - Linux (systemd --user). Unit at `~/.config/systemd/user/ghostlight.service`:
   ```
   [Unit]
@@ -90,16 +75,14 @@ there is ONE source of truth for the names.
 - Add `tests/install_supervisor.rs` (or inline `#[cfg(test)]`), PURE builders only:
   - `windows_task_register_command_is_pinned` (`#[cfg(windows)]`): the register argv contains
     `/tn`, `Ghostlight Service`, `service`, `/rl`, `limited`, `/sc`, `onlogon`.
-  - `macos_plist_names_the_service_subcommand` (`#[cfg(target_os = "macos")]`): the rendered plist
-    contains `<string>service</string>` and `org.sylin.ghostlight.service`.
-  - `linux_unit_names_the_service_subcommand` (`#[cfg(all(unix, not(target_os = "macos")))]`): the
-    rendered unit contains `ExecStart=` ... `service` and `Restart=on-failure`.
-  These transcribe the pinned oracles above; they NEVER run `schtasks`/`launchctl`/`systemctl`.
+  - `linux_unit_names_the_service_subcommand` (`#[cfg(target_os = "linux")]`): the rendered unit
+    contains `ExecStart=` ... `service` and `Restart=on-failure`.
+- These transcribe the pinned oracles above; they NEVER run `schtasks` or `systemctl`.
 - Keep green: all sacred tests (`tool_schema_fidelity`, `all_open_golden`, `architecture` a7).
 
 Manual smoke (documented in the LEDGER entry, NOT a cargo gate): on each platform, `install`, confirm
-`ghostlight service` is running (Task Scheduler / `launchctl print` / `systemctl --user status`), open
-an editor and confirm it connects with no manual start, then `uninstall` and confirm the supervisor is
+`ghostlight service` is running (Task Scheduler or `systemctl --user status`), open an editor and
+confirm it connects with no manual start, then `uninstall` and confirm the supervisor is
 gone.
 
 ## Verification (literal commands)
@@ -114,8 +97,8 @@ cargo fmt --all -- --check
 
 ## STOP preconditions
 
-- If `src/hub/supervisor.rs` (H6) does not define `SUPERVISOR_TASK_NAME`/`SUPERVISOR_LABEL`/
-  `SUPERVISOR_UNIT`, STOP: H6 has not landed; do not re-pin the identifiers here.
+- If `src/hub/supervisor.rs` (H6) does not define `SUPERVISOR_TASK_NAME`/`SUPERVISOR_UNIT`, STOP:
+  H6 has not landed; do not re-pin the identifiers here.
 - If the installer has no existing exe-path resolution to reuse for the `service` launch string, STOP
   and reconcile (do not hardcode a path).
 - If any register/start action would require elevation / admin / SYSTEM, STOP (Decision 8: per-user,

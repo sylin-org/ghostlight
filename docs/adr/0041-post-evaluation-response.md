@@ -109,7 +109,7 @@ published.
 | P7 | Re-baseline against the official extension | Operator-assisted study task (research-12 pattern) | Operator + agent |
 | P8 | Enterprise proof pack | landscape-1 L3 | Batch |
 | P9 | WebMCP stance ADR | ADR-0043 (landed with this ADR) | Done |
-| P10 | Standing verification debts | FOUNDER-TODO.md (LIVE-VERIFY, macOS/Linux, e2e-smoke, license skim) | Operator |
+| P10 | Standing verification debts | FOUNDER-TODO.md (LIVE-VERIFY, Linux, e2e-smoke, license skim) | Operator |
 
 ## Consequences
 

@@ -10,8 +10,8 @@
 
 Ghostlight needs a calm, searchable, user-facing workbench for current sessions and operations,
 history, diagnostics, configuration, supported development-harness installation, and important
-notifications. It must use the preserved Ghostlight identity and operate across Windows, macOS,
-and Linux. A bundled web interface inside Tauri 2 supplies the portable rendering surface, tray,
+notifications. It must provide the same product semantics on Windows and Linux. A bundled web
+interface inside Tauri 2 supplies the portable rendering surface, tray,
 window lifecycle, and native notification delivery.
 
 The first design considered a separate desktop companion connected to the orchestrator through a

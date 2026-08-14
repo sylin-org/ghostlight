@@ -19,8 +19,7 @@ work remains local, visible, interruptible, and optionally governed.
 - Project: Ghostlight by sylin.org.
 - Current release: v0.6.0, published 2026-07-15.
 - Runtime: native Rust service and relay plus a thin Chromium MV3 extension.
-- Distribution: npm, GitHub Releases, official MCP Registry, Homebrew tap, and package-manager
-  manifests.
+- Distribution: npm, GitHub Releases, official MCP Registry, and package-manager manifests.
 - License: automation core Apache-2.0 OR MIT; organization governance source-available under
   separate terms.
 - Account/telemetry: no Ghostlight account, activation service, product telemetry, or update ping.
@@ -60,7 +59,6 @@ watching it.
 
 - Not a headless, isolated, stealth, cloud, or bulk automation runtime.
 - Not a semantic-intent or prompt-injection prevention system.
-- macOS live-browser verification is not complete.
 - Chrome Web Store acceptance must be confirmed before outreach.
 - No independent penetration test or formal security certification exists yet.
 

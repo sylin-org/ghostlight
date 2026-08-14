@@ -33,13 +33,12 @@ ghostlight-relay>`, `args = ["--role","agent"]`, `env = {}` (see `clients::serve
 
 | Client | cli_id | display | config_path (per OS) | detect | Dialect |
 |---|---|---|---|---|---|
-| Zed | `zed` | `Zed` | mac `ctx.config/Zed/settings.json`; win `ctx.config/Zed/settings.json`; **linux `ctx.home/.config/zed/settings.json`** (lowercase!) | `on_path("zed")` or the settings dir exists | `ContextServers` |
+| Zed | `zed` | `Zed` | win `ctx.config/Zed/settings.json`; **linux `ctx.home/.config/zed/settings.json`** (lowercase!) | `on_path("zed")` or the settings dir exists | `ContextServers` |
 | OpenCode | `opencode` | `OpenCode` | `ctx.home/.config/opencode/opencode.json` (all OSes) [RESIDUAL: Windows] | `on_path("opencode")` or `ctx.home/.config/opencode` dir | `OpenCodeMcp` |
 | Crush | `crush` | `Crush` | `ctx.home/.config/crush/crush.json` (all OSes) | `on_path("crush")` or `ctx.home/.config/crush` dir | `CrushMcp` |
 
 Path notes (PIN):
-- **Zed dir casing is per-OS**: `Zed` under the OS config base on macOS/Windows, but literal
-  `~/.config/zed` (lowercase) on Linux. `ctx.config` is `~/Library/Application Support` (mac) /
+- **Zed dir casing is per-OS**: `Zed` under the OS config base on Windows, but literal
   `%APPDATA%` (win) / `~/.config` (linux), so Linux would give `~/.config/Zed` -- WRONG casing.
   Therefore Zed's `config_path` arm MUST branch: `if cfg!(target_os = "linux") { ctx.home.join(".config").join("zed").join("settings.json") } else { ctx.config.join("Zed").join("settings.json") }`.
 - **OpenCode + Crush use `~/.config/...` literally on every OS** (XDG-style apps), NOT `ctx.config`.

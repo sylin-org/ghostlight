@@ -26,8 +26,6 @@ export function releaseTarget(platform = process.platform, architecture = proces
   const key = `${platform}/${architecture}`;
   const targets = {
     "win32/x64": "x86_64-pc-windows-msvc",
-    "darwin/arm64": "aarch64-apple-darwin",
-    "darwin/x64": "x86_64-apple-darwin",
     "linux/x64": "x86_64-unknown-linux-gnu",
   };
   const target = targets[key];
@@ -52,8 +50,6 @@ export function executableNames(platform = process.platform, architecture = proc
 export function publishedAssetNames() {
   return [
     ...assetNames("win32", "x64"),
-    ...assetNames("darwin", "arm64"),
-    ...assetNames("darwin", "x64"),
     ...assetNames("linux", "x64"),
   ];
 }

@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 "use strict";
 
-const { chmodSync } = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const TARGETS = Object.freeze({
   "win32/x64": "x86_64-pc-windows-msvc",
-  "darwin/arm64": "aarch64-apple-darwin",
-  "darwin/x64": "x86_64-apple-darwin",
 });
 
 function targetFor(platform = process.platform, architecture = process.arch) {
@@ -38,18 +35,12 @@ function run(options = {}) {
   const architecture = options.architecture ?? process.arch;
   const serverDirectory = options.serverDirectory ?? __dirname;
   const spawnProcess = options.spawnSyncImpl ?? spawnSync;
-  const makeExecutable = options.chmodSyncImpl ?? chmodSync;
   const standardError = options.stderr ?? process.stderr;
   let orchestrator;
   let mcpConnector;
-  let browserConnector;
   try {
     orchestrator = binaryPath("ghostlight", { platform, architecture, serverDirectory });
     mcpConnector = binaryPath("ghostlight-mcp-connector", { platform, architecture, serverDirectory });
-    browserConnector = binaryPath("ghostlight-browser-connector", { platform, architecture, serverDirectory });
-    if (platform === "darwin") {
-      for (const binary of [orchestrator, mcpConnector, browserConnector]) makeExecutable(binary, 0o755);
-    }
   } catch (error) {
     standardError.write(`Ghostlight MCPB setup failed: ${error.message}\n`);
     return 1;

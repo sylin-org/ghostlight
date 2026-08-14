@@ -374,11 +374,10 @@ CLI shape: `browser-mcp policy init --template <NAME> [--out <PATH>] [--force]`.
 Wrote <path> (template '<name>').
 
 This file is a starting point. Edit the grants and config entries for your
-organization, then deploy it with your management channel (GPO, Intune, Jamf)
+organization, then deploy it with your management channel (GPO, Intune, or MDM)
 to the org policy path for each platform:
 
   Windows  %ProgramData%\browser-mcp\policy.json
-  macOS    /Library/Application Support/browser-mcp/policy.json
   Linux    /etc/browser-mcp/policy.json
 
 For personal use, load it instead with:
@@ -532,7 +531,7 @@ Task-specific:
   and shadow mode (other stage-2 tasks). G18 only consumes the validator in tests.
 - Writing to, creating, or managing the org policy file paths (ProgramData, /Library,
   /etc). `policy init` writes to a user-chosen path; deployment is the org channel's
-  job (GPO, Intune, Jamf).
+  job (GPO, Intune, or MDM).
 - Comment support, JSONC, YAML, or any non-JSON manifest format.
 - Editing `docs/SPEC.md` (Appendix A stays as-is; the SPEC amendment list lives in
   shared-format section 10 and is a separate docs task).

@@ -19,7 +19,7 @@ follow-ons. No synchronized blast is needed.
 
 ## Phase 0: repair readiness blockers
 
-1. Update the public Ghostlight page from v0.5.7 to v0.6.0 and reconcile the Linux/macOS statement
+1. Update the public Ghostlight page from v0.5.7 to v0.6.0 and reconcile the Linux statement
    with the canonical repository status.
 2. Add an automated or release-time drift check covering site version, platform status, npm,
    `server.json`, README, latest release, and store copy.

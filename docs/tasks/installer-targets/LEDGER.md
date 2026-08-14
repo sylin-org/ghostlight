@@ -42,7 +42,7 @@ Durable progress. One task = one commit. Update RESUME HERE and add a log entry 
 
 Resolved 2026-07-13 (see `PINS.md` for the pinned shapes):
 1. **Zed** -- entry shape == `mcpServers` (NO `source` field, command string), under key
-   `context_servers`. Settings.json is JSONC; dir casing is per-OS (`Zed` mac/win, `zed` linux).
+   `context_servers`. Settings.json is JSONC; dir casing is per-OS (`Zed` on Windows, `zed` on Linux).
    RESIDUAL: re-confirm the no-`source` fact against a running Zed (T3).
 2. **OpenCode** -- key `mcp`, entry `{type:"local", command:[cmd,...args], enabled:true}`, env under
    `environment`; JSONC. RESIDUAL: Windows config path (T4).

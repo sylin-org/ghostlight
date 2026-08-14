@@ -23,7 +23,7 @@ detection plus registration state via `doctor` (commit 2ae81de; `src/install/`).
 Native-messaging host registration is per-browser (Chrome/Edge/Brave/Chromium,
 multi-signal detection): on Windows, one shared manifest file plus a per-browser
 registry key (HKCU for --user, both WOW6432 HKLM views for --system); on
-macOS/Linux, a per-browser file drop. Removal is ownership-checked: only a
+Linux, a per-browser file drop. Removal is ownership-checked: only a
 manifest whose name is ours is deleted; a foreign manifest at the same path is
 reported as a manual skip, never removed.
 

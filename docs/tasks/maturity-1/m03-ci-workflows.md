@@ -1,10 +1,10 @@
-# M03: CI workflows (three-OS matrix + release artifacts)
+# M03: CI workflows (Windows-and-Linux matrix + release artifacts)
 
 ## Goal
 
 ADR-0026 Decision 2: a CI gate (fmt, clippy -D warnings, test) across
-windows/macos/ubuntu on every push and PR, plus a tag-triggered release job
-that cross-builds the `ghostlight` binary for the four shipping targets and
+Windows and Linux on every push and PR, plus a tag-triggered release job
+that builds the `ghostlight` binary for the two shipping targets and
 uploads artifacts.
 
 ## Authority
@@ -50,7 +50,7 @@ Create exactly two files with exactly this content.
         strategy:
           fail-fast: false
           matrix:
-            os: [ubuntu-latest, macos-latest, windows-latest]
+            os: [ubuntu-latest, windows-latest]
         runs-on: ${{ matrix.os }}
         steps:
           - uses: actions/checkout@v4
@@ -77,10 +77,6 @@ Create exactly two files with exactly this content.
             include:
               - os: windows-latest
                 target: x86_64-pc-windows-msvc
-              - os: macos-latest
-                target: aarch64-apple-darwin
-              - os: macos-latest
-                target: x86_64-apple-darwin
               - os: ubuntu-latest
                 target: x86_64-unknown-linux-gnu
         runs-on: ${{ matrix.os }}
@@ -111,8 +107,8 @@ other job.
 - `rg -c "windows-latest" .github/workflows/ci.yml` prints `1`.
 - `rg -c "cargo clippy --all-targets -- -D warnings" .github/workflows/ci.yml`
   prints `1`.
-- `rg -c "x86_64-apple-darwin|aarch64-apple-darwin|x86_64-pc-windows-msvc|x86_64-unknown-linux-gnu" .github/workflows/release.yml`
-  prints `4`.
+- `rg -c "x86_64-pc-windows-msvc|x86_64-unknown-linux-gnu" .github/workflows/release.yml`
+  prints `2`.
 - `rg -c "if-no-files-found: error" .github/workflows/release.yml` prints `1`.
 - YAML validity is confirmed live on the first push (GitHub parses it); locally
   the rg pins above plus a visual check that indentation is two-space and
@@ -125,7 +121,7 @@ The rg assertions; ASCII diff scan; `cargo test` unchanged (no compiled
 change). Ledger entry noting that the workflows are validated live on the
 first push. Commit.
 
-Commit subject: `ci: three-OS gate (fmt, clippy, test) and tag-triggered release artifacts`
+Commit subject: `ci: Windows-and-Linux gate (fmt, clippy, test) and tag-triggered release artifacts`
 
 ## Out of scope
 

@@ -526,7 +526,7 @@ screenshot, or semantic query. See the current
 
 Three artifacts, all pushed through existing IT channels:
 
-**1. Binary.** A single executable (no runtime dependencies) deployed to a well-known path (e.g., `C:\Program Files\BrowserMCP\ghostlight.exe` on Windows, `/opt/ghostlight/ghostlight` on Linux/macOS). Pushed via Intune app deployment or SCCM package.
+**1. Binary.** A single executable (no runtime dependencies) deployed to a well-known path (e.g., `C:\Program Files\BrowserMCP\ghostlight.exe` on Windows, `/opt/ghostlight/ghostlight` on Linux). Pushed via Intune app deployment or SCCM package.
 
 **2. Extension.** A Chromium extension (unpacked folder or .crx). Force-installed via Chrome enterprise policy (`ExtensionInstallForcelist`) or Edge policy equivalent. The extension's native messaging host manifest points to the binary path.
 

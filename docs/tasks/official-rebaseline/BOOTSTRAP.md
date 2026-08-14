@@ -92,8 +92,7 @@ Do them IN ORDER. Do not start T<n+1> until T<n> is committed with a green tree.
     node --test tests/extension/constants.test.js tests/extension/geometry.test.js tests/extension/grouping.test.js tests/extension/keys.test.js tests/extension/settle.test.js tests/extension/observation.test.js tests/extension/treediff.test.js tests/extension/fileset.test.js
 
 (If a task adds an extension unit test file, the prompt adds it to the `node --test` line.)
-Note the known-flaky macOS-only `peer_death` connection race and the quarantined `e2e-smoke` job are
-CI concerns, not local gates; locally, all V-ALL must pass.
+The quarantined `e2e-smoke` job is a CI concern, not a local gate; locally, all V-ALL must pass.
 
 ## Completion criteria (per task)
 

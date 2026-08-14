@@ -124,8 +124,7 @@ of this; re-read before editing):
   needed for this task.
 - The user config file per shared format section 1.1 resolves to
   `dirs::config_dir().join("browser-mcp").join("config.json")` on every platform
-  (Windows `%APPDATA%\browser-mcp\config.json`, macOS
-  `~/Library/Application Support/browser-mcp/config.json`, Linux
+  (Windows `%APPDATA%\browser-mcp\config.json`; Linux
   `~/.config/browser-mcp/config.json`). Absence of the file is normal and means
   "no user layer". The prerequisite resolver may already expose a path helper for
   it; if so, call that helper instead of re-deriving the path.

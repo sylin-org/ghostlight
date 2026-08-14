@@ -40,8 +40,6 @@ function Portable-Hash([string]$Target) {
 
 $replacements = [ordered]@{
     "__VERSION__" = $candidate.version
-    "__SHA_AARCH64_APPLE_DARWIN__" = Portable-Hash "aarch64-apple-darwin"
-    "__SHA_X86_64_APPLE_DARWIN__" = Portable-Hash "x86_64-apple-darwin"
     "__SHA_X86_64_UNKNOWN_LINUX_GNU__" = Portable-Hash "x86_64-unknown-linux-gnu"
     "__SHA_X86_64_PC_WINDOWS_MSVC__" = Portable-Hash "x86_64-pc-windows-msvc"
 }
@@ -56,18 +54,12 @@ function Expand-Template([string]$RelativePath) {
     return $content.Replace("`r`n", "`n")
 }
 
-$homebrewDirectory = Join-Path $OutputDirectory "homebrew"
 $scoopDirectory = Join-Path $OutputDirectory "scoop"
 $wingetDirectory = Join-Path $OutputDirectory "winget"
-foreach ($directory in @($homebrewDirectory, $scoopDirectory, $wingetDirectory)) {
+foreach ($directory in @($scoopDirectory, $wingetDirectory)) {
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
 $utf8 = [System.Text.UTF8Encoding]::new($false)
-[System.IO.File]::WriteAllText(
-    (Join-Path $homebrewDirectory "ghostlight.rb"),
-    (Expand-Template "packaging/homebrew/ghostlight.rb"),
-    $utf8
-)
 $scoop = Expand-Template "packaging/scoop/ghostlight.json"
 [void]($scoop | ConvertFrom-Json)
 [System.IO.File]::WriteAllText((Join-Path $scoopDirectory "ghostlight.json"), $scoop, $utf8)

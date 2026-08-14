@@ -100,7 +100,7 @@ mattered to the original decision:
 - **A view, not an authoring surface.** The config panel renders the ALREADY-RESOLVED effective
   value/layer/lock per key -- the `chrome://policy` analog ADR-0019 named outright (see that ADR's
   own amendment below) -- never a manifest editor. Organization policy is still authored and
-  deployed exclusively as a file over the org's existing channel (GPO/Intune/Jamf); the Console
+  deployed exclusively as a file over the org's existing channel (GPO/Intune/MDM); the Console
   cannot write, edit, or push a manifest, mandatory layer, or org-recommended default. `policy
   explain`, `policy simulate`, shadow enforcement, manifest identity, and structured denials are
   all unaffected and remain the CLI/file-based surfaces this ADR specifies.

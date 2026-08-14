@@ -1,14 +1,12 @@
 //! Narrow retirement of recognized pre-1.0 resident-supervisor artifacts.
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::env;
-#[cfg(target_os = "macos")]
-use std::ffi::OsStr;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::fs;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
-#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+#[cfg(any(windows, target_os = "linux"))]
 use std::process::Command;
 
 use serde::Serialize;
@@ -19,10 +17,8 @@ const WINDOWS_RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const WINDOWS_VALUE_NAME: &str = "Ghostlight Service";
 #[cfg(windows)]
 const WINDOWS_TASK_NAME: &str = "Ghostlight Service";
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
 const LINUX_UNIT_NAME: &str = "ghostlight.service";
-#[cfg(target_os = "macos")]
-const MACOS_LABEL: &str = "org.sylin.ghostlight.service";
 
 /// Content-free account of obsolete artifacts removed or deliberately preserved.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
@@ -53,21 +49,17 @@ pub fn retire_obsolete_supervisor() -> MigrationReport {
     {
         retire_windows()
     }
-    #[cfg(target_os = "macos")]
-    {
-        retire_macos()
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(target_os = "linux")]
     {
         retire_linux()
     }
-    #[cfg(not(any(windows, unix)))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         MigrationReport::default()
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn home_directory() -> PathBuf {
     env::var_os("USERPROFILE")
         .or_else(|| env::var_os("HOME"))
@@ -75,7 +67,7 @@ fn home_directory() -> PathBuf {
         .unwrap_or_default()
 }
 
-#[cfg(any(windows, all(unix, not(target_os = "macos")), test))]
+#[cfg(any(windows, target_os = "linux", test))]
 fn command_is_old_ghostlight_service(command: &str) -> bool {
     let command = command.trim();
     let (program, arguments) = if let Some(rest) = command.strip_prefix('"') {
@@ -101,7 +93,7 @@ fn command_is_old_ghostlight_service(command: &str) -> bool {
     owned_program && owned_arguments
 }
 
-#[cfg(any(all(unix, not(target_os = "macos")), test))]
+#[cfg(any(target_os = "linux", test))]
 fn definition_is_old_ghostlight_service(contents: &str, marker: &str) -> bool {
     contents.contains(marker)
         && contents.lines().any(|line| {
@@ -195,7 +187,7 @@ fn retire_windows() -> MigrationReport {
     report
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
 fn retire_linux() -> MigrationReport {
     let config = env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -213,7 +205,7 @@ fn retire_linux() -> MigrationReport {
     })
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
 fn retire_linux_at(
     config: &Path,
     mut systemctl: impl FnMut(&[&str]) -> Result<(), String>,
@@ -272,53 +264,13 @@ fn retire_linux_at(
     report
 }
 
-#[cfg(target_os = "macos")]
-fn retire_macos() -> MigrationReport {
-    let mut report = MigrationReport::default();
-    let plist = home_directory()
-        .join("Library/LaunchAgents")
-        .join(format!("{MACOS_LABEL}.plist"));
-    match fs::read_to_string(&plist) {
-        Ok(contents)
-            if contents.contains(&format!("<string>{MACOS_LABEL}</string>"))
-                && contents.contains("<string>service</string>")
-                && contents
-                    .split("<string>")
-                    .filter_map(|tail| tail.split("</string>").next())
-                    .any(|value| {
-                        Path::new(value)
-                            .file_stem()
-                            .and_then(OsStr::to_str)
-                            .is_some_and(|stem| stem.eq_ignore_ascii_case("ghostlight"))
-                    }) =>
-        {
-            match fs::remove_file(&plist) {
-                Ok(()) => report
-                    .removed
-                    .push("obsolete Ghostlight launchd agent".into()),
-                Err(error) => report
-                    .warnings
-                    .push(format!("could not remove the old launchd agent: {error}")),
-            }
-        }
-        Ok(_) => report
-            .preserved
-            .push("foreign launchd agent using the Ghostlight label".into()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => report
-            .warnings
-            .push(format!("could not inspect the old launchd agent: {error}")),
-    }
-    report
-}
-
 #[cfg(test)]
 mod tests {
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(target_os = "linux")]
     use std::fs;
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(target_os = "linux")]
     use std::os::unix::fs::symlink;
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(target_os = "linux")]
     use std::time::SystemTime;
 
     use super::*;
@@ -368,7 +320,7 @@ mod tests {
         ));
     }
 
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(target_os = "linux")]
     #[test]
     fn linux_retirement_stops_the_service_and_removes_its_enablement() {
         let config = std::env::temp_dir().join(format!(

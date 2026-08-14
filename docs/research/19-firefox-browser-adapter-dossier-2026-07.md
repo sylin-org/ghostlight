@@ -488,7 +488,7 @@ ADRs 0058 and 0061 already solve an important part of the problem:
 - browser extensions report window focus through browser APIs rather than OS window enumeration.
 
 This design is vendor-portable. Firefox exposes window focus events too. "Window focus" here means
-browser-window focus on Windows, macOS, or Linux, not a dependency on the Microsoft Windows OS.
+browser-window focus on Windows or Linux, not a dependency on the Microsoft Windows OS.
 
 ### Why focus alone is not enough
 

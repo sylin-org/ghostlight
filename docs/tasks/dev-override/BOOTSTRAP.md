@@ -42,8 +42,8 @@ never by line number alone. If an anchor cannot be found, STOP (protocol).
 - ASCII ONLY in every file you write (code AND docs): no emoji literals, no em-dashes (use `--`),
   no arrows or curly quotes.
 - Do not push. Do not run `ghostlight install`/`uninstall` (not even dry-run), and do not run any
-  schtasks, launchctl, or systemctl command. Do not start `ghostlight service` outside the pinned
-  test commands (the integration tests spawn their own on test-unique endpoints).
+  `schtasks` or `systemctl` command. Do not start `ghostlight service` outside the pinned test
+  commands (the integration tests spawn their own on test-unique endpoints).
 
 ## Task sequence (strict order; every prefix leaves a coherent, green tree)
 

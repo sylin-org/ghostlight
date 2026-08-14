@@ -49,7 +49,7 @@ pass.
 - `dev` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`. It absorbed
   `ghostlight-1.0`, which was a fast-forward and has been retired.
 - `main` carries the 0.8 line at `0116feca`. Promoting it is a deliberate release decision, not
-  routine sync. The 1.0 line now carries adapted three-platform source, extension, process, and
+  routine sync. The 1.0 line now carries Windows and Linux source, extension, process, and
   supply-chain CI; a manual Pages deployment; and bounded monthly dependency updates targeting
   `dev`. A manual build-only workflow now creates and inspects unsigned native-package candidates
   without publishing them. Signing, native operating-system validation, and publication remain
@@ -64,11 +64,11 @@ pass.
   It is history, never implementation authority for the 1.0 tree.
 - The 0.8 recovery is now source-backed rather than implicit. `docs/0.8/HARVEST.md` distinguishes
   the released, reconciled, mature, and archived snapshots; `docs/0.8/test-inventory.json` records
-  1,355 ordinary test declarations and 34 source-enumerated Lightbox scenarios; and the dated
+  1,354 ordinary test declarations and 34 source-enumerated Lightbox scenarios; and the dated
   publication observation corrects WinGet to merged while recording Glama drift. The old ledger's
   unexplained claim of 37 Lightbox scenarios is preserved as a discrepancy, not repeated as fact.
-- Release safeguards are active again on `dev`: Rust and extension CI cover all three operating
-  systems; process journeys cover all three; dependency licenses, sources, wildcards, and
+- Release safeguards are active again on `dev`: Rust, extension, and process CI cover Windows and
+  Linux; dependency licenses, sources, wildcards, and
   advisories are gated; source and observed-public versions are checked separately; and the store
   extension package is built from an explicit runtime allowlist. The online public check passed
   against GitHub, npm, Chrome, the official MCP Registry, and sylin.org on 2026-08-13. These local
@@ -76,24 +76,24 @@ pass.
 - Packaged native-host lifecycle is restored without restoring the 0.8 resident supervisors
   (ADR-0115). The orchestrator now checks, installs, updates, and safely removes Chrome, Edge,
   Brave, and Chromium registrations; packages carry both connector sidecars; and narrow migration
-  retires only recognized pre-1.0 Run/task, launchd, or systemd artifacts. The unsigned Windows
-  NSIS candidate built locally and its payload inspection found exactly the three required
-  executables. Linux and macOS package builds plus all clean-install, upgrade, reboot, and uninstall
+  retires recognized pre-1.0 Windows and Linux supervisor artifacts. The unsigned Windows NSIS
+  candidate built locally and its payload inspection found exactly the three required
+  executables. Linux package builds plus all clean-install, upgrade, reboot, and uninstall
   journeys remain required native-host evidence.
 - The 0.8 test recovery is now dispositioned rather than merely counted.
-  `docs/0.8/RECOVERY-MATRIX.md` maps all 1,389 entries through twelve current behavior areas;
+  `docs/0.8/RECOVERY-MATRIX.md` maps all 1,388 entries through twelve current behavior areas;
   `docs/0.8/test-recovery.json` gives each of the 34 Lightbox process scenarios an explicit
   reexpressed, superseded, invariant-retained, or deferred state; and CI checks the map against the
   source-derived inventory. Two missing high-value proofs were added: sibling runtime discovery
   does not depend on Linux session environment, and an unreachable configured managed authority
   fails closed from cold start.
-- The file-level harvest now names and content-addresses all 810 artifacts in the mature 0.8 tree.
+- The file-level harvest now names and content-addresses 809 in-scope artifacts from the mature 0.8 tree.
   Four high-value absences are restored on current seams: static Windows runtime policy, a narrow
   live-swap command, Chrome OAuth recovery, and independent Chrome publication. The checked ledger
   still detects a removed, newly restored, or identical-to-evolved path, but an already-evolved
-  active file may keep evolving without an 810-row bookkeeping rewrite.
-- Release construction is one checked 27-artifact unit: four native packages, four portable
-  archives, 12 raw binaries, the deterministic extension, four component SBOMs, the npm launcher,
+  active file may keep evolving without an 809-row bookkeeping rewrite.
+- Release construction is one checked 17-artifact unit: two native packages, two portable
+  archives, six raw binaries, the deterministic extension, four component SBOMs, the npm launcher,
   and the Claude Desktop MCPB. Exact byte length and SHA-256 bind every item to one version and full
   source revision. The workflow adds GitHub build provenance but remains build-only. GitHub, npm,
   Chrome, and MCP Registry adapters each default to a non-mutating plan and require an explicit
@@ -103,12 +103,12 @@ pass.
   binaries on every run. `ghostlight install`, `uninstall`, `doctor`, `doctor --fix`, `status
   --json`, `service`, dry-run, repeated client selection, and repeated browser selection are live.
   One-line installers, deterministic portable archives, the self-contained MCPB, and
-  candidate-derived Homebrew, Scoop, and WinGet 1.12 metadata are present and tested.
+  candidate-derived Scoop and WinGet 1.12 metadata are present and tested.
 - Release access was recovered as far as this machine permits without exposing values. GitHub and
   npm authentication work, the MCP DNS key and official publisher binary are present, and the
   Chrome client, secret, item id, and old refresh token were found. The Chrome token is revoked or
-  expired and the API V2 publisher id is missing. Windows and Apple signing credentials were not
-  found. The 0.8 Linux username, SSH key, and known-host identity survive, but `test-host-01` no
+  expired and the API V2 publisher id is missing. Windows signing credentials were not found. The
+  0.8 Linux username, SSH key, and known-host identity survive, but `test-host-01` no
   longer resolves.
 
 ## Implemented
@@ -193,7 +193,9 @@ pass.
 - Supported MCP client registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
   Code, Windsurf, Zed, OpenCode, and Crush. Re-check is read-only. Connect and disconnect are
   explicit, serialized, ownership-checked, backed up, and preserve unrelated JSONC/TOML comments
-  and configuration.
+  and configuration. Harness paths follow the effective Windows or Linux environment, including
+  `CODEX_HOME`; exact owned pre-1.0 agent relays are migrated while other relay entries remain
+  untouched and visible as attention-required state.
 - `ghostlight --headless` retains the service-only execution path. Recoverable desktop startup and
   event-loop failures leave that service running.
 - The shared bridge owns one demand-start seam used by both connectors after a failed service
@@ -257,23 +259,27 @@ source-gate pass, not release approval.
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 187 Rust tests -- 151 in the orchestrator library, 2 in its launch-mode
+- `cargo test --workspace`: 190 Rust tests -- 154 in the orchestrator library, 2 in its launch-mode
   binary, 30 in the shared bridge, and 4 in the MCP connector.
 - `npm test --prefix extension`: 99 extension tests.
-- `npm test --prefix packaging/npm`: 8 launcher tests. The MCPB launcher has 5 Node tests.
+- `npm test --prefix packaging/npm`: 10 launcher tests. The MCPB launcher has 4 Node tests.
 - The four executable process/workbench journeys passed from a clean isolated target directory,
   all 41 tracked JavaScript and module files parsed, dependency license/source/bans checks passed,
-  the 1,389-entry recovery matrix passed, and every one of 681 tracked files was readable with all
-  local documentation links valid. The artifact guard covers all 810 mature 0.8 paths.
+  the 1,388-entry recovery matrix passed, and every tracked file was readable with all local
+  documentation links valid. The artifact guard covers 809 in-scope mature 0.8 paths.
+- An isolated Linux command journey seeded an exact pre-1.0 Codex relay under a non-default
+  `CODEX_HOME`, ran the built `ghostlight install --client codex`, and proved the Codex binary read
+  the replacement MCP connector with empty arguments. The fixture used separate home and XDG roots
+  and did not touch the active user configuration.
 - The restored development loop found the running repository service only by its exact
   `target/release/ghostlight.exe` path in plan mode. Its isolated smoke then built one selected
   package, enclosed the swap in `deploy.lock`, copied into a disposable repository-local live
   directory, removed the lock, and performed no launch under `-NoStart`. The real stack was not
   disturbed.
 - Four real CycloneDX component SBOMs were generated with pinned `cargo-cyclonedx` 0.5.9. Synthetic
-  cross-platform input exercised the exact 27-artifact assembly, npm hash embedding, deterministic
+  Windows and Linux input exercised the exact 17-artifact assembly, npm hash embedding, deterministic
   MCPB, portable packaging, and package-manager metadata paths. That proves the construction code,
-  not the missing native Linux/macOS artifacts or their signatures.
+  not the missing native Linux artifacts or their signatures.
 - Chrome, GitHub, and MCP publication plans made no mutation. Chrome correctly named the missing
   publisher id. GitHub refused the unsigned candidate. MCP Registry planning found the recovered
   key and publisher but refused the current 0.8 `server.json` and npm coordinate for a 1.0
@@ -474,10 +480,10 @@ source-gate pass, not release approval.
 ## Release gates still requiring an owner or release environment
 
 - Push the local 1.0 recovery commits only when the owner approves, then run the manual candidate
-  workflow on GitHub. Its four native builders and provenance step have not executed for this
+  workflow on GitHub. Its two native builders and provenance step have not executed for this
   source revision.
 - Produce and sign platform bundles, install the native-messaging registration, and verify upgrade
-  and uninstall from a clean machine on Windows, macOS, and Linux.
+  and uninstall from a clean machine on Windows and Linux.
 - Complete interactive native-window, tray, and notification smoke tests on each platform. The
   automated environment verifies native build and failure containment but does not expose its GUI
   desktop to the test runner.
@@ -489,11 +495,11 @@ source-gate pass, not release approval.
 - Reconcile release metadata, public status, store submission, compatibility, distribution, and
   the final public documentation only when the 1.0 artifacts exist.
 - Recover Chrome Web Store API access by completing desktop OAuth and recording the API V2
-  publisher id. Choose and provision Windows and Apple platform-signing identities.
+  publisher id. Choose and provision a Windows platform-signing identity.
 - Bring `test-host-01` back onto reachable DNS/mDNS or provide its current address, then record a
   stable SSH alias and execute the checked Linux lifecycle matrix. The SSH identity itself is not
   lost.
-- Publish the candidate-bound `ghostlight@1.0.0` tarball only after its 12 raw GitHub assets are
+- Publish the candidate-bound `ghostlight@1.0.0` tarball only after its six raw GitHub assets are
   observable. Then update `server.json` and publish the MCP Registry record; it must never point a
   1.0 record at the public 0.8 launcher.
 - Keep the checked 0.8 recovery matrix aligned as current proofs move. Its remaining live-package
@@ -520,3 +526,7 @@ source-gate pass, not release approval.
   [`adr/0114-plural-browser-adapters.md`](adr/0114-plural-browser-adapters.md).
 - Packaged native-host lifecycle decision:
   [`adr/0115-packaged-native-host-lifecycle.md`](adr/0115-packaged-native-host-lifecycle.md).
+- Supported operating-system scope:
+  [`adr/0116-windows-and-linux-platform-scope.md`](adr/0116-windows-and-linux-platform-scope.md).
+- Effective harness configuration resolution:
+  [`adr/0117-effective-harness-config-resolution.md`](adr/0117-effective-harness-config-resolution.md).

@@ -33,7 +33,7 @@ whose parsed host name is `org.sylin.ghostlight` and only a Windows registry ent
 a Ghostlight-owned manifest. Malformed or foreign state is reported and left untouched.
 
 Windows uses one manifest below the current user's local application-data directory and one HKCU
-key per browser. macOS and archive installs use the browsers' per-user `NativeMessagingHosts`
+key per browser. Linux archive installs use the browsers' per-user `NativeMessagingHosts`
 directories. A Debian package also owns the four fixed system manifest files under `/etc`; its
 first ordinary user launch reconciles the per-user locations so a stale 0.8 file cannot shadow the
 package. The product command itself has no elevation path.
@@ -52,8 +52,8 @@ names the connector inside that exact installed sibling set.
 
 ### 3. Demand-start replaces the old supervisor
 
-No Run key, scheduled task, launchd agent, or systemd user unit is installed for 1.0. Either
-connector demand-starts its trusted sibling orchestrator through the ADR-0104 seam. Upgrade
+No Run key, scheduled task, or systemd user unit is installed for 1.0. Either connector
+demand-starts its trusted sibling orchestrator through the ADR-0104 seam. Upgrade
 migration may remove a recognized 0.8 supervisor artifact, but it never creates a replacement.
 
 Migration is narrow and ownership checked. Unknown commands, malformed files, foreign units, and
@@ -67,8 +67,8 @@ Tauri bundles the MCP and browser connectors as external binaries. A release sta
 them Tauri's required target-triple names from one locked workspace build. The UI receives no shell
 permission and does not execute the sidecars; bundling is distribution only.
 
-Windows NSIS uses an installer hook for the package-facing lifecycle command. Linux and macOS
-artifacts must run the same command from their package integration or documented first-launch
+Windows NSIS uses an installer hook for the package-facing lifecycle command. Linux artifacts
+must run the same command from their package integration or documented first-launch
 handoff. A format is not release-ready merely because Tauri emitted a file: its clean install,
 upgrade, uninstall, and real visible-browser journeys must pass on that operating system.
 
@@ -85,9 +85,7 @@ harvest inventory records the rest until an equivalent 1.0 proof exists.
   supervisor or a broad multi-client installer.
 - Stale Ghostlight-owned connector paths become a first-class updatable state instead of looking
   healthy, while foreign state remains protected.
-- The same lifecycle seam is usable by NSIS, Linux packages, Homebrew, Scoop, WinGet, and manual
+- The same lifecycle seam is usable by NSIS, Linux packages, Scoop, WinGet, and manual
   archives without duplicating registry or manifest policy in packaging scripts.
-- macOS drag-to-trash cannot run an uninstall hook. Its package and documentation must state the
-  cleanup path honestly, and the ownership-safe command remains available before removal.
 - Release work now includes native packaging and real Linux revalidation. Those are product gates,
   not standing release bureaucracy.

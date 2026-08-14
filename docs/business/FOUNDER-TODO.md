@@ -39,7 +39,7 @@ Last reconciled: 2026-08-07. This checklist is current through Ghostlight v0.8.0
       GitHub description, homepage, and discovery topics are live.
 - [ ] Upload `docs/assets/social-preview.png` as the repository's custom social preview. GitHub
       still reports the generated default image as of 2026-08-01.
-- [x] Ghostlight v0.8.0 is published on GitHub, npm, Homebrew, the official MCP Registry, and the
+- [x] Ghostlight v0.8.0 is published on GitHub, npm, the official MCP Registry, and the
       website. The release and live-install checks passed on 2026-08-07.
 - [x] **Chrome Web Store is public.** Adapter v0.8.0 is live and byte-validated under store id
       `lejccfmoeogmhemakeknjjdhkfkgncdl`.
@@ -103,8 +103,6 @@ Last reconciled: 2026-08-07. This checklist is current through Ghostlight v0.8.0
 - [ ] Run the ADR-0047 stage-2 supervised real-browser verification.
 - [ ] Complete the repeated-model visible baseline evidence.
 - [ ] Arrange and capture a consented follow-up non-author review.
-- [ ] Live-verify macOS when suitable hardware is available. Linux verification and release CI are
-      complete.
 - [x] The official-extension rebaseline completed against v1.0.80; the resulting fidelity work is
       shipped.
 - [ ] Decide whether to approve the drafted WebMCP response, join Chrome's early preview, and choose
@@ -136,7 +134,7 @@ Last reconciled: 2026-08-07. This checklist is current through Ghostlight v0.8.0
 - 2026-07-04: hello@sylin.org chosen as the single sink address (changeable later).
   Public content pass landed: PRICING.md (pricing numbers now PUBLISHED, freezing the
   ADR-0028 initial prices as list), SECURITY.md, three guides, COMPARISON.md, README
-  refresh. First live CI run: core suite green on all three OSes; extension-unit fixed
+  refresh. First live CI run: core suite green on Windows and Linux; extension-unit fixed
   forward; e2e-smoke quarantined (continue-on-error) pending log access via gh auth.
 - 2026-07-04: **v0.1.0 SHIPPED.** gh CLI authenticated (via Ghostlight dogfooding the
   browser to mint a token). CI hardened (least-privilege, --locked, cargo-audit, per-OS
@@ -166,7 +164,7 @@ Last reconciled: 2026-08-07. This checklist is current through Ghostlight v0.8.0
   ADR-0044 (named instances), ADR-0045 (resilient reconnect), ADR-0046 (three role executables),
   ADR-0047 (tab identity), ADR-0048 (development override + the per-user hub-key fix), and
   ADR-0049 (the MCP protocol-conformance pass).
-- 2026-08-01: **v0.7.3 SHIPPED.** GitHub, npm, Homebrew, the official MCP Registry, and the
+- 2026-08-01: **v0.7.3 SHIPPED.** GitHub, npm, the official MCP Registry, and the
   canonical website agree on the service release. Chrome Web Store v0.7.1 is now public. Codex
   and Zed Show and tell posts are live, Glama scores Ghostlight
   A/A/B across all 25 tools. The awesome-mcp, Cline, and Winget paths are in external review; the

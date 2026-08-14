@@ -58,11 +58,15 @@ foreach ($path in $paths) {
         $ordinal = 0
         foreach ($match in $matches) {
             $ordinal += 1
+            $name = $match.Groups["name"].Value
+            if ($name -match '_plist_') {
+                continue
+            }
             [void]$inventory.Add([pscustomobject][ordered]@{
                 kind = "rust-test"
                 category = $category
                 file = $path
-                name = $match.Groups["name"].Value
+                name = $name
                 ordinalInFile = $ordinal
             })
         }

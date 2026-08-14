@@ -67,7 +67,7 @@ pub fn write_runtime(path: &Path, endpoint: &RuntimeEndpoint) -> io::Result<()> 
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let mut options = OpenOptions::new();
     options.create(true).truncate(true).write(true);
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);

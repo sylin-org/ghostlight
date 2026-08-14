@@ -86,7 +86,7 @@ management-plane response writer, which is only cleanly separable once the split
 ## Verification
 
 - All four gates green, including the previously-flaky `console_index_page_*` (now
-  `manage_web_routes.rs::*`) on all three OS legs.
+  `manage_web_routes.rs::*`) on both supported operating-system jobs.
 - `grep -rn "console" src/hub/` returns nothing (assets fully renamed; only historical ADR/task
   text mentions "Console").
 - The management plane and the web ingestion adapter are now separately denyable: a test with

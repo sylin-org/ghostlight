@@ -36,9 +36,9 @@ quoted anchor text, never by line number alone. If an anchor cannot be found, ST
   `node --test tests/extension/grouping.test.js`.
 - ASCII ONLY in every file you write (code AND docs): no emoji literals (write `\u{1F47B}`
   escapes), no em-dashes (use `--`), no arrows or curly quotes.
-- Do not push. Do not run any install/uninstall (not even dry-run is needed), schtasks,
-  launchctl, or systemctl command. Do not start `ghostlight service` outside the pinned test
-  commands (the integration tests spawn their own).
+- Do not push. Do not run any install/uninstall (not even dry-run is needed), `schtasks`, or
+  `systemctl` command. Do not start `ghostlight service` outside the pinned test commands (the
+  integration tests spawn their own).
 
 ## Task sequence (strict order; every prefix leaves a coherent, green tree)
 

@@ -65,8 +65,8 @@ enforcing independently.
 - **Ship ready-to-import policy templates**, not just a binary: GPO `.reg`; an Intune Settings
   Catalog force-install profile + a **PowerShell platform script** that writes the
   `3rdparty\extensions\<id>\policy` managed-storage keys (Intune has *no native UI* for
-  third-party managed storage, the #1 admin friction); a macOS `.mobileconfig`; a signed
-  self-hosted `updates.xml`. "5-minute rollout vs. support ticket."
+  third-party managed storage, the #1 admin friction); and a signed self-hosted `updates.xml`.
+  "5-minute rollout vs. support ticket."
 - **Loudly document the Windows off-store gotcha:** on Windows, an extension not on the Web Store
   **can only be force-installed if the machine is AD-joined, Entra-joined, or CBCM-enrolled.**
   Intune-managed devices qualify; unmanaged BYOD silently refuses.
@@ -188,7 +188,7 @@ not a terminal**. Adopt both for the spec §11 `"approval": "required"` idea.
   modes; redact URL query strings by default; add hash-chaining.
 - **Identity:** deployment-channel-as-identity is right for v1; make the `identity` block
   ID-JAG/OAuth-superset-ready for a v2 runtime story; use **MCP elicitation** for v2 HITL.
-- **Deployment:** pin the extension `key`; ship Intune/GPO/mobileconfig templates + a PowerShell
+- **Deployment:** pin the extension `key`; ship Intune/GPO templates plus a PowerShell
   script for third-party managed storage; document the Windows off-store domain-join requirement
   and the MV3 reconnect contract loudly.
 

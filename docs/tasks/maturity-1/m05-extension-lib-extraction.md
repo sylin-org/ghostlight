@@ -147,7 +147,7 @@ pinned; do not invent cases):
       strategy:
         fail-fast: false
         matrix:
-          os: [ubuntu-latest, macos-latest, windows-latest]
+          os: [ubuntu-latest, windows-latest]
       runs-on: ${{ matrix.os }}
       steps:
         - uses: actions/checkout@v4

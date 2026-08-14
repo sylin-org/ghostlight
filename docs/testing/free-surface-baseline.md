@@ -10,7 +10,7 @@ and it does not change the public MCP schema.
 
 ## Automated mechanical baseline
 
-Run on the same Linux or macOS environment used by the real-browser smoke gate:
+Run on the same Linux environment used by the real-browser smoke gate:
 
 ```sh
 node tests/e2e/run-smoke.mjs --free-surface-baseline

@@ -12,7 +12,7 @@ are not interchangeable.
 
 1. Run `npx -y ghostlight@1.0.0 install`. The checksum-bound launcher downloads one exact sibling
    set, registers the browser connector for the current user, and connects detected MCP clients.
-   A signed native package, Homebrew, Scoop, WinGet, the one-line installer, or the Claude Desktop
+   A signed native package, Scoop, WinGet, the one-line installer, or the Claude Desktop
    MCPB may provide the same binaries instead.
 2. Install the matching `Ghostlight in Browser` 1.0 extension from its release listing.
 3. Run `npx -y ghostlight@1.0.0 doctor`. Fix any named missing or stale part.

@@ -2,7 +2,7 @@
 
 Status: Accepted (2026-07-10; owner: "Let's do 0.5.1 then. This is exactly the kind of issues I was
 hoping to catch"). Amends ADR-0030 Decision 8 (the always-ready-service amendment) on Windows only;
-macOS launchd and Linux systemd --user paths are untouched. Fixes issue #17. Ships as v0.5.1.
+the Linux systemd user path is untouched. Fixes issue #17. Ships as v0.5.1.
 
 ## Context
 
@@ -46,14 +46,12 @@ handle -- so replacing it loses nothing.
 3. **Legacy migration.** Windows registration best-effort deletes the old scheduled task
    (`schtasks /delete /tn <name> /f`) so elevated installs from earlier versions converge on the
    Run key; uninstall keeps deleting both mechanisms.
-4. **macOS and Linux are unchanged.** launchd LaunchAgents and systemd --user units are genuinely
-   user-scoped, and both provide real crash-restart (`KeepAlive` / `Restart=on-failure`), which
-   the Run key cannot -- so the richer mechanisms stay where they work.
+4. **Linux is unchanged.** Its systemd user unit is user-scoped and provides real crash-restart
+   (`Restart=on-failure`), which the Run key cannot, so the richer mechanism stays where it works.
 5. **Pins move.** The PINNED Windows supervisor commands (H9 / PINS.md SS5.2: schtasks
    create/run/delete; the `supervisor_start_command` Windows arm) are superseded by this ADR. The
    new pins: the Run-key path + value name + data shape, the sibling-exe resolution
-   (`ghostlight-relay*` -> sibling `ghostlight`), and the detached-spawn creation flags. macOS and
-   Linux pins stand as written.
+   and detached creation flags. Linux pins stand as written.
 
 ## Consequences
 

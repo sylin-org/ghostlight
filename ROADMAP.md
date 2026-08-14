@@ -8,7 +8,7 @@ the installed baseline until 1.0 completes its release gates.
 - Finish the accepted visible-browser journey matrix across screenshots, semantic input, upload,
   dialogs, governed denial, reconnect, tab-close interlock, tab grouping, and multiple concurrent
   client sessions.
-- Produce signed Windows, macOS, and Linux packages containing the orchestrator/workbench and both
+- Produce signed Windows and Linux packages containing the orchestrator/workbench and both
   version-matched connectors.
 - Verify clean install, upgrade, harness registration, native messaging, tray, notification,
   headless fallback, and uninstall on each platform.

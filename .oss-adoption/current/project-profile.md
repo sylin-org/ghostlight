@@ -48,8 +48,7 @@ the managed tab group and visible action feedback, receive a compact useful answ
 - Primary: developer tool and MCP server.
 - Secondary: Chromium extension, local infrastructure primitive, and governance or policy tool.
 - Ecosystem objects: npm launcher, native GitHub release, MCP Registry entry, Chromium extension,
-  Homebrew tap, package-manager manifests, RAWX capability specification, examples, demos, and
-  Trust Center.
+  package-manager manifests, RAWX capability specification, examples, demos, and Trust Center.
 
 ## Maturity, support surface, and maintainer capacity
 
@@ -59,15 +58,15 @@ tools and surrounding interfaces can still evolve. The latest public release was
 used for security, licensing, and private matters. Support is best effort outside separately
 licensed commitments.
 
-Windows and Linux are described as live verified in the README. macOS builds and tests in CI but
-still lacks live-browser proof. The website-source contradiction found by this exercise is repaired
+Windows and Linux are described as live verified in the README. The website-source contradiction
+found by this exercise is repaired
 through the canonical `docs/public-status.json` fallback; deployment remains an external gate.
 
 ## Installation, use, and evidence
 
 The fast path is the npm launcher plus a visible browser-extension installation. The extension is
 currently loaded from a GitHub release while Chrome Web Store review remains open. The v0.6.0
-release contains Windows, Linux, and macOS binaries, a store-ready extension ZIP, checksums, and a
+release contains Windows and Linux binaries, a store-ready extension ZIP, checksums, and a
 CycloneDX SBOM. The release workflow supplies attestations.
 
 Useful evidence is unusually strong for a young project:
@@ -78,7 +77,7 @@ Useful evidence is unusually strong for a young project:
 - architecture and product decisions are recorded in ADRs;
 - the public Trust Center links claims to code, tests, and decisions;
 - a candid comparison and decision aid explain fit and non-fit;
-- the release pipeline covers npm, Homebrew, MCP Registry, extension assets, SBOM, checksums, and
+- the release pipeline covers npm, MCP Registry, extension assets, SBOM, checksums, and
   attestations.
 
 ## Constraints and open questions

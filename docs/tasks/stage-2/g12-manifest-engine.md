@@ -304,7 +304,6 @@ Org policy file path (shared format doc section 1.2), by `cfg(target_os)`:
 
 - Windows: `%ProgramData%\browser-mcp\policy.json` (read the `ProgramData` environment
   variable; fall back to `C:\ProgramData` when unset).
-- macOS: `/Library/Application Support/browser-mcp/policy.json`.
 - Linux and other unix: `/etc/browser-mcp/policy.json`.
 
 Selection rule (shared format doc section 1.3), implemented as a pure function over

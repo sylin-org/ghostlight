@@ -120,7 +120,6 @@ All line numbers verified against the working tree as it stands now.
 `src/install/mod.rs` (1015 lines):
 
 - Lines 58-61: `DoctorOptions { verbose: bool }`.
-- Lines 543-549: `host_file_path(b, ctx)` (private) picks the macOS or Linux manifest path.
 - Lines 719-757: `run_doctor` prints `browser-mcp doctor`, a `Binary: <exe>` line, a
   `Browsers:` section (`{:<16} detected={:<5} registered={}` rows; on Windows registered
   means the registry key default value exists in HKCU native view or HKLM both views; on

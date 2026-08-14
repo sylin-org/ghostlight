@@ -1,7 +1,7 @@
 # Ghostlight MCPB
 
 This directory is the source template for Ghostlight's Claude Desktop MCPB package. Release
-packaging adds the signed release binaries for Windows x64, macOS Apple Silicon, and macOS Intel.
+packaging adds the signed release binaries for Windows x64.
 The package does not download code or send telemetry at runtime.
 
 The bundle contains the persistent `ghostlight` service, the protocol-versioned

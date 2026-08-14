@@ -262,7 +262,7 @@ current task prompt, then continue. Never rely on remembering earlier work; re-r
   org_mandatory/user/org_recommended/preset/builtin that defines it, returning the shared-format
   2.1 triple (value/source/locked); `layers::validate_value` delegates to G01's
   `KeyDef::parse_value`. `load::user_config_path`/`org_policy_path` implement the exact
-  shared-format 1.1/1.2 per-platform paths (Windows/macOS/Linux `cfg` branches, `ProgramData`
+  shared-format 1.1/1.2 per-platform paths (Windows/Linux `cfg` branches, `ProgramData`
   env fallback). `load::parse_user_config` is lenient per entry (warn + skip unknown keys,
   invalid values, unknown presets, unknown top-level members; hard error only on structurally
   broken JSON). `load::parse_org_config` is strict everywhere (every violation --
@@ -2363,7 +2363,7 @@ current task prompt, then continue. Never rely on remembering earlier work; re-r
   (not just via the test's own read-and-compare).
   **Deliberately NOT run** (this task's own Verification steps 4 and 5): running `config
   preset <name>` WITHOUT `--dry-run` against the real per-platform user config file. This
-  would mutate `%APPDATA%\browser-mcp\config.json` (or the equivalent macOS/Linux path) on
+  would mutate `%APPDATA%\browser-mcp\config.json` (or the equivalent Linux path) on
   whatever machine runs this unattended session -- a side effect outside the repository
   and outside this task's authority to make unattended, unlike a temp-path write. The
   write path's correctness is instead proven by `write_preset_at`'s own temp-path unit

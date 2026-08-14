@@ -46,7 +46,7 @@ button:disabled { cursor: default; opacity: .6; }
   min-height: 100vh;
   color: #e6edf6;
   background: radial-gradient(900px 520px at 82% -10%, rgba(56,189,248,.10), transparent 60%), #0a0e17;
-  font: 13.5px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font: 13.5px/1.5 system-ui, "Segoe UI", Roboto, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 .options-shell main { max-width: 620px; margin: 0 auto; padding: 56px 24px 48px; }

@@ -34,7 +34,6 @@ normal and means "no user layer".
 | Platform | Path |
 |---|---|
 | Windows | `%APPDATA%\browser-mcp\config.json` |
-| macOS | `~/Library/Application Support/browser-mcp/config.json` |
 | Linux | `~/.config/browser-mcp/config.json` |
 
 Format:
@@ -59,14 +58,13 @@ Format:
 ### 1.2. Org policy file
 
 The organization manifest (section 4). Lives at an admin-writable-only path and is
-delivered by the org's deployment channel (GPO, Intune, Jamf), per ADR-0019. File ACLs
+delivered by the org's deployment channel (GPO, Intune, or MDM), per ADR-0019. File ACLs
 plus the deployment channel are a usage-surface guard, not a cryptographic boundary;
 manifest signing stays excluded (SPEC section 10).
 
 | Platform | Path |
 |---|---|
 | Windows | `%ProgramData%\browser-mcp\policy.json` |
-| macOS | `/Library/Application Support/browser-mcp/policy.json` |
 | Linux | `/etc/browser-mcp/policy.json` |
 
 The binary loads this file automatically at startup when it exists. No flag can bypass it.
@@ -101,7 +99,6 @@ Used when `audit.file.path` resolves to the empty string (section 3.4):
 | Platform | Path |
 |---|---|
 | Windows | `%LOCALAPPDATA%\browser-mcp\audit.jsonl` |
-| macOS | `~/Library/Application Support/browser-mcp/audit.jsonl` |
 | Linux | `~/.local/share/browser-mcp/audit.jsonl` |
 
 ---
@@ -775,8 +772,8 @@ SPEC text. Amend the SPEC accordingly.
    triple (value, source, locked); presets fully_open/safe/restricted; typed key
    registry (ADR-0019). File locations per section 1.
 8. **Manifest sources (SPEC 4.4).** Add the auto-loaded org policy file
-   (ProgramData / /Library/Application Support / /etc) as the primary org source, taking
-   precedence over `--manifest`/env; `managed://` is deferred out of stage 2; the
+   (`%ProgramData%` on Windows or `/etc` on Linux) as the primary org source, taking precedence
+   over `--manifest`/env; `managed://` is deferred out of stage 2; the
    no-manifest row's "equivalent to unlisted_domains: observe" wording is replaced by
    all-open per ADR-0013.
 9. **Audit record schema (SPEC 7.1, 7.2).** New field set per section 6 (`event_id`,

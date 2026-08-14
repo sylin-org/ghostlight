@@ -95,7 +95,7 @@ The canonical service-first page required by ADR-0070 is live at
 1. Finish the Chrome Web Store listing so the visible browser step becomes one click.
 2. Capture the README hero GIF using Ghostlight itself. The empty hero slot remains the largest
    gap between the promised experience and the public page.
-3. Live-verify macOS and Linux, then replace the current-state caveat with evidence.
+3. Live-verify Linux, then replace the current-state caveat with evidence.
 4. Ask first-time users two questions: what made you try it, and where did installation hesitate?
 5. Review public architecture statements as part of every topology-changing ADR and release.
 

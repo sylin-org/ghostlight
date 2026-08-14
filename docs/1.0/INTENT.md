@@ -8,6 +8,9 @@ browser steps, applies one authority snapshot, and returns one truthful terminal
 The browser is the user's visible, existing, authenticated Chromium browser. Ghostlight does
 not create a hidden browsing world or ask a model to reproduce browser orchestration.
 
+Ghostlight 1.0 supports Windows and Linux. Runtime behavior, installers, packages, launchers,
+continuous integration, and release evidence use only those operating systems.
+
 ## User jobs
 
 Ghostlight supports these distinct jobs:

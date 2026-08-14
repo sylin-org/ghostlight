@@ -156,32 +156,29 @@ struct HarnessContext {
     home: PathBuf,
     config: PathBuf,
     roaming: PathBuf,
+    codex_config: PathBuf,
     connector: PathBuf,
     path_entries: Vec<PathBuf>,
     windows: bool,
-    macos: bool,
 }
 
 impl HarnessContext {
     fn system() -> Self {
-        let home = env::var_os("USERPROFILE")
-            .or_else(|| env::var_os("HOME"))
-            .map(PathBuf::from)
-            .unwrap_or_default();
         let windows = cfg!(target_os = "windows");
-        let macos = cfg!(target_os = "macos");
-        let config = env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".config"));
-        let roaming = if windows {
-            env::var_os("APPDATA")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join("AppData/Roaming"))
-        } else if macos {
-            home.join("Library/Application Support")
+        let home = if windows {
+            env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"))
         } else {
-            config.clone()
-        };
+            env::var_os("HOME")
+        }
+        .map(PathBuf::from)
+        .unwrap_or_default();
+        let roots = harness_roots(
+            &home,
+            env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            env::var_os("APPDATA").map(PathBuf::from),
+            env::var_os("CODEX_HOME").map(PathBuf::from),
+            windows,
+        );
         let connector = env::current_exe()
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf))
@@ -192,13 +189,49 @@ impl HarnessContext {
             .unwrap_or_default();
         Self {
             home,
-            config,
-            roaming,
+            config: roots.config,
+            roaming: roots.roaming,
+            codex_config: roots.codex_config,
             connector,
             path_entries,
             windows,
-            macos,
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HarnessRoots {
+    config: PathBuf,
+    roaming: PathBuf,
+    codex_config: PathBuf,
+}
+
+fn harness_roots(
+    home: &Path,
+    xdg_config_home: Option<PathBuf>,
+    app_data: Option<PathBuf>,
+    codex_home: Option<PathBuf>,
+    windows: bool,
+) -> HarnessRoots {
+    let config = if windows {
+        app_data
+            .clone()
+            .unwrap_or_else(|| home.join("AppData/Roaming"))
+    } else {
+        xdg_config_home.unwrap_or_else(|| home.join(".config"))
+    };
+    let roaming = if windows {
+        app_data.unwrap_or_else(|| home.join("AppData/Roaming"))
+    } else {
+        config.clone()
+    };
+    let codex_config = codex_home
+        .unwrap_or_else(|| home.join(".codex"))
+        .join("config.toml");
+    HarnessRoots {
+        config,
+        roaming,
+        codex_config,
     }
 }
 
@@ -229,7 +262,7 @@ enum JsonDialect {
 }
 
 fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
-    let zed = if context.windows || context.macos {
+    let zed = if context.windows {
         context.roaming.join("Zed/settings.json")
     } else {
         context.config.join("zed/settings.json")
@@ -249,7 +282,7 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
         HarnessDefinition {
             id: "codex",
             name: "Codex",
-            path: context.home.join(".codex/config.toml"),
+            path: context.codex_config.clone(),
             executables: &["codex"],
             dialect: ConfigDialect::CodexToml,
         },
@@ -330,7 +363,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     let detail = match state {
         HarnessState::Installed => "Ghostlight is registered for this user context.".into(),
         HarnessState::Updatable => {
-            "Ghostlight is registered, but its connector path belongs to an older installation."
+            "Ghostlight is registered through an older Ghostlight installation or executable."
                 .into()
         }
         HarnessState::Available if connector_ready => {
@@ -403,7 +436,8 @@ fn inspect_json(
     };
     Ok(
         json_entry_command(entry, dialect).map_or(RegistrationState::Foreign, |command| {
-            command_registration_state(command, connector, windows)
+            let args = json_entry_args(entry, dialect);
+            command_registration_state(command, args.as_deref(), connector, windows)
         }),
     )
 }
@@ -427,7 +461,13 @@ fn inspect_toml(
         .get("command")
         .and_then(Item::as_str)
         .unwrap_or_default();
-    Ok(command_registration_state(command, connector, windows))
+    let args = toml_entry_args(entry);
+    Ok(command_registration_state(
+        command,
+        args.as_deref(),
+        connector,
+        windows,
+    ))
 }
 
 fn apply_install(
@@ -509,7 +549,7 @@ fn edit_json(
     let parsed = parse_jsonc(&source)?;
     let current = json_entry(&parsed, dialect);
     if let Some(entry) = current {
-        if !json_entry_owned(entry, dialect) {
+        if !json_entry_owned(entry, dialect, connector, cfg!(target_os = "windows")) {
             return Err(HarnessError::ForeignEntry);
         }
         if install && entry == &expected_json_entry(connector, dialect) {
@@ -556,7 +596,13 @@ fn edit_toml(path: &Path, connector: &Path, install: bool) -> Result<bool, Harne
             .get("command")
             .and_then(Item::as_str)
             .unwrap_or_default();
-        if !command_owned(command) {
+        let args = toml_entry_args(entry);
+        if !command_owned(
+            command,
+            args.as_deref(),
+            connector,
+            cfg!(target_os = "windows"),
+        ) {
             return Err(HarnessError::ForeignEntry);
         }
         if install
@@ -703,8 +749,11 @@ fn escape_cst_string(value: &str) -> String {
     escaped
 }
 
-fn json_entry_owned(entry: &Value, dialect: JsonDialect) -> bool {
-    json_entry_command(entry, dialect).is_some_and(command_owned)
+fn json_entry_owned(entry: &Value, dialect: JsonDialect, connector: &Path, windows: bool) -> bool {
+    json_entry_command(entry, dialect).is_some_and(|command| {
+        let args = json_entry_args(entry, dialect);
+        command_owned(command, args.as_deref(), connector, windows)
+    })
 }
 
 fn json_entry_command(entry: &Value, dialect: JsonDialect) -> Option<&str> {
@@ -721,30 +770,87 @@ fn json_entry_command(entry: &Value, dialect: JsonDialect) -> Option<&str> {
     }
 }
 
-fn command_owned(command: &str) -> bool {
+fn json_entry_args(entry: &Value, dialect: JsonDialect) -> Option<Vec<&str>> {
+    let values: &[Value] = match dialect {
+        JsonDialect::McpServers
+        | JsonDialect::Servers
+        | JsonDialect::ContextServers
+        | JsonDialect::Crush => entry.get("args")?.as_array()?,
+        JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => {
+            let command = entry.get("command")?.as_array()?;
+            command.get(1..)?
+        }
+    };
+    values.iter().map(Value::as_str).collect()
+}
+
+fn toml_entry_args(entry: &Item) -> Option<Vec<&str>> {
+    entry
+        .get("args")?
+        .as_array()?
+        .iter()
+        .map(toml_edit::Value::as_str)
+        .collect()
+}
+
+fn command_name(command: &str, expected: &str) -> bool {
     Path::new(command)
         .file_stem()
         .and_then(OsStr::to_str)
-        .is_some_and(|name| name.eq_ignore_ascii_case("ghostlight-mcp-connector"))
+        .is_some_and(|name| name.eq_ignore_ascii_case(expected))
 }
 
-fn command_registration_state(command: &str, connector: &Path, windows: bool) -> RegistrationState {
-    if !command_owned(command) {
+fn command_owned(command: &str, args: Option<&[&str]>, connector: &Path, windows: bool) -> bool {
+    command_name(command, "ghostlight-mcp-connector")
+        || legacy_relay_owned(command, args, connector, windows)
+}
+
+fn legacy_relay_owned(
+    command: &str,
+    args: Option<&[&str]>,
+    connector: &Path,
+    windows: bool,
+) -> bool {
+    if !command_name(command, "ghostlight-relay") || args != Some(&["--role", "agent"]) {
+        return false;
+    }
+    let Some(actual_root) = Path::new(command).parent().and_then(Path::parent) else {
+        return false;
+    };
+    let Some(expected_root) = connector.parent().and_then(Path::parent) else {
+        return false;
+    };
+    paths_equal(actual_root, expected_root, windows)
+}
+
+fn command_registration_state(
+    command: &str,
+    args: Option<&[&str]>,
+    connector: &Path,
+    windows: bool,
+) -> RegistrationState {
+    if !command_owned(command, args, connector, windows) {
         return RegistrationState::Foreign;
     }
     let actual = fs::canonicalize(command).unwrap_or_else(|_| PathBuf::from(command));
     let expected = fs::canonicalize(connector).unwrap_or_else(|_| connector.to_path_buf());
-    let actual = actual.to_string_lossy();
-    let expected = expected.to_string_lossy();
-    let current = if windows {
-        actual.eq_ignore_ascii_case(&expected)
-    } else {
-        actual == expected
-    };
+    let current = command_name(command, "ghostlight-mcp-connector")
+        && paths_equal(&actual, &expected, windows)
+        && args.is_some_and(|args| args.is_empty());
     if current {
         RegistrationState::Current
     } else {
         RegistrationState::Updatable
+    }
+}
+
+fn paths_equal(actual: &Path, expected: &Path, windows: bool) -> bool {
+    let actual = actual.to_string_lossy();
+    let expected = expected.to_string_lossy();
+    if windows {
+        actual.eq_ignore_ascii_case(&expected)
+    } else {
+        actual == expected
     }
 }
 
@@ -884,8 +990,8 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        edit_json, edit_toml, inspect_json, inspect_toml, HarnessError, JsonDialect,
-        RegistrationState,
+        command_registration_state, edit_json, edit_toml, harness_roots, inspect_json,
+        inspect_toml, HarnessError, HarnessRoots, JsonDialect, RegistrationState,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -906,6 +1012,89 @@ mod tests {
         });
         fs::write(&connector, b"test").unwrap();
         connector
+    }
+
+    #[test]
+    fn platform_roots_honor_effective_linux_and_windows_configuration() {
+        let linux = harness_roots(
+            Path::new("/home/test"),
+            Some(PathBuf::from("/mnt/config")),
+            Some(PathBuf::from("/ignored/appdata")),
+            Some(PathBuf::from("/workbench/codex")),
+            false,
+        );
+        assert_eq!(
+            linux,
+            HarnessRoots {
+                config: PathBuf::from("/mnt/config"),
+                roaming: PathBuf::from("/mnt/config"),
+                codex_config: PathBuf::from("/workbench/codex/config.toml"),
+            }
+        );
+
+        let windows = harness_roots(
+            Path::new("C:/Users/test"),
+            Some(PathBuf::from("C:/ignored/xdg")),
+            Some(PathBuf::from("D:/Profiles/Roaming")),
+            None,
+            true,
+        );
+        assert_eq!(
+            windows,
+            HarnessRoots {
+                config: PathBuf::from("D:/Profiles/Roaming"),
+                roaming: PathBuf::from("D:/Profiles/Roaming"),
+                codex_config: PathBuf::from("C:/Users/test/.codex/config.toml"),
+            }
+        );
+    }
+
+    #[test]
+    fn legacy_relay_requires_the_exact_agent_signature_and_install_root() {
+        let directory = temporary("legacy-relay");
+        let install_root = directory.join("bin");
+        let current = install_root.join("v1").join(if cfg!(windows) {
+            "ghostlight-mcp-connector.exe"
+        } else {
+            "ghostlight-mcp-connector"
+        });
+        let legacy = install_root.join("v0").join(if cfg!(windows) {
+            "ghostlight-relay.exe"
+        } else {
+            "ghostlight-relay"
+        });
+        assert_eq!(
+            command_registration_state(
+                legacy.to_string_lossy().as_ref(),
+                Some(&["--role", "agent"]),
+                &current,
+                cfg!(windows),
+            ),
+            RegistrationState::Updatable
+        );
+        assert_eq!(
+            command_registration_state(
+                legacy.to_string_lossy().as_ref(),
+                Some(&["--role", "browser"]),
+                &current,
+                cfg!(windows),
+            ),
+            RegistrationState::Foreign
+        );
+        assert_eq!(
+            command_registration_state(
+                directory
+                    .join("foreign/v0")
+                    .join(legacy.file_name().unwrap())
+                    .to_string_lossy()
+                    .as_ref(),
+                Some(&["--role", "agent"]),
+                &current,
+                cfg!(windows),
+            ),
+            RegistrationState::Foreign
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

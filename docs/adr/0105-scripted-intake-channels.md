@@ -145,7 +145,7 @@ session at all, which is a different and weaker claim than knowing who is callin
   own signed binaries for WDAC. The guide must say so beside the policy key.
 - Signature checking is not a sandbox. Injection into an already-signed process defeats it, and the
   trust center must not imply otherwise.
-- Verification is Windows and macOS in practice. Linux has no deployed equivalent, so a signer
+- Verification is Windows in practice. Linux has no deployed equivalent, so a signer
   requirement denies there.
 - Controlled tabs group by client label. The CLI channel uses one stable label so a scripted session
   gets its own visible group rather than multiplying groups per calling program.

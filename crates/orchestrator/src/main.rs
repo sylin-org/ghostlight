@@ -136,9 +136,23 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
 
     let harnesses = HarnessRegistry::discover();
     let summaries = harnesses.refresh()?;
+    let attention_count = summaries
+        .iter()
+        .filter(|summary| summary.state == ghostlight::install::HarnessState::NeedsAttention)
+        .inspect(|summary| {
+            eprintln!(
+                "MCP client needs attention: {} -- {}",
+                summary.name, summary.detail
+            );
+        })
+        .count();
     let selected = select_harnesses(&summaries, options, install)?;
     if selected.is_empty() {
-        println!("No MCP client configuration needs to change.");
+        if attention_count == 0 {
+            println!("No MCP client configuration needs to change.");
+        } else {
+            println!("No MCP client configuration can be changed automatically.");
+        }
         return finish_setup(install, options);
     }
     let mut failures = Vec::new();
@@ -190,10 +204,6 @@ fn open_walkthrough() -> std::io::Result<()> {
     let mut command = if cfg!(windows) {
         let mut command = Command::new("rundll32.exe");
         command.args(["url.dll,FileProtocolHandler", WALKTHROUGH]);
-        command
-    } else if cfg!(target_os = "macos") {
-        let mut command = Command::new("open");
-        command.arg(WALKTHROUGH);
         command
     } else {
         let mut command = Command::new("xdg-open");
@@ -494,6 +504,16 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
     {
         return Ok(LaunchMode::Help);
     }
+    if arguments.len() == 2
+        && arguments
+            .first()
+            .is_some_and(|argument| argument == "install" || argument == "uninstall")
+        && arguments
+            .get(1)
+            .is_some_and(|argument| argument == "--help" || argument == "-h")
+    {
+        return Ok(LaunchMode::Help);
+    }
     if arguments
         .first()
         .is_some_and(|argument| argument == "native-host")
@@ -646,6 +666,10 @@ mod tests {
             LaunchMode::Headless
         );
         assert_eq!(launch_mode(["--help".into()]).unwrap(), LaunchMode::Help);
+        assert_eq!(
+            launch_mode(["install".into(), "--help".into()]).unwrap(),
+            LaunchMode::Help
+        );
         assert_eq!(
             launch_mode(["--version".into()]).unwrap(),
             LaunchMode::Version

@@ -2,8 +2,8 @@
 
 **Date:** 2026-07-01 · **Track:** Delight (developer) / Fork 4 · **Source:** research agent (verbatim report)
 
-> What a `browser-mcp install` command must discover and wire on Windows / macOS / Linux to
-> register (A) a native-messaging host for Chromium browsers and (B) an MCP stdio server in AI
+> What a `browser-mcp install` command must discover and wire on Windows and Linux to register
+> (A) a native-messaging host for Chromium browsers and (B) an MCP stdio server in AI
 > coding clients. This is the actionable spec for Fork 4's self-registering installer. Sources
 > cited inline.
 
@@ -25,13 +25,13 @@
 }
 ```
 - `name`: lowercase alphanumeric + `_` + `.`; no leading/trailing dot, no `..`.
-- `path`: must be **absolute** on macOS/Linux; on Windows may be relative to the manifest dir.
+- `path`: must be **absolute** on Linux; on Windows may be relative to the manifest dir.
 - `type`: always `stdio`.
 - `allowed_origins`: **no wildcards**, must enumerate exact `chrome-extension://<id>/` origins.
-  This forces the installer to know the extension ID (see A.6).
+  This forces the installer to know the extension ID (see A.5).
 
 **Two registration models, split by OS:**
-- **macOS / Linux** -> drop a `<host_name>.json` file into a **per-browser directory**.
+- **Linux** -> drop a `<host_name>.json` file into a per-browser directory.
 - **Windows** -> the manifest can live anywhere; a **registry key** whose `(Default)` value is the
   absolute path to the `.json` is what Chrome reads. Registry is authoritative; file location is
   arbitrary. Confirmed by [claude-code #24367](https://github.com/anthropics/claude-code/issues/24367),
@@ -72,29 +72,8 @@ default value to the manifest path. Sources:
 [keepassxc-browser #48](https://github.com/keepassxreboot/keepassxc-browser/issues/48) (Vivaldi->Chrome fallback),
 [Edge native messaging](https://learn.microsoft.com/en-us/microsoft-edge/extensions/developer-guide/native-messaging).
 
-### A.2 macOS: detection + host directories
 
-**Detect** via `.app` bundle (+ `CFBundleIdentifier`):
-
-| Browser | App path | Bundle ID |
-|---|---|---|
-| Chrome | `/Applications/Google Chrome.app` | `com.google.Chrome` |
-| Edge | `/Applications/Microsoft Edge.app` | `com.microsoft.edgemac` |
-| Brave | `/Applications/Brave Browser.app` | `com.brave.Browser` |
-| Vivaldi | `/Applications/Vivaldi.app` | `com.vivaldi.Vivaldi` |
-| Opera | `/Applications/Opera.app` | `com.operasoftware.Opera` |
-| Arc | `/Applications/Arc.app` | `company.thebrowser.Browser` |
-| Chromium | `/Applications/Chromium.app` | `org.chromium.Chromium` |
-
-**Native-host dir** (drop `<host_name>.json`; user-level, no admin) under `~/Library/Application Support/`:
-Chrome `Google/Chrome/NativeMessagingHosts/`; Edge `Microsoft Edge/NativeMessagingHosts/`; Brave
-`BraveSoftware/Brave-Browser/NativeMessagingHosts/`; Vivaldi `Vivaldi/NativeMessagingHosts/`; Opera
-`com.operasoftware.Opera/NativeMessagingHosts/`; Arc `Arc/User Data/NativeMessagingHosts/` (verify);
-Chromium `Chromium/NativeMessagingHosts/`. System-wide (needs admin): `/Library/Google/Chrome/NativeMessagingHosts/`, etc.
-Also check `~/Applications/`. Sources: [Chrome docs](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging),
-[claude-code #20887](https://github.com/anthropics/claude-code/issues/20887).
-
-### A.3 Linux: detection + host directories
+### A.2 Linux: detection + host directories
 
 **Detect** via binary on PATH (`google-chrome[-stable]`, `microsoft-edge[-stable]`, `brave-browser`,
 `vivaldi[-stable]`, `opera`, `chromium[-browser]`), `.desktop` files, and config-dir presence.
@@ -115,14 +94,14 @@ Sources: [Chrome docs](https://developer.chrome.com/docs/extensions/develop/conc
 [claude-code #14391](https://github.com/anthropics/claude-code/issues/14391) (exact Linux dirs +
 installer-only-writes-Chrome bug), [vdhcoapp PR #110](https://github.com/aclap-dev/vdhcoapp/pull/110/files).
 
-### A.4 User-data / profile directories
+### A.3 User-data / profile directories
 
 For (a) confirming real use, (b) enumerating profiles, (c) dev-time scraping of a loaded unpacked
 extension's ID from `<UserData>/<Profile>/Preferences` (`extensions.settings`) or `Secure Preferences`.
-Chrome roots: Windows `%LOCALAPPDATA%\Google\Chrome\User Data\`; macOS `~/Library/Application Support/Google/Chrome/`;
-Linux `~/.config/google-chrome/`. Real-profile markers: `Local State`, `Default/Preferences`.
+Chrome roots: Windows `%LOCALAPPDATA%\Google\Chrome\User Data\`; Linux
+`~/.config/google-chrome/`. Real-profile markers: `Local State`, `Default/Preferences`.
 
-### A.5 Per-browser gotchas
+### A.4 Per-browser gotchas
 
 - **`allowed_origins` has no wildcards**: pin exact extension ID (drives the `--extension-id` fallback).
 - **Linux dir casing:** `NativeMessagingHosts` (user) vs `native-messaging-hosts` (`/etc`). Wrong = silent "host not found."
@@ -130,7 +109,7 @@ Linux `~/.config/google-chrome/`. Real-profile markers: `Local State`, `Default/
 - **Windows off-store force-install** requires AD/Entra/CBCM enrollment; unmanaged consumer Windows cannot silently force-install an off-store extension. ([Chrome Enterprise](https://chromeenterprise.google/policies/extension-install-forcelist/))
 - **Windows registry `(Default)` value is what's read**, not a conventional file path.
 
-### A.6 The `key` field -> deterministic extension ID (solves `allowed_origins`)
+### A.5 The `key` field -> deterministic extension ID (solves `allowed_origins`)
 
 Chrome derives the extension ID from the manifest `key`: base64-decode `key` -> SHA-256 -> first 32
 hex chars -> map `0-9a-f` to `a-p`. Ship a fixed `key` and the ID is **deterministic and identical**
@@ -164,8 +143,8 @@ Most use `mcpServers` with `{command, args, env}`. Exceptions: **VS Code** uses 
 
 ### B.2 Claude Desktop
 
-- **Config file:** macOS `~/Library/Application Support/Claude/claude_desktop_config.json`;
-  Windows `%APPDATA%\Claude\claude_desktop_config.json`; Linux `~/.config/Claude/claude_desktop_config.json`.
+- **Config file:** Windows `%APPDATA%\Claude\claude_desktop_config.json`; Linux
+  `~/.config/Claude/claude_desktop_config.json`.
 - **Schema:** `{ "mcpServers": { "<name>": {command, args, env} } }`. No CLI: merge JSON, user restarts.
 
 ### B.3 Cursor
@@ -179,8 +158,8 @@ Most use `mcpServers` with `{command, args, env}`. Exceptions: **VS Code** uses 
 
 ### B.5 VS Code (Copilot agent) + Continue / Cline
 
-- **Config:** workspace `.vscode/mcp.json`; user `mcp.json` (Win `%APPDATA%\Code\User\mcp.json`;
-  macOS `~/Library/Application Support/Code/User/mcp.json`; Linux `~/.config/Code/User/mcp.json`).
+- **Config:** workspace `.vscode/mcp.json`; user `mcp.json` (Windows
+  `%APPDATA%\Code\User\mcp.json`; Linux `~/.config/Code/User/mcp.json`).
   **Top-level key is `servers`** (+ optional `inputs`), entries carry `"type": "stdio"`.
 - **CLI (preferred):** `code --add-mcp '{"name":"browser-mcp","command":"browser-mcp","args":[...]}'`;
   deeplink `vscode:mcp/install?<url-encoded-json>`.
@@ -224,10 +203,10 @@ Most use `mcpServers` with `{command, args, env}`. Exceptions: **VS Code** uses 
 ### C.3 Minimum-viable `browser-mcp install` UX
 
 **Auto-detect (no prompt):** OS+arch; own path (`std::env::current_exe`); installed browsers (C.1);
-installed clients (C.2); extension ID pre-pinned via manifest `key` (A.6).
+installed clients (C.2); extension ID pre-pinned via manifest `key` (A.5).
 
 **One-click actions (idempotent; back up before editing existing JSON):** per browser, write
-`<host>.json` (mac/linux) or registry key (win) with our unique host name + pinned `allowed_origins`;
+`<host>.json` on Linux or a registry key on Windows with our unique host name plus pinned `allowed_origins`;
 per client, prefer CLI (`claude mcp add`, `code --add-mcp`) else merge JSON under the correct top-level
 key, `command` = absolute exe path (no npx). Print a summary; offer `--dry-run`.
 
@@ -243,7 +222,7 @@ instructions escape hatch printing exact path/key + content on any write failure
 
 1. **Pin the extension ID at build time** via manifest `key` -> hardcode `allowed_origins` (no wildcards).
 2. **Use a unique host name** (`org.sylin.browser_mcp`) to dodge the Anthropic Desktop/Code collision.
-3. **Windows = registry**, not a file path; **macOS/Linux = drop file** in the per-browser dir.
+3. **Windows = registry**, not a file path; **Linux = drop file** in the per-browser dir.
 4. **Linux casing:** `NativeMessagingHosts` (user) vs `native-messaging-hosts` (`/etc`).
 5. **`command` = absolute native-binary path**; never npx -> sidesteps the Windows cmd/c stdio bug.
 6. Prefer client CLIs (`claude mcp add`, `code --add-mcp`); JSON-merge (never overwrite) otherwise.
@@ -261,13 +240,12 @@ claude-code issues #14391 / #24367 / #20887 / #21426 / #21582 / #20341 / #20061 
 codex #24040 · playwright-mcp #1540 ·
 Community installer: https://github.com/stolot0mt0m/claude-chromium-native-messaging ·
 MCP clients: Claude Code https://code.claude.com/docs/en/mcp · Claude Desktop https://modelcontextprotocol.io/docs/develop/connect-local-servers ·
-VS Code https://code.visualstudio.com/docs/agents/reference/mcp-configuration · Zed https://zed.dev/docs/ai/mcp ·
-Bundle IDs: https://macbundleid.lemonproductions.ca/ · Arc: https://resources.arc.net/hc/en-us/articles/22353769256471
+VS Code https://code.visualstudio.com/docs/agents/reference/mcp-configuration · Zed https://zed.dev/docs/ai/mcp
 
 ---
 
 **Feeds:** Fork 4 (self-registering installer) implementation. **Key takeaways:** bake a fixed
 extension `key` (deterministic ID -> compile-time `allowed_origins`); Windows = registry (HKCU, no
-admin), macOS/Linux = per-browser dir file drop (mind Linux casing); ship a native binary with an
+admin), Linux = per-browser dir file drop (mind Linux casing); ship a native binary with an
 absolute `command` path in every client config (avoids npx-on-Windows failures); use a unique host
 name; prefer client CLIs, fall back to careful JSON merges across three key dialects.

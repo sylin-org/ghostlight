@@ -60,7 +60,6 @@ Use now or maintain:
 - GitHub repository, Releases, topics, and Discussions;
 - npm package `ghostlight`;
 - Official MCP Registry `org.sylin/ghostlight`;
-- Homebrew tap and release artifacts;
 - Chrome Web Store after review, then Edge Add-ons if the accepted artifact remains equivalent.
 
 Prepare selectively:

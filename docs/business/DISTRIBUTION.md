@@ -18,8 +18,8 @@ in the session record and docs/research/14 (P1 was "ship the distribution alread
   the extension opens `https://sylin.org/ghostlight/chromium-extension/post-install/` on first
   install.
 - README quick-install block with Cursor/VS Code deeplink buttons and the npx snippet.
-- `server.json` (MCP registry descriptor), `packaging/winget/`, `packaging/scoop/`,
-  `packaging/homebrew/` (templates; hashes come from release assets).
+- `server.json` (MCP registry descriptor), plus `packaging/winget/` and `packaging/scoop/`
+  templates whose hashes come from release assets.
 
 ## Artifact shape after the ADR-0096 cutover release
 
@@ -27,7 +27,7 @@ Every post-cutover release ships three executables side by side: `ghostlight-mcp
 edge), `ghostlight` (the CLI and persistent protocol-neutral service), and `ghostlight-browser-connector` (the
 browser-only native-messaging host). Each platform archive carries all three, and release.yml
 uploads all three as raw per-target binaries too. The install scripts, npm launcher, MCPB, and
-winget/scoop/homebrew templates place them together in one directory. MCP-client entries launch
+winget/scoop templates place them together in one directory. MCP-client entries launch
 `ghostlight-mcp-connector`; the Chromium native-host manifest independently launches `ghostlight-browser-connector`.
 
 ## Founder: accounts and publishes (order matters)
@@ -59,7 +59,7 @@ winget/scoop/homebrew templates place them together in one directory. MCP-client
       mcpservers.org Development listing is live at
       `https://mcpservers.org/servers/sylin-org/ghostlight`. A refresh request was accepted on
       2026-08-07. A self-contained
-      Windows/macOS MCPB source, launcher, release packager, and validation gate now prepare the
+      Windows MCPB source, launcher, release packager, and validation gate now prepare the
       Claude Desktop path. The released v0.8.0 asset is ready; Anthropic submission remains gated
       only on clarification of the live form's MIT-only requirement because Ghostlight is
       open-core. OpenAI's public
@@ -75,8 +75,6 @@ winget/scoop/homebrew templates place them together in one directory. MCP-client
 - [ ] **Winget.** v0.7.3 is publicly discoverable. The v0.8.0 manifest validates locally, and PR
       [#413601](https://github.com/microsoft/winget-pkgs/pull/413601) is open with the CLA check
       green. Microsoft controls review and merge.
-- [x] **Homebrew tap.** `sylin-org/homebrew-tap` is live. Release v0.8.0 was published in commit
-      `302c710`; users install it with `brew install sylin-org/tap/ghostlight`.
 - [x] **Scoop direct manifest.** `packaging/scoop/ghostlight.json` carries v0.8.0 and can be
       installed directly by URL. The central Extras package-request template currently requires
       at least 100 GitHub stars or 50 forks; Ghostlight has neither, so an Extras request would

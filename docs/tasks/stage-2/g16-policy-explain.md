@@ -581,7 +581,7 @@ Task-specific:
 9. The renderer is pure and machine independent: no clock, no randomness, no HashMap
    iteration order anywhere in the output path (the manifest and config types preserve
    order via `preserve_order`; the registry is an ordered const slice), no platform
-   paths, no environment reads. Byte-identical output on Windows, macOS, and Linux is a
+   paths, no environment reads. Byte-identical output on Windows and Linux is a
    requirement, not a nicety.
 10. Use the template strings of Required behavior sections 3 and 4 verbatim. If a
     template seems wrong or a case seems unrepresentable with the prerequisite's types,

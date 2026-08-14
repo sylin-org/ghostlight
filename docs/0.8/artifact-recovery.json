@@ -3,13 +3,13 @@
   "sourceRevision": "c01cc3276102471f3e18de2ae90cb90abf98ed88",
   "generatedBy": "scripts/harvest-0.8-artifacts.ps1",
   "counts": {
-    "total": 810,
+    "total": 809,
     "byTreatment": {
       "behavior-dispositioned": 95,
       "historical-implementation-only": 162,
       "redesign-after-signed-candidate": 1,
-      "retained-evolved": 106,
-      "retained-identical": 442,
+      "retained-evolved": 184,
+      "retained-identical": 363,
       "retired-low-value-conductor": 1,
       "reviewed-repository-history": 1,
       "reviewed-tooling-history": 1,
@@ -103,15 +103,15 @@
     },
     {
       "path": ".oss-adoption/current/claim-ledger.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/current/ecosystem-map.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/current/measurement-plan.md",
@@ -121,9 +121,9 @@
     },
     {
       "path": ".oss-adoption/current/project-profile.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/current/publication-pack/community-post.md",
@@ -133,33 +133,33 @@
     },
     {
       "path": ".oss-adoption/current/publication-pack/curator-brief.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/current/publication-pack/launch-brief.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/current/publication-pack/release-announcement.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/current/publication-plan.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/current/readiness-audit.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/current/repository-inventory.json",
@@ -169,9 +169,9 @@
     },
     {
       "path": ".oss-adoption/current/RESULTS.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/STATE.md",
@@ -1231,9 +1231,9 @@
     },
     {
       "path": "docs/adr/0015-idempotent-merge-installer.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0016-debug-mode-pinned-extension-id.md",
@@ -1255,15 +1255,15 @@
     },
     {
       "path": "docs/adr/0019-layered-configuration-model.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0020-org-policy-experience.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0021-ghostlight-brand-and-family.md",
@@ -1297,9 +1297,9 @@
     },
     {
       "path": "docs/adr/0026-release-maturity-and-externalities.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0027-open-core-business-model-and-licensing.md",
@@ -1315,15 +1315,15 @@
     },
     {
       "path": "docs/adr/0029-process-lifecycle-hygiene.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0030-ghostlight-hub-orchestrator.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0031-agent-onboarding-contract.md",
@@ -1333,9 +1333,9 @@
     },
     {
       "path": "docs/adr/0032-test-at-seams-and-inject-config-sources.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0033-inbound-outbound-manage-zones.md",
@@ -1387,9 +1387,9 @@
     },
     {
       "path": "docs/adr/0041-post-evaluation-response.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0042-origin-flow-provenance.md",
@@ -1405,9 +1405,9 @@
     },
     {
       "path": "docs/adr/0044-named-instances.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0045-resilient-reconnecting-adapter.md",
@@ -1465,15 +1465,15 @@
     },
     {
       "path": "docs/adr/0054-zero-elevation-windows-autostart.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0055-managed-scheme-central-policy-distribution.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0056-lightbox-injectable-composition-and-e2e-harness.md",
@@ -1489,9 +1489,9 @@
     },
     {
       "path": "docs/adr/0058-per-browser-identity-and-focus-routing.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0059-developer-instrumentation-and-live-test-tooling.md",
@@ -1519,9 +1519,9 @@
     },
     {
       "path": "docs/adr/0063-deploy-quiesce-lock.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0064-explicit-dev-isolation.md",
@@ -1567,9 +1567,9 @@
     },
     {
       "path": "docs/adr/0071-additional-installer-targets.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0072-agent-narration.md",
@@ -1603,9 +1603,9 @@
     },
     {
       "path": "docs/adr/0077-local-only-ingress.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0078-closed-loop-browser-core.md",
@@ -1693,9 +1693,9 @@
     },
     {
       "path": "docs/adr/0092-install-activates-selected-engine.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0093-independent-browser-adapter-versioning.md",
@@ -1711,9 +1711,9 @@
     },
     {
       "path": "docs/adr/0095-local-mcpb-distribution.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md",
@@ -1789,15 +1789,15 @@
     },
     {
       "path": "docs/business/DISTRIBUTION.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/business/FOUNDER-TODO.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/business/issuing-licenses.md",
@@ -1807,21 +1807,21 @@
     },
     {
       "path": "docs/business/PLAN.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/business/PUBLIC-COPY-DRAFTS-0.8.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/business/PUBLICATION-PACKET-0.8.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/COMPARISON.md",
@@ -1885,9 +1885,9 @@
     },
     {
       "path": "docs/design/public-documentation-review-2026-07.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/design/public-message-0.8.md",
@@ -1915,9 +1915,9 @@
     },
     {
       "path": "docs/design/visual-feedback-dictionary.html",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/design/visual-feedback.md",
@@ -2053,15 +2053,15 @@
     },
     {
       "path": "docs/research/02-install-and-onboarding-friction.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/research/03-governance-enterprise-prior-art.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/research/04-mcp-gateway-lasso-deep-dive.md",
@@ -2107,9 +2107,9 @@
     },
     {
       "path": "docs/research/11-install-detection.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/research/12-official-extension-parity.md",
@@ -2125,9 +2125,9 @@
     },
     {
       "path": "docs/research/14-post-evaluation-2026-07.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/research/15-webmcp-governance-participation.md",
@@ -2149,15 +2149,15 @@
     },
     {
       "path": "docs/research/18-free-surface-evaluation-plan-2026-07.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/research/19-firefox-browser-adapter-dossier-2026-07.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/research/20-open-source-publication-paths-2026-07.md",
@@ -2191,9 +2191,9 @@
     },
     {
       "path": "docs/research/public-reception-loop-0.8.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/research/README.md",
@@ -2461,9 +2461,9 @@
     },
     {
       "path": "docs/tasks/dev-override/BOOTSTRAP.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/dev-override/LEDGER.md",
@@ -2509,15 +2509,15 @@
     },
     {
       "path": "docs/tasks/exe-split/BOOTSTRAP.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/exe-split/LEDGER.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/exe-split/S1-workspace-and-transport-skeleton.md",
@@ -2527,9 +2527,9 @@
     },
     {
       "path": "docs/tasks/exe-split/S10-packaging-and-distribution.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/exe-split/S2-move-leaf-utilities.md",
@@ -2575,15 +2575,15 @@
     },
     {
       "path": "docs/tasks/exe-split/S9-no-supervisor-and-dev-loop-doc.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/exe-split/SPEC.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/experience-closure/BOOTSTRAP.md",
@@ -2659,21 +2659,21 @@
     },
     {
       "path": "docs/tasks/hub/H9-installer-autostart.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/hub/LEDGER.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/hub/PINS.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/installer-targets/BOOTSTRAP.md",
@@ -2683,15 +2683,15 @@
     },
     {
       "path": "docs/tasks/installer-targets/LEDGER.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/installer-targets/PINS.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/installer-targets/T1-windsurf.md",
@@ -2707,9 +2707,9 @@
     },
     {
       "path": "docs/tasks/installer-targets/T3-zed.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/installer-targets/T4-opencode.md",
@@ -2779,9 +2779,9 @@
     },
     {
       "path": "docs/tasks/licensing-1/l02-disk-resolution-and-recorder-stamp.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/licensing-1/l03-license-cli-and-fixture.md",
@@ -2887,9 +2887,9 @@
     },
     {
       "path": "docs/tasks/maturity-1/00-design.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/maturity-1/BOOTSTRAP.md",
@@ -2899,15 +2899,15 @@
     },
     {
       "path": "docs/tasks/maturity-1/LEDGER.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/maturity-1/m01-ledger-correction.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/maturity-1/m02-spdx-headers.md",
@@ -2917,9 +2917,9 @@
     },
     {
       "path": "docs/tasks/maturity-1/m03-ci-workflows.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/maturity-1/m04-audit-syslog-none.md",
@@ -2929,21 +2929,21 @@
     },
     {
       "path": "docs/tasks/maturity-1/m05-extension-lib-extraction.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/maturity-1/m06-headless-smoke.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/official-rebaseline/BOOTSTRAP.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/official-rebaseline/LEDGER.md",
@@ -3049,9 +3049,9 @@
     },
     {
       "path": "docs/tasks/public-delight-0.8/LEDGER.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/release-1/BOOTSTRAP.md",
@@ -3115,9 +3115,9 @@
     },
     {
       "path": "docs/tasks/release-1/t07-doctor-subcommand.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/release-1/t08-type-real-key-events.md",
@@ -3187,9 +3187,9 @@
     },
     {
       "path": "docs/tasks/stage-2/00-shared-format.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-2/a1-module-reorg.md",
@@ -3241,15 +3241,15 @@
     },
     {
       "path": "docs/tasks/stage-2/g02-layered-resolution.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-2/g03-config-cli.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-2/g04-schema-generation.md",
@@ -3265,9 +3265,9 @@
     },
     {
       "path": "docs/tasks/stage-2/g06-audit-recorder.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-2/g07-domain-matcher.md",
@@ -3283,9 +3283,9 @@
     },
     {
       "path": "docs/tasks/stage-2/g09-manifest-identity.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-2/g10-take-the-wheel-pause.md",
@@ -3301,9 +3301,9 @@
     },
     {
       "path": "docs/tasks/stage-2/g12-manifest-engine.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-2/g13-grant-enforcement.md",
@@ -3325,9 +3325,9 @@
     },
     {
       "path": "docs/tasks/stage-2/g16-policy-explain.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-2/g17-policy-simulate.md",
@@ -3337,27 +3337,27 @@
     },
     {
       "path": "docs/tasks/stage-2/g18-presets-and-templates.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-2/LEDGER.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-2/PLAN.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-2/RECONCILIATION.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-3/BOOTSTRAP.md",
@@ -3427,9 +3427,9 @@
     },
     {
       "path": "docs/tasks/stage-4/LEDGER.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-4/registry/BOOTSTRAP.md",
@@ -3463,9 +3463,9 @@
     },
     {
       "path": "docs/tasks/stage-4/soc-split/t04-extract-manage-web-and-fix-truncation.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/stage-4/soc-split/t05-fold-manage-cli-and-instrumentation.md",
@@ -3523,9 +3523,9 @@
     },
     {
       "path": "docs/tasks/tab-identity/BOOTSTRAP.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/tasks/tab-identity/LEDGER.md",
@@ -3703,9 +3703,9 @@
     },
     {
       "path": "docs/trust/openssf-self-assessment.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/trust/questionnaire.md",
@@ -4116,12 +4116,6 @@
       "reason": "The current tree retains the exact historical blob at the same path."
     },
     {
-      "path": "packaging/homebrew/ghostlight.rb",
-      "currentState": "retained-evolved",
-      "treatment": "retained-evolved",
-      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
-    },
-    {
       "path": "packaging/mcpb/icon.png",
       "currentState": "retained-identical",
       "treatment": "retained-identical",
@@ -4321,15 +4315,15 @@
     },
     {
       "path": "site/index.html",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "site/install.html",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "site/mascot.png",

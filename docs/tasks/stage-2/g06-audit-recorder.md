@@ -287,8 +287,8 @@ Rules the type must satisfy (assert in tests):
 - `pub fn default_audit_path() -> Option<std::path::PathBuf>`: returns
   `dirs::data_local_dir()` joined with `browser-mcp` then `audit.jsonl`. `dirs` is
   already a dependency and `data_local_dir()` maps exactly to the shared format doc
-  section 1.4 table: `%LOCALAPPDATA%` on Windows, `~/Library/Application Support` on
-  macOS, `~/.local/share` (or `XDG_DATA_HOME`) on Linux. Doc comment cites section 1.4.
+  section 1.4 table: `%LOCALAPPDATA%` on Windows or `~/.local/share` (or `XDG_DATA_HOME`) on
+  Linux. Doc comment cites section 1.4.
 - `pub fn append_line_to_file(path: &std::path::Path, line: &str) -> std::io::Result<()>`:
   `create_dir_all` on the parent (if any), then open with
   `OpenOptions::new().create(true).append(true)` and write the line bytes followed by

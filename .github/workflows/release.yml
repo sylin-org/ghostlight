@@ -66,14 +66,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
             bundles: deb
             package_platform: linux
-          - os: macos-15
-            target: aarch64-apple-darwin
-            bundles: app,dmg
-            package_platform: macos
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            bundles: app,dmg
-            package_platform: macos
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -123,12 +115,6 @@ jobs:
         run: |
           $artifact = Get-ChildItem -LiteralPath target/${{ matrix.target }}/release/bundle/deb -Filter '*.deb' | Select-Object -First 1 -ExpandProperty FullName
           ./scripts/check-native-package.ps1 -Platform linux -Artifact $artifact
-      - name: Verify macOS application contents
-        if: matrix.package_platform == 'macos'
-        shell: pwsh
-        run: |
-          $artifact = Get-ChildItem -LiteralPath target/${{ matrix.target }}/release/bundle/macos -Filter '*.app' | Select-Object -First 1 -ExpandProperty FullName
-          ./scripts/check-native-package.ps1 -Platform macos -Artifact $artifact
       - uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.target }}

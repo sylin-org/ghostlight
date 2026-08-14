@@ -3,6 +3,9 @@
 Acceptance is the smallest executable proof of the product language, architecture, safety, and
 real journey. Each fact is protected once at its narrowest meaningful seam.
 
+The supported operating-system matrix is Windows and Linux. Every cross-platform source,
+process, package, launcher, install, upgrade, and uninstall gate runs against that matrix.
+
 ## Contract gates
 
 1. The catalog contains exactly the 22 tools in `LANGUAGE.md`, in documented order, with no
@@ -228,15 +231,19 @@ real journey. Each fact is protected once at its narrowest meaningful seam.
 8. JSONC and Codex TOML comments, trailing commas, formatting, and unrelated values survive
    install and uninstall. Malformed configuration, unreadable files, and foreign `ghostlight`
    entries are left untouched with an actionable result.
-9. The WebView loads bundled assets under a restrictive CSP and has no shell, arbitrary file,
+9. Harness paths follow the effective Windows or Linux environment. Codex honors `CODEX_HOME`
+   before its home-directory fallback. An exact pre-1.0 `ghostlight-relay --role agent` entry in
+   the owned versioned install root is updatable; a different command, role, or root remains
+   foreign and is reported rather than silently skipped.
+10. The WebView loads bundled assets under a restrictive CSP and has no shell, arbitrary file,
    remote-navigation, or network capability. File mutation terminates in the explicit harness
    application service, outside the UI event loop.
-10. The desktop executable, tray, bundle, and workbench use the original Ghostlight icon bytes,
+11. The desktop executable, tray, bundle, and workbench use the original Ghostlight icon bytes,
     established palette and spring curve, and a static readable reduced-motion treatment.
-11. Recoverable Tauri setup or event-loop failure leaves the orchestrator service alive in
+12. Recoverable Tauri setup or event-loop failure leaves the orchestrator service alive in
     headless mode. The MCP connector, browser connector, shared bridge, and extension have empty
     diffs for the complete workbench feature.
-12. Clear view removes completed actions from the current Monitor surface, preserves running work,
+13. Clear view removes completed actions from the current Monitor surface, preserves running work,
     issues no orchestrator mutation, and leaves the durable audit unchanged. A later action appears
     normally, and a fresh desktop process may reconstruct the cleared history from audit.
 

@@ -176,7 +176,7 @@ Commit subject: `test(e2e): headless extension+binary smoke over native messagin
 
 ## Out of scope
 
-Windows/macOS live e2e; flake-retry infrastructure; screenshots-to-artifact
+Windows live e2e; flake-retry infrastructure; screenshots-to-artifact
 uploads; testing governance behavior (this smoke is all-open); any extension
 or binary code change to make the smoke pass (if the smoke exposes a product
 bug, BLOCKED with evidence is the correct outcome).

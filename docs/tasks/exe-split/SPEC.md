@@ -377,7 +377,7 @@ pub fn from_exe_stem_with_base(exe: &std::path::Path, base: &str) -> Option<Self
 
 `from_exe_stem(exe)` becomes `Self::from_exe_stem_with_base(exe, LEAF_BASE)` (behavior for the
 root bin unchanged). Pinned new tests (S6, in transport::instance). Path literals MUST be
-forward-slash (a backslash is not a separator on unix; the CI matrix runs all three OSes --
+forward-slash (a backslash is not a separator on unix; the CI matrix runs Windows and Linux --
 this exact mistake reddened CI once already):
 - `from_exe_stem_with_base_resolves_the_browser_adapter_family`:
   `("/x/ghostlight-adapter-browser", base)` -> default;
@@ -437,7 +437,7 @@ Run `ghostlight install` to update client registrations, then restart your edito
 - Pinned test in `tests/install_instance.rs`:
   `no_supervisor_flag_plans_no_supervisor_steps` -- run the dry-run with `--no-supervisor` added;
   assert stdout contains `(skipped: --no-supervisor)` and does NOT contain `schtasks` /
-  `launchctl` / `systemctl` (platform-agnostic: assert all three absent).
+  `systemctl` (platform-agnostic: assert both absent).
 - Dev workflow doc: new `docs/DEV-LOOP.md` (plain, human style; ASCII; no em-dashes) describing:
   build (`cargo build -p ghostlight`), dev install
   (`ghostlight --instance dev install --no-supervisor --debug --extension-id <id>`), terminal
@@ -461,7 +461,7 @@ Run `ghostlight install` to update client registrations, then restart your edito
   `ghostlight-adapter-agent`, passing argv through. ALSO: `ghostlight install` config entries
   written by the npm flow point at the downloaded adapter (sibling rule handles it: they sit in
   one dir).
-- `packaging/winget|scoop|homebrew` templates and `docs/business/DISTRIBUTION.md`: list the three
+- `packaging/winget|scoop` templates and `docs/business/DISTRIBUTION.md`: list the three
   binaries (template edits are textual; keep shapes).
 - `tests/e2e/run-smoke.mjs`: host-manifest wrapper wraps the adapter-browser bin; the MCP stdio
   spawn uses the adapter-agent bin; the service spawn stays `ghostlight service`. (Job remains
@@ -480,8 +480,7 @@ cargo check --target x86_64-unknown-linux-gnu --workspace --all-targets
 
 All four must be clean/green. `cargo test --workspace` output must contain no `FAILED` and no
 `test result:` line with a nonzero `failed` count. The linux cross-check target is installed on
-this machine. macOS cannot be checked locally; CI covers it -- do not guess-edit mac-only code
-beyond the mechanical path rewrites.
+this machine. Windows behavior is covered by its native CI runner.
 
 ## 13. Facts as of authoring (2026-07-08, dev @ fccca60)
 

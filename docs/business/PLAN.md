@@ -25,7 +25,7 @@ Three structural advantages no incumbent can easily copy:
 2. Source-available governance: the enforcement and audit code is readable by the
    security team that must trust it.
 3. Windows-first enterprise ergonomics (registry install, %ProgramData% org policy,
-   PowerShell tooling) in a Mac-first tooling market.
+   PowerShell tooling) in a desktop-focused tooling market.
 
 ## Principles (fixed)
 
@@ -63,7 +63,7 @@ Engineering (frontier-session work, queued):
 - docs/SPEC.md rewrite (ADR-0026 Decision 3, already owed).
 - managed:// org manifest distribution (ADR-0026 Decision 5): sequence together with
   license infrastructure; the pair makes the enterprise tier real.
-- macOS/Linux live verification (owed from t-live-1) before any cross-platform claim.
+- Linux live verification (owed from t-live-1) before any cross-platform claim.
 - v0.1.0 tagged release through the release workflow.
 
 Founder actions: see docs/business/FOUNDER-TODO.md.
@@ -179,8 +179,8 @@ All zero-dollar, all frontier-authored, all public under docs/ or the site:
 
 ## Opportunity backlog (unscheduled, revisit quarterly)
 
-- Package managers: winget, scoop bucket, homebrew tap (free PRs; winget doubles down
-  on Windows-first).
+- Package managers: WinGet and a Scoop bucket (free contribution paths that reinforce
+  Windows-first distribution).
 - GitHub Sponsors on the engine as a passive lane separate from commercial licensing.
 - crates.io publication of the engine (needs the workspace split into engine +
   governance crates; revisit when there is a reason).

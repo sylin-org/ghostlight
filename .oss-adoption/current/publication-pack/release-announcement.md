@@ -15,7 +15,7 @@ Release: use for the first store-backed release after v0.6.0, not as a retroacti
 ## What shipped
 
 - A reviewed Chrome Web Store package as the default extension path.
-- The current native service and relay for Windows, Linux, and macOS release targets.
+- The current native service and relay for Windows and Linux release targets.
 - One-command MCP client and browser registration through the npm launcher.
 - Visible managed-tab scope and unified action feedback.
 - Compact browser tools for reading, acting, forms, files, scripts, waits, recording, and audit.
@@ -36,7 +36,6 @@ structured audit record. The unrestricted free path remains first-class.
 
 - Chromium browsers version 116 or newer.
 - Windows and Linux live verification must be recorded for this exact release.
-- macOS scope must state whether live verification completed or remains owed.
 - Existing manual extension installs should receive explicit instructions for switching to the
   store package without losing the native host connection.
 - Stable trained schemas remain unchanged; additive tool and implementation changes must be named

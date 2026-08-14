@@ -58,7 +58,7 @@ repair. Four parts, prioritized by invisibility (a user should never learn the w
      creation time (GetProcessTimes). "Orphaned" means that pid is no longer *running* with the
      same creation time, so a reused pid reads as dead, not alive.
    - Unix: the original `getppid()`. "Orphaned" means `getppid()` no longer equals it (the
-     kernel reparents an orphan to init/launchd). No pid-reuse hazard, since getppid reflects
+     kernel reparents an orphan to init). No pid-reuse hazard, since getppid reflects
      the real current parent.
 
    **Liveness is the termination signal, not object existence (a correctness landmine).** A

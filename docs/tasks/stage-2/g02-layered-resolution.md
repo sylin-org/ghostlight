@@ -238,7 +238,6 @@ pub fn user_config_path() -> Option<std::path::PathBuf>
 
 Returns `dirs::config_dir()?.join("browser-mcp").join("config.json")`. This lands on
 exactly the shared-format 1.1 table: `%APPDATA%\browser-mcp\config.json` on Windows,
-`~/Library/Application Support/browser-mcp/config.json` on macOS,
 `~/.config/browser-mcp/config.json` on Linux.
 
 ```rust
@@ -250,8 +249,7 @@ Per platform, with `cfg` branches:
 
 - Windows: `%ProgramData%\browser-mcp\policy.json`, reading the `ProgramData`
   environment variable and falling back to `C:\ProgramData` when unset.
-- macOS (`target_os = "macos"`): `/Library/Application Support/browser-mcp/policy.json`.
-- Linux and other unix: `/etc/browser-mcp/policy.json`.
+- Linux: `/etc/browser-mcp/policy.json`.
 
 There is NO flag, environment variable, or config key that relocates or bypasses the
 org policy path (shared format 1.2: "No flag can bypass it"). Do not add one.
@@ -525,9 +523,7 @@ In `load.rs`:
 14. `paths_follow_the_shared_format_locations`: `cfg`-gated per platform. On Windows,
     `user_config_path` ends with `browser-mcp\config.json` under `dirs::config_dir()`
     and `org_policy_path` ends with `browser-mcp\policy.json` under the `ProgramData`
-    root. On macOS, the org path equals
-    `/Library/Application Support/browser-mcp/policy.json`; on Linux,
-    `/etc/browser-mcp/policy.json`. Read-only assertions; do not set or unset
+    root. On Linux, the org path equals `/etc/browser-mcp/policy.json`. Read-only assertions; do not set or unset
     environment variables in tests.
 
 ## Constraints

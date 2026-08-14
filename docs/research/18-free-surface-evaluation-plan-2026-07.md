@@ -1,8 +1,8 @@
 # Free-surface candidate evaluation plan, 2026-07
 
 Status: Baseline harness implemented and wired into blocking Linux CI; the first CI result,
-visible-browser repetition, macOS, and repeated model runs are pending. No product surface is
-accepted by this document.
+visible-browser repetition, and repeated model runs are pending. No product surface is accepted by
+this document.
 
 ## Purpose
 

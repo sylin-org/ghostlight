@@ -147,7 +147,7 @@ Evidence: docs/guides/siem-integration.md (record schema, policy_seq field); ADR
 ### Can we enforce policy centrally across a fleet?
 
 Yes, through the `managed://` scheme. A central policy bundle, signed by your organization, is
-provisioned to endpoints by your existing management channel (GPO, Intune, Jamf), fetched from
+provisioned to endpoints by your existing management channel (GPO, Intune, or MDM), fetched from
 an endpoint you host, and enforced with a last-known-good cache so a device keeps its policy
 even when the source is unreachable. The trust anchor is the signature on the bundle, not the
 transport, and a monotonic publish sequence prevents rollback to an older, more permissive
@@ -301,8 +301,8 @@ and publishes it as a release asset (introduced 2026-07; earlier releases carry 
 attestations but no SBOM), alongside per-file SHA-256 checksums and build-provenance
 attestations. You can verify what you downloaded against the published checksums and confirm its
 provenance with one command before deploying. The currently live distribution channels are GitHub
-Releases, npm, the MCP Registry, and the Sylin Homebrew tap; each resolves to the same tagged
-release artifacts. Scoop and winget manifests exist in the repository but are not claimed as live
+Releases, npm, and the MCP Registry; each resolves to the same tagged release artifacts. Scoop and
+winget manifests exist in the repository but are not claimed as live
 channels until their public packages ship. The dependency tree is deliberately lean, and a build
 flag yields an air-gap binary with no HTTP or TLS stack at all.
 

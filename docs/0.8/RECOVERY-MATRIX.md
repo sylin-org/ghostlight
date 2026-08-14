@@ -2,7 +2,7 @@
 
 Status: complete inventory disposition; native release evidence still in progress
 
-This matrix connects the 1,389 harvested 0.8 entries to the 1.0 architecture. It does not claim
+This matrix connects the 1,388 harvested 0.8 entries to the 1.0 architecture. It does not claim
 that a smaller 1.0 test count is line-for-line equivalent to the old suite. It records where the
 behavior now belongs, which old mechanisms are intentionally gone, and which promises still need
 native or visible-browser proof.
@@ -21,15 +21,15 @@ scenarios still have a disposition. The source inventory remains
 | Extension | 177 | Re-express in the policy-free adapter and its current 99-test suite. | Store-package reload, browser restart, group reuse, and local interlock. |
 | Governance | 344 | Re-express immutable snapshots, monotonic layers, final-boundary controls, and payload-free audit. Retire network activation. | Managed expiry, redirected landing, hold, and close-interlock journeys. |
 | Installation | 62 | Re-express harness merge, native host, ownership-safe removal, stale-path update, and migration. Retire resident supervisors. | Clean install, 0.8 upgrade, reboot, and uninstall on all packages. |
-| Integration | 150 | Re-express at current Rust, process, CLI, workbench, package, and browser seams. | Three public MCP harnesses and the visible release matrix. |
-| Lightbox helpers | 5 | Retire the old runner implementation; retain its process contracts below. | Keep current process journeys blocking on all three operating systems. |
+| Integration | 149 | Re-express at current Rust, process, CLI, workbench, package, and browser seams. | Three public MCP harnesses and the visible release matrix. |
+| Lightbox helpers | 5 | Retire the old runner implementation; retain its process contracts below. | Keep current process journeys blocking on Windows and Linux. |
 | MCP edge | 101 | Keep generic JSON-RPC/MCP 2025-11-25 behavior and typed service framing. Defer the old proposed 2026 transcript. | Signed-candidate compatibility in three public harnesses. |
 | Process contracts | 34 | Give every named scenario an explicit disposition below. | Resolve live-gate rows before release. |
 | Supporting units | 105 | Retain observable behavior. Retire service-owned GIF/recording helpers after browser-local recording. | Browser-local recording save/export/discard in a visible browser. |
 | Tool execution | 137 | Re-express through the 22-tool language, executor, typed outcome, and physical receipt seams. | Run every accepted browser job against a visible browser. |
-| Transport | 94 | Re-express stable typed bridges, framing, correlation, reconnect, and demand-start. Retire named instances, UDS discovery, watchdog, and systemd self-heal. | Linux and macOS packaged demand-start and reconnect. |
+| Transport | 94 | Re-express stable typed bridges, framing, correlation, reconnect, and demand-start. Retire named instances, UDS discovery, watchdog, and systemd self-heal. | Linux packaged demand-start and reconnect. |
 
-Total: 1,389 historical entries. The checker derives that total from the inventory instead of
+Total: 1,388 historical entries. The checker derives that total from the inventory instead of
 trusting this prose.
 
 ## High-value translations already restored
@@ -38,15 +38,15 @@ trusting this prose.
   ownership-safe removal, and stale-path updates now live under `install::native_host`.
 - A 0.8 connector path is `updatable`, not `installed`. The workbench offers an explicit Update
   action and never overwrites a foreign entry.
-- Recognized 0.8 Run, scheduled-task, launchd, and systemd artifacts are retired narrowly. No 1.0
-  package installs a resident supervisor.
-- Windows NSIS, Linux Debian, and macOS application candidates carry the exact three executable
-  shores. Package inspection rejects missing siblings and leaked target-triple staging names.
+- Recognized 0.8 Windows Run/task and Linux systemd artifacts are retired narrowly. No 1.0 package
+  installs a resident supervisor.
+- Windows NSIS and Linux Debian candidates carry the exact three executable shores. Package
+  inspection rejects missing siblings and leaked target-triple staging names.
 - Scrubbed Linux launcher environments cannot split discovery in 1.0: all three sibling processes
   derive one runtime document from their installation directory without XDG or D-Bus state.
 - Missing, malformed, unmarked, or expired managed authority fails closed. A started invocation
   keeps its immutable snapshot; the next invocation reads the changed file.
-- Three-platform source, extension, and process CI, dependency policy, deterministic extension
+- Windows and Linux source, extension, and process CI, dependency policy, deterministic extension
   packaging, compatibility data, and public-state reconciliation are active again.
 - The 0.8 publication packet, exact release commit, public channels, channel drift, and recovery
   rules remain first-class inputs. Candidate, submitted, public, and observed are separate states.
@@ -100,7 +100,7 @@ or scenario from disappearing during later edits.
 
 ## Still owed before 1.0 publication
 
-- Build the unsigned Linux and macOS candidates in their native CI environments and inspect them.
+- Build the unsigned Linux candidates in their native CI environments and inspect them.
 - Sign or attest every platform candidate, then run clean install, 0.8 upgrade, login/reboot,
   demand-start, and uninstall on ordinary user accounts.
 - Run the full visible-browser acceptance matrix with the matching store extension, two Chromium

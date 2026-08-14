@@ -149,6 +149,9 @@ $inventoryEntries = [System.Collections.Generic.List[object]]::new()
 $recoveryEntries = [System.Collections.Generic.List[object]]::new()
 
 foreach ($entry in $historical) {
+    if ($entry.path -match '^packaging/[^/]+/ghostlight\.rb$') {
+        continue
+    }
     $currentBlob = if ($currentBlobs.ContainsKey($entry.path)) {
         $currentBlobs[$entry.path]
     }

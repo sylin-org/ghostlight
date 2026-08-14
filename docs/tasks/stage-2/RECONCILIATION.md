@@ -84,9 +84,9 @@ reload (see `PLAN.md` "Cross-cutting workstream" and `a5-hot-reload-substrate.md
 ## 4. Org policy loading
 
 Per `PLAN.md` "Org policy loading": a single admin-writable-only machine file
-(`%ProgramData%\browser-mcp\policy.json` / `/etc/browser-mcp/policy.json` /
-`/Library/Application Support/browser-mcp/policy.json`); auto-loaded and non-bypassable; delivered by
-MDM/GPO/Intune/Jamf; strict parse, fail-closed on load AND on reload; precedence
+(`%ProgramData%\browser-mcp\policy.json` on Windows or `/etc/browser-mcp/policy.json` on Linux);
+auto-loaded and non-bypassable; delivered by MDM/GPO/Intune; strict parse, fail-closed on load AND
+on reload; precedence
 `org_mandatory > user > org_recommended > preset > builtin`; trust is OS ACLs + the deployment channel,
 not signatures; the extension never sees policy. This refines g02/g12 where they describe org loading.
 

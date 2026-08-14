@@ -29,7 +29,6 @@ SHA-256 files, the extension ZIP, MCPB bundle, SBOM, and sorted `SHA256SUMS`.
 | Official MCP Registry | `org.sylin/ghostlight` 0.8.0 is active and latest. |
 | GitHub MCP catalog | Search returns `Sylin Ghostlight` by `sylin-org`. |
 | Canonical website | <https://sylin.org/ghostlight/> presents the 0.8 product and install path. |
-| Homebrew | The Sylin tap carries the 0.8.0 formula and immutable release hashes. |
 | Scoop | Public `main` carries the direct 0.8.0 manifest and Windows archive hash. |
 | WinGet | PR <https://github.com/microsoft/winget-pkgs/pull/413601> is merged. Validation, moderator review, and publication completed. |
 | mcpservers.org | <https://mcpservers.org/servers/sylin-org/ghostlight> is live. |

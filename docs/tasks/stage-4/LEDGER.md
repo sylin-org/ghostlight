@@ -947,7 +947,7 @@ covering s-live-1, s-live-2, s-live-4, t01-1, t05-1, t06-1, and t06-2
 observability gap stands from that pass (the expected ERROR-level server
 log line for the invalid mid-edit could not be confirmed; the behavioral
 guarantee was confirmed via identical denial ids). Still owed to a human:
-g13-1 steps 4-5, g13-3's governed half, g15-1 and g15-2, and macOS and
-Linux live checks. This note is appended per ADR-0026 Decision 7; the
+g13-1 steps 4-5, g13-3's governed half, g15-1 and g15-2, and Linux live
+checks. This note is appended per ADR-0026 Decision 7; the
 statement above is preserved unedited as the record of what was known at
 stage close.

@@ -130,12 +130,8 @@ Write-AccessState -Name "CHROME_WEB_STORE" -State $chromeState
 
 $windowsSigning = @("AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET") |
     Where-Object { -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
-$appleSigning = @("APPLE_CERTIFICATE", "APPLE_CERTIFICATE_PASSWORD", "APPLE_SIGNING_IDENTITY") |
-    Where-Object { -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
 Write-AccessState -Name "WINDOWS_SIGNING_ENV" -State $(if (@($windowsSigning).Count -eq 3) { "present" } else { "missing" })
-Write-AccessState -Name "APPLE_SIGNING_ENV" -State $(if (@($appleSigning).Count -eq 3) { "present" } else { "missing" })
 
 if ($RequireReady -and $problems.Count -gt 0) {
     throw "Release access is not ready: $($problems -join '; ')"
 }
-

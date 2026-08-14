@@ -19,7 +19,7 @@ All external observations below were rechecked on 2026-08-05 unless a narrower d
 | Fact | Current truth | Evidence | Owner of the fact |
 | --- | --- | --- | --- |
 | Public service | 0.7.3 | Product: [npm latest](https://registry.npmjs.org/ghostlight/latest), [official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=org.sylin%2Fghostlight), and [repository status](../public-status.json) | Release pipeline and `docs/public-status.json` |
-| Public platform proof | Windows and Linux verified end to end with live browsers; macOS build and full-suite CI verified, with live-browser verification still owed | Product: [repository status](../public-status.json) | `docs/public-status.json` and release verification |
+| Public platform proof | Windows and Linux verified end to end with live browsers | Product: [repository status](../public-status.json) | `docs/public-status.json` and release verification |
 | Source service candidate | 0.8.0, not released | Product: [Cargo workspace](../../Cargo.toml), [changelog](../../CHANGELOG.md), and [repository status](../public-status.json) | Source tree and changelog |
 | Public Chrome adapter | 0.7.1, updated 2026-08-02 | Product and distribution: [Chrome Web Store listing](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl) | Chrome Web Store public listing |
 | Source Chrome adapter | 0.8.0; covers 0.8.x services | Product: [extension manifest](../../extension/manifest.json) and [compatibility contract](../../compatibility.json) | Source tree and compatibility contract |

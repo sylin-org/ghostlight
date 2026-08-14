@@ -21,8 +21,7 @@ l01 (the license module exists). STOP preconditions:
 
 - src/governance/config/load.rs defines `pub fn org_policy_path() -> std::path::PathBuf`
   (fixed per platform: `%ProgramData%\ghostlight\policy.json` on Windows,
-  `/Library/Application Support/ghostlight/policy.json` on macOS,
-  `/etc/ghostlight/policy.json` on other unix) and
+  `/etc/ghostlight/policy.json` on Linux) and
   `pub fn user_config_path() -> Option<PathBuf>` returning
   `dirs::config_dir()?/ghostlight/config.json`.
 - src/governance/audit/mod.rs: `pub struct Recorder { inner: Mutex<Option<Inner>> }` with

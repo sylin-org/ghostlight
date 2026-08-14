@@ -275,7 +275,8 @@ current executable. It deliberately does not search `PATH` for the orchestrator 
 over the wire. That creates several consequences:
 
 - A plugin that copies only the connector cannot start the installed Ghostlight authority.
-- A self-contained plugin would need all three platform-matched executables plus native-host setup,
+- A self-contained plugin would need all three platform-matched executables for each supported OS
+  plus native-host setup,
   duplicating the installed product and its lifecycle.
 - Per-client plugin copies could race versions and registration ownership while Ghostlight is
   designed as one machine-wide authority.
@@ -319,7 +320,7 @@ registration races, and uninstall residue. It is a poor default.
 
 A bundled launcher could find the canonical installed product, but it becomes a new cross-platform
 compatibility product that must be signed, versioned, tested, and distributed. A script is not
-uniformly executable across Windows, macOS, and Linux. This option should exist only if installer
+uniformly executable across Windows and Linux. This option should exist only if installer
 and client experiments prove a direct installed-command route cannot work.
 
 ### Remote MCP

@@ -23,7 +23,7 @@ the canonical dev workflow document.
 
 - `tests/install_instance.rs` NEW test `no_supervisor_flag_plans_no_supervisor_steps` per SPEC
   section 10 (dry-run with the flag; stdout contains `(skipped: --no-supervisor)`; stdout does
-  NOT contain any of `schtasks`, `launchctl`, `systemctl`).
+- NOT contain either `schtasks` or `systemctl`).
 - Existing install tests stay green unmodified.
 
 ## Verify (literal)

@@ -118,20 +118,6 @@ $specifications = @(
         name = "ghostlight-v$Version-x86_64-unknown-linux-gnu.deb"
     },
     [ordered]@{
-        kind = "native-package"
-        target = "aarch64-apple-darwin"
-        directory = "native-aarch64-apple-darwin"
-        pattern = "*.dmg"
-        name = "ghostlight-v$Version-aarch64-apple-darwin.dmg"
-    },
-    [ordered]@{
-        kind = "native-package"
-        target = "x86_64-apple-darwin"
-        directory = "native-x86_64-apple-darwin"
-        pattern = "*.dmg"
-        name = "ghostlight-v$Version-x86_64-apple-darwin.dmg"
-    },
-    [ordered]@{
         kind = "browser-adapter"
         target = "chromium-store"
         directory = "chrome-extension"
@@ -142,9 +128,7 @@ $specifications = @(
 
 $rawTargets = @(
     [ordered]@{ target = "x86_64-pc-windows-msvc"; extension = ".exe" },
-    [ordered]@{ target = "x86_64-unknown-linux-gnu"; extension = "" },
-    [ordered]@{ target = "aarch64-apple-darwin"; extension = "" },
-    [ordered]@{ target = "x86_64-apple-darwin"; extension = "" }
+    [ordered]@{ target = "x86_64-unknown-linux-gnu"; extension = "" }
 )
 foreach ($rawTarget in $rawTargets) {
     foreach ($component in @(

@@ -47,7 +47,6 @@ stays marked missed; do not reconstruct precise historical counters from a later
 | Official MCP Registry | `org.sylin/ghostlight` 0.8.0 | yes | 7-day checkpoint |
 | Chrome Web Store | adapter 0.8.0; public CRX matched submitted files | yes | 7-day checkpoint |
 | sylin.org | 0.8 fallbacks at website commit `0c801c6` | yes | 7-day checkpoint |
-| Homebrew | formula 0.8.0 at tap commit `302c710` | yes | 7-day checkpoint |
 | Scoop | direct manifest 0.8.0; central Extras popularity gate unmet | direct yes; central ineligible | Recheck only after the stated threshold is met |
 | Winget | PR #413601 open; CLA green | pending Microsoft review | Check PR state at 7 days |
 | Glama | synced to repository commit `9546875` | yes | 7-day checkpoint |
@@ -107,7 +106,6 @@ Copy this section for each checkpoint.
 | Official MCP Registry | - | - | - |
 | Chrome Web Store | - | - | - |
 | sylin.org | - | - | - |
-| Homebrew | - | - | - |
 | Winget | - | - | - |
 | Glama | - | - | - |
 | mcpservers.org | - | - | - |

@@ -72,7 +72,6 @@ large clone count is inconsistent with visitor data and should be treated as aut
 
 ## Unresolved risks and evidence gaps
 
-- macOS live-browser verification remains owed.
 - No completed independent penetration test exists.
 - Solo-founder release, moderation, security, and support load remains the principal capacity risk.
 - Current user retention and repeat-use evidence is not available without a proof cohort.

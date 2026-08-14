@@ -22,7 +22,6 @@ the intent, not the code:
 - **Windows Group Policy / ADMX**: machine policies live where only
   administrators can write; the policy-vs-preference distinction separates
   enforced-and-reverting settings from defaults that merely tattoo.
-- **macOS managed preferences**: MDM profiles layer above user defaults.
 - **Firefox policies.json**: a single cross-platform policy file.
 - **GNOME dconf**: system databases plus explicit lock files that mark
   individual keys read-only; the cleanest open-source key-level lock.
@@ -46,8 +45,8 @@ the intent, not the code:
    are named bundles that write the user layer only. "Safe" is today's
    Minimal. A preset is a starting point the user can then edit key by key.
 4. **The org layer is a machine-scope file.** It lives at an
-   admin-writable-only path (ProgramData, /etc, /Library) and is delivered by
-   the org's existing deployment channel (GPO, Intune, Jamf), consistent with
+   admin-writable-only path (ProgramData or /etc) and is delivered by
+   the org's existing deployment channel (GPO, Intune, or MDM), consistent with
    deployment-channel identity binding (SPEC 8.1). Each entry sets a value at
    level mandatory (locked) or recommended (overridable default). Range
    constraints (allow a key but bound its values) are a later extension.
@@ -76,7 +75,7 @@ the intent, not the code:
 - Positive: locked-field UX falls out of the model instead of being bolted on.
 - Negative: key names become a public, stable API surface; renames need
   deprecation handling.
-- Negative: three platform-specific org-file paths to document and test.
+- Negative: two platform-specific org-file paths to document and test.
 - Follow-up: implement resolution and the CLI in stage 2 step 1 (alongside the
   audit recorder, ADR-0018), since audit destinations are the first keys an
   organization will want to lock.

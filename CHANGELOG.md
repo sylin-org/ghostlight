@@ -123,7 +123,7 @@ protocol-neutral, and makes browser tab continuity match what users see in Chrom
 - **Immediate upgrade activation (ADR-0092).** Installing a new release now replaces a verified
   managed Windows service under deploy locks and confirms that the selected executable owns the
   endpoint. External repository/dev engines stay in place. Linux explicitly restarts its updated
-  user service; macOS retains its existing forced kickstart.
+  user service.
 - `tabs_create_mcp` now reports one composite tab ID consistently in its leading prose, embedded
   JSON inventory, and structured result.
 
@@ -420,7 +420,7 @@ Center -- a public, evidence-linked set of procurement and security-review docum
   v0.1.0, surfaced by the winget clean-room validation. This is a generic Rust-on-MSVC behavior
   (Rust's own `std` links the VC runtime dynamically by default), not a dependency of any crate, and
   the static-linking fix covers every Windows channel at once (npm, scoop, winget, direct download).
-  Linux and macOS are unchanged.
+  Linux is unchanged.
 
 ## [0.5.3] - 2026-07-10
 
@@ -474,7 +474,7 @@ Windows first-run fix, found live while validating the Cline marketplace submiss
   the service once, detached; the relay's self-heal likewise spawns the sibling service executable
   detached (null stdio, its own process group) instead of asking a scheduled task that may not
   exist. Old scheduled tasks from elevated installs are cleaned up on install and uninstall.
-  macOS (launchd) and Linux (systemd --user) are unchanged.
+- Linux systemd user-service behavior is unchanged.
 
 ## [0.5.0] - 2026-07-09
 
@@ -521,8 +521,8 @@ fills out the package-manager manifests. No runtime behavior changes.
 
 ### Changed
 - `server.json` targets the current registry schema (`2025-12-11`) and tracks this release.
-- The winget, scoop, and homebrew manifests carry the real per-artifact sha256 sums for this
-  release instead of placeholders.
+- The winget and scoop manifests carry the real per-artifact sha256 sums for this release instead
+  of placeholders.
 
 ## [0.4.0] - 2026-07-09
 
@@ -599,7 +599,7 @@ launcher, the landing/install pages, and the extension's first-run walkthrough t
   (version-less names) so `releases/latest/download/...` works with no API parsing.
 - `ghostlight` npm launcher (`npx -y ghostlight`): fetches the version-matched binary on first
   run; stderr-only chatter so MCP stdio stays clean.
-- cargo-binstall metadata; winget/scoop/Homebrew manifest templates under `packaging/`.
+- cargo-binstall metadata and winget/scoop manifest templates under `packaging/`.
 - Landing + install pages under `site/` (GitHub Pages); the extension opens the install
   walkthrough on first install (reason "install" only, no state, no tracking).
 - README quick-install block with Cursor / VS Code one-click deeplinks and the npx snippet;
@@ -608,7 +608,7 @@ launcher, the landing/install pages, and the extension's first-run walkthrough t
 ### Fixed (distribution session)
 
 - Cross-platform test-profile compile errors (`proc.rs` cfg-gated `Stdio` import,
-  `supervisor.rs` cfg-gated test helper) that failed the macOS/Linux CI gate.
+  `supervisor.rs` cfg-gated test helper) that failed the Linux CI gate.
 - Console index truncation on hosted Windows runners: the management web server now performs a
   bounded lingering close (drain to client EOF) after `flush` + `shutdown`.
 - The quarantined `e2e-smoke` CI job is capped at 15 minutes (it previously hung to the
@@ -667,9 +667,9 @@ single governance chokepoint, plus a local Console for seeing what the service i
   as a thin adapter that connects to it, so any number of clients (Claude Code, Cursor,
   and others) can be connected at once, each multiplexed as its own session through the
   single governance chokepoint. This repeals the previous one-session-at-a-time limit
-  (ADR-0004). The service is kept warm by a per-user OS supervisor (Windows Task
-  Scheduler, macOS launchd, Linux systemd --user), self-heal-started on first use if it
-  is down, and shuts down only after an idle-grace window with no live sessions and no
+  (ADR-0004). The service is kept warm by a per-user OS supervisor (Windows Task Scheduler or
+  Linux systemd --user), self-heal-started on first use if it is down, and shuts down only after
+  an idle-grace window with no live sessions and no
   browser link.
 - **The Console (ADR-0030 Decision 9).** A local, loopback-pinned web page served by the
   service at its web-API address. It shows live sessions (with truncated session ids), a
@@ -714,9 +714,9 @@ single governance chokepoint, plus a local Console for seeing what the service i
 ## [0.1.0] -- 2026-07-04
 
 First tagged release: the unconstrained browser-automation engine (all-open) with the
-governance overlay available as an opt-in capability manifest. Shipped as four platform
-binaries (Windows x86_64, macOS Intel and Apple Silicon, Linux x86_64) plus the extension
-zip, with SHA-256 checksums and signed build-provenance attestations.
+governance overlay available as an opt-in capability manifest. Shipped as Windows x86_64 and Linux
+x86_64 binaries plus the extension ZIP, with SHA-256 checksums and signed build-provenance
+attestations.
 
 [0.2.0]: https://github.com/sylin-org/ghostlight/releases/tag/v0.2.0
 [0.1.0]: https://github.com/sylin-org/ghostlight/releases/tag/v0.1.0

@@ -46,7 +46,6 @@ parallel sessions, or a Claude-only workflow already fully served by Anthropic.
 - Pre-1.0 at v0.6.0.
 - Chromium only for v1; Firefox and multi-browser adapters are v2 research.
 - The Chrome Web Store listing is still under review.
-- macOS live-browser verification remains owed.
 - Governance constrains capability and destination; it does not infer semantic user intent or
   eliminate in-domain prompt injection.
 - The tab group is visible organization, not a security sandbox.

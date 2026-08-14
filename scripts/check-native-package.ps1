@@ -2,7 +2,7 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("windows", "linux", "macos")]
+    [ValidateSet("windows", "linux")]
     [string]$Platform,
     [Parameter(Mandatory = $true)]
     [string]$Artifact
@@ -155,15 +155,6 @@ switch ($Platform) {
                 -Path $tempRoot `
                 -Prefix "ghostlight-deb-check-"
         }
-    }
-    "macos" {
-        $macosDirectory = Join-Path $Artifact "Contents/MacOS"
-        foreach ($binary in $binaries) {
-            if (-not (Test-Path -LiteralPath (Join-Path $macosDirectory $binary) -PathType Leaf)) {
-                throw "macOS application bundle is missing Contents/MacOS/$binary"
-            }
-        }
-        Assert-LegalPayload -Root $Artifact
     }
 }
 

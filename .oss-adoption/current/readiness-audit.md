@@ -29,8 +29,8 @@ All repository-controlled repairs from this audit are implemented in the working
 - an evidence-linked OSPS Baseline 2026.02.19 self-assessment records both strengths and gaps.
 
 The remaining gates are not repository defects: deploy the website source, upload the social card,
-wait for Chrome Web Store review, run the non-author cohort, complete macOS live verification, and
-decide whether to change GitHub security settings identified by the OSPS assessment. No external
+wait for Chrome Web Store review, run the non-author cohort, and decide whether to change GitHub
+security settings identified by the OSPS assessment. No external
 action is authorized by this update.
 
 ## Blockers before broad publication
@@ -38,8 +38,8 @@ action is authorized by this update.
 ### Blocker: public product truth is inconsistent
 
 The repository and latest release are v0.6.0. The public project page still labels Ghostlight
-v0.5.7. The README says Windows and Linux are live verified and macOS live verification is owed;
-the website says only Windows is live verified and both Linux and macOS are owed. The website also
+v0.5.7. The README says Windows and Linux are live verified, while the website says only Windows
+is live verified and Linux is owed. The website also
 uses 0.5 in its project index. A new visitor cannot know which platform statement is current.
 
 Repair: update the public site from canonical release and verification state, then add a release
@@ -103,12 +103,6 @@ launch blocker for a solo pre-1.0 project, though a short routing file could red
 The public website links the browser-control decision aid, but the README's comparison path goes
 only to the repository comparison. A single link near "Is this your problem?" or the comparison
 guide would help evaluators choose without pulling organization material into the first screen.
-
-### macOS scope must remain explicit
-
-macOS artifacts and CI exist, but live-browser verification remains owed. This is acceptable if
-every surface calls it out consistently. Do not turn CI success into an end-to-end claim.
-
 ## Legal and ownership
 
 - **Strong:** the engine is Apache-2.0 OR MIT; governance has an explicit separate license.

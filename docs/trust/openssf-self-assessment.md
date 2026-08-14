@@ -36,7 +36,7 @@ Status vocabulary:
 | OSPS-BR-01.01 | Met | Pull-request CI does not interpolate branch names, titles, commit text, or other untrusted metadata into commands. Workflows use static commands and checked-in configuration. |
 | OSPS-BR-01.03 | Met | Pull-request CI declares `contents: read` and has no privileged release credentials. Release publication is isolated to the trusted tag workflow and separates unprivileged assembly from privileged publication. See `.github/workflows/ci.yml`, `.github/workflows/release.yml`, and `docs/trust/supply-chain.md`. |
 | OSPS-BR-03.01 | Met | Official repository, website, package, registry, support, and documentation URLs use HTTPS. SSH is an optional authenticated Git transport, not a public content channel. |
-| OSPS-BR-03.02 | Met | GitHub, npm, Homebrew, and MCP Registry delivery use authenticated HTTPS. Releases also carry `SHA256SUMS`, Sigstore attestations, and a CycloneDX SBOM. |
+| OSPS-BR-03.02 | Met | GitHub, npm, and MCP Registry delivery use authenticated HTTPS. Releases also carry `SHA256SUMS`, Sigstore attestations, and a CycloneDX SBOM. |
 | OSPS-BR-07.01 | Partial | Secrets are excluded from tracked configuration and release workflows use GitHub secrets or local environment files. GitHub secret scanning and push protection are currently disabled, so the preventive control rests on repository boundaries and review alone. |
 | OSPS-DO-01.01 | Met | `README.md`, `docs/guides/`, CLI help, configuration docs, and the canonical install guide cover installation and basic use. Consequential capabilities and residual risks are called out. |
 | OSPS-DO-02.01 | Met | `SUPPORT.md`, `CONTRIBUTING.md`, and structured Issue forms explain defect and installation reporting. |

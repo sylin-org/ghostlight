@@ -19,8 +19,8 @@ underdetermines a choice that matters, STOP and record BLOCKED.
 - Branch: `dev`. Base commit for this batch: `fccca60` (tree green; commits after it touching
   only `docs/` are expected -- the batch files themselves).
 - Shell: bash tool available (use POSIX sh syntax) and PowerShell. Prefer bash for cargo/git.
-- `x86_64-unknown-linux-gnu` target is installed for cross-checks. macOS is CI-only: never
-  hand-verify mac code beyond mechanical rewrites.
+- `x86_64-unknown-linux-gnu` target is installed for cross-checks. Windows-specific behavior is
+  covered on its native runner.
 - ASCII ONLY in every file you write or edit (code AND docs): no em-dashes, no unicode arrows,
   no curly quotes.
 - `Cargo.lock` is committed; commit its changes together with each task.
@@ -85,8 +85,8 @@ task's scope, or the task would require touching a NEVER item):
 - `docs/tasks/**` other than this batch's own LEDGER -- no exception.
 - Behavior of the DEFAULT instance identity (byte-identical, ADR-0044 D2) -- guarded by existing
   tests; if one fails, your change is wrong.
-- Do not run `ghostlight install` (non-dry-run), `schtasks`, `launchctl`, or `systemctl` against
-  the real machine. Dry-run only. No exception.
+- Do not run `ghostlight install` (non-dry-run), `schtasks`, or `systemctl` against the real
+  machine. Dry-run only. No exception.
 - Do not push. Commits stay local; the owner pushes after review. No exception.
 
 ## Completion criteria (the batch is DONE when)

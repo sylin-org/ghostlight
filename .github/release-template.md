@@ -21,11 +21,11 @@ Then install `Ghostlight in Browser` ${ADAPTER_VERSION} from the Chrome Web Stor
 your MCP client. The installer connects detected clients directly to the cached native connector;
 Node is not a resident service.
 
-The signed Windows setup, macOS disk image, and Debian package below are equivalent native-package
-routes. Start Ghostlight, open **MCP integrations** to connect a client, and use **Status** to check
-the whole chain.
+The signed Windows setup and Debian package below are equivalent native-package routes. Start
+Ghostlight, open **MCP integrations** to connect a client, and use **Status** to check the whole
+chain.
 
-Use the Windows setup executable, open the macOS disk image, or install the Debian package with
+Use the Windows setup executable or install the Debian package with
 `sudo apt install ./ghostlight-v${VERSION}-x86_64-unknown-linux-gnu.deb`. The package owns the three
 Ghostlight executables, native-messaging registration, and exact license texts. It does not install
 a resident supervisor or phone home; either connector demand-starts the one local authority.
@@ -60,15 +60,12 @@ ${SIGNATURE_NOTES}
 | Platform or evidence | Architecture | Asset |
 | --- | --- | --- |
 | Windows setup | x86_64 | `ghostlight-v${VERSION}-x86_64-pc-windows-msvc-setup.exe` |
-| macOS disk image | Apple silicon | `ghostlight-v${VERSION}-aarch64-apple-darwin.dmg` |
-| macOS disk image | Intel | `ghostlight-v${VERSION}-x86_64-apple-darwin.dmg` |
 | Debian package | x86_64 | `ghostlight-v${VERSION}-x86_64-unknown-linux-gnu.deb` |
 | Portable archive | Windows x86_64 | `ghostlight-v${VERSION}-x86_64-pc-windows-msvc.zip` |
 | Portable archive | Linux x86_64 | `ghostlight-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz` |
-| Portable archive | macOS | `ghostlight-v${VERSION}-*-apple-darwin.tar.gz` |
-| Claude Desktop MCPB | Windows and macOS | `ghostlight-v${VERSION}.mcpb` |
+| Claude Desktop MCPB | Windows | `ghostlight-v${VERSION}.mcpb` |
 | npm launcher source tarball | Supported desktops | `ghostlight-${VERSION}.tgz` |
-| Raw launcher binaries | Four target triples | `ghostlight*-<target>[.exe]` |
+| Raw launcher binaries | Two target triples | `ghostlight*-<target>[.exe]` |
 | Chromium adapter | Any supported desktop | `ghostlight-extension-v${ADAPTER_VERSION}.zip` |
 | Component SBOMs | All | `ghostlight-v${VERSION}-sbom-*.cyclonedx.json` |
 | Checksums | All | `SHA256SUMS` |

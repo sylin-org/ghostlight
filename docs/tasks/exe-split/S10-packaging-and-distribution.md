@@ -24,7 +24,7 @@ shape, and make the smallest edits that reach the pinned end state (SPEC section
 3. `packaging/npm/`: the launcher downloads the three raw binaries on first run; its bin script
    EXECS `ghostlight-adapter-agent` (argv passed through) -- the npm entry is what MCP clients
    launch. Keep stderr-only logging. Update its README section that names the binary.
-4. `packaging/winget`, `packaging/scoop`, `packaging/homebrew` templates: extend file lists to
+4. `packaging/winget` and `packaging/scoop` templates: extend file lists to
    the three binaries (textual; shapes preserved).
 5. `docs/business/DISTRIBUTION.md`: one short subsection noting the three-binary artifact shape
    (plain style).

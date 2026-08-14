@@ -1,5 +1,8 @@
 //! Ghostlight's single mutable, domain-driven browser orchestrator.
 
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+compile_error!("Ghostlight supports Windows and Linux only.");
+
 pub mod browser;
 pub mod cli;
 pub mod desktop;

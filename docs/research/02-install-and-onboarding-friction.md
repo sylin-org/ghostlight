@@ -77,7 +77,7 @@ https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging
 
 ## DELIGHT SIGNALS (easy install)
 
-- **Single static binary, zero deps, GitHub-Releases download for mac/Linux/Windows** is the
+- **Single static binary, zero deps, GitHub-Releases download for Linux/Windows** is the
   emerging "it just works" bar (e.g., codebase-memory-mcp markets exactly this).
 - **Anthropic's MCPB (formerly DXT) desktop bundles** = one-click install in Claude Desktop,
   cross-OS, language-agnostic: "ideal for users who shouldn't have to handle npm."

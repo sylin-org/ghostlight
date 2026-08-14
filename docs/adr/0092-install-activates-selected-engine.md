@@ -59,10 +59,9 @@ After stopping the verified predecessor, the installer starts the selected servi
 waits for the adapter endpoint to report that exact executable as its owner. A different owner or a
 startup timeout is a warning, not a false success.
 
-### 4. Unix supervisors restart after registration
+### 4. The Linux supervisor restarts after registration
 
-macOS already uses `launchctl kickstart -k`, which replaces an active predecessor. Linux now runs
-`systemctl --user restart` after writing, reloading, and enabling the user unit. Unix package
+Linux runs `systemctl --user restart` after writing, reloading, and enabling the user unit. Linux package
 replacement remains the supervisor's responsibility; the Windows process-owner path is not copied
 there.
 

@@ -32,9 +32,7 @@ if (-not [string]::IsNullOrWhiteSpace($CandidateDirectory)) {
     }
     foreach ($target in @(
         [ordered]@{ name = "x86_64-pc-windows-msvc"; extension = ".exe" },
-        [ordered]@{ name = "x86_64-unknown-linux-gnu"; extension = "" },
-        [ordered]@{ name = "aarch64-apple-darwin"; extension = "" },
-        [ordered]@{ name = "x86_64-apple-darwin"; extension = "" }
+        [ordered]@{ name = "x86_64-unknown-linux-gnu"; extension = "" }
     )) {
         foreach ($component in @("ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector")) {
             $name = "$component-$($target.name)$($target.extension)"
@@ -54,8 +52,8 @@ if ($packageJson.name -ne "ghostlight" -or $packageJson.version -ne $Version) {
     throw "npm package identity does not match release version $Version"
 }
 
-if ($rawBinaries.Count -ne 12) {
-    throw "npm preparation requires exactly 12 raw binaries, found $($rawBinaries.Count)"
+if ($rawBinaries.Count -ne 6) {
+    throw "npm preparation requires exactly 6 raw binaries, found $($rawBinaries.Count)"
 }
 $checksums = [ordered]@{
     version = $Version

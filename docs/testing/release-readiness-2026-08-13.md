@@ -24,10 +24,10 @@ published.
 | CLI | Governed result, non-zero refusal, caller-owned batch session, and CLI-attributed audit passed. |
 | PowerShell journey | Separate-process open/list/read/JPEG capture/close passed against the isolated stack. |
 | Workbench surface | Startup fault containment and the recovered stale-path Update action passed. |
-| Historical evidence | Regeneration reproduced 1,355 tests plus 34 Lightbox scenarios byte-for-byte. |
-| Recovery disposition | All 1,389 entries and all 34 scenarios are covered by the checked recovery matrix. |
-| Artifact recovery | All 810 mature 0.8 files are named and dispositioned; the four high-value missing release artifacts are restored on current seams. |
-| Repository integrity | All 681 tracked files were readable, local documentation links resolved, source versions aligned, and no new ASCII exception appeared. |
+| Historical evidence | Regeneration reproduced 1,354 tests plus 34 Lightbox scenarios byte-for-byte. |
+| Recovery disposition | All 1,388 entries and all 34 scenarios are covered by the checked recovery matrix. |
+| Artifact recovery | All 809 in-scope mature 0.8 files are named and dispositioned; the four high-value missing release artifacts are restored on current seams. |
+| Repository integrity | All tracked files were readable, local documentation links resolved, source versions aligned, and no new ASCII exception appeared. |
 | Dependency policy | `cargo deny check licenses bans sources` passed. |
 | Advisory gate | `cargo audit` exited zero with no unallowed vulnerability error; residual warnings are below. |
 | Public truth | Offline check reported source 1.0.0, observed public product 0.8.0, and observed public adapter 0.8.0. |
@@ -36,8 +36,8 @@ published.
 | Windows bundle contents | Exact three sibling executables and four source-matched legal files present; no staging names leaked. |
 | Release native-host check | Read-only check named the exact sibling connector and four missing browser registrations. |
 | Development swap | Exact-path plan found only the repository service; isolated build/lock/copy/cleanup passed without touching that service. |
-| Candidate assembler | Four real component SBOMs plus synthetic cross-platform input passed exact 27-artifact assembly and verification. |
-| Distribution entry points | npm, MCPB, four portable archives, one-line installers, and Homebrew/Scoop/WinGet metadata were constructed and checked from candidate hashes. |
+| Candidate assembler | Four real component SBOMs plus synthetic Windows and Linux input passed exact 17-artifact assembly and verification. |
+| Distribution entry points | npm, Windows MCPB, two portable archives, one-line installers, and Scoop/WinGet metadata were constructed and checked from candidate hashes. |
 | Publication planning | Chrome, GitHub, npm, and MCP plans made no mutation and named the missing or mismatched prerequisites. |
 
 The local unsigned NSIS output was
@@ -95,11 +95,10 @@ the dependency scan as warning-free.
 | --- | --- |
 | GitHub workflow execution | NOT OBSERVED for the combined Linux head in this record; inspect the triggered runs after the authorized `dev` push. |
 | Linux Debian candidate | NOT RUN. CachyOS source/user-candidate and portable proof does not substitute for it. |
-| macOS arm64/x64 candidates | NOT RUN in native macOS builders. |
 | Windows package install | NOT RUN. Building and inspecting NSIS does not prove its hooks or lifecycle. |
 | Package signing/attestation | Platform signing NOT RUN. Workflow provenance is implemented but has not run on GitHub. |
 | SBOM and immutable release checksums | Assembly logic passed locally; a real cross-platform 1.0 publication candidate is NOT BUILT. |
-| Clean install | NOT RUN on Windows, macOS, or Linux ordinary-user machines. |
+| Clean install | NOT RUN on Windows or Linux ordinary-user machines. |
 | 0.8 -> 1.0 upgrade | Development user-path proof passed on CachyOS; packaged Ubuntu/Debian upgrade remains NOT RUN. |
 | Login/reboot demand-start | NOT RUN on any packaged platform. |
 | Uninstall ownership | Development user-path ownership proof passed on CachyOS; native package removal remains NOT RUN. |
@@ -111,8 +110,8 @@ the dependency scan as warning-free.
 
 Release access is only partly ready. GitHub and npm authentication are valid. The MCP DNS key and
 publisher exist. Chrome's stored refresh token is revoked or expired and `CWS_PUBLISHER_ID` is
-missing. Windows and Apple signing credentials were not found. The 0.8 Linux SSH identity was
-recovered, but its `test-host-01` name is not currently resolvable.
+missing. Windows signing credentials were not found. The 0.8 Linux SSH identity was recovered,
+but its `test-host-01` name is not currently resolvable.
 
 The Linux L1-L9 record remains [`linux-live-lifecycle.md`](linux-live-lifecycle.md), with every row
 still `NOT RUN`. That is the next high-value platform gate. It must start from public 0.8 for the

@@ -283,10 +283,7 @@ pub fn active_manifest_identity() -> Option<ManifestIdentity>
   - Windows (`cfg(windows)`): `std::env::var_os("ProgramData")` joined with
     `browser-mcp` then `policy.json` (that is,
     `%ProgramData%\browser-mcp\policy.json`). Return `None` if the env var is absent.
-  - macOS (`cfg(target_os = "macos")`): the fixed path
-    `/Library/Application Support/browser-mcp/policy.json`.
-  - All other unix (`cfg(all(unix, not(target_os = "macos")))`): the fixed path
-    `/etc/browser-mcp/policy.json`.
+  - Linux (`cfg(target_os = "linux")`): the fixed path `/etc/browser-mcp/policy.json`.
   - Do not use the `dirs` crate here; it has no system-scope (machine-wide) helper for
     these locations.
 - `manifest_status()`: if `org_policy_path()` is `None` or the file does not exist,

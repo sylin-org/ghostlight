@@ -60,7 +60,7 @@ fn lock_is_contended(error: &io::Error) -> bool {
     {
         error.raw_os_error() == Some(ERROR_LOCK_VIOLATION)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
         false
     }
@@ -179,14 +179,14 @@ fn configure_detached(command: &mut Command) {
     command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn configure_detached(command: &mut Command) {
     use std::os::unix::process::CommandExt;
 
     command.process_group(0);
 }
 
-#[cfg(not(any(windows, unix)))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn configure_detached(_command: &mut Command) {}
 
 #[cfg(test)]

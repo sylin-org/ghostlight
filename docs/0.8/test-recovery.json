@@ -40,7 +40,7 @@
     },
     {
       "category": "integration",
-      "historicalEntries": 150,
+      "historicalEntries": 149,
       "treatment": "reexpressed-at-1.0-contract-seams",
       "currentEvidence": ["crates/orchestrator/src", "tests/process-journey.mjs", "tests/cli-journey.mjs"],
       "remainingProof": "Complete the visible browser, package, and three-harness release matrix."
@@ -85,7 +85,7 @@
       "historicalEntries": 94,
       "treatment": "reexpressed-with-uds-instance-and-supervisor-mechanisms-retired",
       "currentEvidence": ["crates/bridge/src", "crates/browser-connector/src", "crates/mcp-connector/src/service_session.rs"],
-      "remainingProof": "Run Linux and macOS package demand-start and reconnect journeys."
+      "remainingProof": "Run Linux package demand-start and reconnect journeys."
     }
   ],
   "processScenarios": [

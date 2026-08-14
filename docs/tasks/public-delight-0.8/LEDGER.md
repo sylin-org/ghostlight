@@ -82,8 +82,7 @@ commit hashes, external drafts, and numbered deviations.
 - Baseline: `docs/research/public-reception-2026-08.md`, observed 2026-08-05.
 - Verified product facts: public service 0.7.3; source service 0.8.0; public adapter 0.7.1;
   source and pending adapter 0.8.0; 25 registry tools; nine installer clients; Windows and Linux
-  live-browser proof; macOS CI proof with live-browser verification still owed; exact 2025-11-25
-  and 2026-07-28 source-candidate MCP shores.
+  live-browser proof; exact 2025-11-25 and 2026-07-28 source-candidate MCP shores.
 - Verified reception measurements: npm 538 downloads for 2026-07-29 through 2026-08-04 and 2,009
   for 2026-07-06 through 2026-08-04; Chrome Web Store two users with no ratings or written
   reviews; GitHub 0 stars, 0 forks, 0 open issues, 62 aggregate v0.7.3 asset downloads, and one
@@ -357,11 +356,11 @@ commit hashes, external drafts, and numbered deviations.
   CRX3 matched all 37 submitted files; only Chrome's injected manifest `update_url` differed.
 - PR #80 merged to `main` as `993135b048b60622157266b53b21f1719c9df4b3`. Release workflow
   `31152001239` passed and the immutable v0.8.0 release published 38 assets. npm 0.8.0, the official
-  MCP Registry record, Homebrew, Trust Center footers, and website fallbacks are live. The release
+  MCP Registry record, Trust Center footers, and website fallbacks are live. The release
   script's checksum-fill setters were made idempotent after a safe resume stopped on an
-  already-correct Homebrew hash. The resumed orchestration and online surface check passed.
-- Package-manager descriptions now use the settled visible-local-browser copy. Homebrew is live at
-  tap commit `302c710`. Winget PR #413601 is open with its CLA check green; Microsoft controls
+  already-correct package hash. The resumed orchestration and online surface check passed.
+- Package-manager descriptions now use the settled visible-local-browser copy. Winget PR #413601
+  is open with its CLA check green; Microsoft controls
   review and merge.
 - GitHub's MCP catalog now publicly discovers Ghostlight. Glama explicitly synchronized to
   repository commit `9546875`. mcpservers.org accepted a refresh request. Cline issue #1989,

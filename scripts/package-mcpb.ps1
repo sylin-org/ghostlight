@@ -64,9 +64,7 @@ try {
         Copy-Item -LiteralPath (Join-Path $repo $legalFile.source) -Destination (Join-Path $stage $legalFile.destination)
     }
     foreach ($target in @(
-        [ordered]@{ name = "x86_64-pc-windows-msvc"; extension = ".exe" },
-        [ordered]@{ name = "aarch64-apple-darwin"; extension = "" },
-        [ordered]@{ name = "x86_64-apple-darwin"; extension = "" }
+        [ordered]@{ name = "x86_64-pc-windows-msvc"; extension = ".exe" }
     )) {
         $targetDirectory = Join-Path $stage "server/bin/$($target.name)"
         New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
@@ -116,8 +114,6 @@ try {
             "manifest.json",
             "server/launch.js",
             "server/bin/x86_64-pc-windows-msvc/ghostlight.exe",
-            "server/bin/aarch64-apple-darwin/ghostlight",
-            "server/bin/x86_64-apple-darwin/ghostlight",
             "LICENSE",
             "MIT.txt",
             "LicenseRef-Ghostlight-Commercial.txt",

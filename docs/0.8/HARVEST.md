@@ -30,7 +30,7 @@ Deleted material included:
 - four GitHub workflow and dependency-management files;
 - `compatibility.json`, `deny.toml`, and the pinned toolchain policy;
 - fourteen build, install, package, release, publication, and store-reconciliation scripts;
-- ten package definitions and launcher tests across npm, MCPB, Homebrew, Scoop, and WinGet;
+- package definitions and launcher tests across npm, MCPB, Scoop, and WinGet;
 - the native-host and supervisor installer implementation;
 - the Lightbox process-contract runner;
 - eighty-three files under `tests/`; and
@@ -46,14 +46,14 @@ evidence.
 `scripts/harvest-0.8-test-inventory.ps1`. It records every Rust test attribute, every JavaScript
 `test` or `it` declaration, and every named Lightbox scenario in the source registries.
 
-The source contains 1,355 ordinary test declarations:
+The source contains 1,354 ordinary test declarations:
 
 | Behavior area | Declarations |
 | --- | ---: |
 | Governance | 344 |
 | Browser hub and coordination | 176 |
 | Extension | 177 |
-| Integration | 150 |
+| Integration | 149 |
 | Tool execution | 137 |
 | MCP edge | 101 |
 | Transport | 94 |
@@ -76,12 +76,12 @@ coverage because 1.0 deliberately removed many old mechanisms. They do show why 
 needs a disposition instead of an unreviewed deletion.
 
 [`RECOVERY-MATRIX.md`](RECOVERY-MATRIX.md) and its checked
-[`test-recovery.json`](test-recovery.json) now cover all 1,389 entries in twelve reviewed behavior
+[`test-recovery.json`](test-recovery.json) now cover all 1,388 entries in twelve reviewed behavior
 groups and give every one of the 34 Lightbox process scenarios an explicit disposition. The matrix
 is a map, not a false claim of one-for-one private implementation equivalence.
 
 [`ARTIFACT-RECOVERY.md`](ARTIFACT-RECOVERY.md) adds the file-level half of the harvest. Its generated
-inventory content-addresses every path in the 810-file mature 0.8 tree, and its checked recovery
+scoped inventory content-addresses 809 paths from the mature 0.8 tree, and its checked recovery
 ledger gives each artifact an explicit treatment. A later rewrite may change a treatment, but it
 cannot make a file disappear from project memory without the drift gate noticing.
 
@@ -135,7 +135,7 @@ The 0.8 installer carried useful cross-platform facts:
 - native host name `org.sylin.ghostlight`;
 - public extension id `lejccfmoeogmhemakeknjjdhkfkgncdl`;
 - development extension id `cjcmhepmagomefjggkcohdbfemacojoa`;
-- exact per-browser Windows registry keys and macOS/Linux manifest directories;
+- exact per-browser Windows registry keys and Linux manifest directories;
 - atomic manifest writes and ownership-checked removal;
 - unrelated MCP configuration must survive install and uninstall;
 - an upgrade is incomplete while an older managed executable still owns the service endpoint; and
@@ -145,7 +145,6 @@ The old supervisor architecture does not return. The current shared demand-start
 availability. Migration code may identify and remove only exact legacy registrations:
 
 - Windows HKCU Run value `Ghostlight Service` and the old Task Scheduler entry of the same name;
-- macOS `~/Library/LaunchAgents/org.sylin.ghostlight.service.plist`; and
 - Linux `~/.config/systemd/user/ghostlight.service`.
 
 The common 0.8 npm install cache was `~/.ghostlight/bin/v0.8.0`. A harness entry that points there
@@ -158,8 +157,8 @@ The high-value 0.8 CI shape was:
 
 - least-privilege read access;
 - pinned Rust and Node inputs;
-- format, strict clippy, build, and all tests on Windows, macOS, and Linux;
-- extension tests on all three operating systems;
+- format, strict clippy, build, and all tests on Windows and Linux;
+- extension tests on Windows and Linux;
 - a blocking real Linux Chromium/native-messaging journey with a hard timeout;
 - dependency advisory and license/source checks;
 - exact release artifacts built in a target matrix;
@@ -209,7 +208,7 @@ immutable account of what was known on 2026-08-07.
 | Publication copy and channel recovery | Adapt for 1.0 after public artifacts exist. |
 | Old core, hub, transport, and extension implementation | Git history only. Do not copy into 1.0 internals. |
 | Old always-ready supervisor and named-instance model | Superseded; migration cleanup only. |
-| Raw-binary npm, MCPB, Homebrew, Scoop, and WinGet entry points | Restored on current seams. All are generated from the same checked 1.0 candidate and exact raw or portable hashes. |
+| Raw-binary npm, MCPB, Scoop, and WinGet entry points | Restored on current seams. All are generated from the same checked 1.0 candidate and exact raw or portable hashes. |
 | Giant release conductor and mechanical trust restamping | Retire. |
 | Directory submission sweeps and reception monitoring | Independent, optional post-release work. Never a candidate gate. |
 

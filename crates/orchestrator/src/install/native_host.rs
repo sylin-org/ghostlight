@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 use std::env;
-use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -26,8 +25,6 @@ const CONNECTOR_NAME: &str = "ghostlight-browser-connector";
 pub enum NativeHostPlatform {
     /// Per-user Windows manifest plus HKCU browser keys.
     Windows,
-    /// Per-browser files below `~/Library/Application Support`.
-    MacOs,
     /// Per-browser files below the XDG user configuration directory.
     Linux,
 }
@@ -137,9 +134,8 @@ impl NativeHostRegistry {
 
     /// Reconcile a package whose ordinary desktop launch runs in an identifiable final location.
     ///
-    /// Windows NSIS performs this before launch. Linux Debian installs and macOS application
-    /// bundles use the first normal user launch so a stale per-user 0.8 manifest cannot shadow
-    /// the package-owned registration.
+    /// Windows NSIS performs this before launch. Linux Debian installs use the first normal user
+    /// launch so a stale per-user 0.8 manifest cannot shadow the package-owned registration.
     pub fn reconcile_packaged_launch(
         &self,
     ) -> Result<Option<NativeHostActionResult>, NativeHostError> {
@@ -154,6 +150,7 @@ impl NativeHostRegistry {
 #[derive(Clone, Debug)]
 struct NativeHostContext {
     platform: NativeHostPlatform,
+    #[cfg(test)]
     home: PathBuf,
     config: PathBuf,
     local: PathBuf,
@@ -168,8 +165,6 @@ impl NativeHostContext {
             .unwrap_or_default();
         let platform = if cfg!(target_os = "windows") {
             NativeHostPlatform::Windows
-        } else if cfg!(target_os = "macos") {
-            NativeHostPlatform::MacOs
         } else {
             NativeHostPlatform::Linux
         };
@@ -186,6 +181,7 @@ impl NativeHostContext {
             .join(executable_name(CONNECTOR_NAME, platform));
         Self {
             platform,
+            #[cfg(test)]
             home,
             config,
             local,
@@ -199,7 +195,6 @@ struct BrowserSpec {
     id: &'static str,
     name: &'static str,
     windows_vendor: &'static str,
-    macos_directory: &'static str,
     linux_directory: &'static str,
 }
 
@@ -208,28 +203,24 @@ const BROWSERS: &[BrowserSpec] = &[
         id: "chrome",
         name: "Google Chrome",
         windows_vendor: r"Google\Chrome",
-        macos_directory: "Google/Chrome/NativeMessagingHosts",
         linux_directory: "google-chrome/NativeMessagingHosts",
     },
     BrowserSpec {
         id: "edge",
         name: "Microsoft Edge",
         windows_vendor: r"Microsoft\Edge",
-        macos_directory: "Microsoft Edge/NativeMessagingHosts",
         linux_directory: "microsoft-edge/NativeMessagingHosts",
     },
     BrowserSpec {
         id: "brave",
         name: "Brave",
         windows_vendor: r"BraveSoftware\Brave-Browser",
-        macos_directory: "BraveSoftware/Brave-Browser/NativeMessagingHosts",
         linux_directory: "BraveSoftware/Brave-Browser/NativeMessagingHosts",
     },
     BrowserSpec {
         id: "chromium",
         name: "Chromium",
         windows_vendor: "Chromium",
-        macos_directory: "Chromium/NativeMessagingHosts",
         linux_directory: "chromium/NativeMessagingHosts",
     },
 ];
@@ -397,7 +388,7 @@ fn inspect_browser(
                 ),
             )
         }
-        NativeHostPlatform::MacOs | NativeHostPlatform::Linux => {
+        NativeHostPlatform::Linux => {
             let path = browser_manifest_path(context, browser);
             classify_manifest(
                 registration_io.read_file(&path)?.as_deref(),
@@ -507,7 +498,7 @@ fn apply_install_for(
                 }
             }
         }
-        NativeHostPlatform::MacOs | NativeHostPlatform::Linux => {
+        NativeHostPlatform::Linux => {
             for browser in browsers {
                 let observed = before
                     .browsers
@@ -572,7 +563,7 @@ fn apply_uninstall_for(
             }
             owned_manifests.insert(windows_manifest_path(context));
         }
-        NativeHostPlatform::MacOs | NativeHostPlatform::Linux => {
+        NativeHostPlatform::Linux => {
             for browser in browsers {
                 let path = browser_manifest_path(context, browser);
                 let owned = registration_io
@@ -634,17 +625,13 @@ fn windows_manifest_path(context: &NativeHostContext) -> PathBuf {
 }
 
 fn browser_manifest_path(context: &NativeHostContext, browser: &BrowserSpec) -> PathBuf {
-    let root = match context.platform {
-        NativeHostPlatform::MacOs => context.home.join("Library/Application Support"),
-        NativeHostPlatform::Linux => context.config.clone(),
-        NativeHostPlatform::Windows => return windows_manifest_path(context),
-    };
-    let directory = match context.platform {
-        NativeHostPlatform::MacOs => browser.macos_directory,
-        NativeHostPlatform::Linux => browser.linux_directory,
-        NativeHostPlatform::Windows => unreachable!("windows returned above"),
-    };
-    root.join(directory).join(format!("{HOST_NAME}.json"))
+    if context.platform == NativeHostPlatform::Windows {
+        return windows_manifest_path(context);
+    }
+    context
+        .config
+        .join(browser.linux_directory)
+        .join(format!("{HOST_NAME}.json"))
 }
 
 fn windows_registry_key(browser: &BrowserSpec) -> String {
@@ -669,15 +656,6 @@ fn packaged_desktop_executable(connector: &Path, platform: NativeHostPlatform) -
     match platform {
         NativeHostPlatform::Windows => false,
         NativeHostPlatform::Linux => directory == Path::new("/usr/bin"),
-        NativeHostPlatform::MacOs => {
-            directory.file_name() == Some(OsStr::new("MacOS"))
-                && directory.parent().and_then(Path::file_name) == Some(OsStr::new("Contents"))
-                && directory
-                    .parent()
-                    .and_then(Path::parent)
-                    .and_then(Path::file_name)
-                    .is_some_and(|name| name.to_string_lossy().ends_with(".app"))
-        }
     }
 }
 
@@ -962,10 +940,6 @@ mod tests {
         assert!(!packaged_desktop_executable(
             Path::new("/repo/target/debug/ghostlight-browser-connector"),
             NativeHostPlatform::Linux
-        ));
-        assert!(packaged_desktop_executable(
-            Path::new("/Applications/Ghostlight.app/Contents/MacOS/ghostlight-browser-connector"),
-            NativeHostPlatform::MacOs
         ));
         assert!(!packaged_desktop_executable(
             Path::new(r"C:\Program Files\Ghostlight\ghostlight-browser-connector.exe"),

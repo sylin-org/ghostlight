@@ -41,8 +41,8 @@ As of dev @ 656259c (2026-07-07), tagged v0.2.0 on main (2026-07-05):
   digests; results carry `structuredContent` + declared `outputSchema` (ADR-0038).
 - **Architecture:** Ghostlight Hub (ADR-0030, H0-H9 complete): a persistent per-user service owns
   the one Chrome link; MCP clients are multiplexed adapter sessions; local web API + Console;
-  OS supervisor registration (schtasks / launchd / systemd user units). Inbound/outbound/manage
-  zones (ADR-0033); ICapability/ITransport registry with capability manifest at handshake
+  Windows Task Scheduler and Linux systemd user-service integration; inbound/outbound/manage zones
+  (ADR-0033); ICapability/ITransport registry with capability manifest at handshake
   (ADR-0034).
 - **Governance:** the full overlay is live: RAWX capability classification (read/action/write/
   execute) with per-action requirements and host polarity (ADR-0022), identity-bound grants,
@@ -58,7 +58,7 @@ As of dev @ 656259c (2026-07-07), tagged v0.2.0 on main (2026-07-05):
   idempotency gate) are Proposed, not implemented. The composition batch's LIVE-VERIFY.md (13
   pinned observations) has not been run. v0.2.0 is tagged but has no published GitHub release
   (v0.1.0 is still "Latest"). The Chrome Web Store listing is drafted but not submitted
-  (screenshots + privacy tab owed). macOS/Linux live verification, e2e-smoke unquarantine, and
+  (screenshots + privacy tab owed). Linux live verification, e2e-smoke unquarantine, and
   the commercial-license legal skim remain open.
 
 Versus the world research 13 described, Ghostlight closed the gaps that study implied: it renamed
@@ -246,7 +246,7 @@ safely is exactly a governance problem. No implementation now; Chrome 150 alread
 API once, it is too early to build against.
 
 **P10. Close the standing verification debts (S/M).** Run composition LIVE-VERIFY.md (13
-observations), macOS/Linux live verification, e2e-smoke unquarantine, commercial-license legal
+observations), Linux live verification, e2e-smoke unquarantine, commercial-license legal
 skim. None are landscape-driven; all of them gate the credibility of P1/P8 claims.
 
 ## Outcome (added 2026-07-07)

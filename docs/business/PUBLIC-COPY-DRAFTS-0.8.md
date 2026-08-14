@@ -174,8 +174,7 @@ Replace the stale Additional Information section, or add this as a dated maintai
 > extension run locally. Personal use is complete without policy; optional capability and domain
 > policy plus structured local audit add boundaries when needed.
 >
-> Windows and Linux are verified with live browsers. macOS builds and passes the full suite in CI;
-> live-browser verification is still owed. Current release and adapter state:
+> Windows and Linux are verified with live browsers. Current release and adapter state:
 > https://sylin.org/ghostlight/install.md
 
 Keep the tested-install checkboxes and repository/logo fields unchanged. Do not add a comment or

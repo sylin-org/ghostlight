@@ -31,10 +31,8 @@ test("an installed npm bin symlink still invokes the launcher", async () => {
   }
 });
 
-test("the four published platforms resolve to exact release targets", () => {
+test("the published platforms resolve to exact release targets", () => {
   assert.equal(releaseTarget("win32", "x64"), "x86_64-pc-windows-msvc");
-  assert.equal(releaseTarget("darwin", "arm64"), "aarch64-apple-darwin");
-  assert.equal(releaseTarget("darwin", "x64"), "x86_64-apple-darwin");
   assert.equal(releaseTarget("linux", "x64"), "x86_64-unknown-linux-gnu");
   assert.throws(() => releaseTarget("linux", "arm64"), /does not publish/);
 });

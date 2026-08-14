@@ -30,7 +30,7 @@ Ghostlight group.
 | Dimension | Required coverage |
 | --- | --- |
 | Participants | 5 to 10 non-authors |
-| Operating systems | Windows, macOS, and Linux |
+| Operating systems | Windows and Linux |
 | MCP harnesses | At least three, including a terminal client and graphical editor client |
 | Browser | At least two supported Chromium families, version 116 or later |
 | Installation | Signed package, OS-native uninstall path, matching store extension |

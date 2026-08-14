@@ -11,7 +11,6 @@ Status: core publication complete. External review and eligibility follow-ups re
 | Ghostlight v0.8.0 tag | `993135b048b60622157266b53b21f1719c9df4b3` | Public release commit from PR #80 |
 | Public Ghostlight repository `main` | `95468758` | Release plus resumable checksum fills and refreshed package-manager copy |
 | Website `main` | `0c801c61f9373fd634bbeeae9438f756d62f30e9` | Live 0.8 fallbacks at `https://sylin.org/ghostlight/` |
-| Homebrew tap | `302c710` | Formula 0.8.0 with current description and checksums |
 
 The immutable release tag remains on the reviewed PR merge. Post-release checksum, trust-footer,
 website-fallback, and package-description commits do not move that tag.
@@ -24,7 +23,6 @@ website-fallback, and package-description commits do not move that tag.
 | GitHub release | v0.8.0 public with 38 assets; workflow run `31152001239` passed |
 | npm | `ghostlight@0.8.0` live at `latest`; launcher fetched the published Windows binary and reached `doctor` |
 | Official MCP Registry | `org.sylin/ghostlight` 0.8.0 published |
-| Homebrew | Tap commit `302c710` carries 0.8.0 and current copy |
 | Website and Trust Center | 0.8 fallbacks deployed; reviewed-against footers restamped |
 | GitHub MCP catalog | Public search returns `Sylin Ghostlight` by `sylin-org` |
 | Glama | Explicit sync completed at repository commit `9546875` |
@@ -52,7 +50,7 @@ Observed again on 2026-08-07 after publication:
 | Public Chrome adapter | 0.8.0 from the public Chrome update feed and listing |
 | Pending Chrome adapter | None for this release |
 | Compatibility | Adapter 0.8.x covers services 0.8.x |
-| Platforms | Windows and Linux live-browser verified; macOS build and full-suite CI verified, live-browser proof owed |
+| Platforms | Windows and Linux live-browser verified |
 | MCP revisions | Source candidate has exact local stdio shores for `2025-11-25` and `2026-07-28` |
 | Install command | `npx -y ghostlight install` |
 | Canonical URL | `https://sylin.org/ghostlight/` |
@@ -162,10 +160,10 @@ historical recovery trail for this release.
    ```
 
    The script creates and pushes the tag, watches the release workflow, verifies assets, fills and
-   commits package checksums, updates Homebrew, publishes npm, publishes the official MCP Registry
+   commits package checksums, publishes npm, publishes the official MCP Registry
    record when its DNS credential is present, restamps Trust Center footers, refreshes website
    fallbacks, and reports remaining manual work.
-8. Verify GitHub release assets, npm launcher smoke, official MCP Registry, Homebrew, public Chrome
+8. Verify GitHub release assets, npm launcher smoke, official MCP Registry, public Chrome
    version, website version and adapter summary, install page, privacy page, and decision aid. Run:
 
    ```powershell
@@ -188,7 +186,7 @@ Do not delete or reuse a release tag after it is public.
 | GitHub release | Keep v0.8.0 immutable. Mark a broken release clearly if needed, preserve evidence, and publish a corrected patch release. |
 | npm | Do not overwrite 0.8.0. Deprecate it with a direct reason when needed, then publish the fixed patch after its assets exist. |
 | Official MCP Registry | Preserve the version record. Publish the fixed patch and change active status only through the registry's supported process. |
-| Homebrew, Winget, and Scoop | Revert or supersede manifests with a normal reviewed commit or PR. Point to an existing immutable release only. |
+| WinGet and Scoop | Revert or supersede manifests with a normal reviewed commit or PR. Point to an existing immutable release only. |
 | Website | Revert the exact website refresh commit or publish a small correction. Keep `docs/public-status.json`, README, and website fallbacks aligned. |
 | Directories and showcases | Edit or withdraw only the affected destination. Record that project-authored distribution changed; do not present it as user reception. |
 
@@ -198,7 +196,6 @@ clear current-status note over attempting to hide a broken immutable version.
 
 ## Remaining caveats
 
-- macOS still lacks live-browser verification.
 - The authenticated proof passed on Microsoft Partner Center. Chrome Web Store pages remain
   protected from extension inspection, so their owner-only state still needs dashboard evidence.
 - Edge Add-ons is deferred because its individual enrollment makes the contact address

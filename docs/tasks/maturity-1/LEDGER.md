@@ -38,7 +38,7 @@ that task's single commit.
   docs/tasks/stage-4/LEDGER.md, verbatim per m01's Required behavior, noting
   that the t-live-1 consolidated live pass (commit 44db1f3) has since run and
   passed, while still owed: g13-1 steps 4-5, g13-3's governed half, g15-1/g15-2,
-  and macOS/Linux live checks. No existing byte of the file changed. Filled in
+  and Linux live checks. No existing byte of the file changed. Filled in
   the maturity-1 LEDGER.md RESUME HERE block (branch, base commit, baseline).
 - Deviations from the prompt/design: 1. Three ghostlight.exe processes were
   running (target/debug/ghostlight.exe locked), so all `cargo test` runs in
@@ -80,12 +80,12 @@ that task's single commit.
   scan on staged changes: empty (clean).
 - Notes for the reviewer: none.
 
-### m03 CI workflows (three-OS matrix + release artifacts) -- 2026-07-03
+### m03 CI workflows (Windows-and-Linux matrix + release artifacts) -- 2026-07-03
 - Commit: (see this task's commit)
 - Files touched: .github/workflows/ci.yml (new), .github/workflows/release.yml
   (new), docs/tasks/maturity-1/LEDGER.md.
 - Summary: `.github/` did not exist (STOP precondition verified). Created
-  ci.yml (fmt job on ubuntu; test job matrixed over ubuntu/macos/windows
+  ci.yml (fmt job on ubuntu; test job matrixed over ubuntu/windows
   running clippy -D warnings then cargo test) and release.yml (tag-triggered
   v* release building --release for the four pinned targets, uploading
   artifacts), both transcribed byte-for-byte from the prompt's pinned YAML, no
@@ -211,7 +211,7 @@ that task's single commit.
   acceptance per the prompt.
 - Notes for the reviewer: the CI `extension-unit` job is unvalidated until
   the first push (consistent with m03's note); given deviation 1 above, if
-  it fails on `ubuntu-latest`/`macos-latest`/`windows-latest` with a
+  it fails on `ubuntu-latest`/`windows-latest` with a
   MODULE_NOT_FOUND on the `tests/extension/` arg specifically, that is this
   same Node CLI quirk (likely version- or platform-specific) and the fix is
   to invoke node --test with an explicit glob/file list rather than a bare
@@ -359,7 +359,7 @@ only the one specified line was added.
 Left for a human: review and merge the `maturity-1` branch (left unpushed,
 per Completion); watch the first CI run for all three new jobs
 (extension-unit, e2e-smoke) plus the pre-existing fmt/test jobs across the
-three-OS matrix, since none of ci.yml/release.yml has ever executed on
+Windows-and-Linux matrix, since none of ci.yml/release.yml has ever executed on
 GitHub; treat any e2e-smoke failure per the m06 entry's Notes for the
 reviewer; consider whether the Node-version quirk noted in deviation (4)
 above needs a follow-up (e.g. pinning an explicit glob in the
@@ -370,9 +370,9 @@ memory/ledger (open-core-licensing); unrelated to this batch's scope.
 ## POST-RUN NOTE -- first live CI run (2026-07-04 UTC, appended after batch close)
 
 The first-ever push with workflows ran on origin/dev (heads 3e01136 and c067d33). Results:
-fmt and test GREEN on all three OSes (clippy -D warnings + the full 479-test suite passed
-on ubuntu, macos, and windows -- the core wall is verified cross-platform). extension-unit
-FAILED on all three OSes at `node --test tests/extension/`: this is exactly the failure
+fmt and test GREEN on Windows and Linux (clippy -D warnings + the full 479-test suite passed
+on ubuntu and windows -- the core wall is verified cross-platform). extension-unit
+FAILED on Windows and Linux at `node --test tests/extension/`: this is exactly the failure
 mode predicted in m05's Notes for the reviewer (bare-directory argument), now confirmed to
 affect Node 22 on every CI platform, not only the local Node 24. Fixed forward on dev by
 switching the step to explicit test-file arguments (see the ci fix commit following this
@@ -387,7 +387,7 @@ Diagnosed via gh run logs: the mcp-server binary starts and owns its socket, the
 extension service worker loads, but the native-messaging channel never establishes
 ("extension channel never came up"; tabs_create_mcp returns "Browser extension not
 connected"). Fix attempt 1 (commit af08036): write the native-host manifest to the
-standard per-user Chromium/Chrome config dirs on Linux/macOS (not just --user-data-dir,
+standard per-user Chromium/Chrome config dirs on Linux (not just --user-data-dir,
 which Chromium does not consult for host lookup), plus capture browser console on
 failure. Result: STILL FAILS, and the console capture surfaced nothing -- context.on(
 "console") does not emit service-worker logs in this Playwright version, so the

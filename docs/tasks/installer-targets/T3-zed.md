@@ -24,7 +24,7 @@ STOP if `Dialect::ContextServers` does not exist (run T2 first) or the client st
        add_via: AddVia::JsonFileMerge(Dialect::ContextServers),
    },
    ```
-3. `config_path` arm -- per-OS casing (PINS P1: `Zed` on mac/win, lowercase `zed` on linux):
+3. `config_path` arm -- per-OS casing (PINS P1: `Zed` on Windows, lowercase `zed` on Linux):
    ```rust
    ClientId::Zed => {
        if cfg!(target_os = "linux") {

@@ -3,16 +3,16 @@
   "sourceRevision": "c01cc3276102471f3e18de2ae90cb90abf98ed88",
   "generatedBy": "scripts/harvest-0.8-test-inventory.ps1",
   "counts": {
-    "decoratedOrJavascriptTests": 1355,
+    "decoratedOrJavascriptTests": 1354,
     "lightboxScenarios": 34,
-    "totalEntries": 1389,
+    "totalEntries": 1388,
     "byCategory": {
       "browser-e2e": 4,
       "browser-hub": 176,
       "extension": 177,
       "governance": 344,
       "installation": 62,
-      "integration": 150,
+      "integration": 149,
       "lightbox": 5,
       "mcp-edge": 101,
       "process-contract": 34,
@@ -5997,13 +5997,6 @@
       "file": "tests/install_supervisor.rs",
       "name": "windows_registration_is_zero_elevation_run_key",
       "ordinalInFile": 1
-    },
-    {
-      "kind": "rust-test",
-      "category": "integration",
-      "file": "tests/install_supervisor.rs",
-      "name": "macos_plist_names_the_service_subcommand",
-      "ordinalInFile": 2
     },
     {
       "kind": "rust-test",

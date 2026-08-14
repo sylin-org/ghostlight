@@ -1,3 +1,6 @@
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+compile_error!("Ghostlight supports Windows and Linux only.");
+
 fn main() {
     #[cfg(target_os = "windows")]
     {
@@ -6,7 +9,7 @@ fn main() {
             .windows_attributes(tauri_build::WindowsAttributes::new().window_icon_path(icon));
         tauri_build::try_build(attributes).expect("build Tauri desktop resources");
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
     tauri_build::build();
 }
 

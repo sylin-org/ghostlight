@@ -8,7 +8,7 @@ STOP and record a BLOCKED entry (do not resolve the conflict by judgment).
 
 - ADR-0026 (release maturity sequencing) and ADR-0027 (open-core licensing) are
   the controlling decisions. The founder confirmed in-session on 2026-07-03:
-  three-OS CI matrix plus tag-triggered release artifacts; full SPEC rewrite
+  Windows-and-Linux CI matrix plus tag-triggered release artifacts; full SPEC rewrite
   (excluded from this batch, see below); syslog + none audit destinations now,
   http deferred; managed:// decided but excluded from this batch (see below);
   extension pure-logic extraction plus a headless smoke now.
@@ -58,11 +58,10 @@ none; .rs/.js/.mjs: yes, engine id).
 ### CI (m03)
 
 Two workflows. ci.yml: a fmt job (ubuntu, `cargo fmt --check`) and a test job
-matrixed over ubuntu-latest, macos-latest, windows-latest running
+matrixed over ubuntu-latest and windows-latest running
 `cargo clippy --all-targets -- -D warnings` then `cargo test`. release.yml: on
-tags `v*`, builds `--release` for x86_64-pc-windows-msvc, aarch64-apple-darwin,
-x86_64-apple-darwin, x86_64-unknown-linux-gnu on native runners and uploads the
-binary as an artifact. The literal YAML is pinned in m03; transcribe it.
+tags `v*`, builds for x86_64-pc-windows-msvc and x86_64-unknown-linux-gnu on native runners and
+uploads the binary as an artifact. The literal YAML is pinned in m03; transcribe it.
 
 ### Audit destinations (m04)
 

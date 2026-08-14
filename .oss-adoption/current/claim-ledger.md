@@ -17,7 +17,6 @@ Created: 2026-07-18T21:49:44Z
 | Identity, domain, capability policy, and per-call audit | Governance-enabled local service | examples, Trust Center, tests, ADRs | v0.6.0 | High | "Optional governance authorizes by identity, host, and capability and records each call." | "Understands whether every click matches user intent" or "prevents prompt injection" | Managed proof user and audit sample |
 | Protects ordinary tabs through managed scope | Extension and service managed-tab boundary | README, ADR-0066, extension tests, project memory | v0.6.0 | High | "Ghostlight works only in tabs it manages; ordinary tabs remain outside that surface." | "The tab group is a security sandbox" | Regression test at each extension release |
 | Windows and Linux live verified | End-to-end live browser path | README and internal status | 2026-07-18 | Medium until reconciled | "Windows and Linux have live verification" only after public surfaces agree | Current website statement or unqualified cross-platform claim | Repeat and record clean greenfield acceptance |
-| macOS package exists and CI passes | Build and automated tests, not live browser | release assets, README, CI | v0.6.0 | High | "macOS builds and passes CI; live-browser verification is still owed." | "macOS is end-to-end verified" | Visible macOS test |
 | Release artifacts are verifiable | v0.6.0 release | GitHub assets, SHA256SUMS, SBOM, release workflow, attestations | 2026-07-15 | High | "Releases include checksums, a CycloneDX SBOM, and GitHub build-provenance attestations." | "Reproducible build" or independent audit | Verify a downloaded archive and attestation |
 | Fast first use after installation | Observed author and one non-author path | interview feedback and live development sessions | 2026-07 | Medium | "Once installed, tested MCP clients recognized Ghostlight quickly." | Universal time-to-value or percentage | Time five to ten proof users |
 | More suitable than headless tools for user-context work | Product fit comparison | README, comparison, competitor first-party docs | 2026-07-18 | Medium, inferential | "Choose Ghostlight when the job requires the user's visible authenticated Chromium context." | "Better than agent-browser/Playwright" | Publish mutual capability table with current versions |
@@ -30,7 +29,6 @@ Created: 2026-07-18T21:49:44Z
 - The browser tab group is visible organization, not the security boundary.
 - Ghostlight is not a headless, isolated, stealth, cloud, or bulk automation runtime.
 - The Chrome Web Store path is not public yet.
-- macOS live-browser verification is not complete.
 - There is no SOC 2, ISO certification, completed third-party penetration test, bounty program, or
   maintainer team.
 - Organization governance is source-available under separate terms, not Apache-2.0 OR MIT.

@@ -149,7 +149,7 @@ Evidence: [E1 alternatives and distinctions](../research/public-reception-2026-0
 | C9 | The 0.8 source candidate implements exact local stdio MCP revisions `2025-11-25` and `2026-07-28`. | Product | [0.8 changelog](../../CHANGELOG.md), [MCP connector source](../../crates/mcp-connector/src), [E1 canonical truth](../research/public-reception-2026-08.md#canonical-public-truth) |
 | C10 | The 0.8 runtime ships an MCP connector, persistent service, and browser connector beside the extension. | Product | [ADR-0096](../adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md), [0.8 changelog](../../CHANGELOG.md) |
 | C11 | Public service, adapter, platform, and pending-review claims come only from dated public status. | Product and distribution | [`docs/public-status.json`](../public-status.json), [compatibility contract](../../compatibility.json) |
-| C12 | Windows and Linux have live-browser proof; macOS has build and full-suite CI proof with live-browser verification owed. | Product | [`docs/public-status.json`](../public-status.json) |
+| C12 | Windows and Linux have live-browser proof. | Product | [`docs/public-status.json`](../public-status.json) |
 | C13 | The source declares 25 additive registry tools while the original 13 trained identities remain structurally stable. | Product | [0.8 tool registry](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/crates/core/src/browser/directory.rs), [0.8 schema fidelity test](https://github.com/sylin-org/ghostlight/blob/c01cc3276102471f3e18de2ae90cb90abf98ed88/tests/tool_schema_fidelity.rs), [ADR-0094](../adr/0094-agent-readable-tool-definitions.md) |
 
 Reception counters and directory grades do not appear in this matrix because they are dated
@@ -370,7 +370,6 @@ Do not publish these phrases or implications:
 - `open source` for the whole product without explaining the open-core license boundary;
 - `no network access` or `nothing ever leaves the machine`; browser traffic, optional managed
   policy, and configured audit destinations are real;
-- `all platforms live verified`; macOS live-browser verification is still owed;
 - a public adapter version, pending-review state, release version, directory grade, download
   count, star count, favorite count, or review count without a dated authoritative source;
 - an active-user, adoption, popularity, certification, audit, or comparative-superlative claim
