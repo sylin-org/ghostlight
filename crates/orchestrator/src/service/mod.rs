@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::browser::{BrowserEventSink, BrowserPort, RelayBrowserPort};
 use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade, JsonlAuditSink};
-use crate::language::{catalog, RequestRestrictions, SERVER_INSTRUCTIONS};
+use crate::language::{catalog_for, RequestRestrictions, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::work::{ActiveAuthorityRegistry, ApplicationExecutor, CancellationToken};
 use crate::workbench::{ProjectingAuditSink, WorkbenchFacade, WorkbenchProjection};
@@ -468,7 +468,13 @@ fn serve_session(
         while let Some(request) = read_json_line::<ServiceRequest>(&mut reader)? {
             match request {
                 ServiceRequest::Catalog => {
-                    write_response(&writer, &ServiceResponse::Catalog { tools: catalog() })
+                    let snapshot = governance.snapshot(&RequestRestrictions::default());
+                    write_response(
+                        &writer,
+                        &ServiceResponse::Catalog {
+                            tools: catalog_for(&snapshot),
+                        },
+                    )
                 }
                 ServiceRequest::Invoke {
                     id,

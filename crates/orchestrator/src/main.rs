@@ -22,6 +22,8 @@ enum LaunchMode {
     Desktop,
     /// The command-line intake. A script asked for work, not for a window (ADR-0105).
     Call,
+    /// Local policy validation, explanation, and audit-free simulation.
+    Policy(ghostlight::governance::inspection::Command),
     /// The narrow package-facing Chromium registration seam (ADR-0115).
     NativeHost(NativeHostCommand),
     /// Install the browser and selected MCP-client integrations.
@@ -72,6 +74,7 @@ fn main() -> anyhow::Result<()> {
         LaunchMode::Headless => ghostlight::service::run_forever(),
         LaunchMode::Desktop => start_or_activate_desktop(),
         LaunchMode::Call => run_call(),
+        LaunchMode::Policy(command) => run_policy(&command),
         LaunchMode::NativeHost(command) => run_native_host(command),
         LaunchMode::Install(options) => run_setup(true, &options),
         LaunchMode::Uninstall(options) => run_setup(false, &options),
@@ -375,7 +378,7 @@ fn executable_name(name: &str) -> String {
 
 fn print_help() {
     println!(
-        "Ghostlight {version}\n\nUsage:\n  ghostlight                         Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor                  Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight service                 Run the local authority without a window\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        "Ghostlight {version}\n\nUsage:\n  ghostlight                         Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor                  Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight service                 Run the local authority without a window\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight policy validate <file>  Validate one schema-3 policy\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
         version = env!("CARGO_PKG_VERSION")
     );
 }
@@ -447,6 +450,11 @@ fn run_call() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     let code = ghostlight::cli::run(command, &runtime, &mut out);
     std::process::exit(code);
+}
+
+fn run_policy(command: &ghostlight::governance::inspection::Command) -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    ghostlight::governance::inspection::run(command, &mut out)
 }
 
 fn wait_for_runtime(runtime: &Path) {
@@ -589,6 +597,22 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
         Ok(LaunchMode::Headless)
     } else if arguments.first().is_some_and(|argument| argument == "call") {
         Ok(LaunchMode::Call)
+    } else if arguments
+        .first()
+        .is_some_and(|argument| argument == "policy")
+    {
+        let values = arguments[1..]
+            .iter()
+            .map(|argument| {
+                argument
+                    .to_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| anyhow::anyhow!("policy paths must be valid UTF-8"))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(LaunchMode::Policy(
+            ghostlight::governance::inspection::parse(&values)?,
+        ))
     } else if arguments.len() == 1
         && arguments
             .first()
@@ -665,6 +689,12 @@ mod tests {
             LaunchMode::Headless
         );
         assert_eq!(launch_mode(["call".into()]).unwrap(), LaunchMode::Call);
+        assert_eq!(
+            launch_mode(["policy".into(), "validate".into(), "policy.json".into()]).unwrap(),
+            LaunchMode::Policy(ghostlight::governance::inspection::Command::Validate(
+                "policy.json".into()
+            ))
+        );
         assert_eq!(
             launch_mode(["doctor".into()]).unwrap(),
             LaunchMode::Doctor { fix: false }

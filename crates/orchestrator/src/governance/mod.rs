@@ -3,6 +3,7 @@
 
 //! Authority snapshots, final-boundary admission, runtime controls, and minimized audit intent.
 
+pub mod inspection;
 pub mod manifest;
 
 use std::env;
@@ -529,6 +530,41 @@ impl AuthoritySnapshot {
         Decision::allow()
     }
 
+    /// Whether policy-aware discovery can prove that some host-scoped variant may proceed.
+    ///
+    /// Discovery is an optimization only. Final-boundary admission still resolves the real host
+    /// and current immutable snapshot.
+    #[must_use]
+    pub fn could_admit(&self, requirements: CapabilitySet) -> bool {
+        if !self.valid {
+            return false;
+        }
+        if requirements.is_empty() {
+            return true;
+        }
+        if self
+            .request_capabilities
+            .is_some_and(|allowed| !requirements.is_subset_of(allowed))
+            || self.request_hosts.as_ref().is_some_and(Vec::is_empty)
+        {
+            return false;
+        }
+        let outcomes: Vec<_> = self
+            .layers
+            .iter()
+            .map(|layer| decide_potential_host(layer, requirements))
+            .collect();
+        if outcomes.iter().all(|outcome| outcome.denial.is_none()) {
+            return true;
+        }
+        outcomes
+            .iter()
+            .fold(manifest::PolicyMode::Observe, |mode, outcome| {
+                mode.strictest(outcome.mode)
+            })
+            == manifest::PolicyMode::Observe
+    }
+
     fn resolve_outcomes(&self, outcomes: &[LayerOutcome]) -> Option<Decision> {
         let denial = outcomes
             .iter()
@@ -586,6 +622,38 @@ impl AuthoritySnapshot {
             .map(|grant| grant.id.as_str());
         Some((layer.tier.as_str(), grant))
     }
+}
+
+fn decide_potential_host(layer: &PolicyLayer, requirements: CapabilitySet) -> LayerOutcome {
+    if let Some(grant) = layer.manifest.grants.iter().find(|grant| {
+        requirements.is_subset_of(grant.allowed_set()) && grant_has_possible_host(grant)
+    }) {
+        return LayerOutcome {
+            denial: None,
+            mode: grant.mode.or(layer.manifest.mode).unwrap_or_default(),
+        };
+    }
+    LayerOutcome {
+        denial: Some(RawDenial {
+            reason: ReasonCode::CapabilityDenied,
+            rule: PolicyRule::Capability,
+            grant: None,
+        }),
+        mode: layer.manifest.mode.unwrap_or_default(),
+    }
+}
+
+fn grant_has_possible_host(grant: &manifest::Grant) -> bool {
+    grant.hosts.allow.iter().any(|pattern| {
+        let host = if pattern == "*" {
+            "policy-probe.invalid".to_owned()
+        } else if let Some(suffix) = pattern.strip_prefix("*.") {
+            format!("policy-probe.{suffix}")
+        } else {
+            pattern.clone()
+        };
+        evaluate_host(&host, &grant.hosts) == HostOutcome::Allowed
+    })
 }
 
 fn decide_resource_less(layer: &PolicyLayer, requirements: CapabilitySet) -> LayerOutcome {

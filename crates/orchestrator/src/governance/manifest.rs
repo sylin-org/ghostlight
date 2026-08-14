@@ -108,6 +108,17 @@ pub enum SettingLevel {
     Recommended,
 }
 
+impl SettingLevel {
+    /// Stable policy and explanation vocabulary.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Mandatory => "mandatory",
+            Self::Recommended => "recommended",
+        }
+    }
+}
+
 /// One narrowly registered schema-3 setting.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

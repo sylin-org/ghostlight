@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use ghostlight_bridge::service::{ToolAnnotations, ToolDefinition};
 use serde_json::{json, Value};
 
+use crate::governance::AuthoritySnapshot;
+
 use super::{CAPABILITIES, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS};
 
 /// Return the complete native Ghostlight language in deterministic order.
@@ -166,6 +168,18 @@ pub fn catalog() -> Vec<ToolDefinition> {
             Hints::browser_read(),
         ),
     ]
+}
+
+/// Project the canonical catalog through one immutable authority snapshot.
+#[must_use]
+pub fn catalog_for(snapshot: &AuthoritySnapshot) -> Vec<ToolDefinition> {
+    catalog()
+        .into_iter()
+        .filter(|tool| {
+            super::capability_map::variants(&tool.name)
+                .any(|variant| snapshot.could_admit(variant.requirements))
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy)]
@@ -1296,9 +1310,13 @@ fn coordinate(description: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use serde_json::Value;
 
-    use super::catalog;
+    use super::{catalog, catalog_for};
+    use crate::governance::GovernanceFacade;
+    use crate::language::RequestRestrictions;
 
     const EXPECTED_TOOL_NAMES: [&str; 22] = [
         "browser_tabs",
@@ -1347,6 +1365,44 @@ mod tests {
                 tool.name
             );
         }
+    }
+
+    #[test]
+    fn policy_projection_is_quiet_when_all_open_and_removes_impossible_tools() {
+        let all_open = GovernanceFacade::new(None, None).snapshot(&RequestRestrictions::default());
+        assert_eq!(catalog_for(&all_open), catalog());
+
+        let path = std::env::temp_dir().join(format!(
+            "ghostlight-catalog-policy-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        fs::write(
+            &path,
+            r#"{"schema":3,"name":"read only","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
+        )
+        .unwrap();
+        let read_only = GovernanceFacade::new(Some(path.clone()), None)
+            .snapshot(&RequestRestrictions::default());
+        let names: Vec<_> = catalog_for(&read_only)
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+        assert!(names.contains(&"browser_read".into()));
+        assert!(names.contains(&"browser_tabs".into()));
+        assert!(names.contains(&"browser_record".into()));
+        assert!(!names.contains(&"browser_click".into()));
+        assert!(!names.contains(&"browser_fill_form".into()));
+        assert!(!names.contains(&"browser_execute".into()));
+
+        fs::write(
+            &path,
+            r#"{"schema":3,"name":"observe","version":"1","mode":"observe","grants":[]}"#,
+        )
+        .unwrap();
+        let observe = GovernanceFacade::new(Some(path.clone()), None)
+            .snapshot(&RequestRestrictions::default());
+        assert_eq!(catalog_for(&observe), catalog());
+        let _ = fs::remove_file(path);
     }
 
     #[test]

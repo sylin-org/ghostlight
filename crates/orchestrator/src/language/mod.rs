@@ -5,7 +5,7 @@ pub mod outcome;
 #[path = "catalog.rs"]
 mod tool_catalog;
 
-pub use tool_catalog::catalog;
+pub use tool_catalog::{catalog, catalog_for};
 
 use std::path::Path;
 
