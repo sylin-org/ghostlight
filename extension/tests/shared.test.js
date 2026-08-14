@@ -195,6 +195,14 @@ test("native-host startup is one connection attempt across concurrent wake signa
   assert.doesNotMatch(source, /initializeLocalState\(\)\s*\.then\(connectNative\)/);
 });
 
+test("every native-port disconnect consumes Chrome's callback error", () => {
+  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  assert.match(
+    source,
+    /port\.onDisconnect\.addListener\(\(\) => \{\s+const disconnectError = chrome\.runtime\.lastError\?\.message[^;]+;\s+if \(nativePort !== port\) return;/
+  );
+});
+
 test("a first extension install opens the service-first handoff", () => {
   const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
   assert.match(source, /const SERVICE_INSTALL_URL = "https:\/\/sylin\.org\/ghostlight\/chromium-extension\/post-install\/";/);

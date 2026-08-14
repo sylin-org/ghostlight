@@ -106,6 +106,10 @@ Every one of these cost something to learn.
   create competing native hosts, and leave two structurally live pipes with only one active
   listener. Give connection creation one shared in-progress attempt and recheck ownership after
   every asynchronous initialization boundary.
+- **Consume callback-scoped platform errors before any ownership guard can return.** Chrome reports
+  a native-port exit only inside `onDisconnect`. A stale-port guard that returns before reading
+  `runtime.lastError` turns an expected replacement into an unchecked extension error even when the
+  current port is healthy.
 - **A cached MCP catalog is not a live transport.** Reconnect through the owning client, then look
   at the visible browser before retrying an effectful call.
 - **A native-port or service-worker restart is not a browser restart.** Hold uncertain resource

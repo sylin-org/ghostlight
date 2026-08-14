@@ -56,6 +56,12 @@ or public-release evidence.
   PowerShell runner now waits explicitly for the console-free Windows executable and validates
   stdout before reading result fields. Its real published-stage journey then completed every beat,
   including the off-domain refusal, replay delivery, and recording erasure.
+- Chrome's extension-errors surface then exposed an unchecked `Native host has exited` report from
+  a replaced port. The disconnect handler now consumes Chrome's callback-scoped `runtime.lastError`
+  before its stale-port ownership guard, so an expected replacement cannot leave a false extension
+  error while the current port is healthy. All 101 extension tests pass. The loaded unpacked
+  extension still needs its one explicit reload and the historical error card cleared for final
+  visible confirmation.
 
 ## Linux 1.0 development-host result
 

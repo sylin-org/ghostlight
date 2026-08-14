@@ -152,10 +152,11 @@ async function establishNativeConnection() {
       });
     });
     port.onDisconnect.addListener(() => {
+      const disconnectError = chrome.runtime.lastError?.message || "Native connection ended.";
       if (nativePort !== port) return;
       nativePort = null;
       settleServiceBoundaryState().catch(() => {});
-      setConnection({ connected: false, service_version: null, last_error: chrome.runtime.lastError?.message || "Native connection ended." });
+      setConnection({ connected: false, service_version: null, last_error: disconnectError });
       broadcastRuntimeState("disconnected").catch(() => {});
       chrome.alarms.create("ghostlight-reconnect", { delayInMinutes: 0.05 });
     });
