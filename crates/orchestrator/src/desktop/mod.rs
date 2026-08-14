@@ -658,7 +658,7 @@ mod tests {
             workspace: "workspace_1".into(),
             tool: "browser_read".into(),
             activity: "Reading page".into(),
-            capability: Capability::Read,
+            capability: Capability::Read.as_str().into(),
             started_at_ms: Some(0),
             phase: OperationPhase::Running,
         };

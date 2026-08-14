@@ -15,7 +15,7 @@ use thiserror::Error;
 
 use crate::browser::{BrowserPort, RelayBrowserPort};
 use crate::events::DomainEvent;
-use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade};
+use crate::governance::{AuditRecord, AuditSink, CapabilitySet, GovernanceFacade};
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSummary,
 };
@@ -57,7 +57,7 @@ struct OperationState {
     workspace: String,
     tool: String,
     activity: PresentationActivity,
-    capability: Capability,
+    capabilities: CapabilitySet,
     started_at_ms: u64,
     phase: OperationPhase,
 }
@@ -121,14 +121,14 @@ impl WorkbenchProjection {
                     workspace,
                     tool,
                     activity,
-                    capability,
+                    capabilities,
                 } => {
                     let operation = OperationState {
                         invocation: invocation.clone(),
                         workspace: workspace.clone(),
                         tool: tool.clone(),
                         activity: *activity,
-                        capability: *capability,
+                        capabilities: *capabilities,
                         started_at_ms: unix_ms(),
                         phase: OperationPhase::Running,
                     };
@@ -786,8 +786,8 @@ pub struct OperationSummary {
     pub tool: String,
     /// Fixed presentation activity name.
     pub activity: String,
-    /// Governed capability class this work required.
-    pub capability: Capability,
+    /// Compact label for the complete governed requirement set.
+    pub capability: String,
     /// Local start time.
     pub started_at_ms: Option<u64>,
     /// Current semantic phase.
@@ -801,7 +801,7 @@ impl From<&OperationState> for OperationSummary {
             workspace: value.workspace.clone(),
             tool: value.tool.clone(),
             activity: activity_label(value.activity).into(),
-            capability: value.capability,
+            capability: value.capabilities.label(),
             started_at_ms: Some(value.started_at_ms),
             phase: value.phase,
         }
@@ -882,15 +882,13 @@ pub struct HistoryItem {
 
 impl From<AuditRecord> for HistoryItem {
     fn from(value: AuditRecord) -> Self {
+        let capability = value.requirements().label();
         Self {
             timestamp_ms: value.timestamp_ms,
             invocation: value.invocation,
             workspace: value.workspace,
             tool: value.tool,
-            capability: serde_json::to_value(value.capability)
-                .ok()
-                .and_then(|value| value.as_str().map(str::to_owned))
-                .unwrap_or_else(|| "unknown".into()),
+            capability,
             allowed: value.allowed,
             reason: value.reason.as_str().into(),
             status: value.status,
@@ -1297,7 +1295,7 @@ mod tests {
             workspace: "workspace_1".into(),
             tool: "browser_read".into(),
             activity: PresentationActivity::Read,
-            capability: Capability::Read,
+            capabilities: Capability::Read.into(),
         });
         assert_eq!(projection.operations().len(), 1);
 
@@ -1348,7 +1346,7 @@ mod tests {
             workspace: "workspace_1".into(),
             tool: "browser_fill_form".into(),
             activity: PresentationActivity::Fill,
-            capability: Capability::Write,
+            capabilities: Capability::Write.into(),
         });
         projection.react(&DomainEvent::WorkCompleted {
             invocation: "invocation_1".into(),
@@ -1385,7 +1383,7 @@ mod tests {
         match &published[0].change {
             WorkbenchChange::OperationStarted { operation } => {
                 assert_eq!(operation.tool, "browser_fill_form");
-                assert_eq!(operation.capability, Capability::Write);
+                assert_eq!(operation.capability, "write");
             }
             other => panic!("expected a started change, got {other:?}"),
         }
@@ -1409,7 +1407,7 @@ mod tests {
             workspace: "workspace_1".into(),
             tool: "browser_execute".into(),
             activity: PresentationActivity::Script,
-            capability: Capability::Execute,
+            capabilities: Capability::Execute.into(),
         });
 
         let settled = WorkbenchChange::OperationSettled {
@@ -1461,7 +1459,7 @@ mod tests {
             workspace: "workspace_1".into(),
             tool: "browser_read".into(),
             activity: PresentationActivity::Read,
-            capability: Capability::Read,
+            capabilities: Capability::Read.into(),
         });
         assert_eq!(projection.current_seq(), 0);
         assert_eq!(projection.operations().len(), 1);
@@ -1517,7 +1515,7 @@ mod tests {
             workspace: "workspace_1".into(),
             tool: "browser_tabs".into(),
             activity: PresentationActivity::Read,
-            capability: Capability::Read,
+            capabilities: Capability::Read.into(),
         });
         assert_eq!(projection.operations().len(), 1);
     }

@@ -3,7 +3,7 @@
 
 //! Authority snapshots, final-boundary admission, runtime controls, and minimized audit intent.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -28,8 +28,8 @@ const RUNTIME_HOLD: u8 = 1;
 const RUNTIME_ATTENTION: u8 = 2;
 const RUNTIME_END: u8 = 3;
 
-/// Governed browser capability classes in increasing authority order.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+/// One independent governed browser capability fact.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
     /// Observe browser facts.
@@ -40,6 +40,129 @@ pub enum Capability {
     Write,
     /// Commit a consequential submission.
     Execute,
+}
+
+impl Capability {
+    /// Canonical presentation and serialization order. This is not an authority hierarchy.
+    pub const ALL: [Self; 4] = [Self::Read, Self::Action, Self::Write, Self::Execute];
+
+    /// Stable policy and audit vocabulary.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Action => "action",
+            Self::Write => "write",
+            Self::Execute => "execute",
+        }
+    }
+}
+
+/// A complete independent RAWX requirement set.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct CapabilitySet(u8);
+
+impl CapabilitySet {
+    const READ_BIT: u8 = 1 << 0;
+    const ACTION_BIT: u8 = 1 << 1;
+    const WRITE_BIT: u8 = 1 << 2;
+    const EXECUTE_BIT: u8 = 1 << 3;
+
+    /// No RAWX authority is required.
+    pub const EMPTY: Self = Self(0);
+    /// Read authority only.
+    pub const READ: Self = Self(Self::READ_BIT);
+    /// Action authority only.
+    pub const ACTION: Self = Self(Self::ACTION_BIT);
+    /// Write authority only.
+    pub const WRITE: Self = Self(Self::WRITE_BIT);
+    /// Execute authority only.
+    pub const EXECUTE: Self = Self(Self::EXECUTE_BIT);
+
+    /// Build a set containing one capability.
+    #[must_use]
+    pub const fn one(capability: Capability) -> Self {
+        match capability {
+            Capability::Read => Self::READ,
+            Capability::Action => Self::ACTION,
+            Capability::Write => Self::WRITE,
+            Capability::Execute => Self::EXECUTE,
+        }
+    }
+
+    /// Return the union of two independent requirement sets.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Whether this set contains one capability.
+    #[must_use]
+    pub const fn contains(self, capability: Capability) -> bool {
+        self.0 & Self::one(capability).0 != 0
+    }
+
+    /// Whether every requirement in this set is present in `allowed`.
+    #[must_use]
+    pub const fn is_subset_of(self, allowed: Self) -> bool {
+        self.0 & !allowed.0 == 0
+    }
+
+    /// Whether the set is empty.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Iterate in stable vocabulary order, never authority order.
+    pub fn iter(self) -> impl Iterator<Item = Capability> {
+        Capability::ALL
+            .into_iter()
+            .filter(move |capability| self.contains(*capability))
+    }
+
+    /// Human-plain compact label used by the local workbench.
+    #[must_use]
+    pub fn label(self) -> String {
+        if self.is_empty() {
+            return "local".into();
+        }
+        self.iter()
+            .map(Capability::as_str)
+            .collect::<Vec<_>>()
+            .join(" + ")
+    }
+}
+
+impl From<Capability> for CapabilitySet {
+    fn from(value: Capability) -> Self {
+        Self::one(value)
+    }
+}
+
+impl FromIterator<Capability> for CapabilitySet {
+    fn from_iter<T: IntoIterator<Item = Capability>>(iter: T) -> Self {
+        iter.into_iter()
+            .fold(Self::EMPTY, |set, capability| set.union(capability.into()))
+    }
+}
+
+impl Serialize for CapabilitySet {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_seq(self.iter())
+    }
+}
+
+impl<'de> Deserialize<'de> for CapabilitySet {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Vec::<Capability>::deserialize(deserializer).map(|values| values.into_iter().collect())
+    }
 }
 
 impl FromStr for Capability {
@@ -134,7 +257,7 @@ impl Decision {
 #[derive(Clone, Debug)]
 pub struct AuthoritySnapshot {
     id: String,
-    capabilities: BTreeSet<Capability>,
+    capabilities: HashSet<Capability>,
     tab_close_allowed: bool,
     preserve_target_names: bool,
     allow_host_layers: Vec<Vec<String>>,
@@ -152,10 +275,19 @@ impl AuthoritySnapshot {
     /// Decide a capability at its final boundary.
     #[must_use]
     pub fn authorize_capability(&self, capability: Capability) -> Decision {
+        self.authorize_requirements(capability.into())
+    }
+
+    /// Decide a complete independent capability requirement set at its final boundary.
+    #[must_use]
+    pub fn authorize_requirements(&self, requirements: CapabilitySet) -> Decision {
         if !self.valid {
             return Decision::deny(ReasonCode::InvalidAuthority);
         }
-        if self.capabilities.contains(&capability) {
+        if requirements
+            .iter()
+            .all(|capability| self.capabilities.contains(&capability))
+        {
             Decision::allow()
         } else {
             Decision::deny(ReasonCode::CapabilityDenied)
@@ -183,8 +315,8 @@ impl AuthoritySnapshot {
 
     /// Decide an observed or requested landing at its final boundary.
     #[must_use]
-    pub fn authorize_landing(&self, capability: Capability, url: &str) -> Decision {
-        let capability_decision = self.authorize_capability(capability);
+    pub fn authorize_landing(&self, requirements: impl Into<CapabilitySet>, url: &str) -> Decision {
+        let capability_decision = self.authorize_requirements(requirements.into());
         if !capability_decision.allowed {
             return capability_decision;
         }
@@ -438,7 +570,7 @@ impl GovernanceFacade {
             }
         }
         if let Some(restricted) = &restrictions.restrict_capabilities {
-            let requested: BTreeSet<_> = restricted
+            let requested: HashSet<_> = restricted
                 .iter()
                 .filter_map(|value| Capability::from_str(value).ok())
                 .collect();
@@ -561,14 +693,14 @@ fn validate_patterns(patterns: &[String]) -> Result<(), GovernanceError> {
 
 fn apply_policy(
     policy: &PolicyDocument,
-    capabilities: &mut BTreeSet<Capability>,
+    capabilities: &mut HashSet<Capability>,
     tab_close_allowed: &mut bool,
     preserve_target_names: &mut bool,
     allow_host_layers: &mut Vec<Vec<String>>,
     deny_hosts: &mut Vec<String>,
 ) {
     if let Some(allowed) = &policy.allow_capabilities {
-        let allowed: BTreeSet<_> = allowed.iter().copied().collect();
+        let allowed: HashSet<_> = allowed.iter().copied().collect();
         *capabilities = capabilities.intersection(&allowed).copied().collect();
     }
     for denied in &policy.deny_capabilities {
@@ -586,7 +718,7 @@ fn apply_policy(
     deny_hosts.extend(policy.deny_hosts.iter().cloned());
 }
 
-fn all_capabilities() -> BTreeSet<Capability> {
+fn all_capabilities() -> HashSet<Capability> {
     [
         Capability::Read,
         Capability::Action,
@@ -647,8 +779,12 @@ pub struct AuditRecord {
     pub workspace: String,
     /// Exact catalog tool name.
     pub tool: String,
-    /// Highest capability requested.
-    pub capability: Capability,
+    /// Complete independent RAWX requirement set.
+    #[serde(default)]
+    pub capabilities: CapabilitySet,
+    /// Singular field retained only to read audit lines written before ADR-0121.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability: Option<Capability>,
     /// Opaque immutable authority version.
     pub authority: String,
     /// Whether final-boundary authority admitted the work.
@@ -685,7 +821,7 @@ impl AuditRecord {
         invocation: &str,
         workspace: &str,
         tool: &str,
-        capability: Capability,
+        capabilities: impl Into<CapabilitySet>,
         authority: &str,
         decision: Decision,
         status: &str,
@@ -698,7 +834,8 @@ impl AuditRecord {
             invocation: invocation.into(),
             workspace: workspace.into(),
             tool: tool.into(),
-            capability,
+            capabilities: capabilities.into(),
+            capability: None,
             authority: authority.into(),
             allowed: decision.allowed,
             reason: decision.reason,
@@ -716,6 +853,13 @@ impl AuditRecord {
     pub fn from_channel(mut self, channel: Option<IntakeChannel>) -> Self {
         self.channel = channel;
         self
+    }
+
+    /// Return the truthful requirement set, including a pre-ADR-0121 historical record.
+    #[must_use]
+    pub fn requirements(&self) -> CapabilitySet {
+        self.capabilities
+            .union(self.capability.map_or(CapabilitySet::EMPTY, Into::into))
     }
 
     /// Attach the action's closed observation after completion.
@@ -779,7 +923,7 @@ mod tests {
     use crate::language::RequestRestrictions;
     use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
 
-    use super::{AuditRecord, Capability, Decision, GovernanceFacade, ReasonCode};
+    use super::{AuditRecord, Capability, CapabilitySet, Decision, GovernanceFacade, ReasonCode};
     use crate::language::outcome::Observed;
 
     fn temporary(name: &str) -> PathBuf {
@@ -892,6 +1036,39 @@ mod tests {
     }
 
     #[test]
+    fn authority_requires_every_independent_capability_in_a_compound_set() {
+        let path = temporary("compound-capabilities");
+        fs::write(
+            &path,
+            br#"{"version":1,"allow_capabilities":["read","write"]}"#,
+        )
+        .unwrap();
+        let snapshot = GovernanceFacade::new(Some(path.clone()), None)
+            .snapshot(&RequestRestrictions::default());
+        assert!(
+            snapshot
+                .authorize_requirements(CapabilitySet::READ.union(CapabilitySet::WRITE))
+                .allowed
+        );
+        assert_eq!(
+            snapshot
+                .authorize_requirements(
+                    CapabilitySet::READ
+                        .union(CapabilitySet::WRITE)
+                        .union(CapabilitySet::ACTION),
+                )
+                .reason,
+            ReasonCode::CapabilityDenied
+        );
+        assert!(
+            snapshot
+                .authorize_requirements(CapabilitySet::EMPTY)
+                .allowed
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn maintained_policy_examples_match_the_version_one_decoder() {
         for (name, source, managed) in [
             (
@@ -990,7 +1167,7 @@ mod tests {
             "invocation_x",
             "workspace_x",
             "browser_fill_form",
-            Capability::Write,
+            CapabilitySet::READ.union(CapabilitySet::WRITE),
             "authority_x",
             Decision {
                 allowed: true,
@@ -1055,6 +1232,28 @@ mod tests {
                 "the record grew a {forbidden} field"
             );
         }
+    }
+
+    #[test]
+    fn new_audit_records_serialize_the_complete_set_without_a_highest_capability() {
+        let value = serde_json::to_value(sample_record()).unwrap();
+        assert_eq!(value["capabilities"], serde_json::json!(["read", "write"]));
+        assert!(value.get("capability").is_none());
+
+        let historical: AuditRecord = serde_json::from_value(serde_json::json!({
+            "timestamp_ms": 1,
+            "invocation": "invocation_old",
+            "workspace": "workspace_old",
+            "tool": "browser_read",
+            "capability": "read",
+            "authority": "authority_old",
+            "allowed": true,
+            "reason": "permitted",
+            "status": "succeeded",
+            "effect": "none"
+        }))
+        .expect("historical audit record remains readable");
+        assert_eq!(historical.requirements(), CapabilitySet::READ);
     }
 
     /// The record has exactly one URL-shaped field and it is a host.

@@ -322,7 +322,7 @@ mod tests {
             workspace: "workspace_x".into(),
             tool: "browser_read".into(),
             activity: PresentationActivity::Read,
-            capability: Capability::Read,
+            capabilities: Capability::Read.into(),
         });
         reactor.react(&DomainEvent::TargetIndicated {
             invocation: "invocation_x".into(),
@@ -399,7 +399,7 @@ mod tests {
             workspace: "workspace_x".into(),
             tool: "browser_tabs".into(),
             activity: PresentationActivity::Quiet,
-            capability: Capability::Action,
+            capabilities: Capability::Action.into(),
         });
         reactor.react(&DomainEvent::WorkBlocked {
             invocation: "invocation_x".into(),

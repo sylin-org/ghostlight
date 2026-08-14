@@ -153,7 +153,14 @@
 
   const glyphFor = entry =>
     GLYPHS[ACTIVITY_GLYPH[entry.activity] ?? TOOL_GLYPH[entry.tool] ?? "scan"];
-  const capabilityClass = entry => CAPABILITY_CLASS[entry.capability] ?? "cap-read";
+  const capabilityClass = entry => {
+    const facts = String(entry.capability ?? "").split(" + ");
+    // Consequence colour only. RAWX remains an independent set in authority and audit.
+    for (const capability of ["execute", "write", "action", "read"]) {
+      if (facts.includes(capability)) return CAPABILITY_CLASS[capability];
+    }
+    return "cap-read";
+  };
 
   /** What the audit can honestly say happened to the page, with no payload to draw on. */
   const EFFECT_STORY = {

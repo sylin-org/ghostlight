@@ -29,7 +29,8 @@ use crate::events::{DenialPresentation, DomainEvent};
 use ghostlight_bridge::service::IntakeChannel;
 
 use crate::governance::{
-    AuditRecord, AuditSink, AuthoritySnapshot, Capability, Decision, GovernanceFacade, ReasonCode,
+    AuditRecord, AuditSink, AuthoritySnapshot, Capability, CapabilitySet, Decision,
+    GovernanceFacade, ReasonCode,
 };
 use crate::language::{
     self,
@@ -130,10 +131,10 @@ impl ApplicationExecutor {
         let started = std::time::Instant::now();
         let gate = CompletionGate::default();
         let decoded = language::decode(tool, input);
-        let (operation, capability) = match decoded {
+        let (operation, requirements) = match decoded {
             Ok(operation) => {
-                let capability = operation_capability(&operation);
-                (operation, capability)
+                let requirements = language::capability_map::requirements(&operation);
+                (operation, requirements)
             }
             Err(error) => {
                 let snapshot = self
@@ -167,7 +168,7 @@ impl ApplicationExecutor {
                     Completion {
                         workspace,
                         tool,
-                        capability: Capability::Read,
+                        requirements: CapabilitySet::READ,
                         snapshot: &snapshot,
                         duration_ms: elapsed_ms(started),
                         channel: self.workspaces.channel(workspace).ok(),
@@ -210,7 +211,7 @@ impl ApplicationExecutor {
                 workspace: workspace.as_str().into(),
                 tool: tool.into(),
                 activity: operation_activity(&operation),
-                capability,
+                capabilities: requirements,
             });
             self.active_authority
                 .lock()
@@ -277,7 +278,7 @@ impl ApplicationExecutor {
             Completion {
                 workspace,
                 tool,
-                capability,
+                requirements,
                 snapshot: &snapshot,
                 duration_ms: elapsed_ms(started),
                 channel: self.workspaces.channel(workspace).ok(),
@@ -294,7 +295,7 @@ impl ApplicationExecutor {
         let Completion {
             workspace,
             tool,
-            capability,
+            requirements,
             snapshot,
             duration_ms,
             channel,
@@ -333,7 +334,7 @@ impl ApplicationExecutor {
             &terminal.result.invocation,
             workspace.as_str(),
             tool,
-            capability,
+            requirements,
             snapshot.id(),
             terminal.decision,
             &status,
@@ -490,7 +491,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Action, current_url(&selected));
+        let decision = self.authorize(context, CapabilitySet::EMPTY, current_url(&selected));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -541,7 +542,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         url: &str,
     ) -> Terminal {
-        let decision = self.authorize(context, Capability::Action, Some(url));
+        let decision = self.authorize(context, Capability::Read, Some(url));
         if !decision.allowed {
             return self.blocked_at(
                 context,
@@ -582,7 +583,7 @@ impl ApplicationExecutor {
             tab: controlled.handle.clone(),
             physical_id: controlled.physical_id,
         });
-        let landing = self.authorize_commits(context, Capability::Action, &tab, &commits);
+        let landing = self.authorize_commits(context, Capability::Read, &tab, &commits);
         if !landing.allowed {
             return match self.compensate_close(context, lease, &controlled) {
                 CloseCompensation::Closed => self.blocked_at(
@@ -632,7 +633,7 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         url: &str,
     ) -> Terminal {
-        let decision = self.authorize(context, Capability::Action, Some(url));
+        let decision = self.authorize(context, Capability::Read, Some(url));
         if !decision.allowed {
             return self.blocked_at(
                 context,
@@ -663,7 +664,7 @@ impl ApplicationExecutor {
                 committed_urls,
             }) => {
                 let landing =
-                    self.authorize_commits(context, Capability::Action, &tab, &committed_urls);
+                    self.authorize_commits(context, Capability::Read, &tab, &committed_urls);
                 if !landing.allowed {
                     let _ = lease.hold_tab(&selected.handle);
                     self.emit(DomainEvent::HoldEntered {
@@ -1415,7 +1416,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Action, current_url(&selected));
+        let decision = self.authorize(context, CapabilitySet::EMPTY, current_url(&selected));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1585,12 +1586,14 @@ impl ApplicationExecutor {
             }
             None => None,
         };
-        let capability = if submit.is_some() {
-            Capability::Execute
+        let requirements = if submit.is_some() {
+            CapabilitySet::READ
+                .union(CapabilitySet::WRITE)
+                .union(CapabilitySet::ACTION)
         } else {
-            Capability::Write
+            CapabilitySet::READ.union(CapabilitySet::WRITE)
         };
-        let decision = self.authorize(context, capability, current_url(&selected));
+        let decision = self.authorize(context, requirements, current_url(&selected));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1650,7 +1653,7 @@ impl ApplicationExecutor {
                 filled_count,
                 submitted,
                 committed_urls,
-            }) => self.action_success(context, lease, decision, capability, &selected, &tab, &committed_urls, Outcome::FormFilled { fields: filled_count, submitted, host: observed_host(&tab.url) }, json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted})),
+            }) => self.action_success(context, lease, decision, requirements, &selected, &tab, &committed_urls, Outcome::FormFilled { fields: filled_count, submitted, host: observed_host(&tab.url) }, json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted})),
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
@@ -1670,7 +1673,7 @@ impl ApplicationExecutor {
                 Err(error) => return self.workspace_failure(context, error),
             };
         let typed_role = target.role;
-        let decision = self.authorize(context, Capability::Write, current_url(&selected));
+        let decision = self.authorize(context, Capability::Action, current_url(&selected));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -2212,7 +2215,7 @@ impl ApplicationExecutor {
         let mut completed = 0_usize;
         let mut applied_any = false;
         let mut statuses = Vec::with_capacity(value.steps.len());
-        let mut last_decision = self.authorize(context, Capability::Read, current_url(&selected));
+        let mut last_decision = permitted();
         for step in &value.steps {
             self.emit(DomainEvent::WorkPhaseStarted {
                 invocation: context.invocation.into(),
@@ -2392,8 +2395,6 @@ impl ApplicationExecutor {
         };
         let capability = if value.action == "status" {
             Capability::Read
-        } else if value.action == "respond" {
-            Capability::Write
         } else {
             Capability::Action
         };
@@ -3003,14 +3004,14 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         decision: Decision,
-        landing_capability: Capability,
+        landing_requirements: impl Into<CapabilitySet>,
         selected: &SelectedTab,
         physical: &PhysicalTab,
         commits: &[String],
         outcome: Outcome,
         mut facts: Value,
     ) -> Terminal {
-        let landing = self.authorize_commits(context, landing_capability, physical, commits);
+        let landing = self.authorize_commits(context, landing_requirements, physical, commits);
         if !landing.allowed {
             let _ = lease.hold_tab(&selected.handle);
             self.emit(DomainEvent::HoldEntered {
@@ -3119,9 +3120,10 @@ impl ApplicationExecutor {
     fn authorize(
         &self,
         context: &InvocationContext<'_>,
-        capability: Capability,
+        requirements: impl Into<CapabilitySet>,
         url: Option<&str>,
     ) -> Decision {
+        let requirements = requirements.into();
         let runtime = self.governance.runtime_decision();
         let _ = self
             .browser
@@ -3130,18 +3132,19 @@ impl ApplicationExecutor {
             return runtime;
         }
         url.map_or_else(
-            || context.snapshot.authorize_capability(capability),
-            |url| context.snapshot.authorize_landing(capability, url),
+            || context.snapshot.authorize_requirements(requirements),
+            |url| context.snapshot.authorize_landing(requirements, url),
         )
     }
 
     fn authorize_commits(
         &self,
         context: &InvocationContext<'_>,
-        capability: Capability,
+        requirements: impl Into<CapabilitySet>,
         tab: &PhysicalTab,
         commits: &[String],
     ) -> Decision {
+        let requirements = requirements.into();
         let runtime = self.governance.runtime_decision();
         let _ = self
             .browser
@@ -3150,7 +3153,7 @@ impl ApplicationExecutor {
             return runtime;
         }
         for url in commits.iter().chain(std::iter::once(&tab.url)) {
-            let decision = context.snapshot.authorize_landing(capability, url);
+            let decision = context.snapshot.authorize_landing(requirements, url);
             if !decision.allowed {
                 return decision;
             }
@@ -3595,7 +3598,7 @@ fn denial_presentation(tool: &str, result: &InvocationResult) -> DenialPresentat
 struct Completion<'a> {
     workspace: &'a WorkspaceId,
     tool: &'a str,
-    capability: Capability,
+    requirements: CapabilitySet,
     snapshot: &'a AuthoritySnapshot,
     /// Measured span from decode to terminal outcome. For a navigation this is time to settle.
     duration_ms: u64,
@@ -3651,62 +3654,6 @@ impl ResolvedLocation {
     fn tab(&self) -> SelectedTab {
         match self {
             Self::Target { tab, .. } | Self::Point { tab, .. } => tab.clone(),
-        }
-    }
-}
-
-fn operation_capability(operation: &Operation) -> Capability {
-    match operation {
-        Operation::ListTabs(_)
-        | Operation::ReadPage(_)
-        | Operation::InspectPage(_)
-        | Operation::Find(_)
-        | Operation::TakeScreenshot(_)
-        | Operation::ScrollPage(_)
-        | Operation::SetZoom(_)
-        | Operation::Hover(_)
-        | Operation::Wait(_)
-        | Operation::Diagnose(_) => Capability::Read,
-        Operation::ActivateTab(_)
-        | Operation::OpenPage(_)
-        | Operation::NavigatePage(_)
-        | Operation::NavigateHistory(_)
-        | Operation::ReloadPage(_)
-        | Operation::CloseTab(_)
-        | Operation::Click(_)
-        | Operation::Drag(_)
-        | Operation::ResizeWindow(_)
-        | Operation::PressKey(_) => Capability::Action,
-        Operation::TypeText(_) | Operation::UploadFiles(_) => Capability::Write,
-        Operation::RunScript(_) => Capability::Execute,
-        Operation::FillForm(value) => {
-            if value.submit_target.is_some() {
-                Capability::Execute
-            } else {
-                Capability::Write
-            }
-        }
-        Operation::RunSequence(value) => value
-            .steps
-            .iter()
-            .map(step_capability)
-            .max()
-            .unwrap_or(Capability::Read),
-        Operation::HandleDialog(value) => {
-            if value.action == "status" {
-                Capability::Read
-            } else if value.action == "respond" {
-                Capability::Write
-            } else {
-                Capability::Action
-            }
-        }
-        Operation::Record(value) => {
-            if value.action == "save" && value.target.is_some() {
-                Capability::Write
-            } else {
-                Capability::Read
-            }
         }
     }
 }
@@ -3814,16 +3761,6 @@ fn step_activity(step: &SequenceStep) -> PresentationActivity {
         SequenceStep::Scroll { .. } => PresentationActivity::Scroll,
         SequenceStep::Hover { .. } => PresentationActivity::Hover,
         SequenceStep::Wait { .. } => PresentationActivity::Wait,
-    }
-}
-
-fn step_capability(step: &SequenceStep) -> Capability {
-    match step {
-        SequenceStep::Wait { .. } | SequenceStep::Scroll { .. } | SequenceStep::Hover { .. } => {
-            Capability::Read
-        }
-        SequenceStep::Fill { .. } | SequenceStep::TypeText { .. } => Capability::Write,
-        SequenceStep::Click { .. } | SequenceStep::PressKey { .. } => Capability::Action,
     }
 }
 

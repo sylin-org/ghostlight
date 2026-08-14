@@ -1,6 +1,6 @@
 //! Closed in-process domain events for meaningful completed state changes.
 
-use crate::governance::Capability;
+use crate::governance::CapabilitySet;
 use crate::workspace::TabHandle;
 use ghostlight_bridge::browser::{ClickShape, PresentationActivity};
 
@@ -24,7 +24,7 @@ pub enum DomainEvent {
         workspace: String,
         tool: String,
         activity: PresentationActivity,
-        capability: Capability,
+        capabilities: CapabilitySet,
     },
     /// A controlled tab was created.
     TabCreated {
