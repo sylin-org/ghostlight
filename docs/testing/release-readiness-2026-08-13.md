@@ -93,7 +93,7 @@ the dependency scan as warning-free.
 
 | Gate | State |
 | --- | --- |
-| GitHub workflow execution | NOT RUN. The recovery commits are local and have not been pushed. |
+| GitHub workflow execution | NOT OBSERVED for the combined Linux head in this record; inspect the triggered runs after the authorized `dev` push. |
 | Linux Debian candidate | NOT RUN. CachyOS source/user-candidate and portable proof does not substitute for it. |
 | macOS arm64/x64 candidates | NOT RUN in native macOS builders. |
 | Windows package install | NOT RUN. Building and inspecting NSIS does not prove its hooks or lifecycle. |
