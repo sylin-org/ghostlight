@@ -69,7 +69,7 @@ pub fn offer(
 fn state_root() -> io::Result<PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        return env::var_os("LOCALAPPDATA")
+        env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .or_else(|| {
                 env::var_os("USERPROFILE")
@@ -128,10 +128,10 @@ fn reserve_marker(path: &Path) -> io::Result<bool> {
 fn browser_command() -> (&'static str, Vec<&'static str>) {
     #[cfg(target_os = "windows")]
     {
-        return (
+        (
             "rundll32.exe",
             vec!["url.dll,FileProtocolHandler", EXTENSION_INSTALL_URL],
-        );
+        )
     }
     #[cfg(target_os = "linux")]
     {
