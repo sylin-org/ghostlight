@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 
-use super::{manifest, AuditRecord, CapabilitySet, GovernanceFacade};
+use super::{managed, manifest, AuditRecord, CapabilitySet, GovernanceFacade};
 use crate::language::{capability_map, RequestRestrictions};
 
 /// One local policy inspection command.
@@ -26,6 +26,8 @@ pub enum Command {
         /// Existing Ghostlight audit JSONL.
         audit: PathBuf,
     },
+    /// Create keys or signed organization policy bundles without browser work.
+    Author(managed::cli::Command),
 }
 
 /// Parse arguments after the policy command name.
@@ -37,8 +39,11 @@ pub fn parse(arguments: &[String]) -> Result<Command> {
             policy: policy.into(),
             audit: audit.into(),
         }),
+        [action, ..] if matches!(action.as_str(), "keygen" | "pubkey" | "sign" | "publish") => {
+            managed::cli::parse(arguments).map(Command::Author)
+        }
         _ => Err(anyhow!(
-            "usage: ghostlight policy <validate|explain> <policy.json>\n       ghostlight policy simulate <policy.json> <audit.jsonl>"
+            "usage: ghostlight policy <validate|explain> <policy.json>\n       ghostlight policy simulate <policy.json> <audit.jsonl>\n       ghostlight policy <keygen|pubkey|sign|publish> ..."
         )),
     }
 }
@@ -58,6 +63,7 @@ pub fn run(command: &Command, out: &mut impl Write) -> Result<()> {
         }
         Command::Explain(path) => explain(&load(path)?, out)?,
         Command::Simulate { policy, audit } => simulate(policy, audit, out)?,
+        Command::Author(command) => managed::cli::run(command, out)?,
     }
     Ok(())
 }

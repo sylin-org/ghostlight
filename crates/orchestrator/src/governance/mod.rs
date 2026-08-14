@@ -4,6 +4,7 @@
 //! Authority snapshots, final-boundary admission, runtime controls, and minimized audit intent.
 
 pub mod inspection;
+pub mod managed;
 pub mod manifest;
 
 use std::env;
@@ -369,6 +370,7 @@ impl Decision {
 #[derive(Clone, Debug)]
 pub struct AuthoritySnapshot {
     id: String,
+    managed_sequence: Option<u64>,
     layers: Vec<PolicyLayer>,
     request_capabilities: Option<CapabilitySet>,
     request_hosts: Option<Vec<String>>,
@@ -873,6 +875,7 @@ pub struct GovernanceFacade {
 #[derive(Debug)]
 struct PolicySources {
     managed: PolicySource,
+    managed_remote: Option<managed::ManagedAuthority>,
     user: PolicySource,
 }
 
@@ -880,13 +883,61 @@ impl PolicySources {
     fn new(local: Option<PathBuf>, managed: Option<PathBuf>) -> Self {
         Self {
             managed: PolicySource::new(managed, "managed"),
+            managed_remote: None,
             user: PolicySource::new(local, "user"),
         }
     }
 
+    fn production(local: Option<PathBuf>) -> Self {
+        Self {
+            managed: PolicySource::new(None, "managed"),
+            managed_remote: Some(managed::ManagedAuthority::production()),
+            user: PolicySource::new(local, "user"),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_managed_paths(paths: managed::ManagedPaths) -> Self {
+        Self {
+            managed: PolicySource::new(None, "managed"),
+            managed_remote: Some(managed::ManagedAuthority::from_paths(paths)),
+            user: PolicySource::new(None, "user"),
+        }
+    }
+
     fn refresh(&mut self) {
+        if let Some(remote) = &mut self.managed_remote {
+            remote.refresh();
+        }
         self.managed.refresh("managed");
         self.user.refresh("user");
+    }
+
+    fn managed_configured(&self) -> bool {
+        self.managed_remote
+            .as_ref()
+            .is_some_and(managed::ManagedAuthority::configured)
+            || self.managed.configured()
+    }
+
+    fn managed_valid(&self) -> bool {
+        self.managed_remote.as_ref().map_or(
+            self.managed.last_load_valid,
+            managed::ManagedAuthority::valid,
+        )
+    }
+
+    fn managed_manifest(&self) -> Option<&manifest::Manifest> {
+        self.managed_remote
+            .as_ref()
+            .and_then(managed::ManagedAuthority::manifest)
+            .or(self.managed.active.as_ref())
+    }
+
+    fn managed_sequence(&self) -> Option<u64> {
+        self.managed_remote
+            .as_ref()
+            .and_then(managed::ManagedAuthority::sequence)
     }
 }
 
@@ -971,8 +1022,8 @@ impl GovernanceFacade {
         GovernanceDiagnostics {
             local_policy_configured: policies.user.configured(),
             local_policy_valid: policies.user.last_load_valid,
-            managed_authority_configured: policies.managed.configured(),
-            managed_authority_valid: policies.managed.last_load_valid,
+            managed_authority_configured: policies.managed_configured(),
+            managed_authority_valid: policies.managed_valid(),
             runtime_control_file_configured: self.runtime_control.is_some(),
         }
     }
@@ -987,13 +1038,25 @@ impl GovernanceFacade {
         }
     }
 
+    #[cfg(test)]
+    fn with_managed_paths(paths: managed::ManagedPaths) -> Self {
+        Self {
+            policies: Arc::new(Mutex::new(PolicySources::with_managed_paths(paths))),
+            runtime_control: None,
+            controls: Arc::new(RuntimeControls::default()),
+        }
+    }
+
     /// Construct the facade from Ghostlight-specific environment variables.
     #[must_use]
     pub fn from_environment() -> Self {
-        Self::new(
-            env::var_os("GHOSTLIGHT_POLICY_FILE").map(PathBuf::from),
-            env::var_os("GHOSTLIGHT_MANAGED_AUTHORITY_FILE").map(PathBuf::from),
-        )
+        Self {
+            policies: Arc::new(Mutex::new(PolicySources::production(
+                env::var_os("GHOSTLIGHT_POLICY_FILE").map(PathBuf::from),
+            ))),
+            runtime_control: None,
+            controls: Arc::new(RuntimeControls::default()),
+        }
         .with_runtime_control_file(
             env::var_os("GHOSTLIGHT_RUNTIME_CONTROL_FILE").map(PathBuf::from),
         )
@@ -1039,15 +1102,12 @@ impl GovernanceFacade {
             .policies
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !policies.managed.has_authority() || !policies.user.has_authority() {
+        if !policies.managed_valid() || !policies.user.has_authority() {
             return Decision::deny(ReasonCode::InvalidAuthority);
         }
-        for policy in [
-            policies.managed.active.as_ref(),
-            policies.user.active.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
+        for policy in [policies.managed_manifest(), policies.user.active.as_ref()]
+            .into_iter()
+            .flatten()
         {
             if policy.boolean_setting(key) == Some(false) {
                 return Decision::deny(ReasonCode::ChannelDenied);
@@ -1065,17 +1125,18 @@ impl GovernanceFacade {
         let mut tab_close_source = None;
         let mut preserve_target_names = true;
         let mut sacred_hosts = Vec::new();
-        let (sources, mut valid) = {
+        let (sources, managed_sequence, mut valid) = {
             let policies = self
                 .policies
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             (
                 [
-                    (policies.managed.active.clone(), AuthorityTier::Managed),
+                    (policies.managed_manifest().cloned(), AuthorityTier::Managed),
                     (policies.user.active.clone(), AuthorityTier::User),
                 ],
-                policies.managed.has_authority() && policies.user.has_authority(),
+                policies.managed_sequence(),
+                policies.managed_valid() && policies.user.has_authority(),
             )
         };
 
@@ -1126,6 +1187,7 @@ impl GovernanceFacade {
 
         AuthoritySnapshot {
             id,
+            managed_sequence,
             layers,
             request_capabilities,
             request_hosts,
@@ -1272,6 +1334,9 @@ pub struct AuditRecord {
     pub capability: Option<Capability>,
     /// Opaque immutable authority version.
     pub authority: String,
+    /// Monotonic signed managed-policy publish sequence, when managed authority was active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_seq: Option<u64>,
     /// Whether final-boundary authority admitted the work.
     pub allowed: bool,
     /// Stable reason code.
@@ -1340,6 +1405,7 @@ impl AuditRecord {
             capabilities: capabilities.into(),
             capability: None,
             authority: authority.into(),
+            policy_seq: None,
             allowed: decision.allowed,
             reason: decision.reason,
             policy_observed: false,
@@ -1367,6 +1433,7 @@ impl AuditRecord {
     /// Attach content-free policy attribution from the immutable snapshot that made the decision.
     #[must_use]
     pub fn with_policy(mut self, snapshot: &AuthoritySnapshot, decision: Decision) -> Self {
+        self.policy_seq = snapshot.managed_sequence;
         self.policy_observed = decision.observed;
         self.policy_mode = decision.policy_mode().map(str::to_owned);
         self.policy_rule = decision.policy_rule().map(str::to_owned);
