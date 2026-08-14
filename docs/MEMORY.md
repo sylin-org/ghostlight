@@ -129,6 +129,10 @@ Every one of these cost something to learn.
   launchers, packages, identity, tests, and accumulated platform evidence unless the owner changes
   them explicitly. The npm launcher is a mandatory Ghostlight entry point, and 1.0 may not ship
   with a user-experience regression from 0.8.
+- **A Windows GUI-subsystem executable is not a normal PowerShell pipeline child.** Ghostlight keeps
+  its console-free desktop launch, but scripts that invoke the binary directly must use an explicit
+  waited process with redirected stdout and stderr. `$LASTEXITCODE` and `&` are not a reliable CLI
+  boundary for that executable shape.
 - **Probe the intended native window, not a process-level main-window guess.** Tray helpers,
   event-loop helpers, and console hosts can make `MainWindowHandle` look healthy after the actual
   Tauri workbench has died. Windows desktop acceptance identifies the exact `Ghostlight` / `Tauri

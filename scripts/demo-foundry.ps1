@@ -80,6 +80,69 @@ function Resolve-Ghostlight {
 $exe = Resolve-Ghostlight
 $shot = Join-Path ([System.IO.Path]::GetTempPath()) 'ghostlight-foundry-revision-b.jpg'
 
+function Invoke-GhostlightJson {
+    param(
+        [string] $Label,
+        [string] $Tool,
+        [hashtable] $Body = @{},
+        [string[]] $Extra = @()
+    )
+
+    # ghostlight.exe is a Windows GUI-subsystem application so ordinary desktop launches do not
+    # create a console. PowerShell does not synchronously capture that kind of executable through
+    # `&`; use an explicit process boundary so CLI calls still have deterministic output and status.
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $exe
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @(
+        'call',
+        $Tool,
+        ($Body | ConvertTo-Json -Compress -Depth 6),
+        '--json'
+    ) + $Extra) {
+        $null = $startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw "$Label could not start Ghostlight."
+        }
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $json = $stdout.GetAwaiter().GetResult()
+        $errorText = $stderr.GetAwaiter().GetResult()
+        $exitCode = $process.ExitCode
+    }
+    finally {
+        $process.Dispose()
+    }
+    if (-not [string]::IsNullOrEmpty($errorText)) {
+        [Console]::Error.Write($errorText)
+    }
+    if ([string]::IsNullOrWhiteSpace($json)) {
+        throw "$Label did not return a JSON result (exit $exitCode)."
+    }
+
+    try {
+        $result = $json | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "$Label returned invalid JSON (exit $exitCode): $($_.Exception.Message)"
+    }
+    foreach ($property in @('status', 'summary')) {
+        if ($null -eq $result.PSObject.Properties[$property]) {
+            throw "$Label returned JSON without '$property' (exit $exitCode)."
+        }
+    }
+    return $result
+}
+
 # Expect is the story's assertion: a beat that must be refused is as important as one that must
 # succeed, and a demo that cannot tell them apart proves nothing.
 function Step {
@@ -91,7 +154,7 @@ function Step {
         [string] $Expect = 'succeeded'
     )
 
-    $result = & $exe call $Tool ($Body | ConvertTo-Json -Compress -Depth 6) --json @Extra | ConvertFrom-Json
+    $result = Invoke-GhostlightJson -Label $Name -Tool $Tool -Body $Body -Extra $Extra
     Write-Host ('{0,-16} {1,-10} {2}' -f $Name, $result.status, $result.summary)
     if ($result.status -ne $Expect) {
         throw "$Name expected $Expect but was $($result.status): $($result.summary)"
@@ -109,7 +172,13 @@ function Target {
 
 function Found {
     param([string] $Tab, [string] $Text, [string] $Role)
-    $found = & $exe call browser_find (@{ tab = $Tab; text = $Text } | ConvertTo-Json -Compress) --json | ConvertFrom-Json
+    $found = Invoke-GhostlightJson -Label "find '$Text'" -Tool 'browser_find' -Body @{
+        tab = $Tab
+        text = $Text
+    }
+    if ($found.status -ne 'succeeded') {
+        throw "Finding '$Text' failed: $($found.summary)"
+    }
     $match = $found.facts.matches | Where-Object { $_.role -eq $Role } | Select-Object -First 1
     if (-not $match) { throw "The stage exposes no $Role matching '$Text'." }
     return $match.target

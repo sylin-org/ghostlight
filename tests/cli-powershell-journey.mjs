@@ -235,6 +235,36 @@ try {
     "steps from one caller must share a workspace, whatever process each ran in"
   );
 
+  const demoFailure = await new Promise((resolvePromise) => {
+    const child = spawn(
+      shell,
+      [
+        "-NoProfile", "-File", join(repository, "scripts", "demo-foundry.ps1"),
+        // Node treats Ghostlight's first `call` argument as a missing script, exits nonzero, and
+        // writes no JSON. That gives the demo a portable real-process transport failure.
+        "-Ghostlight", process.execPath,
+        "-Beat", "0"
+      ],
+      { env: environment, windowsHide: true }
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("close", (status) => resolvePromise({ status, stdout, stderr }));
+  });
+  const failureOutput = `${demoFailure.stdout ?? ""}\n${demoFailure.stderr ?? ""}`;
+  assert.notEqual(demoFailure.status, 0, "the demo must fail when Ghostlight returns no result");
+  assert.ok(
+    /open did not return a JSON result \(exit [1-9][0-9]*\)/.test(failureOutput),
+    `the demo hid its transport failure: ${failureOutput}`
+  );
+  assert.equal(
+    failureOutput.includes("The property 'status' cannot be found"),
+    false,
+    "the demo regressed to dereferencing an absent result"
+  );
+
   console.log("\npowershell journey ok: separate processes, one session, open/list/read/capture/close");
 } finally {
   for (const child of children.reverse()) if (!child.killed) child.kill();

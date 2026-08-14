@@ -50,6 +50,12 @@ or public-release evidence.
   uninstaller removed every package-owned file and its uninstall record. Only test-created runtime
   and empty audit files remained; both exact disposable directories were then deleted. No
   Ghostlight process or default runtime file remained.
+- The post-uninstall development checkout was restored on 2026-08-14 by rebuilding and deploying
+  all three release binaries under `target/release`, registering the ownership-checked native host
+  for Chrome, Edge, Brave, and Chromium, and starting the one local authority. The Foundry
+  PowerShell runner now waits explicitly for the console-free Windows executable and validates
+  stdout before reading result fields. Its real published-stage journey then completed every beat,
+  including the off-domain refusal, replay delivery, and recording erasure.
 
 ## Linux 1.0 development-host result
 
