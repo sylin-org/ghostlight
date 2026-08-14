@@ -75,6 +75,7 @@ fn home_directory() -> PathBuf {
         .unwrap_or_default()
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "macos")), test))]
 fn command_is_old_ghostlight_service(command: &str) -> bool {
     let command = command.trim();
     let (program, arguments) = if let Some(rest) = command.strip_prefix('"') {
