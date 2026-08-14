@@ -32,7 +32,7 @@ foreach ($relative in $tracked) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Tracked file is unreadable or missing: $relative"
     }
-    $item = Get-Item -LiteralPath $path
+    $item = Get-Item -LiteralPath $path -Force
     $isText = $textExtensions -contains $item.Extension.ToLowerInvariant() -or
         $textNames -contains $item.Name
     if (-not $isText) {
