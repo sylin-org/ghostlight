@@ -2,7 +2,7 @@
 
 Status: source gate passed; release gate not yet passed
 
-Implementation revision tested: `54802f89d4133c0ac42f8062376a84808003ed9e`.
+Windows implementation revision tested: `b292bb22766686f7a07d8ffb75194867e5e94c70`.
 
 Environment: Windows x86_64, Rust/Cargo 1.95.0, Node 24.7.0, PowerShell 7.6.0, and Tauri CLI
 2.11.0. Build outputs are local and gitignored. Nothing was tagged, pushed, signed, submitted, or
@@ -14,10 +14,10 @@ published.
 | --- | --- |
 | Formatting | `cargo fmt --all -- --check` passed. |
 | Rust lint | Workspace/all-target clippy passed with warnings denied. |
-| Rust tests | 187 passed: 151 orchestrator library, 2 launch mode, 30 bridge, and 4 MCP connector. |
-| Extension tests | 99 passed. |
-| npm launcher | 8 offline tests passed, including cache-tamper replacement and rejected unverified bytes. |
-| Claude Desktop MCPB | 5 launcher tests passed; two complete packages were byte-identical. |
+| Rust tests | 194 passed: 158 orchestrator library, 2 launch mode, 30 bridge, and 4 MCP connector. |
+| Extension tests | 100 passed. |
+| npm launcher | 10 offline tests passed, including cache-tamper replacement and rejected unverified bytes. |
+| Claude Desktop MCPB | 4 launcher tests passed. |
 | JavaScript syntax | All 41 tracked JavaScript and module files parsed. |
 | Isolated build | All four workspace packages built under `.target-release-audit`. |
 | Process topology | Service/relay reconnect, MCP catalog/call, unknown-effect, recording, and audit journey passed. |
@@ -34,16 +34,41 @@ published.
 | Extension artifact | Two builds with exact Apache and MIT texts were byte-identical: SHA-256 `47a7cb7b715d14de991266f3602ecf6f166fd967623c4e7980f58a2afc3c47c3`. |
 | Windows bundle build | Unsigned NSIS completed from one locked release build. |
 | Windows bundle contents | Exact three sibling executables and four source-matched legal files present; no staging names leaked. |
+| Windows package lifecycle | Disposable silent install, browser and MCP registration, doctor, idempotent reinstall, ownership-safe double uninstall, NSIS uninstall, and exact cleanup passed. |
+| Windows desktop lifecycle | Release showed no console; startup minimized one exact Tauri workbench; activation, Close containment, and recreation passed with one authority. |
 | Release native-host check | Read-only check named the exact sibling connector and four missing browser registrations. |
 | Development swap | Exact-path plan found only the repository service; isolated build/lock/copy/cleanup passed without touching that service. |
 | Candidate assembler | Four real component SBOMs plus synthetic Windows and Linux input passed exact 17-artifact assembly and verification. |
 | Distribution entry points | npm, Windows MCPB, two portable archives, one-line installers, and Scoop/WinGet metadata were constructed and checked from candidate hashes. |
 | Publication planning | Chrome, GitHub, npm, and MCP plans made no mutation and named the missing or mismatched prerequisites. |
 
-The local unsigned NSIS output was
-`target/x86_64-pc-windows-msvc/release/bundle/nsis/Ghostlight_1.0.0_x64-setup.exe`, 3,240,136
-bytes, SHA-256 `3d694ea78ee0dcf9589654b48223a32ba60d619dda544c69746d432178f1352c`.
+The rebuilt local unsigned NSIS output was
+`.target-windows-package/x86_64-pc-windows-msvc/release/bundle/nsis/Ghostlight_1.0.0_x64-setup.exe`,
+3,292,239 bytes, SHA-256
+`100093627d781b1a4e0c8cc481d974e63fbce3939ad2383384c74f8915acb4d9`.
 It is build evidence, not a release artifact.
+
+## Native Windows development-host record
+
+The Windows x86_64 lane used a real unsigned NSIS install under an exact disposable directory on
+the development host. It did not simulate user files or registry state.
+
+| Gate | Result |
+| --- | --- |
+| First-run handoff | First usable npm install opened the service-first walkthrough once; repeat, dry-run, `--no-open`, and CI paths stayed non-interactive. |
+| Browser registration | Chrome, Edge, Brave, and Chromium all pointed at the installed sibling browser connector. |
+| MCP registration | Codex, Claude Code, Claude Desktop, Cursor, Visual Studio Code, Windsurf, Zed, OpenCode, and Crush pointed directly at the installed native MCP connector. |
+| Installer idempotency | A second all-client install changed zero bytes across all nine config files. |
+| Runtime chain | Doctor found three siblings, four current browsers, nine installed clients, and a reachable service. A real stdio initialize selected MCP revision `2025-11-25`. |
+| Desktop startup | Exact HWND inspection found one visible minimized `Ghostlight` / `Tauri Window`, no visible console, and one authority. |
+| Desktop recovery | Second launch restored and focused the existing view; native Close destroyed only the view; a later launch recreated it. |
+| Ownership-safe removal | First uninstall removed the four browser keys and nine owned MCP entries. The second changed zero config bytes and no installed connector reference remained. |
+| Native uninstaller | NSIS removed all package-owned files and its uninstall record. Test-created runtime and empty audit files were removed only after exact-path verification. |
+
+No Ghostlight process, browser registration, disposable install directory, or default runtime file
+remained. This passes the development-host package lane. It does not claim a signed clean-machine
+install, public-0.8 package upgrade, login/reboot behavior, notification delivery, or matching
+store-adapter browser acceptance.
 
 ## Native Linux development-host record
 
@@ -95,14 +120,13 @@ the dependency scan as warning-free.
 | --- | --- |
 | GitHub workflow execution | NOT OBSERVED for the combined Linux head in this record; inspect the triggered runs after the authorized `dev` push. |
 | Linux Debian candidate | NOT RUN. CachyOS source/user-candidate and portable proof does not substitute for it. |
-| Windows package install | NOT RUN. Building and inspecting NSIS does not prove its hooks or lifecycle. |
 | Package signing/attestation | Platform signing NOT RUN. Workflow provenance is implemented but has not run on GitHub. |
 | SBOM and immutable release checksums | Assembly logic passed locally; a real cross-platform 1.0 publication candidate is NOT BUILT. |
 | Clean install | NOT RUN on Windows or Linux ordinary-user machines. |
 | 0.8 -> 1.0 upgrade | Development user-path proof passed on CachyOS; packaged Ubuntu/Debian upgrade remains NOT RUN. |
 | Login/reboot demand-start | NOT RUN on any packaged platform. |
-| Uninstall ownership | Development user-path ownership proof passed on CachyOS; native package removal remains NOT RUN. |
-| Native tray/window/notification | NOT RUN interactively. |
+| Uninstall ownership | Windows unsigned development-host NSIS removal and the CachyOS user path passed; signed clean-machine package removal remains NOT RUN. |
+| Native tray/window/notification | Windows native window lifecycle passed by exact HWND inspection. Tray interaction and notification delivery remain NOT RUN interactively. |
 | Store adapter | NOT SUBMITTED and no matching 1.0 store build exists publicly. |
 | Visible browser acceptance | PARTIAL in ordinary-profile Chromium with the unpacked source adapter; package plus matching store adapter remains NOT RUN. |
 | Public MCP harness matrix | NOT RUN in three public harnesses against the signed candidate. |
@@ -119,7 +143,8 @@ upgrade row and retain only content-free evidence.
 
 ## Release decision
 
-Do not publish 1.0 from this state. The source and local Windows build are credible inputs to a
-candidate, but they are not a signed, installed, upgraded, uninstalled, or visibly exercised
-cross-platform product. Run the manual build-only workflow after the owner chooses to push, then
-perform the native and visible gates one platform at a time. Keep publication channels independent.
+Do not publish 1.0 from this state. The source and unsigned Windows development-host install are
+credible inputs to a candidate, but they are not a signed clean-machine, upgraded, login/reboot,
+or visibly exercised cross-platform product. Run the manual build-only workflow after the owner
+chooses to push, then perform the remaining native and visible gates one platform at a time. Keep
+publication channels independent.

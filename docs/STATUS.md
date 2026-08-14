@@ -13,6 +13,41 @@ last fetch.
 The repository carries exactly two branches, `main` and `dev`, as of 2026-08-13. The topology is
 linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 
+## Windows 1.0 development-host and package result
+
+The Windows lane passed through implementation `b292bb22` on 2026-08-14. This is an unsigned
+development-host package result, not clean-machine, signing, login/reboot, matching-store-adapter,
+or public-release evidence.
+
+- `b979a8af` fixed the Windows first-run handoff state-root return found by the native compiler.
+  `b292bb22` then fixed two packaged desktop regressions: release launches no longer expose a
+  console, and the disposable workbench is created when Tauri's native event loop is ready instead
+  of being lost just after startup.
+- Formatting, warnings-denied workspace Clippy, all 194 Rust tests, all 100 extension tests, all 10
+  npm launcher tests, all 4 MCPB tests, and the process, CLI, PowerShell, and workbench-surface
+  journeys passed. The locked Windows build retained the Linux-only Tao patch from ADR-0120.
+- The mandatory npm process model preserved ordered CLI output and exit status from the optimized
+  Windows application binary. A real installed MCP connector negotiated revision `2025-11-25`
+  and returned Ghostlight's catalog metadata.
+- The one-time npm handoff passed its first usable install, repeat-install, dry-run, `--no-open`,
+  and CI-suppression cases. The same disposable install round registered Chrome, Edge, Brave, and
+  Chromium plus Codex, Claude Code, Claude Desktop, Cursor, Visual Studio Code, Windsurf, Zed,
+  OpenCode, and Crush with direct native connector paths. A second install changed zero bytes in
+  the nine client configurations.
+- The locked unsigned NSIS candidate is 3,292,239 bytes with SHA-256
+  `100093627d781b1a4e0c8cc481d974e63fbce3939ad2383384c74f8915acb4d9`. Payload inspection found
+  the exact three executables and four legal files. A silent install into an exact disposable
+  directory ran its browser-registration hook, and doctor reported the full local chain current.
+- Native HWND inspection found one visible minimized `Ghostlight` Tauri window and no visible
+  console. A second launch restored and focused the same workbench, Close destroyed only that
+  window while the authority remained alive, and a third launch rebuilt it. Exactly one authority
+  process remained throughout.
+- A first uninstall removed all four browser registrations and all nine owned MCP entries. A
+  second uninstall changed zero config bytes and left no installed connector reference. The NSIS
+  uninstaller removed every package-owned file and its uninstall record. Only test-created runtime
+  and empty audit files remained; both exact disposable directories were then deleted. No
+  Ghostlight process or default runtime file remained.
+
 ## Linux 1.0 development-host result
 
 The native CachyOS lane was extended through the current 1.0 source candidate on 2026-08-14. This
@@ -105,9 +140,9 @@ reboot, or public-release pass.
   (ADR-0115). The orchestrator now checks, installs, updates, and safely removes Chrome, Edge,
   Brave, and Chromium registrations; packages carry both connector sidecars; and narrow migration
   retires recognized pre-1.0 Windows and Linux supervisor artifacts. The unsigned Windows NSIS
-  candidate built locally and its payload inspection found exactly the three required
-  executables. Linux package builds plus all clean-install, upgrade, reboot, and uninstall
-  journeys remain required native-host evidence.
+  candidate passed payload, install, doctor, idempotency, workbench-lifecycle, and uninstall checks
+  on this development host. Clean-machine, signed, login/reboot, 0.8 package-upgrade, and Linux
+  native-package journeys remain required evidence.
 - The 0.8 test recovery is now dispositioned rather than merely counted.
   `docs/0.8/RECOVERY-MATRIX.md` maps all 1,388 entries through twelve current behavior areas;
   `docs/0.8/test-recovery.json` gives each of the 34 Lightbox process scenarios an explicit
@@ -295,7 +330,7 @@ reboot, or public-release pass.
 
 ## Verified in this workspace
 
-Re-run on 2026-08-13 against the current tree:
+Re-run through 2026-08-14 against the current tree:
 
 The complete dated evidence and explicit NOT RUN release gates are in
 [`testing/release-readiness-2026-08-13.md`](testing/release-readiness-2026-08-13.md). The result is a
@@ -303,7 +338,7 @@ source-gate pass, not release approval.
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 195 Rust tests -- 159 in the orchestrator library, 2 in its launch-mode
+- `cargo test --workspace`: 194 Rust tests -- 158 in the orchestrator library, 2 in its launch-mode
   binary, 30 in the shared bridge, and 4 in the MCP connector.
 - `npm test --prefix extension`: 100 extension tests.
 - `npm test --prefix packaging/npm`: 10 launcher tests. The MCPB launcher has 4 Node tests.
@@ -335,9 +370,9 @@ source-gate pass, not release approval.
   candidate.
 - The deterministic 1.0 extension ZIP has SHA-256
   `47a7cb7b715d14de991266f3602ecf6f166fd967623c4e7980f58a2afc3c47c3` and contains the exact
-  Apache and MIT texts. The final local unsigned Windows NSIS candidate contains the exact three
+  Apache and MIT texts. The rebuilt local unsigned Windows NSIS candidate contains the exact three
   sibling executables and all four exact legal files; its SHA-256 is
-  `3d694ea78ee0dcf9589654b48223a32ba60d619dda544c69746d432178f1352c`. Neither artifact is
+  `100093627d781b1a4e0c8cc481d974e63fbce3939ad2383384c74f8915acb4d9`. Neither artifact is
   published or release-approved.
 - `cargo audit` exited zero but reported 17 residual transitive warnings in the Linux Tauri/GTK3
   and Tauri URL-pattern graphs, including the `glib` iterator unsoundness advisory. The dated audit
@@ -531,8 +566,9 @@ source-gate pass, not release approval.
 - Push the local 1.0 recovery commits only when the owner approves, then run the manual candidate
   workflow on GitHub. Its two native builders and provenance step have not executed for this
   source revision.
-- Produce and sign platform bundles, install the native-messaging registration, and verify upgrade
-  and uninstall from a clean machine on Windows and Linux.
+- Produce and sign platform bundles, then verify clean install, public-0.8 upgrade, and uninstall
+  on clean Windows and Linux machines. The unsigned Windows development-host package lifecycle
+  passes but does not replace those release-environment rows.
 - Complete interactive native-window, tray, and notification smoke tests on each platform. The
   automated environment verifies native build and failure containment but does not expose its GUI
   desktop to the test runner.

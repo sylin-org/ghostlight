@@ -125,6 +125,10 @@ Every one of these cost something to learn.
   launchers, packages, identity, tests, and accumulated platform evidence unless the owner changes
   them explicitly. The npm launcher is a mandatory Ghostlight entry point, and 1.0 may not ship
   with a user-experience regression from 0.8.
+- **Probe the intended native window, not a process-level main-window guess.** Tray helpers,
+  event-loop helpers, and console hosts can make `MainWindowHandle` look healthy after the actual
+  Tauri workbench has died. Windows desktop acceptance identifies the exact `Ghostlight` / `Tauri
+  Window` HWND and checks its visible, minimized, Close, activation, and recreation states.
 - **A historical guard should protect relationships, not freeze active files.** Detect when an old
   path disappears, returns, or changes from byte-identical to evolved. Once an active path is
   explicitly `retained-evolved`, pinning each new blob adds ledger churn without preserving another
