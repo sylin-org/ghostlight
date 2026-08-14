@@ -253,16 +253,20 @@ pass.
   so with the default-on preserve-tabs setting those tabs are released but stay visible. Liveness is observed rather than guessed at, sweeping on admission so the cost follows
   use. Work in flight is never reaped, and a connection that sends no marker keeps the previous
   connection-bound behavior, which is what the MCP edge does.
-- [`scripts/demo-brief.ps1`](../scripts/demo-brief.ps1) drives the ADR-0069-era launch-brief demo
-  story entirely through the command line: open, scan, inventory controls once, three separately
-  paced field writes, two checkbox clicks, submit, and a wait for the exact completion sentence.
+- [`scripts/demo-brief.ps1`](../scripts/demo-brief.ps1) and
+  [`scripts/demo-brief.sh`](../scripts/demo-brief.sh) drive the ADR-0069-era launch-brief demo story
+  entirely through the command line: open, scan, inventory controls once, three separately paced
+  field writes, two checkbox clicks, submit, and a wait for the exact completion sentence.
   Verified live against the published Sylin stage: ten steps, one session, read/write/action
   capabilities classified per tool, and no typed value in the audit. `docs/design/demo-brief.md`
   specified this as a Rust subcommand; it does not need to be one, and the note now says so.
-- [`scripts/browser-journey.ps1`](../scripts/browser-journey.ps1) is a complete PowerShell journey
-  over the CLI: open, list, read, capture to a file, close, with a non-zero exit if any step fails.
-  It holds one `--stdin` session open and writes a line at a time, so each step uses the handle the
-  previous one returned.
+- [`scripts/browser-journey.ps1`](../scripts/browser-journey.ps1) and
+  [`scripts/browser-journey.sh`](../scripts/browser-journey.sh) are complete PowerShell and POSIX
+  shell journeys over the CLI: open, list, read, capture to a file, close, with Ghostlight's own
+  exit code preserved. Each call remains a direct child of its long-lived shell, so each step uses
+  the handle the previous one returned. [`scripts/demo-foundry.sh`](../scripts/demo-foundry.sh)
+  gives the full Card Foundry story the same Linux-native entry point. All three shell scripts are
+  syntax-gated and were verified against visible Chromium.
 - Monitor rows carry the intake between the tool and the description, resolved from the record when
   settled and from the still-connected session while running. A guard derives the row's grid track
   count and each width's hidden cells from the stylesheet and compares them to the cells the surface

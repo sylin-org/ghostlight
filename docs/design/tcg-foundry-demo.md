@@ -1,9 +1,10 @@
 # Sylin Card Foundry demo
 
 Status: Implemented demo design. Rebuilt for 1.0 as
-[`scripts/demo-foundry.ps1`](../../scripts/demo-foundry.ps1) rather than the `ghostlight demo`
+[`scripts/demo-foundry.ps1`](../../scripts/demo-foundry.ps1) and
+[`scripts/demo-foundry.sh`](../../scripts/demo-foundry.sh) rather than the `ghostlight demo`
 subcommand it shipped as on 0.8; the command line reaches the same catalog through the same
-governance. All seven beats run, verified live on 2026-08-12.
+governance. All seven beats run, with both scripts verified live.
 
 One bound changed underneath the story, and then changed again. The 0.8 rehearsals below exported
 100 frames as 21.5 MB and 23.1 MB GIFs, which 1.0 cannot carry: recordings retain at most 5 MB of

@@ -108,6 +108,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 npm test --prefix extension
+sh -n scripts/*.sh
 cargo build --workspace --target-dir .target-ghostlight-1.0
 node tests/process-journey.mjs
 node tests/workbench-surface.mjs

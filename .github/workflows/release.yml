@@ -38,7 +38,7 @@ jobs:
       - run: npm test --prefix extension
       - run: npm test --prefix packaging/npm
       - run: node --test packaging/mcpb/test/launcher.test.js
-      - run: sh -n scripts/get.sh
+      - run: sh -n scripts/*.sh
       - run: node tests/process-journey.mjs
       - run: node tests/cli-journey.mjs
       - run: node tests/cli-powershell-journey.mjs

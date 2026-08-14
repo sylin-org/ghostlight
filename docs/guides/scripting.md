@@ -119,24 +119,39 @@ invoked or audited. The full rules, including how layers compose, are in
 
 ## Worked examples
 
-[`scripts/browser-journey.ps1`](../../scripts/browser-journey.ps1) is a complete PowerShell journey:
-open a page, list tabs, read it, capture it to a file, and close the tab. Every step is a plain
-`ghostlight call` in its own process, and they share a session because they share a shell, which is
-how the last step closes exactly the tab the first one opened.
+[`scripts/browser-journey.ps1`](../../scripts/browser-journey.ps1) and
+[`scripts/browser-journey.sh`](../../scripts/browser-journey.sh) are the same complete journey for
+PowerShell and POSIX shell: open a page, list tabs, read it, capture it to a file, and close the
+tab. Every step is a plain `ghostlight call` in its own process, and they share a session because
+they share a shell, which is how the last step closes exactly the tab the first one opened. The
+shell scripts require `jq` for typo-safe JSON construction and result decoding.
 
 It exits with Ghostlight's own code rather than inventing one, so a refusal stays distinguishable
 from a breakage. On a default install the close step is refused by the browser's preserve-tabs
 setting and the script exits 2, which is governance working rather than the journey failing.
 
-[`scripts/demo-brief.ps1`](../../scripts/demo-brief.ps1) is the longer one: read a page, inventory
+[`scripts/demo-brief.ps1`](../../scripts/demo-brief.ps1) and
+[`scripts/demo-brief.sh`](../../scripts/demo-brief.sh) are the longer story: read a page, inventory
 its controls once, fill three fields as separately paced writes, tick two boxes, submit, and wait
-for an exact completion sentence. It is the story from
+for an exact completion sentence. They implement
 [`design/demo-brief.md`](../design/demo-brief.md), which shipped as a Rust subcommand on the 0.8
 line and no longer needs to stay in the binary. Pacing is parameters, so a recording operator
 retimes it by editing a script:
 
 ```powershell
 ./scripts/demo-brief.ps1 -Beat 0.4 -CompletionHold 5
+```
+
+```sh
+./scripts/demo-brief.sh --beat 0.4 --completion-hold 5
+```
+
+The seven-beat Card Foundry story likewise has
+[`scripts/demo-foundry.ps1`](../../scripts/demo-foundry.ps1) and
+[`scripts/demo-foundry.sh`](../../scripts/demo-foundry.sh):
+
+```sh
+./scripts/demo-foundry.sh --beat 0.6
 ```
 
 Ten steps, three capability classes, one session, and no typed value anywhere in the audit.

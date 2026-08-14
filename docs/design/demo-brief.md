@@ -4,9 +4,10 @@
 > `ghostlight demo-brief` as a Rust subcommand with pacing flags. That subcommand shipped on the 0.8
 > line, then left the tree with the old internals during the 1.0 clean-room rebuild. It does not need
 > to return: the command line reaches the same catalog through the same governance, so the story
-> lives in [`scripts/demo-brief.ps1`](../../scripts/demo-brief.ps1). Whoever records the capture can
-> retime it without rebuilding a binary. The story, values, pacing defaults, and reliability
-> boundary below are what that script implements. Its tool names are the 0.8 catalog; the script
+> lives in [`scripts/demo-brief.ps1`](../../scripts/demo-brief.ps1) and
+> [`scripts/demo-brief.sh`](../../scripts/demo-brief.sh). Whoever records the capture can retime it
+> without rebuilding a binary. The story, values, pacing defaults, and reliability boundary below
+> are what those scripts implement. The note's tool names are the 0.8 catalog; the scripts
 > uses the 1.0 equivalents (`browser_navigate`, `browser_read`, `browser_inspect`,
 > `browser_type_text`, `browser_click`, `browser_wait`).
 
