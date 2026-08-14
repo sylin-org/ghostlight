@@ -29,7 +29,13 @@ const CHANGE_EVENT: &str = "ghostlight://change";
 
 struct DesktopState {
     workbench: WorkbenchFacade,
-    window_lifecycle: Mutex<()>,
+    window_lifecycle: Mutex<WindowLifecycle>,
+}
+
+#[derive(Default)]
+struct WindowLifecycle {
+    #[cfg(target_os = "linux")]
+    replacement_pending: bool,
 }
 
 struct NativePresentation {
@@ -102,7 +108,7 @@ pub fn run() -> Result<()> {
         .plugin(tauri_plugin_opener::init())
         .manage(DesktopState {
             workbench,
-            window_lifecycle: Mutex::new(()),
+            window_lifecycle: Mutex::new(WindowLifecycle::default()),
         })
         .invoke_handler(tauri::generate_handler![
             workbench_snapshot,
@@ -114,9 +120,11 @@ pub fn run() -> Result<()> {
             open_destination,
             quit_ghostlight
         ])
-        .on_window_event(|_, event| {
+        .on_window_event(|window, event| {
             if let WindowEvent::Destroyed = event {
                 eprintln!("Ghostlight workbench window ended; the tray can create a replacement");
+                #[cfg(target_os = "linux")]
+                continue_linux_replacement(window.app_handle());
             }
         })
         .setup(move |app| {
@@ -224,6 +232,43 @@ fn apply_tray_intent(app: &AppHandle, intent: WorkbenchRuntimeIntent) {
 }
 
 fn show_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
+    #[cfg(target_os = "linux")]
+    {
+        show_linux_workbench(app)
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        show_windows_workbench(app)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn show_linux_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
+    let state = app.state::<DesktopState>();
+    let mut lifecycle = state
+        .window_lifecycle
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if lifecycle.replacement_pending {
+        return Ok(());
+    }
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        // xdg-shell deliberately gives a client neither its minimized state nor a request to
+        // undo minimization. Rebuild the disposable view so Open has one deterministic meaning.
+        lifecycle.replacement_pending = true;
+        if let Err(error) = window.destroy() {
+            lifecycle.replacement_pending = false;
+            return Err(WorkbenchPresentationError::Native(error.to_string()));
+        }
+        return Ok(());
+    }
+    let window = build_workbench(app)?;
+    show_window(&window)
+}
+
+#[cfg(target_os = "windows")]
+fn show_windows_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
     let state = app.state::<DesktopState>();
     let _lifecycle = state
         .window_lifecycle
@@ -234,6 +279,33 @@ fn show_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
         None => build_workbench(app)?,
     };
     show_window(&window)
+}
+
+#[cfg(target_os = "linux")]
+fn continue_linux_replacement(app: &AppHandle) {
+    let state = app.state::<DesktopState>();
+    let replacement_pending = state
+        .window_lifecycle
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .replacement_pending;
+    if !replacement_pending {
+        return;
+    }
+
+    let app = app.clone();
+    glib::idle_add_local_once(move || {
+        let result = build_workbench(&app).and_then(|window| show_window(&window));
+        let state = app.state::<DesktopState>();
+        state
+            .window_lifecycle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .replacement_pending = false;
+        if let Err(error) = result {
+            eprintln!("Ghostlight could not replace its Linux workbench: {error}");
+        }
+    });
 }
 
 fn build_workbench(app: &AppHandle) -> Result<WebviewWindow, WorkbenchPresentationError> {

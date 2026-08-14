@@ -19,15 +19,22 @@ The native CachyOS lane was rerun through implementation revision `61526364` on 
 is development-host evidence, not a Debian package, signature, store-adapter, reboot, or release
 pass.
 
-- Rust 1.95.0 formatting, warnings-denied clippy, isolated build, all 190 workspace tests, all 99
+- Rust 1.95.0 formatting, warnings-denied clippy, isolated build, all 191 workspace tests, all 99
   extension tests, all 10 npm tests, all 5 MCPB tests, 41 JavaScript syntax checks, both process
-  journeys, the workbench surface journey, `cargo deny`, and `cargo audit` passed. Audit still
-  reports the 17 allowed GTK3/Tauri-chain warnings recorded in the dated readiness audit.
+  journeys, the workbench surface journey, `cargo deny` bans/licenses/sources, and `cargo audit`
+  passed. Audit still reports the 17 allowed GTK3/Tauri-chain warnings recorded in the dated
+  readiness audit.
 - A three-sibling optimized user candidate is active at
   `~/.ghostlight/bin/v1.0.0-dev-6152636`. Its orchestrator, MCP connector, and browser connector
-  SHA-256 values are respectively `4e846c6bc29c609b53815bf75475f5ca89e55aff6cdfd83f4578aefc09b48333`,
+  SHA-256 values are respectively `97131236cdbb0be8367ce152182af8b8eaba8033f34c8d407a948ac5e20f58b3`,
   `73738e5d71ce6f20ad211c9b10082a5725ab32d05fe2fb9f447913c32662337d`, and
   `1631aed13e00aa0c22a8af8cdde259bcc56c1210dc88a4291441c8025c55cb50`.
+- The installed workbench uses Tao's exact merged Wayland decoration fix. KDE reported a separate
+  28-pixel server-side titlebar with closeable, minimizable, maximizable, and resizable state; the
+  owner confirmed the controls accept pointer input. Native minimize/maximize/restore/close all
+  landed while the authority stayed alive. The exact `Open Ghostlight` tray menu item rebuilt one
+  active 1180x760 view after minimize and after close, and two concurrent Open events coalesced to
+  one replacement without a duplicate label.
 - A fresh offline consumer installed the packed npm launcher and proved bare MCP initialization,
   its 22-tool catalog, one safe browser call, native CLI routing, valid-cache reuse, tamper
   replacement, and refusal to execute incomplete or unverified bytes. No npm registry was
@@ -204,15 +211,17 @@ pass.
 - The orchestrator holds an operating-system lifetime lease before publishing runtime discovery or
   initializing Tauri. Concurrent launch attempts therefore converge on one authority and one tray.
 - There is one normal desktop launch. It always creates the tray and backgrounds its workbench:
-  minimized on Windows and hidden on Linux. A second direct launch restores and focuses the
-  existing authenticated workbench. `--headless` remains the explicit presentation-free mode.
-  Linux reveal queues mapping and deiconification at normal GLib priority, then requests focus at
-  idle priority after Tauri's focus guard can observe the landed window state.
+  minimized on Windows and hidden on Linux. A second direct launch opens and focuses the running
+  authority's authenticated workbench. `--headless` remains the explicit presentation-free mode.
+  Windows restores its existing view. Linux reconstructs its disposable view because Wayland
+  cannot report or unset minimization.
 - The tray and authority outlive their disposable workbench. Native close destroys the window,
-  native minimize remains compositor-owned, and Open focuses the existing window or constructs a
-  replacement from the canonical configuration. Linux observes abnormal WebKit renderer loss,
-  discards only that exact window after the callback, and recreates on the next explicit Open. The
-  proprietary NVIDIA renderer policy is selected before WebKit starts and preserves user override.
+  native minimize remains compositor-owned, and Open uses one serialized lifecycle seam. Linux
+  coalesces Open requests, destroys any existing view, and reconstructs only after Tauri reports
+  that exact window destroyed. Windows focuses or restores its existing view and constructs one
+  when absent. Linux observes abnormal WebKit renderer loss, discards only that exact window after
+  the callback, and recreates on the next explicit Open. The proprietary NVIDIA renderer policy is
+  selected before WebKit starts and preserves user override.
 - `ghostlight call` is a second intake for scripts and programs (ADR-0105). It invokes one tool, or
   a batch of them over one session with `--stdin`, prints the outcome sentence or `--json`, and maps
   the terminal status to distinct exit codes where an uncertain effect is never zero. It demand-

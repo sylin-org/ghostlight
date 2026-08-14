@@ -127,6 +127,7 @@ history live here.
 | [0117](0117-effective-harness-config-resolution.md) | Harness configuration resolves from the effective Windows or Linux environment, including `CODEX_HOME`, while exact pre-1.0 agent relays migrate without weakening foreign-entry protection | Accepted (amends [0015](0015-idempotent-merge-installer.md), [0067](0067-codex-toml-installer.md), and [0071](0071-additional-installer-targets.md); builds on [0116](0116-windows-and-linux-platform-scope.md)) |
 | [0118](0118-recoverable-linux-workbench-startup.md) | Linux starts its workbench hidden and restores it through ordered GLib presentation; Windows retains minimized startup | Accepted (amends [0112](0112-one-minimized-desktop-startup.md) Decision 1; builds on [0116](0116-windows-and-linux-platform-scope.md)) |
 | [0119](0119-durable-desktop-authority-disposable-workbench.md) | The desktop authority outlives disposable workbench windows; native close destroys, minimize remains native, Open creates or focuses, and Linux contains renderer loss | Accepted (supersedes [0102](0102-integrated-desktop-workbench.md) Decision 1 close-to-hide behavior; amends [0112](0112-one-minimized-desktop-startup.md) Decision 3; builds on [0118](0118-recoverable-linux-workbench-startup.md)) |
+| [0120](0120-upstream-wayland-window-decorations.md) | Use Tao's upstream Wayland decorations and reconstruct the Linux workbench on Open because xdg-shell cannot report or unset minimization | Accepted (amends [0119](0119-durable-desktop-authority-disposable-workbench.md) Decision 2 for Linux) |
 
 ## Conventions
 

@@ -64,8 +64,9 @@ Internal browser commands are combined when a person experiences them as one job
   separate startup ritual. Launching an MCP client or Chromium demand-starts the local service
   when it is absent.
 - Every normal Ghostlight startup creates the tray and begins with the workbench backgrounded:
-  minimized on Windows and hidden on Linux. A second direct launch or a tray click restores and
-  focuses the workbench owned by the running authority.
+  minimized on Windows and hidden on Linux. A second direct launch or a tray click opens and
+  focuses the workbench owned by the running authority. Windows restores its existing view;
+  Linux reconstructs its disposable view because Wayland cannot report or unset minimization.
 - Three destinations and one global search reach every workbench surface and user-visible record.
   The monitor carries the current action in full and the recent ones beneath it, so a glance is
   enough.
@@ -98,8 +99,9 @@ Headless operation is an explicit service-only mode, not the ordinary installed 
 - The orchestrator publishes sequenced changes, so the surface shows work as it happens instead of
   sampling for it. A surface that misses a change resynchronizes from a snapshot rather than
   guessing.
-- Closing destroys the workbench window without ending browser service. A tray Open after close,
-  renderer failure, or reload reconstructs the disposable WebView from the orchestrator.
+- Closing destroys the workbench window without ending browser service. Linux Open reconstructs
+  the disposable WebView on every request; Windows reconstructs after close, renderer failure, or
+  reload. Both restore state from the orchestrator.
 - The original Ghostlight artwork, motion character, and reduced-motion behavior remain product
   identity across extension and desktop surfaces. The desktop carries Ghostlight's published teal
   accent and night-garden ground, while the in-page renderer keeps the sky signal users are already

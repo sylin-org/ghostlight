@@ -30,3 +30,9 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = "warn"
+
+[patch.crates-io]
+# Tauri 2.11 still selects Tao 0.35.3, whose custom Wayland titlebar swallows
+# its own control-button events. Pin Tao's merged upstream fix until a Tauri
+# release selects Tao 0.36 or newer. See ADR-0120.
+tao = { git = "https://github.com/tauri-apps/tao", rev = "07f3742b1833b64be27b1ef991e38d557d4276c9" }

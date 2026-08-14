@@ -56,8 +56,10 @@ tray, and backgrounds the workbench: minimized on Windows and hidden on Linux. `
 explicit service-only mode and cannot reveal a workbench.
 
 The tray and authority do not depend on a permanent window. Native close destroys only the
-disposable workbench, native minimize remains compositor-owned, and Open focuses the existing
-window or rebuilds it from the canonical Tauri configuration. On Linux, abnormal WebKit renderer
+disposable workbench, and native minimize remains compositor-owned. Windows Open focuses or
+restores the existing window and rebuilds it when absent. Wayland cannot report or unset a
+client's minimized state, so Linux Open coalesces, destroys any existing view, waits for Tauri's
+destroyed event, and rebuilds from the canonical configuration. On Linux, abnormal WebKit renderer
 termination discards that exact window after the signal callback; the next explicit Open creates a
 fresh WebView without an automatic crash loop. Explicit Quit alone ends the desktop authority.
 
