@@ -76,7 +76,7 @@ fn state_root() -> io::Result<PathBuf> {
                     .map(PathBuf::from)
                     .map(|home| home.join("AppData/Local"))
             })
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no local data directory"));
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no local data directory"))
     }
     #[cfg(target_os = "linux")]
     {
