@@ -8,8 +8,8 @@
       "behavior-dispositioned": 95,
       "historical-implementation-only": 162,
       "redesign-after-signed-candidate": 1,
-      "retained-evolved": 104,
-      "retained-identical": 444,
+      "retained-evolved": 106,
+      "retained-identical": 442,
       "retired-low-value-conductor": 1,
       "reviewed-repository-history": 1,
       "reviewed-tooling-history": 1,
@@ -241,9 +241,9 @@
     },
     {
       "path": "coordination/CHAT.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "coordination/INSTRUCTIONS.md",
@@ -253,9 +253,9 @@
     },
     {
       "path": "coordination/RESULTS.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "crates/browser-connector/Cargo.toml",

@@ -6,8 +6,8 @@
     "total": 810,
     "byCurrentState": {
       "absent": 262,
-      "retained-evolved": 104,
-      "retained-identical": 444
+      "retained-evolved": 106,
+      "retained-identical": 442
     }
   },
   "entries": [
@@ -350,8 +350,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "c9cd0394f880809d16ad392c5dc0774c73b26ed7",
-      "currentState": "retained-identical",
-      "currentBlob": "c9cd0394f880809d16ad392c5dc0774c73b26ed7"
+      "currentState": "retained-evolved",
+      "currentBlob": "ac4bce23a2170d9d09c00e75855b550614bd4328"
     },
     {
       "path": "coordination/INSTRUCTIONS.md",
@@ -368,8 +368,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "e109b6bd73ef3277ec0c6ba8623388d8ee11ac8d",
-      "currentState": "retained-identical",
-      "currentBlob": "e109b6bd73ef3277ec0c6ba8623388d8ee11ac8d"
+      "currentState": "retained-evolved",
+      "currentBlob": "2d62a9e57fdde03ee60782641f436c9fab18d4a9"
     },
     {
       "path": "crates/browser-connector/Cargo.toml",
