@@ -183,6 +183,9 @@ pass.
   - **Status**, which carries diagnostics, authority sources, and the end-session intent.
 
   Pause and resume live in the persistent header beside the connection state and match the tray.
+- The workbench capability grants the notification plugin only its automatic permission-state
+  bootstrap probe. Notification delivery remains a Rust-owned presentation port; the WebView has
+  no permission to request, send, cancel, or otherwise manage native notifications.
 - The orchestrator publishes a closed sequenced change vocabulary (`OperationStarted`,
   `OperationChanged`, `OperationSettled`, `RuntimeChanged`) through a best-effort
   `WorkbenchEventSink`. Snapshots carry the sequence they reflect; a surface that receives a gap

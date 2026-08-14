@@ -576,6 +576,26 @@ mod tests {
     }
 
     #[test]
+    fn the_notification_plugin_can_bootstrap_without_exposing_notification_actions() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../../capabilities/main.json"))
+                .expect("the workbench capability must be valid JSON");
+        let notification_permissions = capability["permissions"]
+            .as_array()
+            .expect("the workbench capability must list permissions")
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .filter(|permission| permission.starts_with("notification:"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            notification_permissions,
+            ["notification:allow-is-permission-granted"],
+            "the plugin bootstrap needs permission-state access, not notification authority"
+        );
+    }
+
+    #[test]
     fn the_surface_uses_the_published_ghostlight_palette() {
         let styles = include_str!("../../ui/styles.css");
         // Ghostlight's accent and the night-garden ground, as published on sylin.org.
