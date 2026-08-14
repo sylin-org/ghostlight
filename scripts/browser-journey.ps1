@@ -80,7 +80,7 @@ $null = Step 'close'      'browser_tabs'       @{ action = 'close'; tab = $tab }
 
 Write-Host ''
 if (Test-Path -LiteralPath $OutputPath) {
-    Write-Host "Screenshot: $OutputPath ($((Get-Item -LiteralPath $OutputPath).Length) bytes)"
+    Write-Host "Screenshot: $OutputPath ($((Get-Item -LiteralPath $OutputPath -Force).Length) bytes)"
 }
 
 switch ($worst) {
