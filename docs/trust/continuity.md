@@ -1,68 +1,30 @@
-# Ghostlight Continuity
+# Ghostlight continuity
 
-Continuity is the question of what happens to your deployment if the license lapses, the
-policy source goes dark, or the vendor ceases to exist. Ghostlight's answer is structural: the
-software keeps working regardless, and this page shows why and how to prove it.
+Ghostlight has no vendor service in the runtime path. An installed copy keeps working without
+telemetry, activation, an update server, or access to Sylin infrastructure. The source license is
+contractual only: Ghostlight 1.0 has no license-status command, runtime license gate, or license
+field in audit.
 
-## The Continuity Promise
+Signed managed policy also remains customer-controlled. A device verifies and caches the last
+accepted bundle. Source failure, malformed bytes, a bad signature, or rollback leaves that bundle
+active. A configured cold start without a valid source or verified cache fails closed. The cache
+has no automatic expiry, so an organization outage cannot silently remove protection.
 
-The Continuity Promise is binding on all tiers. Its normative wording, from ADR-0028, is:
+These behaviors are exercised by unit and service tests for:
 
-> **The Continuity Promise.** Ghostlight never phones home and license state never affects
-> behavior. Enforcement, audit, and your production workflows are never interrupted,
-> degraded, or disabled by license expiry, by the vendor's unavailability, or by the
-> vendor ceasing to exist. An expired license changes exactly one thing: license-state
-> notices appear in `doctor`, `license status`, and your own audit records until it is
-> renewed. Your deployment works forever, offline, as-is.
+- unreachable managed source at cold start;
+- offline recovery from a verified cache;
+- bad updates and rollback retaining last-known-good;
+- signature verification on cache read; and
+- the absence of policy network work when no bootstrap exists.
 
-## Why this holds structurally
+If the vendor ceases to exist, installed software and customer-hosted policy continue operating as
+before. The engine is Apache-2.0 OR MIT and the governance module source remains available under
+its published commercial license. This is a continuity property of the shipped software, not a
+promise of future releases or successor maintenance.
 
-The promise is not a policy that could be reversed; it is a property of how Ghostlight is
-built. License state never gates behavior: enforcement and audit run identically whether the
-license is valid, expired, or absent. No vendor runtime sits in your critical path, so there
-is no vendor service whose outage could degrade you. Central policy operates from a
-last-known-good cache that keeps enforcing when the source is unreachable, and there is no
-cache auto-expiry, because validity is anchored in the policy signature rather than a clock.
-When nothing valid is available at all, Ghostlight fails closed to the protective state and
-never fails open to unrestricted. Every one of these is a design invariant, not a runtime
-check that could be toggled off.
+See [the licensing guide](../guides/licensing.md),
+[the governance guide](../guides/governance-configuration.md), and
+[ADR-0121](../adr/0121-restore-rawx-policy-and-managed-fetch.md).
 
-## Verify it yourself
-
-The promise is testable. Each of the following runnable scenarios exercises one leg of it:
-
-    cargo run -p ghostlight-lightbox -- run continuity-source-unreachable
-
-This proves that enforcement continues from the last-known-good cache when the policy source
-cannot be reached.
-
-    cargo run -p ghostlight-lightbox -- run fail-closed-cold-boot
-
-This proves that a cold boot with no policy available fails closed to the protective state
-rather than opening up.
-
-    cargo run -p ghostlight-lightbox -- run rollback-guardian
-
-This proves that a stale or downgraded but validly signed policy is refused, so protection
-cannot be silently weakened.
-
-    cargo run -p ghostlight-lightbox -- run license-expiry-continuity
-
-This proves that an expired license produces the same governed decision and the same audit fields
-as a valid license, with only the observational `"license":"expired"` marker added.
-
-## If the vendor ceases to exist
-
-Your deployment keeps working, exactly as it did the day before. The automation engine is
-licensed Apache-2.0 OR MIT and the governance module is source-available, so you hold the
-actual code rather than a promise about it, which is stronger than a source-escrow arrangement
-that releases only on a trigger. Everything you were doing, you can keep doing: enforcement,
-audit, central policy from your own endpoint, all unchanged. The one thing that changes over
-time is that there are no new releases. This page makes no commitment to future maintenance, a
-successor maintainer, or a foundation handoff; it commits only to the property that what you
-already run continues to run.
-
-See [ADR-0028](../adr/0028-tripwire-licensing-and-continuity-promise.md) and the
-[licensing guide](../guides/licensing.md).
-
-Last reviewed: 2026-07-14 against v0.8.0 | Contact: support@sylin.org
+Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org

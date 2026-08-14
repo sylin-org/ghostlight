@@ -1,200 +1,163 @@
-# Ghostlight 1.0 governance configuration
+# Configure Ghostlight 1.0 governance
 
-Ghostlight is useful without a policy. With no configured authority file, ordinary remote
-HTTP(S) browser work is permitted while protected hosts, credentials, stale handles, runtime
-holds, and browser-local interlocks remain enforced.
+Ghostlight needs no policy for personal use. With no policy configured, ordinary HTTP(S) browser
+work is open. Runtime controls, credential handoff, stale-handle checks, browser-local interlocks,
+and protected loopback or link-local destinations still apply.
 
-Policy is a monotonic restriction layer. It can remove capabilities, hosts, or model-driven tab
-close; it cannot add a browser mechanism or override another denying layer.
+A policy can only narrow that baseline. Managed policy, local policy, and per-request restrictions
+intersect. No lower layer can restore authority removed above it.
 
-## Capabilities
+## Write a schema-3 policy
 
-The closed 1.0 capability vocabulary is:
-
-- `read` -- observe browser facts;
-- `action` -- cause ordinary browser interaction;
-- `write` -- enter non-credential user data; and
-- `execute` -- run an explicit script or commit a consequential submission.
-
-Each catalog tool has one highest required capability. The complete mapping is maintained with the
-schemas in [`../1.0/LANGUAGE.md`](../1.0/LANGUAGE.md).
-
-## Local policy
-
-Set `GHOSTLIGHT_POLICY_FILE` to the absolute path of a JSON policy owned by the current user. The
-schema is flat and typo-closed:
+Read, Action, Write, and Execute are independent capabilities. A compound operation needs every
+capability in its set; Execute does not imply the other three. The exact operation map lives in
+[`../1.0/LANGUAGE.md`](../1.0/LANGUAGE.md).
 
 ```json
 {
-  "version": 1,
-  "allow_capabilities": ["read", "action", "write"],
-  "deny_capabilities": ["execute"],
-  "allow_tab_close": false,
-  "preserve_target_names": true,
-  "allow_hosts": ["example.com", "*.example.com"],
-  "deny_hosts": ["admin.example.com"]
+  "schema": 3,
+  "name": "Support workspace",
+  "version": "2026-08-14",
+  "mode": "enforce",
+  "identity": {
+    "principal": "support-agent",
+    "groups": ["support"]
+  },
+  "grants": [
+    {
+      "id": "support-sites",
+      "hosts": {
+        "allow": ["support.example.com", "*.support.example.com"],
+        "deny": ["admin.support.example.com"]
+      },
+      "allowed": ["read", "action", "write"],
+      "description": "Ordinary support work"
+    }
+  ],
+  "config": [
+    {"key": "browser.tabs.allow_close", "value": false, "level": "mandatory"},
+    {"key": "privacy.preserve_target_names", "value": false, "level": "mandatory"},
+    {"key": "channels.cli.enabled", "value": false, "level": "mandatory"},
+    {"key": "content.security.sacred_domains", "value": ["vault.example.com"], "level": "mandatory"}
+  ]
 }
 ```
 
-Fields:
+The document is typo-closed. Unknown fields, settings, capabilities, modes, and malformed host
+patterns invalidate it. A configured source with no valid initial policy fails closed.
 
-| Field | Required | Meaning |
+Host patterns are `*`, an exact hostname, or one leading suffix wildcard such as
+`*.example.com`. Exact matches outrank longer suffix matches, which outrank `*`; an exact tie
+denies. A grant's deny patterns shrink only that grant. Grants are checked in written order, and
+the first grant admitting the complete capability set wins.
+
+`mode` is `enforce` or `observe`. Observe records what would have been denied while allowing
+ordinary work to continue. Protected destinations always enforce. A per-grant mode may override
+the manifest mode; the strictest effective layer wins.
+
+Supported settings are:
+
+| Key | Value | Effect |
 | --- | --- | --- |
-| `version` | yes | Must be `1`. |
-| `managed` | no | Must be `true` only for a managed authority file. |
-| `expires_unix_ms` | no | Required future Unix-millisecond expiry for managed authority. |
-| `allow_capabilities` | no | Intersects the current capability set. Omission leaves it unchanged. |
-| `deny_capabilities` | no | Removes named capabilities after the allow intersection. |
-| `allow_tab_close` | no | `false` removes model-driven close. `true` cannot restore another layer's denial. |
-| `preserve_target_names` | no | Defaults to `true`. `false` removes element names from results, History, and audit summaries. `true` cannot restore another layer's denial. |
-| `allow_hosts` | no | Adds a required host allow-list layer. Every configured layer must match. |
-| `deny_hosts` | no | Denies matching hosts regardless of an allow-list match. |
-| `channels` | no | Intake channels this layer takes control of. See below. |
+| `browser.tabs.allow_close` | boolean | `false` removes model-driven close. |
+| `privacy.preserve_target_names` | boolean | `false` keeps page-authored target names out of results and audit. |
+| `channels.mcp.enabled` | boolean | `false` refuses MCP session admission. |
+| `channels.cli.enabled` | boolean | `false` refuses `ghostlight call` admission. |
+| `content.security.sacred_domains` | hostname array | Adds never-touch destinations. |
 
-Unknown fields, unknown capabilities, unsupported versions, invalid host patterns, and non-JSON
-input invalidate the layer. A configured invalid layer fails closed; Ghostlight does not silently
-fall back to unrestricted work.
+## Use a local policy
 
-Host patterns are exact hostnames or a leading wildcard such as `*.example.com`. A wildcard does
-not match the apex, so include `example.com` separately when both are intended. Patterns cannot
-contain schemes, ports, paths, or embedded wildcards.
+Set `GHOSTLIGHT_POLICY_FILE` to the absolute path of the schema-3 JSON file before starting
+Ghostlight. Valid replacements apply atomically to future invocations. A malformed replacement
+keeps the last valid policy; a malformed cold start fails closed.
 
-## Managed authority
+Validate and inspect a candidate with the production parser and capability directory:
 
-Set `GHOSTLIGHT_MANAGED_AUTHORITY_FILE` to a separately provisioned JSON file:
+```sh
+ghostlight policy validate policy.json
+ghostlight policy explain policy.json
+ghostlight policy simulate policy.json audit.jsonl
+```
+
+Simulation is audit-free. It reports which existing audit records the candidate would deny and
+which rule supplied the decision.
+
+## Publish signed managed policy
+
+Managed delivery is opt-in. Without an administrator-provisioned bootstrap, Ghostlight performs no
+policy network I/O. The organization owns its signing keys and the file or HTTPS source.
+
+Create keys offline. The default creates required Ed25519 and additive ML-DSA-65 keys:
+
+```sh
+ghostlight policy keygen policy-keys
+ghostlight policy pubkey policy-keys/policy-ed25519.seed --mldsa-seed policy-keys/policy-mldsa65.seed
+```
+
+Add optional signed presentation in a separate JSON file:
 
 ```json
 {
-  "version": 1,
-  "managed": true,
-  "expires_unix_ms": 1893456000000,
-  "allow_capabilities": ["read", "action"],
-  "allow_tab_close": false,
-  "allow_hosts": ["support.example.com"]
+  "org_name": "Example Organization",
+  "rationale": "Keeps browser work inside approved support sites.",
+  "contacts": [
+    {"kind": "email", "value": "security@example.com", "label": "Security team"}
+  ]
 }
 ```
 
-A managed file must carry `managed: true` and an unexpired `expires_unix_ms`. Local policy,
-managed authority, and per-request restrictions intersect. The most restrictive outcome wins;
-order never grants authority.
+Publish the next monotonic sequence and print a ready bootstrap:
 
-The 1.0 orchestrator consumes a locally provisioned managed file. It does not fetch policy, poll a
-vendor service, accept remote activation, or implement a hidden management channel. External
-provisioning, signing, and fleet distribution are outside this runtime contract.
-
-## Protected host ceiling
-
-Policy never grants:
-
-- schemes other than `http` and `https`;
-- `localhost` or its subdomains;
-- loopback IP addresses; or
-- link-local addresses, including cloud metadata endpoints.
-
-Committed navigation landings are checked again before Ghostlight accepts content or readiness.
-A redirect or page script therefore cannot use an initially allowed URL to smuggle in a denied
-landing.
-
-## Per-request restrictions
-
-Every tool may carry `restrict_capabilities` and `restrict_hosts`. They intersect configured
-authority for that invocation only:
-
-```json
-{
-  "url": "https://example.com",
-  "restrict_capabilities": ["read", "action"],
-  "restrict_hosts": ["example.com"]
-}
+```sh
+ghostlight policy publish policy.json \
+  --ed25519-seed policy-keys/policy-ed25519.seed \
+  --mldsa-seed policy-keys/policy-mldsa65.seed \
+  --source https://policy.example.com/ghostlight.bundle \
+  --out ghostlight.bundle \
+  --presentation presentation.json
 ```
 
-Restrictions are useful when a client wants a narrower unit of work. They cannot add a capability
-or host absent from another layer. One immutable effective snapshot remains attached to started
-work even if policy files change during the invocation.
+Deploy the bundle to the named source. Provision the printed `managed.json` at:
 
-## Runtime controls
+- Windows: `%PROGRAMDATA%\Ghostlight\managed.json`
+- Linux: `/etc/ghostlight/managed.json`
 
-The extension toolbar and desktop workbench send semantic intents to the orchestrator's one
-runtime-control owner:
+The strict bootstrap accepts `source`, `pubkey_ed25519`, optional `pubkey_mldsa`, optional
+`bearer_token`, optional `ca_cert_pem`, and optional `poll_seconds`. Production sources are a
+local file or HTTPS. Redirects are refused. HTTPS uses conditional ETag requests, capped retry
+backoff, and bounded deterministic jitter.
 
-- pause or hold stops later effects;
-- resume permits work again unless the session was ended;
-- attention stops effects until the user resolves the condition; and
-- end-session is terminal until an explicit start-session intent.
+Every bundle is verified before activation and again when read from cache. Lower sequences and a
+different bundle reusing the same sequence are refused. A valid replacement applies to future
+invocations. A malformed, unreachable, or unsigned update keeps the verified last-known-good
+policy. A configured cold start without a valid source or cache fails closed. Signed policy does
+not expire automatically; staleness remains visible without erasing protection.
 
-For managed local testing, `GHOSTLIGHT_RUNTIME_CONTROL_FILE` may name a file whose trimmed content
-is `active`, `hold`, `attention`, or `end_session`. An unreadable or unrecognized configured value
-holds rather than opening work.
+The workbench Policy Passport shows organization, verification, sequence, freshness, source
+class, last verification, rationale, and contact channels. The local managed-status sidecar holds
+the same content-minimized operational facts without policy rules, source addresses, or
+credentials.
 
-## Tab-close protection
+## Denials and attention
 
-Model-driven tab close requires both:
+An enforced denial carries a deterministic `D-` id, the deciding tier, grant, rule, complete RAWX
+set, effective authority identity, mode, and managed sequence in audit. Three matching denials in
+60 seconds, or five enforced denials in 120 seconds, pause that workspace for attention. Resume,
+resume quietly, keep paused, and end session use the existing browser and workbench controls.
 
-1. effective orchestrator authority, including `allow_tab_close`; and
-2. the extension's local **Preserve controlled tabs** setting.
+## Audit collection
 
-Either layer may deny. Neither can expand the other. A refusal keeps the tab available as visual
-evidence, shows a fixed browser receipt, and returns a blocked no-effect result. Manual browser
-closure remains the user's action.
+Ghostlight appends one content-minimized JSONL record per terminal invocation. Set
+`GHOSTLIGHT_AUDIT_FILE` to choose its absolute path; otherwise it sits beside runtime discovery.
+Use the endpoint's existing file collector for SIEM delivery. Ghostlight does not upload audit or
+open a direct syslog or HTTP delivery channel. See [`siem-integration.md`](siem-integration.md).
 
-## Turning an intake channel off
+## Permanent ceilings
 
-Ghostlight accepts work on two intakes: `mcp`, the stdio connector a coding client speaks, and
-`cli`, the `ghostlight call` command line that scripts use. Both cross the same executor and the
-same authority, and neither grants a capability the other does not.
+Policy never grants non-HTTP(S) schemes, localhost or its subdomains, loopback addresses, or
+link-local addresses. Committed landings are checked again, so redirects cannot turn an allowed
+request into access to a protected destination.
 
-A layer that wants to allow only agent work names the channel it is closing:
-
-```json
-{
-  "version": 1,
-  "allow_capabilities": ["read", "action", "write"],
-  "channels": { "cli": {} }
-}
-```
-
-Naming a channel is how a layer takes control of it, and taking control means saying yes
-explicitly. `{}` and `{"enabled": false}` both refuse the channel; `{"enabled": true}` admits it.
-A channel the map does not mention is unrestricted, and an absent `channels` map restricts nothing
-at all, so an unconfigured Ghostlight admits both intakes.
-
-Layers compose the way hosts and capabilities do. If managed authority refuses a channel, a local
-policy naming `{"enabled": true}` cannot hand it back. A channel name that is not `mcp` or `cli` is
-a typo, and like every other policy typo it makes the layer invalid, which denies rather than
-silently restricting nothing.
-
-The refusal happens at admission, before a session exists. The caller sees the stable
-`channel_denied` reason and exits non-zero, and because no work was invoked, no audit record is
-written. Turning `cli` off is a real boundary for an organization's own deployment, but it is worth
-knowing what it is not: anyone who can run `ghostlight call` on that machine can also start the MCP
-connector by hand, so this narrows a deployment rather than containing a determined local user.
-
-## Content-minimized audit and history
-
-The orchestrator appends one JSONL record per terminal invocation. By default the file is
-`audit.jsonl` beside the runtime discovery file; `GHOSTLIGHT_AUDIT_FILE` selects an explicit path.
-
-A record carries three kinds of thing: identifiers (opaque invocation, workspace, and authority
-ids), the decision (capability, allowed, stable reason, terminal status, effect class), and
-content-minimized facts about what the action did (a Ghostlight-authored sentence, how long it took,
-the governed host it attempted or landed on, and a count or capture size). By default an action
-sentence may include one normalized, bounded accessible name for the element actually used.
-
-The governed host and an optional bounded action-target name are the only page-derived text. They
-answer where the agent went and which visible control it actually used. Set
-`preserve_target_names: false` in any authority layer to retain only the closed noun, such as
-`button`. Paths, queries, fragments, arbitrary page text, selectors, target handles, form values,
-file paths, scripts, screenshots, and dialog text never appear. The exact field list lives in one place,
-[`siem-integration.md`](siem-integration.md), so that it cannot drift from the code in three
-documents at once.
-
-The workbench reconstructs at most 500 newest terminal facts from this audit for History. Search
-and notifications operate on the same content-minimized projection. Deleting or rotating the audit is
-an external retention decision; it does not alter authority.
-
-## Validate a policy
-
-Before release, policy validation is performed by the same strict decoder used to start work.
-Open **Status** to see whether configured local and managed sources are present and valid. Then
-exercise both an allowed journey and a deliberately blocked journey against a non-sensitive test
-site. The browser receipt, MCP result, audit reason, and workbench history must agree.
+The extension's **Preserve controlled tabs** setting is an independent physical interlock. Both
+orchestrator policy and that browser-local choice must allow model-driven close. Manual browser
+closure always remains the user's action.

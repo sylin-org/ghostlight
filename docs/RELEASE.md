@@ -148,12 +148,6 @@ harnesses. Exercise concurrent sessions, screenshots, semantic and coordinate in
 dialogs, scripts, governed denial, blocked close, group reuse across windows, child-tab adoption,
 orchestrator restart, browser restart, extension reload, and unknown-effect non-replay.
 
-### First success
-
-Complete [`testing/greenfield-first-success.md`](testing/greenfield-first-success.md) using the exact
-provenance-verified candidate and matching store adapter. Source-build success does not substitute
-for this gate.
-
 ## Publication sequence
 
 After all gates are evidenced and the owner approves, advance one independently recoverable channel

@@ -146,14 +146,17 @@ The unpacked extension is a complete local product surface, not an invisible rel
 
 ## Safety and truth
 
-- No active policy permits browser capability, subject to the protected-host deny ceiling.
+- No configured policy leaves ordinary browser work open, subject to protected-host ceilings.
+- Configured schema-3 grants admit complete independent RAWX sets; every authority tier and
+  request restriction can only tighten them.
 - Started work uses one immutable authority snapshot. Request restrictions only tighten it.
 - Ownership, leases, runtime controls, and landing authority are checked at their final boundary.
 - Model-driven tab closure occurs only when the immutable service authority and the browser's
   local preserve-tabs choice both permit it. Neither gate can expand the other, and local human
   tab closure remains available.
 - Every committed landing is governed before its content or readiness is accepted.
-- Managed authority that is present but invalid fails closed.
+- Managed authority with no valid initial source or cache fails closed. Later source failure keeps
+  verified last-known-good.
 - Credential-class fields require visible user handoff. Ghostlight never types secrets.
 - Local file upload reads only paths explicitly supplied for that invocation, enforces count and
   byte bounds before browser dispatch, and never records paths, names, or contents in audit.
@@ -164,10 +167,11 @@ The unpacked extension is a complete local product surface, not an invisible rel
 - Cancellation, disconnects, holds, attention, partial effects, and uncertain effects are
   terminal truths, not hidden retries or fabricated success.
 - Unknown, partial, committed, or otherwise unsafe effects never recommend replay.
-- Audit records contain identifiers and decisions, never URLs, page content, field values,
-  screenshots, selectors, or dialog text.
+- Audit records contain identifiers, policy attribution, governed host, and bounded measurements,
+  never full URLs, arbitrary page content, field values, screenshots, selectors, or dialog text.
 - Presentation is content-free. Presentation failure cannot grant authority or change a result.
-- Ghostlight never phones home.
+- Ghostlight never contacts a vendor service. Managed HTTPS fetch is opt-in and goes only to the
+  administrator-configured organization source.
 
 ## Exclusions
 
@@ -177,8 +181,8 @@ The unpacked extension is a complete local product surface, not an invisible rel
 - No vendor-, model-, or client-specific language.
 - No remote multi-tenant service.
 - No generic workflow engine, actor framework, event bus, CQRS split, or event store.
-- No telemetry, activation service, update check, or network call unrelated to the requested
-  visible-browser work.
+- No telemetry, activation service, update check, audit upload, or network call unrelated to the
+  requested visible-browser work or administrator-configured managed-policy fetch.
 
 ## Product terms
 

@@ -62,7 +62,7 @@ role and accessible name of the physical element in the same action receipt, wit
 round trip. The role is narrowed to a closed Ghostlight noun; an unknown role becomes `control`.
 The name is normalized, bounded to 80 visible characters, and included by default, so an action can
 say `Clicked the "Save" button on example.com.` Governance may remove all target names with
-`preserve_target_names: false`, leaving `Clicked a button on example.com.` Editable values are
+`privacy.preserve_target_names: false`, leaving `Clicked a button on example.com.` Editable values are
 never name sources. A result with `effect` equal to `partial` or `unknown`, or with a committed effect
 unsafe to duplicate, has `repeat_safe: false` and does not suggest replay.
 
@@ -73,7 +73,7 @@ unsafe to duplicate, has `repeat_safe: false` and does not suggest replay.
 List, focus, or close controlled tabs. Actions are:
 
 - `list`: no `tab`; shortest call `{"action":"list"}`; capability `read`.
-- `focus`: required `tab`; capability `action`.
+- `focus`: required `tab`; no RAWX capability.
 - `close`: required exact `tab`; capability `action` and the tab-close policy constraint.
 
 Close also respects the browser's local preserve-tabs interlock. Facts for list contain `tabs`,
@@ -89,7 +89,7 @@ Inputs: required `url`; optional `tab`; optional `new_tab`, default `false`; opt
 
 With `new_tab:true`, Ghostlight creates and navigates a new controlled tab. With `tab`, it
 navigates that exact tab. With neither, it uses the unambiguous controlled tab, creates one when
-none exists, and rejects ambiguous selection. Capability: `action`.
+none exists, and rejects ambiguous selection. Capability: `read`.
 
 Facts: `tab`, governed `url`, bounded `title`, `created`, and `document_generation`.
 
@@ -110,7 +110,7 @@ Set tab zoom or resize the containing browser window.
 - Zoom: `{"action":"zoom","percent":100}`. `percent` is an integer from 25 to 500;
   optional `tab`; capability `read`.
 - Resize: `{"action":"resize","width":1280,"height":800}`. Required integer `width` from
-  320 to 7680 and `height` from 240 to 4320; optional `tab`; capability `action`.
+  320 to 7680 and `height` from 240 to 4320; optional `tab`; no RAWX capability.
 
 Resize affects every tab in the window and may rerender the page. Either action invalidates a
 current view handle when its bound geometry no longer matches. Facts include the selected tab,
@@ -202,8 +202,8 @@ Fill one or more ordinary controls. It does not submit unless `submit_target` is
 `{"fields":[{"target":"target_...","value":"Ada"}]}`.
 
 Inputs: required `fields` array of 1 to 30 typo-closed objects with required `target` and `value`;
-optional `tab`; optional `submit_target`; optional `timeout_ms`; optional restrictions. Capability:
-`write` without submit and `execute` with `submit_target`.
+optional `tab`; optional `submit_target`; optional `timeout_ms`; optional restrictions.
+Capabilities: `read + write` without submit and `read + write + action` with `submit_target`.
 
 Credential-class targets stop before any value dispatch and request visible user handoff. Facts:
 `tab`, `filled_count`, `submitted`, and any governed committed landing.
@@ -215,7 +215,7 @@ Type ordinary text through browser input events. Shortest call:
 
 Inputs: required `target`; required bounded `text`; optional `tab`; optional `clear_first`, default
 `false`; optional `timeout_ms`; optional restrictions. Empty text is valid only with
-`clear_first:true`. Capability: `write`.
+`clear_first:true`. Capability: `action`.
 
 Credential-class targets stop before text dispatch. Facts: `tab`, `target`, `typed`,
 `character_count`, and any governed committed landing.
@@ -260,7 +260,7 @@ Inspect or resolve the current JavaScript dialog.
 - `{"action":"status"}` reports whether a dialog is blocking; capability `read`.
 - `{"action":"accept"}` accepts it; capability `action`.
 - `{"action":"dismiss"}` dismisses it; capability `action`.
-- `{"action":"respond","text":"Ada"}` supplies non-secret prompt text; capability `write`.
+- `{"action":"respond","text":"Ada"}` supplies non-secret prompt text; capability `action`.
 
 All branches accept optional `tab` and restrictions. `text` is required only for `respond` and is
 invalid for every other action. Facts: `tab`, `dialog_type`, `present`, `accepted`, and `handled`
@@ -297,8 +297,9 @@ Run two to eight fully specified steps on one controlled tab. Shortest useful ca
 
 Inputs: required `steps`; optional `tab`; optional `timeout_ms`; optional restrictions. A step is a
 typo-closed discriminated object. Allowed actions are `click`, `fill`, `type_text`, `press_key`,
-`scroll`, `hover`, and `wait`; other catalog operations are not silently accepted. Capability is
-the highest capability required by any step.
+`scroll`, `hover`, and `wait`; other catalog operations are not silently accepted. The sequence
+wrapper requires no RAWX capability. Every step is classified, admitted, and audited independently
+through the same executor path as a direct call.
 
 Direct and sequence steps use the same operation executor and browser port. Facts: `tab`,
 `completed_steps`, `total_steps`, and bounded per-step statuses. Execution stops at the first

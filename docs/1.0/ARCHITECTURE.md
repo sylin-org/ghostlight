@@ -299,26 +299,30 @@ non-destructive and visually quiet. Diagnostic payloads never enter audit or pre
 
 ## Governance
 
-No policy file configured means all four capabilities are allowed. Browser-internal schemes,
-extension management pages, loopback addresses, and link-local metadata endpoints are an
-independent protected ceiling. A local policy may further allow or deny host patterns and
-capabilities. An optional managed authority layer can only tighten local authority. If a managed
-layer is configured but missing, malformed, expired, or not marked as managed, effective
-authority denies all work.
+No policy configured means all four independent RAWX capabilities are open. Browser-internal
+schemes, extension management pages, loopback addresses, and link-local metadata endpoints remain
+an independent protected ceiling.
 
-`GHOSTLIGHT_POLICY_FILE` selects an optional local version-1 JSON authority document.
-`GHOSTLIGHT_MANAGED_AUTHORITY_FILE` selects an optional managed version-1 document, which must
-set `managed: true` and contain a future `expires_unix_ms`. Each document can contain
-`allow_capabilities`, `deny_capabilities`, `allow_hosts`, `deny_hosts`, and the optional booleans
-`allow_tab_close` and `preserve_target_names`. Missing allow lists and missing boolean constraints
-mean no additional restriction. False tab-close and target-name constraints are monotonic across
-local and managed layers; a later layer cannot expand either. Target names default to retained so
-action history identifies the physical element, while a false constraint leaves the closed role as
-the fallback. Malformed configured layers fail closed. Host patterns are exact names or `*.` suffix
-patterns and never override the protected ceiling.
+`GHOSTLIGHT_POLICY_FILE` selects an optional strict schema-3 local policy. Ordered grants combine
+host allow and deny patterns with complete independent RAWX sets. Exact hosts outrank longer
+suffix wildcards, which outrank `*`; an exact tie denies. Managed policy, local policy, and request
+restrictions intersect. Sacred destinations compose by union. False tab-close and target-name
+settings are monotonic. Observe mode records ordinary would-deny decisions while protected
+destinations continue to enforce. A malformed cold source fails closed; an invalid replacement
+keeps the last valid authority for future snapshots.
+
+Signed managed policy is opt-in through `%PROGRAMDATA%\Ghostlight\managed.json` on Windows or
+`/etc/ghostlight/managed.json` on Linux. With no bootstrap, no policy network work occurs. A
+bootstrap names a local file or HTTPS source plus the organization's public verification key and
+may add a bearer token, CA pin, and polling interval. Ed25519 is required; when ML-DSA-65 is
+configured, both signatures must verify. Monotonic publish sequence blocks rollback. Verified
+bundles are cached and verified again on read. Bad or unreachable updates retain last-known-good;
+a configured cold start without a valid source or cache fails closed. Signed policy has no time
+expiry. The workbench Policy Passport surfaces content-minimized provenance and signed
+organization contacts without policy rules or credentials.
 
 `GHOSTLIGHT_RUNTIME_CONTROL_FILE` optionally names a local text file read at every final browser
-boundary. Its exact states are `active`, `held`, `attention`, and `ended`. A missing or
+boundary. Its exact states are `active`, `hold`, `attention`, and `end_session`. A missing or
 invalid configured control file enters hold. These controls never expand the immutable authority
 snapshot.
 
@@ -333,8 +337,10 @@ visible and the result reports that compensation did not occur. A denied landing
 tab enters hold and returns a committed, non-repeat-safe blocked outcome. Redirects receive the
 same check.
 
-Audit records include time, invocation id, workspace id, tool, capability, authority version,
-decision, status, effect class, and reason code. They exclude all request and page payloads.
+Audit records include time, invocation id, workspace id, tool, complete RAWX requirement set,
+authority version, managed sequence, mode, deciding tier, grant, rule, denial id, decision,
+status, effect class, and reason code. They exclude request and page payloads except the governed
+host and optional bounded target name described by the active privacy setting.
 
 ## Failure and recovery
 

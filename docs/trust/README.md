@@ -20,15 +20,12 @@ Each answer is written to be pasted. The direct, quotable paragraph comes first 
 on its own, so a reviewer can drop it straight into an assessment portal without editing.
 Supporting links come after the paragraph. Where a claim rests on something concrete, the
 answer ends with an `Evidence:` line naming the artifact behind it -- the ADR that decided
-it, the source path that implements it, the test or lightbox scenario that exercises it, or
+it, the source path that implements it, the test that exercises it, or
 the guide that documents it.
 
-Every document carries a review footer of the form `Last reviewed: <date> against
-v<version> | Contact: <address>`. A `+dev` suffix on the version means the review ran
-against the development tree ahead of the release that will carry it; the footer is
-restamped at that release. That footer plus the git history of this folder is the change record: there is
-no separate changelog to trust, because the commit log is the changelog. If a page changed,
-`git log` on the file shows exactly when and why.
+Review footers identify the source state against which a page was materially checked. They are
+evidence, not a release restamping chore: an unchanged legal template or point-in-time assessment
+keeps its original review date. Git history remains the change record.
 
 Absences are stated as facts, not apologies. Where Ghostlight lacks a control or an
 attestation, the page says so plainly and explains why it does or does not matter given the
@@ -78,4 +75,4 @@ reviewer can act on a stated absence, and cannot act on a page of green checkmar
   licensed, and the governance module is source-available, so a customer's ability to keep
   operating never depends on the company's survival. See [continuity.md](continuity.md).
 
-Last reviewed: 2026-07-10 against v0.8.0 | Contact: support@sylin.org
+Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org

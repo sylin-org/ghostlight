@@ -15,54 +15,48 @@ directions: it also states plainly what a governance overlay does NOT mitigate.
 ## The threat themes and what governs them
 
 **Tool misuse / excessive agency.** The core RAWX case. Every action is classified by
-intrinsic capability (read / action / write / execute), and grants set per-host capability
-floors. An agent on a read-only grant cannot type, submit, or execute script anywhere the
+an intrinsic capability set drawn from read / action / write / execute, and grants set per-host
+allowances. An agent on a read-only grant cannot type, submit, or execute script anywhere the
 grant applies, no matter what it was talked into. Advertisement filtering removes ungranted
 tools from the agent's view entirely.
 
 **Goal hijacking / intent manipulation (prompt injection).** A governance layer cannot stop a
 model from BELIEVING injected instructions; that battle happens inside the model and its
 harness. What it does is cap the blast radius: an injected agent still cannot exceed its
-capability floor, cross host polarity, touch sacred never-touch domains, or act while a
+capability allowance, cross host polarity, touch sacred never-touch domains, or act while a
 take-the-wheel hold is in effect. Injection turns from "attacker controls the browser" into
 "attacker controls a session confined to what the human granted."
 
-**Privilege compromise / identity abuse.** Grants are identity-bound and host-scoped; the
-audit record carries the identity, client, grant id, and decision for every call. There is no
-ambient authority to steal: a session holds the manifest's grants and nothing else.
+**Privilege compromise / identity abuse.** Grants are identity-described and host-scoped. Audit
+carries opaque workspace and authority ids plus channel, tier, grant, and decision attribution.
+Ghostlight does not claim federated identity: policy identity is only as strong as the endpoint
+configuration that supplied it.
 
 **Cross-origin data movement (the UW findings; taxonomy: data exfiltration / cascading
 effects).** The 2026 UW study showed four of seven agentic browsers create same-origin-policy
 bypass conditions: content from one origin steering actions or data on another. Host-polarity
-grants confine which hosts can be read versus written at all, and origin-flow provenance
-(Ghostlight ADR-0042) records, per orchestrated step, which prior steps' results fed its
-arguments, making in-band cross-host flows visible and auditable, with flow-level enforcement
-as the recorded next step. The honesty fence: only IN-BAND flows (through the engine's own
-reference substitution) are attestable. Data the model carries in its context between calls is
-out of band for any local mechanism, and any product claiming otherwise is selling
-content-inspection theater.
+grants confine which hosts can receive each capability set. Ghostlight does not implement
+cross-call data-flow provenance or content inspection. Data the model carries in its context
+between calls is out of band for this local mechanism.
 
 **Repudiation / untraceability.** The structured audit stream is the spine: every call --
-allowed, denied, shadow-denied, or held -- produces one record with identity, tool, action,
-capability, domain, grant or denial id, timing, and orchestration correlation (parent,
-batch id, step, dry-run, sources). Denials carry stable ids the security team can reference.
+allowed, denied, shadow-denied, or held -- produces one record with opaque authority and workspace
+ids, tool, complete capability set, governed host, grant or denial id, timing, and managed publish
+sequence. Denials carry stable ids the security team can reference.
 
 **Human-in-the-loop bypass / overwhelming.** The take-the-wheel pause and the panic kill
 switch are user gestures enforced ahead of all policy machinery; a held call never queues or
 replays. Write-class actions can require explicit grants rather than per-call nagging, which
 is what makes the human checkpoint sustainable instead of click-through.
 
-**Unexpected code execution.** `javascript_tool` and script-bearing paths are the `execute`
-class, the highest RAWX tier, grantable separately from everything else and deniable per host.
-Named, hash-bound saved workflows (ADR-0039) are the reviewed alternative to open-ended
-execute grants.
+**Unexpected code execution.** Explicit page JavaScript is the independent `execute` capability,
+grantable separately from everything else and deniable per host. Execute is not a tier and does
+not imply Read, Action, or Write.
 
-**Memory poisoning.** Mostly out of scope: Ghostlight holds no cross-session agent memory to
-poison. The adjacent surface it does govern: saved scripts are hash-bound, so a tampered
-artifact invalidates its standing approval instead of running under it.
+**Memory poisoning.** Out of scope: Ghostlight holds no cross-session agent memory.
 
 **Supply chain.** Out of scope for the governance layer itself; addressed at the project
-level (single auditable binary, reproducible releases, signed provenance) rather than by RAWX.
+level (checked release unit, checksums, and build provenance) rather than by RAWX.
 
 ## What this layer does not do
 
@@ -77,4 +71,4 @@ attributable; it does not make the agent smart or the page trustworthy.
 - OWASP Agentic Security Initiative (threats and mitigations): https://owasp.org
 - Microsoft Agent Governance Toolkit: https://github.com/microsoft/agent-governance-toolkit
 - UW agentic-browser study coverage (2026-07): https://www.technology.org/2026/07/03/some-agentic-ai-browsers-come-with-major-cybersecurity-risks-uw-study-finds/
-- Ghostlight ADRs 0011, 0013, 0018, 0022, 0039, 0042 (docs/adr/) for the mechanisms named here.
+- Ghostlight ADRs 0013, 0018, 0022, and 0121 (docs/adr/) for the mechanisms named here.

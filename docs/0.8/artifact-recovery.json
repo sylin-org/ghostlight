@@ -8,8 +8,8 @@
       "behavior-dispositioned": 95,
       "historical-implementation-only": 162,
       "redesign-after-signed-candidate": 1,
-      "retained-evolved": 185,
-      "retained-identical": 362,
+      "retained-evolved": 189,
+      "retained-identical": 358,
       "retired-low-value-conductor": 1,
       "reviewed-repository-history": 1,
       "reviewed-tooling-history": 1,
@@ -3667,9 +3667,9 @@
     },
     {
       "path": "docs/trust/continuity.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/trust/controls.md",
@@ -3745,9 +3745,9 @@
     },
     {
       "path": "docs/trust/tiers.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "examples/demo-policy.json",
@@ -4099,15 +4099,15 @@
     },
     {
       "path": "open-spec/rawx-capability-model.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "open-spec/rawx-owasp-agentic-mapping.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "open-spec/README.md",

@@ -1,68 +1,55 @@
-# Ghostlight Data Flows
+# Ghostlight data flows
 
-This page states where data moves when you run Ghostlight: between local processes on your
-endpoint and to destinations you configure, and nowhere else.
-
-## What runs where
-
-The Ghostlight MCP edge, persistent service, and browser-only relay run on the endpoint. The
-extension runs inside the user's own Chromium browser on the same endpoint. There is no
-vendor-hosted Ghostlight service or cloud backend anywhere in the path. Your MCP client and the
-model behind it are yours, running where you run them.
+Ghostlight has no vendor-hosted runtime or cloud backend. Browser work, policy decisions, and
+audit run on the endpoint.
 
 ## Flows that exist
 
-| Flow | Transport | Where it goes |
+| Flow | Transport | Destination |
 | --- | --- | --- |
-| MCP client to `ghostlight-mcp-connector` edge | stdio | Local, same machine. |
-| MCP edge to service | Named pipe or Unix-domain socket | Local, owner-scoped typed IPC. |
-| Service to browser relay | Named pipe or Unix-domain socket | Local, owner-scoped IPC. |
-| Browser relay to extension | Chromium native messaging | Local, same machine. |
-| Extension to pages | DevTools protocol | The user's own authenticated browser session. |
-| Audit records | file (JSON Lines), syslog (RFC 5424 over UDP), stderr, or none | The destination you configure; default is a local file. |
-| Managed policy fetch | conditional HTTP(S) GET | Your own policy endpoint, and only when your organization configures central policy. The bundle signature, not the transport, is the trust anchor. |
+| MCP client to MCP connector | stdio | Same endpoint. |
+| MCP connector to service | Authenticated loopback TCP with typed framing | Same endpoint. |
+| Service to browser connector | Authenticated loopback TCP with typed framing | Same endpoint. |
+| Browser connector to extension | Chromium native messaging | Same endpoint. |
+| Extension to the controlled page | Chrome DevTools Protocol | The user's existing browser profile. |
+| Browser page traffic | Browser networking | Sites the user or MCP client directs the browser to. |
+| Audit records | Append-only JSON Lines file | Local path selected by the endpoint owner. |
+| Managed policy fetch | Local file read or conditional HTTPS GET | Customer-configured source, only when an administrator provisions `managed.json`. |
 
-Every one of these is either local to the endpoint or directed at a destination you own and
-choose. Only two flows can leave the endpoint, and both are yours: audit delivery to the
-destination you configure, and the optional managed policy fetch from an endpoint your
-organization hosts.
+The managed HTTPS source may use a bearer token and organization CA pin. The signed bundle is the
+authority: Ed25519 is required, optional ML-DSA-65 makes both legs mandatory, and rollback is
+refused by monotonic sequence. No bootstrap means no policy network work.
 
 ## Flows that do not exist
 
-The following flows are absent by design, not merely unused, and each is foreclosed by
-ADR-0028 Decision 9 (never phone home, normative and permanent):
+- No telemetry, analytics, crash upload, activation callback, or update ping.
+- No audit upload, direct syslog delivery, HTTP collector, or inbound management listener.
+- No Ghostlight model-provider call. The MCP client owns its model relationship.
+- No vendor policy endpoint or embedded vendor policy key.
 
-- Vendor telemetry: none. Ghostlight sends no usage, diagnostic, or analytics data to the
-  vendor.
-- Licensing callbacks: none. License state is evaluated locally and never validated against a
-  vendor server.
-- Update phone-home: none. The Ghostlight executables do not call out to check for or pull
-  updates. (The extension, once installed from the Chrome Web Store, follows Chrome's own store
-  update mechanism; self-hosted and load-unpacked installs update only when you update them.)
-- Model-provider calls: none. Ghostlight calls no LLM; the model belongs to your MCP client.
-
-There is zero vendor-bound traffic. Ghostlight has no channel over which your data could reach
-the vendor, because no such channel is built.
+There is zero vendor-bound traffic. The only Ghostlight-initiated network flow that may leave the
+endpoint is the explicitly configured managed HTTPS fetch to the customer's own source. Ordinary
+site traffic remains browser traffic.
 
 ## Local artifacts
 
-Ghostlight writes a small set of artifacts, all on your endpoint and all owned and retained by
-you:
+- `audit.jsonl`, or the path in `GHOSTLIGHT_AUDIT_FILE`, contains content-minimized terminal
+  records. Use the endpoint's existing file collector for SIEM delivery.
+- The runtime discovery file contains loopback ports, protocol majors, and a local authentication
+  token.
+- Managed deployments keep a verified signed bundle cache and a content-minimized status sidecar.
+  The sidecar includes verification, sequence, freshness, source class, timing, organization, and
+  contacts, but no source address, bearer token, verification key, or policy rules.
+- Browser adapter settings and MCP-client registrations remain in their platform-native local
+  stores.
 
-- Audit records: JSON Lines files (or a syslog stream, or nothing) at the destination you
-  set. Records are content-minimized decision metadata about what each action did, including the
-  governed host it attempted or landed on and, by default, one bounded visible name for the element
-  actually used. Governance can remove target names. Records never contain arbitrary page text,
-  typed values, screenshots, selectors, or the rest of a URL. The records are not themselves signed, so integrity of the
-  log store is a customer-side control.
-- Policy cache and status sidecar: present only when you use central policy. The cache is
-  signed and its signature is verified on load, so a tampered on-disk policy is rejected rather
-  than enforced; the sidecar records the current policy status.
-- Configuration files: the local settings and policy configuration you author.
+The governed host and optional bounded target name are the only page-derived audit text. Audit
+does not contain paths, queries, fragments, arbitrary page text, selectors, target handles, typed
+values, scripts, screenshots, recordings, or credentials. Retention and deletion are customer
+controls.
 
-None of these is transmitted to the vendor. Deletion and retention are entirely under your
-control.
+See [security-overview.md](security-overview.md),
+[the SIEM guide](../guides/siem-integration.md), and
+[the governance guide](../guides/governance-configuration.md).
 
-See [security-overview.md](security-overview.md) and [sub-processors.md](sub-processors.md).
-
-Last reviewed: 2026-08-04 against the unreleased ADR-0096 working tree | Contact: support@sylin.org
+Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org

@@ -1,6 +1,10 @@
 # Ghostlight 1.0 greenfield first-success acceptance
 
-Status: planned release gate
+Status: rejected as a release gate; retained only as historical planning material
+
+This process is not part of Ghostlight 1.0 readiness. It imposed a research cohort and duplicated
+the real package, browser, and first-use evidence in `docs/1.0/ACCEPTANCE.md`. Do not execute or
+report it as required release work.
 
 ## Purpose
 

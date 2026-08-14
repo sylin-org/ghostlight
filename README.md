@@ -127,7 +127,7 @@ Closing a tab needs two independent yes votes: the orchestrator's authority, and
 preserve-tabs setting, which ships on. That keeps the evidence of what happened in front of you.
 Closing a tab yourself always works.
 
-The audit record holds identifiers, decisions, and content-free measurements: which tool ran,
+The audit record holds identifiers, decisions, and content-minimized measurements: which tool ran,
 whether authority allowed it, how long it took, and what it did -- 3 fields, 1,240 words, 1280x720.
 The site an action landed on is named, because that answers where your agent went and is already in
 your own tab strip. Paths, queries, fragments, page text, field values, screenshots, selectors, and

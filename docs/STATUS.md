@@ -13,6 +13,38 @@ last fetch.
 The repository carries exactly two branches, `main` and `dev`, as of 2026-08-13. The topology is
 linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 
+## RAWX and managed-policy restoration
+
+The 1.0 policy product is restored on current orchestrator seams through `44f84eae`.
+
+- RAWX is an independent set, not a rank. The exact action directory drives enforcement, audit,
+  catalog projection, explanation, simulation, and tests. Sequence steps are admitted separately.
+- Strict schema-3 ordered grants, host polarity and specificity, observe/enforce, layer
+  intersection, sacred destinations, stable denial ids, grant attribution, and managed publish
+  sequence are live.
+- Policy-aware catalog projection emits the standard MCP tool-list change notification while
+  all-open remains the exact 22-tool catalog.
+- Local and managed policy reload atomically for future snapshots. Bad replacements keep last
+  valid; configured cold start without authority fails closed.
+- Customer-hosted file or HTTPS delivery uses signed monotonic bundles, required Ed25519, optional
+  mandatory-both ML-DSA-65, verified cache, ETag, CA pin, bearer option, bounded retry, rollback
+  refusal, and local signing/publication commands. No bootstrap performs no network work.
+- The workbench Policy Passport shows organization, rationale, contacts, verification, sequence,
+  freshness, source class, and verification time without source addresses, credentials, keys, or
+  rules.
+- Repeated enforced denials enter the existing workspace-local attention and runtime-control path.
+  The full workspace gate passes with 197 orchestrator library tests, 2 orchestrator binary tests,
+  30 bridge tests, 4 MCP connector tests, warnings denied, and 101 extension tests.
+
+The active 1.0 guides, contracts, public RAWX specification, pricing language, and Trust Center now
+describe this feature set rather than the removed flat policy. The invented cohort-based
+`greenfield-first-success.md` process is explicitly rejected as a release gate. Historical SPEC,
+ADRs, research, and 0.8 task evidence remain preserved as history.
+
+Direct UDP syslog from 0.8 was not rebuilt. The 1.0 audit contract is append-only local JSONL,
+collected by the endpoint's existing file agent. Trust Center claims now say that plainly instead
+of promising a sink that is absent. HTTP audit upload remains absent.
+
 ## Windows 1.0 development-host and package result
 
 The Windows lane passed through implementation `b292bb22` on 2026-08-14. This is a
@@ -596,9 +628,8 @@ source-gate pass, not release approval.
   the final public documentation only when the 1.0 artifacts exist.
 - Use the Chrome Developer Dashboard for store submission. Repair API V2 access only if its optional
   automation is worth the effort; it is not a release gate.
-- Bring `test-host-01` back onto reachable DNS/mDNS or provide its current address, then record a
-  stable SSH alias and execute the checked Linux lifecycle matrix. The SSH identity itself is not
-  lost.
+- Re-run the Linux lifecycle and visible-browser policy matrix on the current policy-restoration
+  revision using the `test-01` development host.
 - Publish the candidate-bound `ghostlight@1.0.0` tarball only after its six raw GitHub assets are
   observable. Then update `server.json` and publish the MCP Registry record; it must never point a
   1.0 record at the public 0.8 launcher.

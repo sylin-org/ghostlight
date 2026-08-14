@@ -63,8 +63,8 @@ from exactly these four primitives.
   change is what is performed. Example: setting a form field to a given value.
 
 - `execute` -- The operation runs unbounded, arbitrary code in the target context.
-  Example: evaluating a script in a page. `execute` is the broadest capability and is
-  never implied by any other.
+  Example: evaluating a script in a page. `execute` is independent and is never implied by
+  any other capability.
 
 Definitions are about knowability, not severity. `write` is often less dangerous than
 `action` even though it is a declared mutation, because a declared mutation is bounded
@@ -107,9 +107,10 @@ Polarity lets "everywhere except here" be written directly: `allow` the broad pa
 
 ## The containment rule (normative)
 
-Enforcement compares the operation's required capability set against the union of
-capabilities the applicable grants allow for the resource. The call is permitted only if
-the required set is a subset of the allowed set:
+Enforcement compares the operation's required capability set against individual applicable
+grants for the resource. The call is permitted only if the complete required set is a subset of
+one resolving grant's allowed set. Capabilities from separate resource grants MUST NOT be pooled
+to manufacture an admission:
 
 - An empty required set is a subset of every set, including the empty set. Operations
   that require nothing are always permitted with respect to capabilities.
@@ -169,7 +170,7 @@ durable asset; the mechanism is the transient one.
 ## Relationship to implementations
 
 Ghostlight is the reference implementation and governs a browser: hosts are the
-resources, and the thirteen trained tool operations plus their sub-actions map onto the
+resources, and the 22 catalog tools plus their sub-actions map onto the
 four capabilities through a published directory. Internally the model is documented as
 "intent-calibrated" or "epistemic" capability classification; RAWX is the public name
 for the vocabulary. Other implementations are welcome and encouraged; conformance means

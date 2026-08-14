@@ -6,8 +6,8 @@
     "total": 809,
     "byCurrentState": {
       "absent": 262,
-      "retained-evolved": 185,
-      "retained-identical": 362
+      "retained-evolved": 189,
+      "retained-identical": 358
     }
   },
   "entries": [
@@ -81,7 +81,7 @@
       "historicalType": "blob",
       "historicalBlob": "db01dec35ea7c728ed4c5104cd99d5e4a50352c6",
       "currentState": "retained-evolved",
-      "currentBlob": "8e444973d8e64ed3096de15b6b174317ec671ec1"
+      "currentBlob": "a3a4aa512ca1734d5487ce41cca987b8f48f7759"
     },
     {
       "path": ".github/workflows/ci.yml",
@@ -90,7 +90,7 @@
       "historicalType": "blob",
       "historicalBlob": "7c9842d6b04ef4d86b87f244f0bd39030d8d2667",
       "currentState": "retained-evolved",
-      "currentBlob": "fd1cfc08b975e3cfa91476c03fac862d218cd95f"
+      "currentBlob": "31237f1f4f457bebed67b58e270abf2cb157f91d"
     },
     {
       "path": ".github/workflows/pages.yml",
@@ -108,7 +108,7 @@
       "historicalType": "blob",
       "historicalBlob": "2249445a1a6803d152d3a24861e6b3145b9f335c",
       "currentState": "retained-evolved",
-      "currentBlob": "3c8ad53b29fcaeed38443911b6d31e7201f3088e"
+      "currentBlob": "5be3c685b79d097bd1d34f616c72d511776eda88"
     },
     {
       "path": ".gitignore",
@@ -288,7 +288,7 @@
       "historicalType": "blob",
       "historicalBlob": "26880fea533e4b5cabbe3844ccdd6de5082ef8b2",
       "currentState": "retained-evolved",
-      "currentBlob": "db7057fb1f19438c1eab3d9be42cc4b3932127c1"
+      "currentBlob": "84dc57ea170297a674b97d3f0d206835f8c06f9c"
     },
     {
       "path": "Cargo.toml",
@@ -297,7 +297,7 @@
       "historicalType": "blob",
       "historicalBlob": "c0fc30542e83e54ea2956feb2a858db67693ba24",
       "currentState": "retained-evolved",
-      "currentBlob": "5a0a69dfa1113d000dc348bbdcee72bbb49679f9"
+      "currentBlob": "2df239d290b2251f4bf6de418a6aff683b545bc3"
     },
     {
       "path": "CHANGELOG.md",
@@ -351,7 +351,7 @@
       "historicalType": "blob",
       "historicalBlob": "c9cd0394f880809d16ad392c5dc0774c73b26ed7",
       "currentState": "retained-evolved",
-      "currentBlob": "ac4bce23a2170d9d09c00e75855b550614bd4328"
+      "currentBlob": "8e4a8ca2b30f5bcb2e67ddcb370ce091e910fa62"
     },
     {
       "path": "coordination/INSTRUCTIONS.md",
@@ -369,7 +369,7 @@
       "historicalType": "blob",
       "historicalBlob": "e109b6bd73ef3277ec0c6ba8623388d8ee11ac8d",
       "currentState": "retained-evolved",
-      "currentBlob": "2d62a9e57fdde03ee60782641f436c9fab18d4a9"
+      "currentBlob": "b778b9a924b1fe53afd938a7c2b2f9e1a6d51722"
     },
     {
       "path": "crates/browser-connector/Cargo.toml",
@@ -1476,7 +1476,7 @@
       "historicalType": "blob",
       "historicalBlob": "5a1c1b5efdc08d3c3f41d0f27d9729a9e1cdcae5",
       "currentState": "retained-evolved",
-      "currentBlob": "1e67ad82a3f11230c31435d2297f47ea113b3792"
+      "currentBlob": "9153c3e27bfd9a0c138b50716995f4b9736e9927"
     },
     {
       "path": "crates/mcp-connector/src/mcp_2025_11_25.rs",
@@ -1701,7 +1701,7 @@
       "historicalType": "blob",
       "historicalBlob": "caf45c47c6321cdef439cd5896b137b10e9520cb",
       "currentState": "retained-evolved",
-      "currentBlob": "af9a087be810a48f4cc5a3e9f71bd89e7323cdf4"
+      "currentBlob": "3a31dd640053da8915bc1efc91049b3d8add848f"
     },
     {
       "path": "docs/adr/0001-single-binary-thin-extension.md",
@@ -2619,7 +2619,7 @@
       "historicalType": "blob",
       "historicalBlob": "4a8c566c732a1a9623d9e816c62fc0637531f72a",
       "currentState": "retained-evolved",
-      "currentBlob": "06836f7d094768f8d04bd1c6dbeaeb91f88283a7"
+      "currentBlob": "16f83ab403c9944ba3db1f19e762bfd8c0ba9882"
     },
     {
       "path": "docs/assets/demo.gif",
@@ -2754,7 +2754,7 @@
       "historicalType": "blob",
       "historicalBlob": "f73c86b3400b65c302c214c57e8a5ce088c74b90",
       "currentState": "retained-evolved",
-      "currentBlob": "c0dccf27bd665674740cd6eb3e72045d1262bf78"
+      "currentBlob": "159b69c3153c2a03d91d2aadcc1e8987ea050df3"
     },
     {
       "path": "docs/design/developer-first-entry-2026-07.md",
@@ -2835,7 +2835,7 @@
       "historicalType": "blob",
       "historicalBlob": "26405af2a2e828ca99c1e2a417672af785385ff8",
       "currentState": "retained-evolved",
-      "currentBlob": "1abd2add736b7bc32233aa4737b6eacf2150d8f8"
+      "currentBlob": "373f64df86b76811c73ec8b03734e18b327a4082"
     },
     {
       "path": "docs/design/tool-visual-signatures.md",
@@ -2898,7 +2898,7 @@
       "historicalType": "blob",
       "historicalBlob": "35b57908872084339c6b0070d360baa872e5d324",
       "currentState": "retained-evolved",
-      "currentBlob": "a22cb3893683505aa9167b216ec86324a3670266"
+      "currentBlob": "cce1ffe311187feb88c5f58d057ec877e8673a4c"
     },
     {
       "path": "docs/guides/compliance-team.md",
@@ -2907,7 +2907,7 @@
       "historicalType": "blob",
       "historicalBlob": "c1e28d4a6b0ba70ded331c09d37555018b46b75f",
       "currentState": "retained-evolved",
-      "currentBlob": "16b826ccab10fbd4924f08755aefd834b1901f2a"
+      "currentBlob": "fd93c924b5e9f92a183e8e73336cd19ebbb16f14"
     },
     {
       "path": "docs/guides/governance-configuration.md",
@@ -2916,7 +2916,7 @@
       "historicalType": "blob",
       "historicalBlob": "4faf6da1531e99f4065492f4293150f1d0d55e33",
       "currentState": "retained-evolved",
-      "currentBlob": "c78961a285c3617792a00fd10151324b5b9edfef"
+      "currentBlob": "97d86c67237b07e73c0516375db42b06d197109a"
     },
     {
       "path": "docs/guides/installation.md",
@@ -2925,7 +2925,7 @@
       "historicalType": "blob",
       "historicalBlob": "92899027be3f0cbeceabea0cb9bca13a4844232f",
       "currentState": "retained-evolved",
-      "currentBlob": "b423ca382133213668214def595bd6ca9a877469"
+      "currentBlob": "38ce4ac5304798be2597e7823ae559d00e5290c2"
     },
     {
       "path": "docs/guides/licensing.md",
@@ -2952,7 +2952,7 @@
       "historicalType": "blob",
       "historicalBlob": "52eabe840a6ba9984ba32493e4b340ab2a14eec7",
       "currentState": "retained-evolved",
-      "currentBlob": "1ef9b5f1f08b6974262bd6f65dec8c394cdfc0c9"
+      "currentBlob": "1ba3f73ecc9bb66f7a6339fb843e8a91d970c72b"
     },
     {
       "path": "docs/guides/siem-integration.md",
@@ -2961,7 +2961,7 @@
       "historicalType": "blob",
       "historicalBlob": "b031f4b60c277aa94243fc4fe17fdfa5f7682d72",
       "currentState": "retained-evolved",
-      "currentBlob": "ccff417835eb0bb342bfec0727a6f5c0192d98c5"
+      "currentBlob": "0348a4152c6cfc12d8ee86050366026b2b9e2268"
     },
     {
       "path": "docs/guides/solo-developer.md",
@@ -2970,7 +2970,7 @@
       "historicalType": "blob",
       "historicalBlob": "d0f72dab62fe3f32c0e9bdd807be6e734052a4f6",
       "currentState": "retained-evolved",
-      "currentBlob": "4158270b43d3fb99c7ea180f80ff4fab450a7f05"
+      "currentBlob": "5d46782e173301e00605dbd3f62ccb6745e01f33"
     },
     {
       "path": "docs/legal/PERMISSION_JUSTIFICATIONS.md",
@@ -2988,7 +2988,7 @@
       "historicalType": "blob",
       "historicalBlob": "72b3b7dc9721f76501e767e084e2341bb824329e",
       "currentState": "retained-evolved",
-      "currentBlob": "3880c62045a3f5e757737de7bb93144652fbdd74"
+      "currentBlob": "652df49b3e0f36d4b16ca61286a43baef6712f30"
     },
     {
       "path": "docs/legal/STORE_LISTING.md",
@@ -2997,7 +2997,7 @@
       "historicalType": "blob",
       "historicalBlob": "82127045dcfef92074b480f9417d69be58c3fd02",
       "currentState": "retained-evolved",
-      "currentBlob": "a403f40774433532c0f86601fa49a0afc53ab541"
+      "currentBlob": "1b82b75aaf2033ea14cda78c5b20ff7b08462c3b"
     },
     {
       "path": "docs/licenses/LicenseRef-Ghostlight-Commercial.txt",
@@ -3024,7 +3024,7 @@
       "historicalType": "blob",
       "historicalBlob": "891ab7a4da78ea50d6b8f67da8228e56b9897f19",
       "currentState": "retained-evolved",
-      "currentBlob": "d3266bb24550a4f6147ea2387ec2b24b1c159bf9"
+      "currentBlob": "0dc811655732583f187abaf17642b29e757a5c89"
     },
     {
       "path": "docs/public-status.json",
@@ -3042,7 +3042,7 @@
       "historicalType": "blob",
       "historicalBlob": "2e1edc340e68f383aa83e2ac3fd0690f0a1a5da6",
       "currentState": "retained-evolved",
-      "currentBlob": "bbc1fa1cf7af86881459dc9a3f0bf46b28688197"
+      "currentBlob": "c32303d30cc265e26c35ee86802b12d88da87a22"
     },
     {
       "path": "docs/research/00-synthesis-and-decisions.md",
@@ -3357,7 +3357,7 @@
       "historicalType": "blob",
       "historicalBlob": "9eabb624c54f70fa3c5f7f424c15f7723eeebc8e",
       "currentState": "retained-evolved",
-      "currentBlob": "c66c6ad183f468dc6a4bedd943b1326c23195568"
+      "currentBlob": "ce3796fe406cf5029638325fb0eb6ac1e8309605"
     },
     {
       "path": "docs/tasks/browser-kernel/BOOTSTRAP.md",
@@ -5472,7 +5472,7 @@
       "historicalType": "blob",
       "historicalBlob": "2dc98270ab2544d770ea484597edca90d9c56577",
       "currentState": "retained-evolved",
-      "currentBlob": "d289f7f6ff55d9c518c65ca9ca5119ea516b9e39"
+      "currentBlob": "399f63a10d3f390250b94299547fbdd9298d2653"
     },
     {
       "path": "docs/testing/linux-live-lifecycle.md",
@@ -5481,7 +5481,7 @@
       "historicalType": "blob",
       "historicalBlob": "793d9bd9b0883017a08fc3a878ea90c4b6ecc54d",
       "currentState": "retained-evolved",
-      "currentBlob": "a848b0ed31ed2c24f3e71cbac406621c6e7b8bce"
+      "currentBlob": "71c9c34cbe70c28f26036ddca02eca16559bca0c"
     },
     {
       "path": "docs/trust/continuity.md",
@@ -5489,8 +5489,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "89c9c9e564b2c53606e9494ef1b9b4bf1f8774d8",
-      "currentState": "retained-identical",
-      "currentBlob": "89c9c9e564b2c53606e9494ef1b9b4bf1f8774d8"
+      "currentState": "retained-evolved",
+      "currentBlob": "eaf8e5d0d416f10bc7cb33dac768518c87c01d2e"
     },
     {
       "path": "docs/trust/controls.md",
@@ -5499,7 +5499,7 @@
       "historicalType": "blob",
       "historicalBlob": "9751c4429fa901ae765682233a560499add35f0c",
       "currentState": "retained-evolved",
-      "currentBlob": "1b46d905bfadf152b6e6f7e7392f1a247fc5562e"
+      "currentBlob": "d3f4fb6dc4b3f3a674b315d70887755e1e909c62"
     },
     {
       "path": "docs/trust/data-flows.md",
@@ -5508,7 +5508,7 @@
       "historicalType": "blob",
       "historicalBlob": "1bfd054025819f4c902bbc58d5637c2e25941433",
       "currentState": "retained-evolved",
-      "currentBlob": "574a40bab42ed943a025a272d966e91bee6ff78d"
+      "currentBlob": "3b7c5577efd4d2cafa94f8d702a07113c10fdeba"
     },
     {
       "path": "docs/trust/dpa.md",
@@ -5526,7 +5526,7 @@
       "historicalType": "blob",
       "historicalBlob": "76bd12090e7c6023671c411a3f4661eaa57393b8",
       "currentState": "retained-evolved",
-      "currentBlob": "50a2f0b00840ef2ad78acd6c1e631abda4d57ac9"
+      "currentBlob": "dfade8813a1d1eedd3d1c312271236675743f6e0"
     },
     {
       "path": "docs/trust/msa.md",
@@ -5553,7 +5553,7 @@
       "historicalType": "blob",
       "historicalBlob": "4161195cc95ccf7f8135145d8afe08baa40b0752",
       "currentState": "retained-evolved",
-      "currentBlob": "4565b832f1e0c78262ca1dac49ff98fdd00102f5"
+      "currentBlob": "64a56368b451b5504c6220423d5331646738303e"
     },
     {
       "path": "docs/trust/README.md",
@@ -5562,7 +5562,7 @@
       "historicalType": "blob",
       "historicalBlob": "3034e9768207dc28090b5f5ab613a489213fbd70",
       "currentState": "retained-evolved",
-      "currentBlob": "189ab30526e813934acd94a57628ef167879ecbe"
+      "currentBlob": "68e4421e1f5f052d65534f0fb30039d9fb81ad8c"
     },
     {
       "path": "docs/trust/security-overview.md",
@@ -5571,7 +5571,7 @@
       "historicalType": "blob",
       "historicalBlob": "b7457b441b74c300dc8600f6ba74bdbbec8e8843",
       "currentState": "retained-evolved",
-      "currentBlob": "ea4ab89107b8d4388df79122e318e822d0f5bd18"
+      "currentBlob": "c068eed21ccc717891cbd799ac6253ac43b74d50"
     },
     {
       "path": "docs/trust/sub-processors.md",
@@ -5589,7 +5589,7 @@
       "historicalType": "blob",
       "historicalBlob": "8026938c62546722f64612a79af6812e9131c90d",
       "currentState": "retained-evolved",
-      "currentBlob": "73f1b2f3dbe4258cee88c2113a594692f906d524"
+      "currentBlob": "b28d5221e87fd359e88945cdeea2405c5ec2963a"
     },
     {
       "path": "docs/trust/support-policy.md",
@@ -5598,7 +5598,7 @@
       "historicalType": "blob",
       "historicalBlob": "b65f059007dda46bb77f453945556c9435032b5e",
       "currentState": "retained-evolved",
-      "currentBlob": "2f55ef0d47438f690ff6f7393983084deac3a62a"
+      "currentBlob": "f32d1aa02508376fd8ac2b3dbef63f091b18b479"
     },
     {
       "path": "docs/trust/tiers.md",
@@ -5606,8 +5606,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "85c19392c0dcd92ddd35b6e340b10344e97af9b1",
-      "currentState": "retained-identical",
-      "currentBlob": "85c19392c0dcd92ddd35b6e340b10344e97af9b1"
+      "currentState": "retained-evolved",
+      "currentBlob": "2dba36d7610ac904f85e17409e941fe105e78e9a"
     },
     {
       "path": "examples/demo-policy.json",
@@ -5616,7 +5616,7 @@
       "historicalType": "blob",
       "historicalBlob": "9b57d3e65c5c0bdc25cb4096e908c8cf4e92b3a1",
       "currentState": "retained-evolved",
-      "currentBlob": "f3986864e3cf8d32c154f48548cfc2c804167682"
+      "currentBlob": "1666737f2d9b805f57d935c70df22374b0148be3"
     },
     {
       "path": "examples/dev-live-test.json",
@@ -5625,7 +5625,7 @@
       "historicalType": "blob",
       "historicalBlob": "d88358b8b6c76233896496dc5bbfb5c1e9a8a35c",
       "currentState": "retained-evolved",
-      "currentBlob": "14048c028fee51fbe0b1a313237a9001528cab51"
+      "currentBlob": "ebfee7942ee643212b28968752dd69b30a73406f"
     },
     {
       "path": "examples/developer-observe.json",
@@ -5634,7 +5634,7 @@
       "historicalType": "blob",
       "historicalBlob": "19054d598e5a026b6e5833481f2e18f3f389dab6",
       "currentState": "retained-evolved",
-      "currentBlob": "1442a721e2b78cab3a2f08e99268fd5d8a44f771"
+      "currentBlob": "f8657dffb308e2756ce299b3d99cc510d3170625"
     },
     {
       "path": "examples/developer-unrestricted.json",
@@ -5643,7 +5643,7 @@
       "historicalType": "blob",
       "historicalBlob": "e369f6bce35d754e9995914ff76d5d04ae42f822",
       "currentState": "retained-evolved",
-      "currentBlob": "61a2092b1b7fa0678466557b6fad95d67b50a112"
+      "currentBlob": "4ff271b3a91220992f0d5af24d762aa46e8c16ea"
     },
     {
       "path": "examples/enterprise-healthcare.json",
@@ -5652,7 +5652,7 @@
       "historicalType": "blob",
       "historicalBlob": "4c0ffde9ce642728839fc27a4b42b3e7e5a1aa4e",
       "currentState": "retained-evolved",
-      "currentBlob": "eca8dcea8194c71bc685e330298aacfe8a7d6aa4"
+      "currentBlob": "f09443707c1f786a9b66c254b731050a36bbcb75"
     },
     {
       "path": "examples/qa-staging.json",
@@ -5661,7 +5661,7 @@
       "historicalType": "blob",
       "historicalBlob": "c393f911c684712ee10f92372c4dfcdcde285302",
       "currentState": "retained-evolved",
-      "currentBlob": "2be3ead2f1ec8a20c48d5a04c0ac89a5e816fda3"
+      "currentBlob": "3df06e601f916ea603d043daebd65f86c84802a3"
     },
     {
       "path": "examples/research-read-only.json",
@@ -5670,7 +5670,7 @@
       "historicalType": "blob",
       "historicalBlob": "6c27d1346db32a3afa996bc88dbb38ad7d817dba",
       "currentState": "retained-evolved",
-      "currentBlob": "d0409d104fa3b873146b911b7aef19fe63e5c467"
+      "currentBlob": "f7eb116a160e9a67903a3fc4a0bbe942c10522b0"
     },
     {
       "path": "extension/agent-visual-indicator.js",
@@ -6057,7 +6057,7 @@
       "historicalType": "blob",
       "historicalBlob": "597ed352cae51e5569c4c3d96c7fca0c98082d6b",
       "currentState": "retained-evolved",
-      "currentBlob": "4bfd00a28360193c5193bb708d343b33bf8f3144"
+      "currentBlob": "17d8de1914bd444ecd039fc2d876cef5c7c97fc0"
     },
     {
       "path": "glama.json",
@@ -6111,7 +6111,7 @@
       "historicalType": "blob",
       "historicalBlob": "4b344ae768311d2eceb1241784e860dd8db21883",
       "currentState": "retained-evolved",
-      "currentBlob": "3ae494838ab0e6b7718118d5024a1301e52e25bb"
+      "currentBlob": "5cd1f6f75df77c5984b0f18073ef7a9a0dbee2c3"
     },
     {
       "path": "local/README.md",
@@ -6137,8 +6137,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "d8228e67746b0ce0f4eb89c36fd9b9030ad0f949",
-      "currentState": "retained-identical",
-      "currentBlob": "d8228e67746b0ce0f4eb89c36fd9b9030ad0f949"
+      "currentState": "retained-evolved",
+      "currentBlob": "2492bc8588ca3df7483732443a96f26c42380c3d"
     },
     {
       "path": "open-spec/rawx-owasp-agentic-mapping.md",
@@ -6146,8 +6146,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "4715c0e0fddb855752bb928b09517949f224abb0",
-      "currentState": "retained-identical",
-      "currentBlob": "4715c0e0fddb855752bb928b09517949f224abb0"
+      "currentState": "retained-evolved",
+      "currentBlob": "a01660c95be16212f6791bcfddf13104adf16b12"
     },
     {
       "path": "open-spec/README.md",
@@ -6210,7 +6210,7 @@
       "historicalType": "blob",
       "historicalBlob": "449ea421883859e154545a743556f80987e9f6e2",
       "currentState": "retained-evolved",
-      "currentBlob": "2f295b1c0e76c7897ab15dcd3b8394444d9431b0"
+      "currentBlob": "efa2a1608a60f6f0c9a008106d2680c5a74d5f6a"
     },
     {
       "path": "packaging/npm/checksums.json",
@@ -6246,7 +6246,7 @@
       "historicalType": "blob",
       "historicalBlob": "cb03dc9dab0fd0efc26bc633582ea44c83c9204e",
       "currentState": "retained-evolved",
-      "currentBlob": "1b531b34077892a5e6332f778922245d1e2b68c7"
+      "currentBlob": "ab7ae9cf83ddb4f58068883c4992d9da91f2c059"
     },
     {
       "path": "packaging/scoop/ghostlight.json",
@@ -6273,7 +6273,7 @@
       "historicalType": "blob",
       "historicalBlob": "24b6aa05386d0d214c89541cf220eca44e1bd74b",
       "currentState": "retained-evolved",
-      "currentBlob": "caa4392e886d25e838530625b33478618720b420"
+      "currentBlob": "6aaeec586550dc38893a113ace8fd77738523588"
     },
     {
       "path": "README.md",
@@ -6282,7 +6282,7 @@
       "historicalType": "blob",
       "historicalBlob": "29f1cbbda0cf22cd1a521cb9fd1631253c37ecad",
       "currentState": "retained-evolved",
-      "currentBlob": "49270de7a8bb5a0d308b66404bc698dfc2047d97"
+      "currentBlob": "adebda7d109566a4712773e41400f3b2519030ed"
     },
     {
       "path": "ROADMAP.md",
@@ -6354,7 +6354,7 @@
       "historicalType": "blob",
       "historicalBlob": "d601d84c4d00c71dcde4d2943b3289c2d3f77317",
       "currentState": "retained-evolved",
-      "currentBlob": "9a76dc693080550de27dec53e461d9689fcc5913"
+      "currentBlob": "9227dbf9a45a0e9cff446a6247aaa87e9351ae5d"
     },
     {
       "path": "scripts/get.sh",
@@ -6363,7 +6363,7 @@
       "historicalType": "blob",
       "historicalBlob": "6a7df61c5094b050749e6d194ea485e4368e4c07",
       "currentState": "retained-evolved",
-      "currentBlob": "718e5b625ce43e69f2d9667c962c241f70149848"
+      "currentBlob": "253b6a52ce7972ae4622fc29b6389f3d272bea35"
     },
     {
       "path": "scripts/package-extension.ps1",
@@ -6381,7 +6381,7 @@
       "historicalType": "blob",
       "historicalBlob": "20e4b09beaa27a2441eb2f97bc82b3d439d9250b",
       "currentState": "retained-evolved",
-      "currentBlob": "2434f46ebaa29e99867dfb67add171c118d7b818"
+      "currentBlob": "a8cd055c7ac87bb4af529271bd06a3cae0b3aab0"
     },
     {
       "path": "scripts/prepare-winget.ps1",
@@ -6399,7 +6399,7 @@
       "historicalType": "blob",
       "historicalBlob": "03e944037d16aa43781010559ef64694ceb702bc",
       "currentState": "retained-evolved",
-      "currentBlob": "00f9636d31bbce04abc3e1581131c4e7c9b66997"
+      "currentBlob": "8fd1b997c91a0ceebfd1558edd53f507421c46d4"
     },
     {
       "path": "scripts/publish-website.ps1",

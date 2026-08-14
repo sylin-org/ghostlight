@@ -24,7 +24,7 @@ ourselves to.
 ## Scope
 
 Support covers the things you need to run Ghostlight: installation, configuration, authoring
-and troubleshooting policy, and `managed://` central-policy deployment. It does not cover
+and troubleshooting policy, and signed managed-policy deployment. It does not cover
 custom development, nor the operation of your own MCP client or the model behind it, which are
 outside Ghostlight and belong to you and your provider. Where an issue turns out to be a
 defect in Ghostlight, it is handled through the normal release process: fixes land on the
@@ -40,4 +40,4 @@ security questionnaires: where the published CAIQ-shaped self-assessment does no
 portal, I complete one full questionnaire per year on request. These match the Enterprise
 commitments on the pricing page.
 
-Last reviewed: 2026-07-14 against v0.8.0 | Contact: support@sylin.org
+Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org

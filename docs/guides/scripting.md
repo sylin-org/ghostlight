@@ -94,7 +94,7 @@ thing that executes.
 Every record says which intake the work arrived on:
 
 ```json
-{ "tool": "browser_navigate", "channel": "cli", "capability": "action", "allowed": true }
+{ "tool": "browser_navigate", "channel": "cli", "capabilities": ["read"], "allowed": true }
 ```
 
 The workbench shows it too, and scripted tabs group under their own name in the browser, so a script
@@ -110,7 +110,15 @@ security boundary, and Ghostlight does not pretend it is.
 An organization that wants agent work but not scripted work closes the channel in policy:
 
 ```json
-{ "version": 1, "channels": { "cli": {} } }
+{
+  "schema": 3,
+  "name": "MCP only",
+  "version": "1",
+  "grants": [],
+  "config": [
+    {"key": "channels.cli.enabled", "value": false, "level": "mandatory"}
+  ]
+}
 ```
 
 `ghostlight call` then exits non-zero with `channel_denied` before any session opens, and nothing is
@@ -130,13 +138,7 @@ It exits with Ghostlight's own code rather than inventing one, so a refusal stay
 from a breakage. On a default install the close step is refused by the browser's preserve-tabs
 setting and the script exits 2, which is governance working rather than the journey failing.
 
-[`scripts/demo-brief.ps1`](../../scripts/demo-brief.ps1) and
-[`scripts/demo-brief.sh`](../../scripts/demo-brief.sh) are the longer story: read a page, inventory
-its controls once, fill three fields as separately paced writes, tick two boxes, submit, and wait
-for an exact completion sentence. They implement
-[`design/demo-brief.md`](../design/demo-brief.md), which shipped as a Rust subcommand on the 0.8
-line and no longer needs to stay in the binary. Pacing is parameters, so a recording operator
-retimes it by editing a script:
+The optional `demo-brief` scripts are a longer form journey with adjustable pacing:
 
 ```powershell
 ./scripts/demo-brief.ps1 -Beat 0.4 -CompletionHold 5
@@ -146,9 +148,7 @@ retimes it by editing a script:
 ./scripts/demo-brief.sh --beat 0.4 --completion-hold 5
 ```
 
-The seven-beat Card Foundry story likewise has
-[`scripts/demo-foundry.ps1`](../../scripts/demo-foundry.ps1) and
-[`scripts/demo-foundry.sh`](../../scripts/demo-foundry.sh):
+The optional Card Foundry scripts exercise the same public CLI:
 
 ```sh
 ./scripts/demo-foundry.sh --beat 0.6

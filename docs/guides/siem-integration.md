@@ -1,17 +1,15 @@
-# Collecting Ghostlight 1.0 audit
+# Collect Ghostlight 1.0 audit
 
-Ghostlight appends one content-minimized JSON object for every terminal invocation. It does not send
-syslog, open a network listener, or call a hosted collector. SIEM delivery belongs to the endpoint's
-existing file-collection agent.
+Ghostlight appends one content-minimized JSON object for every terminal invocation. It does not
+upload audit, send syslog, open a network listener, or call a hosted collector. SIEM delivery uses
+the endpoint's existing file-collection agent.
 
 ## Select the file
 
-Set `GHOSTLIGHT_AUDIT_FILE` to an absolute local path before starting Ghostlight. Without that
-variable, `audit.jsonl` sits beside the runtime discovery file.
-
-The orchestrator creates the parent directory when possible, opens the file append-only, writes one
-LF-terminated record, and flushes it. The workbench also reconstructs its bounded History view from
-this file.
+Set `GHOSTLIGHT_AUDIT_FILE` to an absolute local path before starting Ghostlight. Without it,
+`audit.jsonl` sits beside runtime discovery. Ghostlight creates the parent directory when possible,
+opens the file append-only, writes one LF-terminated record, and flushes it. The workbench rebuilds
+its bounded History view from the same file.
 
 ## Record shape
 
@@ -20,87 +18,86 @@ this file.
   "timestamp_ms": 1786334400000,
   "invocation": "invocation_opaque",
   "workspace": "workspace_opaque",
-  "tool": "browser_read",
-  "capability": "read",
+  "tool": "browser_fill_form",
+  "capabilities": ["read", "write"],
   "authority": "authority_opaque",
-  "allowed": true,
-  "reason": "permitted",
-  "status": "succeeded",
+  "policy_seq": 12,
+  "allowed": false,
+  "reason": "capability_denied",
+  "policy_observed": false,
+  "policy_mode": "enforce",
+  "policy_rule": "capability",
+  "denial_id": "D-opaque",
+  "policy_tier": "managed",
+  "grant_id": "support-sites",
+  "status": "blocked",
   "effect": "none",
-  "summary": "Read 1,240 words from example.com.",
-  "duration_ms": 412,
+  "summary": "Blocked: this session may not take that kind of action.",
+  "duration_ms": 4,
   "observed": {
-    "host": "example.com",
-    "readiness": "complete",
-    "count": 1240,
+    "host": "support.example.com",
+    "readiness": null,
+    "count": null,
     "width": null,
     "height": null
-  }
+  },
+  "channel": "mcp"
 }
 ```
-
-Fields are typo-closed:
 
 | Field | Meaning |
 | --- | --- |
 | `timestamp_ms` | Local observation time as Unix milliseconds. |
-| `invocation` | Opaque invocation correlation handle. |
-| `workspace` | Opaque admitted MCP workspace handle. |
+| `invocation`, `workspace` | Opaque correlation handles. |
 | `tool` | Exact 1.0 catalog tool name. |
-| `capability` | `read`, `action`, `write`, or `execute`. |
+| `capabilities` | Complete independent RAWX requirement set. Empty is valid. |
 | `authority` | Opaque immutable authority snapshot id. |
-| `allowed` | Final-boundary authority decision. |
-| `reason` | Stable closed reason such as `permitted`, `host_denied`, or `runtime_hold`. |
-| `status` | Terminal result status. |
-| `effect` | `none`, `applied`, `partial`, or `unknown`. |
-| `summary` | Ghostlight-authored sentence naming what happened. It may contain one governed, bounded action-target name. |
-| `duration_ms` | Decode to terminal outcome. For a navigation, the time to a settled landing. |
-| `observed` | Content-free landing facts and outcome measurements for the action. |
-| `channel` | Which intake the work arrived on: `mcp` or `cli`. Attribution only, never authority. |
+| `policy_seq` | Signed managed publish sequence, when active. |
+| `allowed`, `reason` | Final-boundary decision and stable reason. |
+| `policy_observed` | True when observe mode shadowed a denial without blocking. |
+| `policy_mode` | Effective `observe` or `enforce`, when policy decided. |
+| `policy_rule`, `policy_tier`, `grant_id` | Content-free deciding attribution. |
+| `denial_id` | Deterministic `D-` correlation id for an authored denial. |
+| `status`, `effect` | Terminal result and physical-effect class. |
+| `summary` | Bounded Ghostlight-authored sentence. |
+| `duration_ms` | Decode-to-terminal elapsed time. |
+| `observed` | Closed governed landing and measurement facts. |
+| `channel` | `mcp` or `cli`; attribution, not authority. |
 
-`observed` is a closed set assembled at completion. The exhaustive browser seam supplies host and
-readiness. The typed language outcome supplies counts and sizes from the same value that authored
-the sentence. Every field is null when neither register can state it:
+The optional singular `capability` field exists only so 1.0 can read historical pre-ADR-0121
+records. New records write `capabilities`.
+
+`observed` has exactly five fields:
 
 | Field | Meaning |
 | --- | --- |
-| `host` | Governed host the action attempted or landed on, lowercased. Never the path, query, or fragment. |
+| `host` | Lowercased governed host attempted or landed on. Never the rest of the URL. |
 | `readiness` | `not_applicable`, `loading`, `interactive`, `complete`, or `unknown`. |
-| `count` | However many things the action touched. `summary` names what was counted. |
+| `count` | A bounded measurement named by `summary`. |
 | `width`, `height` | Pixel size of a capture. |
 
-Records written before 1.0 have no `summary`, `duration_ms`, or `observed`; parse them as absent
-rather than as an error.
+The governed host and an optional normalized target name inside `summary` are the deliberate
+page-derived exceptions. The target name is bounded to 80 characters and can be removed by
+`privacy.preserve_target_names: false`. Audit never contains paths, queries, fragments, arbitrary
+page text, selectors, target handles, form values, filenames, file bytes, scripts, screenshots,
+recordings, dialog text, policy payloads, credentials, or model prompts.
 
-The governed host and an optional action-target name are the deliberate page-derived text. They
-answer "where did the agent go" and "which visible control did it actually use". The target name
-comes from the browser's effect receipt, is normalized, and is bounded to 80 characters. Set
-`preserve_target_names: false` in any authority layer to omit it and keep only a closed noun such
-as `button`. There are deliberately no full URLs, paths, queries, fragments, client names,
-arbitrary page text, selectors, target handles, form values, filenames, file bytes, scripts,
-screenshots, dialog text, policy rules, or model prompts. Page-authored accessibility roles are
-narrowed to a closed Ghostlight noun before a sentence can use them; an unknown role is only
-`control`.
+## Collect and query
 
-## Collection
+Configure the endpoint collector to tail the file and parse one JSON object per line. Track file
+identity and offsets so rotation or replacement does not duplicate evidence. Apply filesystem
+access controls appropriate to operational metadata.
 
-Configure the endpoint collector to tail the selected JSONL file and parse one object per line.
-Use file identity and offsets so rotation does not duplicate evidence. Apply filesystem access
-controls appropriate to operational metadata. Target names may be sensitive operational metadata
-unless governance removes them.
+Useful signals include:
 
-Useful high-signal queries include:
-
-- `allowed = false` grouped by `reason` and `tool`;
-- `effect in (partial, unknown)` because those outcomes are never replay-safe;
+- `allowed = false` grouped by `reason`, `tool`, `policy_tier`, and `grant_id`;
+- `policy_observed = true` when preparing an enforce rollout;
+- `effect in (partial, unknown)`, because those outcomes are never replay-safe;
 - `status = attention_required` or `reason = runtime_attention`;
-- `observed.host` grouped by `allowed`, `reason`, and `capability`, for where authority went or
-  refused to go;
-- `channel = cli` grouped by `capability`, for what scripted work is doing without a model watching;
-- `observed.readiness = loading` beside a long `duration_ms`, which is work that never settled;
-- changes in managed `invalid_authority` volume; and
-- gaps in expected endpoint delivery, which are collector health rather than browser truth.
+- `denial_id` for the user-to-administrator feedback loop;
+- `policy_seq` changes and rollback or invalid-authority events;
+- `observed.host` grouped by decision and RAWX set; and
+- gaps in endpoint delivery, which indicate collector health rather than browser truth.
 
-Do not join opaque ids to page content or inject full-URL collection into Ghostlight. If a
-compliance workflow requires content capture, it is a separate system with a separate consent and
-retention decision.
+Do not join opaque ids to page content or add full-URL collection to Ghostlight. Content capture,
+if required, is a separate system with its own consent and retention decision.

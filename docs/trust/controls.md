@@ -17,10 +17,10 @@ where to verify it.
 | Annex A theme | What your control needs from a supplier | What Ghostlight provides | Evidence |
 | --- | --- | --- | --- |
 | Supplier relationships and ICT supply chain (A.5.19-A.5.23) | Assurance about the supplier and its build/release chain | Per-file checksums, keyless build provenance, a per-release SBOM, and readable governance source | [supply-chain.md](supply-chain.md) |
-| Access control on supplier assets (A.5.15-A.5.18) | Least privilege and strong authentication on the assets that affect you | MFA and least privilege on source, pipeline, and signing keys; keys held air-gapped | [security-overview.md](security-overview.md) |
+| Access control on supplier assets (A.5.15-A.5.18) | Least privilege and strong authentication on the assets that affect you | MFA and least privilege on source, pipeline, and distribution accounts | [security-overview.md](security-overview.md) |
 | Secure development (A.8.25-A.8.28) | A disciplined SDLC behind what you deploy | Decision records for design, CI gates for correctness, and provenance-attested release artifacts | [supply-chain.md](supply-chain.md) |
-| Use of cryptography (A.8.24) | Sound cryptographic practice for integrity | Composite Ed25519 + ML-DSA-65 signatures on production key generations; signature-anchored trust; anti-rollback sequence | [security-overview.md](security-overview.md) |
-| Logging and monitoring (A.8.15-A.8.16) | Records sufficient to reconstruct actions | Identity-bound tool-call audit with `policy_seq` policy provenance | [SIEM integration guide](../guides/siem-integration.md) |
+| Use of cryptography (A.8.24) | Sound cryptographic practice for integrity | Customer-owned Ed25519 signatures, optional mandatory-both ML-DSA-65, and anti-rollback sequence | [security-overview.md](security-overview.md) |
+| Logging and monitoring (A.8.15-A.8.16) | Records sufficient to reconstruct actions | Authority-attributed terminal audit with `policy_seq` policy provenance | [SIEM integration guide](../guides/siem-integration.md) |
 | Technical vulnerability management (A.8.8) | A vendor channel and cadence for vulnerabilities in what you deploy | A private disclosure channel with published best-effort response targets, a dependency-audit CI gate, and published advisories | [SECURITY.md](../../SECURITY.md), [supply-chain.md](supply-chain.md) |
 | Incident management (A.5.24-A.5.28) | A defined vendor incident and notification posture | Prompt advisory after confirming a vendor-side compromise, typically within a few business days as a best-effort target; private disclosure channel | [security-overview.md](security-overview.md), [SECURITY.md](../../SECURITY.md) |
 | ICT readiness for continuity (A.5.30) | Continuity that does not depend on the supplier surviving | The Continuity Promise, last-known-good cache, fail-closed cold boot | [continuity.md](continuity.md) |
@@ -45,8 +45,8 @@ Ghostlight is the tool; when you deploy it, you are the deployer, and these fram
 their operative duties on the deployer. Ghostlight supports those duties; it does not
 discharge them.
 
-- EU AI Act: the audit trail, its `policy_seq` policy provenance, and the Policy Passport (the
-  `explain` surface answering "who governs me") give a deployer the record-keeping and
+- EU AI Act: the audit trail, its `policy_seq` policy provenance, and the workbench Policy Passport
+  answering "who governs me" give a deployer the record-keeping and
   human-oversight evidence that Articles 12 and 26 expect. This orientation supports your
   deployer duties; it is not legal advice, and how the framework applies to your deployment is
   a determination for you and your counsel.
@@ -60,4 +60,4 @@ discharge them.
 See the [compliance team guide](../guides/compliance-team.md) and the
 [governance configuration guide](../guides/governance-configuration.md).
 
-Last reviewed: 2026-07-14 against v0.8.0 | Contact: support@sylin.org
+Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org

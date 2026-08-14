@@ -81,30 +81,48 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 
 1. With no active policy, ordinary remote HTTP(S) browser work is permitted.
 2. Protected schemes, loopback, and link-local metadata remain denied without policy.
-3. Request restrictions never add a host or capability.
-4. Started work keeps one authority snapshot even if configuration changes.
-5. Invalid configured managed authority denies all work and never falls back to unrestricted.
-6. Ownership and leases are checked immediately before effects.
-7. Initial, redirected, and script-caused committed landings are governed before text or readiness
+3. RAWX is independent: each operation uses its complete set, and sequence steps are admitted and
+   audited separately. Empty wrapper or local-window operations do not invent authority.
+4. Strict schema-3 grants use exact, suffix, universal, tie-deny, ordered-first-admission, per-grant
+   deny, observe/enforce, and layer-intersection rules from ADR-0121.
+5. Request restrictions never add a host or capability. Started work keeps one immutable authority
+   snapshot even if configuration changes.
+6. A configured invalid cold source fails closed. An invalid replacement retains last valid for
+   future snapshots and never falls back to unrestricted.
+7. Ownership and leases are checked immediately before effects.
+8. Initial, redirected, and script-caused committed landings are governed before text or readiness
    is accepted.
-8. A denied landing returns truthful committed-effect and compensation facts.
-9. Audit records contain no URL, arbitrary page text, selector, target handle, form value,
+9. A denied landing returns truthful committed-effect and compensation facts.
+10. Audit records contain no URL, arbitrary page text, selector, target handle, form value,
    screenshot, recording frame or GIF, dialog text, console text, request URL, header, body, or
    diagnostic entry. A successful action may retain one governed, normalized, bounded target name
    in its Ghostlight-authored summary.
-10. Hold, attention, end-session, and cancellation stop later effects at the runtime boundary.
-11. Model-driven close dispatches only when the action capability and monotonic tab-close policy
+11. Audit carries the complete RAWX set, authority, mode, tier, grant, rule, deterministic denial
+    id, and managed sequence without policy payloads.
+12. Hold, attention, end-session, and cancellation stop later effects at the runtime boundary.
+13. Three matching enforced denials in 60 seconds or five in 120 seconds enter workspace-local
+    attention. Resume clears the fired window; another workspace is unaffected.
+14. Model-driven close dispatches only when the action capability and monotonic tab-close policy
     constraint both permit it. A denying local or managed layer cannot be expanded later.
-12. A refused explicit navigation records only the normalized attempted host. Its path, query,
+15. A refused explicit navigation records only the normalized attempted host. Its path, query,
     fragment, request value, target description, and page text remain absent from summary,
     observation, presentation, and audit.
-13. A page-authored role is narrowed to the closed Ghostlight role vocabulary before target state
+16. A page-authored role is narrowed to the closed Ghostlight role vocabulary before target state
     is stored. Unknown or malicious roles become `control` and cannot write an action sentence.
-14. Action receipts carry the role and accessible name of the physical element actually used in
+17. Action receipts carry the role and accessible name of the physical element actually used in
     the same browser response, with no describe round trip. Names default to preserved. A local or
-    managed `preserve_target_names: false` removes them monotonically while retaining the closed
+    managed `privacy.preserve_target_names: false` removes them monotonically while retaining the closed
     role. Editable values never become labels, and unobservable coordinate subjects fall back to
     coordinates.
+18. No managed bootstrap performs no policy network work. Signed file and HTTPS bundles share one
+    verification path. Ed25519 is required; configured ML-DSA-65 makes both legs mandatory.
+19. Verified cache recovers offline. Bad signatures, malformed bytes, rollbacks, reused sequence,
+    and unreachable updates keep last-known-good. Configured cold start without valid source or
+    cache fails closed.
+20. The Policy Passport shows organization, verification, sequence, freshness, source class,
+    timing, rationale, and contacts without source address, credentials, keys, or rules.
+21. Authority changes update policy-aware catalog discovery and emit one MCP tool-list change;
+    all-open remains the exact canonical 22-tool catalog.
 
 ## Browser job journeys
 

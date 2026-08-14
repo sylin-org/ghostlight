@@ -49,7 +49,10 @@ the owner wants, and what this project learned the hard way.
   user put it; create a dedicated window only when none exists; never reclaim an unrelated one.
 - **Keep visual evidence.** Model-driven close needs both orchestrator authority and the extension's
   preserve-tabs setting. Either refusal keeps the tab visible, and manual closure stays the user's.
-- **Never phone home.** No telemetry, activation, update ping, remote policy fetch, or audit upload.
+- **Never phone home.** No telemetry, activation, update ping, audit upload, or hidden vendor
+  dependency. An administrator-configured signed policy fetch from the organization's own file or
+  HTTPS source is the explicit opt-in exception; it never contacts Ghostlight or another vendor
+  endpoint.
 - **Outward changes wait for the owner.** Local edits, tests, and commits are normal. Pushes,
   merges, tags, releases, store actions, and anything public are not.
 - **Persist before handoff.** Update STATUS, the relevant ADR or task evidence, and this file when a

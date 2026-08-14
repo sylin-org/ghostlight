@@ -25,9 +25,8 @@ have a structural rather than a procedural answer.
 ### Does any of our data ever reach the vendor?
 
 No. Ghostlight generates zero vendor-bound traffic: the binary never phones home, carries no
-telemetry, and initiates no network activity beyond your own tool calls, the audit
-destinations you configure, and the optional central-policy fetch from an endpoint your own
-organization hosts. Page content, credentials, audit records, and policy all stay on
+telemetry, and initiates no network activity beyond your own tool calls and the optional signed
+policy fetch from an endpoint your own organization hosts. Page content, credentials, audit records, and policy all stay on
 your infrastructure or flow only to endpoints you choose. There is no vendor service to
 receive your data, so there is no vendor-side copy of it to secure, subpoena, or breach.
 
@@ -75,9 +74,8 @@ Evidence: sub-processors.md (the empty subprocessor register, with reasoning).
 ### Where is our data stored and processed, and how is it retained or deleted?
 
 Exclusively on your own infrastructure, under your own retention policies. Ghostlight writes a
-small set of local artifacts: audit records (JSON Lines files, or a syslog stream, or nothing,
-per your configuration) and, when you use central policy, a local policy cache and its status
-sidecar. All of these live on the endpoint or the destinations you configure. Retention and
+small set of local artifacts: an audit JSON Lines file and, when you use central policy, a signed
+policy cache and its status sidecar. All of these live on the endpoint. Retention and
 deletion are yours to set, because there is no vendor-side store to govern.
 
 See [data-flows.md](data-flows.md) for the artifact locations.
@@ -122,7 +120,8 @@ by capability (read, action, write, execute) and gated accordingly; observe and 
 modes let you run the agent in a watching posture before granting it real actions, and under
 observe a loaded policy runs in shadow, recording would-deny events without blocking
 anything. A take-the-wheel pause hands control back to the human mid-run, and a panic kill
-switch terminates the session outright. Nothing runs that the active policy does not permit.
+switch terminates the session outright. Enforce blocks refused work; observe deliberately runs and
+audits ordinary would-deny decisions for rollout analysis.
 
 See [docs/SPEC.md](../SPEC.md) and the
 [governance configuration guide](../guides/governance-configuration.md).
@@ -131,14 +130,13 @@ Evidence: docs/SPEC.md (capability classification, modes, take-the-wheel, panic 
 
 ### What is logged per agent action? Does the audit record capture the policy state at decision time?
 
-Each tool call produces an identity-bound audit record, and yes: under managed governance that
+Each terminal invocation produces an authority-attributed audit record, and yes: under managed governance that
 record carries a `policy_seq` field, the org-signed publish sequence of the exact policy that
 was in force when the decision was made. That ties every logged action to the precise policy
 version that authorized it, so an auditor can reconstruct not just what happened but which
 rules applied at that moment. The record is decision metadata only: it never contains page
 content, typed values, or screenshots, so your SIEM does not become a sensitive-data store.
-Audit streams to syslog (RFC 5424 over UDP) or JSON Lines files today; HTTP delivery is
-deferred.
+Ghostlight writes JSON Lines locally; SIEM delivery uses the endpoint's existing file collector.
 
 See the [SIEM integration guide](../guides/siem-integration.md).
 
@@ -146,20 +144,16 @@ Evidence: docs/guides/siem-integration.md (record schema, policy_seq field); ADR
 
 ### Can we enforce policy centrally across a fleet?
 
-Yes, through the `managed://` scheme. A central policy bundle, signed by your organization, is
-provisioned to endpoints by your existing management channel (GPO, Intune, or MDM), fetched from
-an endpoint you host, and enforced with a last-known-good cache so a device keeps its policy
-even when the source is unreachable. The trust anchor is the signature on the bundle, not the
-transport, and a monotonic publish sequence prevents rollback to an older, more permissive
-policy. The runnable scenario managed-activation-local shows a device activating a managed
-policy end to end:
-
-    cargo run -p ghostlight-lightbox -- run managed-activation-local
+Yes. Your endpoint-management channel provisions a fixed `managed.json` bootstrap. It names a
+customer-owned local file or HTTPS source and customer-owned public verification keys. Ghostlight
+verifies the signed bundle, caches last-known-good, and retains it when the source is unreachable.
+Monotonic publish sequence prevents rollback to an older policy, and the workbench Policy Passport
+shows organization, verification, sequence, freshness, source class, and contacts.
 
 See [ADR-0055](../adr/0055-managed-scheme-central-policy-distribution.md) and the
 [governance configuration guide](../guides/governance-configuration.md).
 
-Evidence: ADR-0055 (managed:// design, signed trust, anti-rollback); docs/guides/governance-configuration.md; lightbox scenario managed-activation-local.
+Evidence: ADR-0121 (signed managed delivery and anti-rollback); docs/guides/governance-configuration.md; governance managed-policy tests.
 
 ### What is your posture under the EU AI Act, ISO/IEC 42001, and NIST AI RMF?
 
@@ -210,10 +204,9 @@ Evidence: README.md what-we-do-not-have section; controls.md framework orientati
 
 ### How do you secure your own infrastructure?
 
-The assets that matter on the vendor side are the source repository, the release pipeline,
-and the signing keys for licenses and policy bundles, and those are what I protect. The
-license- and policy-signing keys are held offline on an air-gapped machine and never touch CI
-or any online system. Release binaries are protected differently: per-file SHA-256 checksums
+The assets that matter on the vendor side are the source repository, release pipeline, and
+distribution channels. Customer policy-signing keys are not vendor assets: Ghostlight generates
+them locally for the customer and never receives them. Release binaries use per-file SHA-256 checksums
 and build-provenance attestations tie each artifact to the exact source commit and workflow
 run that produced it. Source and pipeline access is a single maintainer account with
 multi-factor authentication, no shared accounts, and no third-party write access, and changes
@@ -223,7 +216,7 @@ the integrity of what I ship to you.
 
 See [supply-chain.md](supply-chain.md).
 
-Evidence: supply-chain.md (build and change management); ADR-0028 Decision 10 (air-gapped license signing).
+Evidence: supply-chain.md (build and change management); ADR-0121 (customer-owned policy keys).
 
 ### Has Ghostlight been penetration tested? How do you handle vulnerabilities?
 
@@ -261,19 +254,16 @@ target).
 Nothing stops working. The Continuity Promise, binding on all tiers, states it directly:
 "Ghostlight never phones home and license state never affects behavior. Enforcement, audit,
 and your production workflows are never interrupted, degraded, or disabled by license expiry,
-by the vendor's unavailability, or by the vendor ceasing to exist." An expired license changes
-exactly one thing: license-state notices appear in your own tooling and audit records. Because
-the governance module is source-available, you already hold the code; no escrow trigger
-stands between you and it. The runnable scenario continuity-source-unreachable proves the
-promise's policy leg, enforcement continuing from the last-known-good cache when your policy
-source goes dark:
-
-    cargo run -p ghostlight-lightbox -- run continuity-source-unreachable
+by the vendor's unavailability, or by the vendor ceasing to exist." Ghostlight 1.0 has no runtime
+license state, license-status command, license gate, or license field in audit. Because the
+governance module source is available, you already hold the code; no escrow trigger stands between
+you and it. Managed-policy tests prove that enforcement continues from verified last-known-good
+when your source goes dark.
 
 See [ADR-0028](../adr/0028-tripwire-licensing-and-continuity-promise.md), the
 [licensing guide](../guides/licensing.md), and [continuity.md](continuity.md).
 
-Evidence: ADR-0028 Decision 6 (Continuity Promise wording); docs/guides/licensing.md; continuity.md; lightbox scenario continuity-source-unreachable.
+Evidence: ADR-0028 Decision 6; docs/guides/licensing.md; continuity.md; managed-policy tests.
 
 ### What are your BC/DR commitments?
 
@@ -283,14 +273,12 @@ down.
 Central policy continues to enforce from its last-known-good cache through a policy-source
 outage, and a cold boot with nothing available fails closed to the protective state rather
 than opening up. Your continuity therefore depends on your own infrastructure, which you
-already plan for, not on ours. The runnable scenario fail-closed-cold-boot demonstrates the
-cold boot directly:
-
-    cargo run -p ghostlight-lightbox -- run fail-closed-cold-boot
+already plan for, not on ours. The same production verification path has tests for offline cache
+recovery, cold-start failure, bad signatures, and rollback.
 
 See [continuity.md](continuity.md).
 
-Evidence: continuity.md (last-known-good cache, fail-closed cold boot); ADR-0055 Decision 5; lightbox scenario fail-closed-cold-boot.
+Evidence: continuity.md (last-known-good cache and fail-closed cold boot); ADR-0121 Decision 4; managed-policy tests.
 
 ## Supply chain
 
@@ -300,14 +288,13 @@ Yes. The release pipeline generates a CycloneDX software bill of materials for e
 and publishes it as a release asset (introduced 2026-07; earlier releases carry checksums and
 attestations but no SBOM), alongside per-file SHA-256 checksums and build-provenance
 attestations. You can verify what you downloaded against the published checksums and confirm its
-provenance with one command before deploying. The currently live distribution channels are GitHub
-Releases, npm, and the MCP Registry; each resolves to the same tagged release artifacts. Scoop and
-winget manifests exist in the repository but are not claimed as live
-channels until their public packages ship. The dependency tree is deliberately lean, and a build
-flag yields an air-gap binary with no HTTP or TLS stack at all.
+provenance with one command before deploying. The public channels currently serve 0.8.0. The 1.0
+workflow builds and attests a candidate without publishing it; each channel advances only after an
+explicit owner-approved operation and public reconciliation. The dependency tree is deliberately
+lean; managed HTTPS uses rustls with the pure-Rust ring provider.
 
 See [supply-chain.md](supply-chain.md) and the
-[historical v0.8 release workflow](https://github.com/sylin-org/ghostlight/blob/v0.8.0/.github/workflows/release.yml).
+[current build-only release workflow](../../.github/workflows/release.yml).
 
 Evidence: supply-chain.md (releases, SBOM, dependencies); .github/workflows/release.yml (checksums, provenance, SBOM step).
 
@@ -316,7 +303,7 @@ Evidence: supply-chain.md (releases, SBOM, dependencies); .github/workflows/rele
 Every extension permission is justified individually in a published permission-justification
 document, so your security team can review the exact access before approving it. The extension is
 Manifest V3, and all extension logic ships in the reviewed package. Its advertised
-`javascript_tool` accepts an explicit instruction from the local MCP client and evaluates it only
+`browser_execute` accepts explicit page JavaScript from the local MCP client and evaluates it only
 in the attached page; it does not fetch or install extension logic. Release archives use the
 stable unpacked id pinned by the committed manifest key. The Chrome Web Store item has its own
 stable store-assigned id. Fleet policy can force-install either the Web Store item or a reviewed,
@@ -326,7 +313,7 @@ auto-update; fleets that require version control over the extension can keep sel
 See [docs/legal/PERMISSION_JUSTIFICATIONS.md](../legal/PERMISSION_JUSTIFICATIONS.md) and
 [extension/manifest.json](../../extension/manifest.json).
 
-Evidence: docs/legal/PERMISSION_JUSTIFICATIONS.md (per-permission and page-JavaScript rationale); extension/manifest.json (Manifest V3 and packaged extension logic); crates/core/src/install/native_host.rs (both official ids).
+Evidence: docs/legal/PERMISSION_JUSTIFICATIONS.md (per-permission and page-JavaScript rationale); extension/manifest.json (Manifest V3 and packaged extension logic); crates/orchestrator/src/install/native_host.rs (both official ids).
 
 ## Legal and support
 
@@ -347,19 +334,14 @@ Evidence: support-policy.md (acknowledgment commitments, scope); SECURITY.md (se
 Ghostlight is open-core. The automation engine is licensed Apache-2.0 OR MIT, both of them
 open source licenses. The governance module is source-available under the Ghostlight
 Commercial License: you can read and audit its code, but the license grants narrower rights
-than the engine's. At
-license expiry nothing about enforcement or audit changes; the only effect is that
-license-state notices appear in your own tooling and audit records until you renew, per the
-Continuity Promise.
-
-Run the license-expiry continuity proof:
-
-    cargo run -p ghostlight-lightbox -- run license-expiry-continuity
+than the engine's. Commercial scope and seat counts are contractual. Ghostlight 1.0 has no
+activation server, license-status command, runtime license gate, or audit license stamp, so
+license terms do not alter browser behavior or local continuity.
 
 See the [licensing guide](../guides/licensing.md),
 [ADR-0027](../adr/0027-open-core-business-model-and-licensing.md), and
 [ADR-0028](../adr/0028-tripwire-licensing-and-continuity-promise.md).
 
-Evidence: docs/guides/licensing.md; ADR-0027 (open-core split, source-available governance); ADR-0028 (expiry changes only the audit stamp); lightbox scenario license-expiry-continuity (same governed decision and audit fields, with only the expired marker added).
+Evidence: docs/guides/licensing.md; ADR-0027 (open-core split); ADR-0028 (license state never gates behavior).
 
-Last reviewed: 2026-08-04 against v0.8.0 plus the unreleased ADR-0096 topology | Contact: support@sylin.org
+Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org

@@ -1,88 +1,50 @@
 # Ghostlight 1.0 for a compliance team
 
-Ghostlight applies local, monotonic authority to browser work the user can see happening. Policy
-lives in a file on the endpoint, provisioned through the endpoint-management channel you already
-run. Every hop stays inside your network, and page content stays in the browser.
+Ghostlight applies signed, host-scoped authority to visible browser work. It has no vendor policy
+service. Your organization owns the policy, keys, endpoint bootstrap, and optional HTTPS or file
+distribution source.
 
-## 1. Define the boundary
+## Roll out safely
 
-Start with the smallest capabilities and hosts the user job needs. The flat version-1 schema is
-documented in [`governance-configuration.md`](governance-configuration.md).
+1. Write the smallest schema-3 grants that admit the required hosts and independent RAWX sets.
+2. Start in `mode: "observe"` and collect content-minimized JSONL from a pilot group.
+3. Run `ghostlight policy validate`, `policy explain`, and `policy simulate` against real audit.
+4. Generate organization-owned signing keys offline and publish a monotonically sequenced bundle.
+5. Provision `managed.json` through your endpoint-management tooling.
+6. Confirm the workbench Policy Passport, then move the policy to `mode: "enforce"`.
 
-```json
-{
-  "version": 1,
-  "managed": true,
-  "expires_unix_ms": 1893456000000,
-  "allow_capabilities": ["read", "action", "write"],
-  "deny_capabilities": ["execute"],
-  "allow_tab_close": false,
-  "preserve_target_names": false,
-  "allow_hosts": ["support.example.com", "*.support.example.com"],
-  "deny_hosts": ["admin.support.example.com"]
-}
-```
+The complete schema, signing commands, bootstrap paths, and failure behavior are in
+[`governance-configuration.md`](governance-configuration.md).
 
-`read`, `action`, `write`, and `execute` are the complete capability vocabulary. Host allow-lists
-from local, managed, and request layers must all match. Any deny wins. `allow_tab_close: false` is
-monotonic and remains independent of the extension's local preserve-tabs interlock.
+## What to verify
 
-## 2. Validate before provisioning
+Exercise one permitted read, one permitted action, a host denial, a capability denial, and a
+model-driven close denial. The MCP result, browser receipt, workbench History, Policy Passport,
+and JSONL audit must agree. An enforced denial must carry the same denial id and grant attribution
+as audit.
 
-Run the exact candidate with `GHOSTLIGHT_MANAGED_AUTHORITY_FILE` pointing to a temporary copy.
-Open **Status** and confirm managed authority is configured and valid. Exercise:
+Test update failure too. A bad signature, rollback, malformed source, or unreachable source must
+retain the active verified bundle. A configured cold start without a valid source or cache must
+fail closed. Three matching denials in 60 seconds must enter the visible attention state until a
+person chooses what happens next.
 
-- one permitted read;
-- one permitted action if the policy includes action;
-- one host denial;
-- one capability denial; and
-- one model-driven close denial.
+## Collect evidence
 
-The MCP terminal result, browser receipt, workbench History item, and JSONL audit reason must agree.
-An invalid or expired configured managed file must fail closed.
+Set `GHOSTLIGHT_AUDIT_FILE` to an organization-collected local path and use the endpoint's existing
+file collector. Each record carries opaque correlation ids, the complete RAWX requirement set,
+decision attribution, managed `policy_seq`, terminal outcome, governed host, and bounded
+measurements. It excludes paths, queries, fragments, arbitrary page text, selectors, form values,
+file contents, scripts, screenshots, dialog text, policy rules, and credentials.
 
-## 3. Provision locally
+Ghostlight does not upload audit or send direct syslog/HTTP. The exact record contract and safe
+collection pattern are in [`siem-integration.md`](siem-integration.md).
 
-Use the organization's authenticated endpoint-management tooling to place the policy at an
-administrator-controlled path and set `GHOSTLIGHT_MANAGED_AUTHORITY_FILE` for the Ghostlight
-process. The path is explicit rather than magical so packaging and fleet management can use native
-OS conventions without teaching the model or extension about them.
+## Keep the human controls
 
-Every managed file requires `managed: true` and a future Unix-millisecond expiry. Rotation is an
-external deployment transaction: validate the complete replacement, update atomically through the
-endpoint manager, and verify Status again. Ghostlight snapshots authority once per started
-invocation, so an in-flight unit of work does not change policy halfway through.
+Managed policy does not replace visibility. Keep the toolbar, denial receipts, dedicated tab
+group, workbench history, pause, attention, resume quietly, and end-session paths available. The
+browser-local preserve-tabs setting remains a second gate beneath policy.
 
-The 1.0 runtime deliberately does not implement remote retrieval, signing, last-known-good fetch,
-observe mode, config locks, or tool-catalog filtering. Those historical 0.8 designs are not 1.0
-claims.
-
-## 4. Collect content-minimized evidence
-
-Set `GHOSTLIGHT_AUDIT_FILE` to an organization-collected local path. The append-only JSONL records
-carry opaque ids, the governed decision, and content-minimized facts about what each action did:
-a Ghostlight-authored sentence, a duration, the governed host the action attempted or landed on,
-and a count or capture size where one applies.
-
-The governed host answers "where did this agent go or try to go" rather than only "what was
-allowed". Target names are preserved by default so ten buttons do not produce ten meaningless
-"Clicked a button" entries. A managed `preserve_target_names: false` removes those names
-monotonically. No full URL, path, query, fragment, arbitrary page content, selector, target handle,
-form value, file path, script, screenshot, or dialog text is recorded.
-
-Use the endpoint's existing file collector. Ghostlight 1.0 does not open a syslog socket or send
-audit over the network. The exact record contract and safe collection pattern are in
-[`siem-integration.md`](siem-integration.md).
-
-## 5. Preserve the human controls
-
-Compliance policy must not replace user visibility. Keep the extension toolbar, blocked receipt,
-dedicated tab group, workbench history, pause, attention, and end-session paths enabled. The
-browser-local preserve-tabs setting is a second protective gate, not a policy editor.
-
-## Release evidence
-
-Before organizational rollout, require the checksum-bound, provenance-attested platform package,
-matching extension, clean
-install/upgrade/uninstall evidence, visible-browser policy-denial journey, and native notification
-smoke test from [`../1.0/ACCEPTANCE.md`](../1.0/ACCEPTANCE.md).
+Before rollout, require the checksum-bound package, matching extension, provenance attestation,
+clean install/upgrade/uninstall evidence, visible-browser policy journey, and native notification
+smoke test in [`../1.0/ACCEPTANCE.md`](../1.0/ACCEPTANCE.md).
