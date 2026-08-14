@@ -137,13 +137,6 @@ pub fn run() -> Result<()> {
             if let Err(error) = build_tray(app) {
                 eprintln!("Ghostlight tray is unavailable: {error}");
             }
-            let window = app.get_webview_window(MAIN_WINDOW).ok_or_else(|| {
-                WorkbenchPresentationError::Native(
-                    "Ghostlight workbench window is unavailable".into(),
-                )
-            })?;
-            monitor_workbench(&window)?;
-            background_workbench(app.handle())?;
             Ok(())
         });
 
@@ -163,12 +156,19 @@ pub fn run() -> Result<()> {
         }
     };
     let outcome = catch_unwind(AssertUnwindSafe(|| {
-        app.run_return(|_, event| {
-            if let RunEvent::ExitRequested { code, api, .. } = event {
-                if should_prevent_desktop_exit(code) {
-                    api.prevent_exit();
+        app.run_return(|app, event| match event {
+            RunEvent::Ready => {
+                // Keep the configured workbench as metadata until the native event loop is live.
+                // This is the same disposable construction seam that tray activation uses after
+                // Close, and it prevents Windows from losing its startup window.
+                if let Err(error) = build_workbench(app).and_then(|_| background_workbench(app)) {
+                    eprintln!("Ghostlight workbench is unavailable: {error}");
                 }
             }
+            RunEvent::ExitRequested { code, api, .. } if should_prevent_desktop_exit(code) => {
+                api.prevent_exit();
+            }
+            _ => {}
         })
     }));
     match outcome {

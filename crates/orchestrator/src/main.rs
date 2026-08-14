@@ -1,5 +1,12 @@
 //! Ghostlight 1.0 orchestrator and integrated desktop workbench process.
 
+// The mandatory npm launcher retains CLI stdio and waits for this child. Release desktop launches
+// therefore use the native Windows application subsystem without flashing a console window.
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
 use std::ffi::OsString;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::path::Path;
