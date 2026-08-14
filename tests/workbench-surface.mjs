@@ -52,7 +52,18 @@ const snapshot = () => ({
     detail: "The connector path belongs to an older installation.",
     can_install: true, can_uninstall: false
   }],
-  diagnostics: [], configuration: {}, overview: {}
+  diagnostics: [],
+  configuration: {
+    local_policy_configured: true,
+    local_policy_active: true,
+    local_policy_valid: true,
+    managed_authority_configured: false,
+    managed_authority_active: false,
+    managed_authority_valid: true,
+    runtime_control_file_configured: false,
+    managed_policy: { configured: false }
+  },
+  overview: {}
 });
 
 const sandbox = {
@@ -117,6 +128,8 @@ await new Promise((r) => setTimeout(r, 60));
 
 const connections = nodes.get("connections");
 const integrations = nodes.get("integration-grid");
+const policy = nodes.get("policy-state");
+const policyLabel = nodes.get("policy-state-label");
 const checks = [
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["heartbeat installed", heartbeat],
@@ -130,6 +143,9 @@ const checks = [
     integrations.innerHTML.includes("Update")
       && integrations.innerHTML.includes('data-harness-action="install"'),
     `integrations: ${JSON.stringify(integrations.innerHTML)}`],
+  ["an applied policy stays visible in the persistent band",
+    policyLabel.textContent === "Policy applied" && policy.dataset.tone === "applied",
+    `policy: ${JSON.stringify({ label: policyLabel.textContent, tone: policy.dataset.tone })}`],
   ["failure reported", reported.some((r) => r.includes("deliberate About failure")),
     `reported: ${JSON.stringify(reported)}`],
   ["the failure names the panel", reported.some((r) => r.includes("painting about"))],

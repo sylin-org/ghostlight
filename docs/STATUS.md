@@ -32,6 +32,8 @@ The 1.0 policy product is restored on current orchestrator seams through `44f84e
 - The workbench Policy Passport shows organization, rationale, contacts, verification, sequence,
   freshness, source class, and verification time without source addresses, credentials, keys, or
   rules.
+- The persistent workbench lamp band now distinguishes all-open, applied policy, retained-policy
+  reload warning, and fail-closed policy states, with one click through to Status.
 - Repeated enforced denials enter the existing workspace-local attention and runtime-control path.
   The full workspace gate passes with 197 orchestrator library tests, 2 orchestrator binary tests,
   30 bridge tests, 4 MCP connector tests, warnings denied, and 101 extension tests.

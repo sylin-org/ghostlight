@@ -235,8 +235,10 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    workbench window, tray Open rebuilds it, and only explicit quit stops the process. Native
    minimize does not close or hide the window.
 2. Home presents plural session, operation, and browser counts plus current work and system health
-   at a glance. Activity, history, checkup, configuration, and installations remain separate
-   focused destinations behind one compact rail.
+   at a glance. The persistent lamp band states whether Ghostlight is all-open, has one or more
+   policies applied, or has a configured policy issue, and links to Status for detail. Activity,
+   history, checkup, configuration, and installations remain separate focused destinations behind
+   one compact rail.
 3. Global search covers destinations, sessions, operations, browser instances, terminal history,
    diagnostics, configuration, and supported harnesses. Search input is bounded at the adapter.
 4. Reloading the disposable WebView reconstructs its state from `WorkbenchFacade`; it owns no

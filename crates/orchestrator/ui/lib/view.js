@@ -263,6 +263,42 @@
       return "Quiet";
     }
 
+    function policyState(config = {}) {
+      const sources = [
+        {
+          name: "Local",
+          configured: Boolean(config.local_policy_configured),
+          active: Boolean(config.local_policy_active),
+          valid: Boolean(config.local_policy_valid)
+        },
+        {
+          name: "Managed",
+          configured: Boolean(config.managed_authority_configured),
+          active: Boolean(config.managed_authority_active),
+          valid: Boolean(config.managed_authority_valid)
+        }
+      ];
+      const active = sources.filter((source) => source.active);
+      const unavailable = sources.filter((source) => source.configured && !source.active);
+      const stale = sources.filter((source) => source.active && !source.valid);
+
+      if (unavailable.length) {
+        return {
+          label: "Policy issue",
+          tone: "failing",
+          detail: `${unavailable.map((source) => source.name).join(" and ")} policy is unavailable; work fails closed.`
+        };
+      }
+      if (!active.length) {
+        return { label: "All open", tone: "open", detail: "No authored policy is applied." };
+      }
+      const label = active.length === 1 ? "Policy applied" : `${active.length} policies applied`;
+      const names = active.map((source) => source.name).join(" and ");
+      return stale.length
+        ? { label, tone: "warning", detail: `${names} policy remains applied; its latest reload needs attention.` }
+        : { label, tone: "applied", detail: `${names} policy is applied.` };
+    }
+
     function band(facts) {
       const name = bandClass(facts);
       document.body.className = name;
@@ -276,6 +312,12 @@
           + ` &middot; <b>${facts.running}</b> running`
           + ` &middot; <b>${facts.snapshot.history.length}</b> recorded`;
       }
+
+      const policy = policyState(facts.snapshot?.configuration);
+      el["policy-state-label"].textContent = policy.label;
+      el["policy-state"].dataset.tone = policy.tone;
+      el["policy-state"].title = policy.detail;
+      el["policy-state"].setAttribute("aria-label", `Open Status. ${policy.detail}`);
 
       const paused = facts.runtime !== "active";
       el.wheel.disabled = !facts.connected;
@@ -394,13 +436,14 @@
 
       const config = snapshot.configuration;
       const sources = [
-        ["Local policy", config.local_policy_configured, config.local_policy_valid, "Authority rules you own."],
-        ["Managed authority", config.managed_authority_configured, config.managed_authority_valid, "A monotonic managed restriction layer."],
-        ["Runtime control file", config.runtime_control_file_configured, true, "A local final-boundary control source."]
+        ["Local policy", config.local_policy_configured, config.local_policy_active, config.local_policy_valid, "Authority rules you own."],
+        ["Managed authority", config.managed_authority_configured, config.managed_authority_active, config.managed_authority_valid, "A monotonic managed restriction layer."],
+        ["Runtime control file", config.runtime_control_file_configured, config.runtime_control_file_configured, true, "A local final-boundary control source."]
       ];
-      el["authority-grid"].innerHTML = sources.map(([title, configured, valid, detail]) => {
-        const severity = !configured ? "" : valid ? "passing" : "failing";
-        const label = !configured ? "not configured" : valid ? "valid" : "invalid, failing closed";
+      el["authority-grid"].innerHTML = sources.map(([title, configured, active, valid, detail]) => {
+        const severity = !configured ? "" : active && valid ? "passing" : active ? "warning" : "failing";
+        const label = !configured ? "not configured" : active && valid ? "applied" : active
+          ? "applied; latest reload invalid" : "invalid, failing closed";
         return `<article class="card"><span class="severity ${severity}"><span class="dot"></span>${escapeHtml(label)}</span>`
           + `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(detail)}</p></article>`;
       }).join("");

@@ -1102,10 +1102,14 @@ impl PolicySource {
 pub struct GovernanceDiagnostics {
     /// Whether a local policy source is configured.
     pub local_policy_configured: bool,
+    /// Whether a validated local policy is currently applied.
+    pub local_policy_active: bool,
     /// Whether the configured local policy can be read and validated.
     pub local_policy_valid: bool,
     /// Whether a managed authority source is configured.
     pub managed_authority_configured: bool,
+    /// Whether a verified managed policy is currently applied.
+    pub managed_authority_active: bool,
     /// Whether the configured managed authority can be read and validated.
     pub managed_authority_valid: bool,
     /// Whether a runtime-control file is configured.
@@ -1187,8 +1191,10 @@ impl GovernanceFacade {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         GovernanceDiagnostics {
             local_policy_configured: policies.user.configured(),
+            local_policy_active: policies.user.active.is_some(),
             local_policy_valid: policies.user.last_load_valid,
             managed_authority_configured: policies.managed_configured(),
+            managed_authority_active: policies.managed_manifest().is_some(),
             managed_authority_valid: policies.managed_valid(),
             runtime_control_file_configured: self.runtime_control.is_some(),
             managed_policy: policies.managed_passport(),
@@ -2211,7 +2217,9 @@ mod tests {
         let retained = facade.snapshot(&RequestRestrictions::default());
         assert!(retained.authorize_capability(Capability::Read).allowed);
         assert!(!retained.authorize_capability(Capability::Action).allowed);
-        assert!(!facade.diagnostics().local_policy_valid);
+        let retained_diagnostics = facade.diagnostics();
+        assert!(retained_diagnostics.local_policy_active);
+        assert!(!retained_diagnostics.local_policy_valid);
 
         fs::write(
             &path,
@@ -2225,7 +2233,9 @@ mod tests {
         let replaced = facade.snapshot(&RequestRestrictions::default());
         assert!(!replaced.authorize_capability(Capability::Read).allowed);
         assert!(replaced.authorize_capability(Capability::Action).allowed);
-        assert!(facade.diagnostics().local_policy_valid);
+        let replaced_diagnostics = facade.diagnostics();
+        assert!(replaced_diagnostics.local_policy_active);
+        assert!(replaced_diagnostics.local_policy_valid);
         let _ = fs::remove_file(path);
     }
 

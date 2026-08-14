@@ -38,7 +38,17 @@ const snapshot = {
     { id: "claude-code", name: "Claude Code", state: "available", detail: "Detected and ready for an explicit Ghostlight registration.", can_install: true, can_uninstall: false },
     { id: "cursor", name: "Cursor", state: "not_detected", detail: "Not detected. You can prepare its user configuration before installing it.", can_install: true, can_uninstall: false }
   ],
-  configuration: { runtime_state: "active", local_policy_configured: true, local_policy_valid: true, managed_authority_configured: false, managed_authority_valid: true, runtime_control_file_configured: false }
+  configuration: {
+    runtime_state: "active",
+    local_policy_configured: true,
+    local_policy_active: true,
+    local_policy_valid: true,
+    managed_authority_configured: false,
+    managed_authority_active: false,
+    managed_authority_valid: true,
+    runtime_control_file_configured: false,
+    managed_policy: { configured: false }
+  }
 };
 
 // Representative work the monitor can page through, so the conveyor is reviewable.

@@ -379,8 +379,10 @@ impl WorkbenchFacade {
             configuration: ConfigurationSummary {
                 runtime_state: self.governance.runtime_state(),
                 local_policy_configured: governance.local_policy_configured,
+                local_policy_active: governance.local_policy_active,
                 local_policy_valid: governance.local_policy_valid,
                 managed_authority_configured: governance.managed_authority_configured,
+                managed_authority_active: governance.managed_authority_active,
                 managed_authority_valid: governance.managed_authority_valid,
                 runtime_control_file_configured: governance.runtime_control_file_configured,
                 managed_policy: governance.managed_policy,
@@ -959,10 +961,14 @@ pub struct ConfigurationSummary {
     pub runtime_state: RuntimeControlState,
     /// Whether local authority is configured.
     pub local_policy_configured: bool,
+    /// Whether a validated local policy is currently applied.
+    pub local_policy_active: bool,
     /// Whether local authority is valid.
     pub local_policy_valid: bool,
     /// Whether managed authority is configured.
     pub managed_authority_configured: bool,
+    /// Whether a verified managed policy is currently applied.
+    pub managed_authority_active: bool,
     /// Whether managed authority is valid.
     pub managed_authority_valid: bool,
     /// Whether runtime control is backed by a configured file.
