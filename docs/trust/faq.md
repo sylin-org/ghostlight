@@ -294,7 +294,7 @@ Evidence: continuity.md (last-known-good cache, fail-closed cold boot); ADR-0055
 
 ## Supply chain
 
-### Do you provide an SBOM, signed releases, and build provenance?
+### Do you provide an SBOM, checksums, and build provenance?
 
 Yes. The release pipeline generates a CycloneDX software bill of materials for every release
 and publishes it as a release asset (introduced 2026-07; earlier releases carry checksums and

@@ -82,6 +82,7 @@ browser-local preserve-tabs setting is a second protective gate, not a policy ed
 
 ## Release evidence
 
-Before organizational rollout, require the signed platform package, matching extension, clean
+Before organizational rollout, require the checksum-bound, provenance-attested platform package,
+matching extension, clean
 install/upgrade/uninstall evidence, visible-browser policy-denial journey, and native notification
 smoke test from [`../1.0/ACCEPTANCE.md`](../1.0/ACCEPTANCE.md).

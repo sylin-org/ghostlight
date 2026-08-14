@@ -67,9 +67,9 @@ the development host. It did not simulate user files or registry state.
 | Native uninstaller | NSIS removed all package-owned files and its uninstall record. Test-created runtime and empty audit files were removed only after exact-path verification. |
 
 No Ghostlight process, browser registration, disposable install directory, or default runtime file
-remained. This passes the development-host package lane. It does not claim a signed clean-machine
-install, public-0.8 package upgrade, login/reboot behavior, notification delivery, or matching
-store-adapter browser acceptance.
+remained. This passes the development-host package lane. It does not claim a provenance-verified
+clean-machine install, public-0.8 package upgrade, login/reboot behavior, notification delivery, or
+matching store-adapter browser acceptance.
 
 ## Native Linux development-host record
 
@@ -112,7 +112,7 @@ RustSec reported 17 warnings in target-specific transitive dependencies:
 
 These are warnings under the current `cargo audit` gate, not silently clean output. Ghostlight does
 not call the named `glib::VariantStrIter` API directly, but the dependency is present in the Linux
-desktop graph. Recheck the graph and available Tauri upgrade before signing Linux. Do not describe
+desktop graph. Recheck the graph and available Tauri upgrade before publishing Linux. Do not describe
 the dependency scan as warning-free.
 
 ## Not run and therefore still blocking release
@@ -120,22 +120,24 @@ the dependency scan as warning-free.
 | Gate | State |
 | --- | --- |
 | Linux Debian candidate | NOT RUN. CachyOS source/user-candidate and portable proof does not substitute for it. |
-| Package signing/attestation | Platform signing NOT RUN. Workflow provenance is implemented but has not run on GitHub. |
+| Package provenance | Workflow provenance is implemented but has not run on GitHub. Ghostlight follows the 0.8 checksum plus keyless GitHub attestation model; platform code signing is not a gate. |
 | SBOM and immutable release checksums | Assembly logic passed locally; a real cross-platform 1.0 publication candidate is NOT BUILT. |
 | Clean install | NOT RUN on Windows or Linux ordinary-user machines. |
 | 0.8 -> 1.0 upgrade | Development user-path proof passed on CachyOS; packaged Ubuntu/Debian upgrade remains NOT RUN. |
 | Login/reboot demand-start | NOT RUN on any packaged platform. |
-| Uninstall ownership | Windows unsigned development-host NSIS removal and the CachyOS user path passed; signed clean-machine package removal remains NOT RUN. |
+| Uninstall ownership | Windows development-host NSIS removal and the CachyOS user path passed; clean-machine candidate removal remains NOT RUN. |
 | Native tray/window/notification | Windows native window lifecycle passed by exact HWND inspection. Tray interaction and notification delivery remain NOT RUN interactively. |
 | Store adapter | NOT SUBMITTED and no matching 1.0 store build exists publicly. |
 | Visible browser acceptance | PARTIAL in ordinary-profile Chromium with the unpacked source adapter; package plus matching store adapter remains NOT RUN. |
-| Public MCP harness matrix | NOT RUN in three public harnesses against the signed candidate. |
+| Public MCP harness matrix | NOT RUN in three public harnesses against the provenance-verified candidate. |
 | Public reconciliation | NOT APPLICABLE until approved immutable artifacts exist. |
 
-Release access is only partly ready. GitHub and npm authentication are valid. The MCP DNS key and
-publisher exist. Chrome's stored refresh token is revoked or expired and `CWS_PUBLISHER_ID` is
-missing. Windows signing credentials were not found. The 0.8 Linux SSH identity was recovered,
-but its `test-host-01` name is not currently resolvable.
+Release access is ready for the mandatory GitHub and npm channels. The MCP DNS key and publisher
+also exist. Chrome API automation is not configured because the stored refresh token is revoked or
+expired and `CWS_PUBLISHER_ID` is missing; this is not a release blocker because the 0.8 manual
+Developer Dashboard path remains supported. No Windows signing credential is expected or required.
+The 0.8 Linux SSH identity was recovered, but its recorded host name was not resolvable at the time
+of this report.
 
 The Linux L1-L9 record remains [`linux-live-lifecycle.md`](linux-live-lifecycle.md), with every row
 still `NOT RUN`. That is the next high-value platform gate. It must start from public 0.8 for the
@@ -144,7 +146,7 @@ upgrade row and retain only content-free evidence.
 ## Release decision
 
 Do not publish 1.0 from this state. The source and unsigned Windows development-host install are
-credible inputs to a candidate, but they are not a signed clean-machine, upgraded, login/reboot,
-or visibly exercised cross-platform product. Run the manual build-only workflow after the owner
-chooses to push, then perform the remaining native and visible gates one platform at a time. Keep
-publication channels independent.
+credible inputs to a candidate, but they are not a provenance-verified clean-machine, upgraded,
+login/reboot, or visibly exercised cross-platform product. Run the manual build-only workflow after
+the owner chooses to push, then perform the remaining native and visible gates one platform at a
+time. Keep publication channels independent.

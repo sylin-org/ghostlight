@@ -15,8 +15,8 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 
 ## Windows 1.0 development-host and package result
 
-The Windows lane passed through implementation `b292bb22` on 2026-08-14. This is an unsigned
-development-host package result, not clean-machine, signing, login/reboot, matching-store-adapter,
+The Windows lane passed through implementation `b292bb22` on 2026-08-14. This is a
+development-host package result, not clean-machine, provenance, login/reboot, matching-store-adapter,
 or public-release evidence.
 
 - `b979a8af` fixed the Windows first-run handoff state-root return found by the native compiler.
@@ -37,7 +37,7 @@ or public-release evidence.
   Chromium plus Codex, Claude Code, Claude Desktop, Cursor, Visual Studio Code, Windsurf, Zed,
   OpenCode, and Crush with direct native connector paths. A second install changed zero bytes in
   the nine client configurations.
-- The locked unsigned NSIS candidate is 3,292,239 bytes with SHA-256
+- The locked NSIS candidate is 3,292,239 bytes with SHA-256
   `100093627d781b1a4e0c8cc481d974e63fbce3939ad2383384c74f8915acb4d9`. Payload inspection found
   the exact three executables and four legal files. A silent install into an exact disposable
   directory ran its browser-registration hook, and doctor reported the full local chain current.
@@ -54,7 +54,7 @@ or public-release evidence.
 ## Linux 1.0 development-host result
 
 The native CachyOS lane was extended through the current 1.0 source candidate on 2026-08-14. This
-is development-host and npm-candidate evidence, not a Debian package signature, store-adapter,
+is development-host and npm-candidate evidence, not a Debian package with verified provenance, store-adapter,
 reboot, or public-release pass.
 
 - A locally packed, checksum-bound `ghostlight@1.0.0` installed the current optimized Linux
@@ -117,8 +117,8 @@ reboot, or public-release pass.
 - `main` carries the 0.8 line at `0116feca`. Promoting it is a deliberate release decision, not
   routine sync. The 1.0 line now carries Windows and Linux source, extension, process, and
   supply-chain CI; a manual Pages deployment; and bounded monthly dependency updates targeting
-  `dev`. A manual build-only workflow now creates and inspects unsigned native-package candidates
-  without publishing them. Signing, native operating-system validation, and publication remain
+  `dev`. A manual build-only workflow now creates and inspects native-package candidates without
+  publishing them. Provenance attestation, native operating-system validation, and publication remain
   owed. Do not promote `dev` before those live gates pass.
 - No pull requests are open. Thirteen Dependabot bumps against the 0.8 line were closed as obsolete
   on 2026-08-13: the 1.0 tree either already carried the proposed version or had dropped the
@@ -142,9 +142,9 @@ reboot, or public-release pass.
 - Packaged native-host lifecycle is restored without restoring the 0.8 resident supervisors
   (ADR-0115). The orchestrator now checks, installs, updates, and safely removes Chrome, Edge,
   Brave, and Chromium registrations; packages carry both connector sidecars; and narrow migration
-  retires recognized pre-1.0 Windows and Linux supervisor artifacts. The unsigned Windows NSIS
+  retires recognized pre-1.0 Windows and Linux supervisor artifacts. The Windows NSIS
   candidate passed payload, install, doctor, idempotency, workbench-lifecycle, and uninstall checks
-  on this development host. Clean-machine, signed, login/reboot, 0.8 package-upgrade, and Linux
+  on this development host. Clean-machine, provenance-verified, login/reboot, 0.8 package-upgrade, and Linux
   native-package journeys remain required evidence.
 - The 0.8 test recovery is now dispositioned rather than merely counted.
   `docs/0.8/RECOVERY-MATRIX.md` maps all 1,388 entries through twelve current behavior areas;
@@ -170,12 +170,11 @@ reboot, or public-release pass.
   --json`, `service`, dry-run, repeated client selection, and repeated browser selection are live.
   One-line installers, deterministic portable archives, the self-contained MCPB, and
   candidate-derived Scoop and WinGet 1.12 metadata are present and tested.
-- Release access was recovered as far as this machine permits without exposing values. GitHub and
-  npm authentication work, the MCP DNS key and official publisher binary are present, and the
-  Chrome client, secret, item id, and old refresh token were found. The Chrome token is revoked or
-  expired and the API V2 publisher id is missing. Windows signing credentials were not found. The
-  0.8 Linux username, SSH key, and known-host identity survive, but `test-host-01` no
-  longer resolves.
+- Release access was recovered without exposing values. GitHub and npm authentication work, and
+  the MCP DNS key and official publisher binary are present. Chrome API automation is incomplete,
+  but 0.8 treated it as optional and used the Developer Dashboard when necessary. Ghostlight has no
+  Windows code-signing certificate; 0.8 used checksums plus keyless GitHub provenance, and 1.0 now
+  retains that model instead of inventing a signing gate.
 
 ## Implemented
 
@@ -366,11 +365,12 @@ source-gate pass, not release approval.
 - Four real CycloneDX component SBOMs were generated with pinned `cargo-cyclonedx` 0.5.9. Synthetic
   Windows and Linux input exercised the exact 17-artifact assembly, npm hash embedding, deterministic
   MCPB, portable packaging, and package-manager metadata paths. That proves the construction code,
-  not the missing native Linux artifacts or their signatures.
-- Chrome, GitHub, and MCP publication plans made no mutation. Chrome correctly named the missing
-  publisher id. GitHub refused the unsigned candidate. MCP Registry planning found the recovered
-  key and publisher but refused the current 0.8 `server.json` and npm coordinate for a 1.0
-  candidate.
+  not the missing native Linux artifacts or their provenance.
+- Chrome, GitHub, and MCP publication plans made no mutation. That rehearsal exposed two 1.0
+  release-adapter regressions from 0.8: optional Chrome API automation was described as required,
+  and GitHub refused a candidate for lacking nonexistent platform signing. Both gates were removed;
+  checksums and GitHub provenance remain mandatory. MCP Registry planning found the recovered key
+  and publisher but refused the current 0.8 `server.json` and npm coordinate for a 1.0 candidate.
 - The deterministic 1.0 extension ZIP has SHA-256
   `47a7cb7b715d14de991266f3602ecf6f166fd967623c4e7980f58a2afc3c47c3` and contains the exact
   Apache and MIT texts. The rebuilt local unsigned Windows NSIS candidate contains the exact three
@@ -379,7 +379,7 @@ source-gate pass, not release approval.
   published or release-approved.
 - `cargo audit` exited zero but reported 17 residual transitive warnings in the Linux Tauri/GTK3
   and Tauri URL-pattern graphs, including the `glib` iterator unsoundness advisory. The dated audit
-  records the dependency paths and requires a recheck before Linux signing; do not call this scan
+  records the dependency paths and requires a recheck before Linux publication; do not call this scan
   warning-free.
 - Plurality contracts prove two browser identities stay connected at once and each answers its own
   request, a second connection from one identity collapses onto the first with the replaced stream
@@ -569,21 +569,21 @@ source-gate pass, not release approval.
 - Run the manual candidate workflow on GitHub when the owner approves. Ordinary cross-platform CI
   passed at `de4392db`, but the candidate workflow's two native builders and provenance step have
   not executed for this source revision.
-- Produce and sign platform bundles, then verify clean install, public-0.8 upgrade, and uninstall
-  on clean Windows and Linux machines. The unsigned Windows development-host package lifecycle
+- Produce provenance-attested platform bundles, then verify clean install, public-0.8 upgrade, and
+  uninstall on clean Windows and Linux machines. The Windows development-host package lifecycle
   passes but does not replace those release-environment rows.
 - Complete interactive native-window, tray, and notification smoke tests on each platform. The
   automated environment verifies native build and failure containment but does not expose its GUI
   desktop to the test runner.
-- Verify demand-start, direct workbench activation, and deploy quiesce from each clean signed
+- Verify demand-start, direct workbench activation, and deploy quiesce from each clean
   platform installation.
 - Run the accepted browser-job matrix against visible supported Chromium browsers, including
   screenshots, file upload, form input, dialogs, governed denial, reconnect, and local close
   interlock journeys.
 - Reconcile release metadata, public status, store submission, compatibility, distribution, and
   the final public documentation only when the 1.0 artifacts exist.
-- Recover Chrome Web Store API access by completing desktop OAuth and recording the API V2
-  publisher id. Choose and provision a Windows platform-signing identity.
+- Use the Chrome Developer Dashboard for store submission. Repair API V2 access only if its optional
+  automation is worth the effort; it is not a release gate.
 - Bring `test-host-01` back onto reachable DNS/mDNS or provide its current address, then record a
   stable SSH alias and execute the checked Linux lifecycle matrix. The SSH identity itself is not
   lost.

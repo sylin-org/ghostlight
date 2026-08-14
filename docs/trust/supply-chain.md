@@ -1,6 +1,6 @@
 # Ghostlight Supply Chain
 
-This page is the supply-chain evidence a reviewer needs: how releases are built and signed,
+This page is the supply-chain evidence a reviewer needs: how releases are built and attested,
 what a software bill of materials covers, the dependency posture, and how changes reach a
 release.
 

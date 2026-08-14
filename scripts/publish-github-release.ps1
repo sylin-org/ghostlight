@@ -27,13 +27,7 @@ if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
     throw "Candidate manifest does not exist: $candidatePath"
 }
 $candidate = Get-Content -LiteralPath $candidatePath -Raw | ConvertFrom-Json
-$allowedStatuses = @("unsigned-build-candidate", "signed-release-candidate")
-if ($allowedStatuses -notcontains $candidate.status) {
-    throw "Unknown candidate status: $($candidate.status)"
-}
-& (Join-Path $PSScriptRoot "check-release-candidate.ps1") `
-    -CandidateDirectory $CandidateDirectory `
-    -ExpectedStatus $candidate.status
+& (Join-Path $PSScriptRoot "check-release-candidate.ps1") -CandidateDirectory $CandidateDirectory
 
 $tag = "v$($candidate.version)"
 $releaseFiles = @(
@@ -53,14 +47,8 @@ Write-Output "Source revision: $($candidate.sourceRevision)"
 Write-Output "Candidate status: $($candidate.status)"
 Write-Output "Release files: $($releaseFiles.Count)"
 if ($Action -eq "Plan") {
-    if ($candidate.status -ne "signed-release-candidate") {
-        Write-Output "Publication blocker: native candidates are not signed."
-    }
     Write-Output "No GitHub request was made."
     return
-}
-if ($candidate.status -ne "signed-release-candidate") {
-    throw "GitHub publication refuses an unsigned build candidate"
 }
 
 $remoteRevision = (& gh api "repos/$Repository/commits/$tag" --jq .sha).Trim()

@@ -3,8 +3,8 @@
 Last updated: 2026-08-10
 
 This is repository-local candidate copy. Do not change the public listing or submit a package until
-the owner approves the signed 1.0 artifacts and compatibility evidence. Recheck the store's current
-fields, asset sizes, and policy wording at submission time.
+the owner approves the provenance-verified 1.0 artifacts and compatibility evidence. Recheck the
+store's current fields, asset sizes, and policy wording at submission time.
 
 The public item id is `lejccfmoeogmhemakeknjjdhkfkgncdl`. The pinned source-development key and
 unpacked id are preserved separately by `extension/manifest.json`; release packaging must follow

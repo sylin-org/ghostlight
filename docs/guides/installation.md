@@ -3,8 +3,8 @@
 Ghostlight installs as one local product: three sibling executables, a tray workbench, and a
 matching Chromium extension. No account, no resident launcher service, no admin rights.
 
-This guide covers the planned signed 1.0 package and the source-development path you can follow
-today. The published 0.8 package and its Chrome adapter are documented in
+This guide covers the planned provenance-attested 1.0 package and the source-development path you
+can follow today. The published 0.8 package and its Chrome adapter are documented in
 [`../public-status.json`](../public-status.json); keep those and a 1.0 build apart, because they
 are not interchangeable.
 
@@ -12,7 +12,7 @@ are not interchangeable.
 
 1. Run `npx -y ghostlight@1.0.0 install`. The checksum-bound launcher downloads one exact sibling
    set, registers the browser connector for the current user, and connects detected MCP clients.
-   A signed native package, Scoop, WinGet, the one-line installer, or the Claude Desktop
+   A native package, Scoop, WinGet, the one-line installer, or the Claude Desktop
    MCPB may provide the same binaries instead.
 2. Install the matching `Ghostlight in Browser` 1.0 extension from its release listing.
 3. Restart or reconnect the MCP harness, then run the bounded first proof from the README. Launch
@@ -26,9 +26,9 @@ it is absent. The complete desktop authority starts with its tray available and 
 minimized. Launch Ghostlight again whenever you want the workbench; the second launch focuses the
 existing authority instead of creating another one.
 
-Only signed 1.0 packages and the matching 1.0 extension satisfy this journey. Artifact signing,
-clean-machine install, upgrade, and uninstall are release gates, not claims made by this source
-tree.
+Only checksum-bound, provenance-verified 1.0 packages and the matching 1.0 extension satisfy this
+journey. Provenance verification, clean-machine install, upgrade, and uninstall are release gates,
+not claims made by this source tree.
 
 The npm process is a download and launch edge, not the product authority. Supported-client
 registrations point directly at the cached native MCP connector. A bare `npx -y ghostlight@1.0.0`

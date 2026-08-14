@@ -70,18 +70,31 @@ $required = @(
 $missing = @($required | Where-Object {
     -not $values.ContainsKey($_) -or [string]::IsNullOrWhiteSpace($values[$_])
 })
+$manualInstructions = @"
+Manual Chrome Web Store submission:
+  1. Open https://chrome.google.com/webstore/devconsole and select Ghostlight in Browser.
+  2. On Package, upload: $ZipPath
+  3. Review changed listing fields against docs/legal/STORE_LISTING.md,
+     docs/legal/PRIVACY.md, and docs/legal/PERMISSION_JUSTIFICATIONS.md.
+  4. Submit for review. Google controls review and rollout timing.
+  5. After acceptance, run scripts/reconcile-chrome-store.ps1 for version $($manifest.version).
+"@
 
 Write-Output "Chrome Web Store action: $Action"
 Write-Output "Extension version: $($manifest.version)"
 Write-Output "Extension SHA-256: $hash"
 Write-Output "Publish type: $PublishType"
-Write-Output "Credential state: $(if ($missing.Count -eq 0) { 'complete' } else { 'missing ' + ($missing -join ', ') })"
+Write-Output "API automation: $(if ($missing.Count -eq 0) { 'ready' } else { 'optional fields not configured: ' + ($missing -join ', ') })"
 if ($Action -eq "Plan") {
+    Write-Output $manualInstructions
     Write-Output "No Chrome Web Store request was made."
     return
 }
 if ($missing.Count -gt 0) {
-    throw "Chrome Web Store credentials are incomplete: $($missing -join ', ')"
+    Write-Output "Chrome API automation is unavailable: $($missing -join ', ')"
+    Write-Output $manualInstructions
+    Write-Output "No Chrome Web Store request was made."
+    return
 }
 if ($values.CWS_ITEM_ID -notmatch '^[a-p]{32}$' -or
     $values.CWS_PUBLISHER_ID -notmatch '^[A-Za-z0-9._-]+$') {

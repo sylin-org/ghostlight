@@ -6,8 +6,9 @@ account, no extra service to stand up, no activation.
 
 ## Start
 
-1. Install the matching signed 1.0 package and `Ghostlight in Browser` 1.0 adapter when the release
-   is available. For the source candidate, follow [`installation.md`](installation.md).
+1. Install the matching provenance-verified 1.0 package and `Ghostlight in Browser` 1.0 adapter
+   when the release is available. For the source candidate, follow
+   [`installation.md`](installation.md).
 2. Open Ghostlight from the tray.
 3. In **MCP integrations**, find your MCP client and choose **Connect**.
 4. Reconnect that client and ask for the bounded `example.com` proof in the README.

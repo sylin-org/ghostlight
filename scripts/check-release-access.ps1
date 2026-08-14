@@ -30,25 +30,23 @@ function Write-AccessState {
 }
 
 $problems = [System.Collections.Generic.List[string]]::new()
-$requiredChrome = @(
+$chromeAutomation = @(
     "CWS_CLIENT_ID",
     "CWS_CLIENT_SECRET",
     "CWS_REFRESH_TOKEN",
     "CWS_ITEM_ID",
     "CWS_PUBLISHER_ID"
 )
-foreach ($name in $requiredChrome) {
-    $state = if (Test-Present -Name $name) { "present" } else { "missing" }
+foreach ($name in $chromeAutomation) {
+    $state = if (Test-Present -Name $name) { "optional-present" } else { "optional-not-configured" }
     Write-AccessState -Name $name -State $state
-    if ($state -eq "missing") {
-        [void]$problems.Add("$name is missing")
-    }
 }
+$chromeAutomationReady = @($chromeAutomation | Where-Object { -not (Test-Present -Name $_) }).Count -eq 0
 
 $mcpKeyPresent = Test-Present -Name "MCP_DNS_PRIVATE_KEY"
-Write-AccessState -Name "MCP_DNS_PRIVATE_KEY" -State $(if ($mcpKeyPresent) { "present" } else { "missing" })
+Write-AccessState -Name "MCP_DNS_PRIVATE_KEY" -State $(if ($mcpKeyPresent) { "optional-present" } else { "optional-not-configured" })
 if (-not $mcpKeyPresent) {
-    [void]$problems.Add("MCP_DNS_PRIVATE_KEY is missing")
+    Write-Output "MCP Registry automation is optional; manual or deferred publication remains available."
 }
 
 $publisher = Get-Command "mcp-publisher" -ErrorAction SilentlyContinue
@@ -58,14 +56,14 @@ if ($null -eq $publisher) {
         $publisher = Get-Item -LiteralPath $localPublisher
     }
 }
-Write-AccessState -Name "MCP_PUBLISHER" -State $(if ($null -ne $publisher) { "present" } else { "missing" })
+Write-AccessState -Name "MCP_PUBLISHER" -State $(if ($null -ne $publisher) { "optional-present" } else { "optional-not-configured" })
 if ($null -eq $publisher) {
-    [void]$problems.Add("mcp-publisher is missing")
+    Write-Output "MCP Registry publisher automation is optional."
 }
 
 $githubState = "not-checked"
 $npmState = "not-checked"
-$chromeState = "not-checked"
+$chromeState = if ($chromeAutomationReady) { "configured-not-checked" } else { "manual-dashboard" }
 if ($Online) {
     & gh auth status *> $null
     $githubState = if ($LASTEXITCODE -eq 0) { "valid" } else { "invalid" }
@@ -108,7 +106,6 @@ if ($Online) {
                 }
                 else {
                     $chromeState = "v2-item-invalid-http-$($statusResponse.StatusCode)"
-                    [void]$problems.Add("Chrome Web Store V2 item access is invalid")
                 }
             }
         }
@@ -116,7 +113,6 @@ if ($Online) {
             $body = $tokenResponse.Content | ConvertFrom-Json
             $errorName = if ($body.error) { $body.error } else { "http-$($tokenResponse.StatusCode)" }
             $chromeState = "oauth-invalid-$errorName"
-            [void]$problems.Add("Chrome Web Store OAuth is invalid")
         }
     }
     else {
@@ -127,10 +123,7 @@ if ($Online) {
 Write-AccessState -Name "GITHUB_AUTH" -State $githubState
 Write-AccessState -Name "NPM_AUTH" -State $npmState
 Write-AccessState -Name "CHROME_WEB_STORE" -State $chromeState
-
-$windowsSigning = @("AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET") |
-    Where-Object { -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
-Write-AccessState -Name "WINDOWS_SIGNING_ENV" -State $(if (@($windowsSigning).Count -eq 3) { "present" } else { "missing" })
+Write-Output "Chrome API automation is optional; manual Developer Dashboard submission remains available."
 
 if ($RequireReady -and $problems.Count -gt 0) {
     throw "Release access is not ready: $($problems -join '; ')"

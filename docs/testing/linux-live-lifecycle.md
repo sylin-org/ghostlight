@@ -22,7 +22,8 @@ headless, container, Xvfb, remote-debugging, or cloud-browser test.
 
 Test the candidate Debian package and matching store extension. An unpacked source extension is
 useful for development but does not satisfy this lifecycle. The build-only workflow produces an
-unsigned candidate; signing is required before the public-install pass.
+immutable checksum-bound candidate; its GitHub build provenance must verify before the
+public-install pass.
 
 ## Evidence header
 
@@ -35,7 +36,7 @@ kernel:
 desktop_and_display_protocol:
 browser_versions:
 ghostlight_version:
-package_signature_or_digest:
+package_digest_and_provenance:
 extension_version:
 harness_versions:
 ```
@@ -144,7 +145,7 @@ distribution_and_version: CachyOS rolling
 desktop_and_display_protocol: KDE Plasma, Wayland
 browser_versions: Chromium 151.0.7922.137
 ghostlight_version: 1.0.0 local npm candidate
-package_signature_or_digest: three checksum-bound optimized siblings; no public package or signature
+package_digest_and_provenance: three checksum-bound optimized siblings; no public package or provenance
 extension_version: 1.0.0 unpacked source adapter
 harness_versions: locally packed npm launcher 1.0.0; Codex, Claude Code, and Visual Studio Code
 ```
@@ -164,7 +165,7 @@ harness_versions: locally packed npm launcher 1.0.0; Codex, Claude Code, and Vis
 ## CachyOS development-host record - 2026-08-13
 
 This table deliberately does not change L1-L9 above. It records what the ordinary-user source and
-portable lane proved at revision `61526364` before the signed Debian and matching-store-extension
+portable lane proved at revision `61526364` before the attested Debian and matching-store-extension
 gate exists.
 
 ```text
@@ -175,14 +176,14 @@ kernel: 7.1.8-1-cachyos
 desktop_and_display_protocol: KDE Plasma, Wayland
 browser_versions: Chromium 151.0.7922.137
 ghostlight_version: 1.0.0 development candidate 61526364
-package_signature_or_digest: user candidate; no native package or signature
+package_digest_and_provenance: user candidate; no native package or provenance
 extension_version: 1.0.0 unpacked source adapter
 harness_versions: npm launcher 1.0.0; native Codex and Claude Code registrations
 ```
 
 | Related stage | Development-host result | Evidence or remaining limit |
 | --- | --- | --- |
-| L1 | PARTIAL PASS | Exact three-sibling user candidate installed; four browser manifests plus Codex and Claude Code current; no resident supervisor. No Debian package, signature, package-manager install, or store adapter. |
+| L1 | PARTIAL PASS | Exact three-sibling user candidate installed; four browser manifests plus Codex and Claude Code current; no resident supervisor. No Debian package, provenance, package-manager install, or store adapter. |
 | L2 | PARTIAL PASS | Ordinary visible profile passed open, structured read, screenshot, and presentation. Preserve-tabs correctly blocked close. The full interactive form/drag/upload/dialog matrix remains incomplete. |
 | L3 | PARTIAL PASS | Browser and MCP connectors independently demand-started the trusted sibling authority. Real-process unknown-effect/no-replay passed; a separately interrupted visible effect remains incomplete. |
 | L4 | PARTIAL PASS | Normal browser shutdown removed the connector; restart recovered the native connection and a bounded call. Extension disable/re-enable remains incomplete. |

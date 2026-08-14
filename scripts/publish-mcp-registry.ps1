@@ -29,6 +29,7 @@ if (-not (Test-Path -LiteralPath $ServerFile -PathType Leaf)) {
     throw "MCP server metadata does not exist: $ServerFile"
 }
 $candidate = Get-Content -LiteralPath $candidatePath -Raw | ConvertFrom-Json
+& (Join-Path $PSScriptRoot "check-release-candidate.ps1") -CandidateDirectory $CandidateDirectory
 $server = Get-Content -LiteralPath $ServerFile -Raw | ConvertFrom-Json
 $publisher = Get-Command "mcp-publisher" -ErrorAction SilentlyContinue
 if ($null -eq $publisher) {
@@ -42,9 +43,6 @@ if ($null -eq $publisher) {
 }
 
 $problems = [System.Collections.Generic.List[string]]::new()
-if ($candidate.status -ne "signed-release-candidate") {
-    [void]$problems.Add("candidate is not signed")
-}
 if ($server.name -ne "org.sylin/ghostlight") {
     [void]$problems.Add("server name is not org.sylin/ghostlight")
 }

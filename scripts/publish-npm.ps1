@@ -7,6 +7,7 @@ param(
     [string]$Package,
     [ValidateSet("Plan", "Publish")]
     [string]$Mode = "Plan",
+    [string]$Repository = "sylin-org/ghostlight",
     [string]$ExpectedSha256,
     [switch]$Execute
 )
@@ -16,7 +17,10 @@ Set-StrictMode -Version Latest
 
 $CandidateDirectory = [System.IO.Path]::GetFullPath($CandidateDirectory)
 $Package = [System.IO.Path]::GetFullPath($Package)
-& (Join-Path $PSScriptRoot "check-release-candidate.ps1") -CandidateDirectory $CandidateDirectory -ExpectedStatus signed-release-candidate
+if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+    throw "Repository must have owner/name form"
+}
+& (Join-Path $PSScriptRoot "check-release-candidate.ps1") -CandidateDirectory $CandidateDirectory
 $candidate = Get-Content -LiteralPath (Join-Path $CandidateDirectory "release-candidate.json") -Raw | ConvertFrom-Json
 if ([System.IO.Path]::GetFileName($Package) -ne "ghostlight-$($candidate.version).tgz") {
     throw "npm tarball name does not match release candidate version"
@@ -28,7 +32,7 @@ $packageArtifacts = @($candidate.artifacts | Where-Object {
 if ($packageArtifacts.Count -ne 1 -or
     $packageArtifacts[0].name -ne [System.IO.Path]::GetFileName($Package) -or
     $packageArtifacts[0].sha256 -ne $observedHash) {
-    throw "npm tarball is not the exact launcher bound into the signed candidate"
+    throw "npm tarball is not the exact launcher bound into the release candidate"
 }
 
 Write-Output "npm publication plan"
@@ -46,6 +50,19 @@ if (-not $Execute) {
 if ($ExpectedSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
     $ExpectedSha256.ToLowerInvariant() -ne $observedHash) {
     throw "Publish mode requires the exact tarball SHA-256"
+}
+$tag = "v$($candidate.version)"
+& gh release view $tag --repo $Repository *> $null
+if ($LASTEXITCODE -ne 0) {
+    throw "GitHub release $tag does not exist; refusing to publish npm before its assets"
+}
+& gh attestation verify $Package `
+    --repo $Repository `
+    --signer-workflow "$Repository/.github/workflows/release.yml" `
+    --source-digest $candidate.sourceRevision `
+    --deny-self-hosted-runners *> $null
+if ($LASTEXITCODE -ne 0) {
+    throw "GitHub provenance verification failed for the npm tarball"
 }
 & npm publish $Package --access public
 if ($LASTEXITCODE -ne 0) {

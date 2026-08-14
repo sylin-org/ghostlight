@@ -213,7 +213,7 @@ $candidate = [ordered]@{
     version = $Version
     sourceRevision = $SourceRevision
     generatedBy = "scripts/assemble-release-candidate.ps1"
-    status = "unsigned-build-candidate"
+    status = "release-candidate"
     artifacts = $orderedArtifacts
 }
 $candidateJson = $candidate | ConvertTo-Json -Depth 8

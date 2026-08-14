@@ -16,9 +16,9 @@ where to verify it.
 
 | Annex A theme | What your control needs from a supplier | What Ghostlight provides | Evidence |
 | --- | --- | --- | --- |
-| Supplier relationships and ICT supply chain (A.5.19-A.5.23) | Assurance about the supplier and its build/release chain | Signed releases, per-file checksums, provenance, a per-release SBOM, and readable governance source | [supply-chain.md](supply-chain.md) |
+| Supplier relationships and ICT supply chain (A.5.19-A.5.23) | Assurance about the supplier and its build/release chain | Per-file checksums, keyless build provenance, a per-release SBOM, and readable governance source | [supply-chain.md](supply-chain.md) |
 | Access control on supplier assets (A.5.15-A.5.18) | Least privilege and strong authentication on the assets that affect you | MFA and least privilege on source, pipeline, and signing keys; keys held air-gapped | [security-overview.md](security-overview.md) |
-| Secure development (A.8.25-A.8.28) | A disciplined SDLC behind what you deploy | Decision records for design, CI gates for correctness, signed artifacts for release | [supply-chain.md](supply-chain.md) |
+| Secure development (A.8.25-A.8.28) | A disciplined SDLC behind what you deploy | Decision records for design, CI gates for correctness, and provenance-attested release artifacts | [supply-chain.md](supply-chain.md) |
 | Use of cryptography (A.8.24) | Sound cryptographic practice for integrity | Composite Ed25519 + ML-DSA-65 signatures on production key generations; signature-anchored trust; anti-rollback sequence | [security-overview.md](security-overview.md) |
 | Logging and monitoring (A.8.15-A.8.16) | Records sufficient to reconstruct actions | Identity-bound tool-call audit with `policy_seq` policy provenance | [SIEM integration guide](../guides/siem-integration.md) |
 | Technical vulnerability management (A.8.8) | A vendor channel and cadence for vulnerabilities in what you deploy | A private disclosure channel with published best-effort response targets, a dependency-audit CI gate, and published advisories | [SECURITY.md](../../SECURITY.md), [supply-chain.md](supply-chain.md) |

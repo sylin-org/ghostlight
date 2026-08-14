@@ -23,9 +23,9 @@ Node is not a resident service.
 If anything does not connect, run `npx -y ghostlight@${VERSION} doctor` for an ownership-safe
 checkup.
 
-The signed Windows setup and Debian package below are equivalent native-package routes. Start
-Ghostlight, open **MCP integrations** to connect a client, and use **Status** to check the whole
-chain.
+The provenance-attested Windows setup and Debian package below are equivalent native-package
+routes. Start Ghostlight, open **MCP integrations** to connect a client, and use **Status** to check
+the whole chain.
 
 Use the Windows setup executable or install the Debian package with
 `sudo apt install ./ghostlight-v${VERSION}-x86_64-unknown-linux-gnu.deb`. The package owns the three
@@ -41,7 +41,7 @@ configuration. The removed `ghostlight-relay --role agent` command is not a comp
 ${PLATFORM_EVIDENCE}
 
 This section must name only clean-install, upgrade, demand-start, visible-browser, and uninstall
-journeys actually completed with these signed artifacts. Do not turn a CI build into a live-platform
+journeys actually completed with these exact artifacts. Do not turn a CI build into a live-platform
 claim.
 
 ## Verify
@@ -55,7 +55,8 @@ gh attestation verify <downloaded-file> \
   --signer-workflow sylin-org/ghostlight/.github/workflows/release.yml
 ```
 
-${SIGNATURE_NOTES}
+Ghostlight does not Authenticode-sign the Windows executable. As in 0.8, `SHA256SUMS` and GitHub's
+keyless build-provenance attestations are the artifact-integrity controls.
 
 ## Downloads
 

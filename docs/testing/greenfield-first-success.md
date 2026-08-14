@@ -4,13 +4,13 @@ Status: planned release gate
 
 ## Purpose
 
-Prove that a person who did not build Ghostlight can install the signed 1.0 package, understand the
+Prove that a person who did not build Ghostlight can install the provenance-verified 1.0 package, understand the
 tray workbench, connect one supported MCP harness and the matching extension, and obtain one useful
 visible read without maintainer intervention.
 
 ## Ground rules
 
-- Use one exact signed candidate and matching store-extension version for the cohort.
+- Use one exact provenance-verified candidate and matching store-extension version for the cohort.
 - Give participants only the release installation guide and first task below.
 - Do not screen-share, type commands, or explain around a defect.
 - Record every maintainer intervention as a failed unaided attempt.
@@ -33,7 +33,7 @@ Ghostlight group.
 | Operating systems | Windows and Linux |
 | MCP harnesses | At least three, including a terminal client and graphical editor client |
 | Browser | At least two supported Chromium families, version 116 or later |
-| Installation | Signed package, OS-native uninstall path, matching store extension |
+| Installation | Candidate package, OS-native uninstall path, matching store extension |
 | Existing state | Clean machine or user profile with no Ghostlight 1.0 installation |
 
 ## Run
@@ -56,7 +56,7 @@ run_id:
 date_utc:
 participant_id:
 ghostlight_version:
-package_signature_or_digest:
+package_digest_and_provenance:
 operating_system:
 browser_and_version:
 mcp_harness_and_version:

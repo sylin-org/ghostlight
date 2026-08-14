@@ -2,9 +2,7 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [string]$CandidateDirectory,
-    [ValidateSet("unsigned-build-candidate", "signed-release-candidate")]
-    [string]$ExpectedStatus = "unsigned-build-candidate"
+    [string]$CandidateDirectory
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,7 +21,7 @@ foreach ($path in @($assetDirectory, $manifestPath, $sumsPath)) {
 $candidate = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($candidate.schemaVersion -ne 1 -or
     $candidate.generatedBy -ne "scripts/assemble-release-candidate.ps1" -or
-    $candidate.status -ne $ExpectedStatus) {
+    $candidate.status -ne "release-candidate") {
     throw "Candidate manifest metadata is invalid"
 }
 if ($candidate.version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$' -or

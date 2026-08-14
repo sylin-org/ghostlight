@@ -14,9 +14,7 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $CandidateDirectory = [System.IO.Path]::GetFullPath($CandidateDirectory)
 $candidate = Get-Content -LiteralPath (Join-Path $CandidateDirectory "release-candidate.json") -Raw | ConvertFrom-Json
-& (Join-Path $PSScriptRoot "check-release-candidate.ps1") `
-    -CandidateDirectory $CandidateDirectory `
-    -ExpectedStatus $candidate.status
+& (Join-Path $PSScriptRoot "check-release-candidate.ps1") -CandidateDirectory $CandidateDirectory
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $OutputDirectory) {
     if (-not $Force) { throw "Output exists: $OutputDirectory (pass -Force to replace it)" }

@@ -24,9 +24,7 @@ if ($artifactMode) {
 } else {
     $CandidateDirectory = [System.IO.Path]::GetFullPath($CandidateDirectory)
     $candidate = Get-Content -LiteralPath (Join-Path $CandidateDirectory "release-candidate.json") -Raw | ConvertFrom-Json
-    & (Join-Path $PSScriptRoot "check-release-candidate.ps1") `
-        -CandidateDirectory $CandidateDirectory `
-        -ExpectedStatus $candidate.status
+    & (Join-Path $PSScriptRoot "check-release-candidate.ps1") -CandidateDirectory $CandidateDirectory
     $Version = $candidate.version
 }
 $source = Join-Path $repo "packaging/mcpb"

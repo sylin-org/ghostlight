@@ -100,7 +100,7 @@ jobs:
       - name: Stage exact Tauri sidecars
         shell: pwsh
         run: ./scripts/stage-tauri-sidecars.ps1 -TargetTriple ${{ matrix.target }}
-      - name: Build the unsigned native candidate
+      - name: Build the native candidate
         working-directory: crates/orchestrator
         run: cargo tauri build --config tauri.release.conf.json --bundles ${{ matrix.bundles }} --target ${{ matrix.target }} --ci --no-sign
       - name: Verify Windows package contents

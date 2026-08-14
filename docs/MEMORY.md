@@ -19,6 +19,10 @@ the owner wants, and what this project learned the hard way.
 - **Release work must earn its place.** Keep the checks that prevent a real failure, prove a user
   promise, or make recovery safer. Do not turn restamping, duplicate checklists, optional directory
   submissions, or one giant conductor into release gates.
+- **The 0.8 artifact trust model remains authoritative.** Ghostlight ships checksum-bound artifacts
+  with keyless GitHub build-provenance attestations. It has no Windows code-signing certificate.
+  Chrome API credentials are optional automation; manual Developer Dashboard submission is a
+  supported release path. Do not invent either as a readiness gate without a new owner decision.
 - **Preserve product identity; redesign internals deliberately.** The name, the original icon bytes,
   the visual language, the motion character, and user expectations are identity. Model-facing tools
   and descriptions are mechanisms the orchestrator owns and may redesign.
