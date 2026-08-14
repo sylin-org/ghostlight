@@ -86,7 +86,8 @@ covers browser registration and the full validation loop.
 
 After that first setup there is no startup ritual: launching a connected MCP client or Chromium
 demand-starts Ghostlight when it is not already running. The normal desktop authority always owns
-the tray and begins with its workbench minimized. `--headless` explicitly runs without a desktop.
+the tray and begins with its workbench backgrounded: minimized on Windows and hidden on Linux.
+`--headless` explicitly runs without a desktop.
 
 For an end-user install, the 1.0 release keeps the 0.8 one-command journey:
 

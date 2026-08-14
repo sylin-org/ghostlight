@@ -210,9 +210,9 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 
 ## Desktop workbench gates
 
-1. Normal `ghostlight` startup creates the tray and shows the workbench minimized, or restores and
-   focuses the existing workbench. `--headless` starts no desktop runtime. Closing the window hides
-   it, and only explicit quit stops the process.
+1. Normal `ghostlight` startup creates the tray and backgrounds the workbench (minimized on Windows,
+   hidden on Linux), or restores and focuses the existing workbench. `--headless` starts no desktop
+   runtime. Closing the window hides it, and only explicit quit stops the process.
 2. Home presents plural session, operation, and browser counts plus current work and system health
    at a glance. Activity, history, checkup, configuration, and installations remain separate
    focused destinations behind one compact rail.

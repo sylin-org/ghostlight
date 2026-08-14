@@ -52,8 +52,8 @@ connectors retain their existing reconnect behavior and learn no workbench or pr
 A normal launch first asks the running authority to reveal its workbench through an authenticated
 first message on the existing service bridge. That request admits no workspace and adds no
 listener. If no authority exists, the launch starts the complete desktop authority, creates its
-tray, and shows the workbench minimized. `--headless` is the explicit service-only mode and cannot
-reveal a workbench.
+tray, and backgrounds the workbench: minimized on Windows and hidden on Linux. `--headless` is the
+explicit service-only mode and cannot reveal a workbench.
 
 ## Fringe stability
 

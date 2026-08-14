@@ -19,13 +19,13 @@ The native CachyOS lane was rerun through implementation revision `61526364` on 
 is development-host evidence, not a Debian package, signature, store-adapter, reboot, or release
 pass.
 
-- Rust 1.95.0 formatting, warnings-denied clippy, isolated build, all 188 workspace tests, all 99
+- Rust 1.95.0 formatting, warnings-denied clippy, isolated build, all 190 workspace tests, all 99
   extension tests, all 10 npm tests, all 5 MCPB tests, 41 JavaScript syntax checks, both process
   journeys, the workbench surface journey, `cargo deny`, and `cargo audit` passed. Audit still
   reports the 17 allowed GTK3/Tauri-chain warnings recorded in the dated readiness audit.
 - A three-sibling optimized user candidate is active at
   `~/.ghostlight/bin/v1.0.0-dev-6152636`. Its orchestrator, MCP connector, and browser connector
-  SHA-256 values are respectively `7cc5cd3e3ef569c3ca537b1174f28669bb171504883c8c5602b6530b6f634cd0`,
+  SHA-256 values are respectively `4e846c6bc29c609b53815bf75475f5ca89e55aff6cdfd83f4578aefc09b48333`,
   `73738e5d71ce6f20ad211c9b10082a5725ab32d05fe2fb9f447913c32662337d`, and
   `1631aed13e00aa0c22a8af8cdde259bcc56c1210dc88a4291441c8025c55cb50`.
 - A fresh offline consumer installed the packed npm launcher and proved bare MCP initialization,
@@ -203,11 +203,11 @@ pass.
   a fresh deploy lock, and preserves each connector's established reconnect behavior.
 - The orchestrator holds an operating-system lifetime lease before publishing runtime discovery or
   initializing Tauri. Concurrent launch attempts therefore converge on one authority and one tray.
-- There is one normal desktop launch. It always creates the tray and shows its workbench minimized.
-  A second direct launch restores and focuses the existing authenticated workbench. `--headless`
-  remains the explicit presentation-free mode. Reveal first shows the hidden window, treats
-  de-minimization as a best-effort window-manager refinement, and then focuses it, so a Linux
-  window manager cannot make the tray command fail silently by rejecting de-minimization.
+- There is one normal desktop launch. It always creates the tray and backgrounds its workbench:
+  minimized on Windows and hidden on Linux. A second direct launch restores and focuses the
+  existing authenticated workbench. `--headless` remains the explicit presentation-free mode.
+  Linux reveal queues mapping and deiconification at normal GLib priority, then requests focus at
+  idle priority after Tauri's focus guard can observe the landed window state.
 - `ghostlight call` is a second intake for scripts and programs (ADR-0105). It invokes one tool, or
   a batch of them over one session with `--stdin`, prints the outcome sentence or `--json`, and maps
   the terminal status to distinct exit codes where an uncertain effect is never zero. It demand-
@@ -525,8 +525,9 @@ source-gate pass, not release approval.
   [`adr/0103-language-owned-outcome-voice.md`](adr/0103-language-owned-outcome-voice.md).
 - Demand-start and single-engine decision:
   [`adr/0104-demand-start-single-engine-and-workbench-activation.md`](adr/0104-demand-start-single-engine-and-workbench-activation.md).
-- One minimized desktop-startup decision:
-  [`adr/0112-one-minimized-desktop-startup.md`](adr/0112-one-minimized-desktop-startup.md).
+- One backgrounded desktop-startup decision:
+  [`adr/0112-one-minimized-desktop-startup.md`](adr/0112-one-minimized-desktop-startup.md), amended
+  for Linux by [`adr/0118-recoverable-linux-workbench-startup.md`](adr/0118-recoverable-linux-workbench-startup.md).
 - End-to-end browser availability decision:
   [`adr/0113-end-to-end-browser-adapter-liveness.md`](adr/0113-end-to-end-browser-adapter-liveness.md).
 - Plural browser adapters and routing decision:

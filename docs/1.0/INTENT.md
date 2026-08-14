@@ -63,9 +63,9 @@ Internal browser commands are combined when a person experiences them as one job
 - Once its connector registration and browser extension are installed, Ghostlight needs no
   separate startup ritual. Launching an MCP client or Chromium demand-starts the local service
   when it is absent.
-- Every normal Ghostlight startup creates the tray and begins with the workbench minimized. A
-  second direct launch or a tray click restores and focuses the workbench owned by the running
-  authority.
+- Every normal Ghostlight startup creates the tray and begins with the workbench backgrounded:
+  minimized on Windows and hidden on Linux. A second direct launch or a tray click restores and
+  focuses the workbench owned by the running authority.
 - Three destinations and one global search reach every workbench surface and user-visible record.
   The monitor carries the current action in full and the recent ones beneath it, so a glance is
   enough.

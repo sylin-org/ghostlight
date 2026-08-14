@@ -63,7 +63,7 @@ impl WorkbenchEventSink for NativeEvents {
     }
 }
 
-/// Start the orchestrator and its initially minimized desktop workbench in one process.
+/// Start the orchestrator and its backgrounded desktop workbench in one process.
 pub fn run() -> Result<()> {
     match crate::install::native_host::NativeHostRegistry::discover().reconcile_packaged_launch() {
         Ok(Some(result)) => {
@@ -119,7 +119,7 @@ pub fn run() -> Result<()> {
             if let Err(error) = build_tray(app) {
                 eprintln!("Ghostlight tray is unavailable: {error}");
             }
-            minimize_workbench(app.handle())?;
+            background_workbench(app.handle())?;
             Ok(())
         });
 
@@ -206,7 +206,19 @@ fn show_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
     show_window(&window)
 }
 
-fn minimize_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
+#[cfg(target_os = "linux")]
+fn background_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
+    app.get_webview_window(MAIN_WINDOW).ok_or_else(|| {
+        WorkbenchPresentationError::Native("Ghostlight workbench window is unavailable".into())
+    })?;
+    // The configured Linux window begins hidden. GTK3 cannot reliably deiconify a window that
+    // started minimized under Wayland, while its native presentation operation maps a hidden
+    // window correctly when the tray or activation endpoint asks for it.
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn background_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
     let window = app.get_webview_window(MAIN_WINDOW).ok_or_else(|| {
         WorkbenchPresentationError::Native("Ghostlight workbench window is unavailable".into())
     })?;
@@ -218,17 +230,40 @@ fn minimize_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError>
         .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))
 }
 
+#[cfg(target_os = "linux")]
 fn show_window(window: &WebviewWindow) -> Result<(), WorkbenchPresentationError> {
     window
         .show()
         .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
-    // Some Linux window managers reject unminimize for a hidden window even after show has made
-    // it visible. The reveal still succeeds there, so de-minimization is a best-effort refinement.
-    let _ = window.unminimize();
+    window
+        .unminimize()
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
+    let focus_window = window.clone();
+    window
+        .run_on_main_thread(move || {
+            // Tauri queues Linux window state changes through GLib, but its focus guard reads
+            // state immediately. The idle callback runs after those queued changes, so focus is
+            // requested only after GTK has mapped and deiconified the window.
+            glib::idle_add_local_once(move || {
+                if let Err(error) = focus_window.set_focus() {
+                    eprintln!("Ghostlight could not focus its restored workbench: {error}");
+                }
+            });
+        })
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))
+}
+
+#[cfg(target_os = "windows")]
+fn show_window(window: &WebviewWindow) -> Result<(), WorkbenchPresentationError> {
+    window
+        .unminimize()
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
+    window
+        .show()
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
     window
         .set_focus()
-        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
-    Ok(())
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))
 }
 
 #[tauri::command]

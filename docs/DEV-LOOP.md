@@ -28,10 +28,11 @@ Run only the persistent orchestrator service:
 target/debug/ghostlight --headless
 ```
 
-The normal launch always starts the complete desktop authority with its tray and a minimized
-workbench. Connectors demand-start that same sibling executable with no application arguments. A
-second direct launch restores and focuses the workbench owned by the running authority. Closing the
-window hides it; the tray Quit action ends the whole process.
+The normal launch always starts the complete desktop authority with its tray and a backgrounded
+workbench: minimized on Windows and hidden on Linux. Connectors demand-start that same sibling
+executable with no application arguments. A second direct launch restores and focuses the
+workbench owned by the running authority. Closing the window hides it; the tray Quit action ends
+the whole process.
 
 ## What to restart
 
@@ -64,7 +65,7 @@ start. The order matters less than the scope.
 4. Stop only processes whose exact image path is that directory. Never stop by image name; an
    installed or user-owned stack may be running beside the build.
 5. Copy the binaries that changed, remove `deploy.lock`, then start `ghostlight`. The tray appears
-   and the workbench begins minimized.
+   and the workbench begins backgrounded.
 
 Replacing `ghostlight-browser-connector` has a cost the other two do not: Chromium respawns the
 native host within a second or two while the extension's service worker is awake, so the copy needs
@@ -139,7 +140,7 @@ to that `ghostlight-browser-connector`. Load `extension/` unpacked and reload it
 extension edit. Its pinned development identity and `org.sylin.ghostlight` host name must not
 change.
 
-Run `ghostlight` again to restore the minimized workbench, open Status, and verify a compatible
+Run `ghostlight` again to restore the backgrounded workbench, open Status, and verify a compatible
 browser instance appears. Use a
 supported MCP client registration from MCP integrations, reconnect that client, and execute the
 journeys in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md). Use the `sylin.org` demo forms for visible

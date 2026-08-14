@@ -30,8 +30,8 @@ the owner wants, and what this project learned the hard way.
 - **Fewest meaningful moving parts.** A logical boundary does not earn a process, crate, service,
   event bus, actor system, workflow engine, CQRS split, or registry.
 - **One normal desktop startup.** Installed Ghostlight always creates its tray and starts the
-  workbench minimized. Connectors launch that same executable with no mode flag. Only explicit
-  `--headless` omits desktop presentation.
+  workbench backgrounded: minimized on Windows and hidden on Linux. Connectors launch that same
+  executable with no mode flag. Only explicit `--headless` omits desktop presentation.
 - **Keep the fringes stable.** Product and journey change belongs in the orchestrator. The
   connectors negotiate and relay. The extension owns Chromium, the page, and the drawing, and makes
   no product, workspace, authority, or model-language decision.
