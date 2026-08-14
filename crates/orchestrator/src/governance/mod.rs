@@ -7,6 +7,7 @@ pub mod inspection;
 pub mod managed;
 pub mod manifest;
 
+use std::collections::VecDeque;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -30,6 +31,11 @@ const RUNTIME_ACTIVE: u8 = 0;
 const RUNTIME_HOLD: u8 = 1;
 const RUNTIME_ATTENTION: u8 = 2;
 const RUNTIME_END: u8 = 3;
+const DENIAL_ATTENTION_MATCHING_WINDOW_MS: u64 = 60_000;
+const DENIAL_ATTENTION_ALL_WINDOW_MS: u64 = 120_000;
+const DENIAL_ATTENTION_MATCHING_THRESHOLD: usize = 3;
+const DENIAL_ATTENTION_ALL_THRESHOLD: usize = 5;
+const DENIAL_ATTENTION_HISTORY_LIMIT: usize = 512;
 
 /// One independent governed browser capability fact.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -870,6 +876,72 @@ pub struct GovernanceFacade {
     policies: Arc<Mutex<PolicySources>>,
     runtime_control: Option<PathBuf>,
     controls: Arc<RuntimeControls>,
+    denial_attention: Arc<Mutex<DenialAttention>>,
+}
+
+#[derive(Debug, Default)]
+struct DenialAttention {
+    attempts: VecDeque<DenialAttempt>,
+}
+
+#[derive(Debug)]
+struct DenialAttempt {
+    workspace: String,
+    key: String,
+    at_ms: u64,
+}
+
+impl DenialAttention {
+    fn record(&mut self, workspace: &str, decision: Decision, at_ms: u64) -> bool {
+        if decision.allowed || decision.observed || !attention_eligible(decision.reason) {
+            return false;
+        }
+        let oldest = at_ms.saturating_sub(DENIAL_ATTENTION_ALL_WINDOW_MS);
+        self.attempts.retain(|attempt| attempt.at_ms >= oldest);
+        let key = decision
+            .denial_id()
+            .unwrap_or_else(|| decision.reason.as_str().into());
+        self.attempts.push_back(DenialAttempt {
+            workspace: workspace.into(),
+            key: key.clone(),
+            at_ms,
+        });
+        while self.attempts.len() > DENIAL_ATTENTION_HISTORY_LIMIT {
+            self.attempts.pop_front();
+        }
+        let all = self
+            .attempts
+            .iter()
+            .filter(|attempt| attempt.workspace == workspace)
+            .count();
+        let matching = self
+            .attempts
+            .iter()
+            .filter(|attempt| {
+                attempt.workspace == workspace
+                    && attempt.key == key
+                    && attempt.at_ms >= at_ms.saturating_sub(DENIAL_ATTENTION_MATCHING_WINDOW_MS)
+            })
+            .count();
+        let attention = matching >= DENIAL_ATTENTION_MATCHING_THRESHOLD
+            || all >= DENIAL_ATTENTION_ALL_THRESHOLD;
+        if attention {
+            self.attempts
+                .retain(|attempt| attempt.workspace != workspace);
+        }
+        attention
+    }
+}
+
+const fn attention_eligible(reason: ReasonCode) -> bool {
+    matches!(
+        reason,
+        ReasonCode::CapabilityDenied
+            | ReasonCode::TabCloseDenied
+            | ReasonCode::HostDenied
+            | ReasonCode::ProtectedHost
+            | ReasonCode::InvalidAuthority
+    )
 }
 
 #[derive(Debug)]
@@ -1035,6 +1107,7 @@ impl GovernanceFacade {
             policies: Arc::new(Mutex::new(PolicySources::new(local_policy, managed_policy))),
             runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
+            denial_attention: Arc::new(Mutex::new(DenialAttention::default())),
         }
     }
 
@@ -1044,6 +1117,7 @@ impl GovernanceFacade {
             policies: Arc::new(Mutex::new(PolicySources::with_managed_paths(paths))),
             runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
+            denial_attention: Arc::new(Mutex::new(DenialAttention::default())),
         }
     }
 
@@ -1056,6 +1130,7 @@ impl GovernanceFacade {
             ))),
             runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
+            denial_attention: Arc::new(Mutex::new(DenialAttention::default())),
         }
         .with_runtime_control_file(
             env::var_os("GHOSTLIGHT_RUNTIME_CONTROL_FILE").map(PathBuf::from),
@@ -1084,6 +1159,15 @@ impl GovernanceFacade {
     #[must_use]
     pub fn runtime_state(&self) -> RuntimeControlState {
         self.controls.state()
+    }
+
+    /// Record one enforced workspace-local denial and report whether it crossed the attention
+    /// threshold. The circuit is bounded, memory-only, and clears that workspace after firing.
+    pub(crate) fn record_denial_attention(&self, workspace: &str, decision: Decision) -> bool {
+        self.denial_attention
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .record(workspace, decision, unix_ms())
     }
 
     /// Decide whether an intake channel may open a session at all.
@@ -1513,7 +1597,10 @@ mod tests {
     use crate::language::RequestRestrictions;
     use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
 
-    use super::{AuditRecord, Capability, CapabilitySet, Decision, GovernanceFacade, ReasonCode};
+    use super::{
+        AuditRecord, Capability, CapabilitySet, Decision, DenialAttention, GovernanceFacade,
+        ReasonCode,
+    };
     use crate::language::outcome::Observed;
 
     fn temporary(name: &str) -> PathBuf {
@@ -2317,5 +2404,50 @@ mod tests {
             facade.apply_runtime_intent(RuntimeControlIntent::StartSession),
             RuntimeControlState::Active
         );
+    }
+
+    #[test]
+    fn repeated_matching_denials_require_attention_per_workspace() {
+        let mut attention = DenialAttention::default();
+        let denied = Decision::deny(ReasonCode::CapabilityDenied);
+
+        assert!(!attention.record("workspace_one", denied, 1_000));
+        assert!(!attention.record("workspace_two", denied, 10_000));
+        assert!(!attention.record("workspace_one", denied, 30_000));
+        assert!(attention.record("workspace_one", denied, 60_000));
+        assert!(!attention.record("workspace_one", denied, 61_000));
+        assert!(!attention.record("workspace_two", denied, 61_000));
+    }
+
+    #[test]
+    fn five_distinct_enforced_denials_require_attention_and_old_attempts_expire() {
+        let mut attention = DenialAttention::default();
+        for (index, reason) in [
+            ReasonCode::CapabilityDenied,
+            ReasonCode::TabCloseDenied,
+            ReasonCode::HostDenied,
+            ReasonCode::ProtectedHost,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(!attention.record("workspace", Decision::deny(reason), index as u64 * 1_000));
+        }
+        assert!(attention.record(
+            "workspace",
+            Decision::deny(ReasonCode::InvalidAuthority),
+            4_000
+        ));
+
+        assert!(!attention.record(
+            "expired",
+            Decision::deny(ReasonCode::CapabilityDenied),
+            1_000
+        ));
+        assert!(!attention.record(
+            "expired",
+            Decision::deny(ReasonCode::CapabilityDenied),
+            122_000
+        ));
     }
 }

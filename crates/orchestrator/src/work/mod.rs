@@ -291,23 +291,41 @@ impl ApplicationExecutor {
             duration_ms,
             channel,
         } = completion;
-        let event = match terminal.result.status {
-            Status::Blocked => DomainEvent::WorkBlocked {
+        let denial_attention = terminal.result.status == Status::Blocked
+            && self
+                .governance
+                .record_denial_attention(workspace.as_str(), terminal.decision);
+        if denial_attention {
+            self.governance.controls().require_attention();
+            let _ = self
+                .browser
+                .publish_control_state(self.governance.runtime_state());
+        }
+        let event = if denial_attention {
+            DomainEvent::AttentionRequired {
                 invocation: terminal.result.invocation.clone(),
                 workspace: workspace.as_str().into(),
                 physical_id: terminal.physical_id,
-                presentation: denial_presentation(tool, &terminal.result),
-            },
-            Status::AttentionRequired => DomainEvent::AttentionRequired {
-                invocation: terminal.result.invocation.clone(),
-                workspace: workspace.as_str().into(),
-                physical_id: terminal.physical_id,
-            },
-            _ => DomainEvent::WorkCompleted {
-                invocation: terminal.result.invocation.clone(),
-                workspace: workspace.as_str().into(),
-                physical_id: terminal.physical_id,
-            },
+            }
+        } else {
+            match terminal.result.status {
+                Status::Blocked => DomainEvent::WorkBlocked {
+                    invocation: terminal.result.invocation.clone(),
+                    workspace: workspace.as_str().into(),
+                    physical_id: terminal.physical_id,
+                    presentation: denial_presentation(tool, &terminal.result),
+                },
+                Status::AttentionRequired => DomainEvent::AttentionRequired {
+                    invocation: terminal.result.invocation.clone(),
+                    workspace: workspace.as_str().into(),
+                    physical_id: terminal.physical_id,
+                },
+                _ => DomainEvent::WorkCompleted {
+                    invocation: terminal.result.invocation.clone(),
+                    workspace: workspace.as_str().into(),
+                    physical_id: terminal.physical_id,
+                },
+            }
         };
         self.emit(event);
         let status = serde_json::to_value(terminal.result.status)
@@ -4102,7 +4120,8 @@ mod tests {
         BrowserCommand, BrowserOutcome, BrowserReadiness, CaptureScope, EncodedRecording,
         ObservedTarget, PhysicalActionSubject, PhysicalRecordingSummary, PhysicalTab,
         RecordingDelivery, RecordingDestination, RecordingState, RecordingStopReason,
-        ViewportGeometry, RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES,
+        RuntimeControlIntent, RuntimeControlState, ViewportGeometry, RECORDING_LOCAL_MAX_BYTES,
+        RECORDING_TRANSFER_MAX_BYTES,
     };
     use ghostlight_bridge::service::ServiceContent;
     use serde_json::json;
@@ -4356,6 +4375,58 @@ mod tests {
             listed.facts["browsers"],
             json!([{"browser":FAKE_BROWSER,"name":null,"attended":true}])
         );
+    }
+
+    #[test]
+    fn repeated_policy_denials_pause_browser_work_until_the_user_resumes() {
+        let policy = temporary_policy("denial-attention");
+        fs::write(
+            &policy,
+            r#"{"schema":3,"name":"deny reads","version":"1","grants":[],"config":[]}"#,
+        )
+        .unwrap();
+        let governance = GovernanceFacade::new(Some(policy.clone()), None);
+        let (executor, browser, _, workspace, _) = fixture_with_governance(governance.clone());
+
+        for _ in 0..3 {
+            let denied = executor.execute(
+                &workspace,
+                "browser_tabs",
+                json!({"action":"list"}),
+                None,
+                &CancellationToken::default(),
+            );
+            assert_eq!(denied.status, Status::Blocked);
+        }
+        assert_eq!(governance.runtime_state(), RuntimeControlState::Attention);
+        assert_eq!(
+            browser.control_states().last(),
+            Some(&RuntimeControlState::Attention)
+        );
+
+        let paused = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(paused.status, Status::AttentionRequired);
+
+        assert_eq!(
+            governance.apply_runtime_intent(RuntimeControlIntent::Resume),
+            RuntimeControlState::Active
+        );
+        let denied_again = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(denied_again.status, Status::Blocked);
+        assert_eq!(governance.runtime_state(), RuntimeControlState::Active);
+        let _ = fs::remove_file(policy);
     }
 
     #[test]
