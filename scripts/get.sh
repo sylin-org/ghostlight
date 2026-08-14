@@ -5,7 +5,6 @@
 set -eu
 
 repository="sylin-org/ghostlight"
-walkthrough="https://sylin.org/ghostlight/chromium-extension/post-install/"
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
   *)
@@ -88,5 +87,4 @@ echo "Ghostlight ${version} installed at ${install_directory}"
 if [ "${GHOSTLIGHT_NO_REGISTER:-0}" != "1" ]; then
   "$ghostlight" install
 fi
-echo "Run '${ghostlight} doctor' to check the installation."
-echo "Browser walkthrough: ${walkthrough}"
+echo "If anything does not connect, run '${ghostlight} doctor'."

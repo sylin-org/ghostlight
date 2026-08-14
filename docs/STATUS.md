@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-13.
+Last updated: 2026-08-14.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -15,17 +15,38 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 
 ## Linux 1.0 development-host result
 
-The native CachyOS lane was rerun through implementation revision `61526364` on 2026-08-13. This
-is development-host evidence, not a Debian package, signature, store-adapter, reboot, or release
-pass.
+The native CachyOS lane was extended through the current 1.0 source candidate on 2026-08-14. This
+is development-host and npm-candidate evidence, not a Debian package signature, store-adapter,
+reboot, or public-release pass.
+
+- A locally packed, checksum-bound `ghostlight@1.0.0` installed the current optimized Linux
+  siblings into `~/.ghostlight/bin/v1.0.0`, updated the active Codex, Claude Code, Visual Studio
+  Code, and four Chromium registrations, and handed the unpacked adapter from the older development
+  candidate to that exact installed set. The orchestrator, MCP connector, and browser connector
+  SHA-256 values are respectively `1cac38da4928dec72e8c6ceabdf92c4266142f76c1ba7bf2921a4cdb0a9e59ec`,
+  `81058c3d41fb1815a46cca6e36bb01d5dc8fd864e457ed6f62b2e0a71bd14052`, and
+  `a725e65a3a0ff9cfec760f064f876ebc28e1e946356b4a11875ef005095ed8b6`.
+- A clean temporary npm consumer downloaded all three current Linux binaries through the launcher's
+  injected release transport, printed one progress and one verification line per sibling, and
+  rejected no expected checksum. A separately packed `npx --offline --package` install started
+  from an empty home and config root, registered detected clients, opened the service-first
+  walkthrough once, kept its marker mode `0600`, stayed non-interactive on reinstall, and reported
+  the idle service as ready on demand.
+- The active installed candidate passed `doctor` with its service and native adapter connected,
+  then completed visible open, list, 19-word read, and 1248x615 screenshot against Example Domain.
+  The default preserve-tabs interlock truthfully refused model-driven close. The service-first
+  installer and extension-first adapter now lead to their opposite halves through the two stable
+  pages; only a first real install opens a page, while CI, dry-run, `--no-open`, update, and repeat
+  paths stay non-interactive.
 
 - Rust 1.95.0 formatting, warnings-denied clippy, isolated build, all 191 workspace tests, all 99
   extension tests, all 10 npm tests, all 5 MCPB tests, 41 JavaScript syntax checks, both process
   journeys, the workbench surface journey, `cargo deny` bans/licenses/sources, and `cargo audit`
   passed. Audit still reports the 17 allowed GTK3/Tauri-chain warnings recorded in the dated
   readiness audit.
-- A three-sibling optimized user candidate is active at
-  `~/.ghostlight/bin/v1.0.0-dev-6152636`. Its orchestrator, MCP connector, and browser connector
+- The earlier three-sibling optimized user candidate at
+  `~/.ghostlight/bin/v1.0.0-dev-6152636` remains as historical local evidence but is no longer the
+  active browser stack. Its orchestrator, MCP connector, and browser connector
   SHA-256 values are respectively `97131236cdbb0be8367ce152182af8b8eaba8033f34c8d407a948ac5e20f58b3`,
   `73738e5d71ce6f20ad211c9b10082a5725ab32d05fe2fb9f447913c32662337d`, and
   `1631aed13e00aa0c22a8af8cdde259bcc56c1210dc88a4291441c8025c55cb50`.
@@ -282,9 +303,9 @@ source-gate pass, not release approval.
 
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 190 Rust tests -- 154 in the orchestrator library, 2 in its launch-mode
+- `cargo test --workspace`: 195 Rust tests -- 159 in the orchestrator library, 2 in its launch-mode
   binary, 30 in the shared bridge, and 4 in the MCP connector.
-- `npm test --prefix extension`: 99 extension tests.
+- `npm test --prefix extension`: 100 extension tests.
 - `npm test --prefix packaging/npm`: 10 launcher tests. The MCPB launcher has 4 Node tests.
 - The four executable process/workbench journeys passed from a clean isolated target directory,
   all 41 tracked JavaScript and module files parsed, dependency license/source/bans checks passed,

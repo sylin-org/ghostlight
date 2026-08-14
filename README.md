@@ -93,8 +93,10 @@ For an end-user install, the 1.0 release keeps the 0.8 one-command journey:
 
 ```sh
 npx -y ghostlight@1.0.0 install
-npx -y ghostlight@1.0.0 doctor
 ```
+
+The installer opens the one required browser-store confirmation and tells you when to reconnect
+your MCP client. If anything needs attention later, run `npx -y ghostlight@1.0.0 doctor`.
 
 That coordinate is not public until the gates in [`docs/STATUS.md`](docs/STATUS.md) are met. Signed
 native packages, portable archives, and a self-contained Claude Desktop MCPB are equivalent release

@@ -12,9 +12,12 @@ substitutes for a 1.0 source build.
 1. Ask the user to run `npx -y ghostlight@1.0.0 install`, or install the matching signed native
    package. Never substitute public 0.8 binaries for a 1.0 adapter.
 2. Ask the user to install the matching `Ghostlight in Browser` 1.0 store adapter.
-3. Ask them to run `npx -y ghostlight@1.0.0 doctor`. Ghostlight changes only owned entries,
-   creates a backup before client-config replacement, and preserves unrelated JSONC or TOML.
-4. Reconnect or restart the MCP client if it does not refresh its tool catalog.
+3. Reconnect or restart the MCP client if it does not refresh its tool catalog. Ghostlight changes
+   only owned entries, creates a backup before client-config replacement, and preserves unrelated
+   JSONC or TOML.
+
+Use `npx -y ghostlight@1.0.0 doctor` only if the connection needs recovery. It is not a required
+second installation command.
 
 Supported workbench registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
 Code, Windsurf, Zed, OpenCode, and Crush. Another compatible local stdio MCP client can point

@@ -102,6 +102,7 @@ test("a matching cached binary is reused without a network request", async () =>
   const expectedHash = createHash("sha256").update(bytes).digest("hex");
   await writeFile(path, bytes);
   let fetched = false;
+  let announced = false;
   try {
     const changed = await ensureBinary({
       path,
@@ -110,9 +111,13 @@ test("a matching cached binary is reused without a network request", async () =>
       fetchImpl: async () => {
         fetched = true;
       },
+      onDownload: () => {
+        announced = true;
+      },
     });
     assert.equal(changed, false);
     assert.equal(fetched, false);
+    assert.equal(announced, false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -124,14 +129,19 @@ test("a corrupt cached binary is replaced only by verified bytes", async () => {
   const trusted = Buffer.from("fresh-trusted-binary");
   const expectedHash = createHash("sha256").update(trusted).digest("hex");
   await writeFile(path, "corrupt");
+  let announced = false;
   try {
     const changed = await ensureBinary({
       path,
       url: "https://github.com/sylin-org/ghostlight/releases/download/v1.0.0/ghostlight",
       expectedHash,
       fetchImpl: async () => new Response(trusted, { status: 200 }),
+      onDownload: () => {
+        announced = true;
+      },
     });
     assert.equal(changed, true);
+    assert.equal(announced, true);
     assert.deepEqual(await readFile(path), trusted);
   } finally {
     await rm(directory, { recursive: true, force: true });

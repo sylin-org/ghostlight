@@ -5,7 +5,6 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repository = "sylin-org/ghostlight"
-$walkthrough = "https://sylin.org/ghostlight/chromium-extension/post-install/"
 if (-not [Environment]::Is64BitOperatingSystem) {
     throw "Ghostlight publishes Windows binaries for x64 only."
 }
@@ -82,5 +81,4 @@ if ($env:GHOSTLIGHT_NO_REGISTER -ne "1") {
         throw "Ghostlight installation did not complete. Run '$ghostlight doctor' for details."
     }
 }
-Write-Host "Run '$ghostlight doctor' to check the installation."
-Write-Host "Browser walkthrough: $walkthrough"
+Write-Host "If anything does not connect, run '$ghostlight doctor'."

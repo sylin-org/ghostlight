@@ -132,6 +132,35 @@ retention decision for audit/history.
 Open one bounded defect per failed stage and rerun the affected journey after the fix. Do not turn
 a failed record into a pass by adding undocumented maintainer steps.
 
+## CachyOS npm-candidate record - 2026-08-14
+
+This record extends the development-host evidence below without changing the Debian L1-L9 table.
+The public npm coordinate and 1.0 store adapter deliberately remain unpublished.
+
+```text
+date_utc: 2026-08-14
+architecture: x86_64
+distribution_and_version: CachyOS rolling
+desktop_and_display_protocol: KDE Plasma, Wayland
+browser_versions: Chromium 151.0.7922.137
+ghostlight_version: 1.0.0 local npm candidate
+package_signature_or_digest: three checksum-bound optimized siblings; no public package or signature
+extension_version: 1.0.0 unpacked source adapter
+harness_versions: locally packed npm launcher 1.0.0; Codex, Claude Code, and Visual Studio Code
+```
+
+- A clean temporary user and npm cache completed the packed install, browser registration, detected
+  client registration, one-time service-first handoff, idempotent reinstall, and doctor check.
+- The real user install lives at `~/.ghostlight/bin/v1.0.0`. The browser adapter reconnected through
+  that exact sibling connector and demand-started that exact orchestrator.
+- The installed candidate completed visible open, list, read, and screenshot against Example
+  Domain. Preserve-tabs correctly refused model-driven close.
+- The launcher also completed an empty-cache three-file download simulation with exact current
+  bytes, visible per-file progress, and checksum verification. A public-download pass waits for the
+  immutable GitHub release and npm publication.
+- `doctor` now distinguishes a healthy idle demand-start installation from a broken or stale
+  runtime. It does not require a ceremonial service launch after installation.
+
 ## CachyOS development-host record - 2026-08-13
 
 This table deliberately does not change L1-L9 above. It records what the ordinary-user source and

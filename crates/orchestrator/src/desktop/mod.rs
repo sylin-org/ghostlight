@@ -120,11 +120,11 @@ pub fn run() -> Result<()> {
             open_destination,
             quit_ghostlight
         ])
-        .on_window_event(|window, event| {
+        .on_window_event(|_window, event| {
             if let WindowEvent::Destroyed = event {
                 eprintln!("Ghostlight workbench window ended; the tray can create a replacement");
                 #[cfg(target_os = "linux")]
-                continue_linux_replacement(window.app_handle());
+                continue_linux_replacement(_window.app_handle());
             }
         })
         .setup(move |app| {

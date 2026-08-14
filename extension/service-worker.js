@@ -3,6 +3,7 @@ importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js
 const shared = globalThis.GhostlightShared;
 const stateApi = globalThis.GhostlightState;
 const HOST_NAME = shared.NATIVE_HOST_NAME;
+const SERVICE_INSTALL_URL = "https://sylin.org/ghostlight/chromium-extension/post-install/";
 const adapterEpoch = `adapter_${crypto.randomUUID().replaceAll("-", "")}`;
 const operationEngine = globalThis.GhostlightOperationEngine.create({
   load: async () => (await chrome.storage.session.get(stateApi.OPERATIONS_KEY))[stateApi.OPERATIONS_KEY],
@@ -175,7 +176,14 @@ async function establishNativeConnection() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(connectNative);
+function onExtensionInstalled(details) {
+  connectNative();
+  if (details?.reason === "install") {
+    chrome.tabs.create({ url: SERVICE_INSTALL_URL }).catch(() => {});
+  }
+}
+
+chrome.runtime.onInstalled.addListener(onExtensionInstalled);
 chrome.runtime.onStartup.addListener(connectNative);
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "ghostlight-reconnect") connectNative(); });
 

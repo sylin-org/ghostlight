@@ -195,6 +195,13 @@ test("native-host startup is one connection attempt across concurrent wake signa
   assert.doesNotMatch(source, /initializeLocalState\(\)\s*\.then\(connectNative\)/);
 });
 
+test("a first extension install opens the service-first handoff", () => {
+  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  assert.match(source, /const SERVICE_INSTALL_URL = "https:\/\/sylin\.org\/ghostlight\/chromium-extension\/post-install\/";/);
+  assert.match(source, /if \(details\?\.reason === "install"\) \{\s+chrome\.tabs\.create\(\{ url: SERVICE_INSTALL_URL \}\)/);
+  assert.match(source, /chrome\.runtime\.onInstalled\.addListener\(onExtensionInstalled\)/);
+});
+
 test("page opening is one atomic physical primitive", () => {
   const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
   assert.match(source, /topology\.open\(command\.url, workspace, command\.group_title/);

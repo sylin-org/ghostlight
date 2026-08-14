@@ -3,7 +3,6 @@
 use std::ffi::OsString;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::path::Path;
-use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -83,10 +82,11 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
-    use ghostlight::install::native_host::NativeHostRegistry;
+    use ghostlight::install::native_host::{NativeHostRegistry, NativeHostState};
     use ghostlight::install::{HarnessAction, HarnessRegistry};
 
     let native_hosts = NativeHostRegistry::discover();
+    let mut install_usable = false;
     if !options.browser_ids.is_empty() {
         let report = native_hosts.check()?;
         for id in &options.browser_ids {
@@ -109,6 +109,10 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         };
         println!("Browser connection installed; changed: {}", result.changed);
         print_native_host_report(&result.report);
+        install_usable = result.report.browsers.iter().any(|browser| {
+            (options.browser_ids.is_empty() || options.browser_ids.contains(&browser.id))
+                && browser.state == NativeHostState::Current
+        });
         let migration = ghostlight::install::migration::retire_obsolete_supervisor();
         for removed in migration.removed {
             println!("Retired: {removed}");
@@ -129,9 +133,13 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         print_native_host_report(&result.report);
     }
 
+    if install && !options.dry_run && !install_usable {
+        return finish_setup(install, options, install_usable);
+    }
+
     if options.no_clients {
         println!("MCP client configuration was left unchanged.");
-        return finish_setup(install, options);
+        return finish_setup(install, options, install_usable);
     }
 
     let harnesses = HarnessRegistry::discover();
@@ -153,7 +161,7 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         } else {
             println!("No MCP client configuration can be changed automatically.");
         }
-        return finish_setup(install, options);
+        return finish_setup(install, options, install_usable);
     }
     let mut failures = Vec::new();
     for summary in selected {
@@ -179,43 +187,42 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
             }
         }
     }
+    finish_setup(install, options, install_usable)?;
     if !failures.is_empty() {
         anyhow::bail!(
             "Ghostlight could not update {} MCP client integration(s)",
             failures.len()
         );
     }
-    finish_setup(install, options)
-}
-
-fn finish_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
-    if install && !options.dry_run && !options.no_open {
-        if let Err(error) = open_walkthrough() {
-            eprintln!(
-                "Could not open the browser-extension walkthrough: {error}\nOpen https://sylin.org/ghostlight/chromium-extension/post-install/"
-            );
-        }
-    }
     Ok(())
 }
 
-fn open_walkthrough() -> std::io::Result<()> {
-    const WALKTHROUGH: &str = "https://sylin.org/ghostlight/chromium-extension/post-install/";
-    let mut command = if cfg!(windows) {
-        let mut command = Command::new("rundll32.exe");
-        command.args(["url.dll,FileProtocolHandler", WALKTHROUGH]);
-        command
-    } else {
-        let mut command = Command::new("xdg-open");
-        command.arg(WALKTHROUGH);
-        command
-    };
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(drop)
+fn finish_setup(install: bool, options: &SetupOptions, install_usable: bool) -> anyhow::Result<()> {
+    use ghostlight::install::handoff::{self, HandoffOutcome, EXTENSION_INSTALL_URL};
+
+    if !install || options.dry_run {
+        return Ok(());
+    }
+    if !install_usable {
+        anyhow::bail!("Ghostlight could not establish a usable browser registration");
+    }
+
+    println!();
+    println!("Ghostlight's local connection is ready.");
+    println!("Browser extension: {EXTENSION_INSTALL_URL}");
+    let automated = std::env::var_os("CI").is_some();
+    match handoff::offer(options.dry_run, options.no_open, automated, install_usable) {
+        Ok(HandoffOutcome::Opened) => println!("Opened the browser-extension walkthrough."),
+        Ok(HandoffOutcome::AlreadyOffered) => {}
+        Ok(HandoffOutcome::Suppressed) => {
+            if options.no_open {
+                println!("The walkthrough was not opened because --no-open was used.");
+            }
+        }
+        Err(error) => eprintln!("Could not open the browser-extension walkthrough: {error}"),
+    }
+    println!("After adding the extension, restart or reconnect your MCP client. That is it.");
+    Ok(())
 }
 
 fn select_harnesses(
@@ -259,16 +266,19 @@ fn run_doctor(fix: bool) -> anyhow::Result<()> {
     let directory = executable
         .parent()
         .ok_or_else(|| anyhow::anyhow!("the Ghostlight executable has no parent directory"))?;
+    let mut sibling_set_ready = true;
     for name in [
         executable_name("ghostlight"),
         executable_name("ghostlight-mcp-connector"),
         executable_name("ghostlight-browser-connector"),
     ] {
         let path = directory.join(name);
+        let ready = path.is_file();
+        sibling_set_ready &= ready;
         println!(
             "Binary: {} -- {}",
             path.display(),
-            if path.is_file() { "ready" } else { "missing" }
+            if ready { "ready" } else { "missing" }
         );
     }
     print_native_host_report(&NativeHostRegistry::discover().check()?);
@@ -278,7 +288,7 @@ fn run_doctor(fix: bool) -> anyhow::Result<()> {
             harness.name, harness.state, harness.detail
         );
     }
-    print_runtime_status(false);
+    print_runtime_status(false, sibling_set_ready);
     if fix {
         println!("Applying ownership-safe repairs.");
         run_setup(true, &SetupOptions::default())?;
@@ -290,11 +300,11 @@ fn run_status(json: bool) -> anyhow::Result<()> {
     if !json {
         println!("Ghostlight {}", env!("CARGO_PKG_VERSION"));
     }
-    print_runtime_status(json);
+    print_runtime_status(json, false);
     Ok(())
 }
 
-fn print_runtime_status(json: bool) {
+fn print_runtime_status(json: bool, idle_is_ready: bool) {
     let runtime_path = ghostlight_bridge::runtime::runtime_file();
     match ghostlight_bridge::runtime::read_runtime(&runtime_path) {
         Ok(runtime) => {
@@ -328,6 +338,9 @@ fn print_runtime_status(json: bool) {
             }
         }
         Err(_) if json => println!("{}", serde_json::json!({ "running": false })),
+        Err(_) if idle_is_ready => println!(
+            "Service: ready on demand -- it starts when Chromium or an MCP client connects."
+        ),
         Err(_) => println!(
             "Service: not running (no readable endpoint at {})",
             runtime_path.display()

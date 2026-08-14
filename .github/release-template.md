@@ -14,12 +14,14 @@ The shortest path is the npm launcher:
 
 ```sh
 npx -y ghostlight@${VERSION} install
-npx -y ghostlight@${VERSION} doctor
 ```
 
 Then install `Ghostlight in Browser` ${ADAPTER_VERSION} from the Chrome Web Store and reconnect
 your MCP client. The installer connects detected clients directly to the cached native connector;
 Node is not a resident service.
+
+If anything does not connect, run `npx -y ghostlight@${VERSION} doctor` for an ownership-safe
+checkup.
 
 The signed Windows setup and Debian package below are equivalent native-package routes. Start
 Ghostlight, open **MCP integrations** to connect a client, and use **Status** to check the whole

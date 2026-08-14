@@ -109,7 +109,13 @@ async function download(url, fetchImpl = globalThis.fetch, redirects = 0) {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-export async function ensureBinary({ path, url, expectedHash, fetchImpl = globalThis.fetch }) {
+export async function ensureBinary({
+  path,
+  url,
+  expectedHash,
+  fetchImpl = globalThis.fetch,
+  onDownload = () => {},
+}) {
   try {
     if ((await sha256(path)) === expectedHash) {
       return false;
@@ -120,6 +126,7 @@ export async function ensureBinary({ path, url, expectedHash, fetchImpl = global
     }
   }
 
+  onDownload();
   const bytes = await download(url, fetchImpl);
   const observed = createHash("sha256").update(bytes).digest("hex");
   if (observed !== expectedHash) {
@@ -146,6 +153,7 @@ export async function prepareLaunch({
   architecture = process.arch,
   cacheRoot = process.env.GHOSTLIGHT_HOME ?? join(homedir(), ".ghostlight"),
   fetchImpl = globalThis.fetch,
+  reporter = () => {},
 } = {}) {
   const packageJson = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8"));
   const manifest = JSON.parse(await readFile(join(PACKAGE_ROOT, "checksums.json"), "utf8"));
@@ -155,12 +163,18 @@ export async function prepareLaunch({
   const directory = join(cacheRoot, "bin", `v${packageJson.version}`);
   for (const [index, asset] of assets.entries()) {
     const url = `${RELEASE_ROOT}/v${packageJson.version}/${asset}`;
-    await ensureBinary({
+    const changed = await ensureBinary({
       path: join(directory, executables[index]),
       url,
       expectedHash: manifest.binaries[asset],
       fetchImpl,
+      onDownload: () => reporter(
+        `Downloading Ghostlight ${packageJson.version} for ${platform}/${architecture} (${index + 1}/${assets.length})...`,
+      ),
     });
+    if (changed) {
+      reporter(`Verified ${EXECUTABLES[index]}.`);
+    }
   }
   return {
     executable: join(directory, selectedExecutable(arguments_, platform, architecture)),
@@ -169,7 +183,7 @@ export async function prepareLaunch({
 }
 
 async function main() {
-  const launch = await prepareLaunch();
+  const launch = await prepareLaunch({ reporter: (message) => console.error(`ghostlight: ${message}`) });
   const child = spawn(launch.executable, launch.arguments_, { stdio: "inherit" });
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.on(signal, () => child.kill(signal));

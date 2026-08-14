@@ -15,9 +15,11 @@ are not interchangeable.
    A signed native package, Scoop, WinGet, the one-line installer, or the Claude Desktop
    MCPB may provide the same binaries instead.
 2. Install the matching `Ghostlight in Browser` 1.0 extension from its release listing.
-3. Run `npx -y ghostlight@1.0.0 doctor`. Fix any named missing or stale part.
-4. Restart or reconnect the MCP harness, then run the bounded first proof from the README. Launch
+3. Restart or reconnect the MCP harness, then run the bounded first proof from the README. Launch
    Ghostlight whenever you want the tray workbench.
+
+That is the normal installation path. `npx -y ghostlight@1.0.0 doctor` is recovery when something
+does not connect; it is not another required setup step.
 
 Setup is now complete. Launching the registered MCP client or Chromium demand-starts Ghostlight if
 it is absent. The complete desktop authority starts with its tray available and its workbench
