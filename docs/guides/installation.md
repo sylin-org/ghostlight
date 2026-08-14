@@ -119,7 +119,7 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 - **Service is not running:** reconnect the MCP integration or enable the matching extension.
   Either connector demand-starts its exact sibling service and keeps retrying.
 - **Workbench window is gone:** launch Ghostlight directly or open it from the tray. Closing the
-  window only hides it.
+  window destroys only that disposable surface; browser service and the tray remain available.
 - **Workbench cannot initialize:** the orchestrator continues headlessly; reconnect after fixing
   the native WebView or tray environment.
 - **Tools are absent:** re-check the registration in MCP integrations, then reconnect that MCP

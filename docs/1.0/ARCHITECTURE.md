@@ -55,6 +55,12 @@ listener. If no authority exists, the launch starts the complete desktop authori
 tray, and backgrounds the workbench: minimized on Windows and hidden on Linux. `--headless` is the
 explicit service-only mode and cannot reveal a workbench.
 
+The tray and authority do not depend on a permanent window. Native close destroys only the
+disposable workbench, native minimize remains compositor-owned, and Open focuses the existing
+window or rebuilds it from the canonical Tauri configuration. On Linux, abnormal WebKit renderer
+termination discards that exact window after the signal callback; the next explicit Open creates a
+fresh WebView without an automatic crash loop. Explicit Quit alone ends the desktop authority.
+
 ## Fringe stability
 
 Ghostlight's fringes are independently versioned compatibility products. Their size is not

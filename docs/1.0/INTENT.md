@@ -98,8 +98,8 @@ Headless operation is an explicit service-only mode, not the ordinary installed 
 - The orchestrator publishes sequenced changes, so the surface shows work as it happens instead of
   sampling for it. A surface that misses a change resynchronizes from a snapshot rather than
   guessing.
-- Closing the window returns it to the tray without ending browser service. A failed or reloaded
-  WebView is disposable and reconstructs from the orchestrator.
+- Closing destroys the workbench window without ending browser service. A tray Open after close,
+  renderer failure, or reload reconstructs the disposable WebView from the orchestrator.
 - The original Ghostlight artwork, motion character, and reduced-motion behavior remain product
   identity across extension and desktop surfaces. The desktop carries Ghostlight's published teal
   accent and night-garden ground, while the in-page renderer keeps the sky signal users are already

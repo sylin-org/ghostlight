@@ -212,7 +212,8 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 
 1. Normal `ghostlight` startup creates the tray and backgrounds the workbench (minimized on Windows,
    hidden on Linux), or restores and focuses the existing workbench. `--headless` starts no desktop
-   runtime. Closing the window hides it, and only explicit quit stops the process.
+   runtime. Closing destroys only the workbench window, tray Open rebuilds an absent workbench, and
+   only explicit quit stops the process. Native minimize does not close or hide the window.
 2. Home presents plural session, operation, and browser counts plus current work and system health
    at a glance. Activity, history, checkup, configuration, and installations remain separate
    focused destinations behind one compact rail.
@@ -220,30 +221,33 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    diagnostics, configuration, and supported harnesses. Search input is bounded at the adapter.
 4. Reloading the disposable WebView reconstructs its state from `WorkbenchFacade`; it owns no
    product state, runtime token, authority, or durable history.
-5. Blocked and attention-required operations request at most one content-free native notification
+5. Abnormal Linux WebKit renderer termination discards only the failed workbench. The authority and
+   tray remain live, and the next explicit Open creates one replacement without an automatic retry
+   loop.
+6. Blocked and attention-required operations request at most one content-free native notification
    per invocation. Notification failure cannot change governance, audit, or completion truth.
-6. Workbench runtime controls use the existing governance facade and publish the resulting state
+7. Workbench runtime controls use the existing governance facade and publish the resulting state
    through the existing browser port. The desktop adapter cannot dispatch a browser primitive.
-7. MCP integrations explicitly check, connect, and disconnect Codex, Claude Code, Claude Desktop,
+8. MCP integrations explicitly check, connect, and disconnect Codex, Claude Code, Claude Desktop,
    Cursor, Visual Studio Code, Windsurf, Zed, OpenCode, and Crush registrations. Mutations are
    serialized, idempotent, backed up, preserve unrelated entries, and touch only an entry whose
    command identifies Ghostlight's connector.
-8. JSONC and Codex TOML comments, trailing commas, formatting, and unrelated values survive
+9. JSONC and Codex TOML comments, trailing commas, formatting, and unrelated values survive
    install and uninstall. Malformed configuration, unreadable files, and foreign `ghostlight`
    entries are left untouched with an actionable result.
-9. Harness paths follow the effective Windows or Linux environment. Codex honors `CODEX_HOME`
+10. Harness paths follow the effective Windows or Linux environment. Codex honors `CODEX_HOME`
    before its home-directory fallback. An exact pre-1.0 `ghostlight-relay --role agent` entry in
    the owned versioned install root is updatable; a different command, role, or root remains
    foreign and is reported rather than silently skipped.
-10. The WebView loads bundled assets under a restrictive CSP and has no shell, arbitrary file,
+11. The WebView loads bundled assets under a restrictive CSP and has no shell, arbitrary file,
    remote-navigation, or network capability. File mutation terminates in the explicit harness
    application service, outside the UI event loop.
-11. The desktop executable, tray, bundle, and workbench use the original Ghostlight icon bytes,
+12. The desktop executable, tray, bundle, and workbench use the original Ghostlight icon bytes,
     established palette and spring curve, and a static readable reduced-motion treatment.
-12. Recoverable Tauri setup or event-loop failure leaves the orchestrator service alive in
+13. Recoverable Tauri setup or event-loop failure leaves the orchestrator service alive in
     headless mode. The MCP connector, browser connector, shared bridge, and extension have empty
     diffs for the complete workbench feature.
-13. Clear view removes completed actions from the current Monitor surface, preserves running work,
+14. Clear view removes completed actions from the current Monitor surface, preserves running work,
     issues no orchestrator mutation, and leaves the durable audit unchanged. A later action appears
     normally, and a fresh desktop process may reconstruct the cleared history from audit.
 

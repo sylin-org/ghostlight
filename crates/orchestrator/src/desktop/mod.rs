@@ -1,12 +1,16 @@
 //! Thin Tauri 2 adapter for Ghostlight's orchestrator-owned workbench facade.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::Arc;
+#[cfg(target_os = "linux")]
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, RunEvent, State, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -25,6 +29,7 @@ const CHANGE_EVENT: &str = "ghostlight://change";
 
 struct DesktopState {
     workbench: WorkbenchFacade,
+    window_lifecycle: Mutex<()>,
 }
 
 struct NativePresentation {
@@ -65,6 +70,9 @@ impl WorkbenchEventSink for NativeEvents {
 
 /// Start the orchestrator and its backgrounded desktop workbench in one process.
 pub fn run() -> Result<()> {
+    #[cfg(target_os = "linux")]
+    configure_linux_webkit();
+
     match crate::install::native_host::NativeHostRegistry::discover().reconcile_packaged_launch() {
         Ok(Some(result)) => {
             if result.changed {
@@ -92,7 +100,10 @@ pub fn run() -> Result<()> {
         // Registered in Rust only. The capability file grants the webview no opener permission,
         // so the surface cannot reach this except through the closed command below.
         .plugin(tauri_plugin_opener::init())
-        .manage(DesktopState { workbench })
+        .manage(DesktopState {
+            workbench,
+            window_lifecycle: Mutex::new(()),
+        })
         .invoke_handler(tauri::generate_handler![
             workbench_snapshot,
             workbench_search,
@@ -103,10 +114,9 @@ pub fn run() -> Result<()> {
             open_destination,
             quit_ghostlight
         ])
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+        .on_window_event(|_, event| {
+            if let WindowEvent::Destroyed = event {
+                eprintln!("Ghostlight workbench window ended; the tray can create a replacement");
             }
         })
         .setup(move |app| {
@@ -119,6 +129,12 @@ pub fn run() -> Result<()> {
             if let Err(error) = build_tray(app) {
                 eprintln!("Ghostlight tray is unavailable: {error}");
             }
+            let window = app.get_webview_window(MAIN_WINDOW).ok_or_else(|| {
+                WorkbenchPresentationError::Native(
+                    "Ghostlight workbench window is unavailable".into(),
+                )
+            })?;
+            monitor_workbench(&window)?;
             background_workbench(app.handle())?;
             Ok(())
         });
@@ -138,7 +154,15 @@ pub fn run() -> Result<()> {
             return Ok(());
         }
     };
-    let outcome = catch_unwind(AssertUnwindSafe(|| app.run_return(|_, _| {})));
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        app.run_return(|_, event| {
+            if let RunEvent::ExitRequested { code, api, .. } = event {
+                if should_prevent_desktop_exit(code) {
+                    api.prevent_exit();
+                }
+            }
+        })
+    }));
     match outcome {
         Ok(0) => Ok(()),
         Ok(code) => {
@@ -200,10 +224,84 @@ fn apply_tray_intent(app: &AppHandle, intent: WorkbenchRuntimeIntent) {
 }
 
 fn show_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
-    let window = app.get_webview_window(MAIN_WINDOW).ok_or_else(|| {
-        WorkbenchPresentationError::Native("Ghostlight workbench window is unavailable".into())
-    })?;
+    let state = app.state::<DesktopState>();
+    let _lifecycle = state
+        .window_lifecycle
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let window = match app.get_webview_window(MAIN_WINDOW) {
+        Some(window) => window,
+        None => build_workbench(app)?,
+    };
     show_window(&window)
+}
+
+fn build_workbench(app: &AppHandle) -> Result<WebviewWindow, WorkbenchPresentationError> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|config| config.label == MAIN_WINDOW)
+        .ok_or_else(|| {
+            WorkbenchPresentationError::Native(
+                "Ghostlight workbench configuration is unavailable".into(),
+            )
+        })?;
+    let window = WebviewWindowBuilder::from_config(app, config)
+        .and_then(WebviewWindowBuilder::build)
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))?;
+    monitor_workbench(&window)?;
+    Ok(window)
+}
+
+fn should_prevent_desktop_exit(code: Option<i32>) -> bool {
+    code.is_none()
+}
+
+#[cfg(target_os = "linux")]
+fn monitor_workbench(window: &WebviewWindow) -> Result<(), WorkbenchPresentationError> {
+    let failed_window = window.clone();
+    window
+        .with_webview(move |webview| {
+            use webkit2gtk::WebViewExt;
+
+            webview
+                .inner()
+                .connect_web_process_terminated(move |_, reason| {
+                    eprintln!(
+                        "Ghostlight workbench renderer ended ({reason:?}); discarding its window"
+                    );
+                    let window = failed_window.clone();
+                    glib::idle_add_once(move || {
+                        if let Err(error) = window.destroy() {
+                            eprintln!(
+                                "Ghostlight could not discard its failed workbench window: {error}"
+                            );
+                        }
+                    });
+                });
+        })
+        .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_webkit() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_some() {
+        return;
+    }
+
+    // WebKitGTK's DMA-BUF path remains unreliable with the proprietary NVIDIA stack. Apply the
+    // compatibility policy before GTK/WebKit starts, while preserving an explicit user override.
+    if Path::new("/sys/module/nvidia").exists() || Path::new("/proc/driver/nvidia/version").exists()
+    {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn monitor_workbench(_: &WebviewWindow) -> Result<(), WorkbenchPresentationError> {
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -241,12 +339,9 @@ fn show_window(window: &WebviewWindow) -> Result<(), WorkbenchPresentationError>
     let focus_window = window.clone();
     window
         .run_on_main_thread(move || {
-            // Tauri queues Linux window state changes through GLib, but its focus guard reads
-            // state immediately. The idle callback runs after those queued changes, so focus is
-            // requested only after GTK has mapped and deiconified the window.
             glib::idle_add_local_once(move || {
                 if let Err(error) = focus_window.set_focus() {
-                    eprintln!("Ghostlight could not focus its restored workbench: {error}");
+                    eprintln!("Ghostlight could not focus its workbench: {error}");
                 }
             });
         })
@@ -357,7 +452,14 @@ fn validate_search_query(query: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_search_query;
+    use super::{should_prevent_desktop_exit, validate_search_query};
+
+    #[test]
+    fn only_implicit_window_loss_is_contained() {
+        assert!(should_prevent_desktop_exit(None));
+        assert!(!should_prevent_desktop_exit(Some(0)));
+        assert!(!should_prevent_desktop_exit(Some(1)));
+    }
 
     #[test]
     fn search_input_is_bounded_at_the_adapter() {

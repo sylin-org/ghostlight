@@ -30,6 +30,7 @@ winreg = "=0.55.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 glib = "=0.18.5"
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
 
 [build-dependencies]
 tauri-build = { version = "=2.6.3", features = [] }

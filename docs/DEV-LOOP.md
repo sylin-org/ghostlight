@@ -31,8 +31,8 @@ target/debug/ghostlight --headless
 The normal launch always starts the complete desktop authority with its tray and a backgrounded
 workbench: minimized on Windows and hidden on Linux. Connectors demand-start that same sibling
 executable with no application arguments. A second direct launch restores and focuses the
-workbench owned by the running authority. Closing the window hides it; the tray Quit action ends
-the whole process.
+workbench owned by the running authority. Closing destroys only the disposable workbench window;
+the next tray Open reconstructs it, and the tray Quit action ends the whole process.
 
 ## What to restart
 

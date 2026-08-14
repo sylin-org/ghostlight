@@ -40,7 +40,7 @@ pass.
 - Ordinary-profile Chromium 151 under the active KDE Wayland session proved visible open, read,
   screenshot, presentation, single-authority activation, connector demand-start, and browser
   restart recovery. Local preserve-tabs correctly refused the attempted model-driven close.
-  Closing/hiding the workbench, tray open/quit, login/reboot, a second live harness, and the full
+  Closing/reopening the workbench, tray open/quit, login/reboot, a second live harness, and the full
   interactive form/drag/upload/dialog matrix remain owner-visible work.
 - The portable archive was inspected and hashed. Tauri staged a complete AppDir, but its bundled
   `linuxdeploy` strip tool cannot parse CachyOS `.relr.dyn` sections, so no AppImage pass is
@@ -208,6 +208,11 @@ pass.
   existing authenticated workbench. `--headless` remains the explicit presentation-free mode.
   Linux reveal queues mapping and deiconification at normal GLib priority, then requests focus at
   idle priority after Tauri's focus guard can observe the landed window state.
+- The tray and authority outlive their disposable workbench. Native close destroys the window,
+  native minimize remains compositor-owned, and Open focuses the existing window or constructs a
+  replacement from the canonical configuration. Linux observes abnormal WebKit renderer loss,
+  discards only that exact window after the callback, and recreates on the next explicit Open. The
+  proprietary NVIDIA renderer policy is selected before WebKit starts and preserves user override.
 - `ghostlight call` is a second intake for scripts and programs (ADR-0105). It invokes one tool, or
   a batch of them over one session with `--stdin`, prints the outcome sentence or `--json`, and maps
   the terminal status to distinct exit codes where an uncertain effect is never zero. It demand-

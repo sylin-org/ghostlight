@@ -66,7 +66,7 @@ model, and whether Ghostlight remains running. Visual browser receipts, the exte
 the tray workbench expose those controls without reading page content.
 
 Removing the extension or stopping the native application ends its browser access. Closing only
-the workbench window hides it to the tray and does not imply the orchestrator stopped.
+the workbench window destroys that local surface and does not imply the orchestrator stopped.
 
 ## Policy changes
 
