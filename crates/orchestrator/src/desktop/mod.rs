@@ -14,16 +14,20 @@ use tauri::{
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
+use crate::governance::effective::EffectiveAuthority;
 use crate::install::{HarnessAction, HarnessActionResult, HarnessSummary};
 use crate::service::ServiceHost;
 use crate::workbench::{
-    SearchHit, WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink, WorkbenchFacade,
-    WorkbenchIntentResult, WorkbenchNotification, WorkbenchPresentationError,
+    PolicyPreview, SearchHit, WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink,
+    WorkbenchFacade, WorkbenchIntentResult, WorkbenchNotification, WorkbenchPresentationError,
     WorkbenchPresentationPort, WorkbenchRuntimeIntent, WorkbenchSnapshot,
 };
 
 const MAIN_WINDOW: &str = "main";
 const SEARCH_QUERY_LIMIT: usize = 120;
+/// Upper bound on a policy document arriving from the surface. A schema-3 policy is bounded at 256
+/// grants of bounded patterns; this leaves generous room and still refuses anything absurd.
+const POLICY_DOCUMENT_LIMIT: usize = 256 * 1024;
 /// Single channel the disposable workbench listens on for sequenced orchestrator changes.
 const CHANGE_EVENT: &str = "ghostlight://change";
 
@@ -113,6 +117,10 @@ pub fn run() -> Result<()> {
         .invoke_handler(tauri::generate_handler![
             workbench_snapshot,
             workbench_search,
+            workbench_policy,
+            preview_user_policy,
+            apply_user_policy,
+            remove_user_policy,
             apply_runtime_intent,
             refresh_harnesses,
             manage_harness,
@@ -447,6 +455,61 @@ fn workbench_search(
     Ok(state.workbench.search(&query))
 }
 
+/// The compiled policy for the Policy destination.
+#[tauri::command]
+fn workbench_policy(state: State<'_, DesktopState>) -> EffectiveAuthority {
+    state.workbench.policy()
+}
+
+/// Decide recorded work against a candidate policy without applying or recording anything.
+#[tauri::command]
+fn preview_user_policy(
+    document: String,
+    state: State<'_, DesktopState>,
+) -> Result<PolicyPreview, String> {
+    validate_policy_document(&document)?;
+    state.workbench.preview_user_policy(&document)
+}
+
+/// Apply one locally authored user policy.
+///
+/// The surface hands over a complete document and the orchestrator decides everything about it:
+/// whether authoring is permitted here, whether the document is valid, and where it may be written.
+/// There is no path, no file handle, and no partial write on this seam (ADR-0122 Decision 4).
+#[tauri::command]
+fn apply_user_policy(
+    document: String,
+    state: State<'_, DesktopState>,
+) -> Result<WorkbenchIntentResult, String> {
+    validate_policy_document(&document)?;
+    state
+        .workbench
+        .apply_user_policy(&document)
+        .map_err(|error| error.to_string())
+}
+
+/// Remove this machine's user policy.
+#[tauri::command]
+fn remove_user_policy(state: State<'_, DesktopState>) -> Result<WorkbenchIntentResult, String> {
+    state
+        .workbench
+        .remove_user_policy()
+        .map_err(|error| error.to_string())
+}
+
+/// Bound the document at the adapter boundary before the parser ever sees it.
+fn validate_policy_document(document: &str) -> Result<(), String> {
+    if document.trim().is_empty() {
+        return Err("A policy document cannot be empty.".into());
+    }
+    if document.len() > POLICY_DOCUMENT_LIMIT {
+        return Err(format!(
+            "A policy document is limited to {POLICY_DOCUMENT_LIMIT} bytes."
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn apply_runtime_intent(
     intent: WorkbenchRuntimeIntent,
@@ -649,7 +712,7 @@ mod tests {
     fn the_surface_handles_every_change_the_orchestrator_can_publish() {
         use ghostlight_bridge::browser::RuntimeControlState;
 
-        use crate::governance::Capability;
+        use crate::governance::{Capability, CapabilitySet};
         use crate::workbench::{HistoryItem, OperationPhase, OperationSummary, WorkbenchChange};
 
         let app = &surface_source();
@@ -668,6 +731,7 @@ mod tests {
             workspace: "workspace_1".into(),
             tool: "browser_read".into(),
             capability: "read".into(),
+            requirements: CapabilitySet::READ,
             allowed: true,
             reason: "permitted".into(),
             status: "succeeded".into(),

@@ -208,6 +208,79 @@ pub struct EffectiveAuthority {
     pub passport: ManagedPolicyPassport,
 }
 
+/// How the band chip should read.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChipTone {
+    /// Nothing is applied.
+    Open,
+    /// A policy is applied and healthy.
+    Applied,
+    /// A policy is applied and its latest reload needs attention.
+    Warning,
+    /// Governed work is refused.
+    Failing,
+}
+
+/// The persistent band's policy chip: the entrance to the destination, and its shortest summary.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct PolicyChip {
+    /// Which layers are in force.
+    pub situation: Situation,
+    /// Chip text. Short enough for the band, and the organization's name when there is room.
+    pub label: String,
+    /// The same sentence the destination opens with.
+    pub detail: String,
+    /// Which tone the chip carries.
+    pub tone: ChipTone,
+}
+
+/// Longest organization name the band will carry before falling back to a generic word.
+const CHIP_NAME_LIMIT: usize = 18;
+
+/// Author the band chip.
+///
+/// Naming the organization here is the cheapest reassurance in the product: a person glancing at
+/// the band learns who is setting their rules without opening anything.
+#[must_use]
+pub fn chip(situation: Situation, organization: Option<&str>, stale: bool) -> PolicyChip {
+    let detail = headline(
+        situation,
+        organization
+            .map(|name| OrganizationIdentity {
+                name: name.to_owned(),
+                statement: None,
+                url: None,
+                contacts: Vec::new(),
+            })
+            .as_ref(),
+    );
+    let short = organization.filter(|name| name.chars().count() <= CHIP_NAME_LIMIT);
+    let (label, tone) = match situation {
+        Situation::FailingClosed => ("Policy issue".to_owned(), ChipTone::Failing),
+        Situation::AllOpen => ("All open".to_owned(), ChipTone::Open),
+        Situation::UserOnly => ("Your rules".to_owned(), tone(stale)),
+        Situation::OrganizationOnly | Situation::Layered => (
+            short.map_or_else(|| "Managed".to_owned(), str::to_owned),
+            tone(stale),
+        ),
+    };
+    PolicyChip {
+        situation,
+        label,
+        detail,
+        tone,
+    }
+}
+
+const fn tone(stale: bool) -> ChipTone {
+    if stale {
+        ChipTone::Warning
+    } else {
+        ChipTone::Applied
+    }
+}
+
 /// Everything the projection needs, gathered by the facade under one lock.
 pub(super) struct Inputs<'a> {
     pub(super) organization: Option<&'a manifest::Manifest>,

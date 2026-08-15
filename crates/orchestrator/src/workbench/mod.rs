@@ -15,8 +15,9 @@ use thiserror::Error;
 
 use crate::browser::{BrowserPort, RelayBrowserPort};
 use crate::events::DomainEvent;
+use crate::governance::effective::{EffectiveAuthority, PolicyChip};
 use crate::governance::{
-    AuditRecord, AuditSink, CapabilitySet, GovernanceFacade, ManagedPolicyPassport,
+    AuditRecord, AuditSink, AuthoringError, CapabilitySet, GovernanceFacade, ManagedPolicyPassport,
 };
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSummary,
@@ -26,6 +27,31 @@ use crate::workspace::WorkspaceStore;
 
 const HISTORY_LIMIT: usize = 500;
 const SEARCH_LIMIT: usize = 100;
+const PREVIEW_DETAIL_LIMIT: usize = 8;
+
+/// What a candidate policy would have done to work this machine already did.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct PolicyPreview {
+    /// How many recorded actions were checked.
+    pub considered: usize,
+    /// How many of them the candidate would have refused.
+    pub refused_total: usize,
+    /// The most frequent refusals, grouped by what was done and where.
+    pub refused: Vec<PreviewRefusal>,
+    /// One authored sentence stating the result.
+    pub summary: String,
+}
+
+/// One kind of work a candidate policy would have refused.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct PreviewRefusal {
+    /// Catalog tool name.
+    pub tool: String,
+    /// Where it happened, when a host was recorded.
+    pub host: Option<String>,
+    /// How many recorded actions this covers.
+    pub count: usize,
+}
 
 /// Disposable workbench projection fed directly from the closed domain-event vocabulary.
 #[derive(Clone, Default)]
@@ -386,6 +412,7 @@ impl WorkbenchFacade {
                 managed_authority_valid: governance.managed_authority_valid,
                 runtime_control_file_configured: governance.runtime_control_file_configured,
                 managed_policy: governance.managed_policy,
+                policy: self.governance.policy_chip(),
             },
         }
     }
@@ -554,6 +581,96 @@ impl WorkbenchFacade {
             } else {
                 "Runtime control updated; the browser will receive it after reconnecting.".into()
             },
+        }
+    }
+
+    /// The compiled policy, for the destination that shows a person what applies to them.
+    #[must_use]
+    pub fn policy(&self) -> EffectiveAuthority {
+        self.governance.effective_authority()
+    }
+
+    /// Say what a candidate policy would have changed, before anyone applies it.
+    ///
+    /// Recorded work only. This states what would have happened to actions this machine already
+    /// took; it is deliberately worded as history rather than as a promise about work that has not
+    /// happened yet (ADR-0122 Decision 7).
+    pub fn preview_user_policy(&self, document: &str) -> Result<PolicyPreview, String> {
+        let candidate = self
+            .governance
+            .candidate_snapshot(document)
+            .map_err(|error| error.to_string())?;
+        let history = self.projection.history();
+        let considered = history.iter().filter(|item| item.allowed).count();
+        let mut refused: Vec<PreviewRefusal> = Vec::new();
+        for item in history.iter().filter(|item| item.allowed) {
+            let decision = item.observed.host.as_deref().map_or_else(
+                || candidate.authorize_requirements(item.requirements),
+                |host| candidate.authorize_landing(item.requirements, &format!("https://{host}")),
+            );
+            if decision.allowed && !decision.observed {
+                continue;
+            }
+            let host = item.observed.host.clone();
+            if let Some(existing) = refused
+                .iter_mut()
+                .find(|entry| entry.tool == item.tool && entry.host == host)
+            {
+                existing.count += 1;
+            } else {
+                refused.push(PreviewRefusal {
+                    tool: item.tool.clone(),
+                    host,
+                    count: 1,
+                });
+            }
+        }
+        refused.sort_by_key(|entry| std::cmp::Reverse(entry.count));
+        let refused_total: usize = refused.iter().map(|entry| entry.count).sum();
+        let summary = if considered == 0 {
+            "There is no recorded work on this machine to check this against yet.".to_owned()
+        } else if refused_total == 0 {
+            format!("Nothing in the last {considered} recorded actions would have been refused.")
+        } else {
+            format!(
+                "{refused_total} of the last {considered} recorded actions would have been refused."
+            )
+        };
+        refused.truncate(PREVIEW_DETAIL_LIMIT);
+        Ok(PolicyPreview {
+            considered,
+            refused_total,
+            refused,
+            summary,
+        })
+    }
+
+    /// Apply one locally authored user policy through the authority that owns policy.
+    pub fn apply_user_policy(
+        &self,
+        document: &str,
+    ) -> Result<WorkbenchIntentResult, AuthoringError> {
+        let policy = self.governance.apply_user_policy(document)?;
+        Ok(self.policy_result(format!(
+            "Your rules are applied: {} {}.",
+            policy.name, policy.version
+        )))
+    }
+
+    /// Remove this machine's user policy and return authority to whatever remains above it.
+    pub fn remove_user_policy(&self) -> Result<WorkbenchIntentResult, AuthoringError> {
+        self.governance.remove_user_policy()?;
+        Ok(self.policy_result("Your rules are removed.".to_owned()))
+    }
+
+    /// Report one applied policy change the same way every other workbench mutation is reported.
+    fn policy_result(&self, message: String) -> WorkbenchIntentResult {
+        let state = self.governance.runtime_state();
+        WorkbenchIntentResult {
+            accepted: true,
+            runtime_state: state,
+            browser_notified: false,
+            message,
         }
     }
 
@@ -867,6 +984,10 @@ pub struct HistoryItem {
     pub tool: String,
     /// Requested capability.
     pub capability: String,
+    /// The exact independent requirement set, kept so a policy preview can decide this record
+    /// again offline rather than parsing its own label back.
+    #[serde(skip)]
+    pub requirements: CapabilitySet,
     /// Whether authority admitted the final boundary.
     pub allowed: bool,
     /// Stable reason code.
@@ -887,8 +1008,10 @@ pub struct HistoryItem {
 
 impl From<AuditRecord> for HistoryItem {
     fn from(value: AuditRecord) -> Self {
-        let capability = value.requirements().label();
+        let requirements = value.requirements();
+        let capability = requirements.label();
         Self {
+            requirements,
             timestamp_ms: value.timestamp_ms,
             invocation: value.invocation,
             workspace: value.workspace,
@@ -975,6 +1098,8 @@ pub struct ConfigurationSummary {
     pub runtime_control_file_configured: bool,
     /// Signed managed-policy provenance suitable for the Policy Passport.
     pub managed_policy: ManagedPolicyPassport,
+    /// The band chip, authored by the orchestrator so the surface renders rather than derives it.
+    pub policy: PolicyChip,
 }
 
 /// Every place the workbench is willing to send someone.
@@ -1253,12 +1378,14 @@ mod tests {
     use ghostlight_bridge::browser::PresentationActivity;
 
     use crate::events::{DenialPresentation, DomainEvent};
-    use crate::governance::{AuditRecord, AuditSink, Capability, Decision, GovernanceFacade};
+    use crate::governance::{
+        AuditRecord, AuditSink, Capability, CapabilitySet, Decision, GovernanceFacade,
+    };
     use crate::language::outcome::Observed;
 
     use super::{
         HistoryItem, NotificationKind, ProjectingAuditSink, WorkbenchChange, WorkbenchEvent,
-        WorkbenchEventSink, WorkbenchPresentationError, WorkbenchPresentationPort,
+        WorkbenchEventSink, WorkbenchFacade, WorkbenchPresentationError, WorkbenchPresentationPort,
         WorkbenchProjection,
     };
 
@@ -1520,5 +1647,71 @@ mod tests {
             capabilities: Capability::Read.into(),
         });
         assert_eq!(projection.operations().len(), 1);
+    }
+
+    #[test]
+    fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
+        let projection = WorkbenchProjection::default();
+        let audit = ProjectingAuditSink::new(Arc::new(MemoryAudit::default()), projection.clone());
+        for (invocation, tool, host, capability) in [
+            ("i1", "browser_read", "example.com", Capability::Read),
+            ("i2", "browser_read", "example.com", Capability::Read),
+            ("i3", "browser_execute", "example.com", Capability::Execute),
+            ("i4", "browser_read", "elsewhere.test", Capability::Read),
+        ] {
+            audit
+                .record(
+                    &AuditRecord::now(
+                        invocation,
+                        "workspace_1",
+                        tool,
+                        CapabilitySet::one(capability),
+                        "authority",
+                        Decision::permitted(),
+                        "succeeded",
+                        "applied",
+                        "did the thing",
+                        1,
+                    )
+                    .with_observation(Observed {
+                        host: Some(host.into()),
+                        ..Observed::default()
+                    }),
+                )
+                .unwrap();
+        }
+
+        let facade = WorkbenchFacade::new(
+            projection,
+            crate::workspace::WorkspaceStore::default(),
+            GovernanceFacade::new(None, None),
+            Arc::new(crate::browser::RelayBrowserPort::new("epoch".into())),
+        );
+
+        let preview = facade
+            .preview_user_policy(
+                r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+            )
+            .unwrap();
+        assert_eq!(preview.considered, 4);
+        // Two reads on example.com survive; the page-code run and the other host do not.
+        assert_eq!(preview.refused_total, 2);
+        assert!(preview
+            .summary
+            .contains("2 of the last 4 recorded actions would have been refused"));
+        assert!(preview
+            .refused
+            .iter()
+            .any(|entry| entry.tool == "browser_execute"));
+
+        let unchanged = facade
+            .preview_user_policy(
+                r#"{"schema":3,"name":"open","version":"1","grants":[{"id":"everything","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
+            )
+            .unwrap();
+        assert_eq!(unchanged.refused_total, 0);
+        assert!(unchanged.summary.contains("Nothing in the last 4"));
+
+        assert!(facade.preview_user_policy("not a policy").is_err());
     }
 }

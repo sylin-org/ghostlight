@@ -958,6 +958,8 @@ struct PolicySources {
     managed_remote: Option<managed::ManagedAuthority>,
     user: PolicySource,
     user_origin: effective::UserLayerSource,
+    /// The one path this window may write. Absent when Ghostlight does not own the user layer.
+    owned_user_path: Option<PathBuf>,
 }
 
 impl PolicySources {
@@ -967,6 +969,20 @@ impl PolicySources {
             managed_remote: None,
             user: PolicySource::new(local, "user"),
             user_origin: effective::UserLayerSource::Environment,
+            owned_user_path: None,
+        }
+    }
+
+    /// A user layer Ghostlight owns at an explicit path, for tests that must not touch this
+    /// machine's real state directory.
+    #[cfg(test)]
+    fn owning(path: PathBuf, managed: Option<PathBuf>) -> Self {
+        Self {
+            managed: PolicySource::new(managed, "managed"),
+            managed_remote: None,
+            user: PolicySource::with_options(Some(path.clone()), "user", true),
+            user_origin: effective::UserLayerSource::Workbench,
+            owned_user_path: Some(path),
         }
     }
 
@@ -991,6 +1007,10 @@ impl PolicySources {
             managed_remote: Some(managed::ManagedAuthority::production()),
             user,
             user_origin,
+            owned_user_path: match user_origin {
+                effective::UserLayerSource::Workbench => paths::user_policy_path(),
+                _ => None,
+            },
         }
     }
 
@@ -1001,6 +1021,7 @@ impl PolicySources {
             managed_remote: Some(managed::ManagedAuthority::from_paths(paths)),
             user: PolicySource::new(None, "user"),
             user_origin: effective::UserLayerSource::Workbench,
+            owned_user_path: None,
         }
     }
 
@@ -1277,6 +1298,17 @@ impl GovernanceFacade {
         }
     }
 
+    /// A facade whose user layer is one Ghostlight owns at an explicit path.
+    #[cfg(test)]
+    fn owning_user_policy(path: PathBuf, managed: Option<PathBuf>) -> Self {
+        Self {
+            policies: Arc::new(Mutex::new(PolicySources::owning(path, managed))),
+            runtime_control: None,
+            controls: Arc::new(RuntimeControls::default()),
+            denial_attention: Arc::new(Mutex::new(DenialAttention::default())),
+        }
+    }
+
     #[cfg(test)]
     fn with_managed_paths(paths: managed::ManagedPaths) -> Self {
         Self {
@@ -1366,6 +1398,39 @@ impl GovernanceFacade {
         Decision::allow()
     }
 
+    /// Author the band chip without compiling the whole destination.
+    ///
+    /// The band redraws on every snapshot, so this reads what it needs under one lock rather than
+    /// building the full view thirty times a minute.
+    #[must_use]
+    pub fn policy_chip(&self) -> effective::PolicyChip {
+        self.refresh_policies();
+        let policies = self
+            .policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let organization = policies.managed_manifest();
+        let valid = policies.managed_valid() && policies.user.has_authority();
+        let situation = if !valid {
+            effective::Situation::FailingClosed
+        } else {
+            match (organization.is_some(), policies.user.active.is_some()) {
+                (true, true) => effective::Situation::Layered,
+                (true, false) => effective::Situation::OrganizationOnly,
+                (false, true) => effective::Situation::UserOnly,
+                (false, false) => effective::Situation::AllOpen,
+            }
+        };
+        let stale = matches!(
+            policies.managed_passport().freshness,
+            ManagedPolicyFreshness::LastKnownGood
+        );
+        let name = organization
+            .and_then(|policy| policy.organization.as_ref())
+            .map(|organization| organization.name.clone());
+        effective::chip(situation, name.as_deref(), stale)
+    }
+
     /// Compile the policy into the one answer a person arrives with.
     ///
     /// Assembled under a single lock so the sentence, the capability lines, and the rules behind
@@ -1417,6 +1482,60 @@ impl GovernanceFacade {
         effective::compile(&inputs)
     }
 
+    /// Build one immutable snapshot and apply caller restrictions by intersection.
+    #[must_use]
+    pub fn snapshot(&self, restrictions: &RequestRestrictions) -> AuthoritySnapshot {
+        self.refresh_policies();
+        let (sources, managed_sequence, valid) = {
+            let policies = self
+                .policies
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                [
+                    (policies.managed_manifest().cloned(), AuthorityTier::Managed),
+                    (policies.user.active.clone(), AuthorityTier::User),
+                ],
+                policies.managed_sequence(),
+                policies.managed_valid() && policies.user.has_authority(),
+            )
+        };
+        assemble(restrictions, sources, managed_sequence, valid)
+    }
+
+    /// Build the snapshot a candidate user policy would produce, without applying it.
+    ///
+    /// The organization layer stays exactly as it is, because a preview that ignored the ceiling
+    /// would answer a question nobody asked. Nothing here writes a file, changes authority, or
+    /// records audit (ADR-0122 Decision 7).
+    pub fn candidate_snapshot(
+        &self,
+        document: &str,
+    ) -> Result<AuthoritySnapshot, manifest::ManifestError> {
+        let candidate = manifest::parse(document, "this policy")?;
+        self.refresh_policies();
+        let (managed, managed_sequence, managed_valid) = {
+            let policies = self
+                .policies
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                policies.managed_manifest().cloned(),
+                policies.managed_sequence(),
+                policies.managed_valid(),
+            )
+        };
+        Ok(assemble(
+            &RequestRestrictions::default(),
+            [
+                (managed, AuthorityTier::Managed),
+                (Some(candidate), AuthorityTier::User),
+            ],
+            managed_sequence,
+            managed_valid,
+        ))
+    }
+
     /// Whether an organization layer permits a locally authored user policy.
     ///
     /// This gates authoring, never enforcement. A user layer that already exists keeps applying,
@@ -1436,90 +1555,177 @@ impl GovernanceFacade {
             .and_then(|policy| policy.boolean_setting("policy.user.enabled"))
             .unwrap_or(true)
     }
+}
 
-    /// Build one immutable snapshot and apply caller restrictions by intersection.
-    #[must_use]
-    pub fn snapshot(&self, restrictions: &RequestRestrictions) -> AuthoritySnapshot {
+/// Why a locally authored user policy could not be applied.
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+pub enum AuthoringError {
+    /// An organization layer switched local authoring off.
+    #[error("{0}")]
+    NotAllowed(String),
+    /// Ghostlight reads this policy but does not own its file.
+    #[error("An environment variable points Ghostlight at a policy file it does not own, so this window cannot change it.")]
+    NotOwned,
+    /// This environment names no per-user state directory.
+    #[error("This machine names no per-user state directory to keep a policy in.")]
+    NoHome,
+    /// The document is not a valid policy.
+    #[error("{0}")]
+    Invalid(String),
+    /// Only an organization layer may author this setting.
+    #[error("Only your organization can set {0}.")]
+    OrganizationOnlySetting(String),
+    /// The file could not be replaced.
+    #[error("{0}")]
+    Unwritable(String),
+}
+
+impl GovernanceFacade {
+    /// Replace this machine's user policy with a validated document.
+    ///
+    /// Validation happens before anything is replaced and the write is atomic, so pressing a button
+    /// in the window can never leave Ghostlight configured with a policy it cannot read. That is the
+    /// one failure mode a local authoring surface must not have (ADR-0122 Decision 4).
+    pub fn apply_user_policy(&self, document: &str) -> Result<manifest::Manifest, AuthoringError> {
+        let policy = manifest::parse(document, "this policy")
+            .map_err(|error| AuthoringError::Invalid(error.to_string()))?;
+        if policy.boolean_setting("policy.user.enabled").is_some() {
+            return Err(AuthoringError::OrganizationOnlySetting(
+                "policy.user.enabled".into(),
+            ));
+        }
+        let path = self.writable_user_policy_path()?;
+        let parent = path.parent().ok_or(AuthoringError::NoHome)?;
+        fs::create_dir_all(parent)
+            .map_err(|error| AuthoringError::Unwritable(error.to_string()))?;
+        let staged = path.with_extension("json.writing");
+        fs::write(&staged, document.as_bytes())
+            .map_err(|error| AuthoringError::Unwritable(error.to_string()))?;
+        fs::rename(&staged, &path).map_err(|error| {
+            let _ = fs::remove_file(&staged);
+            AuthoringError::Unwritable(error.to_string())
+        })?;
         self.refresh_policies();
-        let mut layers = Vec::new();
-        let mut tab_close_allowed = true;
-        let mut tab_close_source = None;
-        let mut preserve_target_names = true;
-        let mut sacred_hosts = Vec::new();
-        let (sources, managed_sequence, mut valid) = {
+        Ok(policy)
+    }
+
+    /// Remove this machine's user policy, returning authority to whatever remains above it.
+    pub fn remove_user_policy(&self) -> Result<(), AuthoringError> {
+        let path = self.writable_user_policy_path()?;
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(AuthoringError::Unwritable(error.to_string())),
+        }
+        self.refresh_policies();
+        Ok(())
+    }
+
+    /// The user policy path this window may write, or why it may not.
+    fn writable_user_policy_path(&self) -> Result<PathBuf, AuthoringError> {
+        if !self.user_authoring_allowed() {
             let policies = self
                 .policies
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            (
-                [
-                    (policies.managed_manifest().cloned(), AuthorityTier::Managed),
-                    (policies.user.active.clone(), AuthorityTier::User),
-                ],
-                policies.managed_sequence(),
-                policies.managed_valid() && policies.user.has_authority(),
-            )
-        };
-
-        for (policy, tier) in sources {
-            let Some(policy) = policy else { continue };
-            let index = u16::try_from(layers.len()).expect("policy layer count is bounded");
-            if policy.boolean_setting("browser.tabs.allow_close") == Some(false) {
-                tab_close_allowed = false;
-                tab_close_source.get_or_insert(index);
-            }
-            if policy.boolean_setting("privacy.preserve_target_names") == Some(false) {
-                preserve_target_names = false;
-            }
-            if let Some(patterns) = policy.string_array_setting("content.security.sacred_domains") {
-                sacred_hosts.extend(patterns);
-            }
-            layers.push(PolicyLayer {
-                tier,
-                manifest: policy,
-            });
+            let name = policies
+                .managed_manifest()
+                .and_then(|policy| policy.organization.as_ref())
+                .map_or_else(
+                    || "Your organization".to_owned(),
+                    |organization| organization.name.clone(),
+                );
+            return Err(AuthoringError::NotAllowed(format!(
+                "{name} does not allow rules to be set on this machine."
+            )));
         }
-        let request_capabilities = restrictions.restrict_capabilities.as_ref().map(|values| {
-            values.iter().fold(
-                CapabilitySet::EMPTY,
-                |set, value| match Capability::from_str(value) {
-                    Ok(capability) => set.union(capability.into()),
-                    Err(_) => {
-                        valid = false;
-                        set
-                    }
-                },
-            )
-        });
-        let request_hosts = restrictions.restrict_hosts.clone();
-        if request_hosts.as_ref().is_some_and(|patterns| {
-            patterns
-                .iter()
-                .any(|pattern| !manifest::valid_host_pattern(pattern))
-        }) {
-            valid = false;
+        let policies = self
+            .policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if policies.user_origin == effective::UserLayerSource::Environment {
+            return Err(AuthoringError::NotOwned);
         }
-        let id = authority_id(
-            &layers,
-            request_capabilities,
-            request_hosts.as_deref(),
-            valid,
-        );
-
-        AuthoritySnapshot {
-            id,
-            managed_sequence,
-            layers,
-            request_capabilities,
-            request_hosts,
-            tab_close_allowed,
-            tab_close_source,
-            preserve_target_names,
-            sacred_hosts,
-            valid,
-        }
+        policies
+            .owned_user_path
+            .clone()
+            .ok_or(AuthoringError::NoHome)
     }
+}
 
+/// Fold resolved layers and caller restrictions into one immutable snapshot.
+fn assemble(
+    restrictions: &RequestRestrictions,
+    sources: [(Option<manifest::Manifest>, AuthorityTier); 2],
+    managed_sequence: Option<u64>,
+    valid: bool,
+) -> AuthoritySnapshot {
+    let mut layers = Vec::new();
+    let mut tab_close_allowed = true;
+    let mut tab_close_source = None;
+    let mut preserve_target_names = true;
+    let mut sacred_hosts = Vec::new();
+    let mut valid = valid;
+    for (policy, tier) in sources {
+        let Some(policy) = policy else { continue };
+        let index = u16::try_from(layers.len()).expect("policy layer count is bounded");
+        if policy.boolean_setting("browser.tabs.allow_close") == Some(false) {
+            tab_close_allowed = false;
+            tab_close_source.get_or_insert(index);
+        }
+        if policy.boolean_setting("privacy.preserve_target_names") == Some(false) {
+            preserve_target_names = false;
+        }
+        if let Some(patterns) = policy.string_array_setting("content.security.sacred_domains") {
+            sacred_hosts.extend(patterns);
+        }
+        layers.push(PolicyLayer {
+            tier,
+            manifest: policy,
+        });
+    }
+    let request_capabilities = restrictions.restrict_capabilities.as_ref().map(|values| {
+        values.iter().fold(
+            CapabilitySet::EMPTY,
+            |set, value| match Capability::from_str(value) {
+                Ok(capability) => set.union(capability.into()),
+                Err(_) => {
+                    valid = false;
+                    set
+                }
+            },
+        )
+    });
+    let request_hosts = restrictions.restrict_hosts.clone();
+    if request_hosts.as_ref().is_some_and(|patterns| {
+        patterns
+            .iter()
+            .any(|pattern| !manifest::valid_host_pattern(pattern))
+    }) {
+        valid = false;
+    }
+    let id = authority_id(
+        &layers,
+        request_capabilities,
+        request_hosts.as_deref(),
+        valid,
+    );
+
+    AuthoritySnapshot {
+        id,
+        managed_sequence,
+        layers,
+        request_capabilities,
+        request_hosts,
+        tab_close_allowed,
+        tab_close_source,
+        preserve_target_names,
+        sacred_hosts,
+        valid,
+    }
+}
+
+impl GovernanceFacade {
     /// Check live runtime control at an effect boundary.
     #[must_use]
     pub fn runtime_decision(&self) -> Decision {
@@ -1835,8 +2041,8 @@ mod tests {
     use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
 
     use super::{
-        AuditRecord, Capability, CapabilitySet, Decision, DenialAttention, GovernanceFacade,
-        ReasonCode,
+        AuditRecord, AuthoringError, Capability, CapabilitySet, Decision, DenialAttention,
+        GovernanceFacade, ReasonCode,
     };
     use crate::language::outcome::Observed;
 
@@ -2271,6 +2477,124 @@ mod tests {
             );
             let _ = fs::remove_file(path);
         }
+    }
+
+    #[test]
+    fn authoring_validates_before_it_replaces_and_never_leaves_the_product_failing_closed() {
+        let path = temporary("authored-policy");
+        let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
+        // A machine that has never authored one is open, not failing closed.
+        assert!(
+            facade
+                .snapshot(&RequestRestrictions::default())
+                .authorize_capability(Capability::Execute)
+                .allowed
+        );
+
+        let good = r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#;
+        facade.apply_user_policy(good).unwrap();
+        let applied = facade.snapshot(&RequestRestrictions::default());
+        assert!(
+            applied
+                .authorize_landing(CapabilitySet::READ, "https://example.com")
+                .allowed
+        );
+        assert!(
+            !applied
+                .authorize_landing(CapabilitySet::EXECUTE, "https://example.com")
+                .allowed
+        );
+
+        // A rejected document leaves both the file and the authority exactly as they were.
+        let error = facade.apply_user_policy("{\"schema\":3,").unwrap_err();
+        assert!(matches!(error, AuthoringError::Invalid(_)));
+        assert_eq!(fs::read_to_string(&path).unwrap(), good);
+        assert!(
+            facade
+                .snapshot(&RequestRestrictions::default())
+                .authorize_landing(CapabilitySet::READ, "https://example.com")
+                .allowed
+        );
+
+        // The organization switch is not something a user layer may author for itself.
+        let overreach = r#"{"schema":3,"name":"mine","version":"2","grants":[],"config":[{"key":"policy.user.enabled","value":true,"level":"mandatory"}]}"#;
+        assert!(matches!(
+            facade.apply_user_policy(overreach).unwrap_err(),
+            AuthoringError::OrganizationOnlySetting(_)
+        ));
+
+        facade.remove_user_policy().unwrap();
+        assert!(!path.exists());
+        assert!(
+            facade
+                .snapshot(&RequestRestrictions::default())
+                .authorize_capability(Capability::Execute)
+                .allowed
+        );
+        // Removing what is already gone is not a failure.
+        facade.remove_user_policy().unwrap();
+    }
+
+    #[test]
+    fn a_policy_file_ghostlight_does_not_own_is_never_written_back() {
+        let path = temporary("foreign-policy");
+        fs::write(
+            &path,
+            br#"{"schema":3,"name":"theirs","version":"1","grants":[]}"#,
+        )
+        .unwrap();
+        let facade = GovernanceFacade::new(Some(path.clone()), None);
+        assert!(matches!(
+            facade
+                .apply_user_policy(r#"{"schema":3,"name":"mine","version":"1","grants":[]}"#)
+                .unwrap_err(),
+            AuthoringError::NotOwned
+        ));
+        assert!(matches!(
+            facade.remove_user_policy().unwrap_err(),
+            AuthoringError::NotOwned
+        ));
+        assert!(path.exists());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_candidate_policy_is_decided_under_the_organization_ceiling_without_being_applied() {
+        let managed = temporary("preview-managed");
+        let owned = temporary("preview-user");
+        fs::write(
+            &managed,
+            br#"{"schema":3,"name":"org","version":"1","grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}]}"#,
+        )
+        .unwrap();
+        let facade = GovernanceFacade::owning_user_policy(owned.clone(), Some(managed.clone()));
+
+        let candidate = facade
+            .candidate_snapshot(
+                r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"wide","hosts":{"allow":["*"]},"allowed":["read","action","write"]}]}"#,
+            )
+            .unwrap();
+        // The candidate asks for more than the organization allows, so the ceiling still wins.
+        assert!(
+            candidate
+                .authorize_landing(CapabilitySet::READ, "https://example.com")
+                .allowed
+        );
+        assert!(
+            !candidate
+                .authorize_landing(CapabilitySet::WRITE, "https://example.com")
+                .allowed
+        );
+        assert!(
+            !candidate
+                .authorize_landing(CapabilitySet::READ, "https://elsewhere.test")
+                .allowed
+        );
+        // Previewing writes nothing.
+        assert!(!owned.exists());
+        assert!(facade.candidate_snapshot("not json").is_err());
+
+        let _ = fs::remove_file(managed);
     }
 
     #[test]
