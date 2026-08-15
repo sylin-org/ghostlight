@@ -127,6 +127,10 @@ Every one of these cost something to learn.
   controlled; cursors, scans, ripples, frames, and captions say what is happening now.
 - **Isolate live stacks when testing.** Build into a separate target directory, and stop processes
   only by exact executable path, never by image name.
+- **Persistent package-test overlays need candidate-scoped user state.** A retained runtime file can
+  satisfy a file-exists wait before the new authority publishes, producing a truthful result about
+  the wrong candidate. Namespace the test home by candidate, and pass the effective Cargo target
+  directory explicitly when packaging so a host profile cannot redirect the binaries under test.
 - **The 0.8 distribution and trust records are active inputs, not a working 1.0 pipeline.** Harvest
   their tests, platform facts, public-state model, and delivery safeguards, then adapt the machinery
   to current boundaries before claiming a 1.0 artifact exists. Keep a machine-checked disposition

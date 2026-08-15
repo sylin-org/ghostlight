@@ -141,6 +141,7 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: native-x86_64-unknown-linux-gnu
@@ -151,39 +152,11 @@ jobs:
           artifact=$(find "$PWD/candidate" -type f -name '*.deb' -print -quit)
           test -n "$artifact"
           apt-get update
-          apt-get install -y "$artifact"
-          test "$(ghostlight --version)" = "ghostlight 1.0.0"
-          dpkg-query -L ghostlight | grep -qx '/usr/bin/ghostlight'
-          mapfile -t desktops < <(grep -R -l '^X-Ghostlight-Owned=true$' /usr/share/applications)
-          test "${#desktops[@]}" -eq 1
-          grep -Eq '^Exec=.*ghostlight.* open$' "${desktops[0]}"
-          test_home=/home/ghostlight-package-test
-          install -d -m 0700 -o 1000 -g 1000 "$test_home"
-          setpriv --reuid=1000 --regid=1000 --clear-groups \
-            env HOME="$test_home" ghostlight --headless >candidate/service.log 2>&1 &
-          service_pid=$!
-          trap 'kill "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true' EXIT
-          runtime="$test_home/.cache/ghostlight/ghostlight-runtime.json"
-          for attempt in $(seq 1 100); do
-            test -s "$runtime" && break
-            kill -0 "$service_pid"
-            sleep 0.05
-          done
-          test -s "$runtime"
-          test "$(stat -c '%a' "$runtime")" = "600"
-          response=$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"package-smoke","version":"1"}}}' | \
-            setpriv --reuid=1000 --regid=1000 --clear-groups \
-              env HOME="$test_home" timeout 10s ghostlight-mcp-connector)
-          grep -q '"name":"ghostlight"' <<<"$response"
-          kill "$service_pid"
-          wait "$service_pid" || true
-          trap - EXIT
-          apt-get remove -y ghostlight
-          test ! -e /usr/bin/ghostlight
-          apt-get install -y "$artifact"
-          test "$(ghostlight --version)" = "ghostlight 1.0.0"
-          apt-get purge -y ghostlight
-          test ! -e /usr/bin/ghostlight
+          apt-get install -y binutils desktop-file-utils jq procps
+          ./scripts/check-debian-package-lifecycle.sh \
+            "$artifact" \
+            "${{ matrix.distribution }}" \
+            "${{ github.sha }}"
 
   extension-artifact:
     needs: quality-gate

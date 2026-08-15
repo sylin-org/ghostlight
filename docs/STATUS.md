@@ -217,17 +217,50 @@ highest-value 1.0 findings from [Research 25](research/25-delightful-linux-exper
   deliberate pre-registration route.
 - The release Linux artifact now builds on Ubuntu 22.04. Candidate assembly waits for exact Debian
   package install/remove/reinstall/purge smokes in Debian 12 and Ubuntu 24.04. Those workflow jobs
-  are implemented but have not run and do not replace the visible Ubuntu GNOME Wayland L1-L9 gate.
+  are implemented. An equivalent expanded local rootless matrix has passed; the GitHub workflow
+  itself has not run and the result does not replace the visible Ubuntu GNOME Wayland L1-L9 gate.
 - Current-tree verification passed formatting, warnings-denied workspace Clippy, 274 Rust tests,
   103 extension tests, 10 npm tests, 4 MCPB tests, shell syntax, fresh isolated build, process, CLI,
   workbench, policy-grammar, Tauri-config build, dependency-policy, and advisory gates. The live CLI
   separately reported native browser provenance and missing Applications integration correctly.
-  PowerShell and Debian package tools are absent on this CachyOS host, so no local `.deb` lifecycle
-  is claimed.
+  The rootless package lab below supersedes this source-only package limitation.
 
 RPM remains the next rational native format only after a separate scope decision and a real
 lifecycle host. AppImage, Snap, Flatpak, AUR, and Nix artifacts do not become 1.0 gates merely
 because their packaging tools exist.
+
+## Rootless Linux package evidence
+
+[The dated container record](testing/linux-container-evidence-2026-08-15.md) carries the exact
+candidate, image digests, coverage boundary, and results. The source candidate
+`a9bd73424198cb144154117ad4dcae682d18baf5` produced a 4,768,536-byte Debian package with SHA-256
+`a6c898f9072ae50363b12e8d422f74a6718d2bce3a874bd82d6d25b9658338e9` in a rootless Ubuntu 22.04
+builder on the second drive.
+
+- Debian 12, Debian 13, Ubuntu 24.04, and Ubuntu 26.04 passed the same package journey. It checks
+  control metadata, dependencies, package checksums, modes, missing libraries, RPATH, the GLIBC
+  ceiling, four conffile-bound native manifests, desktop validity, ordinary-UID runtime mode,
+  status, doctor, native-host reporting, MCP initialize, remove, reinstall, purge, owned cleanup,
+  and retained user state. Every binary's maximum required GLIBC symbol is 2.34.
+- Ubuntu 24.04 passed that complete journey with its network namespace disconnected. The portable
+  archive separately passed XDG install, exact idempotency, version-path update, runtime startup,
+  and ownership-safe uninstall. Its SHA-256 is
+  `7bf2994067c148191d797c572abd1a3604b487497c4bef8e2a44fb04548f8d10`.
+- The attested public 0.8.0 archive installed its real user supervisor and browser manifests. The
+  packaged 1.0 command retired the unit and enablement, rewrote all four owned manifests, changed
+  zero bytes on repeat, preserved unrelated state and all old binaries, started as the ordinary
+  user, and left user state after package purge.
+- Advisory `lintian` now reports only browser-mandated `/etc/opt` paths, absent manpages for the
+  three sibling executables, Rust-inapplicable C fortify notices, intentional duplicate legal
+  resources, and binary string-table false positives. Placeholder metadata, libc dependency,
+  conffile, changelog, copyright, strip, archive compression, and package-name path defects found
+  by the first run are fixed and guarded.
+- The release workflow and local guests now share one package lifecycle script. Extra local
+  distributions remain advisory rather than expanding the accepted two-row release gate.
+
+This is strong headless package evidence, not provenance, a clean graphical machine, or a visible
+browser lifecycle. Ubuntu GNOME Wayland L1-L9, the matching store adapter, login/reboot, tray,
+notifications, and the full visible browser matrix remain owed.
 
 - `dev` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`. It absorbed
   `ghostlight-1.0`, which was a fast-forward and has been retired.
