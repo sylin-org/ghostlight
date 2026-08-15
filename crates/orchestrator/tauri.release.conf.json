@@ -1,5 +1,10 @@
 {
   "bundle": {
+    "category": "Utility",
+    "copyright": "Copyright (c) 2026 Leonardo Botinelly",
+    "homepage": "https://sylin.org/ghostlight/",
+    "shortDescription": "Visible local browser automation",
+    "longDescription": "Ghostlight gives MCP clients controlled access to the authenticated\nChromium profile you already use.\nGovernance is optional, local, and fully auditable; the all-open\nengine remains first-class.",
     "externalBin": [
       "binaries/ghostlight-mcp-connector",
       "binaries/ghostlight-browser-connector"
@@ -18,13 +23,19 @@
     },
     "linux": {
       "deb": {
+        "changelog": "../../packaging/linux/changelog",
+        "depends": [
+          "libc6 (>= 2.34)"
+        ],
         "desktopTemplate": "../../packaging/linux/ghostlight.desktop.hbs",
         "files": {
           "/etc/opt/chrome/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json",
           "/etc/opt/edge/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json",
           "/etc/brave/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json",
-          "/etc/chromium/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json"
-        }
+          "/etc/chromium/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json",
+          "/usr/share/doc/ghostlight/copyright": "../../packaging/linux/copyright"
+        },
+        "section": "utils"
       }
     }
   }

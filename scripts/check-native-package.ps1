@@ -109,6 +109,27 @@ switch ($Platform) {
         }
     }
     "linux" {
+        $control = (& dpkg-deb --field $Artifact) -join "`n"
+        if ($LASTEXITCODE -ne 0) {
+            throw "dpkg-deb could not read the Debian control metadata"
+        }
+        $controlExpectations = @(
+            '^Maintainer: Leonardo Botinelly <hello@sylin\.org>$',
+            '^Section: utils$',
+            '^Homepage: https://sylin\.org/ghostlight/$',
+            '^Depends: .*libc6 \(>= 2\.34\)',
+            '^Description: Visible local browser automation$'
+        )
+        foreach ($expectation in $controlExpectations) {
+            if ($control -notmatch "(?m)$expectation") {
+                throw "Debian control metadata does not match $expectation"
+            }
+        }
+        if ($control -notmatch '(?m)^ Ghostlight gives MCP clients controlled access' -or
+            $control -notmatch '(?m)^ Governance is optional, local, and fully auditable') {
+            throw "Debian package is missing its complete extended description"
+        }
+
         $listing = (& dpkg-deb --contents $Artifact) -join "`n"
         if ($LASTEXITCODE -ne 0) {
             throw "dpkg-deb could not inspect the Debian artifact"
@@ -159,10 +180,35 @@ switch ($Platform) {
             }
             $desktopEntry = Get-Content -LiteralPath $desktopEntries[0].FullName -Raw
             if ($desktopEntry -notmatch '(?m)^Exec=.*ghostlight.* open$' -or
+                $desktopEntry -notmatch '(?m)^Keywords=browser;automation;MCP;$' -or
                 $desktopEntry -notmatch '(?m)^X-Ghostlight-Owned=true$') {
                 throw "Debian desktop entry must use the explicit Ghostlight open intent"
             }
+            $copyright = Join-Path $tempRoot "usr/share/doc/ghostlight/copyright"
+            if (-not (Test-Path -LiteralPath $copyright) -or
+                (Get-FileHash -LiteralPath $copyright -Algorithm SHA256).Hash -ne
+                (Get-FileHash -LiteralPath (Join-Path $repo "packaging/linux/copyright") -Algorithm SHA256).Hash) {
+                throw "Debian package is missing its exact copyright summary at the standard path"
+            }
+            $changelog = Join-Path $tempRoot "usr/share/doc/ghostlight/changelog.gz"
+            if (-not (Test-Path -LiteralPath $changelog) -or
+                (Get-Item -LiteralPath $changelog).Length -eq 0) {
+                throw "Debian package is missing its compressed changelog"
+            }
             Assert-LegalPayload -Root $tempRoot
+
+            $controlRoot = Join-Path $tempRoot "package-control"
+            & dpkg-deb --control $Artifact $controlRoot
+            if ($LASTEXITCODE -ne 0) {
+                throw "dpkg-deb could not extract the Debian package control files"
+            }
+            $conffiles = @(Get-Content -LiteralPath (Join-Path $controlRoot "conffiles"))
+            foreach ($destination in $manifestDestinations) {
+                $expected = "/$destination/org.sylin.ghostlight.json"
+                if ($conffiles -notcontains $expected) {
+                    throw "Debian package does not mark $expected as a configuration file"
+                }
+            }
         }
         finally {
             Remove-CheckedTemporaryDirectory `

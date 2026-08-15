@@ -12,6 +12,13 @@ version = "1.0.0"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
 rust-version = "1.82"
+authors = ["Leonardo Botinelly <hello@sylin.org>"]
+description = "Visible local browser automation with optional policy and audit"
+homepage = "https://sylin.org/ghostlight/"
+repository = "https://github.com/sylin-org/ghostlight"
+
+[profile.release]
+strip = "symbols"
 
 [workspace.dependencies]
 anyhow = "1.0"

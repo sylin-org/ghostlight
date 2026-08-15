@@ -114,6 +114,7 @@ jobs:
         shell: pwsh
         run: |
           $artifact = Get-ChildItem -LiteralPath target/${{ matrix.target }}/release/bundle/deb -Filter '*.deb' | Select-Object -First 1 -ExpandProperty FullName
+          ./scripts/finalize-debian-package.ps1 -Artifact $artifact
           ./scripts/check-native-package.ps1 -Platform linux -Artifact $artifact
       - uses: actions/upload-artifact@v7
         with:
