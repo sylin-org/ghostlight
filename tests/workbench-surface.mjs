@@ -161,7 +161,8 @@ const compiled = (editable) => ({
   layers: [
     { kind: "organization", title: "Example Org", policy_name: "Support", version: "1", mode: "enforce",
       rules: [{ id: "support", description: "Ordinary support work", allow: ["support.example.test"], deny: [], allowed: ["read"], mode: "enforce", note: null }],
-      settings: [], path: null, document: '{"schema": 3}' },
+      settings: [{ key: "privacy.preserve_target_names", value: "false", level: "mandatory" }],
+      path: null, document: '{"schema": 3}' },
     { kind: "user", title: "Your rules", policy_name: "Your rules", version: "1", mode: "enforce",
       rules: [{ id: "leftover", description: null, allow: ["other.test"], deny: [], allowed: ["read"], mode: "enforce", note: "no_effect" }],
       settings: [{ key: "browser.tabs.allow_close", value: "false", level: "mandatory" }],
@@ -208,13 +209,16 @@ const documents = nodes.get("policy-documents").innerHTML;
 const settingsShown = nodes.get("policy-settings").innerHTML;
 const rules = nodes.get("rule-list").innerHTML;
 const editorShown = !nodes.get("policy-editor").hidden;
-// Restrictions are authored here too, and only ever in the direction that tightens.
-const restrictions = nodes.get("restriction-list").innerHTML;
+// Permissions are authored here too, phrased as what a person can do, and only ever in the
+// direction that tightens underneath. The fixture's user layer already restricts tab closing and
+// the fixture's organization layer already forces the command line off, so the first render
+// exercises both a person's own toggle and an organization ceiling at once.
+const permissionsOnLoad = nodes.get("setting-groups").innerHTML;
 const authoredOnLoad = JSON.parse(view.draftDocument()).config;
-view.setRestriction("channels.cli.enabled", true);
+view.setPermission("channels.mcp.enabled", false);
 view.setSacred("vault.example.test, *.finance.example.test");
 const authoredAfterEdit = JSON.parse(view.draftDocument()).config;
-view.setRestriction("browser.tabs.allow_close", false);
+view.setPermission("browser.tabs.allow_close", true);
 const authoredAfterClearing = JSON.parse(view.draftDocument()).config;
 
 // Opening and closing one organization rule: the detail belongs to the row, not to the page.
@@ -285,28 +289,43 @@ const checks = [
     documents.includes("Example Org") && documents.includes("Your rules")
       && documents.includes("state/user-policy.json"),
     `documents: ${JSON.stringify(documents)}`],
-  ["restrictions are offered in plain words, never as registered keys",
-    restrictions.includes("Do not let agents close tabs")
-      && restrictions.includes("Turn off the command line")
-      && !restrictions.includes("channels.cli.enabled</span>"),
-    `restrictions: ${JSON.stringify(restrictions)}`],
+  ["permissions are grouped by what a person thinks about, not by registered key",
+    permissionsOnLoad.includes("Where agents may connect")
+      && permissionsOnLoad.includes("In the browser")
+      && permissionsOnLoad.includes("Privacy")
+      && permissionsOnLoad.includes("MCP clients")
+      && permissionsOnLoad.includes("Command line")
+      && !permissionsOnLoad.includes("channels.cli.enabled</span>"),
+    `permissions: ${JSON.stringify(permissionsOnLoad)}`],
+  ["a permission on by default renders checked, and a person's own restriction renders unchecked",
+    /data-restriction="channels\.mcp\.enabled"\s+checked/.test(permissionsOnLoad)
+      && /data-restriction="browser\.tabs\.allow_close"(?!\s+checked)/.test(permissionsOnLoad),
+    `permissions: ${JSON.stringify(permissionsOnLoad)}`],
+  ["an organization ceiling disables the switch and names who set it",
+    permissionsOnLoad.includes("Example Org already turned this off.")
+      && /data-restriction="privacy\.preserve_target_names"[^>]*disabled/.test(permissionsOnLoad),
+    `permissions: ${JSON.stringify(permissionsOnLoad)}`],
+  ["the way in is a real destination, not prose: MCP links to Integrations, CLI to the scripting guide",
+    permissionsOnLoad.includes('data-view="integrations"')
+      && permissionsOnLoad.includes('data-destination="scripting_guide"'),
+    `permissions: ${JSON.stringify(permissionsOnLoad)}`],
   ["an authored restriction is read back into the draft",
     authoredOnLoad.length === 1
       && authoredOnLoad[0].key === "browser.tabs.allow_close"
       && authoredOnLoad[0].value === false
       && authoredOnLoad[0].level === "mandatory",
     `authored: ${JSON.stringify(authoredOnLoad)}`],
-  ["switching a restriction on authors only the tightening value",
-    authoredAfterEdit.some((entry) => entry.key === "channels.cli.enabled" && entry.value === false)
+  ["turning a permission off authors only the tightening value",
+    authoredAfterEdit.some((entry) => entry.key === "channels.mcp.enabled" && entry.value === false)
       && authoredAfterEdit.some((entry) =>
         entry.key === "content.security.sacred_domains"
         && JSON.stringify(entry.value) === '["vault.example.test","*.finance.example.test"]'),
     `authored: ${JSON.stringify(authoredAfterEdit)}`],
-  ["switching one off removes it rather than authoring permission",
+  ["turning one back on removes it rather than authoring permission",
     !authoredAfterClearing.some((entry) => entry.key === "browser.tabs.allow_close"),
     `authored: ${JSON.stringify(authoredAfterClearing)}`],
   ["a restriction in force reads as a sentence, not a key",
-    settingsShown.includes("Agents may not close tabs"),
+    settingsShown.includes("Closing a tab stays something only you do."),
     `settings: ${JSON.stringify(settingsShown)}`],
   ["the editor appears only when authoring is permitted",
     editorShown && editorHiddenWhenRefused],

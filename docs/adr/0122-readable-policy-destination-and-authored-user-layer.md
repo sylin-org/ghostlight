@@ -327,6 +327,42 @@ pattern gets, and they continue to appear under the permanent boundaries once in
 23. Only an organization ceiling disables a capability control; a capability merely absent from this
     person's own rules stays available to grant.
 
+### A4. Permissions are presented as permissions, not as the flags that store them (refines A3)
+
+A3 shipped the four settings as one flat grid of checkboxes, each labelled by the restriction it
+authors ("Turn off MCP clients") and unchecked by default. In use that mixed two concepts a person
+holds separately -- which interfaces may reach Ghostlight at all, versus what an interface may do
+once connected -- under one undifferentiated heading, and asked the reader to interpret a double
+negative on every row: an unchecked box meant "allowed", which is exactly backwards from how a
+switch normally reads.
+
+The grid is now three named groups -- "Where agents may connect", "In the browser", "Privacy" --
+matching the distinctions a person already carries. Each item is a real toggle that starts on,
+because every one of these settings is permissive by default and that is the fact a person needs
+first. The switch reads as the permission itself ("MCP clients", checked) rather than as the
+internal flag wearing a costume ("turn off", unchecked); the words are `on`/`off` sentences stating
+consequence, not the restriction's name. This is presentation only: the schema underneath is
+unchanged, the permissive value is still never authored, and `setPermission` is the one seam that
+turns a checked switch back into the tightening-only value A3 already established.
+
+The two channel items each link to where the fact is actually live rather than restating it in
+prose that will drift: MCP to the Integrations destination, which is the true list of supported
+clients; CLI to the scripting guide. Both use the existing closed destination vocabulary
+(`WorkbenchDestination`, `data-view`), so neither is a new capability, only a new place one is used.
+
+An organization ceiling on a setting renders the same way a capability ceiling already does: the
+switch is off, disabled, and names who set it, with no link out, because there is nothing to link to
+when this machine's user has no say in it.
+
+### Acceptance evidence added
+
+24. Permission toggles render grouped by connection, browser behavior, and privacy, each checked by
+    default, with no registered key visible in the rendered text.
+25. A person's own restriction renders unchecked; an organization ceiling renders unchecked,
+    disabled, and named, with its link (if it has one) withheld.
+26. The MCP toggle links to the Integrations destination and the command-line toggle to the
+    scripting guide, through the existing closed destination vocabulary.
+
 ## Prior art
 
 - [Tailscale visual policy editor](https://tailscale.com/blog/visual-editor-beta): a visual editor

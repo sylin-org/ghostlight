@@ -65,14 +65,19 @@ research input [24-policy-surface-user-delight-2026-08.md](research/24-policy-su
 - The editor speaks sentences: host readback on every pattern, organization ceilings shown on the
   control itself, redundant and unreachable rules marked in place, watch-only as a plain switch,
   and a dry run against recorded audit before applying.
-- The editor authors the registered settings as restrictions to switch on, never authoring the
-  permissive value, with `policy.user.enabled` still refused from a user document.
+- The editor authors the registered settings, presented as three grouped permission toggles --
+  where agents may connect, in the browser, privacy -- each on by default and named by what it
+  does, never by its registered key. The permissive value is still never authored;
+  `policy.user.enabled` is still refused from a user document; an organization ceiling on a setting
+  disables its switch and names who set it, the same as a capability ceiling does. The two channel
+  toggles link to the Integrations destination and the scripting guide instead of restating a
+  client list that would drift.
 - A refused row in the monitor names the deciding layer, the rule, the denial handle, and the
   organization's contacts when it supplied them.
 - Gate at implementation: 212 orchestrator library tests, 2 binary, 30 bridge, 4 MCP connector,
   warnings denied, 101 extension tests, plus `node tests/policy-grammar.mjs` and
-  `node tests/workbench-surface.mjs`. The amendment recorded in ADR-0122 covers the single rule
-  list, stated polarity, and authored restrictions.
+  `node tests/workbench-surface.mjs` (27 assertions). The amendment recorded in ADR-0122 covers the
+  single rule list, stated polarity, authored restrictions, and the A4 permission-toggle framing.
 
 The active 1.0 guides, contracts, public RAWX specification, pricing language, and Trust Center now
 describe this feature set rather than the removed flat policy. The invented cohort-based

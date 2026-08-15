@@ -313,9 +313,11 @@ function wire() {
     if (box) view.toggleCapability(Number(box.dataset.rule), box.dataset.capability, box.checked);
   });
 
-  el["restriction-list"].addEventListener("change", (event) => {
+  el["setting-groups"].addEventListener("change", (event) => {
     const box = event.target.closest("[data-restriction]");
-    if (box) view.setRestriction(box.dataset.restriction, box.checked);
+    // The checkbox is the permission as the person sees it: checked means allowed. setPermission
+    // is the seam that turns that back into the tightening-only value the schema can express.
+    if (box) view.setPermission(box.dataset.restriction, box.checked);
   });
 
   el["sacred-hosts"].addEventListener("input", (event) => view.setSacred(event.target.value));

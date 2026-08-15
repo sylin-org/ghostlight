@@ -13,7 +13,7 @@
 
   const {
     VIEWS, GLYPHS, EFFECT_STORY, READINESS_NOTE, DESTINATIONS, glyphFor, capabilityClass,
-    CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTINGS, SACRED_KEY, settingWords,
+    CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId
   } = globalThis.GhostlightWords;
@@ -610,17 +610,59 @@
       }
     }
 
+    /**
+     * The permission grid, grouped by what a person actually thinks about.
+     *
+     * Every switch here defaults on, because every one of these settings is permissive by default:
+     * absence is what "allowed" means. A switch reads as the permission, not the internal flag --
+     * "MCP clients" with a checked box, not "turn off MCP clients" with an unchecked one. Unchecking
+     * one is the only thing this editor can do to it; the schema underneath is still a restriction
+     * that is only ever authored as `false` (ADR-0122 A3), but a person should never have to hold
+     * that inversion in their head to use the page.
+     */
     function renderSettings() {
       if (!draft) return;
-      el["restriction-list"].innerHTML = SETTINGS.map((setting) => {
-        const on = draft.settings.restricted.has(setting.key);
-        return `<label class="restriction${on ? " on" : ""}">`
-          + `<input type="checkbox" data-restriction="${escapeHtml(setting.key)}"${on ? " checked" : ""}>`
-          + `<span class="restriction-name">${escapeHtml(setting.restrict)}</span>`
-          + `<span class="restriction-effect">${escapeHtml(setting.effect)}</span></label>`;
-      }).join("");
+      el["setting-groups"].innerHTML = SETTING_GROUPS.map((group) =>
+        `<div class="setting-group"><h3>${escapeHtml(group.title)}</h3>`
+        + group.items.map(settingRow).join("")
+        + `</div>`).join("");
       el["sacred-hosts"].value = draft.settings.sacred;
       refreshSacred();
+    }
+
+    function settingRow(item) {
+      const forcedBy = organizationForces(item.key);
+      const checked = !forcedBy && !draft.settings.restricted.has(item.key);
+      const detail = forcedBy
+        ? `${escapeHtml(forcedBy)} already turned this off.`
+        : escapeHtml(checked ? item.on : item.off);
+      const link = !forcedBy && item.link
+        ? `<button class="link-button" type="button" `
+          + (item.link.view
+            ? `data-view="${escapeHtml(item.link.view)}"`
+            : `data-destination="${escapeHtml(item.link.destination)}"`)
+          + `>${escapeHtml(item.link.label)}</button>`
+        : "";
+      return `<div class="setting-row${forcedBy ? " setting-forced" : ""}">`
+        + `<label class="toggle">`
+        + `<input type="checkbox" data-restriction="${escapeHtml(item.key)}"`
+        + `${checked ? " checked" : ""}${forcedBy ? " disabled" : ""}>`
+        + `<span class="toggle-track"><span class="toggle-thumb"></span></span></label>`
+        + `<div class="setting-body"><span class="setting-name">${escapeHtml(item.name)}</span>`
+        + `<span class="setting-detail">${detail}</span>${link}</div></div>`;
+    }
+
+    /**
+     * Whether an organization has already turned this off, and if so who to name.
+     *
+     * A user's own switch cannot undo this, so it renders off and disabled rather than editable:
+     * ADR-0122 A3's ceiling rule applied to settings the same way it already applies to capabilities.
+     */
+    function organizationForces(key) {
+      const organization = applied?.layers?.find((layer) => layer.kind === "organization");
+      const setting = organization?.settings.find((entry) => entry.key === key);
+      if (setting?.value !== "false") return null;
+      return applied?.organization?.name ?? organization?.title ?? "Your organization";
     }
 
     function refreshSacred() {
@@ -632,11 +674,18 @@
       el["sacred-readback"].classList.toggle("readback-empty", !readback);
     }
 
-    /** Switch one restriction on or off. Absence is the only way to say "no opinion". */
-    function setRestriction(key, on) {
+    /**
+     * Switch one permission on or off, as the person sees it.
+     *
+     * `allowed` is the checkbox state, which is the opposite of what the schema stores: allowing
+     * something removes it from the restricted set (no opinion authored), and disallowing it adds
+     * the one value a user layer may ever write for that key. This is the seam where the delightful
+     * vocabulary in words.js turns back into the tightening-only schema in ADR-0122 A3.
+     */
+    function setPermission(key, allowed) {
       if (!draft) return;
-      if (on) draft.settings.restricted.add(key);
-      else draft.settings.restricted.delete(key);
+      if (allowed) draft.settings.restricted.delete(key);
+      else draft.settings.restricted.add(key);
       draft.dirty = true;
       renderSettings();
       editorReady();
@@ -860,9 +909,8 @@
      * consequence.
      */
     function settingEntries() {
-      const entries = SETTINGS
-        .filter((setting) => draft.settings.restricted.has(setting.key))
-        .map((setting) => ({ key: setting.key, value: false, level: "mandatory" }));
+      const entries = [...draft.settings.restricted]
+        .map((key) => ({ key, value: false, level: "mandatory" }));
       const sacred = splitHosts(draft.settings.sacred);
       if (sacred.length) entries.push({ key: SACRED_KEY, value: sacred, level: "mandatory" });
       return entries;
@@ -1120,7 +1168,7 @@
       hero, row, drop, promote, rebuildFeed, queueCount,
       band, collections, navigate, toast,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
-      setRestriction, setSacred,
+      setPermission, setSacred,
       setObserve, discardDraft, renderRules, previewResult, previewCleared, editorStatus,
       openPalette, closePalette, paletteOpen, paletteQuery, searchResults, searchFailed,
       confirmRemoval, answerConfirmation,

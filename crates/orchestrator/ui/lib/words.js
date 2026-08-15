@@ -131,37 +131,64 @@
   };
 
   /**
-   * The settings a policy may author, in the words a person would use.
+   * The settings a policy may author, grouped and worded the way a person actually thinks about
+   * them -- not the way the schema stores them.
    *
-   * Every one of these only ever tightens. A user layer that authored the permissive value would
-   * change nothing -- no lower layer can hand authority back -- so the editor offers each as a
-   * restriction to switch on, and absence means "no opinion" rather than "allowed". Naming them by
-   * what they do keeps the registered key out of the surface a person reads.
+   * Internally every one of these is a restriction: the registered key is only ever authored as
+   * `false`, because a user layer cannot hand back authority a higher one removed, so the
+   * permissive value is never written. But "a grid of things to turn off" is the wrong mental
+   * model to hand a person: it reads as a list of dangers, forces them to hold the double negative
+   * ("leaving this unchecked means...") in their head, and gives channels no more weight than tab
+   * closing. What a person actually has is a small number of things that are on by default, grouped
+   * by what they are about, and a toggle should say what it does when it is on, not what an internal
+   * flag is called.
+   *
+   * So the surface owns a second vocabulary here, built for reading rather than for storage: each
+   * item is `on` (checked, the default) and `off` (what unchecking it does), and the toggle is the
+   * permission itself, not a restriction wearing a costume. `setPermission` in view.js is the seam
+   * that translates a person flipping a switch back into the one thing the schema can express.
    */
-  const SETTINGS = [
+  const SETTING_GROUPS = [
     {
-      key: "browser.tabs.allow_close",
-      restrict: "Do not let agents close tabs",
-      effect: "Closing a controlled tab stays something only you do.",
-      display: "Agents may not close tabs"
+      title: "Where agents may connect",
+      items: [
+        {
+          key: "channels.mcp.enabled",
+          name: "MCP clients",
+          on: "Claude Code, Codex, Cursor, and other MCP-compatible tools may open a session here.",
+          off: "No MCP client may open a session here.",
+          link: { view: "integrations", label: "See connected clients" }
+        },
+        {
+          key: "channels.cli.enabled",
+          name: "Command line",
+          on: "ghostlight call may open a session, for scripts and automation.",
+          off: "The command line may not open a session here.",
+          link: { destination: "scripting_guide", label: "Scripting examples" }
+        }
+      ]
     },
     {
-      key: "privacy.preserve_target_names",
-      restrict: "Keep page-authored names out of results",
-      effect: "Names a page chose for its own elements stay out of results and the audit record.",
-      display: "Page-authored names are kept out of results and audit"
+      title: "In the browser",
+      items: [
+        {
+          key: "browser.tabs.allow_close",
+          name: "Closing tabs",
+          on: "Agents may close a tab they control.",
+          off: "Closing a tab stays something only you do."
+        }
+      ]
     },
     {
-      key: "channels.mcp.enabled",
-      restrict: "Turn off MCP clients",
-      effect: "No MCP client may open a session at all. This window keeps working, so you can undo it.",
-      display: "MCP clients may not open a session"
-    },
-    {
-      key: "channels.cli.enabled",
-      restrict: "Turn off the command line",
-      effect: "ghostlight call may not open a session.",
-      display: "The command line may not open a session"
+      title: "Privacy",
+      items: [
+        {
+          key: "privacy.preserve_target_names",
+          name: "Page-authored names",
+          on: "Names a page chose for its own elements appear in results and the audit record.",
+          off: "Page-authored names are kept out of results and the audit record."
+        }
+      ]
     }
   ];
 
@@ -173,14 +200,17 @@
   /** Registered key for the never-touch destination list, which is a list rather than a switch. */
   const SACRED_KEY = "content.security.sacred_domains";
 
-  /** How one authored setting reads once it is in force. */
+  /** Every setting item, in one flat list, for lookups that do not care about grouping. */
+  const SETTING_ITEMS = SETTING_GROUPS.flatMap((group) => group.items);
+
+  /** How one authored setting reads once it is in force, for the read-only summary. */
   function settingWords(key, value) {
     if (key === SACRED_KEY) {
       const hosts = Array.isArray(value) ? value : [];
       return `Never touched: ${hosts.join(", ")}`;
     }
-    const known = SETTINGS.find((setting) => setting.key === key);
-    if (known) return value === false ? known.display : `${known.display} (not restricted)`;
+    const known = SETTING_ITEMS.find((item) => item.key === key);
+    if (known) return value === false ? known.off : `${known.on} (not restricted)`;
     if (ORGANIZATION_SETTINGS[key]) {
       return value === false ? ORGANIZATION_SETTINGS[key] : `${ORGANIZATION_SETTINGS[key]} (allowed)`;
     }
@@ -353,7 +383,7 @@
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
-    CAPABILITY_BADGE, CAPABILITY_TONE, SETTINGS, SACRED_KEY, settingWords,
+    CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     validHostPattern, hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId });
 });

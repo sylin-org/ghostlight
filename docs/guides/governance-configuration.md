@@ -130,11 +130,13 @@ capabilities an organization refuses are shown refused on the control itself, an
 never fire says so in place. Before applying, the page replays the candidate through the production
 decision engine against this machine's recorded audit and reports what would have been refused.
 
-The same page authors the registered settings. Each appears as a restriction to switch on, named by
-what it does rather than by its key, with its consequence stated beneath it. Leaving one off means
-no opinion: the permissive value is never written, because a user layer cannot hand authority back.
-`policy.user.enabled` stays organization-only and is refused if a user document tries to author it.
-Sacred destinations are edited as a list with the same plain-words readback host patterns get.
+The same page authors the registered settings, presented as toggles grouped by what they are about
+-- where agents may connect, in the browser, privacy -- each starting on, since every one of them
+is permissive by default. Turning one off is the only thing the switch does: the permissive value
+is never written, because a user layer cannot hand authority back, and a switch already forced off
+by an organization renders disabled and names who set it. `policy.user.enabled` stays
+organization-only and is refused if a user document tries to author it. Sacred destinations are
+edited as a list with the same plain-words readback host patterns get.
 
 Applying validates before it replaces anything and writes atomically, so no action in the window
 can leave Ghostlight configured with a policy it cannot read. Removing the rules is one action and

@@ -648,21 +648,49 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 .hero-refusal { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 0; color: var(--muted); font-size: 11.5px; }
 .hero-refusal .denial-id { color: var(--faint); font: 400 10.5px/1 var(--mono); }
 
-/* ----------------------------- the restrictions -------------------------- */
-.editor-hint { margin: 0 0 10px; color: var(--muted); font-size: 11.5px; }
-.restrictions { display: grid; gap: 6px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-.restriction {
-  display: grid; grid-template-columns: auto 1fr; gap: 2px 9px; align-items: baseline;
-  padding: 11px 14px; border: 1px solid var(--line); border-radius: 8px;
-  background: var(--panel-2); cursor: pointer;
-  transition: border-color .25s var(--calm), background .25s var(--calm);
+/* -------------------------- what agents may do here ----------------------- */
+/*
+ * Grouped by what a person thinks about (where agents connect, in the browser, privacy), each item
+ * a permission that starts on -- a real toggle switch, not a checkbox, so "on" reads as on sight
+ * rather than as a box that needs interpreting. See words.js SETTING_GROUPS for why the language
+ * here is deliberately not the schema's.
+ */
+.editor-hint { margin: 0 0 14px; color: var(--muted); font-size: 11.5px; }
+.setting-group { margin-bottom: 14px; }
+.setting-group h3 { margin: 0 0 7px; color: var(--ink-2); font-size: 12px; font-weight: 500; letter-spacing: .01em; }
+.setting-row {
+  display: flex; align-items: flex-start; gap: 13px;
+  padding: 11px 14px; margin-bottom: 6px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
 }
-.restriction:hover { border-color: var(--line-2); }
-.restriction.on { border-color: rgba(var(--argb), .35); background: rgba(var(--argb), .04); }
-.restriction input { grid-row: 1 / span 2; }
-.restriction-name { color: var(--ink-2); font-size: 12.5px; }
-.restriction-effect { grid-column: 2; color: var(--muted); font-size: 11.5px; }
-.sacred { margin-top: 12px; }
+.setting-forced { opacity: .72; }
+.setting-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.setting-name { color: var(--ink); font-size: 12.5px; font-weight: 500; }
+.setting-detail { color: var(--muted); font-size: 11.5px; }
+.setting-row .link-button { align-self: flex-start; margin-top: 2px; }
+
+/* A real switch: track plus thumb, sibling to a visually-hidden input the label still owns. */
+.toggle { flex: none; position: relative; display: inline-flex; margin-top: 1px; cursor: pointer; }
+.toggle input {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.toggle-track {
+  display: block; width: 32px; height: 18px; border-radius: 999px;
+  background: rgba(255, 255, 255, .08); border: 1px solid var(--line-2);
+  transition: background .2s var(--calm), border-color .2s var(--calm);
+}
+.toggle-thumb {
+  display: block; width: 14px; height: 14px; margin: 1px; border-radius: 50%;
+  background: var(--ink-3); transform: translateX(0);
+  transition: transform .2s var(--calm), background .2s var(--calm);
+}
+.toggle input:checked ~ .toggle-track { background: rgba(var(--argb), .3); border-color: rgba(var(--argb), .55); }
+.toggle input:checked ~ .toggle-track .toggle-thumb { transform: translateX(14px); background: var(--a); }
+.toggle input:disabled ~ .toggle-track { opacity: .45; cursor: not-allowed; }
+.toggle input:focus-visible ~ .toggle-track { outline: 2px solid rgba(var(--argb), .6); outline-offset: 2px; }
+
+.sacred { margin-top: 4px; }
 .sacred-label { display: block; margin-bottom: 6px; color: var(--ink-3); font-size: 12.5px; }
 #sacred-hosts {
   width: 100%; height: 30px; padding: 0 10px;
