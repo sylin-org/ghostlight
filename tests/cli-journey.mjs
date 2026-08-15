@@ -6,7 +6,7 @@
 // from one line resolve on the next.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 
@@ -17,7 +17,7 @@ const runtimeFile = join(repository, `tests/.ghostlight-cli-runtime-${process.pi
 const auditFile = join(repository, `tests/.ghostlight-cli-audit-${process.pid}.jsonl`);
 // The service holds its lifetime lease beside the runtime file; killing it leaves the lease behind.
 const leaseFile = runtimeFile.replace(/\.json$/, ".lock");
-const policyFile = join(repository, `tests/.ghostlight-cli-policy-${process.pid}.json`);
+const scriptingDisabledPolicyFile = join(repository, "examples/scripting-disabled.json");
 const environment = {
   ...process.env,
   GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
@@ -43,7 +43,7 @@ rmSync(runtimeFile, { force: true });
 rmSync(auditFile, { force: true });
 rmSync(leaseFile, { force: true });
 const services = [];
-const cleanup = [runtimeFile, auditFile, leaseFile, policyFile];
+const cleanup = [runtimeFile, auditFile, leaseFile];
 const service = spawn(ghostlight, ["--headless"], { env: environment, stdio: ["pipe", "pipe", "pipe"] });
 services.push(service);
 service.stderr.on("data", (chunk) => process.stderr.write(`[ghostlight] ${chunk}`));
@@ -121,14 +121,13 @@ try {
 
   // An authority layer may decline the intake outright. Governance belongs to the service, so
   // this needs its own authority with the policy in its environment.
-  writeFileSync(policyFile, JSON.stringify({ version: 1, channels: { cli: {} } }));
   const governedRuntime = `${runtimeFile}.governed.json`;
   const governedAudit = `${auditFile}.governed.jsonl`;
   const governedEnvironment = {
     ...process.env,
     GHOSTLIGHT_RUNTIME_FILE: governedRuntime,
     GHOSTLIGHT_AUDIT_FILE: governedAudit,
-    GHOSTLIGHT_POLICY_FILE: policyFile
+    GHOSTLIGHT_POLICY_FILE: scriptingDisabledPolicyFile
   };
   cleanup.push(governedRuntime, governedAudit, governedRuntime.replace(/\.json$/, ".lock"));
   const governedService = spawn(ghostlight, ["--headless"], {

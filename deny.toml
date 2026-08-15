@@ -22,6 +22,11 @@ allow = [
     "Unlicense",
     "Zlib",
 ]
+# CDLA-Permissive-2.0 applies to the Mozilla certificate data shipped by webpki-roots.
+# Keep the reviewed data-license allowance scoped to that trust-root package.
+exceptions = [
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+]
 confidence-threshold = 0.9
 private = { ignore = true }
 

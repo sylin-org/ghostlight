@@ -101,6 +101,29 @@ Full interactive form, typing, shortcut, coordinate, scroll, drag, upload, dialo
 multi-harness, close/hide, tray, login, reboot, extension-disable, and notification-failure journeys
 remain incomplete.
 
+## Current-tree Linux source follow-up -- 2026-08-15
+
+The source committed with this follow-up was rerun on the same CachyOS x86_64 development host
+with Rust and Cargo 1.95.0, Node 22.22.1, and npm 10.9.4. This is current-tree source evidence. It
+does not change the Debian L1-L9 table or any public-release state.
+
+| Gate | Result |
+| --- | --- |
+| Formatting and lint | `cargo fmt --all -- --check` and locked workspace/all-target Clippy with warnings denied passed. |
+| Rust tests | 264 passed: 227 orchestrator library, 2 launch mode, 31 bridge, and 4 MCP connector. |
+| JavaScript and shell | 103 extension, 10 npm, and 4 MCPB tests passed; all 42 tracked JavaScript/module files and all shell scripts parsed; policy grammar and all 30 workbench-surface assertions passed. |
+| Fresh builds | Locked debug and optimized workspace builds completed in one new isolated target directory. |
+| Process surfaces | Fresh debug binaries passed reconnect, unknown-effect, recording, audit, CLI governance, batch, and schema-3 channel-refusal journeys. |
+| Dependency policy | License, bans, and source checks passed. `cargo audit` exited zero with the exact 17 allowed warnings below. |
+
+The follow-up also removed the direct unmaintained `rustls-pemfile` dependency, used rustls's own
+PEM iterator for the managed HTTPS CA pin, scoped the reviewed `CDLA-Permissive-2.0` allowance to
+`webpki-roots`, and kept the Windows-only managed-path environment import off Linux.
+
+PowerShell is absent on this host, so the PowerShell CLI journey and PowerShell release-truth
+scripts were not rerun. This rolling CachyOS host also lacks the exact pinned Ubuntu/Debian package
+environment and package inspection tools. No Debian artifact or lifecycle pass is claimed.
+
 ## Residual dependency warnings
 
 RustSec reported 17 warnings in target-specific transitive dependencies:

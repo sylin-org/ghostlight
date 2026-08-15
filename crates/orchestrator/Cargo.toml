@@ -29,7 +29,6 @@ uuid.workspace = true
 zeroize.workspace = true
 sysinfo = { version = "=0.36.1", default-features = false, features = ["system"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-pemfile = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "=0.55.0"

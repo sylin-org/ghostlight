@@ -419,22 +419,35 @@ reboot, or public-release pass.
 
 ## Verified in this workspace
 
-Re-run through 2026-08-14 against the current tree:
+Re-run through 2026-08-15 against the current tree:
 
 The complete dated evidence and explicit NOT RUN release gates are in
 [`testing/release-readiness-2026-08-13.md`](testing/release-readiness-2026-08-13.md). The result is a
 source-gate pass, not release approval.
 
-- `cargo fmt --check`.
-- `cargo clippy --workspace --all-targets -- -D warnings`.
-- `cargo test --workspace`: 194 Rust tests -- 158 in the orchestrator library, 2 in its launch-mode
-  binary, 30 in the shared bridge, and 4 in the MCP connector.
-- `npm test --prefix extension`: 100 extension tests.
+- The follow-up gate repair made the managed-policy environment import Windows-only, moved the CLI
+  refusal journey onto the maintained schema-3 policy example, scoped the reviewed
+  `CDLA-Permissive-2.0` data-license exception to `webpki-roots`, and removed the unmaintained
+  direct `rustls-pemfile` dependency in favor of the parser already exposed by `rustls`.
+- `cargo fmt --all -- --check` and locked workspace/all-target warnings-denied Clippy passed.
+- `cargo test --workspace --locked --no-fail-fast`: 264 Rust tests -- 227 in the orchestrator
+  library, 2 in its launch-mode binary, 31 in the shared bridge, and 4 in the MCP connector.
+- `npm test --prefix extension`: 103 extension tests.
 - `npm test --prefix packaging/npm`: 10 launcher tests. The MCPB launcher has 4 Node tests.
-- The four executable process/workbench journeys passed from a clean isolated target directory,
-  all 41 tracked JavaScript and module files parsed, dependency license/source/bans checks passed,
-  the 1,388-entry recovery matrix passed, and every tracked file was readable with all local
-  documentation links valid. The artifact guard covers 809 in-scope mature 0.8 paths.
+- Fresh isolated debug binaries passed the Linux process and CLI journeys, including the schema-3
+  CLI channel refusal. The workbench surface passed all 30 assertions, all 42 tracked JavaScript
+  and module files parsed, and a fresh locked optimized workspace build completed. Dependency
+  license/source/bans checks passed, and `cargo audit` returned to the documented 17 allowed
+  Tauri/GTK-chain warnings after the direct PEM dependency was removed.
+- The PowerShell-specific CLI journey was not rerun because PowerShell is absent on this host. The
+  CachyOS host also cannot satisfy the exact pinned Ubuntu/Debian candidate and package inspection
+  gate. The existing Windows and older development-host evidence remains unchanged, and the Debian
+  L1-L9 lifecycle remains NOT RUN.
+- The earlier cross-platform gate passed all four executable process/workbench journeys and all 41
+  JavaScript and module files then tracked. This Linux follow-up reran the three journeys available
+  without PowerShell and all 42 files now tracked. The 1,388-entry recovery matrix passed, every
+  tracked file was readable with all local documentation links valid, and the artifact guard covers
+  809 in-scope mature 0.8 paths.
 - An isolated Linux command journey seeded an exact pre-1.0 Codex relay under a non-default
   `CODEX_HOME`, ran the built `ghostlight install --client codex`, and proved the Codex binary read
   the replacement MCP connector with empty arguments. The fixture used separate home and XDG roots

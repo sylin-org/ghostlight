@@ -6,6 +6,7 @@ mod http;
 
 pub mod cli;
 
+#[cfg(target_os = "windows")]
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

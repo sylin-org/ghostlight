@@ -4,6 +4,7 @@ use std::io::Read as _;
 use std::sync::Arc;
 use std::time::Duration;
 
+use rustls::pki_types::{pem::PemObject as _, CertificateDer};
 use thiserror::Error;
 
 use super::Bootstrap;
@@ -75,9 +76,8 @@ fn agent(ca_cert_pem: Option<&str>) -> Result<ureq::Agent, FetchError> {
 
 fn pinned_tls(pem: &str) -> Result<rustls::ClientConfig, FetchError> {
     let mut roots = rustls::RootCertStore::empty();
-    let mut reader = std::io::BufReader::new(pem.as_bytes());
     let mut count = 0_usize;
-    for certificate in rustls_pemfile::certs(&mut reader) {
+    for certificate in CertificateDer::pem_slice_iter(pem.as_bytes()) {
         roots
             .add(certificate.map_err(|error| FetchError::Pin(error.to_string()))?)
             .map_err(|error| FetchError::Pin(error.to_string()))?;
