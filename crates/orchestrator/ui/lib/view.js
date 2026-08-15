@@ -13,7 +13,8 @@
 
   const {
     VIEWS, GLYPHS, EFFECT_STORY, READINESS_NOTE, DESTINATIONS, glyphFor, capabilityClass,
-    CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, hostReadback, patternCovers,
+    CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTINGS, SACRED_KEY, settingWords,
+    hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
@@ -532,11 +533,17 @@
       const settings = layers.flatMap((layer) =>
         layer.settings.map((setting) => ({ ...setting, owner: layer.title, kind: layer.kind })));
       el["policy-settings"].innerHTML = settings.length
-        ? `<h2 class="subhead">Settings</h2><ul class="settings">`
-          + settings.map((setting) =>
-            `<li><code>${escapeHtml(setting.key)}</code> = ${escapeHtml(setting.value)}`
-            + ` <span class="level">${escapeHtml(setting.level)}</span>`
-            + ` <span class="owner">${escapeHtml(setting.owner)}</span></li>`).join("")
+        ? `<h2 class="subhead">Restrictions in force</h2><ul class="settings">`
+          + settings.map((setting) => {
+            let value = setting.value;
+            try {
+              value = JSON.parse(setting.value);
+            } catch (error) {
+              // A value the orchestrator could not render as JSON is shown as it arrived.
+            }
+            return `<li>${escapeHtml(settingWords(setting.key, value))}`
+              + ` <span class="owner">${escapeHtml(setting.owner)}</span></li>`;
+          }).join("")
           + `</ul>`
         : "";
 
@@ -555,7 +562,7 @@
     /** Turn the applied user layer into an editable draft, or start an empty one. */
     function draftFrom(view) {
       const layer = view.layers.find((entry) => entry.kind === "user");
-      if (!layer) return { rules: [], observe: false, dirty: false };
+      if (!layer) return { rules: [], settings: emptySettings(), observe: false, dirty: false };
       return {
         observe: layer.mode === "observe",
         dirty: false,
@@ -564,8 +571,85 @@
           hosts: rule.allow.join(", "),
           description: rule.description || "",
           allowed: new Set(rule.allowed)
-        }))
+        })),
+        settings: settingsFrom(layer.settings)
       };
+    }
+
+    /** No opinion on anything, which is what an absent setting means. */
+    function emptySettings() {
+      return { restricted: new Set(), sacred: "" };
+    }
+
+    /**
+     * Read authored settings back into the draft.
+     *
+     * A restriction is present in the document or it is not; the permissive value never appears,
+     * because authoring it here would change nothing and imply this layer could hand authority
+     * back. Reading is the mirror of that: only the restricting value switches anything on.
+     */
+    function settingsFrom(authored) {
+      const settings = emptySettings();
+      for (const setting of authored) {
+        if (setting.key === SACRED_KEY) {
+          settings.sacred = parseHostList(setting.value).join(", ");
+        } else if (setting.value === "false") {
+          settings.restricted.add(setting.key);
+        }
+      }
+      return settings;
+    }
+
+    /** The compiled view renders values as JSON text, which is what the orchestrator sent. */
+    function parseHostList(value) {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.map(String) : [];
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function renderSettings() {
+      if (!draft) return;
+      el["restriction-list"].innerHTML = SETTINGS.map((setting) => {
+        const on = draft.settings.restricted.has(setting.key);
+        return `<label class="restriction${on ? " on" : ""}">`
+          + `<input type="checkbox" data-restriction="${escapeHtml(setting.key)}"${on ? " checked" : ""}>`
+          + `<span class="restriction-name">${escapeHtml(setting.restrict)}</span>`
+          + `<span class="restriction-effect">${escapeHtml(setting.effect)}</span></label>`;
+      }).join("");
+      el["sacred-hosts"].value = draft.settings.sacred;
+      refreshSacred();
+    }
+
+    function refreshSacred() {
+      const patterns = splitHosts(draft?.settings.sacred ?? "");
+      const readback = patterns.map((pattern) => hostReadback(pattern)).join("; ");
+      el["sacred-readback"].textContent = readback
+        ? `Never touched: ${readback}.`
+        : "No sites beyond the ones Ghostlight always refuses.";
+      el["sacred-readback"].classList.toggle("readback-empty", !readback);
+    }
+
+    /** Switch one restriction on or off. Absence is the only way to say "no opinion". */
+    function setRestriction(key, on) {
+      if (!draft) return;
+      if (on) draft.settings.restricted.add(key);
+      else draft.settings.restricted.delete(key);
+      draft.dirty = true;
+      renderSettings();
+      editorReady();
+      el["discard-policy"].hidden = false;
+    }
+
+    function setSacred(value) {
+      if (!draft) return;
+      draft.settings.sacred = value;
+      draft.dirty = true;
+      refreshSacred();
+      editorReady();
+      el["discard-policy"].hidden = false;
     }
 
     /**
@@ -601,6 +685,7 @@
       if (draft) {
         el["observe-mode"].checked = draft.observe;
         el["discard-policy"].hidden = !draft.dirty;
+        renderSettings();
       }
       editorReady();
     }
@@ -703,6 +788,8 @@
      */
     function editorReady() {
       if (!draft) return;
+      // Rules are what make a policy decide anything. Restrictions alone still need one, because a
+      // rule-less policy refuses everything regardless of what else it says.
       const empty = !draft.rules.length;
       el["apply-policy"].disabled = empty || !draft.dirty;
       el["check-policy"].disabled = empty;
@@ -760,8 +847,25 @@
           };
           if (rule.description.trim()) grant.description = rule.description.trim();
           return grant;
-        })
+        }),
+        config: settingEntries()
       }, null, 2);
+    }
+
+    /**
+     * The settings the draft authors, in the one direction a user layer can mean anything.
+     *
+     * `level` is not a choice offered here. Both levels only tighten in 1.0, and nothing sits below
+     * this layer for a recommendation to be relaxed by, so asking would be a word without a
+     * consequence.
+     */
+    function settingEntries() {
+      const entries = SETTINGS
+        .filter((setting) => draft.settings.restricted.has(setting.key))
+        .map((setting) => ({ key: setting.key, value: false, level: "mandatory" }));
+      const sacred = splitHosts(draft.settings.sacred);
+      if (sacred.length) entries.push({ key: SACRED_KEY, value: sacred, level: "mandatory" });
+      return entries;
     }
 
     function editRule(index, field, value) {
@@ -1016,6 +1120,7 @@
       hero, row, drop, promote, rebuildFeed, queueCount,
       band, collections, navigate, toast,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
+      setRestriction, setSacred,
       setObserve, discardDraft, renderRules, previewResult, previewCleared, editorStatus,
       openPalette, closePalette, paletteOpen, paletteQuery, searchResults, searchFailed,
       confirmRemoval, answerConfirmation,

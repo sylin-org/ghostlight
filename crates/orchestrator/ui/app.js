@@ -313,6 +313,12 @@ function wire() {
     if (box) view.toggleCapability(Number(box.dataset.rule), box.dataset.capability, box.checked);
   });
 
+  el["restriction-list"].addEventListener("change", (event) => {
+    const box = event.target.closest("[data-restriction]");
+    if (box) view.setRestriction(box.dataset.restriction, box.checked);
+  });
+
+  el["sacred-hosts"].addEventListener("input", (event) => view.setSacred(event.target.value));
   el["add-rule"].addEventListener("click", () => view.addRule());
   el["observe-mode"].addEventListener("change", (event) => view.setObserve(event.target.checked));
   el["check-policy"].addEventListener("click", () => checkPolicy());

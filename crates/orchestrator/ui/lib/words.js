@@ -131,6 +131,63 @@
   };
 
   /**
+   * The settings a policy may author, in the words a person would use.
+   *
+   * Every one of these only ever tightens. A user layer that authored the permissive value would
+   * change nothing -- no lower layer can hand authority back -- so the editor offers each as a
+   * restriction to switch on, and absence means "no opinion" rather than "allowed". Naming them by
+   * what they do keeps the registered key out of the surface a person reads.
+   */
+  const SETTINGS = [
+    {
+      key: "browser.tabs.allow_close",
+      restrict: "Do not let agents close tabs",
+      effect: "Closing a controlled tab stays something only you do.",
+      display: "Agents may not close tabs"
+    },
+    {
+      key: "privacy.preserve_target_names",
+      restrict: "Keep page-authored names out of results",
+      effect: "Names a page chose for its own elements stay out of results and the audit record.",
+      display: "Page-authored names are kept out of results and audit"
+    },
+    {
+      key: "channels.mcp.enabled",
+      restrict: "Turn off MCP clients",
+      effect: "No MCP client may open a session at all. This window keeps working, so you can undo it.",
+      display: "MCP clients may not open a session"
+    },
+    {
+      key: "channels.cli.enabled",
+      restrict: "Turn off the command line",
+      effect: "ghostlight call may not open a session.",
+      display: "The command line may not open a session"
+    }
+  ];
+
+  /** The one setting only an organization may author, named so its display is not a raw key. */
+  const ORGANIZATION_SETTINGS = {
+    "policy.user.enabled": "You may not set your own rules on this machine"
+  };
+
+  /** Registered key for the never-touch destination list, which is a list rather than a switch. */
+  const SACRED_KEY = "content.security.sacred_domains";
+
+  /** How one authored setting reads once it is in force. */
+  function settingWords(key, value) {
+    if (key === SACRED_KEY) {
+      const hosts = Array.isArray(value) ? value : [];
+      return `Never touched: ${hosts.join(", ")}`;
+    }
+    const known = SETTINGS.find((setting) => setting.key === key);
+    if (known) return value === false ? known.display : `${known.display} (not restricted)`;
+    if (ORGANIZATION_SETTINGS[key]) {
+      return value === false ? ORGANIZATION_SETTINGS[key] : `${ORGANIZATION_SETTINGS[key]} (allowed)`;
+    }
+    return `${key} = ${JSON.stringify(value)}`;
+  }
+
+  /**
    * Whether a host pattern is one Ghostlight accepts.
    *
    * Mirrors the production matcher exactly: `*`, an exact hostname, or one leading `*.` suffix.
@@ -296,7 +353,7 @@
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
-    CAPABILITY_BADGE, CAPABILITY_TONE,
+    CAPABILITY_BADGE, CAPABILITY_TONE, SETTINGS, SACRED_KEY, settingWords,
     validHostPattern, hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId });
 });

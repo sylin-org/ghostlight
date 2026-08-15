@@ -126,6 +126,18 @@
         <div id="policy-documents"></div>
 
         <section class="editor" id="policy-editor" hidden>
+          <h2 class="subhead">Restrictions</h2>
+          <p class="editor-hint">These only ever tighten. Leaving one off means you have no opinion,
+            not that it is permitted.</p>
+          <div class="restrictions" id="restriction-list"></div>
+          <div class="sacred">
+            <label class="sacred-label" for="sacred-hosts">Sites agents must never touch</label>
+            <input id="sacred-hosts" type="text" spellcheck="false"
+                   placeholder="vault.example.com, *.finance.example.com">
+            <p class="readback readback-empty" id="sacred-readback">No sites beyond the ones
+              Ghostlight always refuses.</p>
+          </div>
+
           <div class="editor-mode">
             <label class="switch">
               <input type="checkbox" id="observe-mode">

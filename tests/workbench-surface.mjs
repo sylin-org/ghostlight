@@ -164,7 +164,8 @@ const compiled = (editable) => ({
       settings: [], path: null, document: '{"schema": 3}' },
     { kind: "user", title: "Your rules", policy_name: "Your rules", version: "1", mode: "enforce",
       rules: [{ id: "leftover", description: null, allow: ["other.test"], deny: [], allowed: ["read"], mode: "enforce", note: "no_effect" }],
-      settings: [], path: "state/user-policy.json", document: '{"schema": 3}' }
+      settings: [{ key: "browser.tabs.allow_close", value: "false", level: "mandatory" }],
+      path: "state/user-policy.json", document: '{"schema": 3}' }
   ],
   ceilings: ["localhost and any name ending in .localhost.", "Loopback and link-local addresses."],
   user_layer: {
@@ -204,8 +205,18 @@ view.policy(compiled(true));
 const board = nodes.get("capability-board").innerHTML;
 const organization = nodes.get("policy-organization").innerHTML;
 const documents = nodes.get("policy-documents").innerHTML;
+const settingsShown = nodes.get("policy-settings").innerHTML;
 const rules = nodes.get("rule-list").innerHTML;
 const editorShown = !nodes.get("policy-editor").hidden;
+// Restrictions are authored here too, and only ever in the direction that tightens.
+const restrictions = nodes.get("restriction-list").innerHTML;
+const authoredOnLoad = JSON.parse(view.draftDocument()).config;
+view.setRestriction("channels.cli.enabled", true);
+view.setSacred("vault.example.test, *.finance.example.test");
+const authoredAfterEdit = JSON.parse(view.draftDocument()).config;
+view.setRestriction("browser.tabs.allow_close", false);
+const authoredAfterClearing = JSON.parse(view.draftDocument()).config;
+
 // Opening and closing one organization rule: the detail belongs to the row, not to the page.
 view.toggleRule("org:Example Org:support");
 const openedDetail = nodes.get("rule-list").innerHTML;
@@ -274,6 +285,29 @@ const checks = [
     documents.includes("Example Org") && documents.includes("Your rules")
       && documents.includes("state/user-policy.json"),
     `documents: ${JSON.stringify(documents)}`],
+  ["restrictions are offered in plain words, never as registered keys",
+    restrictions.includes("Do not let agents close tabs")
+      && restrictions.includes("Turn off the command line")
+      && !restrictions.includes("channels.cli.enabled</span>"),
+    `restrictions: ${JSON.stringify(restrictions)}`],
+  ["an authored restriction is read back into the draft",
+    authoredOnLoad.length === 1
+      && authoredOnLoad[0].key === "browser.tabs.allow_close"
+      && authoredOnLoad[0].value === false
+      && authoredOnLoad[0].level === "mandatory",
+    `authored: ${JSON.stringify(authoredOnLoad)}`],
+  ["switching a restriction on authors only the tightening value",
+    authoredAfterEdit.some((entry) => entry.key === "channels.cli.enabled" && entry.value === false)
+      && authoredAfterEdit.some((entry) =>
+        entry.key === "content.security.sacred_domains"
+        && JSON.stringify(entry.value) === '["vault.example.test","*.finance.example.test"]'),
+    `authored: ${JSON.stringify(authoredAfterEdit)}`],
+  ["switching one off removes it rather than authoring permission",
+    !authoredAfterClearing.some((entry) => entry.key === "browser.tabs.allow_close"),
+    `authored: ${JSON.stringify(authoredAfterClearing)}`],
+  ["a restriction in force reads as a sentence, not a key",
+    settingsShown.includes("Agents may not close tabs"),
+    `settings: ${JSON.stringify(settingsShown)}`],
   ["the editor appears only when authoring is permitted",
     editorShown && editorHiddenWhenRefused],
   ["failure reported", reported.some((r) => r.includes("deliberate About failure")),

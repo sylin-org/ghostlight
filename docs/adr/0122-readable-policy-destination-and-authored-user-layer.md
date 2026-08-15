@@ -271,6 +271,62 @@ sit left of the tabs still leads to the same information, one destination furthe
 17. The destination shows the exact document and path for every layer in force.
 18. Diffs for `crates/mcp-connector`, `crates/browser-connector`, and `extension` are empty.
 
+## Amendment (2026-08-14): one rule list, stated polarity, and authored restrictions
+
+Status: Accepted. Extends Decision 2's capability line and Decision 6's editor. Decisions 1, 3, 4,
+5, 7, 8, and 9 stand exactly as written.
+
+### A1. Rules are one list, in evaluation order (refines D2 and D6)
+
+D2 put the rules behind each capability line in a per-layer section, and D6 put the editable ones in
+a second section below. In use that printed the same rules twice under the same heading, and the
+page grew a scrollbar before it said anything the first section had not.
+
+There is now one list. Organization rules come first because authority considers them first and
+nobody can edit them here; this person's own follow. Each rule is one line: the sentence it reads
+as, and at the right edge either the organization's name or the way in to edit it. Opening a line is
+what reveals detail -- read-only for a rule this person cannot change, the editor for one they can.
+Settings and the exact documents sit below the list rather than repeating per layer.
+
+### A2. A capability line states polarity, not just breadth (supersedes D2's three states)
+
+D2 gave a capability three states: available, site-scoped, refused. Site-scoped covered two opposite
+situations -- an open baseline with sites blocked, and a closed one with sites allowed -- and
+flattening them hid the only part a person can act on.
+
+The compiled state is now four: available, some sites blocked, some sites allowed, and not
+available. The two middle states name which way the rules point, in those words.
+
+### A3. The editor authors restrictions, in the one direction they can mean anything
+
+D6 described the editor in terms of site rules only. The registered settings
+(`browser.tabs.allow_close`, `privacy.preserve_target_names`, `channels.mcp.enabled`,
+`channels.cli.enabled`, `content.security.sacred_domains`) were readable on the destination and
+authorable only by hand, which left the window unable to express things its own schema already had.
+
+The editor now authors them. Each appears as a restriction to switch on, named by what it does, with
+the consequence stated beneath it. Absence means no opinion; the permissive value is never authored,
+because a user layer cannot hand authority back and offering it would imply otherwise. `level` is
+not offered: both levels only tighten in 1.0 and nothing sits below this layer, so the choice would
+be a word without a consequence. `policy.user.enabled` remains organization-only and is still
+refused at the boundary (D5).
+
+Sacred destinations are a list rather than a switch, with the same plain-words readback every host
+pattern gets, and they continue to appear under the permanent boundaries once in force.
+
+### Acceptance evidence added
+
+19. Rules render as one list, organization first, each naming whose it is, with no detail pane until
+    a row is opened.
+20. A capability narrowed by a universal rule with holes reads "some sites blocked"; one narrowed by
+    named hosts reads "some sites allowed"; the narrower of two layers wins and both are named.
+21. Switching a restriction on authors only the tightening value; switching it off removes the entry
+    rather than authoring permission.
+22. An authored restriction is read back into the draft, and a restriction in force renders as a
+    sentence rather than a registered key.
+23. Only an organization ceiling disables a capability control; a capability merely absent from this
+    person's own rules stays available to grant.
+
 ## Prior art
 
 - [Tailscale visual policy editor](https://tailscale.com/blog/visual-editor-beta): a visual editor

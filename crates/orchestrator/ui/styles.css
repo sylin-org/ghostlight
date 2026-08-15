@@ -647,3 +647,28 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 .preview-list span { color: var(--muted); font: 400 10.5px/1 var(--mono); }
 .hero-refusal { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 0; color: var(--muted); font-size: 11.5px; }
 .hero-refusal .denial-id { color: var(--faint); font: 400 10.5px/1 var(--mono); }
+
+/* ----------------------------- the restrictions -------------------------- */
+.editor-hint { margin: 0 0 10px; color: var(--muted); font-size: 11.5px; }
+.restrictions { display: grid; gap: 6px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.restriction {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 9px; align-items: baseline;
+  padding: 11px 14px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel-2); cursor: pointer;
+  transition: border-color .25s var(--calm), background .25s var(--calm);
+}
+.restriction:hover { border-color: var(--line-2); }
+.restriction.on { border-color: rgba(var(--argb), .35); background: rgba(var(--argb), .04); }
+.restriction input { grid-row: 1 / span 2; }
+.restriction-name { color: var(--ink-2); font-size: 12.5px; }
+.restriction-effect { grid-column: 2; color: var(--muted); font-size: 11.5px; }
+.sacred { margin-top: 12px; }
+.sacred-label { display: block; margin-bottom: 6px; color: var(--ink-3); font-size: 12.5px; }
+#sacred-hosts {
+  width: 100%; height: 30px; padding: 0 10px;
+  border: 1px solid var(--line-2); border-radius: 7px;
+  background: rgba(0, 0, 0, .18); color: var(--ink); font: 400 12px/1 var(--mono);
+}
+#sacred-hosts:focus { outline: 0; border-color: rgba(var(--argb), .5); }
+.settings li { margin: 4px 0; }
+.settings .owner { margin-left: 8px; }
