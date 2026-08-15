@@ -655,6 +655,13 @@ source-gate pass, not release approval.
 - `origin/main` still carries 0.8. Deciding when the 1.0 line is promoted is a release decision.
 - ADR-0084's complete browser-window attention routing remains deferred; only the narrow Chromium
   slice is implemented.
+- `work/mod.rs` is 5824 lines (~4200 production), by far the largest file in the tree and the worst
+  violation of the file-size guideline in `AGENTS.md`. A 2026-08-15 whole-codebase code-quality
+  pass flagged this and deliberately deferred it rather than folding a structural refactor into the
+  same session; [docs/tasks/executor-split](tasks/executor-split/) is a fully authored, READY batch
+  (six independent tasks) that splits it by operation family. Not yet executed. Several other files
+  are also over the guideline and explicitly out of scope for that batch --
+  `docs/tasks/executor-split/DESIGN.md`'s Scope section lists them for a future batch.
 
 ## Release gates still requiring an owner or release environment
 
