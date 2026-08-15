@@ -3,9 +3,11 @@
 
 //! Authority snapshots, final-boundary admission, runtime controls, and minimized audit intent.
 
+pub mod effective;
 pub mod inspection;
 pub mod managed;
 pub mod manifest;
+pub mod paths;
 
 use std::collections::VecDeque;
 use std::env;
@@ -427,6 +429,12 @@ impl AuthoritySnapshot {
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Destinations policy marked never-touch, for the boundaries a person is shown.
+    #[must_use]
+    pub fn sacred_hosts(&self) -> &[String] {
+        &self.sacred_hosts
     }
 
     /// Decide a capability at its final boundary.
@@ -949,6 +957,7 @@ struct PolicySources {
     managed: PolicySource,
     managed_remote: Option<managed::ManagedAuthority>,
     user: PolicySource,
+    user_origin: effective::UserLayerSource,
 }
 
 impl PolicySources {
@@ -957,14 +966,31 @@ impl PolicySources {
             managed: PolicySource::new(managed, "managed"),
             managed_remote: None,
             user: PolicySource::new(local, "user"),
+            user_origin: effective::UserLayerSource::Environment,
         }
     }
 
+    /// Resolve the one user layer, in the order ADR-0122 Decision 4 fixes.
+    ///
+    /// A path someone else named wins and is never written back. Otherwise Ghostlight uses the file
+    /// it owns, which is optional: a machine that has never authored one stays all-open rather than
+    /// failing closed over a file that was never supposed to exist yet.
     fn production(local: Option<PathBuf>) -> Self {
+        let (user, user_origin) = match local {
+            Some(path) => (
+                PolicySource::new(Some(path), "user"),
+                effective::UserLayerSource::Environment,
+            ),
+            None => (
+                PolicySource::with_options(paths::user_policy_path(), "user", true),
+                effective::UserLayerSource::Workbench,
+            ),
+        };
         Self {
             managed: PolicySource::new(None, "managed"),
             managed_remote: Some(managed::ManagedAuthority::production()),
-            user: PolicySource::new(local, "user"),
+            user,
+            user_origin,
         }
     }
 
@@ -974,6 +1000,7 @@ impl PolicySources {
             managed: PolicySource::new(None, "managed"),
             managed_remote: Some(managed::ManagedAuthority::from_paths(paths)),
             user: PolicySource::new(None, "user"),
+            user_origin: effective::UserLayerSource::Workbench,
         }
     }
 
@@ -1043,9 +1070,33 @@ impl PolicySources {
     }
 }
 
+/// Render one active policy as the document it was authored as.
+///
+/// Serialization rather than a file read, because a signed organization policy arrives inside a
+/// bundle and has no plain file to show. The canonical hash is never authored and never rendered.
+fn document(policy: &manifest::Manifest) -> String {
+    serde_json::to_string_pretty(policy).unwrap_or_else(|_| String::from("{}"))
+}
+
+/// Name a signed managed source by class, never by address.
+fn passport_source(passport: &ManagedPolicyPassport) -> String {
+    match passport.source_class {
+        ManagedPolicySource::Https => "Signed bundle from an HTTPS source".into(),
+        ManagedPolicySource::File => "Signed bundle from a local file".into(),
+        ManagedPolicySource::None => "Signed bundle".into(),
+    }
+}
+
 #[derive(Debug)]
 struct PolicySource {
     path: Option<PathBuf>,
+    /// Whether an absent file means "no layer" rather than "configured but unreadable".
+    ///
+    /// The user policy Ghostlight owns is optional: a machine with no such file is all-open, not
+    /// failing closed. A path someone else named is not optional, because naming a file that is not
+    /// there is a mistake worth refusing over.
+    optional: bool,
+    present: bool,
     active: Option<manifest::Manifest>,
     last_load_valid: bool,
     last_error: Option<String>,
@@ -1053,8 +1104,14 @@ struct PolicySource {
 
 impl PolicySource {
     fn new(path: Option<PathBuf>, tier: &str) -> Self {
+        Self::with_options(path, tier, false)
+    }
+
+    fn with_options(path: Option<PathBuf>, tier: &str, optional: bool) -> Self {
         let mut source = Self {
             last_load_valid: path.is_none(),
+            optional,
+            present: path.is_some(),
             path,
             active: None,
             last_error: None,
@@ -1065,6 +1122,14 @@ impl PolicySource {
 
     fn refresh(&mut self, tier: &str) {
         let Some(path) = &self.path else { return };
+        if self.optional && !path.exists() {
+            self.present = false;
+            self.active = None;
+            self.last_load_valid = true;
+            self.last_error = None;
+            return;
+        }
+        self.present = true;
         match read_policy(path) {
             Ok(policy) => {
                 self.active = Some(policy);
@@ -1089,11 +1154,11 @@ impl PolicySource {
     }
 
     fn configured(&self) -> bool {
-        self.path.is_some()
+        self.path.is_some() && self.present
     }
 
     fn has_authority(&self) -> bool {
-        self.path.is_none() || self.active.is_some()
+        !self.configured() || self.active.is_some()
     }
 }
 
@@ -1299,6 +1364,57 @@ impl GovernanceFacade {
             }
         }
         Decision::allow()
+    }
+
+    /// Compile the policy into the one answer a person arrives with.
+    ///
+    /// Assembled under a single lock so the sentence, the capability lines, and the rules behind
+    /// them all describe the same instant. The words are authored in the orchestrator; the window
+    /// renders them and computes nothing (ADR-0122 Decision 2).
+    #[must_use]
+    pub fn effective_authority(&self) -> effective::EffectiveAuthority {
+        let sacred_hosts = self
+            .snapshot(&RequestRestrictions::default())
+            .sacred_hosts()
+            .to_vec();
+        self.refresh_policies();
+        let policies = self
+            .policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let organization = policies.managed_manifest().cloned();
+        let user = policies.user.active.clone();
+        let passport = policies.managed_passport();
+        let authoring_allowed = organization
+            .as_ref()
+            .and_then(|policy| policy.boolean_setting("policy.user.enabled"))
+            .unwrap_or(true);
+        let inputs = effective::Inputs {
+            organization: organization.as_ref(),
+            user: user.as_ref(),
+            valid: policies.managed_valid() && policies.user.has_authority(),
+            sacred_hosts,
+            organization_source: policies.managed.path.as_ref().map_or_else(
+                || organization.as_ref().map(|_| passport_source(&passport)),
+                |path| Some(path.display().to_string()),
+            ),
+            organization_document: organization.as_ref().map(document),
+            user_source: policies
+                .user
+                .path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            user_document: user.as_ref().map(document),
+            user_layer_source: if user.is_some() {
+                policies.user_origin
+            } else {
+                effective::UserLayerSource::None
+            },
+            owned_user_path: paths::user_policy_path().map(|path| path.display().to_string()),
+            authoring_allowed,
+            passport: passport.clone(),
+        };
+        effective::compile(&inputs)
     }
 
     /// Whether an organization layer permits a locally authored user policy.

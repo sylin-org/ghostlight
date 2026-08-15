@@ -41,17 +41,7 @@ impl ManagedPaths {
         #[cfg(target_os = "linux")]
         let bootstrap = PathBuf::from("/etc/ghostlight/managed.json");
 
-        #[cfg(target_os = "windows")]
-        let state = env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .map(|path| path.join("Ghostlight"));
-        #[cfg(target_os = "linux")]
-        let state = env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| {
-                env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("state"))
-            })
-            .map(|path| path.join("ghostlight"));
+        let state = super::paths::state_directory();
 
         Self {
             bootstrap,
