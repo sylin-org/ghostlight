@@ -1,0 +1,24 @@
+{
+  "schema": 3,
+  "name": "Your rules",
+  "version": "2026-08-14",
+  "mode": "observe",
+  "grants": [
+    {
+      "id": "work-sites",
+      "description": "The sites you actually want an agent working on. Replace these with your own.",
+      "hosts": {
+        "allow": ["example.com", "*.example.com"]
+      },
+      "allowed": ["read", "action"]
+    },
+    {
+      "id": "reading-only",
+      "description": "Somewhere an agent may look but never touch.",
+      "hosts": {
+        "allow": ["*.wikipedia.org"]
+      },
+      "allowed": ["read"]
+    }
+  ]
+}

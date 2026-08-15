@@ -2481,6 +2481,26 @@ mod tests {
                 "scripting-disabled",
                 include_str!("../../../../examples/scripting-disabled.json"),
             ),
+            (
+                "personal-starter",
+                include_str!("../../../../examples/personal-starter.json"),
+            ),
+            (
+                "personal-everywhere-except",
+                include_str!("../../../../examples/personal-everywhere-except.json"),
+            ),
+            (
+                "no-page-code",
+                include_str!("../../../../examples/no-page-code.json"),
+            ),
+            (
+                "organization-support",
+                include_str!("../../../../examples/organization-support.json"),
+            ),
+            (
+                "organization-locked-fleet",
+                include_str!("../../../../examples/organization-locked-fleet.json"),
+            ),
         ] {
             let path = temporary(name);
             fs::write(&path, source).unwrap();

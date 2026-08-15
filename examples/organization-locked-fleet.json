@@ -1,0 +1,39 @@
+{
+  "schema": 3,
+  "name": "Locked fleet",
+  "version": "2026-08-14",
+  "mode": "enforce",
+  "organization": {
+    "name": "Example Organization",
+    "statement": "This fleet runs one agreed configuration. Local changes are turned off so every machine behaves the same way; email the service desk for an exception.",
+    "contacts": [
+      {
+        "kind": "email",
+        "value": "servicedesk@example.com",
+        "label": "Service desk"
+      }
+    ]
+  },
+  "grants": [
+    {
+      "id": "approved-applications",
+      "description": "The approved internal applications, read and ordinary interaction only.",
+      "hosts": {
+        "allow": ["*.apps.example.com"]
+      },
+      "allowed": ["read", "action"]
+    }
+  ],
+  "config": [
+    {
+      "key": "policy.user.enabled",
+      "value": false,
+      "level": "mandatory"
+    },
+    {
+      "key": "browser.tabs.allow_close",
+      "value": false,
+      "level": "mandatory"
+    }
+  ]
+}

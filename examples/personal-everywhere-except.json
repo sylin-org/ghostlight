@@ -1,0 +1,28 @@
+{
+  "schema": 3,
+  "name": "Everywhere except",
+  "version": "2026-08-14",
+  "grants": [
+    {
+      "id": "ordinary-browsing",
+      "description": "Ordinary work anywhere, minus the holes cut below. This is the open baseline with exceptions, not a list of permissions.",
+      "hosts": {
+        "allow": ["*"],
+        "deny": ["intranet.example.com", "*.payroll.example.com"]
+      },
+      "allowed": ["read", "action", "write"]
+    }
+  ],
+  "config": [
+    {
+      "key": "content.security.sacred_domains",
+      "value": ["vault.example.com", "*.banking.example.com"],
+      "level": "mandatory"
+    },
+    {
+      "key": "browser.tabs.allow_close",
+      "value": false,
+      "level": "mandatory"
+    }
+  ]
+}

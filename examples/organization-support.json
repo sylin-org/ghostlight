@@ -1,0 +1,68 @@
+{
+  "schema": 3,
+  "name": "Support workspace",
+  "version": "2026-08-14",
+  "mode": "enforce",
+  "organization": {
+    "name": "Example Organization",
+    "statement": "Browser work stays inside approved support sites. Ask the service desk if you need somewhere else.",
+    "url": "https://example.com/browser-policy",
+    "contacts": [
+      {
+        "kind": "email",
+        "value": "servicedesk@example.com",
+        "label": "Service desk"
+      },
+      {
+        "kind": "url",
+        "value": "https://example.com/security",
+        "label": "Security team"
+      }
+    ]
+  },
+  "identity": {
+    "principal": "support-agent",
+    "groups": ["support"]
+  },
+  "grants": [
+    {
+      "id": "support-sites",
+      "description": "Ordinary support work, minus the admin console.",
+      "hosts": {
+        "allow": ["support.example.com", "*.support.example.com"],
+        "deny": ["admin.support.example.com"]
+      },
+      "allowed": ["read", "action", "write"]
+    },
+    {
+      "id": "knowledge-base",
+      "description": "Reading the public documentation, without touching it.",
+      "hosts": {
+        "allow": ["docs.example.com"]
+      },
+      "allowed": ["read"]
+    }
+  ],
+  "config": [
+    {
+      "key": "browser.tabs.allow_close",
+      "value": false,
+      "level": "mandatory"
+    },
+    {
+      "key": "privacy.preserve_target_names",
+      "value": false,
+      "level": "mandatory"
+    },
+    {
+      "key": "channels.cli.enabled",
+      "value": false,
+      "level": "mandatory"
+    },
+    {
+      "key": "content.security.sacred_domains",
+      "value": ["vault.example.com"],
+      "level": "mandatory"
+    }
+  ]
+}

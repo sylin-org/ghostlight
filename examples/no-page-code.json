@@ -1,0 +1,15 @@
+{
+  "schema": 3,
+  "name": "Everything except page code",
+  "version": "2026-08-14",
+  "grants": [
+    {
+      "id": "ordinary-work",
+      "description": "Read, click, type, and fill in forms anywhere. Running JavaScript inside a page is left out, so it is refused everywhere.",
+      "hosts": {
+        "allow": ["*"]
+      },
+      "allowed": ["read", "action", "write"]
+    }
+  ]
+}
