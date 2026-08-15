@@ -306,11 +306,11 @@
           + ` &middot; <b>${facts.snapshot.history.length}</b> recorded`;
       }
 
-      // The chip is authored by the orchestrator. A surface that invents its own policy words is a
-      // second source of truth about the one thing that must have exactly one.
+      // The tab is called Policy and stays called Policy. What changes is the tone it carries and
+      // the sentence behind it, and both are authored by the orchestrator: a surface that invents
+      // its own policy words is a second source of truth about the one thing that must have one.
       const policy = facts.snapshot?.configuration?.policy;
       if (policy) {
-        el["policy-state-label"].textContent = policy.label;
         el["policy-state"].dataset.tone = policy.tone;
         el["policy-state"].title = policy.detail;
         el["policy-state"].setAttribute("aria-label", `Open Policy. ${policy.detail}`);

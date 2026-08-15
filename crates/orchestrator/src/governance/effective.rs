@@ -222,26 +222,22 @@ pub enum ChipTone {
     Failing,
 }
 
-/// The persistent band's policy chip: the entrance to the destination, and its shortest summary.
+/// The policy tab's state: the entrance to the destination, and its shortest summary.
+///
+/// The tab is named `Policy` in the markup and stays named that. What the orchestrator supplies is
+/// the state behind the name: a tone the tab can carry quietly, and the same sentence the
+/// destination opens with, for whoever hovers or reads it aloud.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PolicyChip {
     /// Which layers are in force.
     pub situation: Situation,
-    /// Chip text. Short enough for the band, and the organization's name when there is room.
-    pub label: String,
-    /// The same sentence the destination opens with.
+    /// The same sentence the destination opens with, naming the organization when there is one.
     pub detail: String,
-    /// Which tone the chip carries.
+    /// Which tone the tab carries.
     pub tone: ChipTone,
 }
 
-/// Longest organization name the band will carry before falling back to a generic word.
-const CHIP_NAME_LIMIT: usize = 18;
-
-/// Author the band chip.
-///
-/// Naming the organization here is the cheapest reassurance in the product: a person glancing at
-/// the band learns who is setting their rules without opening anything.
+/// Author the policy tab's state.
 #[must_use]
 pub fn chip(situation: Situation, organization: Option<&str>, stale: bool) -> PolicyChip {
     let detail = headline(
@@ -255,29 +251,21 @@ pub fn chip(situation: Situation, organization: Option<&str>, stale: bool) -> Po
             })
             .as_ref(),
     );
-    let short = organization.filter(|name| name.chars().count() <= CHIP_NAME_LIMIT);
-    let (label, tone) = match situation {
-        Situation::FailingClosed => ("Policy issue".to_owned(), ChipTone::Failing),
-        Situation::AllOpen => ("All open".to_owned(), ChipTone::Open),
-        Situation::UserOnly => ("Your rules".to_owned(), tone(stale)),
-        Situation::OrganizationOnly | Situation::Layered => (
-            short.map_or_else(|| "Managed".to_owned(), str::to_owned),
-            tone(stale),
-        ),
+    let tone = match situation {
+        Situation::FailingClosed => ChipTone::Failing,
+        Situation::AllOpen => ChipTone::Open,
+        Situation::OrganizationOnly | Situation::UserOnly | Situation::Layered => {
+            if stale {
+                ChipTone::Warning
+            } else {
+                ChipTone::Applied
+            }
+        }
     };
     PolicyChip {
         situation,
-        label,
         detail,
         tone,
-    }
-}
-
-const fn tone(stale: bool) -> ChipTone {
-    if stale {
-        ChipTone::Warning
-    } else {
-        ChipTone::Applied
     }
 }
 

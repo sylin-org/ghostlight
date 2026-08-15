@@ -133,19 +133,22 @@ body.runtime-offline .state-word { color: var(--muted); }
 .state-facts { min-width: 0; overflow: hidden; color: var(--muted); font: 400 11px/1 var(--mono); letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
 .state-facts b { color: var(--ink-3); font-weight: 400; }
 
-.policy-state {
-  display: inline-flex; flex: none; align-items: center; gap: 6px;
-  height: 26px; padding: 0 9px;
-  border: 1px solid var(--line); border-radius: 999px;
-  color: var(--muted); background: var(--panel-2);
-  font: 500 10.5px/1 var(--mono); letter-spacing: .02em;
-  transition: color .25s var(--calm), border-color .25s var(--calm), background .25s var(--calm);
+/*
+ * The policy tab.
+ *
+ * It is a tab first and a state second: it sits in the tab row, so it has to read as one of them.
+ * The only thing that separates it is the shield and a tint on that shield when policy is doing
+ * something worth noticing. A pill among tabs looked like a control from another product.
+ */
+.policy-state { display: inline-flex; align-items: center; gap: 6px; }
+.policy-state svg {
+  width: 13px; height: 13px; fill: none; stroke: currentColor;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+  color: var(--faint); transition: color .25s var(--calm);
 }
-.policy-state:hover { color: var(--ink-2); border-color: var(--line-2); background: var(--panel); }
-.policy-state svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.policy-state[data-tone="applied"] { color: var(--ok); border-color: rgba(74, 222, 128, .22); }
-.policy-state[data-tone="warning"] { color: var(--amber); border-color: rgba(251, 191, 36, .25); }
-.policy-state[data-tone="failing"] { color: var(--danger); border-color: rgba(248, 113, 113, .3); }
+.policy-state[data-tone="applied"] svg { color: var(--ok); }
+.policy-state[data-tone="warning"] svg { color: var(--amber); }
+.policy-state[data-tone="failing"] svg { color: var(--danger); }
 
 .tabs { display: flex; flex: none; gap: 2px; }
 .tab {
@@ -517,9 +520,6 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 }
 
 /* --------------------------------- policy -------------------------------- */
-/* The chip lives inside the tab row, so it needs the row's rhythm rather than the band's. */
-.tabs .policy-state { margin: 0 2px; }
-
 .org-card {
   padding: 15px 17px; margin-bottom: 4px;
   border: 1px solid var(--line-2); border-radius: 10px;

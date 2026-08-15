@@ -50,7 +50,6 @@ const snapshot = {
     managed_policy: { configured: false },
     policy: {
       situation: "layered",
-      label: "Northwind",
       detail: "Northwind sets the rules, and you have narrowed them further.",
       tone: "applied"
     }

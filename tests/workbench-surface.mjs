@@ -62,11 +62,10 @@ const snapshot = () => ({
     managed_authority_valid: true,
     runtime_control_file_configured: false,
     managed_policy: { configured: false },
-    // The band chip is authored by the orchestrator now. The surface must render exactly what it
-    // is handed, so this fixture carries a name no local computation could have produced.
+    // The tab's state is authored by the orchestrator now. The surface must render exactly what
+    // it is handed, so this fixture carries a sentence no local computation could have produced.
     policy: {
       situation: "layered",
-      label: "Example Org",
       detail: "Example Org sets the rules, and you have narrowed them further.",
       tone: "applied"
     }
@@ -139,7 +138,6 @@ const connections = nodes.get("connections");
 // view instance shares this one stub document, so a later render would answer for the first.
 const integrationsHtml = nodes.get("integration-grid").innerHTML;
 const policy = nodes.get("policy-state");
-const policyLabel = nodes.get("policy-state-label");
 
 // The Policy destination, drawn from a compiled view exactly as the orchestrator hands it over.
 // Nothing here is computed by the window, so the assertions below are about rendering fidelity:
@@ -224,9 +222,12 @@ const checks = [
     integrationsHtml.includes("Update")
       && integrationsHtml.includes('data-harness-action="install"'),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
-  ["the band renders the policy words the orchestrator authored",
-    policyLabel.textContent === "Example Org" && policy.dataset.tone === "applied",
-    `policy: ${JSON.stringify({ label: policyLabel.textContent, tone: policy.dataset.tone })}`],
+  ["the policy tab is a tab, keeps its name, and carries the authored state behind it",
+    markup.includes('class="tab policy-state"')
+      && !ids.includes("policy-state-label")
+      && policy.dataset.tone === "applied"
+      && policy.title === "Example Org sets the rules, and you have narrowed them further.",
+    `policy: ${JSON.stringify({ tone: policy.dataset.tone, title: policy.title })}`],
   ["a refusal names the rule, the handle, and who to ask",
     refusal.includes("Example Org") && refusal.includes("rule support-sites")
       && refusal.includes("D-a1b2c3") && refusal.includes("security@example.test")
