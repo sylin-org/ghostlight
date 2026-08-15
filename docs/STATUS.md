@@ -229,6 +229,36 @@ RPM remains the next rational native format only after a separate scope decision
 lifecycle host. AppImage, Snap, Flatpak, AUR, and Nix artifacts do not become 1.0 gates merely
 because their packaging tools exist.
 
+## Full local Linux release rehearsal
+
+The current CachyOS user installation passed the fullest local release rehearsal at `51552025`.
+The [dated record](testing/local-linux-release-rehearsal-2026-08-15.md) carries exact hashes,
+commands, coverage, and limits.
+
+- The supported uninstall removed only owned browser, client, and Applications state. The previous
+  version directory was preserved on the second drive. Reinstall restored the exact three siblings,
+  Chromium native messaging, Codex, Claude Code, Visual Studio Code, and the XDG entry. Repeat
+  install changed nothing, and no product supervisor exists.
+- Direct MCP negotiated `2025-11-25`, returned the exact 22-tool catalog, and completed a real
+  call. CLI and PowerShell journeys passed. All 13 policy examples validated; explain, audit
+  simulation, invalid-input refusal, Ed25519 authoring, live narrowed authority, fail-closed invalid
+  authority, and all-open restoration passed.
+- The published Foundry journey completed form, upload, recording, diagnostics, host refusal,
+  replay, and byte erasure. Prompt handling and screenshot-bound coordinate input passed. Authority
+  demand start, browser restart, stable browser identity, and post-restart work passed.
+- The first Foundry run found that the clean-room drag path had retained only pointer packets and
+  could wait forever for a held move receipt. `51552025` restores ADR-0088's bounded two-lane seam:
+  explicit held-button packets, action-scoped native interception, opaque drag-data replay, and
+  cleanup on every terminal path. The Foundry pointer lane and a native HTML drag/drop fixture both
+  passed live after the fix. Extension coverage is now 106 tests.
+- All 276 Rust, 106 extension, 10 npm, and 4 MCPB tests pass, as do formatting, strict Clippy,
+  JavaScript and shell syntax, process/CLI/PowerShell/workbench/policy journeys, deterministic
+  extension packaging, recovery and integrity checks, dependency policy, and the advisory gate.
+
+This closes the broad development-host browser matrix previously listed as incomplete. It does not
+close the provenance-bound Debian, matching-store-adapter, Ubuntu GNOME login/reboot, notification,
+or three-public-harness gates.
+
 ## Rootless Linux package evidence
 
 [The dated container record](testing/linux-container-evidence-2026-08-15.md) carries the exact
@@ -758,9 +788,9 @@ The executor-split batch is complete through `4d633fbc`.
   desktop to the test runner.
 - Verify demand-start, direct workbench activation, and deploy quiesce from each clean
   platform installation.
-- Run the accepted browser-job matrix against visible supported Chromium browsers, including
-  screenshots, file upload, form input, dialogs, governed denial, reconnect, and local close
-  interlock journeys.
+- Repeat the now-passing development-host browser-job matrix against the provenance-bound Debian
+  candidate and matching store adapter on Ubuntu GNOME Wayland. The unpacked-adapter CachyOS run
+  does not replace that release-environment gate.
 - Reconcile release metadata, public status, store submission, compatibility, distribution, and
   the final public documentation only when the 1.0 artifacts exist.
 - Use the Chrome Developer Dashboard for store submission. Repair API V2 access only if its optional

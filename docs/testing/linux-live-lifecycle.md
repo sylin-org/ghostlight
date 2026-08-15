@@ -135,6 +135,19 @@ retention decision for audit/history.
 Open one bounded defect per failed stage and rerun the affected journey after the fix. Do not turn
 a failed record into a pass by adding undocumented maintainer steps.
 
+## CachyOS full local rehearsal -- 2026-08-15
+
+The [dated local release rehearsal](local-linux-release-rehearsal-2026-08-15.md) records a clean
+user-level remove/reinstall, direct MCP and CLI access, policy authoring and live enforcement,
+orchestrator and browser recovery, and the broad ordinary-profile browser matrix. It includes form,
+upload, prompt, coordinate input, recording, governed refusal, pointer-only drag, and native HTML
+drag-and-drop evidence at revision `51552025`.
+
+This materially completes the development-host gaps recorded below. It does not change the L1-L9
+table because this host used a user installation and unpacked adapter on CachyOS KDE. It did not use
+the provenance-bound Debian candidate, matching store adapter, Ubuntu GNOME session, login, or
+reboot required by that table.
+
 ## CachyOS npm-candidate record - 2026-08-14
 
 This record extends the development-host evidence below without changing the Debian L1-L9 table.
