@@ -588,6 +588,16 @@ source-gate pass, not release approval.
 
 ## Owed
 
+- [ADR-0122](adr/0122-readable-policy-destination-and-authored-user-layer.md) is accepted and
+  entirely unimplemented. It gives the window a Policy destination between Status and About, moves
+  the lamp-band state chip there, replaces the four-boolean authority cards with an
+  orchestrator-owned effective-authority view carrying per-line provenance, adds an optional
+  `organization` block to schema 3, adds the `policy.user.enabled` setting, and lets the workbench
+  author one user policy through two bounded commands over a product-owned path. Its research input
+  is [24-policy-surface-user-delight-2026-08.md](research/24-policy-surface-user-delight-2026-08.md).
+  The ADR also records that ADR-0121 Decision 3's always-available policy explain operation exists
+  only as a CLI command over a file path: the 22-tool catalog has no policy tool, so neither the
+  person nor the model can currently ask what current authority permits.
 - A row that never settled reads its readiness as a parenthetical. Colour would carry it better
   than words: the duration cell already has a running and a blocked treatment, and an unsettled one
   would be found while scrolling instead of read for.
