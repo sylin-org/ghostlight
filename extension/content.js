@@ -6,6 +6,38 @@
   const locators = new Map();
   const reverse = new WeakMap();
   let nextLocator = 1;
+  let dragObservation = null;
+
+  function finishDragObservation() {
+    if (!dragObservation) return { started: false, cancelled: false };
+    const result = {
+      started: dragObservation.started,
+      cancelled: dragObservation.cancelled
+    };
+    window.removeEventListener("dragstart", dragObservation.listener, true);
+    dragObservation = null;
+    return result;
+  }
+
+  function armDragObservation() {
+    finishDragObservation();
+    const observation = { started: false, cancelled: false, listener: null };
+    observation.listener = (event) => {
+      observation.started = true;
+      queueMicrotask(() => {
+        if (dragObservation === observation) observation.cancelled = event.defaultPrevented;
+      });
+    };
+    dragObservation = observation;
+    window.addEventListener("dragstart", observation.listener, true);
+    return { armed: true };
+  }
+
+  function dragObservationStatus() {
+    return dragObservation
+      ? { started: dragObservation.started, cancelled: dragObservation.cancelled }
+      : { started: false, cancelled: false };
+  }
 
   function locatorFor(element) {
     let locator = reverse.get(element);
@@ -319,6 +351,9 @@
       }
       if (message.kind === "hover") { const element = requireActionable(resolve(message.locator), "hover"); element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); return { rectangle: viewportRectangle(element), subject: actionSubject(element) }; }
       if (message.kind === "drag_geometry") { const source = requireActionable(resolve(message.source_locator), "drag"); const destination = requireActionable(resolve(message.destination_locator), "drop"); source.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); return { source: viewportRectangle(source), destination: viewportRectangle(destination), source_subject: actionSubject(source), destination_subject: actionSubject(destination) }; }
+      if (message.kind === "drag_observation_arm") return armDragObservation();
+      if (message.kind === "drag_observation_status") return dragObservationStatus();
+      if (message.kind === "drag_observation_finish") return finishDragObservation();
       if (message.kind === "upload_files") { const element = resolve(message.locator); const subject = actionSubject(element); return { ...uploadFiles(element, message.files), subject }; }
       if (message.kind === "observe") return observe(message);
       if (message.kind === "present") return { presented: renderPresentation(message.signal, message.preferences) };

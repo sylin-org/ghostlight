@@ -82,6 +82,35 @@
     return { key, text: key };
   }
 
+  function dragPackets(start, end, steps = 12) {
+    if (!Number.isSafeInteger(steps) || steps < 1 || steps > 60) {
+      throw new RangeError("drag steps must be from 1 through 60");
+    }
+    const packets = [
+      { type: "mouseMoved", x: start.x, y: start.y },
+      { type: "mousePressed", x: start.x, y: start.y, button: "left", clickCount: 1 }
+    ];
+    for (let step = 1; step <= steps; step += 1) {
+      const ratio = step / steps;
+      packets.push({
+        type: "mouseMoved",
+        x: start.x + (end.x - start.x) * ratio,
+        y: start.y + (end.y - start.y) * ratio,
+        button: "left",
+        buttons: 1,
+        force: 1
+      });
+    }
+    packets.push({
+      type: "mouseReleased",
+      x: end.x,
+      y: end.y,
+      button: "left",
+      clickCount: 1
+    });
+    return packets;
+  }
+
   function presentationLabel(signal) {
     const labels = {
       start: "Ghostlight starting",
@@ -153,6 +182,7 @@
     isCredentialMetadata,
     modifierMask,
     keyDescriptor,
+    dragPackets,
     presentationLabel,
     activityLabel,
     browserEventFrame,

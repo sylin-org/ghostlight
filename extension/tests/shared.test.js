@@ -119,6 +119,28 @@ test("named keys receive physical CDP codes", () => {
   assert.deepEqual(shared.keyDescriptor("x"), { key: "x", text: "x" });
 });
 
+test("drag packets hold the left button through movement and always release", () => {
+  const packets = shared.dragPackets({ x: 10, y: 20 }, { x: 30, y: 60 }, 2);
+  assert.deepEqual(packets, [
+    { type: "mouseMoved", x: 10, y: 20 },
+    { type: "mousePressed", x: 10, y: 20, button: "left", clickCount: 1 },
+    { type: "mouseMoved", x: 20, y: 40, button: "left", buttons: 1, force: 1 },
+    { type: "mouseMoved", x: 30, y: 60, button: "left", buttons: 1, force: 1 },
+    { type: "mouseReleased", x: 30, y: 60, button: "left", clickCount: 1 }
+  ]);
+  assert.throws(() => shared.dragPackets({ x: 0, y: 0 }, { x: 1, y: 1 }, 0), /drag steps/);
+});
+
+test("drag execution scopes native interception and keeps drag data inside the worker", () => {
+  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  assert.match(worker, /Input\.setInterceptDrags", \{ enabled: true \}/);
+  assert.match(worker, /method === "Input\.dragIntercepted"/);
+  assert.match(worker, /for \(const type of \["dragEnter", "dragOver", "drop"\]\)/);
+  assert.match(worker, /Input\.dispatchDragEvent/);
+  assert.match(worker, /Input\.cancelDragging/);
+  assert.doesNotMatch(worker, /params\.data\.(items|files|dragOperationsMask)/);
+});
+
 test("browser events use the nested typed bridge envelope", () => {
   assert.deepEqual(shared.browserEventFrame({ event: "tab_closed", tab_id: 7 }), {
     kind: "event",

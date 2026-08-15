@@ -24,6 +24,7 @@ const commandChunks = globalThis.GhostlightCommandChunks.create({
   }
 });
 const navigationWatchers = new Map();
+const dragInterceptions = new Map();
 const cancelled = new Set();
 const activity = new Map();
 const topology = globalThis.GhostlightTopology.create(chrome, stateApi.TOPOLOGY_KEY);
@@ -190,6 +191,7 @@ chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "ghostlight-re
 
 chrome.webNavigation.onCommitted.addListener((details) => {
   if (details.frameId !== 0) return;
+  cancelDragInterception(details.tabId);
   recording.noteUrl(details.tabId, details.url);
   const watcher = navigationWatchers.get(details.tabId);
   watcher?.commits.push(details.url);
@@ -256,6 +258,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   const activeRecording = recording.interruptTab(tabId, "browser_detached");
   diagnostics.forget(tabId);
   debuggerLifecycle.forget(tabId);
+  cancelDragInterception(tabId);
   topology.forget(tabId).catch(() => {});
   if (presentationQueue.forget(tabId)) {
     persistPresentationQueue().then(publishUiState).catch(() => {});
@@ -266,6 +269,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId) return;
+  if (method === "Input.dragIntercepted") {
+    dragInterceptions.get(source.tabId)?.resolve(params.data);
+    return;
+  }
   if (method === "Page.screencastFrame") {
     handleScreencastFrame(source.tabId, params).catch((error) => {
       setConnection({ last_error: shared.bounded(error?.message ?? error, 500) });
@@ -318,6 +325,7 @@ chrome.debugger.onDetach.addListener((source) => {
   const activeRecording = recording.interruptTab(source.tabId, "browser_detached");
   diagnostics.forget(source.tabId);
   debuggerLifecycle.detached(source.tabId);
+  cancelDragInterception(source.tabId);
   publishUiState();
 });
 
@@ -1055,20 +1063,97 @@ async function typeText(correlation, command) {
 }
 
 async function dispatchDrag(tabId, start, end) {
-  const steps = 12;
-  await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: start.x, y: start.y });
-  await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mousePressed", x: start.x, y: start.y, button: "left", clickCount: 1 });
-  for (let step = 1; step <= steps; step += 1) {
-    const ratio = step / steps;
-    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", {
-      type: "mouseMoved",
-      x: start.x + (end.x - start.x) * ratio,
-      y: start.y + (end.y - start.y) * ratio,
-      button: "left",
-      buttons: 1
-    });
+  const packets = shared.dragPackets(start, end);
+  const finalPacket = packets.at(-1);
+  let interceptEnabled = false;
+  let nextHeldPacket = 2;
+  let pressed = false;
+  let released = false;
+  const interception = beginDragInterception(tabId);
+  await content(tabId, { kind: "drag_observation_arm" });
+  try {
+    try {
+      await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: true });
+      interceptEnabled = true;
+    } catch (_unsupported) {
+      cancelDragInterception(tabId);
+    }
+
+    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", packets[0]);
+    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", packets[1]);
+    pressed = true;
+
+    if (interceptEnabled) {
+      for (; nextHeldPacket < packets.length - 1; nextHeldPacket += 1) {
+        await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
+        const observed = await content(tabId, { kind: "drag_observation_status" });
+        if (!observed.started) continue;
+        nextHeldPacket += 1;
+        await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: false });
+        interceptEnabled = false;
+        if (!observed.cancelled) {
+          const dragData = await waitForDragInterception(interception);
+          if (dragData) {
+            for (const type of ["dragEnter", "dragOver", "drop"]) {
+              await chrome.debugger.sendCommand({ tabId }, "Input.dispatchDragEvent", {
+                type,
+                x: end.x,
+                y: end.y,
+                data: dragData
+              });
+            }
+            await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", finalPacket);
+            released = true;
+            return;
+          }
+        }
+        break;
+      }
+    }
+
+    if (interceptEnabled) {
+      await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: false });
+      interceptEnabled = false;
+    }
+    for (; nextHeldPacket < packets.length - 1; nextHeldPacket += 1) {
+      await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
+    }
+    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", finalPacket);
+    released = true;
+  } finally {
+    cancelDragInterception(tabId);
+    await content(tabId, { kind: "drag_observation_finish" }, true);
+    if (interceptEnabled) {
+      await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: false }).catch(() => {});
+    }
+    if (pressed && !released) {
+      await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", finalPacket).catch(() => {});
+      await chrome.debugger.sendCommand({ tabId }, "Input.cancelDragging").catch(() => {});
+    }
   }
-  await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseReleased", x: end.x, y: end.y, button: "left", clickCount: 1 });
+}
+
+function beginDragInterception(tabId) {
+  cancelDragInterception(tabId);
+  let resolve;
+  const promise = new Promise((settle) => { resolve = settle; });
+  const interception = { promise, resolve };
+  dragInterceptions.set(tabId, interception);
+  return interception;
+}
+
+function cancelDragInterception(tabId) {
+  const interception = dragInterceptions.get(tabId);
+  if (!interception) return;
+  dragInterceptions.delete(tabId);
+  interception.resolve(null);
+}
+
+async function waitForDragInterception(interception) {
+  return Promise.race([
+    interception.promise,
+    new Promise((resolve) => setTimeout(() => resolve(null), 500))
+  ]);
 }
 
 async function dragWithPoints(correlation, tabId, start, end, sourceSubject = null, destinationSubject = null) {

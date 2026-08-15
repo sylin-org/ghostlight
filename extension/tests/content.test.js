@@ -10,6 +10,7 @@ function contentHarness() {
   let listener;
   let clock = 0;
   const delays = [];
+  const windowListeners = new Map();
 
   class HTMLElement {}
   class HTMLInputElement extends HTMLElement {
@@ -81,7 +82,14 @@ function contentHarness() {
     chrome: { runtime: { onMessage: { addListener(value) { listener = value; } } } },
     document,
     location: { href: "https://example.test/" },
-    window: { scrollX: 0, scrollY: 0 },
+    window: {
+      scrollX: 0,
+      scrollY: 0,
+      addEventListener(type, value) { windowListeners.set(type, value); },
+      removeEventListener(type, value) {
+        if (windowListeners.get(type) === value) windowListeners.delete(type);
+      }
+    },
     HTMLElement,
     HTMLInputElement,
     HTMLTextAreaElement,
@@ -95,6 +103,7 @@ function contentHarness() {
     Map,
     Set,
     Promise,
+    queueMicrotask,
     Array,
     String,
     Number,
@@ -146,7 +155,13 @@ function contentHarness() {
     });
   }
 
-  return { input, delays, send };
+  return {
+    input,
+    delays,
+    send,
+    dispatchWindowEvent(type, event) { windowListeners.get(type)?.(event); },
+    hasWindowListener(type) { return windowListeners.has(type); }
+  };
 }
 
 test("upload accepts a connected enabled file input even when it is hidden", async () => {
@@ -249,4 +264,23 @@ test("observation polling stops at its physical timeout without overshooting", a
   assert.equal(observed.result.elapsed_ms, 250);
   assert.equal(observed.result.readiness, "complete");
   assert.deepEqual(harness.delays, [100, 100, 50]);
+});
+
+test("drag observation retains only native lifecycle booleans and cleans up", async () => {
+  const harness = contentHarness();
+  assert.equal((await harness.send({ kind: "drag_observation_arm" })).result.armed, true);
+  assert.equal(harness.hasWindowListener("dragstart"), true);
+
+  const event = { defaultPrevented: true, dataTransfer: { secret: "never retained" } };
+  harness.dispatchWindowEvent("dragstart", event);
+  await new Promise((resolve) => queueMicrotask(resolve));
+  const status = await harness.send({ kind: "drag_observation_status" });
+  assert.equal(status.ok, true);
+  assert.equal(status.result.started, true);
+  assert.equal(status.result.cancelled, true);
+  const finished = await harness.send({ kind: "drag_observation_finish" });
+  assert.equal(finished.ok, true);
+  assert.equal(finished.result.started, true);
+  assert.equal(finished.result.cancelled, true);
+  assert.equal(harness.hasWindowListener("dragstart"), false);
 });
