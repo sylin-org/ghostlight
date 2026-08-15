@@ -25,12 +25,37 @@ pub enum FrameError {
 }
 
 /// Read one bounded newline-delimited JSON value, or `None` at clean EOF.
+///
+/// Enforces `MAX_FRAME_BYTES` incrementally, one buffered chunk at a time, rather than growing an
+/// unbounded `Vec` with `read_until` and checking its length only after a `\n` (or EOF) was
+/// already found. A peer that never sends a newline could otherwise force unbounded memory growth
+/// before this function ever got a chance to reject it -- exactly the failure the byte bound
+/// exists to prevent, and the reason `read_length_frame` below checks its declared size before
+/// allocating rather than after.
 pub fn read_json_line<T: DeserializeOwned>(
     reader: &mut impl BufRead,
 ) -> Result<Option<T>, FrameError> {
     let mut bytes = Vec::new();
-    let read = reader.read_until(b'\n', &mut bytes)?;
-    if read == 0 {
+    let mut read_anything = false;
+    loop {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            break;
+        }
+        read_anything = true;
+        if let Some(newline) = chunk.iter().position(|&byte| byte == b'\n') {
+            bytes.extend_from_slice(&chunk[..=newline]);
+            reader.consume(newline + 1);
+            break;
+        }
+        let consumed = chunk.len();
+        bytes.extend_from_slice(chunk);
+        reader.consume(consumed);
+        if bytes.len() > MAX_FRAME_BYTES {
+            return Err(FrameError::TooLarge);
+        }
+    }
+    if !read_anything {
         return Ok(None);
     }
     if bytes.len() > MAX_FRAME_BYTES {
@@ -104,13 +129,13 @@ pub fn write_length_frame(writer: &mut impl Write, payload: &[u8]) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufReader, Cursor};
+    use std::io::{self, BufReader, Cursor, Read};
 
     use serde_json::{json, Value};
 
     use super::{
         read_json_line, read_length_frame, read_native, write_json_line, write_length_frame,
-        write_native,
+        write_native, FrameError, MAX_FRAME_BYTES,
     };
 
     #[test]
@@ -145,6 +170,42 @@ mod tests {
             Some(json!({"b": 2}))
         );
         assert_eq!(read_native::<Value>(&mut cursor).unwrap(), None);
+    }
+
+    #[test]
+    fn read_json_line_rejects_an_oversized_line_before_reading_all_of_it() {
+        // A peer that never sends `\n` could otherwise force this function to buffer arbitrarily
+        // large amounts of memory before its size check ever ran, since read_until has no bound
+        // of its own. This proves the check is incremental: the source has four times
+        // MAX_FRAME_BYTES available, and this function must reject the line well before
+        // consuming all of it, not only after.
+        struct Unbounded {
+            remaining: usize,
+            served: usize,
+        }
+        impl Read for Unbounded {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                let take = buf.len().min(self.remaining);
+                for byte in &mut buf[..take] {
+                    *byte = b'x';
+                }
+                self.remaining -= take;
+                self.served += take;
+                Ok(take)
+            }
+        }
+        let mut reader = BufReader::new(Unbounded {
+            remaining: MAX_FRAME_BYTES * 4,
+            served: 0,
+        });
+        let error = read_json_line::<Value>(&mut reader).unwrap_err();
+        assert!(matches!(error, FrameError::TooLarge), "{error}");
+        let served = reader.get_ref().served;
+        assert!(
+            served < MAX_FRAME_BYTES * 2,
+            "consumed {served} bytes chasing an unterminated line, far more than the \
+             {MAX_FRAME_BYTES}-byte bound"
+        );
     }
 
     #[test]

@@ -4,11 +4,12 @@ mod mcp_2025_11_25;
 mod service_session;
 
 use std::collections::HashMap;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{Context, Result};
+use ghostlight_bridge::framing::{read_json_line, FrameError};
 use ghostlight_bridge::service::{ServiceContent, ServiceRequest, ServiceResponse};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -24,12 +25,20 @@ struct PendingCall {
 
 fn main() -> Result<()> {
     let stdin = io::stdin();
-    let mut input = stdin.lock().lines();
+    // Bounded, typed reads through the same framing every other process boundary in this
+    // codebase uses -- never the raw `Lines` iterator this used to be. `Lines`/`read_line` has no
+    // size cap of its own (this is the external, real-MCP-client-facing boundary, the one this
+    // bound exists to protect) and returns a hard `io::Error` for a single invalid-UTF-8 byte,
+    // which propagated straight out of `main` and ended the whole connector process -- no
+    // JSON-RPC error, no chance to recover within the same session. Reading bytes through
+    // `serde_json::from_slice` instead turns both failures into an ordinary, recoverable parse
+    // error.
+    let mut input = io::BufReader::new(stdin.lock());
     let output = Arc::new(Mutex::new(io::stdout()));
-    let Some(first_line) = input.next() else {
-        return Ok(());
+    let first: Value = match read_json_line(&mut input).context("read initialize request")? {
+        Some(value) => value,
+        None => return Ok(()),
     };
-    let first: Value = serde_json::from_str(&first_line?).context("decode initialize request")?;
     let initialization = mcp_2025_11_25::parse_initialize(&first).map_err(anyhow::Error::msg)?;
 
     let pending: Arc<Mutex<HashMap<String, PendingCall>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -67,14 +76,14 @@ fn main() -> Result<()> {
         mcp_2025_11_25::initialize_result(initialization.id, &server),
     );
 
-    for line in input {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let message: Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(error) => {
+    loop {
+        let message: Value = match read_json_line(&mut input) {
+            Ok(None) => break,
+            Ok(Some(value)) => value,
+            // A malformed line -- including one that is not valid UTF-8, which used to be a hard
+            // `io::Error` that ended the process via `?` -- is answered like any other JSON-RPC
+            // parse failure and the session continues.
+            Err(FrameError::Json(error)) => {
                 write_mcp(
                     &output,
                     mcp_2025_11_25::rpc_error(
@@ -85,6 +94,22 @@ fn main() -> Result<()> {
                 );
                 continue;
             }
+            // A line over the byte bound is read only partially before being rejected, so the
+            // stream is left mid-line: there is no safe boundary left to resynchronize on. Tell
+            // the client once, then end this session cleanly rather than risk misreading the
+            // remainder of the oversized line as a fresh, unrelated message.
+            Err(error @ FrameError::TooLarge) => {
+                write_mcp(
+                    &output,
+                    mcp_2025_11_25::rpc_error(
+                        Value::Null,
+                        -32700,
+                        &format!("Parse error: {error}"),
+                    ),
+                );
+                break;
+            }
+            Err(error) => return Err(error).context("read a request line"),
         };
         let method = message
             .get("method")

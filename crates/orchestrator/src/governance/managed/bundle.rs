@@ -151,7 +151,11 @@ pub(super) fn sign(
     let envelope = Envelope {
         v: 1,
         claims: BASE64.encode(&claims),
-        sig: BASE64.encode(crypto::signing::ed25519(ed25519_seed, &claims)),
+        sig: BASE64.encode(crypto::signing::ed25519(
+            ed25519_seed,
+            POLICY_CONTEXT,
+            &claims,
+        )),
         sig_mldsa: mldsa_seed
             .map(|seed| BASE64.encode(crypto::signing::mldsa(seed, POLICY_CONTEXT, &claims))),
     };
@@ -223,7 +227,7 @@ mod tests {
     use base64::Engine as _;
     use serde_json::json;
 
-    use super::{armor, sign, verify, Envelope};
+    use super::{armor, sign, verify, Envelope, POLICY_CONTEXT};
     use crate::governance::managed::crypto::{self, verification_key};
 
     fn manifest() -> serde_json::Value {
@@ -288,7 +292,7 @@ mod tests {
         let envelope = Envelope {
             v: 1,
             claims: BASE64.encode(&claims),
-            sig: BASE64.encode(crypto::signing::ed25519(&seed, &claims)),
+            sig: BASE64.encode(crypto::signing::ed25519(&seed, POLICY_CONTEXT, &claims)),
             sig_mldsa: None,
         };
         let bytes = serde_json::to_vec(&envelope).unwrap();
@@ -308,7 +312,7 @@ mod tests {
         let envelope = Envelope {
             v: 1,
             claims: BASE64.encode(&claims),
-            sig: BASE64.encode(crypto::signing::ed25519(&seed, &claims)),
+            sig: BASE64.encode(crypto::signing::ed25519(&seed, POLICY_CONTEXT, &claims)),
             sig_mldsa: None,
         };
         let bytes = serde_json::to_vec(&envelope).unwrap();

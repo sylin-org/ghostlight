@@ -225,6 +225,54 @@ test("debugger attachment lifetime follows controlled tab ownership", () => {
   assert.match(source, /controlState === "ended"[\s\S]*?debuggerLifecycle\.detachAll\(\);/);
 });
 
+test("releasing a debugger session never depends on the native connection", () => {
+  // A disconnected service leaves the automatic path -- controlState === "ended" above -- unable
+  // to fire at all, since it only runs in response to a signal the service has to send. Without
+  // a local escape hatch, Chrome's own "controlled by automated software" banner could then
+  // outlive the service indefinitely: crashed, uninstalled, or simply never restarted. The fix is
+  // this message kind, which must call detachAll() directly and must never be gated behind
+  // nativePort the way requestRuntimeControl (used by every other popup action) is.
+  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  const handler = source.match(
+    /"release_debugger_sessions"\)\s*\{([\s\S]*?)\n\s{4}\}/
+  );
+  assert.ok(handler, "the release_debugger_sessions message handler was not found");
+  assert.match(handler[1], /debuggerLifecycle\.detachAll\(\)/);
+  assert.doesNotMatch(
+    handler[1],
+    /nativePort|requestRuntimeControl/,
+    "release_debugger_sessions must stay reachable with no live service connection"
+  );
+
+  const popup = readFileSync(join(__dirname, "..", "popup.js"), "utf8");
+  assert.match(popup, /kind:\s*"release_debugger_sessions"/);
+  const button = popup.match(/function renderReleaseDebugger\(snapshot\) \{([\s\S]*?)\n {2}\}/);
+  assert.ok(button, "renderReleaseDebugger was not found");
+  assert.doesNotMatch(
+    button[1],
+    /snapshot\.connected|snapshot\.compatible/,
+    "the release button must not be gated on connection state the way End session is"
+  );
+});
+
+test("giving up on a stuck download cancels it before its blob URL is revoked", () => {
+  // exportRecording's finally block revokes the object_url unconditionally the moment
+  // downloadSettled's promise settles, success or failure. Timing out without also requesting
+  // cancellation used to leave Chrome writing from a URL that had just gone dead -- on a slow
+  // disk or a large recording, that can truncate the delivered file instead of merely failing
+  // to report on time.
+  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  const timeoutBody = source.match(/setTimeout\(\(\) => \{([\s\S]*?)\}, DOWNLOAD_SETTLE_MS\)/);
+  assert.ok(timeoutBody, "the download settle timeout was not found");
+  assert.match(timeoutBody[1], /chrome\.downloads\.cancel\(downloadId\)/);
+  const cancelIndex = timeoutBody[1].indexOf("chrome.downloads.cancel");
+  const settleIndex = timeoutBody[1].indexOf("settle(new Error");
+  assert.ok(
+    cancelIndex >= 0 && settleIndex > cancelIndex,
+    "cancellation must be requested before the promise settles and the caller revokes the URL"
+  );
+});
+
 test("adapter protocol two wires the new physical mechanisms at the Chrome seam", () => {
   const root = join(__dirname, "..");
   const worker = readFileSync(join(root, "service-worker.js"), "utf8");

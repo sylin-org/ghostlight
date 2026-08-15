@@ -30,6 +30,18 @@ pub(super) fn verification_key(
     }
 }
 
+/// Pure Ed25519 (RFC 8032) has no context argument of its own, unlike the ML-DSA leg's `context`
+/// parameter. Binding `context` into the signed bytes ourselves, with an explicit length prefix
+/// so `(context, message)` cannot be reinterpreted as a different split, gives both legs the same
+/// domain separation: a signature made for one context is not a valid signature under another.
+fn bind_context(context: &[u8], message: &[u8]) -> Vec<u8> {
+    let mut bound = Vec::with_capacity(8 + context.len() + message.len());
+    bound.extend_from_slice(&(context.len() as u64).to_le_bytes());
+    bound.extend_from_slice(context);
+    bound.extend_from_slice(message);
+    bound
+}
+
 pub(super) fn verify(
     key: &VerificationKey,
     context: &[u8],
@@ -41,8 +53,11 @@ pub(super) fn verify(
         let Ok(bytes) = <[u8; ED_SIGNATURE_BYTES]>::try_from(ed25519_signature) else {
             return false;
         };
-        key.verify_strict(message, &EdSignature::from_bytes(&bytes))
-            .is_ok()
+        key.verify_strict(
+            &bind_context(context, message),
+            &EdSignature::from_bytes(&bytes),
+        )
+        .is_ok()
     };
     match key {
         VerificationKey::Ed25519(key) => mldsa_signature.is_none() && ed25519_valid(key),
@@ -63,13 +78,16 @@ pub(super) mod signing {
     use fips204::ml_dsa_65;
     use fips204::traits::{KeyGen as _, SerDes as _, Signer as _};
 
-    use super::{ED_SIGNATURE_BYTES, MLDSA_PUBLIC_BYTES, MLDSA_SIGNATURE_BYTES};
+    use super::{bind_context, ED_SIGNATURE_BYTES, MLDSA_PUBLIC_BYTES, MLDSA_SIGNATURE_BYTES};
 
     pub(in crate::governance::managed) fn ed25519(
         seed: &[u8; 32],
+        context: &[u8],
         message: &[u8],
     ) -> [u8; ED_SIGNATURE_BYTES] {
-        SigningKey::from_bytes(seed).sign(message).to_bytes()
+        SigningKey::from_bytes(seed)
+            .sign(&bind_context(context, message))
+            .to_bytes()
     }
 
     pub(in crate::governance::managed) fn ed25519_public(seed: &[u8; 32]) -> [u8; 32] {
@@ -110,7 +128,7 @@ mod tests {
             Some(&signing::mldsa_public(&mldsa_seed)),
         )
         .unwrap();
-        let ed = signing::ed25519(&ed_seed, message);
+        let ed = signing::ed25519(&ed_seed, context, message);
         let mldsa = signing::mldsa(&mldsa_seed, context, message);
 
         assert!(verify(&key, context, message, &ed, Some(&mldsa)));
@@ -130,7 +148,7 @@ mod tests {
         let seed = [3_u8; 32];
         let message = b"signed policy claims";
         let key = verification_key(&signing::ed25519_public(&seed), None).unwrap();
-        let signature = signing::ed25519(&seed, message);
+        let signature = signing::ed25519(&seed, b"ghostlight/policy", message);
         assert!(verify(
             &key,
             b"ghostlight/policy",
@@ -144,6 +162,45 @@ mod tests {
             message,
             &signature,
             Some(&[0_u8; MLDSA_SIGNATURE_BYTES])
+        ));
+    }
+
+    #[test]
+    fn ed25519_leg_is_bound_to_its_context_not_just_the_message() {
+        // Before this bound the context into what gets signed, a signature made for any context
+        // verified successfully under every other context too, as long as the message bytes
+        // matched -- silently discarding the one thing `context` exists to guarantee.
+        let seed = [11_u8; 32];
+        let message = b"signed policy claims";
+        let key = verification_key(&signing::ed25519_public(&seed), None).unwrap();
+        let signature = signing::ed25519(&seed, b"ghostlight/policy", message);
+
+        assert!(verify(
+            &key,
+            b"ghostlight/policy",
+            message,
+            &signature,
+            None
+        ));
+        assert!(!verify(
+            &key,
+            b"some/other/context",
+            message,
+            &signature,
+            None
+        ));
+        assert!(!verify(&key, b"", message, &signature, None));
+
+        // The length prefix also rules out `(context, message)` being reinterpreted as a
+        // differently-split pair that happens to concatenate to the same bytes.
+        let split_signature =
+            signing::ed25519(&seed, b"ghostlight", b"/policysigned policy claims");
+        assert!(!verify(
+            &key,
+            b"ghostlight/policy",
+            message,
+            &split_signature,
+            None
         ));
     }
 }

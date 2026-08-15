@@ -587,7 +587,10 @@ fn validate_search_query(query: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_prevent_desktop_exit, validate_search_query};
+    use super::{
+        should_prevent_desktop_exit, validate_policy_document, validate_search_query,
+        POLICY_DOCUMENT_LIMIT,
+    };
 
     #[test]
     fn only_implicit_window_loss_is_contained() {
@@ -601,6 +604,23 @@ mod tests {
         assert!(validate_search_query("blocked browser").is_ok());
         assert!(validate_search_query(&"x".repeat(121)).is_err());
         assert!(validate_search_query("blocked\u{0007}").is_err());
+    }
+
+    #[test]
+    fn policy_document_is_bounded_at_the_adapter() {
+        // The only test coverage of this gate used to be indirect, through the facade tests in
+        // governance::mod, which call preview_user_policy/apply_user_policy directly and so never
+        // exercise this specific boundary at all. A regression that weakened or dropped this
+        // check right here, at the one place the untrusted WebView's bytes actually cross, would
+        // have passed every other test in the suite.
+        assert!(
+            validate_policy_document(r#"{"schema":3,"name":"x","version":"1","grants":[]}"#)
+                .is_ok()
+        );
+        assert!(validate_policy_document("").is_err());
+        assert!(validate_policy_document("   \n\t  ").is_err());
+        assert!(validate_policy_document(&"x".repeat(POLICY_DOCUMENT_LIMIT)).is_ok());
+        assert!(validate_policy_document(&"x".repeat(POLICY_DOCUMENT_LIMIT + 1)).is_err());
     }
 
     #[test]

@@ -164,8 +164,20 @@ impl ManagedAuthority {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if self.configured {
-                    *self = Self::new(self.paths.clone());
-                    self.write_status();
+                    // Every other failure path here calls reject(), which keeps `configured =
+                    // true` and the last verified policy active -- fail closed, not open. This
+                    // branch alone used to replace `self` with a fresh, never-configured
+                    // instance, flipping `configured` back to false so `valid()` (`!configured
+                    // || active.is_some()`) returned true and the whole managed layer silently
+                    // vanished from every snapshot. A deployment tool that updates the bootstrap
+                    // descriptor by delete-then-recreate, rather than an atomic rename, hits
+                    // exactly this window: an already-managed machine must not become
+                    // indistinguishable from one that was never managed at all just because the
+                    // file was briefly absent.
+                    self.reject(
+                        format!("managed bootstrap could not be read: {error}"),
+                        "bootstrap_error",
+                    );
                 }
                 return;
             }
@@ -708,6 +720,44 @@ mod tests {
         assert!(status.contains("security@example.com"));
         assert!(!status.contains("pubkey"));
         assert!(!status.contains("grants"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_bootstrap_that_goes_missing_after_being_configured_fails_closed_not_open() {
+        // Every other failure path -- unreachable source, malformed bootstrap, bad signature --
+        // keeps the last verified policy active. A deployment tool that updates the bootstrap
+        // descriptor by delete-then-recreate leaves a real window where the file is transiently
+        // absent, and this machine was already managed: it must stay exactly as governed as it
+        // was a moment before, not revert to "never configured".
+        let root = directory("vanishing-bootstrap");
+        let paths = ManagedPaths::under(&root);
+        let seed = [37_u8; 32];
+        fs::write(
+            root.join("org.bundle"),
+            bundle::sign(&seed, None, 4, manifest("org", "read"), None),
+        )
+        .unwrap();
+        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
+        let mut authority = ManagedAuthority::new(paths.clone());
+        authority.refresh();
+        assert!(authority.configured());
+        assert!(authority.valid());
+        assert_eq!(authority.sequence(), Some(4));
+
+        fs::remove_file(&paths.bootstrap).unwrap();
+        authority.refresh();
+
+        assert!(
+            authority.configured(),
+            "a managed machine must not silently become unmanaged"
+        );
+        assert!(
+            authority.valid(),
+            "the last verified policy must remain active, not vanish into all-open"
+        );
+        assert_eq!(authority.sequence(), Some(4));
+        assert_eq!(authority.manifest().unwrap().name, "org");
         fs::remove_dir_all(root).unwrap();
     }
 

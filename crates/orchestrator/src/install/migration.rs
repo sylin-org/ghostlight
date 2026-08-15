@@ -61,10 +61,11 @@ pub fn retire_obsolete_supervisor() -> MigrationReport {
 
 #[cfg(target_os = "linux")]
 fn home_directory() -> PathBuf {
-    env::var_os("USERPROFILE")
-        .or_else(|| env::var_os("HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_default()
+    // Linux-only: HOME is the one variable that means this on this platform. USERPROFILE is a
+    // Windows convention; checking it here first was confusing at best, and under WSL interop
+    // that leaks Windows environment variables through, a Windows-style path could silently win
+    // over the correct Linux HOME, misdirecting where the systemd cleanup below looks.
+    env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
 }
 
 #[cfg(any(windows, target_os = "linux", test))]

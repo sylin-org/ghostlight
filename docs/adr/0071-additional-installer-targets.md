@@ -147,3 +147,130 @@ Path nuances to PIN AT IMPLEMENTATION:
   `crates/core/src/install/merge.rs` (`Dialect::{McpServers,Servers}`, pure-JSON pretty-print) and
   `clients.rs` at authoring time. Items marked PIN AT IMPLEMENTATION were not fully resolvable from
   docs and MUST be re-verified against the running client before shipping.
+
+## Amendment (2026-08-15): the Zed `"source"` pin is resolved -- no field, no code change
+
+Status: Accepted. Resolves D3's Zed pin. Every other decision in this ADR stands as written.
+
+D3 shipped with the pin open and an example (`"source": "custom", "command": ..., "args": ...,
+"env": {}`) that recorded the uncertainty rather than an answer. The shipped installer code
+(`crates/orchestrator/src/install/mod.rs`, Zed's `expected_json_entry`) never actually added
+`source`, registering the same `{command, args, env}` shape used for the other JSON-dialect
+clients. That gap sat unresolved through 1.0: the code disagreed with the ADR's own example, and
+the pin was never closed out in either direction.
+
+Re-verified 2026-08-15 against Zed's actual current source, not a vendor docs page or a
+third-party guide: `crates/settings_content/src/project.rs` in `zed-industries/zed` (main branch).
+The stdio context-server variant is:
+
+```rust
+Stdio {
+    #[serde(default = "default_true")]
+    enabled: bool,
+    #[serde(default)]
+    remote: bool,
+    #[serde(flatten)]
+    command: ContextServerCommand,
+},
+```
+
+with `ContextServerCommand` carrying `command` (as `path`), `args`, `env`, and `timeout`. There is
+no `source` field anywhere in either type. Zed's own published example
+(`zed.dev/docs/ai/mcp`) matches this exactly: `{"command": ..., "args": [...], "env": {}}`, no
+`source`. Several third-party "how to configure MCP in Zed" guides found during the 2026-08-15
+search claim `"source": "custom"` is required; none of them is Zed's own documentation or source,
+and none could be corroborated against either. They are wrong, and are the likely origin of the
+pin's uncertainty in the first place.
+
+The shipped code was already correct. No code changes. This amendment exists to close the pin with
+a sourced answer instead of leaving it re-litigable, and to flag the specific example at D3 as
+superseded by this verification: read `{command, args, env}` there as the accurate shape, and the
+`"source": "custom"` in that example as the exact uncertainty this amendment resolves, preserved
+rather than edited out.
+
+## Amendment (2026-08-15): VS Code's `--add-mcp` and our direct merge are the same mechanism
+
+Status: Accepted. Confirms the pre-existing VS Code installer entry needs no change. Every other
+decision in this ADR stands as written.
+
+Line 30-31 mentions VS Code's `code --add-mcp` CLI in passing, as prior art for how an editor can
+sidestep the plain-JSON-merge-versus-hand-edited-comments problem the new targets in this ADR had
+to solve directly. That reference raised an unresolved question of its own, carried into this
+pass's review rather than pinned in the original ADR text: Ghostlight's own VS Code installer
+entry (`crates/orchestrator/src/install/mod.rs`, `definitions()` id `"vscode"`) does not shell out
+to `code --add-mcp` at all -- it edits `%APPDATA%/Code/User/mcp.json` (or the XDG-style equivalent
+off `roaming`) directly, via the same plain-JSON `edit_json` path used for every other
+`ConfigDialect::Json` target, writing `{"type":"stdio","command":command,"args":[]}` under a
+`"servers"` key (`JsonDialect::Servers`). The open question was whether that divergence from
+`--add-mcp` reflects a stale or incorrect understanding of VS Code's actual mechanism.
+
+Re-verified 2026-08-15 against VS Code's own current documentation (`code.visualstudio.com/docs/
+copilot/customization/mcp-servers` and `code.visualstudio.com/docs/agents/reference/
+mcp-configuration`), not a third-party guide. Three facts confirmed directly from that source:
+
+- The user-level MCP file is `mcp.json` in the user profile, with a top-level `"servers"` object
+  mapping server names to configurations -- exactly the key and shape Ghostlight already writes.
+- A stdio server entry's documented fields are `type` (required, `"stdio"`), `command` (required),
+  `args` (optional), and `env` (optional) -- a superset of, and consistent with, the
+  `{type, command, args}` shape Ghostlight's `expected_json_entry` produces for this dialect.
+- `code --add-mcp '{"name":...,"command":...,"args":[...]}'` is real and current. Per VS Code's own
+  docs, it is a convenience CLI that "writes the server configuration to your user profile's
+  `mcp.json` file" -- the same file, same key, same entry shape Ghostlight's installer already
+  edits directly. It is not a separate registration path with different effects; it is an
+  alternate way to produce the same edit.
+
+Editing `mcp.json` directly was therefore always a deliberate, correct simplification, not a stale
+assumption: it reaches the identical end state as invoking `--add-mcp` would, without spawning a
+`code` process or depending on it being on `PATH`, which the installer cannot assume (VS Code is
+one of several optional executables `HarnessContext` probes for, not a hard dependency). No code
+change.
+
+One question this verification could not close, and which this amendment does not attempt to
+settle without evidence: whether `mcp.json` itself tolerates JSONC (comments, trailing commas) the
+way `settings.json` does. VS Code's own reference pages do not state this either way. Ghostlight's
+VS Code entry currently uses the plain-JSON `ConfigDialect::Json`, the same as Claude
+Desktop/Cursor/Windsurf, not the JSONC-safe `toml_edit`-style or `jsonc_parser`-based merge this
+ADR added for Zed/OpenCode/Crush. If `mcp.json` does turn out to support comments, a hand-edited
+one could be affected the same way the newer targets' configs could have been before this ADR's
+JSONC-safe merge work. PIN AT IMPLEMENTATION: confirm whether `mcp.json` is JSONC before assuming
+either answer; this amendment only closes the `--add-mcp` question, not this one.
+
+## Amendment (2026-08-15): the OpenCode v1/v2 split is real, and the shipped heuristic is correct
+
+Status: Accepted. Confirms the pre-existing OpenCode installer entry needs no change. Every other
+decision in this ADR stands as written.
+
+The shipped `opencode_dialect()` (`crates/orchestrator/src/install/mod.rs`) picks between two
+JSON shapes for the OpenCode entry -- `JsonDialect::OpenCodeV1` (flat `mcp.<name>`, entry
+`{type, command, enabled}`) and `JsonDialect::OpenCodeV2` (nested `mcp.servers.<name>`, entry
+`{type, command}`, no `enabled` field) -- using, among other signals, whether an `opencode2`
+executable is on `PATH` while `opencode` is not. Read cold, `opencode2` looks like a guessed
+future-binary name rather than something verifiable, and the V1/V2 split itself looked like it
+could be speculative. This pass's review carried that as an open question rather than an
+established fact: was there ever a real second schema and a real second binary, or was this
+written ahead of any evidence for either?
+
+Re-verified 2026-08-15 against OpenCode's own current documentation (`opencode.ai/docs/
+mcp-servers` for the existing product, `opencode.ai/v2/docs` and `opencode.ai/v2/docs/
+mcp-servers` and `opencode.ai/v2/docs/config` for the newer one), not a third-party guide. Four
+facts confirmed directly from that source:
+
+- OpenCode 2 is a real, currently shipping product that "installs and runs as `opencode2`" and
+  explicitly "does not replace OpenCode 1's `opencode` binary, so you can keep both versions
+  installed and run them side by side" -- the exact co-installed-binary situation the executable
+  heuristic assumes.
+- OpenCode 1's documented local-server example is `mcp.<name> = {"type":"local","command":[...],
+  "enabled":true,...}`, flat under `mcp` -- exactly `JsonDialect::OpenCodeV1`'s shape, `enabled`
+  included.
+- OpenCode 2's documented example nests server entries under `mcp.servers.<name>` and its docs
+  say in as many words that "V2 does not place server names directly under `mcp`" and that there
+  is "no V2 `enabled` field" (use `disabled`, defaulting to enabled) -- exactly
+  `JsonDialect::OpenCodeV2`'s shape, `enabled` correctly absent.
+- OpenCode 2's global config is read from the same path as OpenCode 1: `~/.config/opencode/
+  opencode.json(c)`. The two dialects target one shared file with two different internal shapes,
+  which is exactly how this ADR's single `"opencode"` `HarnessDefinition` (one path, dialect
+  chosen per-write) already treats it.
+
+The shipped code was already correct on every axis checked: the split is real, both schemas are
+exactly right, the detection heuristic is grounded in a real, still-current fact about how the two
+binaries coexist, and the shared file path assumption holds. No code changes.

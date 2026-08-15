@@ -897,7 +897,20 @@ fn parse_jsonc(source: &str) -> Result<Value, HarnessError> {
     Ok(value)
 }
 
+/// If `path` is itself a symlink, resolve it to the real file it points at, so a subsequent
+/// atomic write lands on that file instead of unlinking the symlink and leaving a plain file in
+/// its place. A symlinked client config (for example, one tracked through a synced dotfiles repo)
+/// is a deliberate choice; silently replacing the link with an ordinary file would orphan
+/// whatever it pointed to without telling anyone.
+pub(crate) fn resolve_through_symlink(path: &Path) -> io::Result<PathBuf> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => fs::canonicalize(path),
+        _ => Ok(path.to_path_buf()),
+    }
+}
+
 fn replace_with_backup(path: &Path, bytes: &[u8]) -> Result<(), HarnessError> {
+    let path = &resolve_through_symlink(path).map_err(HarnessError::Write)?;
     let parent = path
         .parent()
         .ok_or_else(|| HarnessError::InvalidPath(path.to_path_buf()))?;
@@ -990,9 +1003,12 @@ mod tests {
 
     use serde_json::Value;
 
+    use jsonc_parser::parse_to_serde_value;
+
     use super::{
         command_registration_state, edit_json, edit_toml, harness_roots, inspect_json,
-        inspect_toml, HarnessError, HarnessRoots, JsonDialect, RegistrationState,
+        inspect_toml, jsonc_options, replace_with_backup, resolve_through_symlink, HarnessError,
+        HarnessRoots, JsonDialect, RegistrationState,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -1013,6 +1029,62 @@ mod tests {
         });
         fs::write(&connector, b"test").unwrap();
         connector
+    }
+
+    #[test]
+    fn resolve_through_symlink_leaves_an_ordinary_path_alone() {
+        let directory = temporary("resolve-plain");
+        let path = directory.join("config.json");
+        assert_eq!(resolve_through_symlink(&path).unwrap(), path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_config_is_written_through_to_its_real_target() {
+        use std::os::unix::fs::symlink;
+
+        let directory = temporary("symlink-write-through-unix");
+        let real = directory.join("real-config.json");
+        fs::write(&real, br#"{"old":true}"#).unwrap();
+        let link = directory.join("config.json");
+        symlink(&real, &link).unwrap();
+
+        replace_with_backup(&link, br#"{"new":true}"#).unwrap();
+
+        // The link itself is untouched: still a symlink, still pointing at the same real file.
+        // Before this fix, the rename in replace_with_backup unlinked it and left a plain file
+        // in its place, silently orphaning whatever the link pointed to.
+        let metadata = fs::symlink_metadata(&link).unwrap();
+        assert!(metadata.file_type().is_symlink());
+        assert_eq!(fs::read_link(&link).unwrap(), real);
+
+        // The write landed on the real file behind the link.
+        assert_eq!(fs::read_to_string(&real).unwrap(), r#"{"new":true}"#);
+        assert_eq!(fs::read_to_string(&link).unwrap(), r#"{"new":true}"#);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_symlinked_config_is_written_through_to_its_real_target() {
+        use std::os::windows::fs::symlink_file;
+
+        let directory = temporary("symlink-write-through-windows");
+        let real = directory.join("real-config.json");
+        fs::write(&real, br#"{"old":true}"#).unwrap();
+        let link = directory.join("config.json");
+        if symlink_file(&real, &link).is_err() {
+            // No symlink privilege (Developer Mode / an elevated shell) in this environment.
+            // The write-through logic itself is exercised by the equivalent Unix test; skip
+            // rather than fail on an environment limitation this test cannot control.
+            return;
+        }
+
+        replace_with_backup(&link, br#"{"new":true}"#).unwrap();
+
+        let metadata = fs::symlink_metadata(&link).unwrap();
+        assert!(metadata.file_type().is_symlink());
+        assert_eq!(fs::read_to_string(&real).unwrap(), r#"{"new":true}"#);
+        assert_eq!(fs::read_to_string(&link).unwrap(), r#"{"new":true}"#);
     }
 
     #[test]
@@ -1150,6 +1222,18 @@ mod tests {
             .unwrap(),
             RegistrationState::Current
         );
+        // Pinned against Zed's own current source (crates/settings_content/src/project.rs,
+        // ContextServerCommand): the stdio variant has no `source` field at all, only command,
+        // args, and env. ADR-0071's amendment records the verification; this is where that
+        // verification stops being re-litigable.
+        let written: Value = parse_to_serde_value(&installed, &jsonc_options())
+            .unwrap()
+            .unwrap();
+        let entry = &written["context_servers"]["ghostlight"];
+        assert!(entry.get("source").is_none(), "{entry}");
+        assert!(entry["command"].is_string());
+        assert!(entry["args"].is_array());
+        assert!(entry["env"].is_object());
         assert!(edit_json(&path, &connector, JsonDialect::ContextServers, false).unwrap());
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("// keep this thought"));

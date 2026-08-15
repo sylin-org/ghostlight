@@ -81,7 +81,49 @@ pub struct ApplicationExecutor {
 }
 
 /// Current immutable invocation snapshots used only to govern asynchronous browser events.
-pub type ActiveAuthorityRegistry = Arc<Mutex<HashMap<String, AuthoritySnapshot>>>;
+///
+/// Keyed by workspace, but the value is every invocation currently governing that workspace, not
+/// just one: operations that skip the workspace lease (recording status/stop/discard) can run
+/// fully concurrently with a lease-holding operation on the same workspace, on separate threads.
+/// A single `HashMap<String, AuthoritySnapshot>` here let one invocation's completion silently
+/// clear -- or its start silently overwrite -- another invocation's still-active entry, and the
+/// reader's fallback on a missing entry is the *widest* policy available, which made this a
+/// fail-open race rather than a merely confusing one. Removal here is scoped to the exact
+/// invocation that inserted it, never to "whatever is currently there for this workspace".
+pub type ActiveAuthorityRegistry = Arc<Mutex<HashMap<String, Vec<(String, AuthoritySnapshot)>>>>;
+
+/// Add one invocation's snapshot to its workspace's active set.
+fn register_active_authority(
+    registry: &ActiveAuthorityRegistry,
+    workspace: &str,
+    invocation: &str,
+    snapshot: &AuthoritySnapshot,
+) {
+    registry
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(workspace.to_owned())
+        .or_default()
+        .push((invocation.to_owned(), snapshot.clone()));
+}
+
+/// Remove exactly this invocation's snapshot, leaving any other invocation still governing the
+/// same workspace untouched.
+fn deregister_active_authority(
+    registry: &ActiveAuthorityRegistry,
+    workspace: &str,
+    invocation: &str,
+) {
+    let mut registry = registry
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(entries) = registry.get_mut(workspace) {
+        entries.retain(|(id, _)| id != invocation);
+        if entries.is_empty() {
+            registry.remove(workspace);
+        }
+    }
+}
 
 /// What each in-flight invocation has been observed doing at the browser boundary.
 ///
@@ -210,19 +252,18 @@ impl ApplicationExecutor {
                 activity: operation_activity(&operation),
                 capabilities: requirements,
             });
-            self.active_authority
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(workspace.as_str().into(), snapshot.clone());
+            register_active_authority(
+                &self.active_authority,
+                workspace.as_str(),
+                &invocation,
+                &snapshot,
+            );
             let terminal = if let Some(lease) = lease.as_ref() {
                 self.run(&context, lease, &operation)
             } else {
                 self.run_without_workspace_lease(&context, &operation)
             };
-            self.active_authority
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .remove(workspace.as_str());
+            deregister_active_authority(&self.active_authority, workspace.as_str(), &invocation);
             terminal
         } else if cancellation.is_cancelled() {
             let refusal = Refusal::CancelledBeforeStart;
@@ -501,7 +542,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, CapabilitySet::EMPTY, current_url(&selected));
+        let decision = self.authorize(context, CapabilitySet::EMPTY, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -714,7 +755,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Action, current_url(&selected));
+        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -757,7 +798,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Action, current_url(&selected));
+        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -921,7 +962,7 @@ impl ApplicationExecutor {
                 Ok(value) => value,
                 Err(error) => return self.workspace_failure(context, error),
             };
-        let decision = self.authorize(context, Capability::Read, current_url(&selected));
+        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1029,7 +1070,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, capability, current_url(&selected));
+        let decision = self.authorize(context, capability, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1112,7 +1153,7 @@ impl ApplicationExecutor {
                 Ok(value) => value,
                 Err(error) => return self.workspace_failure(context, error),
             };
-        let decision = self.authorize(context, Capability::Read, current_url(&selected));
+        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1188,7 +1229,7 @@ impl ApplicationExecutor {
             Err(error) => return self.workspace_failure(context, error),
         };
         let selected = location.tab();
-        let decision = self.authorize(context, Capability::Action, current_url(&selected));
+        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1288,7 +1329,7 @@ impl ApplicationExecutor {
             Ok(value) => value,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Read, current_url(&selected));
+        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1370,7 +1411,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Read, current_url(&selected));
+        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1426,7 +1467,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, CapabilitySet::EMPTY, current_url(&selected));
+        let decision = self.authorize(context, CapabilitySet::EMPTY, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1493,7 +1534,7 @@ impl ApplicationExecutor {
             Err(error) => return self.workspace_failure(context, error),
         };
         let selected = location.tab();
-        let decision = self.authorize(context, Capability::Read, current_url(&selected));
+        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1603,7 +1644,7 @@ impl ApplicationExecutor {
         } else {
             CapabilitySet::READ.union(CapabilitySet::WRITE)
         };
-        let decision = self.authorize(context, requirements, current_url(&selected));
+        let decision = self.authorize(context, requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1683,7 +1724,7 @@ impl ApplicationExecutor {
                 Err(error) => return self.workspace_failure(context, error),
             };
         let typed_role = target.role;
-        let decision = self.authorize(context, Capability::Action, current_url(&selected));
+        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1838,7 +1879,7 @@ impl ApplicationExecutor {
             };
             (selected, command, facts)
         };
-        let decision = self.authorize(context, Capability::Action, current_url(&selected));
+        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1891,7 +1932,7 @@ impl ApplicationExecutor {
                 Ok(value) => value,
                 Err(error) => return self.workspace_failure(context, error),
             };
-        let decision = self.authorize(context, Capability::Write, current_url(&selected));
+        let decision = self.authorize(context, Capability::Write, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1982,7 +2023,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Execute, current_url(&selected));
+        let decision = self.authorize(context, Capability::Execute, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -2078,7 +2119,7 @@ impl ApplicationExecutor {
             Ok(value) => value,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Action, current_url(&selected));
+        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -2142,7 +2183,7 @@ impl ApplicationExecutor {
             Ok(value) => value,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Read, current_url(&selected));
+        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -2408,7 +2449,7 @@ impl ApplicationExecutor {
         } else {
             Capability::Action
         };
-        let decision = self.authorize(context, capability, current_url(&selected));
+        let decision = self.authorize(context, capability, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -2479,7 +2520,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Read, current_url(&selected));
+        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -2584,18 +2625,35 @@ impl ApplicationExecutor {
                 lease.expect("recording start holds the workspace lease"),
                 value,
             ),
-            "status" => match self.dispatch(
-                context,
-                BrowserCommand::StatusRecording {
-                    recording_id: value.recording.clone(),
-                },
-            ) {
-                Ok(BrowserOutcome::RecordingStatus { summary }) => {
-                    self.recording_observed(context, &summary)
+            "status" => {
+                // Needs no capability, but every path to the browser still crosses the runtime
+                // gate -- status/stop/discard used to dispatch straight through, the one family
+                // of operations in this executor that ignored a pause. See stop_recording and
+                // discard_recording for the same fix and the same reasoning.
+                let decision = self.authorize(context, CapabilitySet::EMPTY, None);
+                if !decision.allowed {
+                    return self.blocked(
+                        context,
+                        decision,
+                        None,
+                        Effect::None,
+                        true,
+                        json!({"reason":decision.reason.as_str()}),
+                    );
                 }
-                Ok(outcome) => self.recording_selection_failure(context, outcome),
-                Err(error) => self.browser_failure(context, permitted(), error, None),
-            },
+                match self.dispatch(
+                    context,
+                    BrowserCommand::StatusRecording {
+                        recording_id: value.recording.clone(),
+                    },
+                ) {
+                    Ok(BrowserOutcome::RecordingStatus { summary }) => {
+                        self.recording_observed(context, decision, &summary)
+                    }
+                    Ok(outcome) => self.recording_selection_failure(context, outcome),
+                    Err(error) => self.browser_failure(context, decision, error, None),
+                }
+            }
             "stop" => self.stop_recording(context, value.recording.as_deref()),
             "save" => self.save_recording(context, lease, value),
             "discard" => self.discard_recording(context, value.recording.as_deref()),
@@ -2613,7 +2671,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Read, current_url(&selected));
+        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -2662,6 +2720,20 @@ impl ApplicationExecutor {
     }
 
     fn stop_recording(&self, context: &InvocationContext<'_>, requested: Option<&str>) -> Terminal {
+        // Needs no capability, but every operation that reaches the browser still crosses the
+        // runtime pause/attention gate -- this one used to dispatch straight through it, so a
+        // paused session could still have its recording stopped from underneath it.
+        let decision = self.authorize(context, CapabilitySet::EMPTY, None);
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                None,
+                Effect::None,
+                true,
+                json!({"reason":decision.reason.as_str()}),
+            );
+        }
         match self.dispatch(
             context,
             BrowserCommand::StopRecording {
@@ -2670,7 +2742,7 @@ impl ApplicationExecutor {
         ) {
             Ok(BrowserOutcome::RecordingStopped { summary, changed }) => self.succeeded(
                 context,
-                permitted(),
+                decision,
                 Some(summary.tab_id),
                 if changed {
                     Effect::Applied
@@ -2685,7 +2757,7 @@ impl ApplicationExecutor {
                 recording_facts(&summary),
             ),
             Ok(outcome) => self.recording_selection_failure(context, outcome),
-            Err(error) => self.browser_failure(context, permitted(), error, None),
+            Err(error) => self.browser_failure(context, decision, error, None),
         }
     }
 
@@ -2777,7 +2849,7 @@ impl ApplicationExecutor {
                 Ok(value) => value,
                 Err(error) => return Err(Box::new(self.workspace_failure(context, error))),
             };
-            let decision = self.authorize(context, Capability::Write, current_url(&selected));
+            let decision = self.authorize(context, Capability::Write, Some(selected.url.as_str()));
             if !decision.allowed {
                 return Err(Box::new(self.blocked(
                     context,
@@ -2929,6 +3001,19 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         requested: Option<&str>,
     ) -> Terminal {
+        // Needs no capability, but every operation that reaches the browser still crosses the
+        // runtime pause/attention gate -- this one used to dispatch straight through it.
+        let decision = self.authorize(context, CapabilitySet::EMPTY, None);
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                None,
+                Effect::None,
+                true,
+                json!({"reason":decision.reason.as_str()}),
+            );
+        }
         match self.dispatch(
             context,
             BrowserCommand::DiscardRecording {
@@ -2940,7 +3025,7 @@ impl ApplicationExecutor {
                 released_bytes,
             }) => self.succeeded(
                 context,
-                permitted(),
+                decision,
                 None,
                 Effect::Applied,
                 Readiness::NotApplicable,
@@ -2953,18 +3038,19 @@ impl ApplicationExecutor {
                 }),
             ),
             Ok(outcome) => self.recording_selection_failure(context, outcome),
-            Err(error) => self.browser_failure(context, permitted(), error, None),
+            Err(error) => self.browser_failure(context, decision, error, None),
         }
     }
 
     fn recording_observed(
         &self,
         context: &InvocationContext<'_>,
+        decision: Decision,
         summary: &PhysicalRecordingSummary,
     ) -> Terminal {
         self.succeeded(
             context,
-            permitted(),
+            decision,
             None,
             Effect::None,
             Readiness::NotApplicable,
@@ -3127,6 +3213,20 @@ impl ApplicationExecutor {
         }
     }
 
+    /// Authorize one operation, checked against a real destination whenever it names one.
+    ///
+    /// `url: None` means this operation has no tab in play at all -- `list_tabs` is the only
+    /// caller, since listing needs no destination to check. Every operation that names a tab
+    /// must pass `Some(&tab.url)`, the tab's raw string as tracked right now, **even when that
+    /// string is empty** because the tab's first landing has not been governed yet (a page
+    /// calling `window.open()` is adopted immediately, before the async navigation-committed
+    /// event that would establish its real host arrives). An empty or otherwise unparseable
+    /// string falls straight through to `authorize_landing`, which denies it as `HostDenied` --
+    /// there is no third option here that falls back to a host-blind capability check. That
+    /// fallback used to exist and was the bug: a tab whose destination genuinely is not yet
+    /// known must be treated as though its destination is denied, never as though no destination
+    /// applies, or the operator's host allowlist is bypassed for exactly the tabs it exists to
+    /// cover.
     fn authorize(
         &self,
         context: &InvocationContext<'_>,
@@ -3899,14 +3999,6 @@ fn observation_budget_ms(requested_ms: u64, remaining: Duration) -> u64 {
     requested_ms.min(available_ms)
 }
 
-fn current_url(tab: &SelectedTab) -> Option<&str> {
-    if tab.url.is_empty() {
-        None
-    } else {
-        Some(&tab.url)
-    }
-}
-
 fn load_physical_files(paths: &[String]) -> Result<(Vec<PhysicalFile>, u64), &'static str> {
     const MAX_UPLOAD_BYTES: u64 = 5_000_000;
     let mut files = Vec::with_capacity(paths.len());
@@ -4136,8 +4228,9 @@ mod tests {
     use crate::workspace::WorkspaceStore;
 
     use super::{
-        observation_budget_ms, observed_from, readiness_name, ApplicationExecutor,
-        CancellationToken, Effect, Readiness, Status,
+        deregister_active_authority, observation_budget_ms, observed_from, readiness_name,
+        register_active_authority, ApplicationExecutor, CancellationToken, Effect, Readiness,
+        Status,
     };
 
     #[derive(Default)]
@@ -4521,6 +4614,94 @@ mod tests {
         assert!(!calls
             .iter()
             .any(|call| matches!(call, BrowserCommand::ExportRecording { .. })));
+    }
+
+    #[test]
+    fn one_invocations_completion_never_clears_a_still_active_sibling() {
+        // Recording status/stop/discard skip the workspace lease and can run fully concurrently
+        // with a lease-holding operation on the same workspace, on separate threads. A single
+        // snapshot-per-workspace registry let one invocation's insert overwrite another's entry,
+        // and one invocation's finish clear an entry a still-running sibling depended on -- the
+        // reader's fallback on a miss is the widest policy available, so this was a fail-open
+        // race, not just a confusing one. Two distinct policies stand in for two distinct
+        // invocations' snapshots, so a clobber would be visible as the wrong one surviving.
+        let (executor, _, _, workspace, _) = fixture();
+        let registry = executor.active_authority();
+
+        let narrow = GovernanceFacade::new(
+            Some({
+                let path = temporary_policy("sibling-narrow");
+                fs::write(
+                    &path,
+                    r#"{"schema":3,"name":"narrow","version":"1","grants":[]}"#,
+                )
+                .unwrap();
+                path
+            }),
+            None,
+        )
+        .snapshot(&crate::language::RequestRestrictions::default());
+        let wide = GovernanceFacade::new(None, None)
+            .snapshot(&crate::language::RequestRestrictions::default());
+        assert_ne!(
+            narrow.id(),
+            wide.id(),
+            "the two snapshots must be distinguishable"
+        );
+
+        register_active_authority(&registry, workspace.as_str(), "invocation_a", &narrow);
+        register_active_authority(&registry, workspace.as_str(), "invocation_b", &wide);
+
+        // invocation_a finishes first. Its own entry must go; invocation_b's must not.
+        deregister_active_authority(&registry, workspace.as_str(), "invocation_a");
+        {
+            let locked = registry.lock().unwrap();
+            let entries = locked
+                .get(workspace.as_str())
+                .expect("invocation_b is still active");
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].0, "invocation_b");
+            assert_eq!(entries[0].1.id(), wide.id());
+        }
+
+        // invocation_b finishes. The workspace now has no active invocation at all.
+        deregister_active_authority(&registry, workspace.as_str(), "invocation_b");
+        assert!(registry.lock().unwrap().get(workspace.as_str()).is_none());
+    }
+
+    #[test]
+    fn a_paused_runtime_refuses_recording_status_stop_and_discard() {
+        // Every other operation in this executor -- even ones needing no capability at all, like
+        // activating a tab -- crosses the runtime gate before it can reach the browser. Recording
+        // status, stop, and discard used to be the one family that dispatched straight through,
+        // so pausing Ghostlight did not actually stop a recording from being stopped or discarded
+        // out from under the person who paused it.
+        let governance = GovernanceFacade::new(None, None);
+        assert_eq!(
+            governance.apply_runtime_intent(RuntimeControlIntent::Hold),
+            RuntimeControlState::Held
+        );
+        let (executor, browser, _, workspace, _) = fixture_with_governance(governance);
+
+        for action in ["status", "stop", "discard"] {
+            let result = executor.execute(
+                &workspace,
+                "browser_record",
+                json!({"action":action}),
+                None,
+                &CancellationToken::default(),
+            );
+            assert_ne!(
+                result.status,
+                Status::Succeeded,
+                "recording {action} must not succeed while paused: {result:?}"
+            );
+        }
+        assert!(
+            browser.calls().is_empty(),
+            "a paused runtime must never reach the browser at all: {:?}",
+            browser.calls()
+        );
     }
 
     #[test]
@@ -5011,6 +5192,72 @@ mod tests {
         assert!(!encoded.contains("record-42"));
         assert!(!encoded.contains("token"));
         assert!(!encoded.contains("secret"));
+    }
+
+    #[test]
+    fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capability_alone() {
+        // A page under the model's control can open a child tab; the workspace adopts it
+        // immediately, before the async navigation-committed event that would establish its real
+        // host arrives, so the tab's own url is briefly empty. A policy that grants Read only on
+        // a specific host, never "*", proves the point: if authorize() fell back to a host-blind
+        // capability check for this tab (the bug), the read would wrongly succeed, because that
+        // fallback unions grants across every host the policy names, ignoring which host the tab
+        // is actually on. It must be refused instead, exactly as an unparseable committed URL
+        // already is on the click/type/fill path.
+        let policy = temporary_policy("unknown-landing");
+        fs::write(
+            &policy,
+            r#"{"schema":3,"name":"work test","version":"1","grants":[{"id":"approved","hosts":{"allow":["approved.example"]},"allowed":["read"]}]}"#,
+        )
+        .unwrap();
+        let (executor, browser, workspaces, workspace, _) =
+            fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+
+        // An ordinary, fully governed opener tab, admitted under the narrow policy.
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://approved.example/"),
+            committed_urls: vec!["https://approved.example/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://approved.example","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(opened.status, Status::Succeeded, "{opened:?}");
+        let bound_browser = workspaces.browser_of(workspace.as_str()).unwrap();
+
+        // Adopt a child the way a page's own `window.open()` does: through the real production
+        // path (`WorkspaceStore::apply_browser_child`), which stores the new tab's url as empty
+        // regardless of what the physical tab record otherwise says, exactly as it does when the
+        // extension reports a page-opened tab before that tab's first navigation has committed.
+        let (child_workspace, handle) = workspaces
+            .apply_browser_child(&bound_browser, 7, &tab(8, "https://attacker.example/"))
+            .expect("the opener tab is owned by this workspace");
+        assert_eq!(child_workspace, workspace);
+
+        let read = executor.execute(
+            &workspace,
+            "browser_read",
+            json!({"tab": handle.as_str()}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(
+            read.status,
+            Status::Blocked,
+            "a tab with no known landing must be refused, not checked by capability alone: {read:?}"
+        );
+        assert!(
+            browser
+                .calls()
+                .iter()
+                .all(|call| !matches!(call, BrowserCommand::Observe { .. })),
+            "the browser must never be asked to read a tab whose destination was never checked"
+        );
+        let _ = fs::remove_file(policy);
     }
 
     #[test]

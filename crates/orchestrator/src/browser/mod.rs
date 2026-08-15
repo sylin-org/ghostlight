@@ -465,7 +465,7 @@ impl RelayBrowserPort {
         let reader_liveness = liveness.clone();
         let heartbeat_writer = Arc::clone(&writer);
         let heartbeat_pending = Arc::clone(&pending);
-        thread::Builder::new()
+        if let Err(error) = thread::Builder::new()
             .name("ghostlight-browser-reader".into())
             .spawn(move || {
                 read_adapter(
@@ -478,11 +478,23 @@ impl RelayBrowserPort {
                     reader_liveness,
                 );
             })
-            .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+        {
+            // The connection was registered before this thread could prove it would ever run.
+            // Leaving the registration in place on a spawn failure is a permanent zombie: a
+            // connection with no liveness capability negotiated reports "always available"
+            // forever (nothing else ever marks it stale), so every future call() to this
+            // browser_id would insert into pending, write successfully (the socket is still
+            // open), and simply time out, repeatedly, until this exact browser reconnects.
+            // Remove it, matched by connection id so a legitimate concurrent replacement is
+            // never the one torn down instead.
+            self.detach_registered(&tag.browser_id, &tag.connection_id);
+            return Err(BrowserError::Protocol(error.to_string()));
+        }
         if let Some(liveness) = liveness {
             let heartbeat_adapters = Arc::clone(&self.adapters);
             let settings = self.heartbeat;
-            thread::Builder::new()
+            let heartbeat_tag = tag.clone();
+            if let Err(error) = thread::Builder::new()
                 .name("ghostlight-browser-heartbeat".into())
                 .spawn(move || {
                     heartbeat_adapter(
@@ -490,13 +502,42 @@ impl RelayBrowserPort {
                         heartbeat_pending,
                         liveness,
                         heartbeat_adapters,
-                        tag,
+                        heartbeat_tag,
                         settings,
                     );
                 })
-                .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+            {
+                // The reader thread is already live at this point. Losing only the heartbeat is
+                // not the same zombie: a liveness-negotiated connection with nobody updating it
+                // goes stale on the normal schedule and is then correctly treated as
+                // unavailable, so this is tidiness rather than a silent-forever failure -- still
+                // worth cleaning up rather than leaving two threads disagreeing about the same
+                // connection.
+                self.detach_registered(&tag.browser_id, &tag.connection_id);
+                return Err(BrowserError::Protocol(error.to_string()));
+            }
         }
         Ok(())
+    }
+
+    /// Remove a registered connection, but only the exact one named -- never a connection that
+    /// has since replaced it. `attach` registers a connection before either of its threads is
+    /// proven to actually run, so a spawn failure must undo exactly that registration, and
+    /// nothing else: a concurrent `attach` for the same `browser_id` may already have replaced it
+    /// with a newer, healthy connection by the time this runs, and that one must be left alone.
+    fn detach_registered(&self, browser_id: &str, connection_id: &str) {
+        let removed = {
+            let mut adapters = lock(&self.adapters);
+            match adapters.connections.get(browser_id) {
+                Some(connection) if connection.id == connection_id => {
+                    adapters.connections.remove(browser_id)
+                }
+                _ => None,
+            }
+        };
+        if let Some(connection) = removed {
+            retire(&connection);
+        }
     }
 
     fn call_inner(

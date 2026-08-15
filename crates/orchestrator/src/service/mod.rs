@@ -685,9 +685,14 @@ impl BrowserEventSink for ServiceBrowserEvents {
                 let Some(workspace) = self.workspaces.owner_of_physical(browser, tab_id) else {
                     return;
                 };
+                // The most recently started invocation still governing this workspace, when any
+                // is; several may be active at once (recording status/stop/discard skip the
+                // workspace lease), and each keeps its own entry until it finishes, so no
+                // invocation's completion can clear a different one's still-active snapshot.
                 let snapshot = lock(&self.active)
                     .get(workspace.as_str())
-                    .cloned()
+                    .and_then(|entries| entries.last())
+                    .map(|(_, snapshot)| snapshot.clone())
                     .unwrap_or_else(|| self.governance.snapshot(&RequestRestrictions::default()));
                 let runtime = self.governance.runtime_decision();
                 let decision = if runtime.allowed {

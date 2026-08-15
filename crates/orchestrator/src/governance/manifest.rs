@@ -267,9 +267,57 @@ pub enum ManifestError {
     },
 }
 
+/// Upper bound on structural nesting any real schema-3 document needs. The deepest legitimate
+/// shape is manifest -> grants -> grant -> hosts -> allow, five levels; this leaves generous room
+/// for growth while still rejecting a document nested deep enough to threaten the parser below.
+const MAX_NESTING_DEPTH: usize = 64;
+
+/// Reject a document nested deeper than any real manifest could need, before it ever reaches a
+/// recursive-descent parser with no depth limit of its own.
+///
+/// `serde_json::from_str` recurses once per nesting level with no cap, and a deeply nested
+/// document -- comfortably under any byte-size limit callers enforce -- overflows the call stack
+/// before parsing finishes. That aborts the whole process: it is not a panic, so `catch_unwind`
+/// cannot intercept it, and on this product's desktop build the orchestrator's real authority
+/// shares a process with the Tauri shell that can hand this function untrusted WebView input. A
+/// linear scan of raw bracket depth, skipping string contents, is cheap and catches this first.
+fn reject_excessive_nesting(text: &str, source: &str) -> Result<(), ManifestError> {
+    let mut depth: usize = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    for byte in text.bytes() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' | b'[' => {
+                depth += 1;
+                if depth > MAX_NESTING_DEPTH {
+                    return Err(ManifestError::Shape {
+                        origin: source.into(),
+                        message: format!("nested more than {MAX_NESTING_DEPTH} levels deep"),
+                    });
+                }
+            }
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Parse, validate, and canonically identify one policy manifest.
 pub fn parse(text: &str, source: &str) -> Result<Manifest, ManifestError> {
     let stripped = text.strip_prefix('\u{feff}').unwrap_or(text);
+    reject_excessive_nesting(stripped, source)?;
     let value: Value = serde_json::from_str(stripped).map_err(|error| ManifestError::Syntax {
         origin: source.into(),
         line: error.line(),
@@ -567,6 +615,29 @@ fn write_canonical(value: &Value, output: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::{parse, valid_host_pattern, PolicyMode};
+
+    #[test]
+    fn a_deeply_nested_document_is_rejected_before_it_reaches_the_recursive_parser() {
+        // Depth far beyond anything a real manifest needs, and far beyond what this crate's own
+        // test stack could survive parsing recursively if the guard were absent -- the guard must
+        // reject it on a linear scan, never by calling into serde_json's Value parser at all.
+        let bomb = format!(
+            r#"{{"schema":3,"name":"x","version":"1","grants":[],"config":[{{"key":"content.security.sacred_domains","value":{}[]{},"level":"mandatory"}}]}}"#,
+            "[".repeat(5_000),
+            "]".repeat(5_000)
+        );
+        let error = parse(&bomb, "bomb").unwrap_err();
+        assert!(error.to_string().contains("nested more than"), "{error}");
+
+        // A string containing bracket-shaped text must not itself be counted as nesting. 80
+        // brackets exceeds MAX_NESTING_DEPTH if the scanner mistakenly counted them, while
+        // staying under the unrelated 100-character bound `name` already enforces.
+        let deceptive = format!(
+            r#"{{"schema":3,"name":"{}","version":"1","grants":[]}}"#,
+            "[".repeat(80)
+        );
+        assert!(parse(&deceptive, "deceptive").is_ok());
+    }
 
     #[test]
     fn schema_three_is_strict_and_has_a_format_independent_hash() {

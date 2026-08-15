@@ -519,7 +519,11 @@ fn reach(policy: &manifest::Manifest, required: CapabilitySet) -> CapabilityStat
             CapabilityState::Available
         } else if universal {
             CapabilityState::SomeBlocked
-        } else if grant.hosts.allow.is_empty() {
+        } else if !any_allow_survives_deny(grant) {
+            // Every allow pattern in this grant is fully canceled by a deny in the same grant,
+            // so it admits nothing anywhere -- this must read the same as an empty allow list,
+            // not as "some sites allowed". See any_allow_survives_deny for why exact pattern
+            // equality is the right (and only) test.
             continue;
         } else {
             CapabilityState::SomeAllowed
@@ -527,6 +531,28 @@ fn reach(policy: &manifest::Manifest, required: CapabilitySet) -> CapabilityStat
         widest = widest.max(state);
     }
     widest
+}
+
+/// Whether at least one of this grant's allow patterns is not fully canceled by its own deny
+/// list, i.e. whether the grant can admit any host at all.
+///
+/// A deny pattern only ever fully cancels an allow pattern in the *same* grant when the two are
+/// the identical pattern text. This falls directly out of `pattern_specificity`'s tie-break: for
+/// a deny to beat an allow at *every* host the allow pattern matches, it must be at least as
+/// specific everywhere the allow pattern applies. A broader deny (`*.example.com` denying
+/// `*.a.example.com`) loses the tie at every shared host, because the narrower allow pattern is
+/// *more* specific there, not less; a narrower deny (one exact host under a wildcard allow)
+/// only cancels that one host, leaving the rest of the allow pattern's hosts still admitted. The
+/// only pattern that is simultaneously broad enough to cover every host the allow pattern
+/// matches and specific enough to win the tie at all of them is that same pattern, verbatim.
+fn any_allow_survives_deny(grant: &manifest::Grant) -> bool {
+    grant.hosts.allow.iter().any(|allow| {
+        !grant
+            .hosts
+            .deny
+            .iter()
+            .any(|deny| deny.eq_ignore_ascii_case(allow))
+    })
 }
 
 fn layer_view(
@@ -822,6 +848,36 @@ mod tests {
             view.capabilities[0].decided_by,
             vec![LayerKind::Organization, LayerKind::User]
         );
+    }
+
+    #[test]
+    fn a_grant_whose_own_deny_cancels_its_own_allow_admits_nothing() {
+        // The real decision engine's tie-break (evaluate_host: deny wins a specificity tie)
+        // means a deny pattern identical to its own grant's allow pattern refuses every host that
+        // grant would otherwise have admitted. The compiled view must say so -- "some sites
+        // allowed" here would tell a person a site is reachable that the real decision path
+        // refuses on every single call.
+        let self_canceling = policy(
+            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"pointless","hosts":{"allow":["*.example.com"],"deny":["*.example.com"]},"allowed":["read"]}]}"#,
+        );
+        let view = compile(&inputs(None, Some(&self_canceling)));
+        assert_eq!(view.capabilities[0].state, CapabilityState::Unavailable);
+
+        // A deny that only removes ONE host under a wildcard allow does not cancel the rest:
+        // every other host under that suffix is still genuinely admitted.
+        let partly_canceling = policy(
+            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"minus-one","hosts":{"allow":["*.example.com"],"deny":["admin.example.com"]},"allowed":["read"]}]}"#,
+        );
+        let view = compile(&inputs(None, Some(&partly_canceling)));
+        assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
+
+        // A broader deny loses the specificity tie at every host the narrower allow matches --
+        // covering the same hosts is not the same as outranking them.
+        let broader_deny_never_wins = policy(
+            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"narrow-allow","hosts":{"allow":["*.a.example.com"],"deny":["*.example.com"]},"allowed":["read"]}]}"#,
+        );
+        let view = compile(&inputs(None, Some(&broader_deny_never_wins)));
+        assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
     }
 
     #[test]

@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::net::IpAddr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -1611,7 +1611,9 @@ impl GovernanceFacade {
         let parent = path.parent().ok_or(AuthoringError::NoHome)?;
         fs::create_dir_all(parent)
             .map_err(|error| AuthoringError::Unwritable(error.to_string()))?;
-        let staged = path.with_extension("json.writing");
+        // A per-call unique name, not a fixed one, so two overlapping calls to apply_user_policy
+        // never share a staging file and cannot interleave or clobber each other's write.
+        let staged = path.with_extension(format!("json.{}.writing", uuid::Uuid::new_v4().simple()));
         fs::write(&staged, document.as_bytes())
             .map_err(|error| AuthoringError::Unwritable(error.to_string()))?;
         fs::rename(&staged, &path).map_err(|error| {
@@ -1818,19 +1820,49 @@ fn protected_url(url: &Url) -> bool {
     if !matches!(url.scheme(), "http" | "https") {
         return true;
     }
-    let Some(host) = url.host_str().map(str::to_ascii_lowercase) else {
-        return true;
-    };
-    if host == "localhost" || host.ends_with(".localhost") {
-        return true;
+    // `url()` gives the typed host directly. The alternative -- `host_str()` then
+    // `IpAddr::from_str` -- looked equivalent but was not: `host_str()` keeps the enclosing `[ ]`
+    // brackets for an IPv6 host (`"[::1]"`), which `IpAddr::from_str` refuses to parse, so the
+    // string round trip silently failed for every IPv6 literal, not only the mapped/compatible
+    // forms this function was already missing. This is the one boundary documented as holding
+    // unconditionally in every configuration; it must not depend on a string format nobody checked.
+    match url.host() {
+        Some(url::Host::Domain(host)) => {
+            let host = host.to_ascii_lowercase();
+            host == "localhost" || host.ends_with(".localhost")
+        }
+        Some(url::Host::Ipv4(value)) => value.is_loopback() || value.is_link_local(),
+        Some(url::Host::Ipv6(value)) => {
+            value.is_loopback()
+                || (value.segments()[0] & 0xffc0) == 0xfe80
+                || embedded_ipv4(value).is_some_and(|v4| v4.is_loopback() || v4.is_link_local())
+        }
+        None => true,
     }
-    if let Ok(ip) = IpAddr::from_str(&host) {
-        return match ip {
-            IpAddr::V4(value) => value.is_loopback() || value.is_link_local(),
-            IpAddr::V6(value) => value.is_loopback() || (value.segments()[0] & 0xffc0) == 0xfe80,
-        };
+}
+
+/// Recover the IPv4 address embedded in an IPv6 address carrying one, if any.
+///
+/// `Ipv6Addr::is_loopback()` only matches the literal `::1`; it does not unwrap an IPv4-mapped
+/// (`::ffff:a.b.c.d`) or IPv4-compatible (`::a.b.c.d`) address, both of which are ordinary,
+/// browser-parseable IPv6 literals naming a real IPv4 destination. Without this, a boundary
+/// documented as holding unconditionally in every configuration -- including all-open, and while
+/// ordinary policy observes -- would let `https://[::ffff:127.0.0.1]/` or a link-local
+/// cloud-metadata address in mapped form through with no protection at all.
+fn embedded_ipv4(v6: Ipv6Addr) -> Option<Ipv4Addr> {
+    if let Some(v4) = v6.to_ipv4_mapped() {
+        return Some(v4);
     }
-    false
+    let segments = v6.segments();
+    if segments[..6] == [0, 0, 0, 0, 0, 0] && (segments[6] != 0 || segments[7] != 0) {
+        return Some(Ipv4Addr::new(
+            (segments[6] >> 8) as u8,
+            segments[6] as u8,
+            (segments[7] >> 8) as u8,
+            segments[7] as u8,
+        ));
+    }
+    None
 }
 
 fn host_matches(host: &str, pattern: &str) -> bool {
@@ -2107,6 +2139,34 @@ mod tests {
                 .authorize_landing(Capability::Read, "http://169.254.169.254/latest")
                 .reason,
             ReasonCode::ProtectedHost
+        );
+    }
+
+    #[test]
+    fn the_loopback_and_link_local_ceiling_holds_for_ipv4_embedded_in_ipv6() {
+        // These are ordinary, browser-parseable literals naming the same protected destinations
+        // as their plain IPv4 form. A ceiling that only recognized ::1 would let all of these
+        // through untouched, in every configuration including all-open.
+        let facade = GovernanceFacade::new(None, None);
+        let snapshot = facade.snapshot(&RequestRestrictions::default());
+        for url in [
+            "https://[::1]/",
+            "https://[::ffff:127.0.0.1]:9200/",
+            "https://[::ffff:169.254.169.254]/latest/meta-data/",
+            "https://[::127.0.0.1]/",
+        ] {
+            assert_eq!(
+                snapshot.authorize_landing(Capability::Read, url).reason,
+                ReasonCode::ProtectedHost,
+                "{url} must be protected"
+            );
+        }
+        // An ordinary global IPv6 address embedding neither loopback nor link-local octets must
+        // not be swept up by the same check.
+        assert!(
+            snapshot
+                .authorize_landing(Capability::Read, "https://[::ffff:8.8.8.8]/")
+                .allowed
         );
     }
 

@@ -283,10 +283,74 @@ mod tests {
     use crate::governance::CapabilitySet;
     use serde_json::json;
 
-    use super::{requirements, sequence_step_requirements, variants, DIRECTORY};
+    use super::{
+        requirements, sequence_step_requirements, variants, CapabilityVariant, SequenceStep,
+        DIRECTORY,
+    };
 
     fn decoded(tool: &str, input: serde_json::Value) -> CapabilitySet {
         requirements(&crate::language::decode(tool, input).expect("valid operation"))
+    }
+
+    /// One minimal valid decode input for every entry in `DIRECTORY`, keyed by exactly the same
+    /// (tool, variant) pair. A `DIRECTORY` entry with no arm here is a compile-time-silent, test-
+    /// time-loud gap: the match below is exhaustive over what this test knows to check, and an
+    /// unmatched entry panics with its own tool/variant rather than being skipped.
+    fn fixture(tool: &str, variant: Option<&str>) -> serde_json::Value {
+        let upload_path = if cfg!(windows) {
+            r"C:\ghostlight\upload.txt"
+        } else {
+            "/tmp/ghostlight/upload.txt"
+        };
+        match (tool, variant) {
+            ("browser_tabs", Some("list")) => json!({"action":"list"}),
+            ("browser_tabs", Some("focus")) => json!({"action":"focus","tab":"tab_1"}),
+            ("browser_tabs", Some("close")) => json!({"action":"close","tab":"tab_1"}),
+            ("browser_navigate", None) => json!({"url":"https://example.com"}),
+            ("browser_history", None) => json!({"action":"back"}),
+            ("browser_window", Some("zoom")) => json!({"action":"zoom","percent":100}),
+            ("browser_window", Some("resize")) => {
+                json!({"action":"resize","width":1280,"height":720})
+            }
+            ("browser_read", None) => json!({}),
+            ("browser_inspect", None) => json!({}),
+            ("browser_find", None) => json!({"text":"Login"}),
+            ("browser_screenshot", None) => json!({}),
+            ("browser_click", None) => json!({"target":"target_1"}),
+            ("browser_scroll", None) => json!({}),
+            ("browser_hover", None) => json!({"target":"target_1"}),
+            ("browser_fill_form", Some("fill")) => {
+                json!({"fields":[{"target":"target_1","value":"Ada"}]})
+            }
+            ("browser_fill_form", Some("submit")) => {
+                json!({"fields":[{"target":"target_1","value":"Ada"}],"submit_target":"target_2"})
+            }
+            ("browser_type_text", None) => json!({"target":"target_1","text":"Ada"}),
+            ("browser_press_key", None) => json!({"key":"Enter"}),
+            ("browser_drag", None) => {
+                json!({"source_target":"target_1","destination_target":"target_2"})
+            }
+            ("browser_upload", None) => json!({"target":"target_1","paths":[upload_path]}),
+            ("browser_execute", None) => json!({"script":"1+1"}),
+            ("browser_wait", None) => json!({"condition":"load_ready"}),
+            ("browser_sequence", None) => json!({"steps":[
+                {"action":"wait","condition":"load_ready"},
+                {"action":"hover","target":"target_1"}
+            ]}),
+            ("browser_dialog", Some("status")) => json!({"action":"status"}),
+            ("browser_dialog", Some("resolve")) => json!({"action":"accept"}),
+            ("browser_record", Some("start")) => json!({"action":"start"}),
+            ("browser_record", Some("inspect")) => json!({"action":"status"}),
+            ("browser_record", Some("save_client")) => json!({"action":"save"}),
+            ("browser_record", Some("save_target")) => {
+                json!({"action":"save","target":"target_1"})
+            }
+            ("browser_diagnose", None) => json!({}),
+            (tool, variant) => panic!(
+                "DIRECTORY grew a (tool={tool}, variant={variant:?}) entry with no fixture in \
+                 this test; add one so its requirements stay cross-checked against decode()"
+            ),
+        }
     }
 
     #[test]
@@ -417,5 +481,109 @@ mod tests {
             sequence_step_requirements(&sequence.steps[0]),
             CapabilitySet::READ.union(CapabilitySet::WRITE)
         );
+    }
+
+    #[test]
+    fn every_directory_entry_matches_what_decode_actually_requires() {
+        for entry in DIRECTORY {
+            let CapabilityVariant {
+                tool,
+                variant,
+                requirements: expected,
+                ..
+            } = *entry;
+            let input = fixture(tool, variant);
+            let operation = crate::language::decode(tool, input.clone())
+                .unwrap_or_else(|error| panic!("tool={tool} variant={variant:?} input={input}: fixture must decode, got {error:?}"));
+            assert_eq!(
+                requirements(&operation),
+                expected,
+                "tool={tool} variant={variant:?}: DIRECTORY's advertised requirement diverged \
+                 from what requirements() actually returns for the decoded operation"
+            );
+        }
+    }
+
+    #[test]
+    fn sequence_steps_carry_the_same_requirements_as_their_standalone_tool() {
+        // Every SequenceStep variant has exactly one standalone-tool equivalent in DIRECTORY.
+        // A drift here means composing an action inside browser_sequence would be governed
+        // differently than calling the same action directly -- exactly the kind of mismatch
+        // that would let a sequence step slip past a policy the standalone tool honors.
+        let pairs: &[(&str, Option<&str>, SequenceStep)] = &[
+            (
+                "browser_click",
+                None,
+                SequenceStep::Click {
+                    target: "target_1".into(),
+                    button: "primary".into(),
+                    click_count: 1,
+                },
+            ),
+            (
+                "browser_fill_form",
+                Some("fill"),
+                SequenceStep::Fill {
+                    target: "target_1".into(),
+                    value: "Ada".into(),
+                },
+            ),
+            (
+                "browser_type_text",
+                None,
+                SequenceStep::TypeText {
+                    target: "target_1".into(),
+                    text: "Ada".into(),
+                    clear_first: false,
+                },
+            ),
+            (
+                "browser_press_key",
+                None,
+                SequenceStep::PressKey {
+                    key: "Enter".into(),
+                    target: None,
+                    modifiers: Vec::new(),
+                },
+            ),
+            (
+                "browser_scroll",
+                None,
+                SequenceStep::Scroll {
+                    target: None,
+                    direction: None,
+                    amount: None,
+                },
+            ),
+            (
+                "browser_hover",
+                None,
+                SequenceStep::Hover {
+                    target: "target_1".into(),
+                },
+            ),
+            (
+                "browser_wait",
+                None,
+                SequenceStep::Wait {
+                    condition: "load_ready".into(),
+                    value: None,
+                    target: None,
+                },
+            ),
+        ];
+        for (tool, variant, step) in pairs {
+            let expected = DIRECTORY
+                .iter()
+                .find(|entry| entry.tool == *tool && entry.variant == *variant)
+                .unwrap_or_else(|| panic!("no DIRECTORY entry for tool={tool} variant={variant:?}"))
+                .requirements;
+            assert_eq!(
+                sequence_step_requirements(step),
+                expected,
+                "tool={tool} variant={variant:?}: sequence step requirements diverged from its \
+                 standalone tool's DIRECTORY entry"
+            );
+        }
     }
 }

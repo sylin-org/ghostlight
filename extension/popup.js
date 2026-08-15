@@ -6,6 +6,7 @@
   const linkDot = document.getElementById("link-dot");
   const sessionStatus = document.getElementById("session-status");
   const sessionButton = document.getElementById("session-button");
+  const releaseDebuggerButton = document.getElementById("release-debugger-button");
   const attentionSection = document.getElementById("attention-section");
   const attentionList = document.getElementById("attention-list");
   const captions = document.getElementById("captions-toggle");
@@ -69,6 +70,20 @@
     sessionButton.disabled = !snapshot.connected || !snapshot.compatible;
   }
 
+  // Unlike "End session now", this never needs a live connection: it is a purely local release
+  // of Chrome's own debugger attachment, not a governance decision the orchestrator has to make.
+  // It exists specifically for the case "End session" cannot cover -- the service crashed, was
+  // uninstalled, or is simply not running -- which used to leave the automation banner stuck with
+  // no way to clear it short of Chrome's own infobar or closing every tab by hand.
+  function renderReleaseDebugger(snapshot) {
+    const attached = snapshot.attached_tabs || 0;
+    releaseDebuggerButton.hidden = attached === 0;
+    releaseDebuggerButton.disabled = attached === 0;
+    releaseDebuggerButton.textContent = attached === 1
+      ? "Release debugger session (1 tab)"
+      : `Release debugger sessions (${attached} tabs)`;
+  }
+
   function attentionRecords(snapshot) {
     if (snapshot.control_state !== "attention") return [];
     const grouped = new Map();
@@ -118,6 +133,7 @@
     renderLink(snapshot);
     renderHold(snapshot);
     renderSession(snapshot);
+    renderReleaseDebugger(snapshot);
     renderAttention(snapshot);
   }
 
@@ -161,6 +177,16 @@
   sessionButton.addEventListener("click", async () => {
     sessionButton.disabled = true;
     await attentionAction(sessionButton.dataset.intent);
+  });
+  releaseDebuggerButton.addEventListener("click", async () => {
+    releaseDebuggerButton.disabled = true;
+    try {
+      await request({ kind: "release_debugger_sessions" });
+    } catch (error) {
+      sessionStatus.textContent = String(error?.message ?? error);
+    } finally {
+      await refresh();
+    }
   });
   captions.addEventListener("change", async () => {
     try {

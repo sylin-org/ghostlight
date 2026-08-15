@@ -804,7 +804,17 @@ function downloadSettled(downloadId) {
     const watch = (delta) => {
       if (delta.id === downloadId && delta.state) observe(delta.state.current);
     };
-    const timer = setTimeout(() => settle(new Error("the browser did not finish writing the replay")), DOWNLOAD_SETTLE_MS);
+    const timer = setTimeout(() => {
+      // The caller's finally block revokes the source blob URL the instant this promise settles,
+      // whether it resolves or rejects. Giving up here without also stopping the download used
+      // to leave Chrome writing from a URL that had just gone dead -- a slow disk, a large
+      // recording, or a synced Downloads folder could then deliver a truncated file while still
+      // reporting success from a stale in-flight search, or a spurious failure if it did not.
+      // Requesting cancellation first means the write has genuinely stopped by the time the URL
+      // disappears, not merely that this function stopped waiting for it to.
+      chrome.downloads.cancel(downloadId).catch(() => {});
+      settle(new Error("the browser did not finish writing the replay"));
+    }, DOWNLOAD_SETTLE_MS);
     chrome.downloads.onChanged.addListener(watch);
     // The download can finish before the listener attaches, and then no change ever arrives.
     chrome.downloads.search({ id: downloadId }).then(([item]) => observe(item?.state)).catch(() => {});
@@ -1378,6 +1388,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.kind === "runtime_control") {
       requestRuntimeControl(message.intent);
       return { queued: true };
+    }
+    if (message?.kind === "release_debugger_sessions") {
+      // A purely local, mechanical release -- unlike runtime_control, this never touches the
+      // native port and needs no session state at all. It exists because releasing a debugger
+      // attachment (and Chrome's own "controlled by automated software" banner with it) is not a
+      // governance decision the orchestrator has to make; it is the same kind of thing as closing
+      // the tab by hand. If the service is gone for good -- crashed, uninstalled, never
+      // restarted -- the normal path never fires (it only detaches on an explicit "ended" signal
+      // the service has to send), and the person is left with no way to clear the banner short of
+      // Chrome's own infobar or closing every tab. This is that way.
+      await debuggerLifecycle.detachAll();
+      return { released: true };
     }
     if (message?.kind === "attention_action") {
       if (message.disposition === "keep_paused") return { queued: false };

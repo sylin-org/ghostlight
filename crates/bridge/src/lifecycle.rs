@@ -60,7 +60,7 @@ fn lock_is_contended(error: &io::Error) -> bool {
     {
         error.raw_os_error() == Some(ERROR_LOCK_VIOLATION)
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(not(windows))]
     {
         false
     }

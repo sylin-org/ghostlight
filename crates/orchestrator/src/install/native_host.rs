@@ -680,6 +680,10 @@ fn same_path(left: &Path, right: &Path, platform: NativeHostPlatform) -> bool {
 }
 
 fn write_file_atomic(path: &Path, contents: &str) -> Result<(), NativeHostError> {
+    let path = &super::resolve_through_symlink(path).map_err(|source| NativeHostError::Write {
+        path: path.to_path_buf(),
+        source,
+    })?;
     let parent = path
         .parent()
         .ok_or_else(|| NativeHostError::InvalidPath(path.to_path_buf()))?;
@@ -876,6 +880,61 @@ mod tests {
             self.registry().remove(key);
             Ok(())
         }
+    }
+
+    fn symlink_probe_directory(name: &str) -> PathBuf {
+        let directory = env::temp_dir().join(format!(
+            "ghostlight-native-host-{name}-{}-{}",
+            std::process::id(),
+            Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_file_atomic_writes_through_a_symlinked_registration_file() {
+        use std::os::unix::fs::symlink;
+
+        let directory = symlink_probe_directory("symlink-unix");
+        let real = directory.join("real-registration.json");
+        fs::write(&real, "old").unwrap();
+        let link = directory.join("registration.json");
+        symlink(&real, &link).unwrap();
+
+        write_file_atomic(&link, "new").unwrap();
+
+        // The link is untouched -- still a symlink, still pointing at the same real file.
+        // Before write_file_atomic resolved through the link, the rename inside it unlinked the
+        // link and left a plain file in its place, orphaning whatever the link pointed to.
+        let metadata = fs::symlink_metadata(&link).unwrap();
+        assert!(metadata.file_type().is_symlink());
+        assert_eq!(fs::read_to_string(&real).unwrap(), "new");
+        assert_eq!(fs::read_to_string(&link).unwrap(), "new");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn write_file_atomic_writes_through_a_symlinked_registration_file() {
+        use std::os::windows::fs::symlink_file;
+
+        let directory = symlink_probe_directory("symlink-windows");
+        let real = directory.join("real-registration.json");
+        fs::write(&real, "old").unwrap();
+        let link = directory.join("registration.json");
+        if symlink_file(&real, &link).is_err() {
+            // No symlink privilege (Developer Mode / an elevated shell) in this environment.
+            // The equivalent Unix test above exercises the same write_file_atomic logic.
+            return;
+        }
+
+        write_file_atomic(&link, "new").unwrap();
+
+        let metadata = fs::symlink_metadata(&link).unwrap();
+        assert!(metadata.file_type().is_symlink());
+        assert_eq!(fs::read_to_string(&real).unwrap(), "new");
+        assert_eq!(fs::read_to_string(&link).unwrap(), "new");
     }
 
     fn context(platform: NativeHostPlatform) -> NativeHostContext {
