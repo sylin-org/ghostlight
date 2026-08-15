@@ -1508,11 +1508,9 @@ impl GovernanceFacade {
     /// The organization layer stays exactly as it is, because a preview that ignored the ceiling
     /// would answer a question nobody asked. Nothing here writes a file, changes authority, or
     /// records audit (ADR-0122 Decision 7).
-    pub fn candidate_snapshot(
-        &self,
-        document: &str,
-    ) -> Result<AuthoritySnapshot, manifest::ManifestError> {
+    pub fn candidate_snapshot(&self, document: &str) -> Result<Candidate, manifest::ManifestError> {
         let candidate = manifest::parse(document, "this policy")?;
+        let rules = candidate.grants.len();
         self.refresh_policies();
         let (managed, managed_sequence, managed_valid) = {
             let policies = self
@@ -1525,15 +1523,18 @@ impl GovernanceFacade {
                 policies.managed_valid(),
             )
         };
-        Ok(assemble(
-            &RequestRestrictions::default(),
-            [
-                (managed, AuthorityTier::Managed),
-                (Some(candidate), AuthorityTier::User),
-            ],
-            managed_sequence,
-            managed_valid,
-        ))
+        Ok(Candidate {
+            snapshot: assemble(
+                &RequestRestrictions::default(),
+                [
+                    (managed, AuthorityTier::Managed),
+                    (Some(candidate), AuthorityTier::User),
+                ],
+                managed_sequence,
+                managed_valid,
+            ),
+            rules,
+        })
     }
 
     /// Whether an organization layer permits a locally authored user policy.
@@ -1555,6 +1556,18 @@ impl GovernanceFacade {
             .and_then(|policy| policy.boolean_setting("policy.user.enabled"))
             .unwrap_or(true)
     }
+}
+
+/// One candidate policy, decided but not applied.
+///
+/// The rule count travels with the snapshot because a policy with no rules allows nothing, and a
+/// preview that reported only the resulting refusals would read as an accusation about the past
+/// rather than a statement about an empty draft.
+pub struct Candidate {
+    /// The authority this candidate would produce, under the organization ceiling as it stands.
+    pub snapshot: AuthoritySnapshot,
+    /// How many rules the candidate authors.
+    pub rules: usize,
 }
 
 /// Why a locally authored user policy could not be applied.
@@ -2569,11 +2582,13 @@ mod tests {
         .unwrap();
         let facade = GovernanceFacade::owning_user_policy(owned.clone(), Some(managed.clone()));
 
-        let candidate = facade
+        let decided = facade
             .candidate_snapshot(
                 r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"wide","hosts":{"allow":["*"]},"allowed":["read","action","write"]}]}"#,
             )
             .unwrap();
+        assert_eq!(decided.rules, 1);
+        let candidate = decided.snapshot;
         // The candidate asks for more than the organization allows, so the ceiling still wins.
         assert!(
             candidate

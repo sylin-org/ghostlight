@@ -602,13 +602,14 @@ impl WorkbenchFacade {
             .governance
             .candidate_snapshot(document)
             .map_err(|error| error.to_string())?;
+        let snapshot = &candidate.snapshot;
         let history = self.projection.history();
         let considered = history.iter().filter(|item| item.allowed).count();
         let mut refused: Vec<PreviewRefusal> = Vec::new();
         for item in history.iter().filter(|item| item.allowed) {
             let decision = item.observed.host.as_deref().map_or_else(
-                || candidate.authorize_requirements(item.requirements),
-                |host| candidate.authorize_landing(item.requirements, &format!("https://{host}")),
+                || snapshot.authorize_requirements(item.requirements),
+                |host| snapshot.authorize_landing(item.requirements, &format!("https://{host}")),
             );
             if decision.allowed && !decision.observed {
                 continue;
@@ -629,16 +630,33 @@ impl WorkbenchFacade {
         }
         refused.sort_by_key(|entry| std::cmp::Reverse(entry.count));
         let refused_total: usize = refused.iter().map(|entry| entry.count).sum();
-        let summary = if considered == 0 {
-            "There is no recorded work on this machine to check this against yet.".to_owned()
+        // Every sentence here is explicitly about the draft, in the conditional. An earlier
+        // wording stated the count on its own, which read as a claim that this machine's recorded
+        // work had been refused -- the opposite of what it means, and alarming to anyone who had
+        // just watched that work succeed.
+        let summary = if candidate.rules == 0 {
+            "These rules allow nothing yet, because there are none. Add at least one rule; \
+             until then this policy would refuse everything."
+                .to_owned()
+        } else if considered == 0 {
+            "There is no recorded work on this machine to check these rules against yet.".to_owned()
         } else if refused_total == 0 {
-            format!("Nothing in the last {considered} recorded actions would have been refused.")
+            format!(
+                "If these rules had been applied, nothing in the last {considered} recorded \
+                 actions would have been refused."
+            )
         } else {
             format!(
-                "{refused_total} of the last {considered} recorded actions would have been refused."
+                "If these rules had been applied, {refused_total} of the last {considered} \
+                 recorded actions would have been refused."
             )
         };
         refused.truncate(PREVIEW_DETAIL_LIMIT);
+        // An empty draft refuses everything by definition. Listing what it would refuse turns one
+        // explainable sentence into a wall of alarming detail about work that was never at risk.
+        if candidate.rules == 0 {
+            refused.clear();
+        }
         Ok(PolicyPreview {
             considered,
             refused_total,
@@ -1714,7 +1732,7 @@ mod tests {
         assert_eq!(preview.refused_total, 2);
         assert!(preview
             .summary
-            .contains("2 of the last 4 recorded actions would have been refused"));
+            .contains("If these rules had been applied, 2 of the last 4 recorded actions"));
         assert!(preview
             .refused
             .iter()
@@ -1726,7 +1744,20 @@ mod tests {
             )
             .unwrap();
         assert_eq!(unchanged.refused_total, 0);
-        assert!(unchanged.summary.contains("Nothing in the last 4"));
+        assert!(unchanged
+            .summary
+            .contains("nothing in the last 4 recorded actions would have been refused"));
+
+        // A draft with no rules refuses everything by definition. The count is arithmetically
+        // right and useless, so the sentence explains the draft instead of reporting a number
+        // that reads as a claim about work this machine already completed.
+        let empty = facade
+            .preview_user_policy(r#"{"schema":3,"name":"mine","version":"1","grants":[]}"#)
+            .unwrap();
+        assert_eq!(empty.refused_total, 4);
+        assert!(empty.refused.is_empty());
+        assert!(empty.summary.starts_with("These rules allow nothing yet"));
+        assert!(!empty.summary.contains("4 of the last 4"));
 
         assert!(facade.preview_user_policy("not a policy").is_err());
     }

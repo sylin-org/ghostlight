@@ -619,11 +619,25 @@
           + `</div></article>`;
       }).join("");
       el["observe-mode"].checked = draft.observe;
-      el["apply-policy"].disabled = !draft.dirty;
       el["discard-policy"].hidden = !draft.dirty;
-      if (!draft.rules.length) {
+      editorReady();
+    }
+
+    /**
+     * What the editor will let you do with the draft as it stands.
+     *
+     * A draft with no rules is a policy that refuses everything, so neither applying it nor asking
+     * what it would have done is a question worth answering. Saying that once, plainly, beats
+     * letting someone press a button and read a number that sounds like an accusation.
+     */
+    function editorReady() {
+      const empty = !draft?.rules.length;
+      el["apply-policy"].disabled = empty || !draft?.dirty;
+      el["check-policy"].disabled = empty;
+      if (empty) {
+        previewCleared();
         el["editor-status"].textContent =
-          "No rules yet. With none, this policy refuses everything, so add at least one before applying.";
+          "No rules yet. A policy with none refuses everything, so add at least one.";
       }
     }
 
@@ -676,8 +690,8 @@
       if (!draft?.rules[index]) return;
       draft.rules[index][field] = value;
       draft.dirty = true;
-      el["apply-policy"].disabled = false;
       el["discard-policy"].hidden = false;
+      editorReady();
       if (field === "hosts") refreshRuleHints(index);
     }
 
@@ -750,8 +764,8 @@
       if (!draft) return;
       draft.observe = on;
       draft.dirty = true;
-      el["apply-policy"].disabled = false;
       el["discard-policy"].hidden = false;
+      editorReady();
     }
 
     function discardDraft() {
