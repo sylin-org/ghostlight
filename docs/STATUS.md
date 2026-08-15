@@ -199,6 +199,25 @@ reboot, or public-release pass.
   `linuxdeploy` strip tool cannot parse CachyOS `.relr.dyn` sections, so no AppImage pass is
   claimed. The Ubuntu/Debian lifecycle table remains untouched and blocking.
 
+## Linux experience research
+
+[Research 25](research/25-delightful-linux-experience-2026-08.md) records the 2026-08-15 prior-art
+sweep for a broad but simple Linux user experience. It is research input, not an accepted contract
+or an implementation claim.
+
+- The proposed 1.0 shape is one no-sudo per-user default, one proven Debian package, and one
+  verified portable archive, all delegating to the same installer core and three-sibling unit.
+- The highest-value gaps are a normal Applications entry that visibly opens on first use, typed
+  Snap/Flatpak browser diagnosis, a declared old-enough build baseline, and one clean GNOME Wayland
+  release lifecycle alongside the current CachyOS KDE development evidence.
+- RPM is the next rational native format only after a separate scope decision and a real lifecycle
+  host. AppImage, Snap, Flatpak, AUR, and Nix artifacts do not become 1.0 gates merely because their
+  packaging tools exist.
+- ADR-0112's backgrounded first launch, implemented on Linux by ADR-0118 as a hidden workbench plus
+  a tray, conflicts with an explicit Applications launch on a desktop that may not show that tray.
+  Any remedy must preserve connector demand-start and one authority, and needs an ADR amendment
+  before code changes.
+
 - `dev` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`. It absorbed
   `ghostlight-1.0`, which was a fast-forward and has been retired.
 - `main` carries the 0.8 line at `0116feca`. Promoting it is a deliberate release decision, not
