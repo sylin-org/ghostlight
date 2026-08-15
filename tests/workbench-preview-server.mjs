@@ -47,7 +47,69 @@ const snapshot = {
     managed_authority_active: false,
     managed_authority_valid: true,
     runtime_control_file_configured: false,
-    managed_policy: { configured: false }
+    managed_policy: { configured: false },
+    policy: {
+      situation: "layered",
+      label: "Northwind",
+      detail: "Northwind sets the rules, and you have narrowed them further.",
+      tone: "applied"
+    }
+  }
+};
+
+// The compiled policy the Policy destination reads. Shaped exactly like the orchestrator's own
+// projection so the preview exercises the real rendering, including a rule it can prove is inert.
+const policyView = {
+  situation: "layered",
+  headline: "Northwind sets the rules, and you have narrowed them further.",
+  organization: {
+    name: "Northwind",
+    statement: "Browser work stays inside approved support sites.",
+    url: "https://northwind.example/browser-policy",
+    contacts: [{ kind: "email", value: "security@northwind.example", label: "Security team" }]
+  },
+  capabilities: [
+    { capability: "read", label: "Look at pages", covers: "Read page text, take screenshots, scroll, and find things on a page.", state: "sites", detail: "Available on specific sites only, set by Northwind.", decided_by: ["organization"] },
+    { capability: "action", label: "Click and type", covers: "Click, type, press keys, drag, and move through history.", state: "sites", detail: "Available on specific sites only, set by Northwind and you.", decided_by: ["organization", "user"] },
+    { capability: "write", label: "Fill in forms", covers: "Enter information into forms and upload files.", state: "unavailable", detail: "Not available anywhere. Northwind does not allow it.", decided_by: ["organization"] },
+    { capability: "execute", label: "Run page code", covers: "Run JavaScript inside a page.", state: "unavailable", detail: "Not available anywhere. Northwind does not allow it.", decided_by: ["organization"] }
+  ],
+  layers: [
+    {
+      kind: "organization", title: "Northwind", policy_name: "Support workspace", version: "2026-08-14", mode: "enforce",
+      rules: [{ id: "support-sites", description: "Ordinary support work", allow: ["support.northwind.example", "*.support.northwind.example"], deny: ["admin.support.northwind.example"], allowed: ["read", "action"], mode: "enforce", note: null }],
+      settings: [{ key: "browser.tabs.allow_close", value: "false", level: "mandatory" }],
+      path: null,
+      document: '{\n  "schema": 3,\n  "name": "Support workspace",\n  "version": "2026-08-14"\n}'
+    },
+    {
+      kind: "user", title: "Your rules", policy_name: "Your rules", version: "2026-08-14", mode: "enforce",
+      rules: [
+        { id: "rule-1", description: null, allow: ["*.support.northwind.example"], deny: [], allowed: ["read", "action"], mode: "enforce", note: null },
+        { id: "rule-2", description: "Left over from last week", allow: ["one.support.northwind.example"], deny: [], allowed: ["read"], mode: "enforce", note: "unreachable" }
+      ],
+      settings: [],
+      path: "C:/Users/you/AppData/Local/Ghostlight/user-policy.json",
+      document: '{\n  "schema": 3,\n  "name": "Your rules",\n  "version": "2026-08-14"\n}'
+    }
+  ],
+  ceilings: [
+    "Anything that is not an ordinary http or https address.",
+    "localhost and any name ending in .localhost.",
+    "Loopback and link-local addresses."
+  ],
+  user_layer: {
+    source: "workbench",
+    authoring_allowed: true,
+    editable: true,
+    path: "C:/Users/you/AppData/Local/Ghostlight/user-policy.json",
+    blocked_reason: null
+  },
+  passport: {
+    configured: true, verified: true, freshness: "fresh", sequence: 7,
+    organization: "Northwind", rationale: "Browser work stays inside approved support sites.",
+    contacts: [{ kind: "email", value: "security@northwind.example", label: "Security team" }],
+    source_class: "https", last_success_ms: Date.now() - 240000, last_attempt_ms: Date.now() - 240000
   }
 };
 
@@ -126,6 +188,20 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
       invoke: async (command, args = {}) => {
         if (command === "workbench_snapshot") return preview;
         if (command === "workbench_search") return [];
+        if (command === "workbench_policy") return policyView;
+        if (command === "preview_user_policy") {
+          return {
+            considered: 42,
+            refused_total: 3,
+            refused: [
+              { tool: "browser_execute", host: "github.com", count: 2 },
+              { tool: "browser_upload", host: null, count: 1 }
+            ],
+            summary: "3 of the last 42 recorded actions would have been refused."
+          };
+        }
+        if (command === "apply_user_policy") return { accepted: true, runtime_state: "active", browser_notified: false, message: "Your rules are applied: Your rules 2026-08-14." };
+        if (command === "remove_user_policy") return { accepted: true, runtime_state: "active", browser_notified: false, message: "Your rules are removed." };
         if (command === "apply_runtime_intent") {
           const state = args.intent === "end_session" ? "ended" : args.intent === "hold" ? "held" : "active";
           preview.service.runtime_state = state;

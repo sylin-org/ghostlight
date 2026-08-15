@@ -13,6 +13,7 @@
 
   const {
     VIEWS, GLYPHS, EFFECT_STORY, READINESS_NOTE, DESTINATIONS, glyphFor, capabilityClass,
+    CAPABILITY_ORDER, hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
@@ -263,42 +264,6 @@
       return "Quiet";
     }
 
-    function policyState(config = {}) {
-      const sources = [
-        {
-          name: "Local",
-          configured: Boolean(config.local_policy_configured),
-          active: Boolean(config.local_policy_active),
-          valid: Boolean(config.local_policy_valid)
-        },
-        {
-          name: "Managed",
-          configured: Boolean(config.managed_authority_configured),
-          active: Boolean(config.managed_authority_active),
-          valid: Boolean(config.managed_authority_valid)
-        }
-      ];
-      const active = sources.filter((source) => source.active);
-      const unavailable = sources.filter((source) => source.configured && !source.active);
-      const stale = sources.filter((source) => source.active && !source.valid);
-
-      if (unavailable.length) {
-        return {
-          label: "Policy issue",
-          tone: "failing",
-          detail: `${unavailable.map((source) => source.name).join(" and ")} policy is unavailable; work fails closed.`
-        };
-      }
-      if (!active.length) {
-        return { label: "All open", tone: "open", detail: "No authored policy is applied." };
-      }
-      const label = active.length === 1 ? "Policy applied" : `${active.length} policies applied`;
-      const names = active.map((source) => source.name).join(" and ");
-      return stale.length
-        ? { label, tone: "warning", detail: `${names} policy remains applied; its latest reload needs attention.` }
-        : { label, tone: "applied", detail: `${names} policy is applied.` };
-    }
-
     function band(facts) {
       const name = bandClass(facts);
       document.body.className = name;
@@ -313,11 +278,15 @@
           + ` &middot; <b>${facts.snapshot.history.length}</b> recorded`;
       }
 
-      const policy = policyState(facts.snapshot?.configuration);
-      el["policy-state-label"].textContent = policy.label;
-      el["policy-state"].dataset.tone = policy.tone;
-      el["policy-state"].title = policy.detail;
-      el["policy-state"].setAttribute("aria-label", `Open Status. ${policy.detail}`);
+      // The chip is authored by the orchestrator. A surface that invents its own policy words is a
+      // second source of truth about the one thing that must have exactly one.
+      const policy = facts.snapshot?.configuration?.policy;
+      if (policy) {
+        el["policy-state-label"].textContent = policy.label;
+        el["policy-state"].dataset.tone = policy.tone;
+        el["policy-state"].title = policy.detail;
+        el["policy-state"].setAttribute("aria-label", `Open Policy. ${policy.detail}`);
+      }
 
       const paused = facts.runtime !== "active";
       el.wheel.disabled = !facts.connected;
@@ -434,47 +403,358 @@
         + `${escapeHtml(item.severity)}</span><h2>${escapeHtml(item.label)}</h2>`
         + `<p>${escapeHtml(item.detail)}</p></article>`).join("");
 
-      const config = snapshot.configuration;
-      const sources = [
-        ["Local policy", config.local_policy_configured, config.local_policy_active, config.local_policy_valid, "Authority rules you own."],
-        ["Managed authority", config.managed_authority_configured, config.managed_authority_active, config.managed_authority_valid, "A monotonic managed restriction layer."],
-        ["Runtime control file", config.runtime_control_file_configured, config.runtime_control_file_configured, true, "A local final-boundary control source."]
-      ];
-      el["authority-grid"].innerHTML = sources.map(([title, configured, active, valid, detail]) => {
-        const severity = !configured ? "" : active && valid ? "passing" : active ? "warning" : "failing";
-        const label = !configured ? "not configured" : active && valid ? "applied" : active
-          ? "applied; latest reload invalid" : "invalid, failing closed";
-        return `<article class="card"><span class="severity ${severity}"><span class="dot"></span>${escapeHtml(label)}</span>`
-          + `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(detail)}</p></article>`;
-      }).join("");
-
-      const passport = config.managed_policy;
-      if (passport?.configured) {
-        const organization = passport.organization || "Managed policy";
-        const freshness = words(passport.freshness);
-        const sequence = passport.sequence == null ? "No verified sequence" : `Verified sequence ${passport.sequence}`;
-        const source = passport.source_class === "https" ? "HTTPS" : words(passport.source_class);
-        const checked = passport.last_success_ms
-          ? ` Last verified ${new Date(passport.last_success_ms).toLocaleString()}.`
-          : "";
-        const contacts = (passport.contacts || []).map((contact) => {
-          const label = contact.label || words(contact.kind);
-          return `${label}: ${contact.value}`;
-        });
-        const detail = [passport.rationale, `${sequence} from ${source}. ${freshness}.${checked}`, ...contacts]
-          .filter(Boolean)
-          .join(" ");
-        const severity = passport.verified ? (passport.freshness === "fresh" ? "passing" : "") : "failing";
-        el["authority-grid"].insertAdjacentHTML("beforeend",
-          `<article class="card"><span class="severity ${severity}"><span class="dot"></span>${escapeHtml(freshness)}</span>`
-          + `<h2>${escapeHtml(organization)}</h2><p>${escapeHtml(detail)}</p></article>`);
-      }
-
       const started = snapshot.service.started_at_ms
         ? new Date(snapshot.service.started_at_ms).toLocaleString()
         : "unknown";
       el.colophon.textContent =
         `Ghostlight ${snapshot.service.version} - running since ${started} - everything on this page stays on this device.`;
+    }
+
+    /* -------------------------------- policy -------------------------------- */
+
+    /*
+     * The one page that answers "what may agents do here, and who decided".
+     *
+     * Everything drawn below arrives compiled from the orchestrator. This function chooses shapes
+     * and order; it never decides what is allowed, never composes a policy sentence, and never
+     * computes a decision. The draft the editor holds is disposable view state and stays that way
+     * until the person applies it.
+     */
+    let draft = null;
+    let applied = null;
+
+    function policy(view) {
+      applied = view;
+      el["policy-headline"].textContent = view.headline;
+
+      organizationCard(view.organization, view.passport);
+
+      el["capability-board"].innerHTML = view.capabilities.map((line) => {
+        const tone = line.state === "available" ? "ok" : line.state === "sites" ? "some" : "no";
+        const badge = line.state === "available" ? "Allowed"
+          : line.state === "sites" ? "Some sites" : "Not allowed";
+        return `<article class="cap cap-${tone}">`
+          + `<div class="cap-top"><h3>${escapeHtml(line.label)}</h3>`
+          + `<span class="cap-state">${badge}</span></div>`
+          + `<p class="cap-covers">${escapeHtml(line.covers)}</p>`
+          + `<p class="cap-detail">${escapeHtml(line.detail)}</p></article>`;
+      }).join("");
+
+      el["policy-ceilings"].innerHTML = view.ceilings
+        .map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+
+      el["policy-layers"].innerHTML = view.layers.map(layerSection).join("");
+
+      const user = view.user_layer;
+      el["policy-editor"].hidden = !user.editable;
+      el["policy-blocked"].hidden = user.editable || !user.blocked_reason;
+      if (user.blocked_reason) el["policy-blocked-reason"].textContent = user.blocked_reason;
+      el["policy-remove"].hidden = !(user.editable && user.source === "workbench" && hasUserLayer(view));
+
+      if (user.editable) {
+        draft = draftFrom(view);
+        renderRules();
+      }
+    }
+
+    function hasUserLayer(view) {
+      return view.layers.some((layer) => layer.kind === "user");
+    }
+
+    function organizationCard(organization, passport) {
+      const card = el["policy-organization"];
+      if (!organization && !passport?.configured) {
+        card.hidden = true;
+        card.innerHTML = "";
+        return;
+      }
+      const name = organization?.name || passport?.organization || "Your organization";
+      const statement = organization?.statement || passport?.rationale;
+      const contacts = (organization?.contacts?.length ? organization.contacts : passport?.contacts || [])
+        .map((contact) => `<li><span>${escapeHtml(contact.label || words(contact.kind))}</span>${escapeHtml(contact.value)}</li>`)
+        .join("");
+      const provenance = [];
+      if (passport?.configured) {
+        provenance.push(words(passport.freshness));
+        if (passport.sequence != null) provenance.push(`verified sequence ${passport.sequence}`);
+        if (passport.source_class && passport.source_class !== "none") {
+          provenance.push(passport.source_class === "https" ? "from an HTTPS source" : `from a ${words(passport.source_class)} source`);
+        }
+        if (passport.last_success_ms) {
+          provenance.push(`last checked ${new Date(passport.last_success_ms).toLocaleString()}`);
+        }
+      }
+      card.hidden = false;
+      card.innerHTML = `<h2>${escapeHtml(name)}</h2>`
+        + (statement ? `<p class="org-statement">${escapeHtml(statement)}</p>` : "")
+        + (organization?.url ? `<p class="org-url">${escapeHtml(organization.url)}</p>` : "")
+        + (contacts ? `<ul class="org-contacts">${contacts}</ul>` : "")
+        + (provenance.length ? `<p class="org-provenance">${escapeHtml(provenance.join(", "))}.</p>` : "");
+    }
+
+    function layerSection(layer) {
+      const rules = layer.rules.length
+        ? layer.rules.map((rule) => {
+          const note = rule.note === "unreachable"
+            ? `<span class="rule-note">An earlier rule already covers this, so it never applies.</span>`
+            : rule.note === "no_effect"
+              ? `<span class="rule-note">Your organization already refuses this, so it changes nothing.</span>`
+              : "";
+          const hosts = rule.allow.length ? rule.allow.map(escapeHtml).join(", ") : "no sites";
+          const except = rule.deny.length ? ` except ${rule.deny.map(escapeHtml).join(", ")}` : "";
+          const verbs = rule.allowed.map((capability) => words(capability)).join(", ") || "nothing";
+          return `<li class="rule-read${rule.note ? " rule-inert" : ""}">`
+            + `<p><b>On ${hosts}</b>${except}, agents may ${escapeHtml(verbs)}.</p>`
+            + (rule.description ? `<p class="rule-why">${escapeHtml(rule.description)}</p>` : "")
+            + note
+            + `<span class="rule-mode">${escapeHtml(rule.mode === "observe" ? "watch only" : "enforced")}</span></li>`;
+        }).join("")
+        : `<li class="rule-read"><p>No rules. Nothing is allowed by this policy.</p></li>`;
+      const settings = layer.settings.length
+        ? `<ul class="settings">${layer.settings.map((setting) =>
+          `<li><code>${escapeHtml(setting.key)}</code> = ${escapeHtml(setting.value)}`
+          + ` <span class="level">${escapeHtml(setting.level)}</span></li>`).join("")}</ul>`
+        : "";
+      const source = layer.path ? `<p class="layer-source">${escapeHtml(layer.path)}</p>` : "";
+      const document = layer.document
+        ? `<details class="layer-doc"><summary>Show the exact document</summary><pre>${escapeHtml(layer.document)}</pre></details>`
+        : "";
+      return `<section class="layer" data-layer="${escapeHtml(layer.kind)}">`
+        + `<h2 class="subhead">${escapeHtml(layer.title)}</h2>`
+        + `<p class="layer-meta">${escapeHtml(layer.policy_name)} ${escapeHtml(layer.version)}`
+        + ` &middot; ${escapeHtml(layer.mode === "observe" ? "watch only" : "enforced")}</p>`
+        + source
+        + `<ul class="rules-read">${rules}</ul>`
+        + settings
+        + document
+        + `</section>`;
+    }
+
+    /* ------------------------------ the editor ----------------------------- */
+
+    /** Turn the applied user layer into an editable draft, or start an empty one. */
+    function draftFrom(view) {
+      const layer = view.layers.find((entry) => entry.kind === "user");
+      if (!layer) return { rules: [], observe: false, dirty: false };
+      return {
+        observe: layer.mode === "observe",
+        dirty: false,
+        rules: layer.rules.map((rule) => ({
+          id: rule.id,
+          hosts: rule.allow.join(", "),
+          description: rule.description || "",
+          allowed: new Set(rule.allowed)
+        }))
+      };
+    }
+
+    /** Which capabilities an organization has already refused everywhere. */
+    function ceilingFor(capability) {
+      const line = applied?.capabilities?.find((entry) => entry.capability === capability);
+      if (!line || line.state !== "unavailable") return null;
+      return line.detail;
+    }
+
+    function renderRules() {
+      if (!draft) return;
+      el["rule-list"].innerHTML = draft.rules.map((rule, index) => {
+        const boxes = CAPABILITY_ORDER.map((capability) => {
+          const blocked = ceilingFor(capability);
+          const checked = rule.allowed.has(capability) && !blocked;
+          return `<label class="cap-box${blocked ? " cap-box-blocked" : ""}">`
+            + `<input type="checkbox" data-rule="${index}" data-capability="${capability}"`
+            + `${checked ? " checked" : ""}${blocked ? " disabled" : ""}>`
+            + `<span>${escapeHtml(words(capability))}</span>`
+            + (blocked ? `<em>${escapeHtml(blocked)}</em>` : "")
+            + `</label>`;
+        }).join("");
+        const readback = rule.hosts
+          .split(",")
+          .map((pattern) => pattern.trim())
+          .filter(Boolean)
+          .map((pattern) => hostReadback(pattern))
+          .join("; ");
+        const shadow = shadowedBy(index);
+        return `<article class="rule-edit">`
+          + `<div class="rule-line"><span>On</span>`
+          + `<input class="hosts" type="text" data-rule="${index}" data-field="hosts"`
+          + ` value="${escapeHtml(rule.hosts)}" placeholder="example.com, *.example.com" spellcheck="false">`
+          + `<span>agents may</span></div>`
+          + `<div class="cap-boxes">${boxes}</div>`
+          + (readback ? `<p class="readback">Matches ${escapeHtml(readback)}.</p>` : `<p class="readback readback-empty">Add a site for this rule to do anything.</p>`)
+          + (shadow ? `<p class="rule-note">Rule ${shadow} above already covers this, so this one never applies. Move it up to use it.</p>` : "")
+          + `<div class="rule-foot">`
+          + `<input class="why" type="text" data-rule="${index}" data-field="description"`
+          + ` value="${escapeHtml(rule.description)}" placeholder="What is this rule for? (optional)" maxlength="200">`
+          + `<button class="link-button" type="button" data-rule="${index}" data-rule-action="up"${index === 0 ? " disabled" : ""}>Move up</button>`
+          + `<button class="link-button" type="button" data-rule="${index}" data-rule-action="remove">Remove</button>`
+          + `</div></article>`;
+      }).join("");
+      el["observe-mode"].checked = draft.observe;
+      el["apply-policy"].disabled = !draft.dirty;
+      el["discard-policy"].hidden = !draft.dirty;
+      if (!draft.rules.length) {
+        el["editor-status"].textContent =
+          "No rules yet. With none, this policy refuses everything, so add at least one before applying.";
+      }
+    }
+
+    /**
+     * Which earlier rule, if any, makes this one unreachable.
+     *
+     * Grants are answered in written order, so a later rule fully covered by an earlier one can
+     * never fire. Hiding that would turn a known ordering hazard into a silent one.
+     */
+    function shadowedBy(index) {
+      const rule = draft.rules[index];
+      const patterns = splitHosts(rule.hosts);
+      if (!patterns.length) return null;
+      for (let earlier = 0; earlier < index; earlier += 1) {
+        const above = draft.rules[earlier];
+        const covers = [...rule.allowed].every((capability) => above.allowed.has(capability));
+        const hosts = splitHosts(above.hosts);
+        if (covers && patterns.every((pattern) => hosts.some((broad) => patternCovers(broad, pattern)))) {
+          return earlier + 1;
+        }
+      }
+      return null;
+    }
+
+    function splitHosts(value) {
+      return String(value || "").split(",").map((pattern) => pattern.trim()).filter(Boolean);
+    }
+
+    /** Compose the document the orchestrator will validate. The surface authors no semantics. */
+    function draftDocument() {
+      if (!draft) return null;
+      return JSON.stringify({
+        schema: 3,
+        name: "Your rules",
+        version: new Date().toISOString().slice(0, 10),
+        mode: draft.observe ? "observe" : "enforce",
+        grants: draft.rules.map((rule, index) => {
+          const grant = {
+            id: rule.id && /^[A-Za-z0-9._-]+$/.test(rule.id) ? rule.id : `rule-${index + 1}`,
+            hosts: { allow: splitHosts(rule.hosts) },
+            allowed: CAPABILITY_ORDER.filter((capability) => rule.allowed.has(capability))
+          };
+          if (rule.description.trim()) grant.description = rule.description.trim();
+          return grant;
+        })
+      }, null, 2);
+    }
+
+    function editRule(index, field, value) {
+      if (!draft?.rules[index]) return;
+      draft.rules[index][field] = value;
+      draft.dirty = true;
+      el["apply-policy"].disabled = false;
+      el["discard-policy"].hidden = false;
+      if (field === "hosts") refreshRuleHints(index);
+    }
+
+    /**
+     * Update one rule's readback in place.
+     *
+     * Redrawing the whole list on every keystroke would take the caret with it, so the hints that
+     * depend on what was just typed are the only thing that changes while a person is typing.
+     */
+    function refreshRuleHints(index) {
+      const card = el["rule-list"].children[index];
+      if (!card) return;
+      const rule = draft.rules[index];
+      const patterns = splitHosts(rule.hosts);
+      const readback = card.querySelector(".readback");
+      if (readback) {
+        const text = patterns.map((pattern) => hostReadback(pattern)).join("; ");
+        readback.textContent = text ? `Matches ${text}.` : "Add a site for this rule to do anything.";
+        readback.classList.toggle("readback-empty", !text);
+      }
+      const shadow = shadowedBy(index);
+      let note = card.querySelector(".rule-note");
+      if (shadow && !note) {
+        note = document.createElement("p");
+        note.className = "rule-note";
+        readback?.insertAdjacentElement("afterend", note);
+      }
+      if (note) {
+        note.textContent = shadow
+          ? `Rule ${shadow} above already covers this, so this one never applies. Move it up to use it.`
+          : "";
+        note.hidden = !shadow;
+      }
+    }
+
+    function toggleCapability(index, capability, on) {
+      if (!draft?.rules[index]) return;
+      if (on) draft.rules[index].allowed.add(capability);
+      else draft.rules[index].allowed.delete(capability);
+      draft.dirty = true;
+      renderRules();
+    }
+
+    function ruleAction(index, action) {
+      if (!draft) return;
+      if (action === "remove") draft.rules.splice(index, 1);
+      if (action === "up" && index > 0) {
+        const [moved] = draft.rules.splice(index, 1);
+        draft.rules.splice(index - 1, 0, moved);
+      }
+      draft.dirty = true;
+      renderRules();
+    }
+
+    function addRule(seed) {
+      if (!draft) return;
+      draft.rules.push({
+        id: `rule-${draft.rules.length + 1}`,
+        hosts: seed || "",
+        description: "",
+        allowed: new Set(["read"])
+      });
+      draft.dirty = true;
+      renderRules();
+      const inputs = el["rule-list"].querySelectorAll(".hosts");
+      inputs[inputs.length - 1]?.focus();
+    }
+
+    function setObserve(on) {
+      if (!draft) return;
+      draft.observe = on;
+      draft.dirty = true;
+      el["apply-policy"].disabled = false;
+      el["discard-policy"].hidden = false;
+    }
+
+    function discardDraft() {
+      if (!applied) return;
+      draft = draftFrom(applied);
+      renderRules();
+      previewCleared();
+      el["editor-status"].textContent = "Back to the rules that are applied.";
+    }
+
+    function previewResult(preview) {
+      const box = el["policy-preview"];
+      box.hidden = false;
+      const rows = preview.refused.map((entry) =>
+        `<li><b>${escapeHtml(entry.tool)}</b>${entry.host ? ` on ${escapeHtml(entry.host)}` : ""}`
+        + ` <span>${entry.count}x</span></li>`).join("");
+      box.innerHTML = `<p class="preview-summary">${escapeHtml(preview.summary)}</p>`
+        + (rows ? `<ul class="preview-list">${rows}</ul>` : "");
+    }
+
+    function previewCleared() {
+      el["policy-preview"].hidden = true;
+      el["policy-preview"].innerHTML = "";
+    }
+
+    function editorStatus(message) {
+      el["editor-status"].textContent = message;
+    }
+
+    function draftIsDirty() {
+      return Boolean(draft?.dirty);
     }
 
     /** Repaint a section only when its own facts changed, so a safety pull never rewrites a
@@ -607,6 +887,8 @@
       el, attempt,
       hero, row, drop, promote, rebuildFeed, queueCount,
       band, collections, navigate, toast,
+      policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule,
+      setObserve, discardDraft, renderRules, previewResult, previewCleared, editorStatus,
       openPalette, closePalette, paletteOpen, paletteQuery, searchResults, searchFailed,
       confirmRemoval, answerConfirmation,
       tickElapsed, tickAges, armCard

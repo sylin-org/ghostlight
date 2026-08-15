@@ -1221,7 +1221,10 @@ mod tests {
 
     #[test]
     fn managed_policy_passport_surfaces_every_signed_provenance_fact() {
-        let app = &surface_source();
+        // Optional chaining is ordinary in the surface, so the guard compares the reach itself
+        // rather than the punctuation around it. What it protects is unchanged: every signed
+        // provenance fact is rendered somewhere a person can see it.
+        let app = &surface_source().replace("passport?.", "passport.");
         for field in [
             "organization",
             "rationale",

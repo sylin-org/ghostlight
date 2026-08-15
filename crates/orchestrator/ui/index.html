@@ -19,16 +19,15 @@
         <span class="state-facts" id="state-facts"></span>
       </div>
 
-      <button class="policy-state" id="policy-state" type="button" data-view="status"
-              data-tone="open" aria-label="Open Status. Policy state is loading.">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9.4 12l1.9 1.9L15 10"/></svg>
-        <span id="policy-state-label">Policy</span>
-      </button>
-
       <nav class="tabs" aria-label="Ghostlight">
         <button class="tab active" type="button" data-view="monitor" aria-current="page">Monitor</button>
         <button class="tab" type="button" data-view="integrations">Integrations</button>
         <button class="tab" type="button" data-view="status">Status</button>
+        <button class="policy-state" id="policy-state" type="button" data-view="policy"
+                data-tone="open" aria-label="Open Policy. Policy state is loading.">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9.4 12l1.9 1.9L15 10"/></svg>
+          <span id="policy-state-label">Policy</span>
+        </button>
         <button class="tab" type="button" data-view="about">About</button>
       </nav>
 
@@ -80,8 +79,6 @@
           <button class="ghost-button" type="button" id="refresh-status">Refresh</button>
         </div>
         <div class="card-grid" id="diagnostic-grid"></div>
-        <h2 class="subhead">Authority sources</h2>
-        <div class="card-grid" id="authority-grid"></div>
         <section class="strip">
           <div>
             <h2>Runtime session</h2>
@@ -99,6 +96,68 @@
         </section>
         <p class="colophon" id="colophon"></p>
       </section>
+      <section class="view" id="view-policy" data-page="policy" aria-labelledby="policy-heading">
+        <div class="page-heading">
+          <div>
+            <span class="kicker">What agents may do here, and who decided</span>
+            <h1 id="policy-heading">Policy</h1>
+            <p id="policy-headline">Reading the policy that applies to this machine.</p>
+          </div>
+          <button class="ghost-button" type="button" id="refresh-policy">Refresh</button>
+        </div>
+
+        <div class="org-card" id="policy-organization" hidden></div>
+
+        <h2 class="subhead">Right now</h2>
+        <div class="cap-board" id="capability-board"></div>
+
+        <h2 class="subhead">Always off limits</h2>
+        <ul class="ceilings" id="policy-ceilings"></ul>
+
+        <div id="policy-layers"></div>
+
+        <section class="editor" id="policy-editor" hidden>
+          <div class="page-heading">
+            <div>
+              <span class="kicker">Only you can see or change this</span>
+              <h2 id="editor-heading">Your rules</h2>
+              <p id="editor-note">Each rule says where agents may work, and what they may do there.
+                Anything not covered by a rule is refused.</p>
+            </div>
+            <button class="ghost-button" type="button" id="add-rule">Add a rule</button>
+          </div>
+          <div class="rules" id="rule-list"></div>
+          <div class="editor-mode">
+            <label class="switch">
+              <input type="checkbox" id="observe-mode">
+              <span id="observe-label">Watch only, without blocking anything</span>
+            </label>
+          </div>
+          <div class="preview" id="policy-preview" hidden></div>
+          <div class="editor-actions">
+            <span class="editor-status" id="editor-status"></span>
+            <button class="ghost-button" type="button" id="check-policy">Check against my history</button>
+            <button class="ghost-button" type="button" id="discard-policy" hidden>Discard changes</button>
+            <button class="primary-button" type="button" id="apply-policy" disabled>Apply</button>
+          </div>
+        </section>
+
+        <section class="strip" id="policy-blocked" hidden>
+          <div>
+            <h2>Your own rules</h2>
+            <p id="policy-blocked-reason"></p>
+          </div>
+        </section>
+
+        <section class="strip" id="policy-remove" hidden>
+          <div>
+            <h2>Remove your rules</h2>
+            <p>Ghostlight goes back to whatever applies without them. Nothing else changes.</p>
+          </div>
+          <button class="danger-button" type="button" id="remove-policy">Remove</button>
+        </section>
+      </section>
+
       <section class="view" id="view-about" data-page="about" aria-label="About">
         <div class="about">
           <button class="tcg" id="about-card" type="button" data-destination="home"

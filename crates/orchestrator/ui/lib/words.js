@@ -14,7 +14,7 @@
   const FEED_LIMIT = 200;
 
   /** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
-  const VIEWS = { monitor: "Monitor", integrations: "MCP integrations", status: "Status", about: "About" };
+  const VIEWS = { monitor: "Monitor", integrations: "MCP integrations", status: "Status", policy: "Policy", about: "About" };
 
   /**
    * How long the band keeps saying "Working" after the last thing happened.
@@ -30,7 +30,7 @@
     activity: "monitor",
     history: "monitor",
     checkup: "status",
-    configuration: "status",
+    configuration: "policy",
     install: "integrations"
   };
 
@@ -88,7 +88,73 @@
   }
 
   function words(value) {
-    return String(value ?? "").replaceAll("_", " ");
+    return CAPABILITY_WORDS[value] ?? String(value ?? "").replaceAll("_", " ");
+  }
+
+  /* --------------------------- the policy grammar -------------------------- */
+
+  /** Canonical capability order, matching the orchestrator's own. */
+  const CAPABILITY_ORDER = ["read", "action", "write", "execute"];
+
+  /**
+   * What each capability does, in the words a person would use.
+   *
+   * The policy vocabulary is the orchestrator's; these are the labels the editor puts on a
+   * checkbox, so nobody has to learn what "action" means as a policy word before using the editor.
+   */
+  const CAPABILITY_WORDS = {
+    read: "look at pages",
+    action: "click and type",
+    write: "fill in forms",
+    execute: "run page code"
+  };
+
+  /**
+   * Whether a host pattern is one Ghostlight accepts.
+   *
+   * Mirrors the production matcher exactly: `*`, an exact hostname, or one leading `*.` suffix.
+   * The editor checks here so a person learns about a bad pattern while typing rather than when
+   * they press Apply, but the orchestrator still validates every document it is handed.
+   */
+  function validHostPattern(pattern) {
+    const value = String(pattern ?? "");
+    if (value === "*") return true;
+    const host = value.startsWith("*.") ? value.slice(2) : value;
+    if (!host || host.length > 253) return false;
+    return host.split(".").every((label) =>
+      label.length > 0 && label.length <= 63
+      && !label.startsWith("-") && !label.endsWith("-")
+      && /^[A-Za-z0-9-]+$/.test(label));
+  }
+
+  /**
+   * Say in plain words what a pattern matches.
+   *
+   * Ghostlight's suffix wildcard covers subdomains only, which is its own choice and differs from
+   * what a person may expect from other products. Stating the result removes the need to know.
+   */
+  function hostReadback(pattern) {
+    const value = String(pattern ?? "").trim();
+    if (!value) return "";
+    if (!validHostPattern(value)) return `${value} (not a site Ghostlight can match)`;
+    if (value === "*") return "any website";
+    if (value.startsWith("*.")) {
+      const suffix = value.slice(2);
+      return `anything under ${suffix}, but not ${suffix} itself`;
+    }
+    return `${value} exactly, and none of its subdomains`;
+  }
+
+  /** Whether every host matched by `narrow` is also matched by `broad`. */
+  function patternCovers(broad, narrow) {
+    if (broad === "*") return true;
+    if (String(broad).toLowerCase() === String(narrow).toLowerCase()) return true;
+    if (!String(broad).startsWith("*.")) return false;
+    const suffix = String(broad).slice(2).toLowerCase();
+    const candidate = String(narrow).startsWith("*.")
+      ? String(narrow).slice(2).toLowerCase()
+      : String(narrow).toLowerCase();
+    return candidate.length > suffix.length && candidate.endsWith(`.${suffix}`);
   }
 
   function duration(ms) {
@@ -208,6 +274,7 @@
 
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
-    DESTINATIONS, glyphFor, capabilityClass,
+    DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
+    validHostPattern, hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId });
 });

@@ -61,7 +61,15 @@ const snapshot = () => ({
     managed_authority_active: false,
     managed_authority_valid: true,
     runtime_control_file_configured: false,
-    managed_policy: { configured: false }
+    managed_policy: { configured: false },
+    // The band chip is authored by the orchestrator now. The surface must render exactly what it
+    // is handed, so this fixture carries a name no local computation could have produced.
+    policy: {
+      situation: "layered",
+      label: "Example Org",
+      detail: "Example Org sets the rules, and you have narrowed them further.",
+      tone: "applied"
+    }
   },
   overview: {}
 });
@@ -130,6 +138,57 @@ const connections = nodes.get("connections");
 const integrations = nodes.get("integration-grid");
 const policy = nodes.get("policy-state");
 const policyLabel = nodes.get("policy-state-label");
+
+// The Policy destination, drawn from a compiled view exactly as the orchestrator hands it over.
+// Nothing here is computed by the window, so the assertions below are about rendering fidelity:
+// the sentence, the decider on every line, the boundaries that survive an all-open machine, and
+// an editor that appears only when the person is actually allowed to author.
+const compiled = (editable) => ({
+  situation: "layered",
+  headline: "Example Org sets the rules, and you have narrowed them further.",
+  organization: {
+    name: "Example Org",
+    statement: "Ask the service desk for an exception.",
+    url: "https://example.test/policy",
+    contacts: [{ kind: "email", value: "security@example.test", label: "Security team" }]
+  },
+  capabilities: [
+    { capability: "read", label: "Look at pages", covers: "Read page text.", state: "sites", detail: "Available on specific sites only, set by Example Org.", decided_by: ["organization"] },
+    { capability: "action", label: "Click and type", covers: "Click and type.", state: "available", detail: "Available on ordinary websites. Nothing narrows it.", decided_by: [] },
+    { capability: "write", label: "Fill in forms", covers: "Enter information.", state: "unavailable", detail: "Not available anywhere. Example Org does not allow it.", decided_by: ["organization"] },
+    { capability: "execute", label: "Run page code", covers: "Run JavaScript.", state: "unavailable", detail: "Not available anywhere. Example Org does not allow it.", decided_by: ["organization"] }
+  ],
+  layers: [
+    { kind: "organization", title: "Example Org", policy_name: "Support", version: "1", mode: "enforce",
+      rules: [{ id: "support", description: "Ordinary support work", allow: ["support.example.test"], deny: [], allowed: ["read"], mode: "enforce", note: null }],
+      settings: [], path: null, document: '{"schema": 3}' },
+    { kind: "user", title: "Your rules", policy_name: "Your rules", version: "1", mode: "enforce",
+      rules: [{ id: "leftover", description: null, allow: ["other.test"], deny: [], allowed: ["read"], mode: "enforce", note: "no_effect" }],
+      settings: [], path: "state/user-policy.json", document: '{"schema": 3}' }
+  ],
+  ceilings: ["localhost and any name ending in .localhost.", "Loopback and link-local addresses."],
+  user_layer: {
+    source: "workbench",
+    authoring_allowed: editable,
+    editable,
+    path: "state/user-policy.json",
+    blocked_reason: editable ? null : "Example Org does not allow rules to be set on this machine."
+  },
+  passport: { configured: false, contacts: [] }
+});
+
+// A second view over the same stub document. The booted surface holds its own instance; this one
+// exists so the destination can be drawn on demand without a real click.
+const view = sandbox.globalThis.GhostlightView.create({ onFailure: (what, error) => reported.push(`${what}: ${error?.message ?? error}`) });
+view.policy(compiled(true));
+const board = nodes.get("capability-board");
+const layers = nodes.get("policy-layers");
+const organization = nodes.get("policy-organization");
+const editorShown = !nodes.get("policy-editor").hidden;
+view.policy(compiled(false));
+const editorHiddenWhenRefused = nodes.get("policy-editor").hidden
+  && !nodes.get("policy-blocked").hidden
+  && nodes.get("policy-blocked-reason").textContent.includes("Example Org");
 const checks = [
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["heartbeat installed", heartbeat],
@@ -143,9 +202,35 @@ const checks = [
     integrations.innerHTML.includes("Update")
       && integrations.innerHTML.includes('data-harness-action="install"'),
     `integrations: ${JSON.stringify(integrations.innerHTML)}`],
-  ["an applied policy stays visible in the persistent band",
-    policyLabel.textContent === "Policy applied" && policy.dataset.tone === "applied",
+  ["the band renders the policy words the orchestrator authored",
+    policyLabel.textContent === "Example Org" && policy.dataset.tone === "applied",
     `policy: ${JSON.stringify({ label: policyLabel.textContent, tone: policy.dataset.tone })}`],
+  ["the policy destination opens with the orchestrator's sentence",
+    nodes.get("policy-headline").textContent
+      === "Example Org sets the rules, and you have narrowed them further.",
+    nodes.get("policy-headline").textContent],
+  ["every capability line carries its answer and its decider",
+    board.innerHTML.includes("Some sites") && board.innerHTML.includes("Not allowed")
+      && board.innerHTML.includes("Allowed")
+      && board.innerHTML.includes("Example Org does not allow it"),
+    `board: ${JSON.stringify(board.innerHTML)}`],
+  ["the permanent boundaries are shown",
+    nodes.get("policy-ceilings").innerHTML.includes(".localhost")],
+  ["the organization is named in its own words, with somewhere to ask",
+    organization.innerHTML.includes("Example Org")
+      && organization.innerHTML.includes("Ask the service desk")
+      && organization.innerHTML.includes("security@example.test"),
+    `organization: ${JSON.stringify(organization.innerHTML)}`],
+  ["both layers are shown with their documents",
+    layers.innerHTML.includes("Example Org") && layers.innerHTML.includes("Your rules")
+      && layers.innerHTML.includes("state/user-policy.json")
+      && layers.innerHTML.includes("Show the exact document"),
+    `layers: ${JSON.stringify(layers.innerHTML)}`],
+  ["a rule the organization already refuses is marked in place",
+    layers.innerHTML.includes("already refuses this, so it changes nothing"),
+    `layers: ${JSON.stringify(layers.innerHTML)}`],
+  ["the editor appears only when authoring is permitted",
+    editorShown && editorHiddenWhenRefused],
   ["failure reported", reported.some((r) => r.includes("deliberate About failure")),
     `reported: ${JSON.stringify(reported)}`],
   ["the failure names the panel", reported.some((r) => r.includes("painting about"))],

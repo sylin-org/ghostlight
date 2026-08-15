@@ -128,6 +128,59 @@ function receiveChange(event) {
   if (store.applyChange(event) === "gap") resync({ rebuildFeed: true });
 }
 
+/* --------------------------------- policy ------------------------------- */
+
+/*
+ * The Policy destination is fetched rather than carried in every snapshot.
+ *
+ * It changes when somebody changes a policy, which is rare, and it carries the exact documents.
+ * Pulling it on arrival and on demand keeps the ten-second safety pull small.
+ */
+async function loadPolicy() {
+  if (!transport.available) return;
+  try {
+    view.policy(await transport.policy());
+  } catch (error) {
+    reportFailure("reading the policy", error);
+  }
+}
+
+async function checkPolicy() {
+  const document = view.draftDocument();
+  if (!document) return;
+  try {
+    view.previewResult(await transport.previewPolicy(document));
+  } catch (error) {
+    view.previewCleared();
+    view.editorStatus(String(error));
+  }
+}
+
+async function applyPolicy() {
+  const document = view.draftDocument();
+  if (!document) return;
+  try {
+    view.toast((await transport.applyPolicy(document)).message);
+    view.previewCleared();
+    await loadPolicy();
+    await resync();
+  } catch (error) {
+    // A refused document changed nothing, so the draft stays exactly as the person left it.
+    view.editorStatus(String(error));
+  }
+}
+
+async function removePolicy() {
+  try {
+    view.toast((await transport.removePolicy()).message);
+    view.previewCleared();
+    await loadPolicy();
+    await resync();
+  } catch (error) {
+    view.toast(String(error), true);
+  }
+}
+
 /* -------------------------------- intents ------------------------------- */
 
 async function applyIntent(intent) {
@@ -206,7 +259,14 @@ function wire() {
     const confirmation = event.target.closest("[data-confirm]");
     if (confirmation && view.answerConfirmation(confirmation.dataset.confirm === "remove")) return;
     const tab = event.target.closest("[data-view]");
-    if (tab) view.navigate(tab.dataset.view);
+    if (tab) {
+      view.navigate(tab.dataset.view);
+      if (tab.dataset.view === "policy") loadPolicy();
+    }
+    const ruleAction = event.target.closest("[data-rule-action]");
+    if (ruleAction && !ruleAction.disabled) {
+      view.ruleAction(Number(ruleAction.dataset.rule), ruleAction.dataset.ruleAction);
+    }
     const intent = event.target.closest("[data-intent]");
     if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
     const harness = event.target.closest("[data-harness-action]");
@@ -234,6 +294,28 @@ function wire() {
       return;
     }
     if (event.key === "Escape" && view.paletteOpen()) view.closePalette();
+  });
+
+  // The editor is one delegated listener per kind of change, so a rule list that redraws after
+  // every edit never leaves a listener behind on a node that no longer exists.
+  el["rule-list"].addEventListener("input", (event) => {
+    const field = event.target.closest("[data-field]");
+    if (field) view.editRule(Number(field.dataset.rule), field.dataset.field, field.value);
+  });
+
+  el["rule-list"].addEventListener("change", (event) => {
+    const box = event.target.closest("[data-capability]");
+    if (box) view.toggleCapability(Number(box.dataset.rule), box.dataset.capability, box.checked);
+  });
+
+  el["add-rule"].addEventListener("click", () => view.addRule());
+  el["observe-mode"].addEventListener("change", (event) => view.setObserve(event.target.checked));
+  el["check-policy"].addEventListener("click", () => checkPolicy());
+  el["apply-policy"].addEventListener("click", () => applyPolicy());
+  el["discard-policy"].addEventListener("click", () => view.discardDraft());
+  el["remove-policy"].addEventListener("click", () => removePolicy());
+  el["refresh-policy"].addEventListener("click", () => {
+    loadPolicy().then(() => view.toast("Policy re-read."));
   });
 
   el["refresh-status"].addEventListener("click", () => {
