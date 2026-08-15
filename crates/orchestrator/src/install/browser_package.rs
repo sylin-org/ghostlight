@@ -139,8 +139,29 @@ pub(crate) fn detail(name: &str, package: BrowserPackage) -> String {
 fn native_executable(context: &BrowserPackageContext, name: &str) -> bool {
     context.path_entries.iter().any(|directory| {
         let candidate = directory.join(name);
-        candidate.is_file() && !sandbox_path(&candidate, context) && !small_snap_wrapper(&candidate)
+        executable_file(&candidate)
+            && !sandbox_path(&candidate, context)
+            && !small_snap_wrapper(&candidate)
     })
+}
+
+fn executable_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn sandbox_path(path: &Path, context: &BrowserPackageContext) -> bool {
@@ -168,6 +189,8 @@ fn small_snap_wrapper(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     use uuid::Uuid;
 
@@ -194,6 +217,13 @@ mod tests {
         fs::write(path, bytes).unwrap();
     }
 
+    #[cfg(unix)]
+    fn make_executable(path: &std::path::Path) {
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
     #[test]
     fn package_forms_are_closed_and_native_wins() {
         let (root, context) = context("forms");
@@ -210,8 +240,20 @@ mod tests {
         );
         assert_eq!(inspect(&context, SPEC), BrowserPackage::MultipleSandboxes);
 
-        touch(&context.path_entries[0].join("chromium"), b"native binary");
+        let native = context.path_entries[0].join("chromium");
+        touch(&native, b"native binary");
+        #[cfg(unix)]
+        make_executable(&native);
         assert_eq!(inspect(&context, SPEC), BrowserPackage::Native);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_executable_path_entry_is_not_a_native_browser() {
+        let (root, context) = context("non-executable");
+        touch(&context.path_entries[0].join("chromium"), b"not executable");
+        assert_eq!(inspect(&context, SPEC), BrowserPackage::NotDetected);
         fs::remove_dir_all(root).unwrap();
     }
 

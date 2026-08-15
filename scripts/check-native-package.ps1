@@ -114,7 +114,7 @@ switch ($Platform) {
             throw "dpkg-deb could not inspect the Debian artifact"
         }
         foreach ($binary in $binaries) {
-            if ($listing -notmatch "(?m)\./usr/bin/$([regex]::Escape($binary))$") {
+            if ($listing -notmatch "(?m)(?:\./)?usr/bin/$([regex]::Escape($binary))$") {
                 throw "Debian package is missing /usr/bin/$binary"
             }
         }
@@ -125,7 +125,7 @@ switch ($Platform) {
             "etc/chromium/native-messaging-hosts"
         )
         foreach ($destination in $manifestDestinations) {
-            if ($listing -notmatch "(?m)\./$([regex]::Escape($destination))/org\.sylin\.ghostlight\.json$") {
+            if ($listing -notmatch "(?m)(?:\./)?$([regex]::Escape($destination))/org\.sylin\.ghostlight\.json$") {
                 throw "Debian package is missing the $destination native-host manifest"
             }
         }

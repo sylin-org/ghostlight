@@ -25,26 +25,31 @@ pub struct RuntimeEndpoint {
     pub service_version: String,
 }
 
-/// Resolve the runtime endpoint beside the active repo-built executable.
+/// Resolve the runtime endpoint shared by the active sibling installation.
 pub fn runtime_file() -> PathBuf {
     runtime_file_from(
         env::var_os("GHOSTLIGHT_RUNTIME_FILE").map(PathBuf::from),
         env::current_exe().ok(),
+        env::var_os("HOME").map(PathBuf::from),
         &env::temp_dir(),
+        cfg!(target_os = "linux"),
     )
 }
 
 fn runtime_file_from(
     explicit: Option<PathBuf>,
     executable: Option<PathBuf>,
+    home: Option<PathBuf>,
     temporary_directory: &Path,
+    linux: bool,
 ) -> PathBuf {
     explicit
         .or_else(|| {
-            executable
-                .as_deref()
-                .and_then(Path::parent)
-                .map(|directory| directory.join("ghostlight-runtime.json"))
+            let directory = executable.as_deref().and_then(Path::parent)?;
+            if linux && directory == Path::new("/usr/bin") {
+                return home.map(|home| home.join(".cache/ghostlight/ghostlight-runtime.json"));
+            }
+            Some(directory.join("ghostlight-runtime.json"))
         })
         .unwrap_or_else(|| temporary_directory.join("ghostlight-runtime.json"))
 }
@@ -127,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn sibling_processes_converge_without_linux_session_environment() {
+    fn portable_sibling_processes_converge_beside_the_installation() {
         let installation = Path::new("/opt/ghostlight");
         let expected = installation.join("ghostlight-runtime.json");
         for executable in [
@@ -136,7 +141,13 @@ mod tests {
             "ghostlight-browser-connector",
         ] {
             assert_eq!(
-                runtime_file_from(None, Some(installation.join(executable)), Path::new("/tmp")),
+                runtime_file_from(
+                    None,
+                    Some(installation.join(executable)),
+                    Some(PathBuf::from("/home/person")),
+                    Path::new("/tmp"),
+                    true,
+                ),
                 expected
             );
         }
@@ -144,9 +155,32 @@ mod tests {
             runtime_file_from(
                 Some(PathBuf::from("/explicit/runtime.json")),
                 None,
-                Path::new("/tmp")
+                None,
+                Path::new("/tmp"),
+                true,
             ),
             PathBuf::from("/explicit/runtime.json")
         );
+    }
+
+    #[test]
+    fn linux_system_package_siblings_converge_in_the_user_cache() {
+        let expected = PathBuf::from("/home/person/.cache/ghostlight/ghostlight-runtime.json");
+        for executable in [
+            "ghostlight",
+            "ghostlight-mcp-connector",
+            "ghostlight-browser-connector",
+        ] {
+            assert_eq!(
+                runtime_file_from(
+                    None,
+                    Some(Path::new("/usr/bin").join(executable)),
+                    Some(PathBuf::from("/home/person")),
+                    Path::new("/tmp"),
+                    true,
+                ),
+                expected
+            );
+        }
     }
 }
