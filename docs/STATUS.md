@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-14.
+Last updated: 2026-08-15.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -627,6 +627,19 @@ source-gate pass, not release approval.
   Guards hold the seam: words, entries, store and transport fail the build if they contain
   `document.`, `window.` or `el[`, with the view as the negative control.
 
+## Executor decomposition
+
+The executor-split batch is complete through `4d633fbc`.
+
+- The operation families now live in `work/reading.rs`, `work/navigation.rs`,
+  `work/recording.rs`, `work/pointer.rs`, `work/forms.rs`, and `work/sequence.rs`.
+- `work/mod.rs` now contains the dispatch spine, shared execution infrastructure, free helpers,
+  private shared types, and the unchanged test module. It fell from 5,824 to 3,255 total lines,
+  with its production portion falling from roughly 4,200 to 1,633 lines.
+- Each family landed as one pure-move commit. Every task independently passed formatting,
+  warnings-denied Ghostlight Clippy, and all 226 orchestrator library tests without test edits.
+  The durable task record is [docs/tasks/executor-split/LEDGER.md](tasks/executor-split/LEDGER.md).
+
 ## Owed
 
 - ADR-0121 Decision 3's always-available policy explain operation still exists only as a CLI command
@@ -655,13 +668,6 @@ source-gate pass, not release approval.
 - `origin/main` still carries 0.8. Deciding when the 1.0 line is promoted is a release decision.
 - ADR-0084's complete browser-window attention routing remains deferred; only the narrow Chromium
   slice is implemented.
-- `work/mod.rs` is 5824 lines (~4200 production), by far the largest file in the tree and the worst
-  violation of the file-size guideline in `AGENTS.md`. A 2026-08-15 whole-codebase code-quality
-  pass flagged this and deliberately deferred it rather than folding a structural refactor into the
-  same session; [docs/tasks/executor-split](tasks/executor-split/) is a fully authored, READY batch
-  (six independent tasks) that splits it by operation family. Not yet executed. Several other files
-  are also over the guideline and explicitly out of scope for that batch --
-  `docs/tasks/executor-split/DESIGN.md`'s Scope section lists them for a future batch.
 
 ## Release gates still requiring an owner or release environment
 

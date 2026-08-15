@@ -4,12 +4,9 @@ Durable progress. One task = one commit. Update RESUME HERE and add a log entry 
 
 ## RESUME HERE
 
-- **Batch authored, READY. Nothing executed yet.** All six tasks (T1-T6) are independent -- see
-  `BOOTSTRAP.md` -- and may be run in any order or subset.
-- Baseline to reconfirm before starting: `cargo test -p ghostlight --lib` reports
-  `226 passed; 0 failed` on the current tree (pinned 2026-08-15 in `DESIGN.md`, includes that day's
-  uncommitted code-quality-pass fixes to `work/mod.rs`). If this baseline does not hold when you
-  start, STOP and record why before touching anything.
+- **Batch COMPLETE.** All six operation families now live in their named `work/*.rs` modules.
+  Every task passed all three gates with `226 passed; 0 failed`; resume only for review or later
+  follow-up work outside this batch's scope.
 
 ## Task sequence
 
@@ -20,16 +17,16 @@ green tree. Recommended order (smallest/most self-contained first) is T1, T2, T3
 
 | Task | Commit | Status | Notes |
 |------|--------|--------|-------|
-| T1 reading | -- | READY | -- |
-| T2 navigation | -- | READY | -- |
-| T3 recording | -- | READY | -- |
-| T4 pointer | -- | READY | -- |
-| T5 forms | -- | READY | -- |
-| T6 sequence | -- | READY | -- |
+| T1 reading | `49607ca5` | DONE | Pure move; all gates passed, 226 tests. |
+| T2 navigation | `e16a4fd1` | DONE | Pure move; all gates passed, 226 tests. |
+| T3 recording | `35c5ad2f` | DONE | Pure move; all gates passed, 226 tests. |
+| T4 pointer | `3512c3ca` | DONE | Pure move; all gates passed, 226 tests. |
+| T5 forms | `6b931c01` | DONE | Pure move; all gates passed, 226 tests. |
+| T6 sequence | `4d633fbc` | DONE | Pure move; all gates passed, 226 tests. |
 
 ## Deviations
 
-None yet.
+None.
 
 ## Research resolution
 
