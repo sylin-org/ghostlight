@@ -13,7 +13,7 @@
 
   const {
     VIEWS, GLYPHS, EFFECT_STORY, READINESS_NOTE, DESTINATIONS, glyphFor, capabilityClass,
-    CAPABILITY_ORDER, hostReadback, patternCovers,
+    CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
@@ -458,9 +458,10 @@
       organizationCard(view.organization, view.passport);
 
       el["capability-board"].innerHTML = view.capabilities.map((line) => {
-        const tone = line.state === "available" ? "ok" : line.state === "sites" ? "some" : "no";
-        const badge = line.state === "available" ? "Allowed"
-          : line.state === "sites" ? "Some sites" : "Not allowed";
+        // The badge states polarity, because "some sites" is true of both an open baseline with
+        // holes cut in it and a closed one with holes opened, and they are opposite situations.
+        const tone = CAPABILITY_TONE[line.state] ?? "no";
+        const badge = CAPABILITY_BADGE[line.state] ?? "Not allowed";
         return `<article class="cap cap-${tone}">`
           + `<div class="cap-top"><h3>${escapeHtml(line.label)}</h3>`
           + `<span class="cap-state">${badge}</span></div>`
@@ -471,18 +472,18 @@
       el["policy-ceilings"].innerHTML = view.ceilings
         .map((line) => `<li>${escapeHtml(line)}</li>`).join("");
 
-      el["policy-layers"].innerHTML = view.layers.map(layerSection).join("");
+      settingsAndDocuments(view.layers);
 
       const user = view.user_layer;
       el["policy-editor"].hidden = !user.editable;
+      el["add-rule"].hidden = !user.editable;
       el["policy-blocked"].hidden = user.editable || !user.blocked_reason;
       if (user.blocked_reason) el["policy-blocked-reason"].textContent = user.blocked_reason;
       el["policy-remove"].hidden = !(user.editable && user.source === "workbench" && hasUserLayer(view));
 
-      if (user.editable) {
-        draft = draftFrom(view);
-        renderRules();
-      }
+      draft = user.editable ? draftFrom(view) : null;
+      opened.clear();
+      renderRules();
     }
 
     function hasUserLayer(view) {
@@ -520,42 +521,33 @@
         + (provenance.length ? `<p class="org-provenance">${escapeHtml(provenance.join(", "))}.</p>` : "");
     }
 
-    function layerSection(layer) {
-      const rules = layer.rules.length
-        ? layer.rules.map((rule) => {
-          const note = rule.note === "unreachable"
-            ? `<span class="rule-note">An earlier rule already covers this, so it never applies.</span>`
-            : rule.note === "no_effect"
-              ? `<span class="rule-note">Your organization already refuses this, so it changes nothing.</span>`
-              : "";
-          const hosts = rule.allow.length ? rule.allow.map(escapeHtml).join(", ") : "no sites";
-          const except = rule.deny.length ? ` except ${rule.deny.map(escapeHtml).join(", ")}` : "";
-          const verbs = rule.allowed.map((capability) => words(capability)).join(", ") || "nothing";
-          return `<li class="rule-read${rule.note ? " rule-inert" : ""}">`
-            + `<p><b>On ${hosts}</b>${except}, agents may ${escapeHtml(verbs)}.</p>`
-            + (rule.description ? `<p class="rule-why">${escapeHtml(rule.description)}</p>` : "")
-            + note
-            + `<span class="rule-mode">${escapeHtml(rule.mode === "observe" ? "watch only" : "enforced")}</span></li>`;
-        }).join("")
-        : `<li class="rule-read"><p>No rules. Nothing is allowed by this policy.</p></li>`;
-      const settings = layer.settings.length
-        ? `<ul class="settings">${layer.settings.map((setting) =>
-          `<li><code>${escapeHtml(setting.key)}</code> = ${escapeHtml(setting.value)}`
-          + ` <span class="level">${escapeHtml(setting.level)}</span></li>`).join("")}</ul>`
+    /**
+     * The settings a layer authors, and the exact document behind every layer.
+     *
+     * Settings only appear when a layer actually sets one, the way a policy page that lists every
+     * possible setting teaches nothing. The documents stay reachable so this page never becomes the
+     * only way to read the policy.
+     */
+    function settingsAndDocuments(layers) {
+      const settings = layers.flatMap((layer) =>
+        layer.settings.map((setting) => ({ ...setting, owner: layer.title, kind: layer.kind })));
+      el["policy-settings"].innerHTML = settings.length
+        ? `<h2 class="subhead">Settings</h2><ul class="settings">`
+          + settings.map((setting) =>
+            `<li><code>${escapeHtml(setting.key)}</code> = ${escapeHtml(setting.value)}`
+            + ` <span class="level">${escapeHtml(setting.level)}</span>`
+            + ` <span class="owner">${escapeHtml(setting.owner)}</span></li>`).join("")
+          + `</ul>`
         : "";
-      const source = layer.path ? `<p class="layer-source">${escapeHtml(layer.path)}</p>` : "";
-      const document = layer.document
-        ? `<details class="layer-doc"><summary>Show the exact document</summary><pre>${escapeHtml(layer.document)}</pre></details>`
-        : "";
-      return `<section class="layer" data-layer="${escapeHtml(layer.kind)}">`
-        + `<h2 class="subhead">${escapeHtml(layer.title)}</h2>`
-        + `<p class="layer-meta">${escapeHtml(layer.policy_name)} ${escapeHtml(layer.version)}`
-        + ` &middot; ${escapeHtml(layer.mode === "observe" ? "watch only" : "enforced")}</p>`
-        + source
-        + `<ul class="rules-read">${rules}</ul>`
-        + settings
-        + document
-        + `</section>`;
+
+      el["policy-documents"].innerHTML = layers.map((layer) => {
+        if (!layer.document) return "";
+        const where = layer.path ? `<span class="doc-path">${escapeHtml(layer.path)}</span>` : "";
+        return `<details class="layer-doc"><summary>${escapeHtml(layer.title)}: `
+          + `${escapeHtml(layer.policy_name)} ${escapeHtml(layer.version)}, `
+          + `${escapeHtml(layer.mode === "observe" ? "watch only" : "enforced")}</summary>`
+          + where + `<pre>${escapeHtml(layer.document)}</pre></details>`;
+      }).join("");
     }
 
     /* ------------------------------ the editor ----------------------------- */
@@ -576,51 +568,130 @@
       };
     }
 
-    /** Which capabilities an organization has already refused everywhere. */
+    /**
+     * Which capabilities an organization has refused everywhere.
+     *
+     * Only an organization ceiling may disable a control. A capability that merely happens to be
+     * missing from this person's own rules is exactly what they are here to change, and greying it
+     * out would tell them they cannot grant themselves something they plainly can.
+     */
     function ceilingFor(capability) {
       const line = applied?.capabilities?.find((entry) => entry.capability === capability);
       if (!line || line.state !== "unavailable") return null;
-      return line.detail;
+      if (!line.decided_by?.includes("organization")) return null;
+      const name = applied?.organization?.name;
+      return name ? `${name} does not allow this` : "your organization does not allow this";
     }
 
+    /**
+     * Every rule in force, in the order authority actually considers them.
+     *
+     * One list, not two. The organization's rules come first because they are checked first and
+     * cannot be edited here, and this person's own follow. Each is one line: what it covers, and
+     * whose it is. Opening a line is what reveals detail, so the common case -- reading what
+     * applies -- stays a single glance instead of a page of repeated headings.
+     */
     function renderRules() {
-      if (!draft) return;
-      el["rule-list"].innerHTML = draft.rules.map((rule, index) => {
-        const boxes = CAPABILITY_ORDER.map((capability) => {
-          const blocked = ceilingFor(capability);
-          const checked = rule.allowed.has(capability) && !blocked;
-          return `<label class="cap-box${blocked ? " cap-box-blocked" : ""}">`
-            + `<input type="checkbox" data-rule="${index}" data-capability="${capability}"`
-            + `${checked ? " checked" : ""}${blocked ? " disabled" : ""}>`
-            + `<span>${escapeHtml(words(capability))}</span>`
-            + (blocked ? `<em>${escapeHtml(blocked)}</em>` : "")
-            + `</label>`;
-        }).join("");
-        const readback = rule.hosts
-          .split(",")
-          .map((pattern) => pattern.trim())
-          .filter(Boolean)
-          .map((pattern) => hostReadback(pattern))
-          .join("; ");
-        const shadow = shadowedBy(index);
-        return `<article class="rule-edit">`
-          + `<div class="rule-line"><span>On</span>`
-          + `<input class="hosts" type="text" data-rule="${index}" data-field="hosts"`
-          + ` value="${escapeHtml(rule.hosts)}" placeholder="example.com, *.example.com" spellcheck="false">`
-          + `<span>agents may</span></div>`
-          + `<div class="cap-boxes">${boxes}</div>`
-          + (readback ? `<p class="readback">Matches ${escapeHtml(readback)}.</p>` : `<p class="readback readback-empty">Add a site for this rule to do anything.</p>`)
-          + (shadow ? `<p class="rule-note">Rule ${shadow} above already covers this, so this one never applies. Move it up to use it.</p>` : "")
-          + `<div class="rule-foot">`
-          + `<input class="why" type="text" data-rule="${index}" data-field="description"`
-          + ` value="${escapeHtml(rule.description)}" placeholder="What is this rule for? (optional)" maxlength="200">`
-          + `<button class="link-button" type="button" data-rule="${index}" data-rule-action="up"${index === 0 ? " disabled" : ""}>Move up</button>`
-          + `<button class="link-button" type="button" data-rule="${index}" data-rule-action="remove">Remove</button>`
-          + `</div></article>`;
-      }).join("");
-      el["observe-mode"].checked = draft.observe;
-      el["discard-policy"].hidden = !draft.dirty;
+      const organization = (applied?.layers ?? []).filter((layer) => layer.kind === "organization");
+      const rows = organization.flatMap((layer) =>
+        layer.rules.map((rule) => organizationRow(rule, layer)));
+      const mine = draft ? draft.rules.map((rule, index) => userRow(rule, index)) : [];
+      el["rule-list"].innerHTML = rows.concat(mine).join("")
+        || `<p class="rules-empty">No rules anywhere. Agents may work on ordinary websites.</p>`;
+      if (draft) {
+        el["observe-mode"].checked = draft.observe;
+        el["discard-policy"].hidden = !draft.dirty;
+      }
       editorReady();
+    }
+
+    /** The sentence a rule reads as, which is the whole row when it is closed. */
+    function sentenceFor(hosts, deny, capabilities) {
+      const where = hosts.length ? hosts.map(escapeHtml).join(", ") : "no sites";
+      const except = deny.length ? ` except ${deny.map(escapeHtml).join(", ")}` : "";
+      const verbs = capabilities.length
+        ? capabilities.map((capability) => escapeHtml(words(capability))).join(", ")
+        : "nothing";
+      return `On <b>${where}</b>${except}, agents may ${verbs}.`;
+    }
+
+    function organizationRow(rule, layer) {
+      const key = `org:${layer.title}:${rule.id}`;
+      const open = opened.has(key);
+      const mode = rule.mode === "observe" ? "watch only" : "enforced";
+      const detail = `<div class="rule-detail">`
+        + (rule.description ? `<p>${escapeHtml(rule.description)}</p>` : "")
+        + `<dl><dt>Sites</dt><dd>${rule.allow.map(escapeHtml).join(", ") || "none"}</dd>`
+        + (rule.deny.length ? `<dt>Never</dt><dd>${rule.deny.map(escapeHtml).join(", ")}</dd>` : "")
+        + `<dt>Named</dt><dd>${escapeHtml(rule.id)}</dd>`
+        + `<dt>When it decides</dt><dd>${mode}</dd></dl></div>`;
+      return `<article class="rule rule-theirs${open ? " open" : ""}" data-rule-key="${escapeHtml(key)}">`
+        + `<button class="rule-row" type="button" data-rule-toggle="${escapeHtml(key)}"`
+        + ` aria-expanded="${open}">`
+        + `<span class="rule-sentence">${sentenceFor(rule.allow, rule.deny, rule.allowed)}</span>`
+        + `<span class="rule-owner">${escapeHtml(layer.title)}</span></button>`
+        + (open ? detail : "")
+        + `</article>`;
+    }
+
+    function userRow(rule, index) {
+      const key = `mine:${index}`;
+      const open = opened.has(key);
+      const capabilities = CAPABILITY_ORDER.filter((capability) => rule.allowed.has(capability));
+      const sentence = sentenceFor(splitHosts(rule.hosts), [], capabilities);
+      const shadow = shadowedBy(index);
+      return `<article class="rule rule-mine${open ? " open" : ""}${shadow ? " rule-inert" : ""}"`
+        + ` data-rule-key="${escapeHtml(key)}">`
+        + `<button class="rule-row" type="button" data-rule-toggle="${escapeHtml(key)}"`
+        + ` aria-expanded="${open}">`
+        + `<span class="rule-sentence">${sentence}</span>`
+        + `<span class="rule-edit-hint">${open ? "Close" : "Edit"}</span></button>`
+        + (open ? userEditor(rule, index, shadow) : "")
+        + `</article>`;
+    }
+
+    function userEditor(rule, index, shadow) {
+      const boxes = CAPABILITY_ORDER.map((capability) => {
+        const blocked = ceilingFor(capability);
+        const checked = rule.allowed.has(capability) && !blocked;
+        return `<label class="cap-box${blocked ? " cap-box-blocked" : ""}">`
+          + `<input type="checkbox" data-rule="${index}" data-capability="${capability}"`
+          + `${checked ? " checked" : ""}${blocked ? " disabled" : ""}>`
+          + `<span>${escapeHtml(words(capability))}</span>`
+          + (blocked ? `<em>${escapeHtml(blocked)}</em>` : "")
+          + `</label>`;
+      }).join("");
+      const readback = splitHosts(rule.hosts).map((pattern) => hostReadback(pattern)).join("; ");
+      return `<div class="rule-detail">`
+        + `<div class="rule-line"><span>On</span>`
+        + `<input class="hosts" type="text" data-rule="${index}" data-field="hosts"`
+        + ` value="${escapeHtml(rule.hosts)}" placeholder="example.com, *.example.com" spellcheck="false">`
+        + `<span>agents may</span></div>`
+        + `<div class="cap-boxes">${boxes}</div>`
+        + (readback
+          ? `<p class="readback">Matches ${escapeHtml(readback)}.</p>`
+          : `<p class="readback readback-empty">Add a site for this rule to do anything.</p>`)
+        + (shadow
+          ? `<p class="rule-note">Rule ${shadow} above already covers this, so this one never applies. Move it up to use it.</p>`
+          : "")
+        + `<div class="rule-foot">`
+        + `<input class="why" type="text" data-rule="${index}" data-field="description"`
+        + ` value="${escapeHtml(rule.description)}" placeholder="What is this rule for? (optional)" maxlength="200">`
+        + `<button class="link-button" type="button" data-rule="${index}" data-rule-action="up"${index === 0 ? " disabled" : ""}>Move up</button>`
+        + `<button class="link-button" type="button" data-rule="${index}" data-rule-action="remove">Remove</button>`
+        + `</div></div>`;
+    }
+
+    /** Which rows are open. Disposable view state, and the only thing this list remembers. */
+    const opened = new Set();
+
+    function toggleRule(key) {
+      if (opened.has(key)) opened.delete(key);
+      else opened.add(key);
+      renderRules();
+      if (opened.has(key)) {
+        el["rule-list"].querySelector(`[data-rule-key="${key}"] .hosts`)?.focus();
+      }
     }
 
     /**
@@ -631,13 +702,20 @@
      * letting someone press a button and read a number that sounds like an accusation.
      */
     function editorReady() {
-      const empty = !draft?.rules.length;
-      el["apply-policy"].disabled = empty || !draft?.dirty;
+      if (!draft) return;
+      const empty = !draft.rules.length;
+      el["apply-policy"].disabled = empty || !draft.dirty;
       el["check-policy"].disabled = empty;
       if (empty) {
         previewCleared();
         el["editor-status"].textContent =
           "No rules yet. A policy with none refuses everything, so add at least one.";
+        return;
+      }
+      // Clearing matters as much as setting: the empty-draft warning outlived the empty draft and
+      // sat under two perfectly good rules, contradicting them.
+      if (el["editor-status"].textContent.startsWith("No rules yet")) {
+        el["editor-status"].textContent = "";
       }
     }
 
@@ -702,7 +780,7 @@
      * depend on what was just typed are the only thing that changes while a person is typing.
      */
     function refreshRuleHints(index) {
-      const card = el["rule-list"].children[index];
+      const card = el["rule-list"].querySelector(`[data-rule-key="mine:${index}"]`);
       if (!card) return;
       const rule = draft.rules[index];
       const patterns = splitHosts(rule.hosts);
@@ -737,10 +815,15 @@
 
     function ruleAction(index, action) {
       if (!draft) return;
-      if (action === "remove") draft.rules.splice(index, 1);
+      if (action === "remove") {
+        draft.rules.splice(index, 1);
+        opened.delete(`mine:${index}`);
+      }
       if (action === "up" && index > 0) {
         const [moved] = draft.rules.splice(index, 1);
         draft.rules.splice(index - 1, 0, moved);
+        opened.delete(`mine:${index}`);
+        opened.add(`mine:${index - 1}`);
       }
       draft.dirty = true;
       renderRules();
@@ -755,6 +838,8 @@
         allowed: new Set(["read"])
       });
       draft.dirty = true;
+      // A rule you just asked for opens on its own; anything else is a second click for nothing.
+      opened.add(`mine:${draft.rules.length - 1}`);
       renderRules();
       const inputs = el["rule-list"].querySelectorAll(".hosts");
       inputs[inputs.length - 1]?.focus();
@@ -930,7 +1015,7 @@
       el, attempt,
       hero, row, drop, promote, rebuildFeed, queueCount,
       band, collections, navigate, toast,
-      policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule,
+      policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setObserve, discardDraft, renderRules, previewResult, previewCleared, editorStatus,
       openPalette, closePalette, paletteOpen, paletteQuery, searchResults, searchFailed,
       confirmRemoval, answerConfirmation,

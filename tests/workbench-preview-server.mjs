@@ -68,10 +68,10 @@ const policyView = {
     contacts: [{ kind: "email", value: "security@northwind.example", label: "Security team" }]
   },
   capabilities: [
-    { capability: "read", label: "Look at pages", covers: "Read page text, take screenshots, scroll, and find things on a page.", state: "sites", detail: "Available on specific sites only, set by Northwind.", decided_by: ["organization"] },
-    { capability: "action", label: "Click and type", covers: "Click, type, press keys, drag, and move through history.", state: "sites", detail: "Available on specific sites only, set by Northwind and you.", decided_by: ["organization", "user"] },
-    { capability: "write", label: "Fill in forms", covers: "Enter information into forms and upload files.", state: "unavailable", detail: "Not available anywhere. Northwind does not allow it.", decided_by: ["organization"] },
-    { capability: "execute", label: "Run page code", covers: "Run JavaScript inside a page.", state: "unavailable", detail: "Not available anywhere. Northwind does not allow it.", decided_by: ["organization"] }
+    { capability: "read", label: "Look at pages", covers: "Read page text, take screenshots, scroll, and find things on a page.", state: "some_allowed", detail: "Refused everywhere except the sites Northwind allowed.", decided_by: ["organization"] },
+    { capability: "action", label: "Click and type", covers: "Click, type, press keys, drag, and move through history.", state: "some_allowed", detail: "Refused everywhere except the sites Northwind and you allowed.", decided_by: ["organization", "user"] },
+    { capability: "write", label: "Fill in forms", covers: "Enter information into forms and upload files.", state: "unavailable", detail: "Not available. Northwind does not allow it anywhere.", decided_by: ["organization"] },
+    { capability: "execute", label: "Run page code", covers: "Run JavaScript inside a page.", state: "unavailable", detail: "Not available. Northwind does not allow it anywhere.", decided_by: ["organization"] }
   ],
   layers: [
     {

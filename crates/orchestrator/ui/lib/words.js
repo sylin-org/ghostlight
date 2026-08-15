@@ -110,6 +110,27 @@
   };
 
   /**
+   * How each compiled capability state reads on the board, and how it is coloured.
+   *
+   * Two of these are the same shape of answer pointing opposite ways: an open baseline with sites
+   * blocked, and a closed one with sites allowed. Naming them the same thing would hide the only
+   * part a person needs in order to act.
+   */
+  const CAPABILITY_BADGE = {
+    available: "Allowed",
+    some_blocked: "Some sites blocked",
+    some_allowed: "Some sites allowed",
+    unavailable: "Not allowed"
+  };
+
+  const CAPABILITY_TONE = {
+    available: "ok",
+    some_blocked: "most",
+    some_allowed: "some",
+    unavailable: "no"
+  };
+
+  /**
    * Whether a host pattern is one Ghostlight accepts.
    *
    * Mirrors the production matcher exactly: `*`, an exact hostname, or one leading `*.` suffix.
@@ -275,6 +296,7 @@
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
+    CAPABILITY_BADGE, CAPABILITY_TONE,
     validHostPattern, hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId });
 });

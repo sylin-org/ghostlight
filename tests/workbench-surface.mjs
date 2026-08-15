@@ -153,10 +153,10 @@ const compiled = (editable) => ({
     contacts: [{ kind: "email", value: "security@example.test", label: "Security team" }]
   },
   capabilities: [
-    { capability: "read", label: "Look at pages", covers: "Read page text.", state: "sites", detail: "Available on specific sites only, set by Example Org.", decided_by: ["organization"] },
+    { capability: "read", label: "Look at pages", covers: "Read page text.", state: "some_allowed", detail: "Refused everywhere except the sites Example Org allowed.", decided_by: ["organization"] },
     { capability: "action", label: "Click and type", covers: "Click and type.", state: "available", detail: "Available on ordinary websites. Nothing narrows it.", decided_by: [] },
-    { capability: "write", label: "Fill in forms", covers: "Enter information.", state: "unavailable", detail: "Not available anywhere. Example Org does not allow it.", decided_by: ["organization"] },
-    { capability: "execute", label: "Run page code", covers: "Run JavaScript.", state: "unavailable", detail: "Not available anywhere. Example Org does not allow it.", decided_by: ["organization"] }
+    { capability: "write", label: "Fill in forms", covers: "Enter information.", state: "unavailable", detail: "Not available. Example Org does not allow it anywhere.", decided_by: ["organization"] },
+    { capability: "execute", label: "Run page code", covers: "Run JavaScript.", state: "unavailable", detail: "Not available. Example Org does not allow it anywhere.", decided_by: ["organization"] }
   ],
   layers: [
     { kind: "organization", title: "Example Org", policy_name: "Support", version: "1", mode: "enforce",
@@ -201,10 +201,17 @@ view.hero({
 const refusal = nodes.get("hero-body").innerHTML;
 
 view.policy(compiled(true));
-const board = nodes.get("capability-board");
-const layers = nodes.get("policy-layers");
-const organization = nodes.get("policy-organization");
+const board = nodes.get("capability-board").innerHTML;
+const organization = nodes.get("policy-organization").innerHTML;
+const documents = nodes.get("policy-documents").innerHTML;
+const rules = nodes.get("rule-list").innerHTML;
 const editorShown = !nodes.get("policy-editor").hidden;
+// Opening and closing one organization rule: the detail belongs to the row, not to the page.
+view.toggleRule("org:Example Org:support");
+const openedDetail = nodes.get("rule-list").innerHTML;
+view.toggleRule("org:Example Org:support");
+const closedAgain = nodes.get("rule-list").innerHTML;
+
 view.policy(compiled(false));
 const editorHiddenWhenRefused = nodes.get("policy-editor").hidden
   && !nodes.get("policy-blocked").hidden
@@ -237,26 +244,36 @@ const checks = [
     nodes.get("policy-headline").textContent
       === "Example Org sets the rules, and you have narrowed them further.",
     nodes.get("policy-headline").textContent],
-  ["every capability line carries its answer and its decider",
-    board.innerHTML.includes("Some sites") && board.innerHTML.includes("Not allowed")
-      && board.innerHTML.includes("Allowed")
-      && board.innerHTML.includes("Example Org does not allow it"),
-    `board: ${JSON.stringify(board.innerHTML)}`],
+  ["every capability line states its polarity and its decider",
+    board.includes("Some sites allowed") && board.includes("Not allowed")
+      && board.includes("Allowed")
+      && board.includes("Example Org does not allow it anywhere"),
+    `board: ${JSON.stringify(board)}`],
   ["the permanent boundaries are shown",
     nodes.get("policy-ceilings").innerHTML.includes(".localhost")],
   ["the organization is named in its own words, with somewhere to ask",
-    organization.innerHTML.includes("Example Org")
-      && organization.innerHTML.includes("Ask the service desk")
-      && organization.innerHTML.includes("security@example.test"),
-    `organization: ${JSON.stringify(organization.innerHTML)}`],
-  ["both layers are shown with their documents",
-    layers.innerHTML.includes("Example Org") && layers.innerHTML.includes("Your rules")
-      && layers.innerHTML.includes("state/user-policy.json")
-      && layers.innerHTML.includes("Show the exact document"),
-    `layers: ${JSON.stringify(layers.innerHTML)}`],
-  ["a rule the organization already refuses is marked in place",
-    layers.innerHTML.includes("already refuses this, so it changes nothing"),
-    `layers: ${JSON.stringify(layers.innerHTML)}`],
+    organization.includes("Example Org")
+      && organization.includes("Ask the service desk")
+      && organization.includes("security@example.test"),
+    `organization: ${JSON.stringify(organization)}`],
+  ["every rule is one line, organization first, each naming whose it is",
+    rules.indexOf("rule-theirs") < rules.indexOf("rule-mine")
+      && rules.includes("On <b>support.example.test</b>, agents may look at pages.")
+      && rules.includes(">Example Org</span>")
+      && rules.includes(">Edit</span>"),
+    `rules: ${JSON.stringify(rules)}`],
+  ["a closed rule shows no detail pane until it is opened",
+    !rules.includes("rule-detail")
+      && rules.includes('aria-expanded="false"'),
+    `rules: ${JSON.stringify(rules)}`],
+  ["opening a rule reveals its detail, and closing puts it away",
+    openedDetail.includes("rule-detail") && openedDetail.includes("Ordinary support work")
+      && !closedAgain.includes("rule-detail"),
+    `opened: ${JSON.stringify(openedDetail)}`],
+  ["both layers keep their exact document and path",
+    documents.includes("Example Org") && documents.includes("Your rules")
+      && documents.includes("state/user-policy.json"),
+    `documents: ${JSON.stringify(documents)}`],
   ["the editor appears only when authoring is permitted",
     editorShown && editorHiddenWhenRefused],
   ["failure reported", reported.some((r) => r.includes("deliberate About failure")),

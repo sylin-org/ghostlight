@@ -114,19 +114,18 @@
         <h2 class="subhead">Always off limits</h2>
         <ul class="ceilings" id="policy-ceilings"></ul>
 
-        <div id="policy-layers"></div>
+        <div class="rules-head">
+          <h2 class="subhead">Rules</h2>
+          <p id="rules-note">Checked in this order. The first rule that covers what an agent is
+            doing decides it; anything no rule covers is refused.</p>
+          <button class="ghost-button" type="button" id="add-rule" hidden>Add a rule</button>
+        </div>
+        <div class="rules" id="rule-list"></div>
+
+        <div id="policy-settings"></div>
+        <div id="policy-documents"></div>
 
         <section class="editor" id="policy-editor" hidden>
-          <div class="page-heading">
-            <div>
-              <span class="kicker">Only you can see or change this</span>
-              <h2 id="editor-heading">Your rules</h2>
-              <p id="editor-note">Each rule says where agents may work, and what they may do there.
-                Anything not covered by a rule is refused.</p>
-            </div>
-            <button class="ghost-button" type="button" id="add-rule">Add a rule</button>
-          </div>
-          <div class="rules" id="rule-list"></div>
           <div class="editor-mode">
             <label class="switch">
               <input type="checkbox" id="observe-mode">

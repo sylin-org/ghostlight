@@ -44,16 +44,22 @@ pub enum LayerKind {
     Ghostlight,
 }
 
-/// Whether one capability is available, and how widely.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+/// Whether one capability is available, how widely, and which way the rules point.
+///
+/// Polarity is the difference between a rule that carves holes out of an open baseline and one
+/// that opens holes in a closed one. Both leave a capability "on some sites", and telling a person
+/// only that much hides which way their policy actually points.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityState {
-    /// Nothing restricts it.
-    Available,
-    /// Available on specific sites only.
-    Sites,
     /// No layer admits it anywhere.
     Unavailable,
+    /// Refused everywhere except the sites some rule allows.
+    SomeAllowed,
+    /// Allowed everywhere except the sites some rule blocks.
+    SomeBlocked,
+    /// Nothing restricts it.
+    Available,
 }
 
 /// One capability, answered in plain words, with the layers that narrowed it.
@@ -437,14 +443,16 @@ fn capability_line(
         (LayerKind::Organization, inputs.organization),
         (LayerKind::User, inputs.user),
     ];
-    let mut narrowed = Vec::new();
-    let mut refused = Vec::new();
+    // Layers intersect, so the effective answer is the narrowest any of them gives, and the
+    // deciders are every layer that gave something narrower than "nothing restricts this".
+    let mut state = CapabilityState::Available;
+    let mut decided_by = Vec::new();
     for (kind, policy) in layers {
         let Some(policy) = policy else { continue };
-        match reach(policy, required) {
-            Reach::Everywhere => {}
-            Reach::Sites => narrowed.push(kind),
-            Reach::Nowhere => refused.push(kind),
+        let layer = reach(policy, required);
+        state = state.min(layer);
+        if layer != CapabilityState::Available {
+            decided_by.push(kind);
         }
     }
 
@@ -453,70 +461,72 @@ fn capability_line(
         (LayerKind::Organization, Some(name)) => name.to_owned(),
         (kind, _) => layer_word(kind).to_owned(),
     };
-
-    if let Some(kind) = refused.first().copied() {
-        return CapabilityLine {
-            capability,
-            label,
-            covers,
-            state: CapabilityState::Unavailable,
-            detail: format!("Not available anywhere. {} does not allow it.", word(kind)),
-            decided_by: refused,
-        };
-    }
-    if narrowed.is_empty() {
-        return CapabilityLine {
-            capability,
-            label,
-            covers,
-            state: CapabilityState::Available,
-            detail: "Available on ordinary websites. Nothing narrows it.".into(),
-            decided_by: Vec::new(),
-        };
-    }
-    let who = narrowed
+    let who = decided_by
         .iter()
         .map(|kind| word(*kind))
         .collect::<Vec<_>>()
         .join(" and ");
+
+    let detail = match state {
+        CapabilityState::Available => {
+            "Available on ordinary websites. Nothing narrows it.".to_owned()
+        }
+        // Polarity is the point of these two sentences. A rule that carves holes out of an open
+        // baseline and a rule that opens holes in a closed one both leave a capability available
+        // "on some sites", and a person cannot act on that without knowing which way it points.
+        CapabilityState::SomeBlocked => {
+            format!("Available everywhere except the sites {who} blocked.")
+        }
+        CapabilityState::SomeAllowed => {
+            format!("Refused everywhere except the sites {who} allowed.")
+        }
+        CapabilityState::Unavailable => {
+            let kind = decided_by.first().copied().unwrap_or(LayerKind::Ghostlight);
+            // "you does not allow it" is what a template gets you. Whoever refused is named in
+            // their own grammar, because a person reading why they were stopped deserves a
+            // sentence rather than a substitution.
+            let refusal = match kind {
+                LayerKind::User => "You do not allow it anywhere.".to_owned(),
+                LayerKind::Ghostlight => "Ghostlight does not allow it anywhere.".to_owned(),
+                LayerKind::Organization => format!(
+                    "{} does not allow it anywhere.",
+                    named.as_deref().unwrap_or("Your organization")
+                ),
+            };
+            format!("Not available. {refusal}")
+        }
+    };
+
     CapabilityLine {
         capability,
         label,
         covers,
-        state: CapabilityState::Sites,
-        detail: format!("Available on specific sites only, set by {who}."),
-        decided_by: narrowed,
+        state,
+        detail,
+        decided_by,
     }
 }
 
-/// How widely one layer admits a capability.
-enum Reach {
-    /// Some rule admits it on every host.
-    Everywhere,
-    /// Some rule admits it, but only on named hosts.
-    Sites,
-    /// No rule in this layer admits it.
-    Nowhere,
-}
-
-fn reach(policy: &manifest::Manifest, required: CapabilitySet) -> Reach {
-    let mut sited = false;
+/// How widely one layer admits a capability, and which way its rules point.
+fn reach(policy: &manifest::Manifest, required: CapabilitySet) -> CapabilityState {
+    let mut widest = CapabilityState::Unavailable;
     for grant in &policy.grants {
         if !required.is_subset_of(grant.allowed_set()) {
             continue;
         }
-        if grant.hosts.allow.iter().any(|pattern| pattern == "*") && grant.hosts.deny.is_empty() {
-            return Reach::Everywhere;
-        }
-        if !grant.hosts.allow.is_empty() {
-            sited = true;
-        }
+        let universal = grant.hosts.allow.iter().any(|pattern| pattern == "*");
+        let state = if universal && grant.hosts.deny.is_empty() {
+            CapabilityState::Available
+        } else if universal {
+            CapabilityState::SomeBlocked
+        } else if grant.hosts.allow.is_empty() {
+            continue;
+        } else {
+            CapabilityState::SomeAllowed
+        };
+        widest = widest.max(state);
     }
-    if sited {
-        Reach::Sites
-    } else {
-        Reach::Nowhere
-    }
+    widest
 }
 
 fn layer_view(
@@ -769,13 +779,73 @@ mod tests {
         );
 
         let read = &view.capabilities[0];
-        assert_eq!(read.state, CapabilityState::Sites);
+        assert_eq!(read.state, CapabilityState::SomeAllowed);
         assert_eq!(read.decided_by, vec![LayerKind::Organization]);
-        assert!(read.detail.contains("Example Organization"));
+        assert_eq!(
+            read.detail,
+            "Refused everywhere except the sites Example Organization allowed."
+        );
 
         let execute = &view.capabilities[3];
         assert_eq!(execute.state, CapabilityState::Unavailable);
         assert!(execute.detail.contains("does not allow it"));
+    }
+
+    #[test]
+    fn polarity_is_stated_rather_than_flattened_into_some_sites() {
+        // An open baseline with holes cut in it, and a closed one with holes opened. Both leave a
+        // capability available on "some sites" and they are opposite situations.
+        let carved = policy(
+            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"everywhere-but","hosts":{"allow":["*"],"deny":["intranet.example"]},"allowed":["read"]}]}"#,
+        );
+        let view = compile(&inputs(None, Some(&carved)));
+        assert_eq!(view.capabilities[0].state, CapabilityState::SomeBlocked);
+        assert_eq!(
+            view.capabilities[0].detail,
+            "Available everywhere except the sites you blocked."
+        );
+
+        let opened = policy(
+            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"just-here","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+        );
+        let view = compile(&inputs(None, Some(&opened)));
+        assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
+        assert_eq!(
+            view.capabilities[0].detail,
+            "Refused everywhere except the sites you allowed."
+        );
+
+        // The narrower of the two layers is the answer, and both are named as deciders.
+        let view = compile(&inputs(Some(&carved), Some(&opened)));
+        assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
+        assert_eq!(
+            view.capabilities[0].decided_by,
+            vec![LayerKind::Organization, LayerKind::User]
+        );
+    }
+
+    #[test]
+    fn whoever_refused_is_named_in_their_own_grammar() {
+        let mine = policy(
+            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+        );
+        let view = compile(&inputs(None, Some(&mine)));
+        let execute = &view.capabilities[3];
+        assert_eq!(execute.state, CapabilityState::Unavailable);
+        assert_eq!(
+            execute.detail,
+            "Not available. You do not allow it anywhere."
+        );
+        assert_eq!(execute.decided_by, vec![LayerKind::User]);
+
+        let anonymous = policy(
+            r#"{"schema":3,"name":"org","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+        );
+        let view = compile(&inputs(Some(&anonymous), None));
+        assert_eq!(
+            view.capabilities[3].detail,
+            "Not available. Your organization does not allow it anywhere."
+        );
     }
 
     #[test]

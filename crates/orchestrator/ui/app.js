@@ -266,7 +266,12 @@ function wire() {
     const ruleAction = event.target.closest("[data-rule-action]");
     if (ruleAction && !ruleAction.disabled) {
       view.ruleAction(Number(ruleAction.dataset.rule), ruleAction.dataset.ruleAction);
+      return;
     }
+    // Opening a rule is the whole interaction for one nobody may change, and the way in for one
+    // they may. An action inside an open rule is handled above and must not close it again.
+    const toggle = event.target.closest("[data-rule-toggle]");
+    if (toggle) view.toggleRule(toggle.dataset.ruleToggle);
     const intent = event.target.closest("[data-intent]");
     if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
     const harness = event.target.closest("[data-harness-action]");
