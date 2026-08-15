@@ -38,6 +38,35 @@ The 1.0 policy product is restored on current orchestrator seams through `44f84e
   The full workspace gate passes with 197 orchestrator library tests, 2 orchestrator binary tests,
   30 bridge tests, 4 MCP connector tests, warnings denied, and 101 extension tests.
 
+## The policy a person can read, and author
+
+[ADR-0122](adr/0122-readable-policy-destination-and-authored-user-layer.md) is implemented, from
+research input [24-policy-surface-user-delight-2026-08.md](research/24-policy-surface-user-delight-2026-08.md).
+
+- Policy is the window's fourth destination. The state chip moved into the tab row between Status
+  and About and opens it; Status keeps diagnostics, the session control, and notifications.
+- One orchestrator-owned projection compiles the answer: a situation sentence, one line per
+  capability in plain verbs with the layer that decided it, the rules behind those lines, the
+  permanent ceilings in every situation including all-open, and the exact document and path for
+  every layer. The surface renders it and computes no policy words of its own.
+- Schema 3 gained an optional additive `organization` block (name, statement, HTTPS url, contacts).
+  A signed bundle's presentation block still wins on conflict. Manifests stay typo-closed, so a
+  document using the block is refused by older builds.
+- The workbench authors one user policy through two bounded commands over a product-owned path in
+  the per-user state directory. `GHOSTLIGHT_POLICY_FILE` still wins when set, and that file is
+  shown read-only. Applying validates before replacing and writes atomically; no window action can
+  leave the product failing closed.
+- `policy.user.enabled` is registered. It gates authoring only, never enforcement, and is recorded
+  as an operational control rather than a security boundary.
+- The editor speaks sentences: host readback on every pattern, organization ceilings shown on the
+  control itself, redundant and unreachable rules marked in place, watch-only as a plain switch,
+  and a dry run against recorded audit before applying.
+- A refused row in the monitor names the deciding layer, the rule, the denial handle, and the
+  organization's contacts when it supplied them.
+- Gate at implementation: 210 orchestrator library tests, 2 binary, 30 bridge, 4 MCP connector,
+  warnings denied, 101 extension tests, plus `node tests/policy-grammar.mjs` and
+  `node tests/workbench-surface.mjs`.
+
 The active 1.0 guides, contracts, public RAWX specification, pricing language, and Trust Center now
 describe this feature set rather than the removed flat policy. The invented cohort-based
 `greenfield-first-success.md` process is explicitly rejected as a release gate. Historical SPEC,
@@ -588,16 +617,11 @@ source-gate pass, not release approval.
 
 ## Owed
 
-- [ADR-0122](adr/0122-readable-policy-destination-and-authored-user-layer.md) is accepted and
-  entirely unimplemented. It gives the window a Policy destination between Status and About, moves
-  the lamp-band state chip there, replaces the four-boolean authority cards with an
-  orchestrator-owned effective-authority view carrying per-line provenance, adds an optional
-  `organization` block to schema 3, adds the `policy.user.enabled` setting, and lets the workbench
-  author one user policy through two bounded commands over a product-owned path. Its research input
-  is [24-policy-surface-user-delight-2026-08.md](research/24-policy-surface-user-delight-2026-08.md).
-  The ADR also records that ADR-0121 Decision 3's always-available policy explain operation exists
-  only as a CLI command over a file path: the 22-tool catalog has no policy tool, so neither the
-  person nor the model can currently ask what current authority permits.
+- ADR-0121 Decision 3's always-available policy explain operation still exists only as a CLI command
+  over a file path. The 22-tool catalog has no policy tool, so the model cannot ask what current
+  authority permits, even though a person now can.
+  [ADR-0122](adr/0122-readable-policy-destination-and-authored-user-layer.md) Decision 9 defers the
+  model-facing rendering to a later ADR; the projection it would use exists.
 - A row that never settled reads its readiness as a parenthetical. Colour would carry it better
   than words: the duration cell already has a running and a blocked treatment, and an unsettled one
   would be found while scrolling instead of read for.

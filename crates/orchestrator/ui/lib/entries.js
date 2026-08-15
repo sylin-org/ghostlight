@@ -36,6 +36,10 @@
       phase: record.allowed ? "completed" : "blocked",
       allowed: record.allowed,
       reason: record.reason,
+      // Kept so a refusal can name the rule that caused it rather than only that it happened.
+      policyTier: record.policy_tier ?? null,
+      grantId: record.grant_id ?? null,
+      denialId: record.denial_id ?? null,
       status: record.status,
       effect: record.effect,
       summary: record.summary,

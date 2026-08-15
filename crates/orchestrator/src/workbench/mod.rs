@@ -234,7 +234,9 @@ impl WorkbenchProjection {
                 .retain(|(invocation, _)| invocation != &record.invocation);
             push_bounded(&mut state.history, item.clone());
         }
-        self.publish(WorkbenchChange::OperationSettled { record: item });
+        self.publish(WorkbenchChange::OperationSettled {
+            record: Box::new(item),
+        });
     }
 
     fn operations(&self) -> Vec<OperationSummary> {
@@ -774,7 +776,11 @@ pub enum WorkbenchChange {
     /// One operation reached its terminal record and left the live set.
     OperationSettled {
         /// The content-minimized completion record.
-        record: HistoryItem,
+        ///
+        /// Boxed because a settled record carries far more than a live one, and every other
+        /// variant would otherwise be padded to its size for the whole life of the channel. The
+        /// published JSON is unchanged: a box serializes as the value it holds.
+        record: Box<HistoryItem>,
     },
     /// Authoritative runtime control state changed.
     RuntimeChanged {
@@ -992,6 +998,13 @@ pub struct HistoryItem {
     pub allowed: bool,
     /// Stable reason code.
     pub reason: String,
+    /// Tighten-only tier that supplied the deciding rule, when policy decided this.
+    pub policy_tier: Option<String>,
+    /// Authored rule that supplied the decision, when policy decided this.
+    pub grant_id: Option<String>,
+    /// Deterministic denial handle, so a refusal in the window and a line in audit are the same
+    /// event to whoever has to ask about it.
+    pub denial_id: Option<String>,
     /// Terminal status.
     pub status: String,
     /// Effect class.
@@ -1019,6 +1032,9 @@ impl From<AuditRecord> for HistoryItem {
             capability,
             allowed: value.allowed,
             reason: value.reason.as_str().into(),
+            policy_tier: value.policy_tier,
+            grant_id: value.grant_id,
+            denial_id: value.denial_id,
             status: value.status,
             effect: value.effect,
             summary: value.summary,
@@ -1543,7 +1559,7 @@ mod tests {
         });
 
         let settled = WorkbenchChange::OperationSettled {
-            record: HistoryItem::from(
+            record: Box::new(HistoryItem::from(
                 AuditRecord::now(
                     "invocation_1",
                     "workspace_1",
@@ -1561,7 +1577,7 @@ mod tests {
                     readiness: Some("complete".into()),
                     ..Observed::default()
                 }),
-            ),
+            )),
         };
 
         let published = events.0.lock().unwrap();

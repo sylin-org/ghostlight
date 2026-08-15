@@ -123,7 +123,7 @@
       if (entry.settled && entry.endedAt) meta.push(`<span><i></i>${escapeHtml(ago(entry.endedAt))} ago</span>`);
 
       const reason = isBlocked(entry) && entry.reason
-        ? `<p class="hero-reason">${escapeHtml(words(entry.reason))}</p>`
+        ? `<p class="hero-reason">${escapeHtml(words(entry.reason))}</p>${refusalMarkup(entry)}`
         : "";
 
       return `<div class="hero-tool">${escapeHtml(entry.tool)}<span class="cap-label">${escapeHtml(entry.capability ?? "read")}</span></div>`
@@ -131,6 +131,34 @@
         + reason
         + (meta.length ? `<div class="hero-meta">${meta.join("")}</div>` : "");
     }
+
+    /**
+     * Where a refusal leads.
+     *
+     * A blocked row used to end at the reason code, which tells a person that something stopped
+     * them and nothing about what to do next. The deciding layer and rule are already recorded on
+     * every enforced denial, and an organization that supplied contacts supplied them for exactly
+     * this moment, so both belong here rather than on a page nobody had a reason to open.
+     */
+    function refusalMarkup(entry) {
+      if (!entry.policyTier && !entry.grantId && !entry.denialId) return "";
+      const managed = entry.policyTier === "managed";
+      const who = managed ? (passportName() ?? "your organization") : "your own rules";
+      const parts = [`Refused by ${who}`];
+      if (entry.grantId) parts.push(`rule ${entry.grantId}`);
+      const contacts = managed ? passportContacts() : [];
+      const ask = contacts.length
+        ? ` Ask ${contacts.map((contact) => `${contact.label || words(contact.kind)}: ${contact.value}`).join(", ")}.`
+        : "";
+      return `<p class="hero-refusal">${escapeHtml(`${parts.join(", ")}.${ask}`)}`
+        + (entry.denialId ? `<span class="denial-id">${escapeHtml(entry.denialId)}</span>` : "")
+        + `<button class="link-button" type="button" data-view="policy">See the policy</button></p>`;
+    }
+
+    /* The passport the last snapshot carried, so a refusal can name who to ask without a fetch. */
+    let passport = null;
+    const passportName = () => passport?.organization ?? null;
+    const passportContacts = () => passport?.contacts ?? [];
 
     function heroRightMarkup(entry) {
       const running = isRunning(entry);
@@ -760,6 +788,7 @@
     /** Repaint a section only when its own facts changed, so a safety pull never rewrites a
      * surface the user is pointing at. */
     function collections(snapshot, pending) {
+      passport = snapshot.configuration?.managed_policy ?? null;
       ifChanged("connections", [snapshot.sessions, snapshot.browsers], () => connections(snapshot));
       ifChanged("about", [snapshot.service, snapshot.sessions.length, snapshot.browsers.length, snapshot.history.length], () => about(snapshot));
       ifChanged("integrations", [snapshot.harnesses, [...pending]], () => integrations(snapshot, pending));

@@ -135,7 +135,9 @@ const before = sandbox.__aboutAttempts ?? 0;
 await new Promise((r) => setTimeout(r, 60));
 
 const connections = nodes.get("connections");
-const integrations = nodes.get("integration-grid");
+// Read what the booted surface drew before anything below repaints the same nodes: the second
+// view instance shares this one stub document, so a later render would answer for the first.
+const integrationsHtml = nodes.get("integration-grid").innerHTML;
 const policy = nodes.get("policy-state");
 const policyLabel = nodes.get("policy-state-label");
 
@@ -180,6 +182,26 @@ const compiled = (editable) => ({
 // A second view over the same stub document. The booted surface holds its own instance; this one
 // exists so the destination can be drawn on demand without a real click.
 const view = sandbox.globalThis.GhostlightView.create({ onFailure: (what, error) => reported.push(`${what}: ${error?.message ?? error}`) });
+
+// A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
+// enforced denial, and an organization that supplied contacts supplied them for this moment.
+view.collections({
+  sessions: [], browsers: [], harnesses: [], diagnostics: [], history: [], service: { version: "1.0.0" },
+  configuration: {
+    managed_policy: {
+      configured: true, organization: "Example Org",
+      contacts: [{ kind: "email", value: "security@example.test", label: "Security team" }]
+    }
+  }
+}, new Set());
+view.hero({
+  invocation: "i9", workspace: "w1", tool: "browser_execute", capability: "execute",
+  settled: true, allowed: false, phase: "blocked", reason: "policy_denied",
+  policyTier: "managed", grantId: "support-sites", denialId: "D-a1b2c3",
+  summary: "Refused.", endedAt: Date.now(), durationMs: 12
+}, false);
+const refusal = nodes.get("hero-body").innerHTML;
+
 view.policy(compiled(true));
 const board = nodes.get("capability-board");
 const layers = nodes.get("policy-layers");
@@ -199,12 +221,17 @@ const checks = [
   ["the pass continued past the broken panel", connections.innerHTML.length > 0,
     `connections: ${JSON.stringify(connections.innerHTML)}`],
   ["an old owned harness path is offered as an update",
-    integrations.innerHTML.includes("Update")
-      && integrations.innerHTML.includes('data-harness-action="install"'),
-    `integrations: ${JSON.stringify(integrations.innerHTML)}`],
+    integrationsHtml.includes("Update")
+      && integrationsHtml.includes('data-harness-action="install"'),
+    `integrations: ${JSON.stringify(integrationsHtml)}`],
   ["the band renders the policy words the orchestrator authored",
     policyLabel.textContent === "Example Org" && policy.dataset.tone === "applied",
     `policy: ${JSON.stringify({ label: policyLabel.textContent, tone: policy.dataset.tone })}`],
+  ["a refusal names the rule, the handle, and who to ask",
+    refusal.includes("Example Org") && refusal.includes("rule support-sites")
+      && refusal.includes("D-a1b2c3") && refusal.includes("security@example.test")
+      && refusal.includes('data-view="policy"'),
+    `refusal: ${JSON.stringify(refusal)}`],
   ["the policy destination opens with the orchestrator's sentence",
     nodes.get("policy-headline").textContent
       === "Example Org sets the rules, and you have narrowed them further.",

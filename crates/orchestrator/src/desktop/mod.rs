@@ -734,6 +734,9 @@ mod tests {
             requirements: CapabilitySet::READ,
             allowed: true,
             reason: "permitted".into(),
+            policy_tier: None,
+            grant_id: None,
+            denial_id: None,
             status: "succeeded".into(),
             effect: "none".into(),
             summary: "Read 1,240 words from example.com.".into(),
@@ -747,7 +750,9 @@ mod tests {
                 operation: operation.clone(),
             },
             WorkbenchChange::OperationChanged { operation },
-            WorkbenchChange::OperationSettled { record },
+            WorkbenchChange::OperationSettled {
+                record: Box::new(record),
+            },
             WorkbenchChange::RuntimeChanged {
                 runtime_state: RuntimeControlState::Active,
             },

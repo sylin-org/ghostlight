@@ -104,9 +104,35 @@ bundles already deployed keep behaving exactly as they do.
 
 ## Use a local policy
 
-Set `GHOSTLIGHT_POLICY_FILE` to the absolute path of the schema-3 JSON file before starting
-Ghostlight. Valid replacements apply atomically to future invocations. A malformed replacement
-keeps the last valid policy; a malformed cold start fails closed.
+There is exactly one user layer. Its document comes from one of two places, in this order:
+
+1. `GHOSTLIGHT_POLICY_FILE`, when set to the absolute path of a schema-3 JSON file before starting
+   Ghostlight. Ghostlight reads that file and never writes to it. The workbench shows it read-only
+   and says why.
+2. Otherwise the file Ghostlight owns, beside the managed cache in the per-user state directory:
+   `%LOCALAPPDATA%\Ghostlight\user-policy.json` on Windows,
+   `$XDG_STATE_HOME/ghostlight/user-policy.json` on Linux. This is the file the workbench writes,
+   and it is optional: a machine that has never authored one is all-open, not failing closed.
+
+Valid replacements apply atomically to future invocations. A malformed replacement keeps the last
+valid policy; a malformed cold start fails closed.
+
+## Read and write policy in the workbench
+
+The workbench has a Policy destination, reached from the tab row or from the state chip beside it.
+It shows the compiled result rather than the configuration: what agents may do right now, which
+layer decided each line, the rules behind those lines, the boundaries no policy can lift, and the
+exact document and path for every layer in force.
+
+When Ghostlight owns the user file and no organization has switched authoring off, the same page
+edits it. Rules read as sentences, host patterns are read back in plain words as they are typed,
+capabilities an organization refuses are shown refused on the control itself, and a rule that can
+never fire says so in place. Before applying, the page replays the candidate through the production
+decision engine against this machine's recorded audit and reports what would have been refused.
+
+Applying validates before it replaces anything and writes atomically, so no action in the window
+can leave Ghostlight configured with a policy it cannot read. Removing the rules is one action and
+returns authority to whatever remains above them.
 
 Validate and inspect a candidate with the production parser and capability directory:
 
