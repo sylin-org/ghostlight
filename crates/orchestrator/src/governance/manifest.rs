@@ -60,6 +60,43 @@ pub struct IdentityBlock {
     pub resolved_at: Option<String>,
 }
 
+/// Who authored this policy, addressed to the person it governs.
+///
+/// Informational only. Nothing here grants, denies, or participates in a decision; it exists so a
+/// governed person can see who is restricting them and where to ask about it, which every mature
+/// managed-device surface names in a sentence rather than leaving anonymous (ADR-0122 Decision 3).
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrganizationBlock {
+    /// Display name of the authoring organization.
+    pub name: String,
+    /// The organization's own explanation of why this policy exists.
+    #[serde(default)]
+    pub statement: Option<String>,
+    /// An HTTPS page the organization publishes about this policy.
+    ///
+    /// Presented as text. The workbench opens destinations from a closed vocabulary and never an
+    /// authored address, so carrying one here can never turn into a reachable link.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Channels a governed person may use to ask about this policy.
+    #[serde(default)]
+    pub contacts: Vec<OrganizationContact>,
+}
+
+/// One organization contact channel.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrganizationContact {
+    /// Channel kind, such as email or url.
+    pub kind: String,
+    /// Channel address.
+    pub value: String,
+    /// Optional organization-authored display label.
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
 /// Host allow/deny polarity for one grant.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -147,6 +184,9 @@ pub struct Manifest {
     /// Informational resolved identity.
     #[serde(default)]
     pub identity: Option<IdentityBlock>,
+    /// Informational authoring organization.
+    #[serde(default)]
+    pub organization: Option<OrganizationBlock>,
     /// Ordered grants. May be empty.
     pub grants: Vec<Grant>,
     /// Narrow monotonic product settings.
@@ -294,6 +334,43 @@ fn validate(manifest: &Manifest, source: &str) -> Result<(), ManifestError> {
             }
         }
     }
+    if let Some(organization) = &manifest.organization {
+        validate_organization(organization, source)?;
+    }
+    Ok(())
+}
+
+/// Bounds mirror the signed presentation block so the same organization facts survive either
+/// delivery path unchanged.
+fn validate_organization(
+    organization: &OrganizationBlock,
+    source: &str,
+) -> Result<(), ManifestError> {
+    bounded_nonempty(&organization.name, 100, source, "organization.name")?;
+    if let Some(statement) = &organization.statement {
+        bounded_nonempty(statement, 500, source, "organization.statement")?;
+    }
+    if let Some(url) = &organization.url {
+        bounded_nonempty(url, 300, source, "organization.url")?;
+        if !url.starts_with("https://") {
+            return field(source, "organization.url", "must be an https address");
+        }
+    }
+    if organization.contacts.len() > 8 {
+        return field(
+            source,
+            "organization.contacts",
+            "must contain at most 8 entries",
+        );
+    }
+    for (index, contact) in organization.contacts.iter().enumerate() {
+        let prefix = format!("organization.contacts[{index}]");
+        bounded_nonempty(&contact.kind, 32, source, &format!("{prefix}.kind"))?;
+        bounded_nonempty(&contact.value, 240, source, &format!("{prefix}.value"))?;
+        if let Some(label) = &contact.label {
+            bounded_nonempty(label, 80, source, &format!("{prefix}.label"))?;
+        }
+    }
     Ok(())
 }
 
@@ -363,7 +440,8 @@ fn validate_config(entry: &ConfigEntry, index: usize, source: &str) -> Result<()
         "browser.tabs.allow_close"
         | "privacy.preserve_target_names"
         | "channels.mcp.enabled"
-        | "channels.cli.enabled" => {
+        | "channels.cli.enabled"
+        | "policy.user.enabled" => {
             if !entry.value.is_boolean() {
                 return field(source, &path, "must be a boolean");
             }
@@ -537,6 +615,49 @@ mod tests {
         ] {
             assert!(!valid_host_pattern(invalid), "{invalid}");
         }
+    }
+
+    #[test]
+    fn organization_identity_is_optional_bounded_and_additive() {
+        let anonymous = parse(
+            r#"{"schema":3,"name":"test","version":"1","grants":[]}"#,
+            "plain",
+        )
+        .unwrap();
+        assert!(anonymous.organization.is_none());
+
+        let named = parse(
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"organization":{"name":"Example Organization","statement":"Keeps browser work inside approved sites.","url":"https://example.com/policy","contacts":[{"kind":"email","value":"security@example.com","label":"Security team"}]}}"#,
+            "named",
+        )
+        .unwrap();
+        let organization = named.organization.expect("organization block parses");
+        assert_eq!(organization.name, "Example Organization");
+        assert_eq!(organization.contacts.len(), 1);
+        assert_eq!(organization.contacts[0].value, "security@example.com");
+
+        for rejected in [
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"organization":{"name":""}}"#,
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"organization":{"name":"Example","url":"http://example.com"}}"#,
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"organization":{"name":"Example","surprise":true}}"#,
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"organization":{}}"#,
+        ] {
+            assert!(parse(rejected, "rejected").is_err(), "{rejected}");
+        }
+    }
+
+    #[test]
+    fn the_user_layer_switch_is_a_registered_boolean_setting() {
+        assert!(parse(
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":"policy.user.enabled","value":false,"level":"mandatory"}]}"#,
+            "registered"
+        )
+        .is_ok());
+        assert!(parse(
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":"policy.user.enabled","value":"no","level":"mandatory"}]}"#,
+            "typed"
+        )
+        .is_err());
     }
 
     #[test]

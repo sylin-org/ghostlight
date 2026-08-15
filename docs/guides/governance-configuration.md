@@ -64,6 +64,43 @@ Supported settings are:
 | `channels.mcp.enabled` | boolean | `false` refuses MCP session admission. |
 | `channels.cli.enabled` | boolean | `false` refuses `ghostlight call` admission. |
 | `content.security.sacred_domains` | hostname array | Adds never-touch destinations. |
+| `policy.user.enabled` | boolean | `false` stops this machine's user from authoring a local policy. |
+
+`policy.user.enabled` is honored only from an organization layer, and it gates authoring rather than
+enforcement. A user policy that already exists keeps applying when it is switched off, because a
+user layer can only subtract authority and ignoring it would hand authority back. It is not a
+security control: a user layer could never widen anything. Use it when a fleet needs to stay
+predictable, and supply an `organization.statement` so the person reads a reason rather than a
+missing button.
+
+## Say who wrote the policy
+
+A policy may name its author. The block is optional, informational, and never participates in a
+decision. It exists so the person being governed can see who is restricting them and where to ask.
+
+```json
+{
+  "organization": {
+    "name": "Example Organization",
+    "statement": "Keeps browser work inside approved support sites.",
+    "url": "https://example.com/browser-policy",
+    "contacts": [
+      {"kind": "email", "value": "security@example.com", "label": "Security team"}
+    ]
+  }
+}
+```
+
+`name` is required when the block is present, `url` must be HTTPS, and at most 8 contacts are
+allowed. The workbench shows the URL as text: destinations it can open come from a closed
+vocabulary, never from an authored address.
+
+Manifests are typo-closed, so a policy carrying this block is rejected by a Ghostlight older than
+its introduction. Keep it out of documents you publish to a mixed fleet until the fleet has moved.
+
+When a signed bundle carries the separate presentation block, that presentation wins on conflict.
+Both are covered by the signature; the presentation block is the outer published statement, so
+bundles already deployed keep behaving exactly as they do.
 
 ## Use a local policy
 

@@ -1301,6 +1301,26 @@ impl GovernanceFacade {
         Decision::allow()
     }
 
+    /// Whether an organization layer permits a locally authored user policy.
+    ///
+    /// This gates authoring, never enforcement. A user layer that already exists keeps applying,
+    /// because it can only subtract: dropping it at decision time would restore authority no upper
+    /// layer removed, which is the one thing the monotonic rule forbids. The switch exists so an
+    /// organization can keep a fleet predictable, and it is not a security boundary -- a user layer
+    /// could never widen anything in the first place (ADR-0122 Decision 5).
+    #[must_use]
+    pub fn user_authoring_allowed(&self) -> bool {
+        self.refresh_policies();
+        let policies = self
+            .policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        policies
+            .managed_manifest()
+            .and_then(|policy| policy.boolean_setting("policy.user.enabled"))
+            .unwrap_or(true)
+    }
+
     /// Build one immutable snapshot and apply caller restrictions by intersection.
     #[must_use]
     pub fn snapshot(&self, restrictions: &RequestRestrictions) -> AuthoritySnapshot {
@@ -2135,6 +2155,42 @@ mod tests {
             );
             let _ = fs::remove_file(path);
         }
+    }
+
+    #[test]
+    fn an_organization_may_switch_off_user_authoring_without_widening_authority() {
+        let managed = temporary("authoring-managed");
+        let local = temporary("authoring-local");
+        fs::write(
+            &managed,
+            br#"{"schema":3,"name":"org","version":"1","grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}],"config":[{"key":"policy.user.enabled","value":false,"level":"mandatory"}]}"#,
+        )
+        .unwrap();
+        fs::write(
+            &local,
+            br#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"narrow","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+        )
+        .unwrap();
+
+        let facade = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()));
+        assert!(!facade.user_authoring_allowed());
+        // The switch gates authoring only. An existing user layer keeps subtracting, because
+        // ignoring it would restore authority the organization never granted back.
+        let snapshot = facade.snapshot(&RequestRestrictions::default());
+        assert!(
+            snapshot
+                .authorize_landing(CapabilitySet::READ, "https://example.com")
+                .allowed
+        );
+        assert!(
+            !snapshot
+                .authorize_landing(CapabilitySet::ACTION, "https://example.com")
+                .allowed
+        );
+
+        assert!(GovernanceFacade::new(Some(local.clone()), None).user_authoring_allowed());
+        let _ = fs::remove_file(managed);
+        let _ = fs::remove_file(local);
     }
 
     #[test]
