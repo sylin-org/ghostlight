@@ -231,6 +231,26 @@ view.policy(compiled(false));
 const editorHiddenWhenRefused = nodes.get("policy-editor").hidden
   && !nodes.get("policy-blocked").hidden
   && nodes.get("policy-blocked-reason").textContent.includes("Example Org");
+
+/*
+ * A real browser nulls Event.currentTarget once dispatch finishes, which is at the first `await`
+ * in an async listener -- well before an awaited call settles. `withButton` used to read
+ * `event.currentTarget` a second time in its `finally` block, after that point, which threw on
+ * every use of Re-check or Send test and left the button stuck disabled. The synthetic `node()`
+ * stub above is a plain object and cannot reproduce that expiry, so this checks the one function
+ * where it matters against an event shaped like the real one: valid once, synchronously, then gone.
+ */
+const reCheckButton = node("refresh-integrations");
+let dispatchEnded = false;
+const clickEvent = { get currentTarget() { return dispatchEnded ? null : reCheckButton; } };
+queueMicrotask(() => { dispatchEnded = true; });
+let withButtonThrew = null;
+try {
+  await sandbox.withButton(clickEvent, async () => {}, "done");
+} catch (error) {
+  withButtonThrew = error.message;
+}
+
 const checks = [
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["heartbeat installed", heartbeat],
@@ -329,6 +349,9 @@ const checks = [
     `settings: ${JSON.stringify(settingsShown)}`],
   ["the editor appears only when authoring is permitted",
     editorShown && editorHiddenWhenRefused],
+  ["withButton re-enables its button after currentTarget has expired, and never throws",
+    withButtonThrew === null && reCheckButton.disabled === false,
+    `threw: ${JSON.stringify(withButtonThrew)}, disabled: ${reCheckButton.disabled}`],
   ["failure reported", reported.some((r) => r.includes("deliberate About failure")),
     `reported: ${JSON.stringify(reported)}`],
   ["the failure names the panel", reported.some((r) => r.includes("painting about"))],

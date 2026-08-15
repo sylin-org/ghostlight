@@ -231,14 +231,19 @@ async function openDestination(destination) {
 }
 
 async function withButton(event, work, done) {
-  event.currentTarget.disabled = true;
+  // event.currentTarget is only live during synchronous dispatch: the browser nulls it once the
+  // listener returns, and an async listener returns at its first await, long before work()
+  // settles. Reading it again in finally threw on a null, uncaught, and left the button stuck
+  // disabled. A captured element reference has no such expiry.
+  const button = event.currentTarget;
+  button.disabled = true;
   try {
     await work();
     view.toast(done);
   } catch (error) {
     view.toast(String(error), true);
   } finally {
-    event.currentTarget.disabled = false;
+    button.disabled = false;
   }
 }
 
