@@ -199,24 +199,35 @@ reboot, or public-release pass.
   `linuxdeploy` strip tool cannot parse CachyOS `.relr.dyn` sections, so no AppImage pass is
   claimed. The Ubuntu/Debian lifecycle table remains untouched and blocking.
 
-## Linux experience research
+## Lean Linux installation and visible activation
 
-[Research 25](research/25-delightful-linux-experience-2026-08.md) records the 2026-08-15 prior-art
-sweep for a broad but simple Linux user experience. It is research input, not an accepted contract
-or an implementation claim.
+[ADR-0123](adr/0123-lean-linux-install-and-visible-activation.md) accepts and implements the
+highest-value 1.0 findings from [Research 25](research/25-delightful-linux-experience-2026-08.md).
 
-- The proposed 1.0 shape is one no-sudo per-user default, one proven Debian package, and one
-  verified portable archive, all delegating to the same installer core and three-sibling unit.
-- The highest-value gaps are a normal Applications entry that visibly opens on first use, typed
-  Snap/Flatpak browser diagnosis, a declared old-enough build baseline, and one clean GNOME Wayland
-  release lifecycle alongside the current CachyOS KDE development evidence.
-- RPM is the next rational native format only after a separate scope decision and a real lifecycle
-  host. AppImage, Snap, Flatpak, AUR, and Nix artifacts do not become 1.0 gates merely because their
-  packaging tools exist.
-- ADR-0112's backgrounded first launch, implemented on Linux by ADR-0118 as a hidden workbench plus
-  a tray, conflicts with an explicit Applications launch on a desktop that may not show that tray.
-  Any remedy must preserve connector demand-start and one authority, and needs an ADR amendment
-  before code changes.
+- `ghostlight open` composes the existing sibling demand-start and authenticated activation seams.
+  Connector startup still passes no arguments, the authority still begins backgrounded, and no
+  second service role, listener, wrapper, or resident supervisor was added.
+- Linux user installation owns one XDG Applications entry and the existing 128-pixel icon. The
+  entry names the exact installed executable plus `open`; updates rewrite only owned state,
+  uninstall removes only owned bytes, and `/usr/bin/ghostlight` defers to the Debian package's
+  system entry.
+- Browser package provenance is a closed local fact separate from native-host registration.
+  Default Linux setup selects detected native Chrome, Edge, Brave, or Chromium packages. Snap and
+  Flatpak-only selections are refused with the native-package remedy; `--all-browsers` keeps the
+  deliberate pre-registration route.
+- The release Linux artifact now builds on Ubuntu 22.04. Candidate assembly waits for exact Debian
+  package install/remove/reinstall/purge smokes in Debian 12 and Ubuntu 24.04. Those workflow jobs
+  are implemented but have not run and do not replace the visible Ubuntu GNOME Wayland L1-L9 gate.
+- Current-tree verification passed formatting, warnings-denied workspace Clippy, 274 Rust tests,
+  103 extension tests, 10 npm tests, 4 MCPB tests, shell syntax, fresh isolated build, process, CLI,
+  workbench, policy-grammar, Tauri-config build, dependency-policy, and advisory gates. The live CLI
+  separately reported native browser provenance and missing Applications integration correctly.
+  PowerShell and Debian package tools are absent on this CachyOS host, so no local `.deb` lifecycle
+  is claimed.
+
+RPM remains the next rational native format only after a separate scope decision and a real
+lifecycle host. AppImage, Snap, Flatpak, AUR, and Nix artifacts do not become 1.0 gates merely
+because their packaging tools exist.
 
 - `dev` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`. It absorbed
   `ghostlight-1.0`, which was a fast-forward and has been retired.

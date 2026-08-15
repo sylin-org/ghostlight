@@ -148,6 +148,20 @@ switch ($Platform) {
                     throw "Debian native-host manifest does not carry both fixed extension identities"
                 }
             }
+            $desktopEntries = @(
+                Get-ChildItem `
+                    -LiteralPath (Join-Path $tempRoot "usr/share/applications") `
+                    -File `
+                    -Filter "*.desktop"
+            )
+            if ($desktopEntries.Count -ne 1) {
+                throw "Debian package must contain one desktop entry, found $($desktopEntries.Count)"
+            }
+            $desktopEntry = Get-Content -LiteralPath $desktopEntries[0].FullName -Raw
+            if ($desktopEntry -notmatch '(?m)^Exec=.*ghostlight.* open$' -or
+                $desktopEntry -notmatch '(?m)^X-Ghostlight-Owned=true$') {
+                throw "Debian desktop entry must use the explicit Ghostlight open intent"
+            }
             Assert-LegalPayload -Root $tempRoot
         }
         finally {

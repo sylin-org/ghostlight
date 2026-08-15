@@ -49,10 +49,12 @@ It observes the lifetime lease, honors a fresh deployment lock, and starts only 
 `ghostlight` executable with no application arguments and with detached null standard streams. The
 connectors retain their existing reconnect behavior and learn no workbench or product semantics.
 
-A normal launch first asks the running authority to reveal its workbench through an authenticated
-first message on the existing service bridge. That request admits no workspace and adds no
-listener. If no authority exists, the launch starts the complete desktop authority, creates its
-tray, and backgrounds the workbench: minimized on Windows and hidden on Linux. `--headless` is the
+A no-argument launch first asks a running authority to reveal its workbench, then otherwise starts
+the complete desktop authority, creates its tray, and backgrounds the workbench: minimized on
+Windows and hidden on Linux. Connectors use that exact no-argument launch. The explicit local-human
+`ghostlight open` intent composes the same bridge lifecycle operation with the same authenticated
+activation request: when absent it demand-starts the ordinary no-argument sibling, waits for its
+runtime, then reveals it. The request admits no workspace and adds no listener. `--headless` is the
 explicit service-only mode and cannot reveal a workbench.
 
 The tray and authority do not depend on a permanent window. Native close destroys only the
@@ -203,6 +205,13 @@ Install and uninstall are serialized,
 merge only the `ghostlight` entry, keep unrelated siblings, preserve JSONC and TOML comments,
 create a backup, and refuse malformed, unreadable, or foreign-owned configuration rather than
 guessing. The UI exposes no generic filesystem or process operation.
+
+Linux desktop integration is another installer-owned local-human capability. A per-user install
+owns one XDG desktop entry and one byte-identical icon. The entry invokes the exact versioned
+orchestrator with `open`; update and uninstall touch only explicitly owned files. The Debian package
+owns the equivalent system entry and does not create a per-user shadow. Browser package provenance
+is read-only and typed separately from native-host registration, so a current manifest cannot make
+a sandboxed or absent browser look usable.
 
 Tauri commands form a small typed inbound adapter over `WorkbenchFacade`. File work runs outside
 the UI event loop. The native notification port is best effort and content-free. WebView, tray,

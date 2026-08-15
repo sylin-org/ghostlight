@@ -77,7 +77,7 @@ Three executables land side by side:
 - `ghostlight-browser-connector` -- the Chromium native-messaging relay.
 
 ```sh
-target/debug/ghostlight
+target/debug/ghostlight open
 ```
 
 That shows the workbench, or focuses the one already running. Then open **MCP integrations**,
@@ -87,7 +87,8 @@ covers browser registration and the full validation loop.
 After that first setup there is no startup ritual: launching a connected MCP client or Chromium
 demand-starts Ghostlight when it is not already running. The normal desktop authority always owns
 the tray and begins with its workbench backgrounded: minimized on Windows and hidden on Linux.
-`--headless` explicitly runs without a desktop.
+The installed Applications entry runs `ghostlight open`, so a desktop without a visible tray still
+has a one-click route to the workbench. `--headless` explicitly runs without a desktop.
 
 For an end-user install, the 1.0 release keeps the 0.8 one-command journey:
 
@@ -97,6 +98,11 @@ npx -y ghostlight@1.0.0 install
 
 The installer opens the one required browser-store confirmation and tells you when to reconnect
 your MCP client. If anything needs attention later, run `npx -y ghostlight@1.0.0 doctor`.
+
+Linux 1.0 supports x86_64 glibc-based desktops with a native Chrome, Edge, Brave, or Chromium
+package. A native `.deb` is provided for Debian and Ubuntu; the verified per-user install is the
+default elsewhere. `doctor` identifies unsupported Snap and Flatpak browser packages instead of
+reporting them as an unexplained disconnect.
 
 That coordinate is not public until the gates in [`docs/STATUS.md`](docs/STATUS.md) are met. Signed
 native packages, portable archives, and a self-contained Claude Desktop MCPB are equivalent release

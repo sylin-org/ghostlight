@@ -124,6 +124,26 @@ PowerShell is absent on this host, so the PowerShell CLI journey and PowerShell 
 scripts were not rerun. This rolling CachyOS host also lacks the exact pinned Ubuntu/Debian package
 environment and package inspection tools. No Debian artifact or lifecycle pass is claimed.
 
+## Lean Linux installation source follow-up -- 2026-08-15
+
+[ADR-0123](../adr/0123-lean-linux-install-and-visible-activation.md) adds the Linux integration
+seams found by Research 25 without changing the three-process topology.
+
+| Gate | Result |
+| --- | --- |
+| Formatting and lint | Formatting and locked workspace/all-target Clippy with warnings denied passed. |
+| Rust tests | 274 passed: 235 orchestrator library, 4 orchestrator binary, 31 bridge, and 4 MCP connector. |
+| Other tests | 103 extension, 10 npm, and 4 MCPB tests passed; all shell scripts parsed. |
+| Fresh process surfaces | A new isolated build passed process, CLI, workbench-surface, and policy-grammar journeys. A real headless authority returned the exact `ghostlight open` presentation refusal. |
+| Linux install diagnostics | Live dry-run and doctor output separated native browser-package provenance, unsupported or absent packages, registration freshness, and the XDG Applications entry. |
+| Package configuration | Tauri parsed the custom release configuration and completed a no-bundle application build. JSON parsing and desktop-entry rendering checks passed. |
+| Dependency policy | License, bans, and source checks passed. `cargo audit` exited zero with the same 17 allowed warnings below. |
+
+The release workflow now builds the Linux binary on Ubuntu 22.04 and blocks candidate assembly on
+Debian 12 and Ubuntu 24.04 package lifecycle smokes. Those jobs have not run. PowerShell,
+`dpkg-deb`, and a clean Ubuntu GNOME host are absent here, so native package inspection and the
+visible L1-L9 lifecycle remain release blockers rather than inferred passes.
+
 ## Residual dependency warnings
 
 RustSec reported 17 warnings in target-specific transitive dependencies:

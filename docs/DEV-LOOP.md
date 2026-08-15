@@ -19,7 +19,7 @@ The sibling executables are:
 Run the product with its workbench:
 
 ```powershell
-target/debug/ghostlight
+target/debug/ghostlight open
 ```
 
 Run only the persistent orchestrator service:
@@ -28,12 +28,14 @@ Run only the persistent orchestrator service:
 target/debug/ghostlight --headless
 ```
 
-The normal launch always starts the complete desktop authority with its tray and a backgrounded
-workbench: minimized on Windows and hidden on Linux. Connectors demand-start that same sibling
-executable with no application arguments. A second direct launch opens and focuses the workbench
-owned by the running authority. Windows restores its existing view; Linux reconstructs its
+The normal no-argument launch always starts the complete desktop authority with its tray and a
+backgrounded workbench: minimized on Windows and hidden on Linux. Connectors demand-start that same
+sibling executable with no application arguments. `ghostlight open` is the explicit human intent:
+it uses the shared lifecycle seam to demand-start the same ordinary authority when absent, then
+opens and focuses its workbench. Windows restores its existing view; Linux reconstructs its
 disposable view because Wayland cannot report or unset minimization. Closing destroys only the
-workbench window; the next tray Open reconstructs it, and tray Quit ends the whole process.
+workbench window; the next tray or Applications Open reconstructs it, and tray Quit ends the whole
+process.
 
 ## What to restart
 
@@ -142,7 +144,7 @@ to that `ghostlight-browser-connector`. Load `extension/` unpacked and reload it
 extension edit. Its pinned development identity and `org.sylin.ghostlight` host name must not
 change.
 
-Run `ghostlight` again to restore the backgrounded workbench, open Status, and verify a compatible
+Run `ghostlight open` to restore the backgrounded workbench, open Status, and verify a compatible
 browser instance appears. Use a
 supported MCP client registration from MCP integrations, reconnect that client, and execute the
 journeys in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md). Use the `sylin.org` demo forms for visible

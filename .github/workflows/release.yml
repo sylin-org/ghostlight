@@ -62,7 +62,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             bundles: nsis
             package_platform: windows
-          - os: ubuntu-24.04
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             bundles: deb
             package_platform: linux
@@ -125,6 +125,44 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  linux-package-smoke:
+    needs: native-packages
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distribution: debian-12
+            image: debian:12
+          - distribution: ubuntu-24.04
+            image: ubuntu:24.04
+    container: ${{ matrix.image }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-x86_64-unknown-linux-gnu
+          path: candidate
+      - name: Verify Debian package lifecycle on ${{ matrix.distribution }}
+        shell: bash
+        run: |
+          artifact=$(find "$PWD/candidate" -type f -name '*.deb' -print -quit)
+          test -n "$artifact"
+          apt-get update
+          apt-get install -y "$artifact"
+          test "$(ghostlight --version)" = "ghostlight 1.0.0"
+          dpkg-query -L ghostlight | grep -qx '/usr/bin/ghostlight'
+          mapfile -t desktops < <(grep -R -l '^X-Ghostlight-Owned=true$' /usr/share/applications)
+          test "${#desktops[@]}" -eq 1
+          grep -Eq '^Exec=.*ghostlight.* open$' "${desktops[0]}"
+          apt-get remove -y ghostlight
+          test ! -e /usr/bin/ghostlight
+          apt-get install -y "$artifact"
+          test "$(ghostlight --version)" = "ghostlight 1.0.0"
+          apt-get purge -y ghostlight
+          test ! -e /usr/bin/ghostlight
+
   extension-artifact:
     needs: quality-gate
     runs-on: ubuntu-24.04
@@ -141,7 +179,7 @@ jobs:
           retention-days: 7
 
   candidate-bundle:
-    needs: [quality-gate, native-packages, extension-artifact]
+    needs: [quality-gate, native-packages, extension-artifact, linux-package-smoke]
     runs-on: ubuntu-24.04
     permissions:
       contents: read

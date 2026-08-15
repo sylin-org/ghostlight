@@ -8,8 +8,10 @@ browser steps, applies one authority snapshot, and returns one truthful terminal
 The browser is the user's visible, existing, authenticated Chromium browser. Ghostlight does
 not create a hidden browsing world or ask a model to reproduce browser orchestration.
 
-Ghostlight 1.0 supports Windows and Linux. Runtime behavior, installers, packages, launchers,
-continuous integration, and release evidence use only those operating systems.
+Ghostlight 1.0 supports Windows and x86_64 glibc-based desktop Linux. Linux requires a native
+Chrome, Edge, Brave, or Chromium package for browser native messaging. Snap and Flatpak browser
+packages are detected but unsupported. Runtime behavior, installers, packages, launchers,
+continuous integration, and release evidence use only Windows and that declared Linux surface.
 
 ## User jobs
 
@@ -64,9 +66,13 @@ Internal browser commands are combined when a person experiences them as one job
   separate startup ritual. Launching an MCP client or Chromium demand-starts the local service
   when it is absent.
 - Every normal Ghostlight startup creates the tray and begins with the workbench backgrounded:
-  minimized on Windows and hidden on Linux. A second direct launch or a tray click opens and
-  focuses the workbench owned by the running authority. Windows restores its existing view;
-  Linux reconstructs its disposable view because Wayland cannot report or unset minimization.
+  minimized on Windows and hidden on Linux. An explicit `ghostlight open` intent or a tray click
+  opens and focuses the workbench owned by the running authority. Windows restores its existing
+  view; Linux reconstructs its disposable view because Wayland cannot report or unset
+  minimization.
+- Every Linux install has an Applications entry. It uses the explicit `ghostlight open` intent,
+  which demand-starts the same backgrounded authority when absent and then reveals it through the
+  existing authenticated activation seam. A tray is never the only route to the workbench.
 - Three destinations and one global search reach every workbench surface and user-visible record.
   The monitor carries the current action in full and the recent ones beneath it, so a glance is
   enough.

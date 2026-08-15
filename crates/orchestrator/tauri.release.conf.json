@@ -18,6 +18,7 @@
     },
     "linux": {
       "deb": {
+        "desktopTemplate": "../../packaging/linux/ghostlight.desktop.hbs",
         "files": {
           "/etc/opt/chrome/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json",
           "/etc/opt/edge/native-messaging-hosts/org.sylin.ghostlight.json": "binaries/native-host/org.sylin.ghostlight.json",

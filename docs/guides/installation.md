@@ -11,20 +11,26 @@ are not interchangeable.
 ## Release installation journey
 
 1. Run `npx -y ghostlight@1.0.0 install`. The checksum-bound launcher downloads one exact sibling
-   set, registers the browser connector for the current user, and connects detected MCP clients.
+   set, registers detected native browsers for the current user, creates the Linux Applications
+   entry, and connects detected MCP clients.
    A native package, Scoop, WinGet, the one-line installer, or the Claude Desktop
    MCPB may provide the same binaries instead.
 2. Install the matching `Ghostlight in Browser` 1.0 extension from its release listing.
 3. Restart or reconnect the MCP harness, then run the bounded first proof from the README. Launch
-   Ghostlight whenever you want the tray workbench.
+   Open Ghostlight from Applications whenever you want the workbench.
 
 That is the normal installation path. `npx -y ghostlight@1.0.0 doctor` is recovery when something
 does not connect; it is not another required setup step.
 
 Setup is now complete. Launching the registered MCP client or Chromium demand-starts Ghostlight if
 it is absent. The complete desktop authority starts with its tray available and its workbench
-minimized. Launch Ghostlight again whenever you want the workbench; the second launch focuses the
-existing authority instead of creating another one.
+backgrounded. Applications uses `ghostlight open`: it demand-starts that same authority when absent,
+then focuses the workbench instead of creating another one.
+
+Linux 1.0 supports x86_64 glibc-based desktops and a native Chrome, Edge, Brave, or Chromium
+package. Snap and Flatpak browsers cannot start Ghostlight's host native-messaging connector.
+Install and doctor identify those package forms and name the native-package remedy. Use
+`--all-browsers` only when deliberately preparing registrations before browser installation.
 
 Only checksum-bound, provenance-verified 1.0 packages and the matching 1.0 extension satisfy this
 journey. Provenance verification, clean-machine install, upgrade, and uninstall are release gates,
@@ -73,7 +79,7 @@ cargo build --workspace
 Start the workbench:
 
 ```sh
-target/debug/ghostlight
+target/debug/ghostlight open
 ```
 
 Or start only the persistent service:
@@ -130,6 +136,8 @@ opens in a dedicated normal window rather than disrupting the user's active wind
   Status again.
 - **A client needs attention:** inspect its configuration. Ghostlight deliberately did not
   overwrite malformed or foreign data.
+- **Browser is a Snap or Flatpak:** install Chrome, Edge, Brave, or Chromium as a native package,
+  then run `ghostlight doctor --fix`. Ghostlight does not punch through the browser sandbox.
 - **A tab close was blocked:** the tab is retained as visible evidence. Change both applicable
   orchestrator policy and the extension's local preserve-tabs setting only if the user wants
   model-driven close.

@@ -40,8 +40,10 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
      indefinitely.
 15. Concurrent demand-start requests converge on one lifetime-leased service authority before
      runtime publication or desktop initialization.
-16. A direct/default launch reveals the existing authenticated authority's workbench without a
-    new listener or workspace. A headless authority refuses that presentation request clearly.
+16. An explicit `ghostlight open` reveals the existing authenticated authority's workbench without
+    a new listener or workspace. When absent, it asks the shared lifecycle seam to start the same
+    no-argument sibling used by connectors, then activates it. A headless authority refuses that
+    presentation request clearly.
 17. An adapter that advertises end-to-end liveness acknowledges content-free heartbeats through the
     unchanged opaque browser connector. A relay socket that stays attached without acknowledgements
     becomes unavailable, while a silent browser operation stays available when its independent
@@ -272,6 +274,13 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 14. Clear view removes completed actions from the current Monitor surface, preserves running work,
     issues no orchestrator mutation, and leaves the durable audit unchanged. A later action appears
     normally, and a fresh desktop process may reconstruct the cleared history from audit.
+15. A Linux user install owns one XDG Applications entry and one byte-identical icon. The entry
+    invokes the exact installed executable with `open`; repeat install is a no-op, upgrade changes
+    an owned version path, foreign state is preserved, and repeat uninstall is a no-op. A Debian
+    package owns the system entry and creates no per-user shadow.
+16. Install and doctor distinguish native, Snap, Flatpak, multiple-sandbox, missing, and unchecked
+    browser package forms from native-host registration. Default Linux setup selects only detected
+    native browsers, while `--all-browsers` remains explicit pre-registration.
 
 ## Integration and release-readiness gates
 
@@ -291,3 +300,7 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    journeys lacking implementation.
 10. The bundled workbench HTML, CSS, and JavaScript render against a representative plural-state
     fixture, every destination is keyboard reachable, and frontend scripts pass syntax checks.
+11. Release Linux binaries are built on Ubuntu 22.04. The exact Debian candidate installs,
+    version-checks, removes, reinstalls, and purges in Debian 12 and Ubuntu 24.04 containers before
+    candidate assembly. Those headless package smokes do not replace the Ubuntu GNOME Wayland
+    L1-L9 lifecycle.

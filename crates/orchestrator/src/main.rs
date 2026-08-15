@@ -20,6 +20,8 @@ const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
 enum LaunchMode {
     Headless,
     Desktop,
+    /// Explicit local-human intent to make the workbench visible.
+    Open,
     /// The command-line intake. A script asked for work, not for a window (ADR-0105).
     Call,
     /// Local policy validation, explanation, and audit-free simulation.
@@ -73,6 +75,7 @@ fn main() -> anyhow::Result<()> {
     match launch_mode(std::env::args_os().skip(1))? {
         LaunchMode::Headless => ghostlight::service::run_forever(),
         LaunchMode::Desktop => start_or_activate_desktop(),
+        LaunchMode::Open => open_desktop(),
         LaunchMode::Call => run_call(),
         LaunchMode::Policy(command) => run_policy(&command),
         LaunchMode::NativeHost(command) => run_native_host(command),
@@ -92,36 +95,37 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
+    use ghostlight::install::desktop_entry::DesktopIntegration;
     use ghostlight::install::native_host::{NativeHostRegistry, NativeHostState};
     use ghostlight::install::{HarnessAction, HarnessRegistry};
 
     let native_hosts = NativeHostRegistry::discover();
     let mut install_usable = false;
-    if !options.browser_ids.is_empty() {
-        let report = native_hosts.check()?;
-        for id in &options.browser_ids {
-            if !report.browsers.iter().any(|browser| browser.id == *id) {
-                anyhow::bail!("unknown browser '{id}'; expected chrome, edge, brave, or chromium");
-            }
-        }
-    }
+    let initial_browser_report = native_hosts.check()?;
+    let install_browser_ids = if install {
+        select_install_browsers(&initial_browser_report, options)?
+    } else {
+        None
+    };
     if options.dry_run {
         println!(
             "Ghostlight {} dry run -- no machine state will change.",
             if install { "install" } else { "uninstall" }
         );
-        print_native_host_report(&native_hosts.check()?);
+        print_native_host_report(&initial_browser_report);
     } else if install {
-        let result = if options.browser_ids.is_empty() {
-            native_hosts.install()?
-        } else {
-            native_hosts.install_selected(&options.browser_ids)?
+        let result = match &install_browser_ids {
+            None => native_hosts.install()?,
+            Some(browser_ids) => native_hosts.install_selected(browser_ids)?,
         };
         println!("Browser connection installed; changed: {}", result.changed);
         print_native_host_report(&result.report);
         install_usable = result.report.browsers.iter().any(|browser| {
-            (options.browser_ids.is_empty() || options.browser_ids.contains(&browser.id))
+            (install_browser_ids
+                .as_ref()
+                .is_none_or(|browser_ids| browser_ids.contains(&browser.id)))
                 && browser.state == NativeHostState::Current
+                && (browser.package.native_messaging_usable() || options.all_browsers)
         });
         let migration = ghostlight::install::migration::retire_obsolete_supervisor();
         for removed in migration.removed {
@@ -141,6 +145,27 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         };
         println!("Browser connection removed; changed: {}", result.changed);
         print_native_host_report(&result.report);
+    }
+
+    let desktop = DesktopIntegration::discover();
+    if options.dry_run {
+        print_desktop_integration_report(&desktop.check()?);
+    } else {
+        let result = if install {
+            desktop.install()?
+        } else {
+            desktop.uninstall()?
+        };
+        if result.report.state
+            != ghostlight::install::desktop_entry::DesktopIntegrationState::NotApplicable
+        {
+            println!(
+                "Applications entry {}; changed: {}",
+                if install { "installed" } else { "removed" },
+                result.changed
+            );
+            print_desktop_integration_report(&result.report);
+        }
     }
 
     if install && !options.dry_run && !install_usable {
@@ -207,6 +232,68 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn select_install_browsers(
+    report: &ghostlight::install::native_host::NativeHostReport,
+    options: &SetupOptions,
+) -> anyhow::Result<Option<Vec<String>>> {
+    use ghostlight::install::browser_package::BrowserPackage;
+
+    if options.all_browsers {
+        return Ok(None);
+    }
+    if !options.browser_ids.is_empty() {
+        for id in &options.browser_ids {
+            let browser = report
+                .browsers
+                .iter()
+                .find(|browser| browser.id == *id)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "unknown browser '{id}'; expected chrome, edge, brave, or chromium"
+                    )
+                })?;
+            if browser.package.sandboxed() {
+                anyhow::bail!("{}", browser.package_detail);
+            }
+            if browser.package == BrowserPackage::NotDetected {
+                anyhow::bail!(
+                    "{} Install Chrome, Edge, Brave, or Chromium as a native package, then run Ghostlight install again.",
+                    browser.package_detail
+                );
+            }
+        }
+        return Ok(Some(options.browser_ids.clone()));
+    }
+    if report
+        .browsers
+        .iter()
+        .all(|browser| browser.package == BrowserPackage::NotChecked)
+    {
+        return Ok(None);
+    }
+    let native = report
+        .browsers
+        .iter()
+        .filter(|browser| browser.package == BrowserPackage::Native)
+        .map(|browser| browser.id.clone())
+        .collect::<Vec<_>>();
+    if !native.is_empty() {
+        return Ok(Some(native));
+    }
+    let sandboxed = report
+        .browsers
+        .iter()
+        .filter(|browser| browser.package.sandboxed())
+        .map(|browser| browser.package_detail.as_str())
+        .collect::<Vec<_>>();
+    if sandboxed.is_empty() {
+        anyhow::bail!(
+            "No supported native browser was detected. Install Chrome, Edge, Brave, or Chromium as a native package, then run Ghostlight install again."
+        );
+    }
+    anyhow::bail!("{}", sandboxed.join(" "))
+}
+
 fn finish_setup(install: bool, options: &SetupOptions, install_usable: bool) -> anyhow::Result<()> {
     use ghostlight::install::handoff::{self, HandoffOutcome, EXTENSION_INSTALL_URL};
 
@@ -268,6 +355,7 @@ fn select_harnesses(
 }
 
 fn run_doctor(fix: bool) -> anyhow::Result<()> {
+    use ghostlight::install::desktop_entry::DesktopIntegration;
     use ghostlight::install::native_host::NativeHostRegistry;
     use ghostlight::install::HarnessRegistry;
 
@@ -292,6 +380,7 @@ fn run_doctor(fix: bool) -> anyhow::Result<()> {
         );
     }
     print_native_host_report(&NativeHostRegistry::discover().check()?);
+    print_desktop_integration_report(&DesktopIntegration::discover().check()?);
     for harness in HarnessRegistry::discover().refresh()? {
         println!(
             "MCP client: {} -- {:?} -- {}",
@@ -362,10 +451,21 @@ fn print_native_host_report(report: &ghostlight::install::native_host::NativeHos
     println!("Browser connector: {}", report.connector.display());
     for browser in &report.browsers {
         println!(
-            "Browser: {} -- {:?} -- {}",
-            browser.name, browser.state, browser.detail
+            "Browser: {} -- package {:?} -- {} -- registration {:?} -- {}",
+            browser.name, browser.package, browser.package_detail, browser.state, browser.detail
         );
     }
+}
+
+fn print_desktop_integration_report(
+    report: &ghostlight::install::desktop_entry::DesktopIntegrationReport,
+) {
+    println!(
+        "Applications: {:?} -- {} -- {}",
+        report.state,
+        report.detail,
+        report.desktop_entry.display()
+    );
 }
 
 fn executable_name(name: &str) -> String {
@@ -378,7 +478,7 @@ fn executable_name(name: &str) -> String {
 
 fn print_help() {
     println!(
-        "Ghostlight {version}\n\nUsage:\n  ghostlight                         Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor                  Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight service                 Run the local authority without a window\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight policy validate <file>  Validate one schema-3 policy\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor                  Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight service                 Run the local authority without a window\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight policy validate <file>  Validate one schema-3 policy\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
         version = env!("CARGO_PKG_VERSION")
     );
 }
@@ -479,6 +579,23 @@ fn start_or_activate_desktop() -> anyhow::Result<()> {
             finish_activation(wait_for_workbench_activation(&runtime), Some(start_error))
         }
     }
+}
+
+fn open_desktop() -> anyhow::Result<()> {
+    use ghostlight_bridge::lifecycle::StartDisposition;
+
+    let runtime = ghostlight_bridge::runtime::runtime_file();
+    match ghostlight::service::request_workbench_activation(&runtime) {
+        Ok(true) => return Ok(()),
+        Ok(false) => return finish_activation(wait_for_workbench_activation(&runtime), None),
+        Err(_) => {}
+    }
+    if ghostlight_bridge::lifecycle::request_orchestrator_start()?
+        == StartDisposition::DeploymentInProgress
+    {
+        anyhow::bail!("Ghostlight is being updated; open it again when the update finishes");
+    }
+    finish_activation(wait_for_workbench_activation(&runtime), None)
 }
 
 fn wait_for_workbench_activation(runtime: &Path) -> ActivationState {
@@ -595,6 +712,8 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
             .is_some_and(|argument| argument == "service")
     {
         Ok(LaunchMode::Headless)
+    } else if arguments.len() == 1 && arguments.first().is_some_and(|argument| argument == "open") {
+        Ok(LaunchMode::Open)
     } else if arguments.first().is_some_and(|argument| argument == "call") {
         Ok(LaunchMode::Call)
     } else if arguments
@@ -679,11 +798,39 @@ fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOptions> {
 
 #[cfg(test)]
 mod tests {
-    use super::{launch_mode, LaunchMode, NativeHostCommand, SetupOptions};
+    use std::path::PathBuf;
+
+    use ghostlight::install::browser_package::BrowserPackage;
+    use ghostlight::install::native_host::{
+        BrowserRegistration, NativeHostReport, NativeHostState,
+    };
+
+    use super::{
+        launch_mode, select_install_browsers, LaunchMode, NativeHostCommand, SetupOptions,
+    };
+
+    fn browser(id: &str, package: BrowserPackage) -> BrowserRegistration {
+        BrowserRegistration {
+            id: id.into(),
+            name: id.into(),
+            package,
+            package_detail: format!("{id} package detail"),
+            state: NativeHostState::Missing,
+            detail: "registration detail".into(),
+        }
+    }
+
+    fn browser_report(browsers: Vec<BrowserRegistration>) -> NativeHostReport {
+        NativeHostReport {
+            connector: PathBuf::from("/ghostlight-browser-connector"),
+            browsers,
+        }
+    }
 
     #[test]
     fn launch_modes_keep_desktop_headless_and_call_intents_distinct() {
         assert_eq!(launch_mode(Vec::new()).unwrap(), LaunchMode::Desktop);
+        assert_eq!(launch_mode(["open".into()]).unwrap(), LaunchMode::Open);
         assert_eq!(
             launch_mode(["--headless".into()]).unwrap(),
             LaunchMode::Headless
@@ -772,5 +919,50 @@ mod tests {
             "--client=codex".into(),
         ])
         .is_err());
+    }
+
+    #[test]
+    fn ordinary_install_selects_only_detected_native_browsers() {
+        let report = browser_report(vec![
+            browser("chrome", BrowserPackage::Native),
+            browser("chromium", BrowserPackage::Snap),
+            browser("brave", BrowserPackage::NotDetected),
+        ]);
+        assert_eq!(
+            select_install_browsers(&report, &SetupOptions::default()).unwrap(),
+            Some(vec!["chrome".into()])
+        );
+        assert!(select_install_browsers(
+            &report,
+            &SetupOptions {
+                browser_ids: vec!["chromium".into()],
+                ..SetupOptions::default()
+            }
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("chromium package detail"));
+    }
+
+    #[test]
+    fn all_browsers_and_windows_keep_deliberate_pre_registration() {
+        let missing = browser_report(vec![browser("chrome", BrowserPackage::NotDetected)]);
+        assert!(select_install_browsers(&missing, &SetupOptions::default()).is_err());
+        assert_eq!(
+            select_install_browsers(
+                &missing,
+                &SetupOptions {
+                    all_browsers: true,
+                    ..SetupOptions::default()
+                }
+            )
+            .unwrap(),
+            None
+        );
+        let windows = browser_report(vec![browser("chrome", BrowserPackage::NotChecked)]);
+        assert_eq!(
+            select_install_browsers(&windows, &SetupOptions::default()).unwrap(),
+            None
+        );
     }
 }

@@ -13,8 +13,8 @@ headless, container, Xvfb, remote-debugging, or cloud-browser test.
 
 ## Host
 
-- Current Ubuntu Desktop LTS on x86_64 or arm64.
-- Normal graphical login with a visible Wayland or X11 session.
+- Current Ubuntu Desktop LTS on x86_64.
+- Normal GNOME graphical login with a visible Wayland session.
 - Chrome Stable plus a second supported Chromium family when available.
 - One standard local user who owns the desktop, browser profile, Ghostlight process, and MCP
   harnesses.
@@ -50,7 +50,8 @@ data, raw MCP payloads, or browser profiles.
 
 1. Confirm no 1.0 process, package, native-host registration, harness entry, or extension exists.
 2. Verify the candidate digest and install the Debian package through the normal package manager.
-3. Launch Ghostlight and open it from the tray.
+3. Open Ghostlight from Applications. Verify the first click visibly opens the workbench even when
+   the desktop exposes no tray, then verify tray Open when the shell provides it.
 4. Run `ghostlight native-host check` as the graphical user. Every installed browser must point at
    `/usr/bin/ghostlight-browser-connector`; the first launch must repair any owned user-level drift.
 5. Install the matching extension visibly.
@@ -58,7 +59,8 @@ data, raw MCP payloads, or browser profiles.
 
 Pass: all three executables are version-matched; native messaging points to the packaged browser
 connector; no `ghostlight.service`, Run key, scheduled task, or other resident supervisor was
-created; Status names healthy service/browser/authority state; unrelated client config remains
+created; the package-owned desktop entry invokes `ghostlight open`; Status names native browser
+package, healthy registration/service/browser/authority state; unrelated client config remains
 unchanged.
 
 ### L2. Visible browser journey

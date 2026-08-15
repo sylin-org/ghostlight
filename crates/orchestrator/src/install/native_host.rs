@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::browser_package::{self, BrowserPackage, BrowserPackageContext, BrowserPackageSpec};
+
 /// Stable native-messaging identity used by every supported Chromium browser.
 pub const HOST_NAME: &str = "org.sylin.ghostlight";
 /// Public Chrome Web Store extension identity.
@@ -50,6 +52,10 @@ pub struct BrowserRegistration {
     pub id: String,
     /// Human-readable browser name.
     pub name: String,
+    /// Detected package form and native-messaging usability.
+    pub package: BrowserPackage,
+    /// Content-free package-form explanation.
+    pub package_detail: String,
     /// Current ownership and freshness state.
     pub state: NativeHostState,
     /// Content-free explanation of the state.
@@ -155,6 +161,7 @@ struct NativeHostContext {
     config: PathBuf,
     local: PathBuf,
     connector: PathBuf,
+    browser_packages: BrowserPackageContext,
 }
 
 impl NativeHostContext {
@@ -179,6 +186,8 @@ impl NativeHostContext {
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .unwrap_or_default()
             .join(executable_name(CONNECTOR_NAME, platform));
+        let browser_packages =
+            BrowserPackageContext::system(&home, platform == NativeHostPlatform::Linux);
         Self {
             platform,
             #[cfg(test)]
@@ -186,6 +195,7 @@ impl NativeHostContext {
             config,
             local,
             connector: normalize_path(&connector),
+            browser_packages,
         }
     }
 }
@@ -196,6 +206,7 @@ struct BrowserSpec {
     name: &'static str,
     windows_vendor: &'static str,
     linux_directory: &'static str,
+    package: BrowserPackageSpec,
 }
 
 const BROWSERS: &[BrowserSpec] = &[
@@ -204,24 +215,44 @@ const BROWSERS: &[BrowserSpec] = &[
         name: "Google Chrome",
         windows_vendor: r"Google\Chrome",
         linux_directory: "google-chrome/NativeMessagingHosts",
+        package: BrowserPackageSpec {
+            executables: &["google-chrome", "google-chrome-stable"],
+            snap_executable: "google-chrome",
+            flatpak_ids: &["com.google.Chrome"],
+        },
     },
     BrowserSpec {
         id: "edge",
         name: "Microsoft Edge",
         windows_vendor: r"Microsoft\Edge",
         linux_directory: "microsoft-edge/NativeMessagingHosts",
+        package: BrowserPackageSpec {
+            executables: &["microsoft-edge", "microsoft-edge-stable"],
+            snap_executable: "microsoft-edge",
+            flatpak_ids: &["com.microsoft.Edge"],
+        },
     },
     BrowserSpec {
         id: "brave",
         name: "Brave",
         windows_vendor: r"BraveSoftware\Brave-Browser",
         linux_directory: "BraveSoftware/Brave-Browser/NativeMessagingHosts",
+        package: BrowserPackageSpec {
+            executables: &["brave-browser", "brave"],
+            snap_executable: "brave",
+            flatpak_ids: &["com.brave.Browser"],
+        },
     },
     BrowserSpec {
         id: "chromium",
         name: "Chromium",
         windows_vendor: "Chromium",
         linux_directory: "chromium/NativeMessagingHosts",
+        package: BrowserPackageSpec {
+            executables: &["chromium", "chromium-browser"],
+            snap_executable: "chromium",
+            flatpak_ids: &["org.chromium.Chromium"],
+        },
     },
 ];
 
@@ -348,9 +379,12 @@ fn inspect(
         .iter()
         .map(|browser| {
             let state = inspect_browser(context, registration_io, browser, &expected)?;
+            let package = browser_package::inspect(&context.browser_packages, browser.package);
             Ok(BrowserRegistration {
                 id: browser.id.into(),
                 name: browser.name.into(),
+                package,
+                package_detail: browser_package::detail(browser.name, package),
                 state,
                 detail: state_detail(state).into(),
             })
@@ -951,6 +985,7 @@ mod tests {
             connector: root
                 .join("Ghostlight/bin")
                 .join(executable_name(CONNECTOR_NAME, platform)),
+            browser_packages: BrowserPackageContext::isolated(&root.join("browser-packages")),
         }
     }
 
@@ -976,6 +1011,7 @@ mod tests {
             config: PathBuf::from("/home/test/.config"),
             local: PathBuf::from(r"C:\Users\test\AppData\Local"),
             connector: PathBuf::from("/opt/ghostlight/ghostlight-browser-connector"),
+            browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
         };
         assert_eq!(BROWSERS.len(), 4);
         assert_eq!(
