@@ -186,7 +186,11 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
             user_assets.uninstall()?
         };
         if result.report.state != ghostlight::install::user_assets::UserAssetState::NotApplicable {
-            println!("Documentation: {}", result.report.detail);
+            println!(
+                "Documentation: {} -- {}",
+                result.report.state.label(),
+                result.report.detail
+            );
         }
     }
 
@@ -415,6 +419,7 @@ struct DoctorObservation {
     sibling_set_ready: bool,
     native_host: ghostlight::install::native_host::NativeHostReport,
     command_path: ghostlight::install::command_path::CommandPathReport,
+    user_assets: ghostlight::install::user_assets::UserAssetReport,
     desktop: ghostlight::install::desktop_entry::DesktopIntegrationReport,
     harnesses: Vec<ghostlight::install::HarnessSummary>,
     runtime: RuntimeObservation,
@@ -450,6 +455,7 @@ fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         sibling_set_ready,
         native_host: NativeHostRegistry::discover().check()?,
         command_path: ghostlight::install::command_path::CommandPath::discover().check()?,
+        user_assets: ghostlight::install::user_assets::UserAssets::discover().check()?,
         desktop: DesktopIntegration::discover().check()?,
         harnesses: HarnessRegistry::discover().refresh()?,
         runtime: observe_runtime(),
@@ -480,11 +486,22 @@ fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     }
     print_native_host_report(&observation.native_host);
     print_command_path_report(&observation.command_path);
+    if observation.user_assets.state
+        != ghostlight::install::user_assets::UserAssetState::NotApplicable
+    {
+        println!(
+            "Documentation: {} -- {}",
+            observation.user_assets.state.label(),
+            observation.user_assets.detail
+        );
+    }
     print_desktop_integration_report(&observation.desktop);
     for harness in &observation.harnesses {
         println!(
-            "MCP client: {} -- {:?} -- {}",
-            harness.name, harness.state, harness.detail
+            "MCP client: {} -- {} -- {}",
+            harness.name,
+            harness.state.label(),
+            harness.detail
         );
     }
     render_runtime_status(&observation.runtime, false, observation.sibling_set_ready);
@@ -515,6 +532,7 @@ fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
         "browser_connector": observation.native_host.connector.display().to_string(),
         "browsers": observation.native_host.browsers,
         "command": observation.command_path,
+        "documentation": observation.user_assets,
         "applications": observation.desktop,
         "mcp_clients": observation.harnesses,
         "service": runtime_document(&observation.runtime),
@@ -611,8 +629,11 @@ fn print_native_host_report(report: &ghostlight::install::native_host::NativeHos
     println!("Browser connector: {}", report.connector.display());
     for browser in &report.browsers {
         println!(
-            "Browser: {} -- package {:?} -- {} -- registration {:?} -- {}",
-            browser.name, browser.package, browser.package_detail, browser.state, browser.detail
+            "Browser: {} -- {} -- {} -- {}",
+            browser.name,
+            browser.package_detail,
+            browser.state.label(),
+            browser.detail
         );
     }
 }
@@ -637,8 +658,8 @@ fn print_desktop_integration_report(
     report: &ghostlight::install::desktop_entry::DesktopIntegrationReport,
 ) {
     println!(
-        "Applications: {:?} -- {} -- {}",
-        report.state,
+        "Applications: {} -- {} -- {}",
+        report.state.label(),
         report.detail,
         report.desktop_entry.display()
     );
@@ -999,6 +1020,81 @@ mod tests {
     use super::{
         launch_mode, select_install_browsers, LaunchMode, NativeHostCommand, SetupOptions,
     };
+
+    /// Every state `doctor` can report has plain words, and they are pinned here.
+    ///
+    /// Before this, `doctor` printed Rust identifiers such as `NeedsAttention` through `{:?}`,
+    /// which is a debugger's vocabulary rather than a person's. The workbench renders the same
+    /// states from the same serialized values; S6 makes it consume these exact words.
+    #[test]
+    fn every_reportable_state_has_plain_words() {
+        use ghostlight::install::command_path::CommandPathState;
+        use ghostlight::install::desktop_entry::DesktopIntegrationState;
+        use ghostlight::install::native_host::NativeHostState;
+        use ghostlight::install::user_assets::UserAssetState;
+        use ghostlight::install::HarnessState;
+
+        assert_eq!(HarnessState::NotDetected.label(), "not detected");
+        assert_eq!(HarnessState::Available.label(), "detected, not connected");
+        assert_eq!(HarnessState::Installed.label(), "connected");
+        assert_eq!(
+            HarnessState::Updatable.label(),
+            "connected, needs an update"
+        );
+        assert_eq!(HarnessState::NeedsAttention.label(), "needs attention");
+
+        assert_eq!(NativeHostState::Missing.label(), "not registered");
+        assert_eq!(NativeHostState::Current.label(), "registered");
+        assert_eq!(
+            NativeHostState::Updatable.label(),
+            "registered, needs an update"
+        );
+        assert_eq!(NativeHostState::NeedsAttention.label(), "needs attention");
+
+        for label in [
+            DesktopIntegrationState::NotApplicable.label(),
+            DesktopIntegrationState::Missing.label(),
+            DesktopIntegrationState::Current.label(),
+            DesktopIntegrationState::Updatable.label(),
+            DesktopIntegrationState::NeedsAttention.label(),
+            CommandPathState::NotApplicable.label(),
+            CommandPathState::Missing.label(),
+            CommandPathState::Current.label(),
+            CommandPathState::Updatable.label(),
+            CommandPathState::NeedsAttention.label(),
+            UserAssetState::NotApplicable.label(),
+            UserAssetState::Missing.label(),
+            UserAssetState::Current.label(),
+            UserAssetState::NeedsAttention.label(),
+        ] {
+            assert!(!label.is_empty());
+            // A person's word, not an identifier: no capitals and no camel case.
+            assert_eq!(
+                label,
+                label.to_lowercase(),
+                "{label} reads as an identifier"
+            );
+        }
+    }
+
+    /// `doctor` renders those words rather than Rust's debug formatting.
+    #[test]
+    fn doctor_prints_no_debug_formatted_state() {
+        let source =
+            std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"))
+                .expect("main.rs is readable");
+        for line in source.lines() {
+            let reports_state = line.contains("Browser: {")
+                || line.contains("Applications: {")
+                || line.contains("MCP client: {")
+                || line.contains("Command: {")
+                || line.contains("Documentation: {");
+            assert!(
+                !(reports_state && line.contains("{:?}")),
+                "doctor line uses debug formatting for a state: {line}"
+            );
+        }
+    }
 
     /// The shell completions offer exactly the subcommands the command line has.
     ///

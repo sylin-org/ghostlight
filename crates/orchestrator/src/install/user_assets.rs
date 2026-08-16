@@ -67,6 +67,19 @@ pub enum UserAssetState {
     NeedsAttention,
 }
 
+impl UserAssetState {
+    /// The plain words a person reads for this state.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NotApplicable => "not used on this installation",
+            Self::Missing => "not installed",
+            Self::Current => "installed",
+            Self::NeedsAttention => "needs attention",
+        }
+    }
+}
+
 /// Read-only result for the per-user documentation and completion files.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct UserAssetReport {

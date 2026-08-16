@@ -6,9 +6,11 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1, S2, and S3 COMPLETE.
-- Current stage: S4, terminal citizenship. Orchestrator, installer, and packaging.
-- Next action: S4f, below. S4a through S4e landed. S4 does not land coherently in one commit; its ordered substeps are in
+- State: S1 through S4 COMPLETE.
+- Current stage: S5, human runtime control. Orchestrator.
+- Next action: implement ADR-0126 Decisions 4 through 6: the non-terminal pause refusal with its
+  pinned directive, the terminal stop directive, resume revalidation, and explicit scopes for
+  plural work. Nothing waits, so no scheduler and no deadline reconciliation are needed. S4 does not land coherently in one commit; its ordered substeps are in
   the S4 section further down. Each substep is one commit and leaves a green tree.
 - Blocking condition: none. S4b's central behavior cannot be verified on a Windows host; see the
   substep note.
@@ -49,8 +51,8 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 | S1 experience contract | COMPLETE | `9b537a14` | Decisions and pins only | ADR-0126; no behavior change |
 | S2 the second machine | COMPLETE | (this commit) | A new computer explains itself | Extension only |
 | S3 adaptive familiarity | COMPLETE | (this commit) | Local desktop language | Includes WSL |
-| S4 terminal citizenship | READY | -- | PATH, man, completions, `--json` | Depends on S3 |
-| S5 human runtime control | NOT STARTED | -- | Pause, resume, stop | Semantic change |
+| S4 terminal citizenship | COMPLETE | (this commit) | PATH, man, completions, `--json` | Six substeps, S4a-S4f |
+| S5 human runtime control | READY | -- | Pause, resume, stop | Smaller than first scoped: ADR-0126 D4 |
 | S6 At a glance | NOT STARTED | -- | One calm window | Depends on S4, S5 |
 | S7 readiness recovery | NOT STARTED | -- | Safe repair, exact refusal | Platform-asymmetric |
 | S8 evaluation | NOT STARTED | -- | Evidence on real desktops | Depends on S1-S7 |
@@ -67,7 +69,7 @@ A prose assertion is not evidence. Link a commit, test, fixture, ADR, or dated r
 | Vocabulary and measures | S1 | Accepted ADR; reconciled 1.0 contracts; appended pins | COMPLETE | `9b537a14`: ADR-0126; `docs/1.0/INTENT.md` corrected; `PINS.md` S1 section |
 | Host-absent state | S2 | Distinguished state, both surfaces, offline route, tests | COMPLETE | `shared.linkState`; `extension/setup.html`; `extension/tests/onboarding.test.js`, 9 tests |
 | Platform and desktop table | S3 | One owner, closed set, WSL case, consumer parity, tests | COMPLETE | `crates/orchestrator/src/language/environment.rs`, 8 tests; install and `doctor` both consume it |
-| Terminal citizenship | S4 | PATH ownership, man pages, completions, `--json`, doctor parity guard | NOT STARTED | -- |
+| Terminal citizenship | S4 | PATH ownership, man pages, completions, `--json`, doctor parity guard | COMPLETE | `command_path.rs`, `user_assets.rs`, `packaging/linux/{man,completions}`, four guard tests in `main.rs` |
 | Runtime control | S5 | One state machine, effect truth, deadline interaction, plural scopes | NOT STARTED | -- |
 | At a glance | S6 | All states, controls, keyboard, accessibility, redundant surface removed | NOT STARTED | -- |
 | Readiness recovery | S7 | Per-platform posture, single flight, bounded waits, exact failures | NOT STARTED | -- |
@@ -115,7 +117,7 @@ Ordered so every prefix is coherent and green.
 | S4c | `NO_COLOR` honored wherever the CLI styles output | Yes. **DONE**, as a guard: nothing is styled |
 | S4d | Man pages for the three siblings, authored, installed by the Debian package and available to the per-user route | Partly. **DONE**: content, per-user install, and deb wiring here; `man` rendering and the deb payload check are Linux |
 | S4e | Shell completions for bash, zsh, and fish, plus the guard comparing their subcommand list against the parser | Yes for the guard. **DONE**; live shell completion is Linux |
-| S4f | `doctor` parity guard: every reportable state has a line in the same words the workbench uses | Yes |
+| S4f | `doctor` parity guard: every reportable state has a line in the same words the workbench uses | Yes. **DONE**, Rust half; the workbench half is S6 |
 
 S4f is the substep that couples forward to S6. Today's reportable set is what the workbench renders
 now; when S6 reshapes the landing surface it must keep this guard passing rather than weaken it.
@@ -132,6 +134,7 @@ now; when S6 reshapes the landing surface it must keep this guard passing rather
 | 2026-08-16 | S4c | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 261/5/32/6, 0 failed; `npm test --prefix extension` 115 pass | Source audit found no ANSI escape or color dependency in any crate, the npm launcher, or the shell scripts | PASS |
 | 2026-08-16 | S4d | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/5/32/6, 0 failed; `npm test --prefix extension` 115 pass; PowerShell parse of the finalize script | Three man pages authored; per-user install tested; the Debian injection could not run here because `dpkg-deb` and `gzip` are absent on the Windows host | PASS with a recorded limit |
 | 2026-08-16 | S4e | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/7/32/6, 0 failed; `npm test --prefix extension` 115 pass; `bash -n` on the bash completion; PowerShell parse of the finalize script | An unknown subcommand now names the eight available ones. Completion guard verified against a negative control | PASS |
+| 2026-08-16 | S4f | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/9/32/6, 0 failed; `npm test --prefix extension` 115 pass | Live `ghostlight doctor` reads in plain words: `registered, needs an update` where it used to print `Updatable` | PASS |
 
 ## Deviations and findings
 
@@ -177,6 +180,12 @@ name.
 command line's own subcommands, and `bash -n` parses the bash file, but no shell was driven to
 completion on this host. zsh additionally needs `fpath` configuration for the per-user path, which
 `ghostlight.1` now states. Carried into S8.
+
+**8. `doctor` was speaking Rust.** It printed state enums through `{:?}`, so a person saw
+`NeedsAttention` and `Updatable`. Five state enums gained a `label()` with pinned words, and doctor
+renders those. A guard pins every label and a second guard fails if a doctor line reintroduces debug
+formatting. The workbench still renders its own words from the serialized values; making it consume
+these exact labels is S6's work, and the S4 substep table already recorded that coupling.
 
 ## Stage close checklist
 

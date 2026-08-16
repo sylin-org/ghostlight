@@ -197,6 +197,20 @@ pub enum HarnessState {
     NeedsAttention,
 }
 
+impl HarnessState {
+    /// The plain words a person reads for this state.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NotDetected => "not detected",
+            Self::Available => "detected, not connected",
+            Self::Installed => "connected",
+            Self::Updatable => "connected, needs an update",
+            Self::NeedsAttention => "needs attention",
+        }
+    }
+}
+
 /// Immutable user-facing integration summary.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct HarnessSummary {

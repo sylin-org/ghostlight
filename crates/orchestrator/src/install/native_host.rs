@@ -45,6 +45,19 @@ pub enum NativeHostState {
     NeedsAttention,
 }
 
+impl NativeHostState {
+    /// The plain words a person reads for this state.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Missing => "not registered",
+            Self::Current => "registered",
+            Self::Updatable => "registered, needs an update",
+            Self::NeedsAttention => "needs attention",
+        }
+    }
+}
+
 /// Read-only state for one supported browser.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct BrowserRegistration {
