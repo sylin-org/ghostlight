@@ -1,6 +1,7 @@
 //! Thin Tauri 2 adapter for Ghostlight's orchestrator-owned workbench facade.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
+#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
