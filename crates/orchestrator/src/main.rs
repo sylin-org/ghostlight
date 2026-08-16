@@ -1129,6 +1129,21 @@ mod tests {
         }
     }
 
+    /// Zsh selects option completions from the subcommand rather than the executable word.
+    #[test]
+    fn zsh_options_are_selected_from_the_subcommand_word() {
+        let source = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packaging/linux/completions/_ghostlight"),
+        )
+        .expect("zsh completion is readable");
+        assert!(source.contains("local command=$words[2]"));
+        assert!(source.contains("words=(\"${(@)words[2,-1]}\")"));
+        assert!(source.contains("case $command in"));
+        assert!(!source.contains("case $words[1] in"));
+        assert!(!source.contains("_arguments -C"));
+    }
+
     /// Every offered subcommand is documented in help, so the two surfaces cannot drift.
     #[test]
     fn help_documents_every_subcommand() {

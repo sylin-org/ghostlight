@@ -6,12 +6,12 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S6 COMPLETE and gated on a Windows host. Linux verification V1 and V2 are
-  COMPLETE; V3 is next. S7 and S8 are not started.
+- State: S1 through S6 COMPLETE and gated on a Windows host. Linux verification V1 through V3 is
+  COMPLETE; V4 is next. S7 and S8 are not started.
 - Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages.
-- Next action: continue at V3 in [START-HERE-LINUX.md](START-HERE-LINUX.md). V1 proved the command
-  entry and V2 proved both Debian and per-user manual pages on Linux. The remaining tasks stay
-  ordered: V3 through V5, then S7a, S7b, S7c, then S8.
+- Next action: continue at V4 in [START-HERE-LINUX.md](START-HERE-LINUX.md). V1 proved the command
+  entry, V2 proved manual pages, and V3 proved and repaired live shell completion on Linux. The
+  remaining tasks stay ordered: V4, V5, S7a, S7b, S7c, then S8.
   S7a is a governance-schema change and should start a fresh session.
 - Blocking condition: none.
 - Source baseline when the epic was reworked: `dev` at `2f24943f`.
@@ -154,6 +154,7 @@ than appended to a long session.
 | 2026-08-16 | S3 (WSL) | `7a084ae5` | None; observation only | Real WSL2 Debian on the Windows host reports `WSL_DISTRO_NAME=Debian` and `/proc/sys/kernel/osrelease=6.6.87.2-microsoft-standard-WSL2`. Both halves of the pinned WSL rule match independently, and `XDG_CURRENT_DESKTOP` is empty there, which the unknown-row test already covers | PASS, inputs only |
 | 2026-08-16 | V1 Linux command entry | this commit | Seven focused command-entry tests; `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 286/9/32/6, 0 failed; 116 extension tests; isolated workspace build; process, CLI, and workbench-surface journeys | CachyOS KDE Wayland, ordinary per-user install in a disposable home: a new bash process ran `ghostlight doctor --json`; repeat install was byte-identical; foreign file and symlink survived install and uninstall byte-for-byte; uninstall removed only the owned entry; the real bash, zsh, profile, and fish startup-file hashes did not change; the active installed diagnosis matched before and after. No `/usr/bin/ghostlight` package was available, so the already-unit-proved not-applicable package row remains part of V2 | PASS; deviation 3 resolved |
 | 2026-08-16 | V2 Linux manual pages | this commit | Rootless network-disabled Ubuntu 22.04 build with Rust 1.95.0 and Tauri CLI 2.11.0; current-source optimized workspace and Debian bundle; finalizer; Debian 12 `lintian`; package and per-user `man` rendering; full repository gate | The finalized 1.0.0 package has SHA-256 `20d85aca6d1932f544b55711d8498af73117a453e4aa98f383c854d4448a6c29`. All three compressed pages are present under `usr/share/man/man1`, and all three are in `md5sums`. Debian 12 `lintian` no longer reports any missing manual page; its remaining findings are the six browser-mandated `/etc/opt` paths and an embedded-libyaml string-table finding. All three package pages rendered. A disposable per-user install rendered all three through the owned PATH entry with `MANPATH` unset | PASS; deviation 5 resolved |
+| 2026-08-16 | V3 Linux shell completions | this commit | Current Debian payload and disposable per-user install; real bash 5.3, fish 4.8.1, and zsh 5.9 completion engines; focused zsh regression; full repository gate | The package contains all three conventional vendor paths and the per-user route contains all three XDG paths. Bash and fish offered exactly the eight accepted subcommands and their doctor flags. Zsh offered the commands but initially no options; tracing found that its first `_arguments -C` call shifted the subcommand context. The completion now captures and shifts the context explicitly, a guard protects that relationship, and real Tab completion offers `--fix`, `--json`, and `--verbose`. The documented `fpath=(~/.local/share/zsh/site-functions $fpath)` plus `compinit` instruction loaded the completer. The rebuilt package contains the byte-exact repaired zsh file and has SHA-256 `dbc2642a7d7f24042d806fd91766ea39a07b444991cd9696d7eb23132cff465b` | PASS; deviation 7 resolved; finding 14 fixed |
 
 ## Deviations and findings
 
@@ -202,10 +203,11 @@ would have been a lie. The module was renamed and generalized to own one list of
 contents)` entries. Same commit as the completions, so no intermediate commit carries the wrong
 name.
 
-**7. Live shell completion is unproved.** The guard proves the three files offer exactly the
-command line's own subcommands, and `bash -n` parses the bash file, but no shell was driven to
-completion on this host. zsh additionally needs `fpath` configuration for the per-user path, which
-`ghostlight.1` now states. Carried into S8.
+**7. RESOLVED by V3 on Linux.** Bash 5.3, fish 4.8.1, and zsh 5.9 each offered the eight accepted
+subcommands from a disposable per-user installation. Bash and fish offered their doctor flags.
+Zsh offered the same after finding 14 was fixed. Its documented `fpath` plus `compinit` instruction
+is accurate. The Debian package contains the three conventional vendor paths, and the rebuilt
+package's zsh file is byte-identical to the repaired source.
 
 **8. `doctor` was speaking Rust.** It printed state enums through `{:?}`, so a person saw
 `NeedsAttention` and `Updatable`. Five state enums gained a `label()` with pinned words, and doctor
@@ -249,6 +251,13 @@ against a real WSL2 system: `WSL_DISTRO_NAME` is set and the kernel release cont
 sentence `ghostlight doctor` actually prints there, because that needs a Linux build of the
 orchestrator and its WebKitGTK stack inside WSL, which was not attempted. This stays with the
 Windows host rather than moving to the Linux lane, since WSL is a Windows-side configuration.
+
+**14. V3 found and fixed a zsh subcommand-context defect.** Top-level Tab completion worked, but
+`ghostlight doctor --` offered nothing. The completion called `_arguments -C` before choosing the
+subcommand, which shifted `words` and `CURRENT`; the later branch therefore depended on mutated
+helper state. The function now chooses `words[2]` first, then shifts once into the subcommand
+context before describing its options. A source guard fails if either relationship regresses, and
+real zsh Tab completion now offers `--fix`, `--json`, and `--verbose`.
 
 ## Stage close checklist
 

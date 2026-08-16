@@ -8,51 +8,50 @@
 _ghostlight() {
     local -a ghostlight_commands=(open install uninstall doctor status service call policy)
 
-    _arguments -C \
-        '1: :->command' \
-        '*:: :->argument'
+    if (( CURRENT == 2 )); then
+        _describe -t commands 'ghostlight command' ghostlight_commands
+        return
+    fi
 
-    case $state in
-        command)
-            _describe -t commands 'ghostlight command' ghostlight_commands
+    # In zsh completion, words[1] is the executable and words[2] is the subcommand. Capture that
+    # choice, then give _arguments the subcommand context it expects.
+    local command=$words[2]
+    words=("${(@)words[2,-1]}")
+    (( CURRENT-- ))
+    case $command in
+        install)
+            _arguments \
+                '--dry-run[Show changes without writing them]' \
+                '--browser[Select one supported browser]:browser:(chrome edge brave chromium)' \
+                '--all-browsers[Select every supported browser]' \
+                '--client[Select one MCP client]:client:' \
+                '--all-clients[Include clients not currently detected]' \
+                '--no-clients[Leave MCP client configuration unchanged]' \
+                '--no-open[Do not open the extension walkthrough]'
             ;;
-        argument)
-            case $words[1] in
-                install)
-                    _arguments \
-                        '--dry-run[Show changes without writing them]' \
-                        '--browser[Select one supported browser]:browser:(chrome edge brave chromium)' \
-                        '--all-browsers[Select every supported browser]' \
-                        '--client[Select one MCP client]:client:' \
-                        '--all-clients[Include clients not currently detected]' \
-                        '--no-clients[Leave MCP client configuration unchanged]' \
-                        '--no-open[Do not open the extension walkthrough]'
-                    ;;
-                uninstall)
-                    _arguments \
-                        '--dry-run[Show changes without writing them]' \
-                        '--browser[Select one supported browser]:browser:(chrome edge brave chromium)'
-                    ;;
-                doctor)
-                    _arguments \
-                        '--json[Print one JSON document]' \
-                        '--fix[Apply ownership-safe repairs]' \
-                        '--verbose[Accepted and ignored]'
-                    ;;
-                status)
-                    _arguments '--json[Print one JSON document]'
-                    ;;
-                call)
-                    _arguments \
-                        '--json[Print the structured result]' \
-                        '--stdin[Run a batch over one session]' \
-                        '--output[Write bounded content to a file]:file:_files' \
-                        '--catalog[List the available browser tools]'
-                    ;;
-                policy)
-                    _values 'policy command' validate explain simulate keygen pubkey sign publish
-                    ;;
-            esac
+        uninstall)
+            _arguments \
+                '--dry-run[Show changes without writing them]' \
+                '--browser[Select one supported browser]:browser:(chrome edge brave chromium)'
+            ;;
+        doctor)
+            _arguments \
+                '--json[Print one JSON document]' \
+                '--fix[Apply ownership-safe repairs]' \
+                '--verbose[Accepted and ignored]'
+            ;;
+        status)
+            _arguments '--json[Print one JSON document]'
+            ;;
+        call)
+            _arguments \
+                '--json[Print the structured result]' \
+                '--stdin[Run a batch over one session]' \
+                '--output[Write bounded content to a file]:file:_files' \
+                '--catalog[List the available browser tools]'
+            ;;
+        policy)
+            _values 'policy command' validate explain simulate keygen pubkey sign publish
             ;;
     esac
 }
