@@ -6,9 +6,9 @@
     "total": 809,
     "byTreatment": {
       "behavior-dispositioned": 95,
-      "historical-implementation-only": 162,
+      "historical-implementation-only": 161,
       "redesign-after-signed-candidate": 1,
-      "retained-evolved": 189,
+      "retained-evolved": 190,
       "retained-identical": 358,
       "retired-low-value-conductor": 1,
       "reviewed-repository-history": 1,
@@ -1003,9 +1003,9 @@
     },
     {
       "path": "crates/mcp-connector/src/mcp_2026_07_28.rs",
-      "currentState": "absent",
-      "treatment": "historical-implementation-only",
-      "reason": "Keep the old implementation in Git history; translate observable behavior onto current 1.0 seams."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "crates/mcp-connector/src/surface/data/ghostlight-legacy-v1-agent-guide.txt",

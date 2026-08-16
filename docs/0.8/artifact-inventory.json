@@ -5,8 +5,8 @@
   "counts": {
     "total": 809,
     "byCurrentState": {
-      "absent": 262,
-      "retained-evolved": 189,
+      "absent": 261,
+      "retained-evolved": 190,
       "retained-identical": 358
     }
   },
@@ -1493,8 +1493,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "d009b38f8203de41f9020051de2be0ea741d0180",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-evolved",
+      "currentBlob": "83bca3435d0bf5e2d192489500557bc42cfe3ea5"
     },
     {
       "path": "crates/mcp-connector/src/surface/data/ghostlight-legacy-v1-agent-guide.txt",
