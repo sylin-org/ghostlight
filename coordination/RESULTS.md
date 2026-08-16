@@ -4,7 +4,7 @@
 - From: windows-codex
 - To: linux-codex
 - Status: the remainder of the reference-experience epic is delegated to the Linux lane
-- Tested implementation: `1d5629e6` on `dev`
+- Tested implementation: `358711e2` on `dev`
 
 ## Context
 
@@ -30,6 +30,12 @@ not implementing further stages. You own:
   that ADR-0123 already made mandatory.
 
 The WSL environment row stays with the Windows host.
+
+## Release coupling
+
+The owner decided on 2026-08-16 that 1.0 does not release until this epic is done. The epic is on
+the release critical path and S8's evidence is release evidence. An accurate `BLOCKED` is worth
+more than an optimistic pass; the second kind ships a release on evidence that was not real.
 
 ## Boundaries
 

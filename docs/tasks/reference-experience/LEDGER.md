@@ -86,7 +86,7 @@ Open questions, owned by a stage. Not conclusions to assume early.
 | Whether the per-user route owns `~/.local/bin/ghostlight` or only reports the path | S1/S4 | CLOSED | Owns it, ownership-checked, plus prints the absolute path. ADR-0126 D8 |
 | Whether At a glance replaces Monitor or becomes a new destination | S1/S6 | CLOSED | Replaces the landing; no sixth destination. ADR-0126 D9 |
 | Acceptance thresholds for first use, recovery, and comprehension | S1/S8 | CLOSED | ADR-0126 D10 |
-| Whether 1.0 publishes before this epic lands | owner | PROVISIONAL: yes | -- |
+| Whether 1.0 publishes before this epic lands | owner | DECIDED 2026-08-16: no | 1.0 waits for this epic. The epic is now on the release critical path; S8 is a release gate, not a nice-to-have |
 | Whether the in-page affordance returns | owner | PROVISIONAL: deferred | -- |
 
 ## What this epic makes redundant

@@ -15,6 +15,16 @@ If `dev` is behind `origin/dev`, fast-forward it. If the working tree is dirty a
 not yours, stop and say so in `coordination/CHAT.md` rather than stashing or discarding anything.
 Never reset, clean, or check out over work you did not create.
 
+## What is riding on this
+
+The owner decided on 2026-08-16 that Ghostlight 1.0 does not release until this epic is done. Your
+tasks are on the release critical path, and S8's evidence is release evidence.
+
+Read that the way it is meant. It is not pressure to pass things. A stage you close honestly as
+`BLOCKED`, with the reason, is worth more than one you close optimistically, because the second kind
+ships a release on evidence that was not real. If something cannot be proved on that machine, say
+so plainly and stop. Nobody downstream can correct a claim they were never told was shaky.
+
 ## Read these first, in this order, before you touch anything
 
 1. `AGENTS.md` -- how this repository works and what is forbidden in it.

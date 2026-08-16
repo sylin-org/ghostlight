@@ -50,6 +50,11 @@ S7 is planned in three substeps: the `browser.startup` policy setting, the decis
 launch itself, which needs a live desktop on both platforms. S8 is the evaluation and is split
 between the owed Ubuntu GNOME Wayland lifecycle and a Windows lane.
 
+**1.0 waits for this epic.** The owner decided on 2026-08-16 that the release does not go out ahead
+of it, so the epic's completion is a release gate. Practically, that means S8's evidence is release
+evidence, and a stage that cannot honestly close blocks a release rather than deferring a feature.
+An accurate `BLOCKED` is therefore worth more than an optimistic pass.
+
 Verification boundary: every commit passed formatting, warnings-denied workspace Clippy, the full
 workspace test suite, the extension suite, and the journeys its change touched. What could not be
 proved on a Windows host is delegated to `linux-codex` through `coordination/RESULTS.md`: the
@@ -436,7 +441,9 @@ full visible browser matrix remain owed.
   supply-chain CI; a manual Pages deployment; and bounded monthly dependency updates targeting
   `dev`. Manual build-only run `31920647296` created, inspected, and attested the current candidate
   without publishing it. Visible native operating-system validation and publication remain owed.
-  Do not promote `dev` before those live gates pass.
+  Do not promote `dev` before those live gates pass. As of 2026-08-16 the owner also decided that
+  1.0 waits for the reference-experience epic, so that epic's completion, including its S8
+  evaluation, is a release gate rather than parallel work.
 - No pull requests are open. Thirteen Dependabot bumps against the 0.8 line were closed as obsolete
   on 2026-08-13: the 1.0 tree either already carried the proposed version or had dropped the
   package outright (`clap`, `rustls`, `webpki-roots`, `color_quant`). Dependency updates are paused
