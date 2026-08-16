@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-15.
+Last updated: 2026-08-16.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -215,10 +215,10 @@ highest-value 1.0 findings from [Research 25](research/25-delightful-linux-exper
   Default Linux setup selects detected native Chrome, Edge, Brave, or Chromium packages. Snap and
   Flatpak-only selections are refused with the native-package remedy; `--all-browsers` keeps the
   deliberate pre-registration route.
-- The release Linux artifact now builds on Ubuntu 22.04. Candidate assembly waits for exact Debian
-  package install/remove/reinstall/purge smokes in Debian 12 and Ubuntu 24.04. Those workflow jobs
-  are implemented. An equivalent expanded local rootless matrix has passed; the GitHub workflow
-  itself has not run and the result does not replace the visible Ubuntu GNOME Wayland L1-L9 gate.
+- The release Linux artifact builds on Ubuntu 22.04. Candidate assembly requires exact Debian
+  package install/remove/reinstall/purge smokes in Debian 12 and Ubuntu 24.04. The local expanded
+  matrix and GitHub candidate run `31920647296` both pass those gates. This does not replace the
+  visible Ubuntu GNOME Wayland L1-L9 gate.
 - Current-tree verification passed formatting, warnings-denied workspace Clippy, 274 Rust tests,
   103 extension tests, 10 npm tests, 4 MCPB tests, shell syntax, fresh isolated build, process, CLI,
   workbench, policy-grammar, Tauri-config build, dependency-policy, and advisory gates. The live CLI
@@ -300,8 +300,29 @@ roster pass and its release boundary.
   workbench (34 assertions), and policy journeys; repository integrity; dependency license, ban,
   and source policy; and `cargo audit` with the same 17 documented GTK/Tauri-chain warnings.
 
-This closes current-source roster compatibility, not package provenance, Ubuntu GNOME Wayland,
-matching-store-adapter, login/reboot, or publication.
+This closes current-source roster compatibility. The source-roster pass itself did not provide
+package provenance; the build-only candidate below now does. Ubuntu GNOME Wayland,
+matching-store-adapter, login/reboot, and publication remain open.
+
+## Provenance-bound build-only candidate
+
+The [dated candidate record](testing/release-candidate-2026-08-16.md) carries exact run links,
+hashes, provenance checks, and remaining limits. Source revision
+`fd8640336b11ed12cd47fe96deb7eb06adfbdcd1` passed ordinary CI run `31920645118` and manual
+build-only candidate run `31920647296`.
+
+- All nine cross-platform CI jobs passed, including Windows and Linux Rust and process journeys.
+- The release quality gate, Ubuntu 22.04 Debian build, Windows 2025 NSIS build, deterministic
+  extension build, Debian 12 and Ubuntu 24.04 package lifecycle smokes, and candidate assembly all
+  passed.
+- The candidate contains 17 checksum-bound artifacts and four CycloneDX SBOMs. All 17 hashes
+  matched locally. GitHub provenance verified for every asset plus the manifest and checksum file,
+  pinned to the exact repository, release workflow, source revision, and `dev` ref.
+- The GitHub bundle has 14-day retention. No tag, release, submission, or publication was created.
+
+This closes candidate construction, provenance, and the two accepted headless Debian package
+gates. It does not close visible Ubuntu GNOME Wayland, matching-store-adapter, clean Windows,
+login/reboot, notification, public-harness, or publication gates.
 
 ## Rootless Linux package evidence
 
@@ -332,18 +353,19 @@ builder on the second drive.
 - The release workflow and local guests now share one package lifecycle script. Extra local
   distributions remain advisory rather than expanding the accepted two-row release gate.
 
-This is strong headless package evidence, not provenance, a clean graphical machine, or a visible
-browser lifecycle. Ubuntu GNOME Wayland L1-L9, the matching store adapter, login/reboot, tray,
-notifications, and the full visible browser matrix remain owed.
+This local record supplied strong headless package evidence but not provenance. The build-only
+candidate above now supplies matching GitHub provenance and the accepted two-row package smokes.
+Ubuntu GNOME Wayland L1-L9, the matching store adapter, login/reboot, tray, notifications, and the
+full visible browser matrix remain owed.
 
 - `dev` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`. It absorbed
   `ghostlight-1.0`, which was a fast-forward and has been retired.
 - `main` carries the 0.8 line at `0116feca`. Promoting it is a deliberate release decision, not
   routine sync. The 1.0 line now carries Windows and Linux source, extension, process, and
   supply-chain CI; a manual Pages deployment; and bounded monthly dependency updates targeting
-  `dev`. A manual build-only workflow now creates and inspects native-package candidates without
-  publishing them. Provenance attestation, native operating-system validation, and publication remain
-  owed. Do not promote `dev` before those live gates pass.
+  `dev`. Manual build-only run `31920647296` created, inspected, and attested the current candidate
+  without publishing it. Visible native operating-system validation and publication remain owed.
+  Do not promote `dev` before those live gates pass.
 - No pull requests are open. Thirteen Dependabot bumps against the 0.8 line were closed as obsolete
   on 2026-08-13: the 1.0 tree either already carried the proposed version or had dropped the
   package outright (`clap`, `rustls`, `webpki-roots`, `color_quant`). Dependency updates are paused
@@ -822,12 +844,12 @@ The executor-split batch is complete through `4d633fbc`.
 
 ## Release gates still requiring an owner or release environment
 
-- Run the manual candidate workflow on GitHub when the owner approves. Ordinary cross-platform CI
-  passed at `de4392db`, but the candidate workflow's two native builders and provenance step have
-  not executed for this source revision.
-- Produce provenance-attested platform bundles, then verify clean install, public-0.8 upgrade, and
-  uninstall on clean Windows and Linux machines. The Windows development-host package lifecycle
-  passes but does not replace those release-environment rows.
+- Preserve build-only candidate `fd86403` and its verified manifest while the remaining live gates
+  run. CI `31920645118` and candidate workflow `31920647296` are green; all 19 candidate files have
+  repository-, workflow-, source-, and ref-bound provenance.
+- Use that provenance-attested bundle to verify clean install, public-0.8 upgrade, and uninstall on
+  clean Windows and Linux machines. The Windows development-host package lifecycle and headless
+  Debian/Ubuntu smokes do not replace those release-environment rows.
 - Complete interactive native-window, tray, and notification smoke tests on each platform. The
   automated environment verifies native build and failure containment but does not expose its GUI
   desktop to the test runner.

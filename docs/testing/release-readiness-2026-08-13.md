@@ -2,6 +2,11 @@
 
 Status: source gate passed; release gate not yet passed
 
+Current follow-up: [release-candidate-2026-08-16.md](release-candidate-2026-08-16.md) supersedes
+this dated audit's NOT RUN rows for candidate construction, package provenance, SBOM/checksum
+assembly, and the Debian 12 and Ubuntu 24.04 headless package gates. Visible clean-machine and
+publication gates remain open.
+
 Windows implementation revision tested: `b292bb22766686f7a07d8ffb75194867e5e94c70`.
 
 Environment: Windows x86_64, Rust/Cargo 1.95.0, Node 24.7.0, PowerShell 7.6.0, and Tauri CLI
