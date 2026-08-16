@@ -6,19 +6,15 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S6 COMPLETE.
-- Current stage: S7, readiness recovery. Orchestrator.
-- Next action: the Linux lane owns the rest. Its entry point is
-  [START-HERE-LINUX.md](START-HERE-LINUX.md): five verification tasks for work already landed, then
+- State: S1 through S6 COMPLETE and gated on a Windows host. S7 and S8 are not started.
+- Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages.
+- Next action: start at [START-HERE-LINUX.md](START-HERE-LINUX.md) and follow it top to bottom.
+  Nine tasks in order: V1 through V5 verify what landed but could only be compiled on Windows, then
   S7a, S7b, S7c, then S8. S7a is a governance-schema change and should start a fresh session.
-- Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages. S4 does not land coherently in one commit; its ordered substeps are in
-  the S4 section further down. Each substep is one commit and leaves a green tree.
-- Blocking condition: none. S4b's central behavior cannot be verified on a Windows host; see the
-  substep note.
-- Source baseline: `dev` at `2f24943fa125d952fce9e4f11086aada762e4cad`.
-- Last green evidence: the baseline's recorded Windows current-source pass
-  (`docs/testing/windows-current-source-pass-2026-08-15.md`) and CI run `31920645118`. No
-  implementation gate is claimed for the authoring commits themselves.
+- Blocking condition: none.
+- Source baseline when the epic was reworked: `dev` at `2f24943f`.
+- Last green evidence: every stage commit below passed the gate commands in `PINS.md` on Windows.
+  What a Windows host cannot prove is recorded in the deviations and delegated to the Linux lane.
 
 ## Provenance
 
@@ -50,11 +46,11 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 | Stage | Status | Closing commit | Checkpoint | Notes |
 | --- | --- | --- | --- | --- |
 | S1 experience contract | COMPLETE | `9b537a14` | Decisions and pins only | ADR-0126; no behavior change |
-| S2 the second machine | COMPLETE | (this commit) | A new computer explains itself | Extension only |
-| S3 adaptive familiarity | COMPLETE | (this commit) | Local desktop language | Includes WSL |
-| S4 terminal citizenship | COMPLETE | (this commit) | PATH, man, completions, `--json` | Six substeps, S4a-S4f |
-| S5 human runtime control | COMPLETE | (this commit) | Pause, resume, stop | Language and state; ADR-0126 D4-D6 |
-| S6 At a glance | COMPLETE | (this commit) | One calm window | ADR-0126 D9 |
+| S2 the second machine | COMPLETE | `a46a0db0` | A new computer explains itself | Extension only |
+| S3 adaptive familiarity | COMPLETE | `25ddab80` | Local desktop language | Includes WSL |
+| S4 terminal citizenship | COMPLETE | `61f18bd9`..`d282ede2` | PATH, man, completions, `--json` | Six substeps, S4a-S4f |
+| S5 human runtime control | COMPLETE | `efc15783` | Pause, resume, stop | Language and state; ADR-0126 D4-D6 |
+| S6 At a glance | COMPLETE | `124a5557` | One calm window | ADR-0126 D9 |
 | S7 readiness recovery | READY | -- | Safe repair, exact refusal | Platform-asymmetric |
 | S8 evaluation | NOT STARTED | -- | Evidence on real desktops | Depends on S1-S7 |
 
@@ -144,15 +140,15 @@ than appended to a long session.
 | --- | --- | --- | --- | --- | --- |
 | 2026-08-16 | S1 | `9b537a14` | `cargo fmt --check` and `npm test --prefix extension` passed. Clippy and `cargo test` not rerun: no source changed | None required | PASS, documentation only |
 | 2026-08-16 | S2 | `a46a0db0` | `npm test --prefix extension` 115 pass 0 fail (was 106); `node --check` on all four changed files; `cargo fmt --check`. Clippy and `cargo test` not rerun: no Rust source changed | Not yet observed in a live browser profile; owed before S8 | PASS |
-| 2026-08-16 | S3 | (this commit) | `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test --workspace` 254 orchestrator library, 4 binary, 32 bridge, 6 MCP connector, 0 failed; `npm test --prefix extension` 115 pass; `node tests/process-journey.mjs`; `node tests/cli-journey.mjs` | Live `ghostlight doctor` on the Windows authoring host printed `Environment: Windows -- Ghostlight is in your notification area, and in the Start menu.` | PASS |
-| 2026-08-16 | S4a | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 254/4/32/6, 0 failed; `npm test --prefix extension` 115 pass; `node tests/cli-journey.mjs` | `ghostlight doctor --json` parsed as JSON on the Windows host; `ghostlight status --json` byte shape unchanged | PASS |
-| 2026-08-16 | S4b | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 261/4/32/6, 0 failed; `npm test --prefix extension` 115 pass; CLI and process journeys | Windows `doctor` reports the command entry as not applicable and still names the absolute executable. The four symlink tests compile here but return early: they prove behavior only in the Linux lane | PASS with a recorded limit |
-| 2026-08-16 | S4c | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 261/5/32/6, 0 failed; `npm test --prefix extension` 115 pass | Source audit found no ANSI escape or color dependency in any crate, the npm launcher, or the shell scripts | PASS |
-| 2026-08-16 | S4d | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/5/32/6, 0 failed; `npm test --prefix extension` 115 pass; PowerShell parse of the finalize script | Three man pages authored; per-user install tested; the Debian injection could not run here because `dpkg-deb` and `gzip` are absent on the Windows host | PASS with a recorded limit |
-| 2026-08-16 | S4e | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/7/32/6, 0 failed; `npm test --prefix extension` 115 pass; `bash -n` on the bash completion; PowerShell parse of the finalize script | An unknown subcommand now names the eight available ones. Completion guard verified against a negative control | PASS |
-| 2026-08-16 | S4f | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/9/32/6, 0 failed; `npm test --prefix extension` 115 pass | Live `ghostlight doctor` reads in plain words: `registered, needs an update` where it used to print `Updatable` | PASS |
-| 2026-08-16 | S5 | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 273/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on popup.js; process and CLI journeys | The two directives are pinned character for character against `PINS.md` | PASS |
-| 2026-08-16 | S6 | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 280/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on view.js and words.js; workbench-surface and process journeys | The vocabulary guard was verified against a negative control: reintroducing one word literal in view.js fails two assertions | PASS |
+| 2026-08-16 | S3 | `25ddab80` | `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test --workspace` 254 orchestrator library, 4 binary, 32 bridge, 6 MCP connector, 0 failed; `npm test --prefix extension` 115 pass; `node tests/process-journey.mjs`; `node tests/cli-journey.mjs` | Live `ghostlight doctor` on the Windows authoring host printed `Environment: Windows -- Ghostlight is in your notification area, and in the Start menu.` | PASS |
+| 2026-08-16 | S4a | `61f18bd9` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 254/4/32/6, 0 failed; `npm test --prefix extension` 115 pass; `node tests/cli-journey.mjs` | `ghostlight doctor --json` parsed as JSON on the Windows host; `ghostlight status --json` byte shape unchanged | PASS |
+| 2026-08-16 | S4b | `34e36d9d` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 261/4/32/6, 0 failed; `npm test --prefix extension` 115 pass; CLI and process journeys | Windows `doctor` reports the command entry as not applicable and still names the absolute executable. The four symlink tests compile here but return early: they prove behavior only in the Linux lane | PASS with a recorded limit |
+| 2026-08-16 | S4c | `59ff9471` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 261/5/32/6, 0 failed; `npm test --prefix extension` 115 pass | Source audit found no ANSI escape or color dependency in any crate, the npm launcher, or the shell scripts | PASS |
+| 2026-08-16 | S4d | `7a936f21` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/5/32/6, 0 failed; `npm test --prefix extension` 115 pass; PowerShell parse of the finalize script | Three man pages authored; per-user install tested; the Debian injection could not run here because `dpkg-deb` and `gzip` are absent on the Windows host | PASS with a recorded limit |
+| 2026-08-16 | S4e | `8b383d1d` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/7/32/6, 0 failed; `npm test --prefix extension` 115 pass; `bash -n` on the bash completion; PowerShell parse of the finalize script | An unknown subcommand now names the eight available ones. Completion guard verified against a negative control | PASS |
+| 2026-08-16 | S4f | `d282ede2` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/9/32/6, 0 failed; `npm test --prefix extension` 115 pass | Live `ghostlight doctor` reads in plain words: `registered, needs an update` where it used to print `Updatable` | PASS |
+| 2026-08-16 | S5 | `efc15783` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 273/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on popup.js; process and CLI journeys | The two directives are pinned character for character against `PINS.md` | PASS |
+| 2026-08-16 | S6 | `124a5557` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 280/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on view.js and words.js; workbench-surface and process journeys | The vocabulary guard was verified against a negative control: reintroducing one word literal in view.js fails two assertions | PASS |
 | 2026-08-16 | S3 (WSL) | `7a084ae5` | None; observation only | Real WSL2 Debian on the Windows host reports `WSL_DISTRO_NAME=Debian` and `/proc/sys/kernel/osrelease=6.6.87.2-microsoft-standard-WSL2`. Both halves of the pinned WSL rule match independently, and `XDG_CURRENT_DESKTOP` is empty there, which the unknown-row test already covers | PASS, inputs only |
 
 ## Deviations and findings
