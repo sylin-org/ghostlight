@@ -965,6 +965,45 @@ mod tests {
         launch_mode, select_install_browsers, LaunchMode, NativeHostCommand, SetupOptions,
     };
 
+    /// Ghostlight's command line emits plain text on purpose.
+    ///
+    /// `NO_COLOR` has nothing to suppress today because nothing is styled, and that is worth
+    /// keeping rather than rediscovering later. If styling is ever added, this test fails, and
+    /// whoever adds it has to honor `NO_COLOR` in the same change and say so here.
+    #[test]
+    fn the_command_line_emits_no_terminal_styling() {
+        const ESCAPE: char = '\u{1b}';
+
+        fn visit(directory: &std::path::Path, offenders: &mut Vec<String>) {
+            for entry in std::fs::read_dir(directory).expect("orchestrator source is readable") {
+                let path = entry.expect("directory entry is readable").path();
+                if path.is_dir() {
+                    visit(&path, offenders);
+                    continue;
+                }
+                if path.extension().is_some_and(|extension| extension == "rs") {
+                    let source = std::fs::read_to_string(&path).expect("source file is UTF-8");
+                    let escaped_forms = source.contains("\\x1b[") || source.contains("\\u{1b}[");
+                    // Skip this file: it necessarily contains the patterns it searches for.
+                    let is_this_file = path.file_name().is_some_and(|name| name == "main.rs");
+                    if !is_this_file && (source.contains(ESCAPE) || escaped_forms) {
+                        offenders.push(path.display().to_string());
+                    }
+                }
+            }
+        }
+
+        let mut offenders = Vec::new();
+        visit(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut offenders,
+        );
+        assert!(
+            offenders.is_empty(),
+            "terminal styling was added in {offenders:?}; honor NO_COLOR and update this test"
+        );
+    }
+
     fn browser(id: &str, package: BrowserPackage) -> BrowserRegistration {
         BrowserRegistration {
             id: id.into(),

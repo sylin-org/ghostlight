@@ -8,7 +8,7 @@ every commit, and when closing or blocking a stage.
 
 - State: S1, S2, and S3 COMPLETE.
 - Current stage: S4, terminal citizenship. Orchestrator, installer, and packaging.
-- Next action: S4c, below. S4a and S4b landed. S4 does not land coherently in one commit; its ordered substeps are in
+- Next action: S4d, below. S4a, S4b, and S4c landed. S4 does not land coherently in one commit; its ordered substeps are in
   the S4 section further down. Each substep is one commit and leaves a green tree.
 - Blocking condition: none. S4b's central behavior cannot be verified on a Windows host; see the
   substep note.
@@ -112,7 +112,7 @@ Ordered so every prefix is coherent and green.
 | --- | --- | --- |
 | S4a | `--json` uniformity across every state-reporting subcommand, through the existing command seam | Yes. **DONE** |
 | S4b | `~/.local/bin/ghostlight` ownership per ADR-0126 D8: create, idempotent repeat, ownership check, removal on uninstall | **DONE, with a limit.** Linux-only by definition; the creation path is `cfg(unix)` and only executes in the Linux CI lane and on a Linux host. Inspection and the not-applicable path are cross-platform and testable here |
-| S4c | `NO_COLOR` honored wherever the CLI styles output | Yes |
+| S4c | `NO_COLOR` honored wherever the CLI styles output | Yes. **DONE**, as a guard: nothing is styled |
 | S4d | Man pages for the three siblings, authored, installed by the Debian package and available to the per-user route | Partly: content and packaging wiring here, `man` rendering on Linux |
 | S4e | Shell completions for bash, zsh, and fish, plus the guard comparing their subcommand list against the parser | Yes for the guard; live shell completion on Linux |
 | S4f | `doctor` parity guard: every reportable state has a line in the same words the workbench uses | Yes |
@@ -129,6 +129,7 @@ now; when S6 reshapes the landing surface it must keep this guard passing rather
 | 2026-08-16 | S3 | (this commit) | `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test --workspace` 254 orchestrator library, 4 binary, 32 bridge, 6 MCP connector, 0 failed; `npm test --prefix extension` 115 pass; `node tests/process-journey.mjs`; `node tests/cli-journey.mjs` | Live `ghostlight doctor` on the Windows authoring host printed `Environment: Windows -- Ghostlight is in your notification area, and in the Start menu.` | PASS |
 | 2026-08-16 | S4a | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 254/4/32/6, 0 failed; `npm test --prefix extension` 115 pass; `node tests/cli-journey.mjs` | `ghostlight doctor --json` parsed as JSON on the Windows host; `ghostlight status --json` byte shape unchanged | PASS |
 | 2026-08-16 | S4b | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 261/4/32/6, 0 failed; `npm test --prefix extension` 115 pass; CLI and process journeys | Windows `doctor` reports the command entry as not applicable and still names the absolute executable. The four symlink tests compile here but return early: they prove behavior only in the Linux lane | PASS with a recorded limit |
+| 2026-08-16 | S4c | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 261/5/32/6, 0 failed; `npm test --prefix extension` 115 pass | Source audit found no ANSI escape or color dependency in any crate, the npm launcher, or the shell scripts | PASS |
 
 ## Deviations and findings
 
@@ -151,6 +152,12 @@ check was not run. Disposition: carried into S8's migration cases, where it is a
 refuse, and remove the entry now compile on Windows and return early there, so a type error cannot
 hide until CI, but they assert nothing on this platform. Their real execution is the Linux CI lane
 and S8's Ubuntu run. Recorded rather than implied by a green Windows gate.
+
+**4. S4c had nothing to implement.** `NO_COLOR` exists to suppress styling, and Ghostlight emits
+none: no ANSI escape, no color crate, and no styling in the npm launcher or shell scripts. Adding an
+environment read would have been dead code. Delivered instead as a guard test that fails if styling
+is ever introduced, so the next person has to honor `NO_COLOR` in the same change. Verified against
+a negative control.
 
 ## Stage close checklist
 
