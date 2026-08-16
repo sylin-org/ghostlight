@@ -16,32 +16,49 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 ## Reference experience epic
 
 The owner-approved product direction is the staged
-[reference-experience task batch](tasks/reference-experience/). It is READY at S1 and has not
-changed production behavior. It was authored on 2026-08-15 and reworked on 2026-08-16; the
-[ledger](tasks/reference-experience/LEDGER.md) records what changed and why.
+[reference-experience task batch](tasks/reference-experience/). It was authored on 2026-08-15,
+reworked on 2026-08-16, and is executing. The
+[ledger](tasks/reference-experience/LEDGER.md) is the authority on progress and carries twelve
+numbered deviations; [ADR-0126](adr/0126-reference-experience-contract.md) carries the decisions.
 
-The epic's aim is that Ghostlight behaves as one product across every machine a person uses: the
-same words, the same controls, and the same truth, shaped to the desktop they are on. Ordinary
-browser work succeeds without opening the workbench, safe recovery happens without ceremony, and
-recovery that is not safe ends in an exact statement of what failed and what to do next. Ghostlight
-stays at the mechanism boundary: canonical browser operations, authority, lifecycle, and effect
-truth belong here; inferred user-task meaning does not.
+The aim is that Ghostlight behaves as one product across every machine a person uses: the same
+words, the same controls, and the same truth, shaped to the desktop they are on. Ghostlight stays at
+the mechanism boundary; inferred user-task meaning does not belong here.
 
-Eight stages run in order, each landing on its own: the experience contract; the second machine,
-where an extension arriving by browser sync says the product is not installed here; adaptive
-familiarity, one owner for what the product says about the machine it runs on, including WSL;
-terminal citizenship; human runtime control; At a glance; readiness recovery, applied per platform;
-and evaluation, which runs the Ubuntu GNOME Wayland lifecycle ADR-0123 already made
-release-blocking, a Windows lane, and the migration cases.
+S1 through S6 are complete on the Windows development host:
 
-Two things this epic deliberately does not do. It adds no network behavior of any kind; ADR-0028
-Decision 9 stands, and adoption signal comes from the Chrome Web Store, npm, the MCP registry, and
-GitHub. And it does not add presence to controlled pages: that work is deferred to
-[a design note](design/in-page-affordance-deferred-2026-08.md) pending a vector asset and a named
-audience.
+- **S1** ratified the contract as ADR-0126. Its consequential decision is that a pause refuses
+  rather than holding the caller: a human-scale pause outlives an MCP request timeout, and a
+  suspended operation would compete with the ADR-0113 deadline over one operation's fate. The
+  rejected alternative is recorded so it is not re-proposed.
+- **S2** made the extension distinguish an absent native host from an unreachable service. A browser
+  profile syncs the extension to a second computer and the native host does not travel with it, so
+  both surfaces now say Ghostlight is not installed there and offer one route back, with a bundled
+  page for when the walkthrough host is unreachable.
+- **S3** gave the product one owner for what it says about the machine it runs on: a closed table
+  with a row per platform and desktop, including WSL, consumed by both install and `doctor`.
+- **S4** made the command line a first-class surface: `doctor --json`, an owned
+  `~/.local/bin/ghostlight`, manual pages for the three executables, completions for bash, zsh, and
+  fish, and plain words in place of Rust identifiers for every reported state.
+- **S5** replaced the human-control refusals with the two pinned directives, and separated a policy
+  attention hold from a person's pause in the extension popup.
+- **S6** moved the front door's readiness answer out of JavaScript and into
+  `language/readiness.rs`. The landing destination is now called At a glance, and no sixth
+  destination was added.
 
-Execution keeps the DDD modular monolith, the minimum number of meaningful moving parts, and
-complexity centralized at the seam where each fact becomes knowable. S1 is the next action.
+S7 is planned in three substeps: the `browser.startup` policy setting, the decision layer, and the
+launch itself, which needs a live desktop on both platforms. S8 is the evaluation and is split
+between the owed Ubuntu GNOME Wayland lifecycle and a Windows lane.
+
+Verification boundary: every commit passed formatting, warnings-denied workspace Clippy, the full
+workspace test suite, the extension suite, and the journeys its change touched. What could not be
+proved on a Windows host is delegated to `linux-codex` through `coordination/RESULTS.md`: the
+`~/.local/bin` entry and the four tests that return early off Unix, the Debian man-page and
+completion injection, live shell completion, the extension's not-installed state in a real Chromium
+profile, and the GNOME and KDE environment rows.
+
+This epic adds no network behavior of any kind. ADR-0028 Decision 9 stands, and the epic's NEVER
+list has no exception for it.
 
 ## RAWX and managed-policy restoration
 
