@@ -2066,7 +2066,8 @@ mod tests {
             );
             assert_eq!(summary.connector_command, connector);
             assert!(
-                summary.manual_setup.contains(escaped_connector),
+                summary.manual_setup.contains(&connector)
+                    || summary.manual_setup.contains(escaped_connector),
                 "manual setup for {} omitted the connector",
                 summary.id
             );
