@@ -153,6 +153,7 @@ than appended to a long session.
 | 2026-08-16 | S4f | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/9/32/6, 0 failed; `npm test --prefix extension` 115 pass | Live `ghostlight doctor` reads in plain words: `registered, needs an update` where it used to print `Updatable` | PASS |
 | 2026-08-16 | S5 | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 273/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on popup.js; process and CLI journeys | The two directives are pinned character for character against `PINS.md` | PASS |
 | 2026-08-16 | S6 | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 280/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on view.js and words.js; workbench-surface and process journeys | The vocabulary guard was verified against a negative control: reintroducing one word literal in view.js fails two assertions | PASS |
+| 2026-08-16 | S3 (WSL) | `7a084ae5` | None; observation only | Real WSL2 Debian on the Windows host reports `WSL_DISTRO_NAME=Debian` and `/proc/sys/kernel/osrelease=6.6.87.2-microsoft-standard-WSL2`. Both halves of the pinned WSL rule match independently, and `XDG_CURRENT_DESKTOP` is empty there, which the unknown-row test already covers | PASS, inputs only |
 
 ## Deviations and findings
 
@@ -234,6 +235,13 @@ kind of confident wrong answer this epic exists to remove. The parity that was a
 delivered instead: both surfaces draw every state word from Rust, and neither authors its own. If a
 readiness line in `doctor` is wanted later, it needs a decision about whether `doctor` may query a
 running service.
+
+**13. The WSL row's rendered line is still unproved.** The detection inputs are now verified
+against a real WSL2 system: `WSL_DISTRO_NAME` is set and the kernel release contains the pinned
+`microsoft` marker, which was the assumption most likely to be wrong. What is not proved is the
+sentence `ghostlight doctor` actually prints there, because that needs a Linux build of the
+orchestrator and its WebKitGTK stack inside WSL, which was not attempted. This stays with the
+Windows host rather than moving to the Linux lane, since WSL is a Windows-side configuration.
 
 ## Stage close checklist
 
