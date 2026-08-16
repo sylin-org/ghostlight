@@ -9,8 +9,14 @@ const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0", "debug");
 const runtimeFile = join(repository, `tests/.ghostlight-runtime-${process.pid}.json`);
 const auditFile = join(repository, `tests/.ghostlight-audit-${process.pid}.jsonl`);
+const policyFile = join(repository, `tests/.ghostlight-policy-${process.pid}.json`);
 const deployLock = join(binDir, "deploy.lock");
-const environment = { ...process.env, GHOSTLIGHT_RUNTIME_FILE: runtimeFile, GHOSTLIGHT_AUDIT_FILE: auditFile };
+const environment = {
+  ...process.env,
+  GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
+  GHOSTLIGHT_AUDIT_FILE: auditFile,
+  GHOSTLIGHT_POLICY_FILE: policyFile
+};
 const children = [];
 const physicalCommands = [];
 let createdDeployLock = false;
@@ -258,6 +264,18 @@ async function waitForMcpReady(mcp, timeoutMs = 10000) {
 try {
   rmSync(runtimeFile, { force: true });
   rmSync(auditFile, { force: true });
+  rmSync(policyFile, { force: true });
+  writeFileSync(policyFile, JSON.stringify({
+    schema: 3,
+    name: "Process journey",
+    version: "1",
+    grants: [{
+      id: "ordinary-web",
+      hosts: { allow: ["*"] },
+      allowed: ["read", "action", "write", "execute"]
+    }],
+    config: [{ key: "browser.startup", value: "manual", level: "mandatory" }]
+  }));
   if (existsSync(deployLock)) throw new Error(`Refusing to replace existing deploy lock ${deployLock}`);
   writeFileSync(deployLock, "process journey quiesce", { flag: "wx" });
   createdDeployLock = true;
@@ -426,12 +444,39 @@ try {
   assert.equal(openRecord.observed.host, "example.com");
   assert.equal(openRecord.observed.readiness, "complete");
   assert.equal(records.some((record) => JSON.stringify(record).includes("Example Domain")), false);
-  console.log("process journey ok: reconnect -> open/read -> extension-owned recording save/discard -> close");
+
+  // A new MCP session has no browser binding. With startup explicitly manual, losing the only
+  // adapter must stop before dispatch and return one useful action instead of trying to launch.
+  browserConnector.kill();
+  await waitForExit(browserConnector);
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const manualConnector = start(executable("ghostlight-mcp-connector"));
+  const manualMcp = new McpPeer(manualConnector);
+  const manualInitialized = await manualMcp.request("initialize", {
+    protocolVersion: "2025-11-25",
+    capabilities: {},
+    clientInfo: { name: "manual-recovery", version: "1" }
+  });
+  assert.equal(manualInitialized.result.serverInfo.name, "ghostlight");
+  manualMcp.notify("notifications/initialized");
+  const manual = structured(await manualMcp.request("tools/call", {
+    name: "browser_navigate",
+    arguments: { url: "https://example.com" }
+  }));
+  assert.equal(manual.status, "failed");
+  assert.equal(manual.effect, "none");
+  assert.equal(manual.facts.reason, "browser_startup_manual");
+  assert.equal(physicalCommands.filter((command) => command === "open_tab").length, 2);
+  assert.equal(manual.next_steps.length, 1);
+  assert.match(manual.next_steps[0], /Start the browser/);
+
+  console.log("process journey ok: reconnect -> open/read -> recording -> close -> manual no-browser recovery");
 } finally {
   for (const child of children.reverse()) {
     if (!child.killed) child.kill();
   }
   rmSync(runtimeFile, { force: true });
   rmSync(auditFile, { force: true });
+  rmSync(policyFile, { force: true });
   if (createdDeployLock) rmSync(deployLock, { force: true });
 }

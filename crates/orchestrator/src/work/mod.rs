@@ -27,6 +27,9 @@ use serde_json::{json, Value};
 use url::Url;
 use uuid::Uuid;
 
+use crate::browser::recovery::{
+    BrowserRecovery, RecoveryDecision, RecoveryFailure, RecoveryWaitError,
+};
 use crate::browser::{choose_browser, BrowserError, BrowserPort};
 use crate::events::{DenialPresentation, DomainEvent};
 use ghostlight_bridge::service::IntakeChannel;
@@ -38,7 +41,8 @@ use crate::governance::{
 use crate::language::{
     self,
     outcome::{
-        ActionSubject, BlockedReason, Observed, Outcome, Refusal, TargetRole, WorkspaceReason,
+        ActionSubject, BlockedReason, BrowserRecoveryReason, Observed, Outcome, Refusal,
+        TargetRole, WorkspaceReason,
     },
     Operation, Record, SequenceStep,
 };
@@ -74,6 +78,7 @@ pub struct ApplicationExecutor {
     governance: GovernanceFacade,
     workspaces: WorkspaceStore,
     browser: Arc<dyn BrowserPort>,
+    recovery: BrowserRecovery,
     presentation: PresentationReactor,
     workbench: WorkbenchProjection,
     audit: Arc<dyn AuditSink>,
@@ -143,10 +148,12 @@ impl ApplicationExecutor {
         workbench: WorkbenchProjection,
         audit: Arc<dyn AuditSink>,
     ) -> Self {
+        let recovery = BrowserRecovery::discover(governance.clone());
         Self {
             governance,
             workspaces,
             browser,
+            recovery,
             presentation,
             workbench,
             audit,
@@ -760,11 +767,42 @@ impl ApplicationExecutor {
     /// every later crossing in this workspace reads it back instead of choosing again.
     fn target_browser(&self, context: &InvocationContext<'_>) -> Result<String, BrowserError> {
         let pinned = self.workspaces.browser_of(context.workspace.as_str());
-        let chosen = choose_browser(
+        let chosen = match choose_browser(
             context.requested_browser,
             pinned.as_deref(),
             &self.browser.browsers(),
-        )?;
+        ) {
+            Ok(chosen) => chosen,
+            Err(BrowserError::DisconnectedBeforeDispatch) => {
+                match self.recovery.request(
+                    context.requested_browser,
+                    pinned.as_deref(),
+                    context.deadline,
+                    context.cancellation.flag(),
+                ) {
+                    Ok(RecoveryDecision::Manual { browser }) => {
+                        return Err(BrowserError::RecoveryManual {
+                            browser: browser.map(|browser| browser.name),
+                        });
+                    }
+                    Ok(RecoveryDecision::Failed { reason, details }) => {
+                        return Err(BrowserError::RecoveryFailed { reason, details });
+                    }
+                    // S7b decides the exact target. S7c owns the physical launch and bounded wait;
+                    // until that seam is present, keep the established truthful disconnect.
+                    Ok(RecoveryDecision::Launch { .. }) => {
+                        return Err(BrowserError::DisconnectedBeforeDispatch);
+                    }
+                    Err(RecoveryWaitError::Cancelled) => {
+                        return Err(BrowserError::CancelledBeforeDispatch);
+                    }
+                    Err(RecoveryWaitError::Deadline) => {
+                        return Err(BrowserError::DeadlineBeforeDispatch);
+                    }
+                }
+            }
+            Err(error) => return Err(error),
+        };
         match self
             .workspaces
             .pin_browser(context.workspace.as_str(), &chosen)
@@ -1333,7 +1371,32 @@ fn routing_refusal(error: &BrowserError) -> Option<(Refusal, Value)> {
         BrowserError::BrowserPinned => {
             Some((Refusal::BrowserPinned, json!({"reason":"browser_pinned"})))
         }
+        BrowserError::RecoveryManual { browser } => Some((
+            Refusal::BrowserStartupManual {
+                browser: browser.clone(),
+            },
+            json!({"reason":"browser_startup_manual","browser":browser}),
+        )),
+        BrowserError::RecoveryFailed { reason, details } => Some((
+            Refusal::BrowserRecoveryFailed {
+                reason: recovery_reason(*reason),
+            },
+            json!({"reason":reason.as_str(),"details":details}),
+        )),
         _ => None,
+    }
+}
+
+const fn recovery_reason(reason: RecoveryFailure) -> BrowserRecoveryReason {
+    match reason {
+        RecoveryFailure::BrowserAbsent => BrowserRecoveryReason::BrowserAbsent,
+        RecoveryFailure::LaunchFailed => BrowserRecoveryReason::LaunchFailed,
+        RecoveryFailure::SandboxedPackage => BrowserRecoveryReason::SandboxedPackage,
+        RecoveryFailure::ExtensionAbsent => BrowserRecoveryReason::ExtensionAbsent,
+        RecoveryFailure::NativeHostUnavailable => BrowserRecoveryReason::NativeHostUnavailable,
+        RecoveryFailure::WrongProfile => BrowserRecoveryReason::WrongProfile,
+        RecoveryFailure::HandshakeTimeout => BrowserRecoveryReason::HandshakeTimeout,
+        RecoveryFailure::Ambiguous => BrowserRecoveryReason::Ambiguous,
     }
 }
 
@@ -1831,6 +1894,19 @@ mod tests {
         // Nothing was dispatched and nothing was bound, so naming a browser next still works.
         assert!(browser.routed().is_empty());
         assert_eq!(workspaces.browser_of(workspace.as_str()), None);
+    }
+
+    #[test]
+    fn recovery_is_requested_from_one_seam_only() {
+        let source = include_str!("mod.rs");
+        let marker = [".recovery", ".request("].concat();
+        assert_eq!(source.matches(&marker).count(), 1);
+        let seam = source
+            .split("fn target_browser")
+            .nth(1)
+            .and_then(|tail| tail.split("fn observe").next())
+            .expect("target-browser seam remains explicit");
+        assert!(seam.contains(&marker));
     }
 
     #[test]

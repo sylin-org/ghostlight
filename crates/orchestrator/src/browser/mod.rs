@@ -1,5 +1,7 @@
 //! The physical browser port and authenticated relay-backed adapter implementation.
 
+pub mod recovery;
+
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::net::{Shutdown, TcpStream};
@@ -1037,6 +1039,20 @@ pub enum BrowserError {
     /// Several browsers are connected and nothing implies which one the work belongs to.
     #[error("several browsers are connected and none was selected")]
     AmbiguousBrowser(Vec<String>),
+    /// Browser readiness recovery reached a useful manual-mode outcome.
+    #[error("browser startup is manual")]
+    RecoveryManual {
+        /// Unique installed browser name, when one was found.
+        browser: Option<String>,
+    },
+    /// Browser readiness recovery reached one exact closed failure.
+    #[error("browser recovery failed: {reason:?}")]
+    RecoveryFailed {
+        /// Exact failure class.
+        reason: recovery::RecoveryFailure,
+        /// Candidate names or package diagnoses.
+        details: Vec<String>,
+    },
     /// Browser adapter protocol major is incompatible.
     #[error("browser adapter protocol major {offered} is incompatible with required {required}")]
     Incompatible { offered: u16, required: u16 },

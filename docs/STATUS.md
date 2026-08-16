@@ -48,9 +48,12 @@ S1 through S6 are complete on the Windows development host:
 
 S7 is underway in three substeps. S7a registered `browser.startup` with the closed values
 `on_demand` and `manual`, per-platform defaults, monotonic organization ceiling behavior, and a
-closed workbench choice. It added no recovery or launch behavior. S7b is the decision layer; S7c is
-the launch itself. S8 is the evaluation and is split between the owed Ubuntu GNOME Wayland
-lifecycle and a Windows lane.
+closed workbench choice. S7b added the decision layer at the executor's one no-browser seam:
+deterministic installation diagnosis, Snap and Flatpak refusal, ambiguity reporting, per-scope
+single flight, exact closed failures, and a useful no-effect result in manual mode. It launches
+nothing. S7c is the launch or the platform-honest diagnosis that no verified launch seam is
+available. S8 is the evaluation and is split between the owed Ubuntu GNOME Wayland lifecycle and a
+Windows lane.
 
 **1.0 waits for this epic.** The owner decided on 2026-08-16 that the release does not go out ahead
 of it, so the epic's completion is a release gate. Practically, that means S8's evidence is release

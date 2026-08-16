@@ -690,6 +690,27 @@ impl Outcome {
     }
 }
 
+/// Closed product-language reason for a browser-readiness recovery failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrowserRecoveryReason {
+    /// No supported browser installation was found.
+    BrowserAbsent,
+    /// Starting the selected browser failed.
+    LaunchFailed,
+    /// Only an unsupported sandboxed package was found.
+    SandboxedPackage,
+    /// The selected browser does not have the Ghostlight extension.
+    ExtensionAbsent,
+    /// The native messaging registration cannot be used safely.
+    NativeHostUnavailable,
+    /// The opened browser is not the profile this session belongs to.
+    WrongProfile,
+    /// The selected adapter did not arrive within the bounded wait.
+    HandshakeTimeout,
+    /// More than one installed browser is equally plausible.
+    Ambiguous,
+}
+
 /// Why a browser job did not complete in Ghostlight's product language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Refusal {
@@ -724,6 +745,10 @@ pub enum Refusal {
     BrowserUnknown,
     /// This session already works in a different browser.
     BrowserPinned,
+    /// The configured posture leaves browser startup to the person.
+    BrowserStartupManual { browser: Option<String> },
+    /// Automatic readiness recovery failed before any browser effect.
+    BrowserRecoveryFailed { reason: BrowserRecoveryReason },
     /// A dispatched effect cannot be determined.
     EffectUnknown,
     /// A denied new-tab landing has an unknown final state.
@@ -767,6 +792,38 @@ impl Refusal {
             }
             Self::BrowserUnknown => "That browser is not connected.",
             Self::BrowserPinned => "This session is already working in a different browser.",
+            Self::BrowserStartupManual { browser } => {
+                return browser.as_ref().map_or_else(
+                    || "No browser is connected. Start a supported Chromium browser with the Ghostlight extension installed.".into(),
+                    |name| format!("No browser is connected. Start {name} to continue."),
+                );
+            }
+            Self::BrowserRecoveryFailed { reason } => match reason {
+                BrowserRecoveryReason::BrowserAbsent => {
+                    "No supported Chromium browser is installed."
+                }
+                BrowserRecoveryReason::LaunchFailed => {
+                    "Ghostlight could not start the selected browser."
+                }
+                BrowserRecoveryReason::SandboxedPackage => {
+                    "The installed browser is sandboxed and cannot start Ghostlight's native connector."
+                }
+                BrowserRecoveryReason::ExtensionAbsent => {
+                    "The selected browser does not have the Ghostlight extension installed."
+                }
+                BrowserRecoveryReason::NativeHostUnavailable => {
+                    "The browser cannot use Ghostlight's native messaging registration."
+                }
+                BrowserRecoveryReason::WrongProfile => {
+                    "This session belongs to a browser profile that is not connected."
+                }
+                BrowserRecoveryReason::HandshakeTimeout => {
+                    "The browser started, but its Ghostlight adapter did not connect in time."
+                }
+                BrowserRecoveryReason::Ambiguous => {
+                    "More than one installed browser could handle this work, so Ghostlight did not choose one."
+                }
+            },
             Self::EffectUnknown => "Sent, but the browser never confirmed what happened.",
             Self::LandingDeniedUnknown => {
                 "Blocked the landing, but the new tab's final state is unknown."
@@ -806,6 +863,38 @@ impl Refusal {
             Self::BrowserPinned => vec![
                 "Omit browser to continue in the browser this session already works in.".into(),
             ],
+            Self::BrowserStartupManual { .. } => vec![
+                "Start the browser you normally use with the Ghostlight extension installed, then repeat the call."
+                    .into(),
+            ],
+            Self::BrowserRecoveryFailed { reason } => match reason {
+                BrowserRecoveryReason::BrowserAbsent => vec![
+                    "Install Chrome, Edge, Brave, or Chromium as a native package, then run ghostlight install."
+                        .into(),
+                ],
+                BrowserRecoveryReason::SandboxedPackage => vec![
+                    "Install a supported native browser package; Snap and Flatpak browsers cannot start a native messaging host."
+                        .into(),
+                ],
+                BrowserRecoveryReason::NativeHostUnavailable => {
+                    vec!["Run ghostlight doctor, then repair the named browser registration.".into()]
+                }
+                BrowserRecoveryReason::ExtensionAbsent => vec![
+                    "Install Ghostlight in the selected browser profile, then repeat the call."
+                        .into(),
+                ],
+                BrowserRecoveryReason::WrongProfile => vec![
+                    "Open the browser profile this Ghostlight session already uses, then repeat the call."
+                        .into(),
+                ],
+                BrowserRecoveryReason::Ambiguous => vec![
+                    "Start the browser you want to use, then repeat the call with its browser handle."
+                        .into(),
+                ],
+                BrowserRecoveryReason::LaunchFailed | BrowserRecoveryReason::HandshakeTimeout => {
+                    vec!["Start the selected browser yourself, then repeat the call.".into()]
+                }
+            },
             Self::WorkspaceUnusable { reason } => reason.next_steps(),
             Self::RecordingUnavailable => vec![
                 "Use browser_record with action status and an explicit recording handle when more than one exists."
