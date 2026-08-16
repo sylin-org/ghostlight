@@ -46,14 +46,17 @@ S1 through S6 are complete on the Windows development host:
   `language/readiness.rs`. The landing destination is now called At a glance, and no sixth
   destination was added.
 
-S7 is underway in three substeps. S7a registered `browser.startup` with the closed values
+S7 is complete in three substeps. S7a registered `browser.startup` with the closed values
 `on_demand` and `manual`, per-platform defaults, monotonic organization ceiling behavior, and a
 closed workbench choice. S7b added the decision layer at the executor's one no-browser seam:
 deterministic installation diagnosis, Snap and Flatpak refusal, ambiguity reporting, per-scope
 single flight, exact closed failures, and a useful no-effect result in manual mode. It launches
-nothing. S7c is the launch or the platform-honest diagnosis that no verified launch seam is
-available. S8 is the evaluation and is split between the owed Ubuntu GNOME Wayland lifecycle and a
-Windows lane.
+nothing. S7c added the bounded physical attempt: safe repair only for stale Ghostlight-owned
+registration, direct launch of the chosen installed executable with no arguments, Linux graphical
+session proof through the ADR-0082 seam, and a bounded wait for the inbound adapter. Cancellation
+leaves no recovery flight behind. The Linux default remains manual; a real no-browser call returned
+its exact useful outcome with no effect. S8 is next and is split between the owed Ubuntu GNOME
+Wayland lifecycle and a Windows live-launch lane.
 
 **1.0 waits for this epic.** The owner decided on 2026-08-16 that the release does not go out ahead
 of it, so the epic's completion is a release gate. Practically, that means S8's evidence is release

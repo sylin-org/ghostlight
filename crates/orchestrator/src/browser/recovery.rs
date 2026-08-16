@@ -2,14 +2,19 @@
 //!
 //! The executor asks this service only when the ordinary plural-browser resolver proves that no
 //! usable adapter exists. This module inspects local installation facts, chooses no browser unless
-//! the evidence is unique, and joins simultaneous requests per recovery scope. Process launch and
-//! bounded adapter waiting are separate physical mechanisms added at the next seam.
+//! the evidence is unique, and joins simultaneous requests per recovery scope. Where the selected
+//! platform and policy permit it, the same flight performs one ordinary-profile launch and waits
+//! within the invocation deadline for an inbound adapter.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::thread;
 use std::time::{Duration, Instant};
 
+use super::{choose_browser, BrowserPort};
 use crate::governance::manifest::BrowserStartup;
 use crate::governance::GovernanceFacade;
 use crate::install::browser_package::BrowserPackage;
@@ -95,6 +100,11 @@ pub enum RecoveryDecision {
         /// Whether an owned stale registration may be reconciled first.
         repair_owned_registration: bool,
     },
+    /// One newly connected adapter is ready for the ordinary resolver.
+    Ready {
+        /// Opaque connected browser identity reported by the adapter.
+        browser: String,
+    },
     /// Recovery cannot safely select or prepare a browser.
     Failed {
         /// Exact closed reason.
@@ -115,6 +125,16 @@ pub enum RecoveryWaitError {
 
 trait BrowserInventory: Send + Sync {
     fn inspect(&self) -> Result<Vec<RecoveryCandidate>, ()>;
+}
+
+type MechanismFailure = (RecoveryFailure, String);
+
+trait RecoveryMechanism: Send + Sync {
+    fn launch(
+        &self,
+        browser: &RecoveryCandidate,
+        repair_owned_registration: bool,
+    ) -> Result<(), MechanismFailure>;
 }
 
 #[derive(Debug)]
@@ -141,10 +161,69 @@ impl BrowserInventory for SystemBrowserInventory {
     }
 }
 
+#[derive(Debug)]
+struct SystemRecoveryMechanism;
+
+impl RecoveryMechanism for SystemRecoveryMechanism {
+    fn launch(
+        &self,
+        browser: &RecoveryCandidate,
+        repair_owned_registration: bool,
+    ) -> Result<(), MechanismFailure> {
+        let registry = NativeHostRegistry::discover();
+        if repair_owned_registration {
+            registry
+                .install_selected(std::slice::from_ref(&browser.id))
+                .map_err(|error| {
+                    (
+                        RecoveryFailure::NativeHostUnavailable,
+                        format!("{}: {error}", browser.name),
+                    )
+                })?;
+        }
+        let executable = registry.browser_executable(&browser.id).ok_or_else(|| {
+            (
+                RecoveryFailure::LaunchFailed,
+                format!(
+                    "{} has no ordinary executable Ghostlight can verify",
+                    browser.name
+                ),
+            )
+        })?;
+        let environment = ghostlight_bridge::session::graphical_session_environment()
+            .map_err(|error| (RecoveryFailure::LaunchFailed, error.to_string()))?
+            .ok_or_else(|| {
+                (
+                    RecoveryFailure::LaunchFailed,
+                    "No verified graphical user session is available for browser startup.".into(),
+                )
+            })?;
+        let mut command = ordinary_browser_command(&executable);
+        command.envs(environment.values());
+        command.spawn().map(drop).map_err(|error| {
+            (
+                RecoveryFailure::LaunchFailed,
+                format!("{}: {error}", executable.display()),
+            )
+        })
+    }
+}
+
+fn ordinary_browser_command(executable: &Path) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+type RecoveryResult = Result<RecoveryDecision, RecoveryWaitError>;
+
 #[derive(Debug, Default)]
 struct Flights {
     active: HashSet<String>,
-    completed: HashMap<String, RecoveryDecision>,
+    completed: HashMap<String, RecoveryResult>,
 }
 
 /// Cloneable, service-scoped single-flight recovery decision service.
@@ -152,16 +231,20 @@ struct Flights {
 pub struct BrowserRecovery {
     governance: GovernanceFacade,
     inventory: Arc<dyn BrowserInventory>,
+    browser: Arc<dyn BrowserPort>,
+    mechanism: Arc<dyn RecoveryMechanism>,
     flights: Arc<(Mutex<Flights>, Condvar)>,
 }
 
 impl BrowserRecovery {
     /// Discover the production governance and browser-installation facts.
     #[must_use]
-    pub fn discover(governance: GovernanceFacade) -> Self {
+    pub fn discover(governance: GovernanceFacade, browser: Arc<dyn BrowserPort>) -> Self {
         Self {
             governance,
             inventory: Arc::new(SystemBrowserInventory),
+            browser,
+            mechanism: Arc::new(SystemRecoveryMechanism),
             flights: Arc::new((Mutex::new(Flights::default()), Condvar::new())),
         }
     }
@@ -199,7 +282,7 @@ impl BrowserRecovery {
                         .completed
                         .get(&scope)
                         .cloned()
-                        .ok_or(RecoveryWaitError::Deadline);
+                        .unwrap_or(Err(RecoveryWaitError::Deadline));
                 }
             }
         }
@@ -207,20 +290,97 @@ impl BrowserRecovery {
         flights.completed.remove(&scope);
         drop(flights);
 
-        let mode = self.governance.browser_startup();
-        let decision = self.inventory.inspect().map_or_else(
+        let result = self.attempt(requested, pinned, deadline, cancelled);
+
+        let mut flights = lock(state);
+        flights.active.remove(&scope);
+        flights.completed.insert(scope, result.clone());
+        changed.notify_all();
+        result
+    }
+
+    fn attempt(
+        &self,
+        requested: Option<&str>,
+        pinned: Option<&str>,
+        deadline: Instant,
+        cancelled: &AtomicBool,
+    ) -> RecoveryResult {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(RecoveryWaitError::Cancelled);
+        }
+        if Instant::now() >= deadline {
+            return Err(RecoveryWaitError::Deadline);
+        }
+        let plan = self.inventory.inspect().map_or_else(
             |_| RecoveryDecision::Failed {
                 reason: RecoveryFailure::NativeHostUnavailable,
                 details: Vec::new(),
             },
-            |candidates| decide(mode, requested, pinned, &candidates),
+            |candidates| {
+                decide(
+                    self.governance.browser_startup(),
+                    requested,
+                    pinned,
+                    &candidates,
+                )
+            },
         );
-
-        let mut flights = lock(state);
-        flights.active.remove(&scope);
-        flights.completed.insert(scope, decision.clone());
-        changed.notify_all();
-        Ok(decision)
+        let RecoveryDecision::Launch {
+            browser,
+            repair_owned_registration,
+        } = plan
+        else {
+            return Ok(plan);
+        };
+        if let Err((reason, detail)) = self.mechanism.launch(&browser, repair_owned_registration) {
+            return Ok(RecoveryDecision::Failed {
+                reason,
+                details: vec![detail],
+            });
+        }
+        loop {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(RecoveryWaitError::Cancelled);
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Ok(RecoveryDecision::Failed {
+                    reason: RecoveryFailure::HandshakeTimeout,
+                    details: vec![browser.name],
+                });
+            }
+            let connected = self.browser.browsers();
+            if !connected.is_empty() {
+                return match choose_browser(None, None, &connected) {
+                    Ok(browser) => Ok(RecoveryDecision::Ready { browser }),
+                    Err(super::BrowserError::AmbiguousBrowser(candidates)) => {
+                        Ok(RecoveryDecision::Failed {
+                            reason: RecoveryFailure::Ambiguous,
+                            details: candidates
+                                .into_iter()
+                                .map(|id| {
+                                    connected
+                                        .iter()
+                                        .find(|browser| browser.id == id)
+                                        .and_then(|browser| browser.name.clone())
+                                        .unwrap_or(id)
+                                })
+                                .collect(),
+                        })
+                    }
+                    Err(_) => Ok(RecoveryDecision::Failed {
+                        reason: RecoveryFailure::HandshakeTimeout,
+                        details: vec![browser.name],
+                    }),
+                };
+            }
+            thread::sleep(
+                deadline
+                    .saturating_duration_since(now)
+                    .min(Duration::from_millis(10)),
+            );
+        }
     }
 }
 
@@ -302,6 +462,7 @@ mod tests {
     use std::thread;
 
     use super::*;
+    use crate::browser::testing::{summary, FakeBrowser};
 
     #[derive(Debug)]
     struct FakeInventory {
@@ -321,6 +482,30 @@ mod tests {
                 let _ = release.recv();
             }
             Ok(self.candidates.clone())
+        }
+    }
+
+    #[derive(Debug)]
+    struct FakeMechanism {
+        launches: AtomicUsize,
+        outcome: Mutex<Result<(), MechanismFailure>>,
+        connect: Option<Arc<FakeBrowser>>,
+    }
+
+    impl RecoveryMechanism for FakeMechanism {
+        fn launch(
+            &self,
+            _browser: &RecoveryCandidate,
+            _repair_owned_registration: bool,
+        ) -> Result<(), MechanismFailure> {
+            self.launches.fetch_add(1, Ordering::SeqCst);
+            let outcome = lock(&self.outcome).clone();
+            if outcome.is_ok() {
+                if let Some(browser) = &self.connect {
+                    browser.connect(vec![summary("browser_chromium", true)]);
+                }
+            }
+            outcome
         }
     }
 
@@ -355,9 +540,20 @@ mod tests {
         } else {
             GovernanceFacade::new(None, None)
         };
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
         BrowserRecovery {
             governance,
             inventory,
+            browser,
+            mechanism: Arc::new(FakeMechanism {
+                launches: AtomicUsize::new(0),
+                outcome: Mutex::new(Err((
+                    RecoveryFailure::LaunchFailed,
+                    "fake launch refused".into(),
+                ))),
+                connect: None,
+            }),
             flights: Arc::new((Mutex::new(Flights::default()), Condvar::new())),
         }
     }
@@ -376,7 +572,16 @@ mod tests {
             entered: Some(entered_tx),
             release: Mutex::new(Some(release_rx)),
         });
-        let recovery = coordinator(Some("manual"), Arc::clone(&inventory));
+        let mut recovery = coordinator(Some("on_demand"), Arc::clone(&inventory));
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        let mechanism = Arc::new(FakeMechanism {
+            launches: AtomicUsize::new(0),
+            outcome: Mutex::new(Ok(())),
+            connect: Some(Arc::clone(&browser)),
+        });
+        recovery.browser = browser;
+        recovery.mechanism = mechanism.clone();
         let first = recovery.clone();
         let first_thread = thread::spawn(move || {
             first.request(
@@ -400,6 +605,7 @@ mod tests {
         release_tx.send(()).unwrap();
         assert_eq!(first_thread.join().unwrap(), second_thread.join().unwrap());
         assert_eq!(inventory.inspections.load(Ordering::SeqCst), 1);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -496,37 +702,44 @@ mod tests {
 
     #[test]
     fn cancellation_leaves_no_abandoned_operation() {
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
         let inventory = Arc::new(FakeInventory {
-            candidates: Vec::new(),
+            candidates: vec![candidate(
+                "Chromium",
+                BrowserPackage::Native,
+                NativeHostState::Current,
+            )],
             inspections: AtomicUsize::new(0),
-            entered: Some(entered_tx),
-            release: Mutex::new(Some(release_rx)),
+            entered: None,
+            release: Mutex::new(None),
         });
-        let recovery = coordinator(Some("manual"), inventory);
+        let mut recovery = coordinator(Some("on_demand"), inventory);
+        let mechanism = Arc::new(FakeMechanism {
+            launches: AtomicUsize::new(0),
+            outcome: Mutex::new(Ok(())),
+            connect: None,
+        });
+        recovery.mechanism = mechanism.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
         let active = recovery.clone();
+        let active_cancelled = Arc::clone(&cancelled);
         let active_thread = thread::spawn(move || {
             active.request(
                 None,
                 None,
                 Instant::now() + Duration::from_secs(2),
-                &AtomicBool::new(false),
+                &active_cancelled,
             )
         });
-        entered_rx.recv().unwrap();
-        let cancelled = AtomicBool::new(true);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while mechanism.launches.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
+            thread::yield_now();
+        }
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+        cancelled.store(true, Ordering::SeqCst);
         assert_eq!(
-            recovery.request(
-                None,
-                None,
-                Instant::now() + Duration::from_secs(1),
-                &cancelled,
-            ),
+            active_thread.join().unwrap(),
             Err(RecoveryWaitError::Cancelled)
         );
-        release_tx.send(()).unwrap();
-        active_thread.join().unwrap().unwrap();
         assert!(lock(&recovery.flights.0).active.is_empty());
     }
 
@@ -540,24 +753,16 @@ mod tests {
         let foreign = root.join("foreign.json");
         std::fs::write(&foreign, b"foreign bytes").unwrap();
         let before = std::fs::read(&foreign).unwrap();
-        let inventory = Arc::new(FakeInventory {
-            candidates: vec![candidate(
+        let decision = decide(
+            BrowserStartup::OnDemand,
+            None,
+            None,
+            &[candidate(
                 "Chromium",
                 BrowserPackage::Native,
                 NativeHostState::Updatable,
             )],
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
-        let decision = coordinator(Some("on_demand"), inventory)
-            .request(
-                None,
-                None,
-                Instant::now() + Duration::from_secs(1),
-                &AtomicBool::new(false),
-            )
-            .unwrap();
+        );
         assert!(matches!(
             decision,
             RecoveryDecision::Launch {
@@ -567,5 +772,47 @@ mod tests {
         ));
         assert_eq!(std::fs::read(&foreign).unwrap(), before);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_launch_uses_the_ordinary_profile_with_no_automation_flags() {
+        let command = ordinary_browser_command(Path::new("ordinary-browser"));
+        assert_eq!(command.get_program(), Path::new("ordinary-browser"));
+        assert_eq!(command.get_args().count(), 0);
+    }
+
+    #[test]
+    fn a_bounded_launch_wait_names_handshake_timeout() {
+        let inventory = Arc::new(FakeInventory {
+            candidates: vec![candidate(
+                "Chromium",
+                BrowserPackage::Native,
+                NativeHostState::Current,
+            )],
+            inspections: AtomicUsize::new(0),
+            entered: None,
+            release: Mutex::new(None),
+        });
+        let mut recovery = coordinator(Some("on_demand"), inventory);
+        recovery.mechanism = Arc::new(FakeMechanism {
+            launches: AtomicUsize::new(0),
+            outcome: Mutex::new(Ok(())),
+            connect: None,
+        });
+        assert_eq!(
+            recovery
+                .request(
+                    None,
+                    None,
+                    Instant::now() + Duration::from_millis(20),
+                    &AtomicBool::new(false),
+                )
+                .unwrap(),
+            RecoveryDecision::Failed {
+                reason: RecoveryFailure::HandshakeTimeout,
+                details: vec!["Chromium".into()],
+            }
+        );
+        assert!(lock(&recovery.flights.0).active.is_empty());
     }
 }

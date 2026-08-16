@@ -123,6 +123,40 @@ impl NativeHostRegistry {
         inspect(&self.context, &SystemRegistrationIo)
     }
 
+    /// Resolve the ordinary installed executable for one supported browser without changing the
+    /// machine.
+    #[must_use]
+    pub fn browser_executable(&self, browser_id: &str) -> Option<PathBuf> {
+        let browser = BROWSERS.iter().find(|browser| browser.id == browser_id)?;
+        #[cfg(target_os = "linux")]
+        {
+            browser.package.executables.iter().find_map(|name| {
+                browser_package::native_executable_path(&self.context.browser_packages, name)
+            })
+        }
+        #[cfg(windows)]
+        {
+            let relative = Path::new(browser.windows_vendor)
+                .join("Application")
+                .join(browser.windows_executable);
+            [
+                Some(self.context.local.clone().into_os_string()),
+                env::var_os("PROGRAMFILES"),
+                env::var_os("PROGRAMFILES(X86)"),
+            ]
+            .into_iter()
+            .flatten()
+            .map(PathBuf::from)
+            .map(|base| base.join(&relative))
+            .find(|candidate| candidate.is_file())
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        {
+            let _ = browser;
+            None
+        }
+    }
+
     /// Install or update every safe per-user registration.
     pub fn install(&self) -> Result<NativeHostActionResult, NativeHostError> {
         apply_install(&self.context, &SystemRegistrationIo)
@@ -218,6 +252,8 @@ struct BrowserSpec {
     id: &'static str,
     name: &'static str,
     windows_vendor: &'static str,
+    #[cfg(windows)]
+    windows_executable: &'static str,
     linux_directory: &'static str,
     package: BrowserPackageSpec,
 }
@@ -227,6 +263,8 @@ const BROWSERS: &[BrowserSpec] = &[
         id: "chrome",
         name: "Google Chrome",
         windows_vendor: r"Google\Chrome",
+        #[cfg(windows)]
+        windows_executable: "chrome.exe",
         linux_directory: "google-chrome/NativeMessagingHosts",
         package: BrowserPackageSpec {
             executables: &["google-chrome", "google-chrome-stable"],
@@ -238,6 +276,8 @@ const BROWSERS: &[BrowserSpec] = &[
         id: "edge",
         name: "Microsoft Edge",
         windows_vendor: r"Microsoft\Edge",
+        #[cfg(windows)]
+        windows_executable: "msedge.exe",
         linux_directory: "microsoft-edge/NativeMessagingHosts",
         package: BrowserPackageSpec {
             executables: &["microsoft-edge", "microsoft-edge-stable"],
@@ -249,6 +289,8 @@ const BROWSERS: &[BrowserSpec] = &[
         id: "brave",
         name: "Brave",
         windows_vendor: r"BraveSoftware\Brave-Browser",
+        #[cfg(windows)]
+        windows_executable: "brave.exe",
         linux_directory: "BraveSoftware/Brave-Browser/NativeMessagingHosts",
         package: BrowserPackageSpec {
             executables: &["brave-browser", "brave"],
@@ -260,6 +302,8 @@ const BROWSERS: &[BrowserSpec] = &[
         id: "chromium",
         name: "Chromium",
         windows_vendor: "Chromium",
+        #[cfg(windows)]
+        windows_executable: "chrome.exe",
         linux_directory: "chromium/NativeMessagingHosts",
         package: BrowserPackageSpec {
             executables: &["chromium", "chromium-browser"],

@@ -148,7 +148,7 @@ impl ApplicationExecutor {
         workbench: WorkbenchProjection,
         audit: Arc<dyn AuditSink>,
     ) -> Self {
-        let recovery = BrowserRecovery::discover(governance.clone());
+        let recovery = BrowserRecovery::discover(governance.clone(), Arc::clone(&browser));
         Self {
             governance,
             workspaces,
@@ -788,10 +788,9 @@ impl ApplicationExecutor {
                     Ok(RecoveryDecision::Failed { reason, details }) => {
                         return Err(BrowserError::RecoveryFailed { reason, details });
                     }
-                    // S7b decides the exact target. S7c owns the physical launch and bounded wait;
-                    // until that seam is present, keep the established truthful disconnect.
+                    Ok(RecoveryDecision::Ready { browser }) => browser,
                     Ok(RecoveryDecision::Launch { .. }) => {
-                        return Err(BrowserError::DisconnectedBeforeDispatch);
+                        unreachable!("the recovery service consumes its internal launch plan")
                     }
                     Err(RecoveryWaitError::Cancelled) => {
                         return Err(BrowserError::CancelledBeforeDispatch);

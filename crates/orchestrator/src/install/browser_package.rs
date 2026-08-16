@@ -91,7 +91,7 @@ pub(crate) fn inspect(context: &BrowserPackageContext, spec: BrowserPackageSpec)
     if spec
         .executables
         .iter()
-        .any(|name| native_executable(context, name))
+        .any(|name| native_executable_path(context, name).is_some())
     {
         return BrowserPackage::Native;
     }
@@ -136,12 +136,16 @@ pub(crate) fn detail(name: &str, package: BrowserPackage) -> String {
     }
 }
 
-fn native_executable(context: &BrowserPackageContext, name: &str) -> bool {
-    context.path_entries.iter().any(|directory| {
+pub(crate) fn native_executable_path(
+    context: &BrowserPackageContext,
+    name: &str,
+) -> Option<PathBuf> {
+    context.path_entries.iter().find_map(|directory| {
         let candidate = directory.join(name);
-        executable_file(&candidate)
+        (executable_file(&candidate)
             && !sandbox_path(&candidate, context)
-            && !small_snap_wrapper(&candidate)
+            && !small_snap_wrapper(&candidate))
+        .then_some(candidate)
     })
 }
 

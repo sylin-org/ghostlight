@@ -6,10 +6,9 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S6 and Linux verification V1 through V5 are COMPLETE. S7a and S7b are
-  COMPLETE; S7c is next. S8 is not started.
+- State: S1 through S7 and Linux verification V1 through V5 are COMPLETE. S8 is next.
 - Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages.
-- Next action: continue at S7c in [START-HERE-LINUX.md](START-HERE-LINUX.md), then S8.
+- Next action: execute S8 from [S8-evaluation.md](S8-evaluation.md).
 - Blocking condition: none.
 - Source baseline when the epic was reworked: `dev` at `2f24943f`.
 - Last green evidence: every stage commit below passed the gate commands in `PINS.md` on Windows.
@@ -50,7 +49,7 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 | S4 terminal citizenship | COMPLETE | `61f18bd9`..`d282ede2` | PATH, man, completions, `--json` | Six substeps, S4a-S4f |
 | S5 human runtime control | COMPLETE | `efc15783` | Pause, resume, stop | Language and state; ADR-0126 D4-D6 |
 | S6 At a glance | COMPLETE | `124a5557` | One calm window | ADR-0126 D9 |
-| S7 readiness recovery | IN PROGRESS | -- | Safe repair, exact refusal | S7a and S7b complete; S7c next |
+| S7 readiness recovery | COMPLETE | this commit | Safe repair, exact refusal | Three green substeps, S7a-S7c |
 | S8 evaluation | NOT STARTED | -- | Evidence on real desktops | Depends on S1-S7 |
 
 Allowed values: `NOT STARTED`, `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`. At most one stage is
@@ -68,7 +67,7 @@ A prose assertion is not evidence. Link a commit, test, fixture, ADR, or dated r
 | Terminal citizenship | S4 | PATH ownership, man pages, completions, `--json`, doctor parity guard | COMPLETE | `command_path.rs`, `user_assets.rs`, `packaging/linux/{man,completions}`, four guard tests in `main.rs` |
 | Runtime control | S5 | One state machine, effect truth, deadline interaction, plural scopes | COMPLETE | `HUMAN_PAUSE_DIRECTIVE`/`HUMAN_STOP_DIRECTIVE` in `outcome.rs`; three governance tests; four language oracles; popup separation |
 | At a glance | S6 | All states, controls, keyboard, accessibility, redundant surface removed | COMPLETE | `language/readiness.rs` with 6 tests; `ReadinessSummary` on the snapshot; three surface-journey assertions |
-| Readiness recovery | S7 | Per-platform posture, single flight, bounded waits, exact failures | IN PROGRESS | S7a: registered startup posture and workbench choice. S7b: one executor seam, deterministic installation diagnosis, per-scope single flight, closed failures, manual-mode outcome, and process-level disabled-launch coverage |
+| Readiness recovery | S7 | Per-platform posture, single flight, bounded waits, exact failures | COMPLETE | S7a: registered startup posture and workbench choice. S7b: one executor seam, deterministic installation diagnosis, per-scope single flight, closed failures, manual-mode outcome, and process-level disabled-launch coverage. S7c: safe owned-registration repair, direct ordinary executable with no arguments, ADR-0082 graphical-session proof on Linux, bounded inbound-adapter wait, and cancellation cleanup |
 | Evaluation | S8 | Ubuntu GNOME lifecycle, Windows lane, migration cases, dispositions | NOT STARTED | -- |
 
 ## Decision register
@@ -127,7 +126,7 @@ belong in different commits, and the last one cannot be proved by a unit test at
 | --- | --- | --- |
 | S7a | Register `browser.startup` with the closed values `on_demand` and `manual` in the policy manifest, per ADR-0126 Decision 7: typo-closed validation, per-platform defaults, organization ceiling behavior, the workbench editor's grouped toggles, and the policy grammar fixtures | Yes. **DONE** |
 | S7b | The decision layer: find the one seam that learns readiness failed, choose a browser only from deterministic evidence, reuse the existing Snap and Flatpak diagnosis, refuse ambiguity by naming candidates, and return one useful outcome in `manual` mode. Single-flight guard included | Yes. **DONE** |
-| S7c | The launch itself: spawn the chosen browser with the person's ordinary profile and no automation flags, wait bounded for the adapter, and name the exact failure on exhaustion. Windows first; Linux only if a session environment resolves through the ADR-0082 seam, and diagnosis-only is an acceptable Linux completion | **No.** Spawning a browser is not a unit test. Windows live proof is owner or windows-codex; Linux is the S8 lane |
+| S7c | The launch itself: spawn the chosen browser with the person's ordinary profile and no automation flags, wait bounded for the adapter, and name the exact failure on exhaustion. Windows first; Linux only if a session environment resolves through the ADR-0082 seam, and diagnosis-only is an acceptable Linux completion | **DONE.** Source and deterministic mechanisms are complete. Linux manual-mode diagnosis is live-proved; physical Windows launch remains S8 evidence |
 
 S7a is a governance-surface change: it touches the manifest validator, the effective-authority
 projection, the workbench policy editor, and the documented policy grammar. Start it fresh rather
@@ -156,6 +155,7 @@ than appended to a long session.
 | 2026-08-16 | V5 Linux environment rows | this commit | Current debug `ghostlight doctor` on real KDE Plasma 6.7.4 Wayland; the same binary in a shell with unrecognized `XDG_CURRENT_DESKTOP=Hyprland`; full repository gate | The real desktop printed `Environment: Linux (KDE) -- Ghostlight is in your system tray and your Applications menu.` The unrecognized shell printed `Environment: Linux -- Ghostlight is in your Applications menu, and in your system tray if your desktop draws one.` GNOME is not installed on this host, so no live GNOME claim is made; the exhaustive unit guard still proves that its row contains no tray promise. The WSL row remains the Windows lane's evidence | PASS |
 | 2026-08-16 | S7a browser startup setting | this commit | `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 291/10/32/6, 0 failed; 116 extension tests; policy-grammar and workbench-surface journeys; isolated workspace build; process and CLI journeys | Schema 3 accepts only `on_demand` and `manual`; non-string and unknown values fail. Defaults are `on_demand` on Windows and `manual` on Linux. The effective projection composes organization and user values, with organization `manual` pinning the result. The workbench renders and authors one closed two-option select. The active guide and organization fixture carry the new grammar. No recovery or browser launch behavior was added in this substep | PASS |
 | 2026-08-16 | S7b browser recovery decision | this commit | `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 299/10/32/6, 0 failed; 116 extension tests; `node --check tests/process-journey.mjs`; isolated workspace build; process and CLI journeys | The executor's browser-target seam is the sole recovery caller. Installation inspection reuses the native package, Snap, and Flatpak diagnosis; ambiguity names candidates; simultaneous requests join one decision attempt per scope; cancellation leaves no active flight; and manual mode performs no launch. A real no-browser CLI call on CachyOS KDE Wayland returned `failed`, `effect: none`, reason `browser_startup_manual`, and one start-browser next step in 53 ms. The active installed service and browser registration were unchanged | PASS |
+| 2026-08-16 | S7c bounded browser launch | this commit | `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 301/10/34/6, 0 failed; 116 extension tests; isolated workspace build; process and CLI journeys | The selected native executable is launched directly with no arguments, preserving the ordinary profile and adding no automation flag. An owned stale registration is the only repairable state. Linux launch requires a graphical display plus a real, owner-private same-user runtime directory resolved at the shared ADR-0082 seam; otherwise it returns an exact no-effect launch diagnosis. Launch and adapter wait remain one per-scope flight inside the caller deadline. Cancellation clears it; exhaustion reports `browser_handshake_timeout`. The Linux default remains manual and its 53 ms live no-browser outcome from S7b is the platform completion allowed by ADR-0126 D7. No Windows host was available for a physical launch; that lane remains explicit S8 evidence | PASS on the Linux completion path; Windows live evidence owed in S8 |
 
 ## Deviations and findings
 
