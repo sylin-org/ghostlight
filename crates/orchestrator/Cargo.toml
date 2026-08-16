@@ -21,11 +21,14 @@ ghostlight-bridge = { path = "../bridge" }
 jsonc-parser = { version = "=0.26.3", features = ["cst", "serde"] }
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml = "=0.9.34"
 sha2.workspace = true
 thiserror.workspace = true
 tauri = { version = "=2.11.5", features = ["image-png", "tray-icon"] }
 tauri-plugin-notification = "=2.3.3"
 tauri-plugin-opener = "=2.5.4"
+tauri-plugin-dialog = "=2.7.2"
+tauri-plugin-clipboard-manager = "=2.3.2"
 toml_edit = "=0.22.27"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 url.workspace = true

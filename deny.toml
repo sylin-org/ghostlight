@@ -24,8 +24,12 @@ allow = [
 ]
 # CDLA-Permissive-2.0 applies to the Mozilla certificate data shipped by webpki-roots.
 # Keep the reviewed data-license allowance scoped to that trust-root package.
+# BSL-1.0 applies only to the Windows clipboard implementation reached through Tauri's bounded
+# clipboard plugin. Both crates are permissively licensed; keep the review scoped to that seam.
 exceptions = [
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    { allow = ["BSL-1.0"], crate = "clipboard-win" },
+    { allow = ["BSL-1.0"], crate = "error-code" },
 ]
 confidence-threshold = 0.9
 private = { ignore = true }

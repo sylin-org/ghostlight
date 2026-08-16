@@ -1,6 +1,7 @@
 //! Generic MCP stdio edge for Ghostlight.
 
 mod mcp_2025_11_25;
+mod mcp_2026_07_28;
 mod service_session;
 
 use std::collections::HashMap;
@@ -35,11 +36,23 @@ fn main() -> Result<()> {
     // error.
     let mut input = io::BufReader::new(stdin.lock());
     let output = Arc::new(Mutex::new(io::stdout()));
-    let first: Value = match read_json_line(&mut input).context("read initialize request")? {
+    let mut first: Value = match read_json_line(&mut input).context("read first MCP request")? {
         Some(value) => value,
         None => return Ok(()),
     };
-    let initialization = mcp_2025_11_25::parse_initialize(&first).map_err(anyhow::Error::msg)?;
+    let discovery = if first.get("method").and_then(Value::as_str) == Some("server/discover") {
+        Some(mcp_2026_07_28::parse_discovery(&first).map_err(anyhow::Error::msg)?)
+    } else {
+        None
+    };
+    let initial_client_label = match &discovery {
+        Some(discovery) => discovery.client_label.clone(),
+        None => {
+            mcp_2025_11_25::parse_initialize(&first)
+                .map_err(anyhow::Error::msg)?
+                .client_label
+        }
+    };
 
     let pending: Arc<Mutex<HashMap<String, PendingCall>>> = Arc::new(Mutex::new(HashMap::new()));
     let reverse: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -68,12 +81,27 @@ fn main() -> Result<()> {
             }
         })
     };
-    let service = ServiceSession::start(initialization.client_label.clone(), handler)
+    let service = ServiceSession::start(initial_client_label, handler)
         .context("start Ghostlight service session")?;
     let server = service.wait_until_connected();
+    if let Some(discovery) = discovery {
+        write_mcp(
+            &output,
+            mcp_2026_07_28::discovery_result(discovery.id, &server),
+        );
+        first = match read_json_line(&mut input).context("read initialize after discovery")? {
+            Some(value) => value,
+            None => return Ok(()),
+        };
+    }
+    let initialization = mcp_2025_11_25::parse_initialize(&first).map_err(anyhow::Error::msg)?;
     write_mcp(
         &output,
-        mcp_2025_11_25::initialize_result(initialization.id, &server),
+        mcp_2025_11_25::initialize_result(
+            initialization.id,
+            initialization.protocol_version,
+            &server,
+        ),
     );
 
     loop {

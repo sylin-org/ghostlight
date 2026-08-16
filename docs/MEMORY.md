@@ -115,6 +115,11 @@ Every one of these cost something to learn.
   current port is healthy.
 - **A cached MCP catalog is not a live transport.** Reconnect through the owning client, then look
   at the visible browser before retrying an effectful call.
+- **Standards-valid MCP is not the same as current-harness compatible.** Real clients in one Linux
+  roster requested four initialized revisions, used the newer discovery fallback, and rejected
+  root-level JSON Schema composition in a downstream model API. Test each admitted harness through
+  its real process and model path, advertise only revisions the connector actually serves, and keep
+  portability fixes generic rather than branching on a client name.
 - **A native-port or service-worker restart is not a browser restart.** Hold uncertain resource
   state until an exact generation or terminal evidence resolves it.
 - **A loaded document is not mounted presentation.** That takes a ready handshake, exact document

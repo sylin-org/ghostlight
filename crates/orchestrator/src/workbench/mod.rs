@@ -20,7 +20,8 @@ use crate::governance::{
     AuditRecord, AuditSink, AuthoringError, CapabilitySet, GovernanceFacade, ManagedPolicyPassport,
 };
 use crate::install::{
-    HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSummary,
+    HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessError, HarnessRegistry,
+    HarnessSummary,
 };
 use crate::language::outcome::Observed;
 use crate::workspace::WorkspaceStore;
@@ -706,6 +707,29 @@ impl WorkbenchFacade {
         action: HarnessAction,
     ) -> Result<HarnessActionResult, HarnessError> {
         self.harnesses.apply(id, action)
+    }
+
+    /// Resolve product-owned manual setup text for one supported harness target.
+    pub fn harness_copy_text(
+        &self,
+        id: &str,
+        kind: HarnessCopyKind,
+    ) -> Result<String, HarnessError> {
+        self.harnesses.copy_text(id, kind)
+    }
+
+    /// Resolve one supported product's closed official download destination.
+    pub fn harness_download_url(&self, product_id: &str) -> Result<&'static str, HarnessError> {
+        self.harnesses.download_url(product_id)
+    }
+
+    /// Validate and remember one user-located harness executable or configuration.
+    pub fn locate_harness(
+        &self,
+        id: &str,
+        path: &Path,
+    ) -> Result<HarnessActionResult, HarnessError> {
+        self.harnesses.locate(id, path)
     }
 
     /// Exercise the same best-effort notification port used for important domain facts.

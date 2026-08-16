@@ -54,8 +54,17 @@
       /** Re-detect the MCP clients installed for this user. */
       refreshHarnesses: () => call("refresh_harnesses"),
 
-      /** Connect or disconnect Ghostlight from one MCP client. */
+      /** Set up, update, or remove Ghostlight from one concrete MCP target. */
       manageHarness: (id, action) => call("manage_harness", { id, action }),
+
+      /** Ask the native shell to locate one supported harness executable or settings file. */
+      locateHarness: (id) => call("locate_harness", { id }),
+
+      /** Copy product-owned command or setup text without granting arbitrary clipboard access. */
+      copyHarnessText: (id, kind) => call("copy_harness_text", { id, kind }),
+
+      /** Open one product-owned official download destination. */
+      openHarnessDownload: (productId) => call("open_harness_download", { productId }),
 
       /** Prove the notification path end to end. */
       testNotification: () => call("test_notification"),

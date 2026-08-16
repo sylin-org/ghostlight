@@ -28,6 +28,8 @@ const ORDER = [...markup.matchAll(/<script src="([^"]+)"><\/script>/g)].map(([, 
 const ids = [...markup.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
 
 const listeners = [];
+const documentHandlers = new Map();
+const failedSetupManual = { open: false };
 const node = (id) => ({
   id, textContent: "", innerHTML: "", className: "", hidden: true, disabled: false, scrollTop: 0,
   style: { setProperty() {} }, dataset: {}, classList: { toggle() {}, add() {}, remove() {} },
@@ -48,9 +50,11 @@ const snapshot = () => ({
   service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
   sessions: [], operations: [], browsers: [], history: [],
   harnesses: [{
-    id: "codex", name: "Codex", state: "updatable",
+    id: "codex", product_id: "codex", name: "Codex", target: "User", icon: "codex.svg", state: "updatable",
     detail: "The connector path belongs to an older installation.",
-    can_install: true, can_uninstall: false
+    can_install: true, can_uninstall: false, can_download: true, can_locate: true,
+    config_path: "/home/test/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight-mcp-connector",
+    manual_setup: "[mcp_servers.ghostlight]"
   }],
   diagnostics: [],
   configuration: {
@@ -78,8 +82,11 @@ const sandbox = {
   document: {
     getElementById: (id) => nodes.get(id) ?? null,
     querySelectorAll: (sel) => (sel === "[id]" ? [...nodes.values()] : []),
-    querySelector: () => null,
-    addEventListener: (kind) => listeners.push(`document:${kind}`),
+    querySelector: (sel) => sel === '[data-harness-manual="qwen-code"]' ? failedSetupManual : null,
+    addEventListener: (kind, handler) => {
+      listeners.push(`document:${kind}`);
+      documentHandlers.set(kind, handler);
+    },
     removeEventListener() {},
     hidden: false, body: node("body"),
     createElement: () => node("x"), createDocumentFragment: () => node("f")
@@ -87,7 +94,11 @@ const sandbox = {
   window: {
     addEventListener: (kind) => listeners.push(`window:${kind}`),
     __TAURI__: {
-      core: { invoke: async (cmd) => (cmd === "workbench_snapshot" ? snapshot() : []) },
+      core: { invoke: async (cmd) => {
+        if (cmd === "workbench_snapshot") return snapshot();
+        if (cmd === "manage_harness") throw new Error("deliberate setup failure");
+        return [];
+      } },
       event: { listen: async () => () => {} }
     }
   },
@@ -127,6 +138,19 @@ try {
 }
 
 await new Promise((r) => setTimeout(r, 60));
+const failedSetupButton = {
+  disabled: false,
+  dataset: {
+    harness: "qwen-code", harnessOperation: "manage", harnessAction: "install",
+    harnessName: "Qwen Code"
+  }
+};
+documentHandlers.get("click")({
+  target: {
+    closest: (selector) => selector === "[data-harness-operation]" ? failedSetupButton : null
+  }
+});
+await new Promise((r) => setTimeout(r, 0));
 // A second snapshot: whatever the first pass did with the broken panel, this is where a memo
 // would show itself by never trying again.
 sandbox.globalThis.__second = true;
@@ -182,6 +206,26 @@ const compiled = (editable) => ({
 // A second view over the same stub document. The booted surface holds its own instance; this one
 // exists so the destination can be drawn on demand without a real click.
 const view = sandbox.globalThis.GhostlightView.create({ onFailure: (what, error) => reported.push(`${what}: ${error?.message ?? error}`) });
+
+view.collections({
+  sessions: [], browsers: [], diagnostics: [], history: [], service: { version: "1.0.0" },
+  configuration: { managed_policy: { configured: false } },
+  harnesses: [
+    { id: "cline-cli", product_id: "cline", name: "Cline", target: "CLI", icon: "cline.svg",
+      state: "installed", detail: "Current.", can_install: false, can_uninstall: true,
+      can_download: true, can_locate: true, config_path: "/tmp/cline-cli.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "cli setup" },
+    { id: "cline-vscode", product_id: "cline", name: "Cline", target: "Visual Studio Code",
+      icon: "cline.svg", state: "available", detail: "Detected.", can_install: true,
+      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-vscode.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "editor setup" },
+    { id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", target: "CLI",
+      icon: "qwen-code.svg", state: "not_detected", detail: "Not detected.", can_install: true,
+      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/qwen.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "qwen setup" }
+  ]
+}, new Set());
+const rosterHtml = nodes.get("integration-grid").innerHTML;
 
 // A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
 // enforced denial, and an organization that supplied contacts supplied them for this moment.
@@ -264,6 +308,24 @@ const checks = [
     integrationsHtml.includes("Update")
       && integrationsHtml.includes('data-harness-action="install"'),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
+  ["plural harness targets share one recognizable product card",
+    (rosterHtml.match(/class="tile integration-card/g) ?? []).length === 2
+      && rosterHtml.includes("Visual Studio Code")
+      && rosterHtml.includes('src="integrations/cline.svg"'),
+    `roster: ${JSON.stringify(rosterHtml)}`],
+  ["configured and detected targets offer the right durable actions",
+    rosterHtml.includes('<span class="tile-state">Ready</span>')
+      && rosterHtml.includes(">Remove</button>")
+      && rosterHtml.includes(">Set up</button>")
+      && rosterHtml.includes(">Copy MCP command</button>"),
+    `roster: ${JSON.stringify(rosterHtml)}`],
+  ["a missing product offers one install, locate, and manual route",
+    rosterHtml.includes('data-product="qwen-code"')
+      && rosterHtml.includes('data-harness="qwen-code" data-harness-name="Qwen Code">Locate</button>')
+      && rosterHtml.includes('data-copy-kind="command"')
+      && rosterHtml.includes('data-harness-manual="qwen-code"'),
+    `roster: ${JSON.stringify(rosterHtml)}`],
+  ["failed automatic setup opens the target's manual route", failedSetupManual.open],
   ["the policy tab is a tab, keeps its name, and carries the authored state behind it",
     markup.includes('class="tab policy-state"')
       && !ids.includes("policy-state-label")

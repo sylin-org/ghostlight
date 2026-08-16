@@ -1215,7 +1215,57 @@ fn raw_object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
 }
 
 fn union(branches: Vec<Value>, examples: Vec<Value>) -> Value {
-    json!({"type":"object","oneOf":branches,"examples":examples})
+    let mut properties: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut required: Option<Vec<String>> = None;
+
+    for branch in &branches {
+        let branch_properties = branch
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("union branches are object schemas");
+        for (name, schema) in branch_properties {
+            let variants = properties.entry(name.clone()).or_default();
+            if !variants.contains(schema) {
+                variants.push(schema.clone());
+            }
+        }
+
+        let branch_required: Vec<String> = branch
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("union branches declare required fields")
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect();
+        required = Some(match required {
+            Some(current) => current
+                .into_iter()
+                .filter(|name| branch_required.contains(name))
+                .collect(),
+            None => branch_required,
+        });
+    }
+
+    let properties: BTreeMap<String, Value> = properties
+        .into_iter()
+        .map(|(name, mut variants)| {
+            let schema = if variants.len() == 1 {
+                variants.pop().expect("one property variant")
+            } else {
+                json!({"oneOf":variants})
+            };
+            (name, schema)
+        })
+        .collect();
+
+    json!({
+        "type":"object",
+        "additionalProperties":false,
+        "properties":properties,
+        "required":required.unwrap_or_default(),
+        "examples":examples
+    })
 }
 
 fn examples(mut schema: Value, values: Vec<Value>) -> Value {
@@ -1445,26 +1495,39 @@ mod tests {
     }
 
     #[test]
-    fn screenshot_target_branch_advertises_explicit_false_full_page() {
-        let schema = tool_schema("browser_screenshot");
-        let branches = schema
+    fn catalog_uses_portable_top_level_object_schemas() {
+        for tool in catalog() {
+            assert_eq!(
+                tool.input_schema.get("type"),
+                Some(&Value::String("object".into()))
+            );
+            assert_eq!(
+                tool.input_schema.get("additionalProperties"),
+                Some(&Value::Bool(false)),
+                "{}",
+                tool.name
+            );
+            for keyword in ["oneOf", "anyOf", "allOf"] {
+                assert!(
+                    tool.input_schema.get(keyword).is_none(),
+                    "{} has unsupported top-level {keyword}",
+                    tool.name
+                );
+            }
+        }
+
+        let screenshot = tool_schema("browser_screenshot");
+        let full_page = property(&screenshot, "full_page").expect("full_page property");
+        let variants = full_page
             .get("oneOf")
             .and_then(Value::as_array)
-            .expect("screenshot branches");
-        let target_branch = branches
+            .expect("nested full_page alternatives");
+        assert!(variants
             .iter()
-            .find(|branch| is_required(branch, "target"))
-            .expect("target screenshot branch");
-
-        assert_eq!(
-            property(target_branch, "full_page").and_then(|value| value.get("const")),
-            Some(&Value::Bool(false))
-        );
-        assert!(!is_required(target_branch, "full_page"));
-        assert_eq!(
-            target_branch.get("additionalProperties"),
-            Some(&Value::Bool(false))
-        );
+            .any(|variant| variant.get("const") == Some(&Value::Bool(false))));
+        assert!(variants
+            .iter()
+            .any(|variant| variant.get("const") == Some(&Value::Bool(true))));
     }
 
     #[test]

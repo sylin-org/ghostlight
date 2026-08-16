@@ -323,6 +323,28 @@ body.runtime-offline .state-word { color: var(--muted); }
 .tile.attention .tile-state { color: var(--held); }
 .tile-actions { display: flex; gap: 7px; margin-top: 11px; }
 .tile-actions .ghost-button, .tile-actions .danger-button { height: 27px; padding: 0 11px; font-size: 11.5px; }
+.integration-card { gap: 10px; }
+.integration-identity { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.integration-identity img {
+  width: 28px; height: 28px; flex: none; padding: 4px;
+  border: 1px solid var(--line); border-radius: 7px; background: rgba(255, 255, 255, .035);
+}
+.integration-targets { display: flex; flex-direction: column; gap: 8px; }
+.integration-target {
+  padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0, 0, 0, .1);
+}
+.integration-target-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.integration-target-head strong { color: var(--ink-2); font-size: 11.5px; font-weight: 500; }
+.integration-target-head span { color: var(--faint); font: 500 8.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.manual-setup { margin-top: 8px; }
+.manual-setup summary { color: var(--muted); font-size: 10.5px; cursor: pointer; }
+.manual-setup code { display: block; margin-top: 7px; color: var(--faint); font: 400 9.5px/1.4 var(--mono); word-break: break-all; }
+.manual-setup pre {
+  max-height: 180px; overflow: auto; margin: 7px 0 0; padding: 8px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--ground);
+  color: var(--ink-3); font: 400 9.5px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word;
+}
+.integration-product-actions { margin-top: auto; padding-top: 2px; border-top: 1px solid var(--line); }
 
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); gap: 10px; }
 .card { padding: 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }

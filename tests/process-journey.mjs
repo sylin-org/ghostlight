@@ -280,7 +280,13 @@ try {
 
   const connector = start(executable("ghostlight-mcp-connector"));
   const mcp = new McpPeer(connector);
-  const initialize = mcp.beginRequest("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "acceptance", version: "1" } });
+  const discovery = mcp.beginRequest("server/discover", {
+    _meta: {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { name: "acceptance", version: "1" },
+      "io.modelcontextprotocol/clientCapabilities": {}
+    }
+  });
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
   assert.equal(connector.exitCode, null);
   assert.equal(browserConnector.exitCode, null);
@@ -299,6 +305,15 @@ try {
   assert.deepEqual(await native.next(), { kind: "control_state", state: "active" });
   void runAdapter(native);
 
+  const discovered = await discovery.promise;
+  assert.equal(discovered.result.resultType, "complete");
+  assert.deepEqual(discovered.result.supportedVersions,
+    ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]);
+  assert.equal(discovered.result._meta["io.modelcontextprotocol/serverInfo"].name, "ghostlight");
+  assert.equal(discovered.result.cacheScope, "private");
+  assert.equal(discovered.result.ttlMs, 0);
+
+  const initialize = mcp.beginRequest("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "acceptance", version: "1" } });
   const initialized = await initialize.promise;
   assert.equal(initialized.result.serverInfo.name, "ghostlight");
   assert.equal(initialized.result.protocolVersion, "2025-11-25");

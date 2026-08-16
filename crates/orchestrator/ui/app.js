@@ -195,12 +195,36 @@ async function applyIntent(intent) {
 
 async function handleHarnessAction(button) {
   if (!transport.available || button.disabled) return;
-  const { harness: id, harnessAction: action, harnessName: name } = button.dataset;
-  if (action === "uninstall" && !(await view.confirmRemoval(name))) return;
+  const { harness: id, harnessOperation: operation, harnessAction: action,
+    harnessName: name, product: productId, copyKind: copyKind } = button.dataset;
+  if (operation === "manage" && action === "uninstall" && !(await view.confirmRemoval(name))) return;
+  if (operation === "download") {
+    try {
+      await transport.openHarnessDownload(productId);
+      view.toast(`Opened the official ${name} download page.`);
+    } catch (error) {
+      view.toast(String(error), true);
+    }
+    return;
+  }
+  if (operation === "copy") {
+    try {
+      view.toast(await transport.copyHarnessText(id, copyKind));
+    } catch (error) {
+      view.toast(String(error), true);
+    }
+    return;
+  }
   store.beginHarness(id);
   try {
-    view.toast((await transport.manageHarness(id, action)).message);
+    if (operation === "locate") {
+      const result = await transport.locateHarness(id);
+      if (result) view.toast(result.message);
+    } else {
+      view.toast((await transport.manageHarness(id, action)).message);
+    }
   } catch (error) {
+    if (operation === "manage") view.openHarnessManual(id);
     view.toast(String(error), true);
   } finally {
     store.endHarness(id);
@@ -279,7 +303,7 @@ function wire() {
     if (toggle) view.toggleRule(toggle.dataset.ruleToggle);
     const intent = event.target.closest("[data-intent]");
     if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
-    const harness = event.target.closest("[data-harness-action]");
+    const harness = event.target.closest("[data-harness-operation]");
     if (harness) handleHarnessAction(harness);
     const destination = event.target.closest("[data-destination]");
     if (destination) openDestination(destination.dataset.destination);
@@ -289,6 +313,16 @@ function wire() {
       view.closePalette();
     }
     if (event.target === el.palette) view.closePalette();
+  });
+
+  window.addEventListener("focus", async () => {
+    if (!transport.available) return;
+    try {
+      await transport.refreshHarnesses();
+      await resync();
+    } catch (error) {
+      view.toast(String(error), true);
+    }
   });
 
   el["palette-query"].addEventListener("input", () => {

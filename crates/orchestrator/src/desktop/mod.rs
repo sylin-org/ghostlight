@@ -1,7 +1,6 @@
 //! Thin Tauri 2 adapter for Ghostlight's orchestrator-owned workbench facade.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
-#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -11,11 +10,13 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{
     AppHandle, Emitter, Manager, RunEvent, State, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::governance::effective::EffectiveAuthority;
-use crate::install::{HarnessAction, HarnessActionResult, HarnessSummary};
+use crate::install::{HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessSummary};
 use crate::service::ServiceHost;
 use crate::workbench::{
     PolicyPreview, SearchHit, WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink,
@@ -107,6 +108,10 @@ pub fn run() -> Result<()> {
     let setup_workbench = workbench.clone();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        // Registered in Rust only. The capability file grants the webview neither plugin's generic
+        // commands; it reaches them only through the closed harness commands below.
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         // Registered in Rust only. The capability file grants the webview no opener permission,
         // so the surface cannot reach this except through the closed command below.
         .plugin(tauri_plugin_opener::init())
@@ -124,6 +129,9 @@ pub fn run() -> Result<()> {
             apply_runtime_intent,
             refresh_harnesses,
             manage_harness,
+            locate_harness,
+            copy_harness_text,
+            open_harness_download,
             test_notification,
             open_destination,
             quit_ghostlight
@@ -544,6 +552,72 @@ async fn manage_harness(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn locate_harness(
+    id: String,
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+) -> Result<Option<HarnessActionResult>, String> {
+    let dialog_app = app.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .set_title("Locate the harness application or settings file")
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    let workbench = state.workbench.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        workbench
+            .locate_harness(&id, &path)
+            .map(Some)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn copy_harness_text(
+    id: String,
+    kind: HarnessCopyKind,
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+) -> Result<String, String> {
+    let text = state
+        .workbench
+        .harness_copy_text(&id, kind)
+        .map_err(|error| error.to_string())?;
+    app.clipboard()
+        .write_text(text)
+        .map_err(|error| error.to_string())?;
+    Ok(match kind {
+        HarnessCopyKind::Command => "MCP command copied.".into(),
+        HarnessCopyKind::Setup => "Manual setup copied.".into(),
+    })
+}
+
+#[tauri::command]
+fn open_harness_download(
+    product_id: String,
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+) -> Result<(), String> {
+    let url = state
+        .workbench
+        .harness_download_url(&product_id)
+        .map_err(|error| error.to_string())?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1144,6 +1218,28 @@ mod tests {
         let desktop = include_str!("mod.rs");
         assert!(desktop.contains("tauri_plugin_opener::init()"));
         assert!(desktop.contains("fn open_destination(destination: WorkbenchDestination"));
+    }
+
+    #[test]
+    fn harness_native_plugins_are_available_only_through_closed_commands() {
+        let capability = include_str!("../../capabilities/main.json");
+        for permission in ["dialog:", "clipboard-manager:", "opener:", "shell:", "fs:"] {
+            assert!(
+                !capability.contains(permission),
+                "the workbench bypasses the closed harness command through {permission}"
+            );
+        }
+        let desktop = include_str!("mod.rs");
+        for command in [
+            "fn locate_harness(",
+            "fn copy_harness_text(",
+            "fn open_harness_download(",
+        ] {
+            assert!(
+                desktop.contains(command),
+                "missing closed command {command}"
+            );
+        }
     }
 
     #[test]

@@ -33,7 +33,7 @@ The deterministic extension ZIP is 1.0.0 with SHA-256
 ## Source and artifact gates
 
 - Formatting and locked workspace/all-target Clippy with warnings denied passed.
-- All 276 Rust tests passed: 236 orchestrator library, 4 orchestrator binary, 32 bridge, and 4
+- All 277 Rust tests passed: 237 orchestrator library, 4 orchestrator binary, 32 bridge, and 4
   MCP connector tests.
 - All 106 extension, 10 npm launcher, and 4 MCPB launcher tests passed.
 - Every extension, workbench, harness, npm, and MCPB JavaScript file parsed. Every shell script
@@ -105,6 +105,36 @@ receipt. The extension now constructs one bounded held-button packet plan, uses 
 native drag intercept, retains only content-free drag lifecycle booleans outside the worker, keeps
 CDP drag data opaque, replays native enter/over/drop, and releases or cancels on every terminal
 path. Unit coverage and both live drag lanes passed after the fix.
+
+## Fresh Zed harness
+
+A native CachyOS `zed 1.15.0-1` package supplied `/usr/bin/zeditor`, not `zed`. The untouched
+installation therefore exposed an incomplete candidate list in Ghostlight's existing declarative
+harness descriptor: doctor reported Zed as `NotDetected`. Adding `zeditor` beside `zed` in that one
+descriptor made the generic detector report `Available` from an otherwise empty home and config
+root. A regression test exercises that exact detector boundary.
+
+Zed was launched against this repository, and the owner accepted Zed's project-specific trust
+prompt without trusting the parent directory. Ordinary `ghostlight install --no-open`, with no
+forced client selection, then created `~/.config/zed/settings.json` with the exact installed MCP
+connector under `context_servers.ghostlight`. Zed's AI settings showed Ghostlight enabled with a
+green active indicator. The live process chain was Zed -> its shell -> the exact
+`~/.ghostlight/bin/v1.0.0/ghostlight-mcp-connector`, which proves Zed consumed the registration and
+completed MCP startup.
+
+A repeat install changed zero bytes in Zed, Codex, Claude Code, or Visual Studio Code
+configuration. Explicit removal deleted only Ghostlight's Zed object, retained the empty
+`context_servers` object, left those other three harness files byte-identical, and caused Zed to
+stop the connector. Ordinary auto-detected reinstall restored the byte-identical Zed file plus the
+native Chromium and Applications registrations. As the installer already says, Zed needed a
+restart after re-add; it then spawned the exact connector again.
+
+Zed renders a custom local server with its generated initial and a `C` marker. Its current stdio
+settings type exposes command, args, environment, enablement, locality, and timeout, but no icon or
+display-art field. This is an observed host limitation, not the desired product presentation.
+[Research 26](../research/26-linux-harness-roster-and-integration-delight-2026-08.md) records the
+visual-identity requirement and why Zed's deprecated MCP extension mechanism does not yet prove a
+way to replace that badge.
 
 ## Boundary and release decision
 

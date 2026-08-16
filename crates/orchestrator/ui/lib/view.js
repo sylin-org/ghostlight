@@ -397,7 +397,8 @@
     function integrations(snapshot, pending) {
       const order = { installed: 0, updatable: 1, needs_attention: 2, available: 3, not_detected: 4 };
       const harnesses = [...snapshot.harnesses].sort((left, right) =>
-        (order[left.state] ?? 9) - (order[right.state] ?? 9) || left.name.localeCompare(right.name));
+        left.name.localeCompare(right.name) || (order[left.state] ?? 9) - (order[right.state] ?? 9)
+        || left.target.localeCompare(right.target));
 
       if (!harnesses.length) {
         el["integration-grid"].innerHTML =
@@ -405,23 +406,68 @@
         return;
       }
 
-      el["integration-grid"].innerHTML = harnesses.map((harness) => {
-        const installed = harness.state === "installed";
-        const updatable = harness.state === "updatable";
+      const products = new Map();
+      for (const harness of harnesses) {
+        const id = harness.product_id ?? harness.id;
+        if (!products.has(id)) products.set(id, []);
+        products.get(id).push(harness);
+      }
+      const actionButton = (harness, action, label, kind = "ghost-button") => {
         const waiting = pending.has(harness.id);
-        const allowed = installed ? harness.can_uninstall : harness.can_install;
-        const tone = installed ? " connected" : harness.state === "needs_attention" ? " attention" : "";
-        const label = waiting ? "Working" : installed ? "Connected" : words(harness.state);
-        const action = installed ? "uninstall" : "install";
-        const verb = installed ? "Disconnect" : updatable ? "Update" : "Connect";
-        const button = installed ? "danger-button" : "ghost-button";
-        return `<article class="tile${tone}">`
-          + `<div class="tile-top"><h2>${escapeHtml(harness.name)}</h2>`
+        return `<button class="${kind}" type="button" data-harness-operation="manage"`
+          + ` data-harness-action="${action}" data-harness="${escapeHtml(harness.id)}"`
+          + ` data-harness-name="${escapeHtml(harness.name)}"${waiting ? " disabled" : ""}>`
+          + `${waiting ? "Working..." : label}</button>`;
+      };
+      const utilityButton = (harness, operation, label, extra = "") =>
+        `<button class="link-button" type="button" data-harness-operation="${operation}"`
+        + ` data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}"`
+        + `${extra}>${label}</button>`;
+
+      el["integration-grid"].innerHTML = [...products.entries()].map(([productId, targets]) => {
+        const visible = targets.some((target) => target.state !== "not_detected")
+          ? targets.filter((target) => target.state !== "not_detected") : [targets[0]];
+        const best = [...visible].sort((left, right) => (order[left.state] ?? 9) - (order[right.state] ?? 9))[0];
+        const connected = visible.some((target) => target.state === "installed");
+        const attention = visible.some((target) => target.state === "needs_attention");
+        const tone = connected ? " connected" : attention ? " attention" : "";
+        const label = connected ? "Ready" : words(best.state);
+        const icon = escapeHtml(best.icon ?? "generic.svg");
+        const rows = visible.map((harness) => {
+          const installed = harness.state === "installed";
+          const available = harness.state === "available";
+          const updatable = harness.state === "updatable";
+          let primary = "";
+          if (installed && harness.can_uninstall) {
+            primary = actionButton(harness, "uninstall", "Remove", "danger-button");
+          } else if ((available || updatable) && harness.can_install) {
+            primary = actionButton(harness, "install", updatable ? "Update" : "Set up");
+          }
+          const locate = harness.can_locate && harness.state !== "not_detected"
+            ? utilityButton(harness, "locate", "Locate") : "";
+          const setup = utilityButton(harness, "copy", "Copy setup", ' data-copy-kind="setup"');
+          return `<div class="integration-target">`
+            + `<div class="integration-target-head"><strong>${escapeHtml(harness.target)}</strong>`
+            + `<span>${escapeHtml(words(harness.state))}</span></div>`
+            + `<p>${escapeHtml(harness.detail)}</p>`
+            + `<details class="manual-setup" data-harness-manual="${escapeHtml(harness.id)}"><summary>Manual setup</summary>`
+            + `<code>${escapeHtml(harness.config_path)}</code><pre>${escapeHtml(harness.manual_setup)}</pre></details>`
+            + `<div class="tile-actions">${primary}${locate}${setup}</div></div>`;
+        }).join("");
+        const missing = visible.length === 1 && visible[0].state === "not_detected";
+        const first = visible[0];
+        const install = missing && targets.some((target) => target.can_download)
+          ? `<button class="ghost-button" type="button" data-harness-operation="download"`
+            + ` data-product="${escapeHtml(productId)}" data-harness="${escapeHtml(first.id)}"`
+            + ` data-harness-name="${escapeHtml(first.name)}">Install</button>` : "";
+        const locate = missing ? utilityButton(first, "locate", "Locate") : "";
+        const command = utilityButton(first, "copy", "Copy MCP command", ' data-copy-kind="command"');
+        return `<article class="tile integration-card${tone}">`
+          + `<div class="tile-top"><span class="integration-identity"><img src="integrations/${icon}" alt=""`
+          + ` width="28" height="28"><h2>${escapeHtml(best.name)}</h2></span>`
           + `<span class="tile-state">${escapeHtml(label)}</span></div>`
-          + `<p>${escapeHtml(harness.detail)}</p>`
-          + `<div class="tile-actions"><button class="${button}" type="button" data-harness-action="${action}"`
-          + ` data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}"`
-          + `${waiting || !allowed ? " disabled" : ""}>${waiting ? "Working..." : verb}</button></div>`
+          + `<div class="integration-targets">${rows}</div>`
+          + `<div class="tile-actions integration-product-actions">${install}${locate}${command}</div>`
           + `</article>`;
       }).join("");
     }
@@ -1070,6 +1116,11 @@
       toastTimer = setTimeout(() => { el.toast.hidden = true; }, TOAST_MS);
     }
 
+    function openHarnessManual(id) {
+      const manual = document.querySelector(`[data-harness-manual="${globalThis.CSS?.escape?.(id) ?? id}"]`);
+      if (manual) manual.open = true;
+    }
+
     function openPalette() {
       el.palette.hidden = false;
       el["palette-query"].value = "";
@@ -1094,7 +1145,7 @@
 
     function confirmRemoval(name) {
       if (confirmation) return Promise.resolve(false);
-      el["confirm-title"].textContent = `Disconnect Ghostlight from ${name}?`;
+      el["confirm-title"].textContent = `Remove Ghostlight from ${name}?`;
       el["confirm-detail"].textContent = "Only the entry Ghostlight owns will be removed.";
       return new Promise((resolve) => {
         const finish = (confirmed) => {
@@ -1166,7 +1217,7 @@
     return Object.freeze({
       el, attempt,
       hero, row, drop, promote, rebuildFeed, queueCount,
-      band, collections, navigate, toast,
+      band, collections, navigate, toast, openHarnessManual,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setSacred,
       setObserve, discardDraft, renderRules, previewResult, previewCleared, editorStatus,

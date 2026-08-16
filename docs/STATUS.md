@@ -251,13 +251,57 @@ commands, coverage, and limits.
   explicit held-button packets, action-scoped native interception, opaque drag-data replay, and
   cleanup on every terminal path. The Foundry pointer lane and a native HTML drag/drop fixture both
   passed live after the fix. Extension coverage is now 106 tests.
-- All 276 Rust, 106 extension, 10 npm, and 4 MCPB tests pass, as do formatting, strict Clippy,
+- All 277 Rust, 106 extension, 10 npm, and 4 MCPB tests pass, as do formatting, strict Clippy,
   JavaScript and shell syntax, process/CLI/PowerShell/workbench/policy journeys, deterministic
   extension packaging, recovery and integrity checks, dependency policy, and the advisory gate.
+- A fresh native Zed 1.15.0 installation exposed that CachyOS/Arch names its launcher `zeditor`.
+  Zed's existing declarative harness descriptor now lists both `zed` and `zeditor`; the generic
+  detector and single canonical config target remain unchanged. Ordinary unforced install created
+  the exact `context_servers.ghostlight` entry, Zed showed it active, and the live process chain
+  reached the exact installed connector. Repeat install changed zero config bytes. Removal stopped
+  that connector while preserving other harness files byte-for-byte, and ordinary reinstall plus
+  the documented client restart restored it. Zed's custom-server schema has no icon field, so its
+  generated `G` and custom marker remain an observed host limitation. Ghostlight's own packaged
+  visual identity and the roster expansion are now accepted by [ADR-0125](adr/0125-recognizable-plural-linux-harness-integrations.md).
 
 This closes the broad development-host browser matrix previously listed as incomplete. It does not
 close the provenance-bound Debian, matching-store-adapter, Ubuntu GNOME login/reboot, notification,
 or three-public-harness gates.
+
+## Recognizable plural Linux harness integrations
+
+[ADR-0125](adr/0125-recognizable-plural-linux-harness-integrations.md) is implemented. The
+[dated evidence](testing/linux-harness-roster-2026-08-15.md) records the complete development-host
+roster pass and its release boundary.
+
+- One fixed registry now has 18 products and 21 concrete targets. Added products are GitHub
+  Copilot CLI, Cline, Kiro, Qwen Code, Junie, Kilo Code, goose, Continue, and Antigravity. Cline's
+  CLI, Visual Studio Code, Cursor, and Windsurf targets remain independently owned below one card.
+- Cards use packaged offline Ghostlight-owned visual marks and accessible product names. Missing
+  products offer an official Install destination, Locate, Copy MCP command, and target-specific
+  Copy setup. Detected targets offer Set up or Update; current targets offer Remove. Automatic
+  setup failure opens the same manual route.
+- Locate is one bounded native picker. Download URLs and clipboard material resolve in Rust from
+  closed ids. The WebView has no generic dialog, clipboard, opener, shell, or filesystem grant.
+- JSON, JSONC, TOML, and the new shared YAML seam preserve unrelated configuration. YAML tests cover
+  comments, ordering, file mode, exact no-op bytes, owned removal, and refusal of flow shapes that
+  cannot be edited losslessly.
+- All nine new products were installed and started the exact isolated connector through their real
+  Linux MCP lifecycle. Repeat setup and repeat removal were byte-identical across every target,
+  and the final re-add restored all registrations.
+- That live matrix found three compatibility blockers and closed each at its seam. Junie now
+  negotiates `2025-03-26`; Antigravity receives `2026-07-28` discovery and falls back to an honestly
+  advertised initialized revision; and Kiro/Bedrock receives portable top-level object schemas
+  while the typed decoder retains exact conditional validation. No full stateless 2026 support is
+  claimed.
+- Current gates pass: formatting; warnings-denied workspace/all-target Clippy; all 294 Rust tests
+  (252 orchestrator library, 4 orchestrator binary, 32 bridge, 6 MCP connector); 106 extension,
+  10 npm, and 4 MCPB tests; every tracked JavaScript syntax check; process, native CLI, PowerShell,
+  workbench (34 assertions), and policy journeys; repository integrity; dependency license, ban,
+  and source policy; and `cargo audit` with the same 17 documented GTK/Tauri-chain warnings.
+
+This closes current-source roster compatibility, not package provenance, Ubuntu GNOME Wayland,
+matching-store-adapter, login/reboot, or publication.
 
 ## Rootless Linux package evidence
 
@@ -438,12 +482,13 @@ notifications, and the full visible browser matrix remain owed.
   `--a`/`--al`/`--argb`, the night-garden ground, and the five-step ink ramp. The in-page renderer
   deliberately keeps its trained sky signal. The two surfaces still share the spring curve and the
   ADR-0083 medallion vocabulary.
-- Supported MCP client registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
-  Code, Windsurf, Zed, OpenCode, and Crush. Re-check is read-only. Connect and disconnect are
-  explicit, serialized, ownership-checked, backed up, and preserve unrelated JSONC/TOML comments
-  and configuration. Harness paths follow the effective Windows or Linux environment, including
-  `CODEX_HOME`; exact owned pre-1.0 agent relays are migrated while other relay entries remain
-  untouched and visible as attention-required state.
+- Supported MCP client registrations cover 18 products and 21 concrete targets: Codex, Claude
+  Code, Claude Desktop, Cursor, Visual Studio Code, Windsurf, Zed, OpenCode, Crush, GitHub Copilot
+  CLI, four Cline targets, Kiro, Qwen Code, Junie, Kilo Code, goose, Continue, and Antigravity.
+  Re-check is read-only. Set up, Update, and Remove are explicit, serialized, ownership-checked,
+  backed up, and preserve unrelated JSONC, TOML, and YAML configuration. Harness paths follow the
+  effective Windows or Linux environment, including `CODEX_HOME`; exact owned pre-1.0 agent relays
+  are migrated while other relay entries remain untouched and visible as attention-required state.
 - `ghostlight --headless` retains the service-only execution path. Recoverable desktop startup and
   event-loop failures leave that service running.
 - The shared bridge owns one demand-start seam used by both connectors after a failed service

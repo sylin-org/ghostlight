@@ -3,8 +3,10 @@
 ## Contract rules
 
 The 22 tools below are the complete 1.0 catalog. Input objects and nested objects set
-`additionalProperties` to `false`. Conditional inputs use discriminated schema branches, so the
-advertised schema accepts exactly the shapes the decoder accepts. Omitted optional fields use the
+`additionalProperties` to `false`. Every input schema is a top-level object without root-level
+`oneOf`, `allOf`, or `anyOf`, because current Kiro and Bedrock reject those otherwise valid JSON
+Schema forms. Conditional inputs advertise one portable teaching envelope; the typed decoder
+enforces the exact branch before governance or browser dispatch. Omitted optional fields use the
 defaults stated here.
 
 Each declaration includes concise field descriptions, one shortest valid example, a truthful

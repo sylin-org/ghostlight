@@ -5,12 +5,17 @@ use serde_json::{json, Value};
 
 /// MCP revision implemented by this exact edge state machine.
 pub const PROTOCOL_VERSION: &str = "2025-11-25";
+/// MCP revisions served by this one compatible initialized state machine.
+pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 4] =
+    ["2024-11-05", "2025-03-26", "2025-06-18", PROTOCOL_VERSION];
 const JSONRPC_VERSION: &str = "2.0";
 
 /// Validated initialization facts needed outside the MCP revision module.
 pub struct Initialization {
     /// JSON-RPC request id to echo in the initialize response.
     pub id: Value,
+    /// Compatible protocol revision negotiated for this connection.
+    pub protocol_version: &'static str,
     /// Bounded human-readable label forwarded for presentation and audit only.
     pub client_label: String,
 }
@@ -27,13 +32,10 @@ pub fn parse_initialize(message: &Value) -> Result<Initialization, String> {
         .get("id")
         .cloned()
         .ok_or_else(|| "initialize request requires id".to_owned())?;
-    if message
+    let requested_protocol_version = message
         .pointer("/params/protocolVersion")
         .and_then(Value::as_str)
-        .is_none()
-    {
-        return Err("initialize requires params.protocolVersion".into());
-    }
+        .ok_or_else(|| "initialize requires params.protocolVersion".to_owned())?;
     let client_label = message
         .pointer("/params/clientInfo/name")
         .and_then(Value::as_str)
@@ -41,16 +43,29 @@ pub fn parse_initialize(message: &Value) -> Result<Initialization, String> {
         .chars()
         .take(100)
         .collect();
-    Ok(Initialization { id, client_label })
+    Ok(Initialization {
+        id,
+        protocol_version: negotiate_protocol_version(requested_protocol_version),
+        client_label,
+    })
+}
+
+/// Echo a known compatible MCP revision and counteroffer the latest revision otherwise.
+#[must_use]
+pub fn negotiate_protocol_version(requested: &str) -> &'static str {
+    SUPPORTED_PROTOCOL_VERSIONS
+        .into_iter()
+        .find(|candidate| *candidate == requested)
+        .unwrap_or(PROTOCOL_VERSION)
 }
 
 /// Render the initialize response from orchestrator-owned product metadata.
-pub fn initialize_result(id: Value, server: &ServerProfile) -> Value {
+pub fn initialize_result(id: Value, protocol_version: &str, server: &ServerProfile) -> Value {
     json!({
         "jsonrpc": JSONRPC_VERSION,
         "id": id,
         "result": {
-            "protocolVersion": PROTOCOL_VERSION,
+            "protocolVersion": protocol_version,
             "capabilities": {"tools": {"listChanged": true}},
             "serverInfo": {"name": server.name, "version": server.version},
             "instructions": server.instructions
@@ -85,7 +100,9 @@ mod tests {
     use ghostlight_bridge::service::ServerProfile;
     use serde_json::json;
 
-    use super::{initialize_result, parse_initialize, PROTOCOL_VERSION};
+    use super::{
+        initialize_result, negotiate_protocol_version, parse_initialize, PROTOCOL_VERSION,
+    };
 
     #[test]
     fn negotiation_selects_the_exact_supported_revision() {
@@ -102,6 +119,7 @@ mod tests {
         let initialization = parse_initialize(&request).unwrap();
         let response = initialize_result(
             initialization.id,
+            initialization.protocol_version,
             &ServerProfile {
                 name: "ghostlight".into(),
                 version: "1.0.0".into(),
@@ -114,5 +132,12 @@ mod tests {
             response["result"]["capabilities"]["tools"]["listChanged"],
             true
         );
+    }
+
+    #[test]
+    fn negotiation_echoes_every_known_compatible_revision() {
+        for requested in ["2024-11-05", "2025-03-26", "2025-06-18", PROTOCOL_VERSION] {
+            assert_eq!(negotiate_protocol_version(requested), requested);
+        }
     }
 }

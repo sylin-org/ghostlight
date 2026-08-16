@@ -34,9 +34,11 @@ const snapshot = {
     { id: "authority", label: "Authority", severity: "passing", detail: "Configured authority sources are valid." }
   ],
   harnesses: [
-    { id: "codex", name: "Codex", state: "installed", detail: "Ghostlight is registered for this user context.", can_install: false, can_uninstall: true },
-    { id: "claude-code", name: "Claude Code", state: "available", detail: "Detected and ready for an explicit Ghostlight registration.", can_install: true, can_uninstall: false },
-    { id: "cursor", name: "Cursor", state: "not_detected", detail: "Not detected. You can prepare its user configuration before installing it.", can_install: true, can_uninstall: false }
+    { id: "codex", product_id: "codex", name: "Codex", target: "User", icon: "codex.svg", state: "installed", detail: "Ghostlight is registered for this user context.", can_install: false, can_uninstall: true, can_download: true, can_locate: true, config_path: "/home/test/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "[mcp_servers.ghostlight]" },
+    { id: "claude-code", product_id: "claude-code", name: "Claude Code", target: "User", icon: "claude-code.svg", state: "available", detail: "Detected and ready for an explicit Ghostlight registration.", can_install: true, can_uninstall: false, can_download: true, can_locate: true, config_path: "/home/test/.claude.json", connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "{\"mcpServers\":{}}" },
+    { id: "cline-cli", product_id: "cline", name: "Cline", target: "CLI", icon: "cline.svg", state: "available", detail: "Detected and ready for an explicit Ghostlight registration.", can_install: true, can_uninstall: false, can_download: true, can_locate: true, config_path: "/home/test/.cline/data/settings/cline_mcp_settings.json", connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "{\"mcpServers\":{}}" },
+    { id: "cline-vscode", product_id: "cline", name: "Cline", target: "Visual Studio Code", icon: "cline.svg", state: "installed", detail: "Ghostlight is registered for this user context.", can_install: false, can_uninstall: true, can_download: true, can_locate: true, config_path: "/home/test/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json", connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "{\"mcpServers\":{}}" },
+    { id: "cursor", product_id: "cursor", name: "Cursor", target: "User", icon: "cursor.svg", state: "not_detected", detail: "Not detected. Locate it or install it from the official page.", can_install: true, can_uninstall: false, can_download: true, can_locate: true, config_path: "/home/test/.cursor/mcp.json", connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "{\"mcpServers\":{}}" }
   ],
   configuration: {
     runtime_state: "active",
