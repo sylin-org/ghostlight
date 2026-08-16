@@ -6,11 +6,12 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S6 COMPLETE and gated on a Windows host. S7 and S8 are not started.
+- State: S1 through S6 COMPLETE and gated on a Windows host. Linux verification V1 is COMPLETE;
+  V2 is next. S7 and S8 are not started.
 - Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages.
-- Next action: start at [START-HERE-LINUX.md](START-HERE-LINUX.md) and follow it top to bottom.
-  Nine tasks in order: V1 through V5 verify what landed but could only be compiled on Windows, then
-  S7a, S7b, S7c, then S8. S7a is a governance-schema change and should start a fresh session.
+- Next action: continue at V2 in [START-HERE-LINUX.md](START-HERE-LINUX.md). V1 proved the command
+  entry on Linux. The remaining tasks stay ordered: V2 through V5, then S7a, S7b, S7c, then S8.
+  S7a is a governance-schema change and should start a fresh session.
 - Blocking condition: none.
 - Source baseline when the epic was reworked: `dev` at `2f24943f`.
 - Last green evidence: every stage commit below passed the gate commands in `PINS.md` on Windows.
@@ -150,6 +151,7 @@ than appended to a long session.
 | 2026-08-16 | S5 | `efc15783` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 273/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on popup.js; process and CLI journeys | The two directives are pinned character for character against `PINS.md` | PASS |
 | 2026-08-16 | S6 | `124a5557` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 280/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on view.js and words.js; workbench-surface and process journeys | The vocabulary guard was verified against a negative control: reintroducing one word literal in view.js fails two assertions | PASS |
 | 2026-08-16 | S3 (WSL) | `7a084ae5` | None; observation only | Real WSL2 Debian on the Windows host reports `WSL_DISTRO_NAME=Debian` and `/proc/sys/kernel/osrelease=6.6.87.2-microsoft-standard-WSL2`. Both halves of the pinned WSL rule match independently, and `XDG_CURRENT_DESKTOP` is empty there, which the unknown-row test already covers | PASS, inputs only |
+| 2026-08-16 | V1 Linux command entry | this commit | Seven focused command-entry tests; `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 286/9/32/6, 0 failed; 116 extension tests; isolated workspace build; process, CLI, and workbench-surface journeys | CachyOS KDE Wayland, ordinary per-user install in a disposable home: a new bash process ran `ghostlight doctor --json`; repeat install was byte-identical; foreign file and symlink survived install and uninstall byte-for-byte; uninstall removed only the owned entry; the real bash, zsh, profile, and fish startup-file hashes did not change; the active installed diagnosis matched before and after. No `/usr/bin/ghostlight` package was available, so the already-unit-proved not-applicable package row remains part of V2 | PASS; deviation 3 resolved |
 
 ## Deviations and findings
 
@@ -168,10 +170,15 @@ added without packaging it. Evidence: `the bundled setup page is packaged for th
 with no native host registered. The authoring host has Ghostlight installed and registered, so that
 check was not run. Disposition: carried into S8's migration cases, where it is already required.
 
-**3. S4b's symlink behavior is not proved on this host.** The four tests that create, update,
-refuse, and remove the entry now compile on Windows and return early there, so a type error cannot
-hide until CI, but they assert nothing on this platform. Their real execution is the Linux CI lane
-and S8's Ubuntu run. Recorded rather than implied by a green Windows gate.
+**3. RESOLVED by V1 on Linux.** All seven command-entry tests ran on CachyOS rather than returning
+early. An ordinary per-user install in a disposable home created exactly
+`~/.local/bin/ghostlight`; a new bash process resolved it and ran `doctor --json`; repeat install
+changed no bytes; regular-file and foreign-symlink occupants stayed byte-identical through install
+and uninstall; and uninstall removed the owned link without changing a sentinel beside it. Hashes
+for the real `.bashrc`, `.zshrc`, `.profile`, and fish startup file were identical before and after.
+The active installed Ghostlight diagnosis was also unchanged before and after the task. The
+system-package not-applicable branch passed its focused test; payload proof against a real Debian
+package belongs to V2.
 
 **4. S4c had nothing to implement.** `NO_COLOR` exists to suppress styling, and Ghostlight emits
 none: no ANSI escape, no color crate, and no styling in the npm launcher or shell scripts. Adding an
