@@ -29,7 +29,7 @@ jobs:
       - name: Install Linux desktop build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -39,9 +39,9 @@ jobs:
       - run: npm test --prefix packaging/npm
       - run: node --test packaging/mcpb/test/launcher.test.js
       - run: sh -n scripts/*.sh
-      - run: node tests/process-journey.mjs
-      - run: node tests/cli-journey.mjs
-      - run: node tests/cli-powershell-journey.mjs
+      - run: xvfb-run -a node tests/process-journey.mjs
+      - run: xvfb-run -a node tests/cli-journey.mjs
+      - run: xvfb-run -a node tests/cli-powershell-journey.mjs
       - run: node tests/workbench-surface.mjs
       - shell: pwsh
         run: ./scripts/check-public-surfaces.ps1
@@ -152,7 +152,7 @@ jobs:
           artifact=$(find "$PWD/candidate" -type f -name '*.deb' -print -quit)
           test -n "$artifact"
           apt-get update
-          apt-get install -y binutils desktop-file-utils jq procps
+          apt-get install -y binutils desktop-file-utils jq procps xvfb
           ./scripts/check-debian-package-lifecycle.sh \
             "$artifact" \
             "${{ matrix.distribution }}" \

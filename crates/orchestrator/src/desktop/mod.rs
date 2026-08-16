@@ -3,6 +3,7 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 #[cfg(target_os = "linux")]
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -107,6 +108,8 @@ pub fn run() -> Result<()> {
     );
     let workbench = host.workbench.clone();
     let setup_workbench = workbench.clone();
+    let tray_available = Arc::new(AtomicBool::new(false));
+    let setup_tray_available = Arc::clone(&tray_available);
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         // Registered in Rust only. The capability file grants the webview neither plugin's generic
@@ -151,8 +154,13 @@ pub fn run() -> Result<()> {
             setup_workbench.attach_events(Arc::new(NativeEvents {
                 app: app.handle().clone(),
             }));
-            if let Err(error) = build_tray(app) {
-                eprintln!("Ghostlight tray is unavailable: {error}");
+            match build_tray(app) {
+                Ok(()) => setup_tray_available.store(true, Ordering::SeqCst),
+                Err(error) => {
+                    eprintln!(
+                        "Ghostlight could not create a tray icon in this desktop session: {error}; use the Applications entry or 'ghostlight open'"
+                    );
+                }
             }
             Ok(())
         });
@@ -161,25 +169,28 @@ pub fn run() -> Result<()> {
         builder.build(tauri::generate_context!())
     })) {
         Ok(Ok(app)) => app,
-        Ok(Err(error)) => {
-            eprintln!("Ghostlight workbench is unavailable; continuing headless: {error}");
-            host.wait();
-            return Ok(());
-        }
-        Err(_) => {
-            eprintln!("Ghostlight workbench failed during startup; continuing headless");
-            host.wait();
-            return Ok(());
-        }
+        Ok(Err(error)) => return Err(error.into()),
+        Err(_) => anyhow::bail!("Ghostlight desktop authority failed during startup"),
     };
     let outcome = catch_unwind(AssertUnwindSafe(|| {
-        app.run_return(|app, event| match event {
+        app.run_return(move |app, event| match event {
             RunEvent::Ready => {
                 // Keep the configured workbench as metadata until the native event loop is live.
                 // This is the same disposable construction seam that tray activation uses after
                 // Close, and it prevents Windows from losing its startup window.
-                if let Err(error) = build_workbench(app).and_then(|_| background_workbench(app)) {
-                    eprintln!("Ghostlight workbench is unavailable: {error}");
+                match build_workbench(app) {
+                    Ok(_) => {
+                        if let Err(error) = background_workbench(app) {
+                            eprintln!("Ghostlight could not background its workbench: {error}");
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("Ghostlight workbench is unavailable: {error}");
+                        if !tray_available.load(Ordering::SeqCst) {
+                            eprintln!("Ghostlight has no desktop interaction route and will stop");
+                            app.exit(1);
+                        }
+                    }
                 }
             }
             RunEvent::ExitRequested { code, api, .. } if should_prevent_desktop_exit(code) => {
@@ -190,16 +201,8 @@ pub fn run() -> Result<()> {
     }));
     match outcome {
         Ok(0) => Ok(()),
-        Ok(code) => {
-            eprintln!("Ghostlight workbench exited with status {code}; continuing headless");
-            host.wait();
-            Ok(())
-        }
-        Err(_) => {
-            eprintln!("Ghostlight workbench stopped unexpectedly; continuing headless");
-            host.wait();
-            Ok(())
-        }
+        Ok(code) => anyhow::bail!("Ghostlight desktop authority exited with status {code}"),
+        Err(_) => anyhow::bail!("Ghostlight desktop authority stopped unexpectedly"),
     }
 }
 

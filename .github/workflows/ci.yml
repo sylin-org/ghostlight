@@ -131,7 +131,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: "1.95.0"
@@ -142,9 +142,18 @@ jobs:
         with:
           node-version: "22"
       - run: cargo build --workspace --locked
-      - run: node tests/process-journey.mjs
-      - run: node tests/cli-journey.mjs
-      - run: node tests/cli-powershell-journey.mjs
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a node tests/process-journey.mjs
+      - if: runner.os == 'Windows'
+        run: node tests/process-journey.mjs
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a node tests/cli-journey.mjs
+      - if: runner.os == 'Windows'
+        run: node tests/cli-journey.mjs
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a node tests/cli-powershell-journey.mjs
+      - if: runner.os == 'Windows'
+        run: node tests/cli-powershell-journey.mjs
       - run: node tests/workbench-surface.mjs
 
   supply-chain:

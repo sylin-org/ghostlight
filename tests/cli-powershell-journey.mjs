@@ -140,7 +140,7 @@ async function runAdapter(peer) {
 for (const file of [runtimeFile, leaseFile, auditFile, shotFile]) rmSync(file, { force: true });
 
 try {
-  const service = start(executable("ghostlight"), ["--headless"]);
+  const service = start(executable("ghostlight"));
   for (let attempt = 0; attempt < 100 && !existsSync(runtimeFile); attempt += 1) await sleep(50);
   assert.equal(existsSync(runtimeFile), true, "the service never published runtime discovery");
   assert.equal(service.exitCode, null);

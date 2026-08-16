@@ -13,6 +13,40 @@ last fetch.
 The repository carries exactly two branches, `main` and `dev`, as of 2026-08-13. The topology is
 linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 
+## One invoked desktop authority
+
+[ADR-0127](adr/0127-one-invoked-desktop-authority.md) removes both `ghostlight service` and
+`ghostlight --headless`. MCP connector, browser connector, CLI, and direct-user starts now converge
+on the same no-argument desktop authority. Desktop startup or event-loop failure ends the process
+instead of leaving an invisible authority. Tray creation remains capability-aware: supported
+desktop sessions with trays must show the Ghostlight icon, while sessions without a tray retain the
+Applications entry and `ghostlight open` as explicit interaction routes.
+
+Process and CLI journeys now invoke the production launch with no application arguments. Linux CI
+and Debian-package smokes provide a virtual display rather than using a product-only test mode.
+Visible KDE, GNOME, and Windows evidence remains responsible for proving the real tray and window.
+
+Local implementation evidence on CachyOS KDE Wayland, 2026-08-16:
+
+- Formatting, warnings-denied workspace Clippy, 351 Rust tests, 116 extension tests, 10 npm
+  launcher tests, four MCPB launcher tests, the workbench surface journey, shell syntax, and changed
+  JavaScript syntax all passed. The real process, CLI, and checksum-verified portable-PowerShell
+  journeys passed against freshly rebuilt debug binaries.
+- The release binary was installed at `/home/test/.ghostlight/bin/v1.0.0/ghostlight` with SHA-256
+  `369822d0489b784dc20ae66f72734cff50f4ef2e0b7b8c63502094c6a585660d`. Both removed command
+  forms exited 1 before publishing runtime discovery. The live browser connector then demand-started
+  that exact installed executable with no arguments and reconnected without being restarted.
+- KDE's status-notifier watcher registered the new process's `ghostlight` item as `Active`, backed
+  by the rendered Ghostlight PNG. Its exported menu contains Open Ghostlight, Pause browser work,
+  Resume browser work, and Quit Ghostlight. `ghostlight open` activated the running authority.
+- A real unpacked-extension journey through ordinary Chromium navigated to example.com, read the
+  page, and returned a real JPEG screenshot. Its final close assertion remained blocked by the
+  extension's user-owned preserve-tabs interlock, with reason `browser_local_interlock`; that is an
+  expected safety refusal, not a green close result, and the evidence tab remains visible.
+- An isolated launch with no X11 display, no Wayland runtime, and no session bus exited 1 and
+  removed runtime discovery. A session missing only a display variable was not accepted as a
+  negative control because live KDE still supplied its D-Bus tray interaction route.
+
 ## Reference experience epic
 
 The owner-approved product direction is the staged
@@ -415,7 +449,7 @@ build-only candidate run `31920647296`.
   pinned to the exact repository, release workflow, source revision, and `dev` ref.
 - The GitHub bundle has 14-day retention. No tag, release, submission, or publication was created.
 
-This closes candidate construction, provenance, and the two accepted headless Debian package
+This closes candidate construction, provenance, and the two accepted noninteractive Debian package
 gates. It does not close visible Ubuntu GNOME Wayland, matching-store-adapter, clean Windows,
 login/reboot, notification, public-harness, or publication gates.
 
@@ -448,7 +482,7 @@ builder on the second drive.
 - The release workflow and local guests now share one package lifecycle script. Extra local
   distributions remain advisory rather than expanding the accepted two-row release gate.
 
-This local record supplied strong headless package evidence but not provenance. The build-only
+This local record supplied strong noninteractive package evidence but not provenance. The build-only
 candidate above now supplies matching GitHub provenance and the accepted two-row package smokes.
 Ubuntu GNOME Wayland L1-L9, the matching store adapter, login/reboot, tray, notifications, and the
 full visible browser matrix remain owed.
@@ -592,7 +626,7 @@ full visible browser matrix remain owed.
   `WorkbenchEventSink`. Snapshots carry the sequence they reflect; a surface that receives a gap
   resynchronizes from a fresh snapshot rather than trusting its cache. The WebView may listen and
   is not granted permission to emit. A projection with no sink attached publishes nothing, so
-  headless runs and domain tests stay free of presentation.
+  domain tests with no presentation sink stay free of desktop dependencies.
 - `OperationSummary` carries the governed capability, so live work is classified as plainly as
   completed history.
 - Monitor has a presentation-only Clear view control. It hides completed actions for the current
@@ -608,18 +642,19 @@ full visible browser matrix remain owed.
   backed up, and preserve unrelated JSONC, TOML, and YAML configuration. Harness paths follow the
   effective Windows or Linux environment, including `CODEX_HOME`; exact owned pre-1.0 agent relays
   are migrated while other relay entries remain untouched and visible as attention-required state.
-- `ghostlight --headless` retains the service-only execution path. Recoverable desktop startup and
-  event-loop failures leave that service running.
+- There is no `service` command or `--headless` flag. Connector demand-start, CLI demand-start, and
+  direct execution all invoke the same no-argument desktop authority. Desktop startup or event-loop
+  failure ends it instead of leaving an invisible process.
 - The shared bridge owns one demand-start seam used by both connectors after a failed service
   connection. It starts only the exact sibling `ghostlight` with no application arguments, honors
   a fresh deploy lock, and preserves each connector's established reconnect behavior.
 - The orchestrator holds an operating-system lifetime lease before publishing runtime discovery or
   initializing Tauri. Concurrent launch attempts therefore converge on one authority and one tray.
-- There is one normal desktop launch. It always creates the tray and backgrounds its workbench:
-  minimized on Windows and hidden on Linux. A second direct launch opens and focuses the running
-  authority's authenticated workbench. `--headless` remains the explicit presentation-free mode.
-  Windows restores its existing view. Linux reconstructs its disposable view because Wayland
-  cannot report or unset minimization.
+- There is one desktop-authority launch. It creates a tray where the desktop session provides one
+  and backgrounds its workbench: minimized on Windows and hidden on Linux. A second direct launch
+  opens and focuses the running authority's authenticated workbench. Sessions without a tray retain
+  the Applications entry and `ghostlight open`. Windows restores its existing view. Linux
+  reconstructs its disposable view because Wayland cannot report or unset minimization.
 - The tray and authority outlive their disposable workbench. Native close destroys the window,
   native minimize remains compositor-owned, and Open uses one serialized lifecycle seam. Linux
   coalesces Open requests, destroys any existing view, and reconstructs only after Tauri reports
@@ -751,8 +786,8 @@ source-gate pass, not release approval.
   adapter keeps compatible attachment semantics, and a silent operation can outlast the liveness
   timeout while independent acknowledgements keep it available.
 - Lifecycle tests prove demand-start supplies no application arguments and the executable has one
-  normal desktop mode beside explicit headless and scripted intake. The real process journey still
-  passes across service restart and connector renegotiation.
+  desktop-authority mode beside scripted intake. The real process journey still passes across
+  authority restart and connector renegotiation.
 - Action-subject tests prove the Chrome receipt carries the physical role and name without a
   describe round trip, the role cannot author language, editable values cannot become names, names
   are normalized and bounded, and either authority layer can remove them monotonically.
@@ -945,8 +980,8 @@ The executor-split batch is complete through `4d633fbc`.
   run. CI `31920645118` and candidate workflow `31920647296` are green; all 19 candidate files have
   repository-, workflow-, source-, and ref-bound provenance.
 - Use that provenance-attested bundle to verify clean install, public-0.8 upgrade, and uninstall on
-  clean Windows and Linux machines. The Windows development-host package lifecycle and headless
-  Debian/Ubuntu smokes do not replace those release-environment rows.
+  clean Windows and Linux machines. The Windows development-host package lifecycle and
+  virtual-display Debian/Ubuntu smokes do not replace those release-environment rows.
 - Complete interactive native-window, tray, and notification smoke tests on each platform. The
   automated environment verifies native build and failure containment but does not expose its GUI
   desktop to the test runner.

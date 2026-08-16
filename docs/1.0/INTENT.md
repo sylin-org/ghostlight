@@ -85,7 +85,9 @@ Internal browser commands are combined when a person experiences them as one job
 
 The workbench is the orchestrator's local-human presentation surface. It is part of the same
 installed product and process, while remaining a separate presentation and application context.
-Headless operation is an explicit service-only mode, not the ordinary installed experience.
+Every supported orchestrator start initializes this desktop authority. There is no service-only
+or presentation-free launch mode. A desktop session without a tray retains `ghostlight open` and
+the Applications entry as interaction routes.
 
 - Monitor is where the work becomes visible. The current action stands in full with its elapsed
   time running. When the next one starts, that action settles and drops into a newest-first queue

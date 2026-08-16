@@ -12,16 +12,16 @@ esac
 artifact=$(realpath "$artifact")
 test_home=/home/ghostlight-package-test-$state_label
 runtime=$test_home/.cache/ghostlight/ghostlight-runtime.json
-service_pid=
+authority_pid=
 
-cleanup_service() {
-    if test -n "$service_pid"; then
-        kill "$service_pid" 2>/dev/null || true
-        wait "$service_pid" 2>/dev/null || true
+cleanup_authority() {
+    if test -n "$authority_pid"; then
+        kill "$authority_pid" 2>/dev/null || true
+        wait "$authority_pid" 2>/dev/null || true
     fi
-    pkill -f '^/usr/bin/ghostlight --headless$' 2>/dev/null || true
+    pkill -f '^/usr/bin/ghostlight$' 2>/dev/null || true
 }
-trap cleanup_service EXIT
+trap cleanup_authority EXIT
 
 echo "distribution=$distribution"
 grep -E '^(PRETTY_NAME|VERSION_ID|ID)=' /etc/os-release
@@ -81,11 +81,11 @@ test -z "$(find /usr/bin/ghostlight /usr/bin/ghostlight-mcp-connector \
 install -d -m 0700 -o 1000 -g 1000 "$test_home" "$test_home/run"
 setpriv --reuid=1000 --regid=1000 --clear-groups \
     env HOME="$test_home" XDG_RUNTIME_DIR="$test_home/run" \
-    ghostlight --headless >"$test_home/service.log" 2>&1 &
-service_pid=$!
+    xvfb-run -a ghostlight >"$test_home/authority.log" 2>&1 &
+authority_pid=$!
 for attempt in $(seq 1 100); do
     test -s "$runtime" && break
-    kill -0 "$service_pid"
+    kill -0 "$authority_pid"
     sleep 0.05
 done
 test -s "$runtime"
@@ -103,8 +103,8 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
         timeout 10s ghostlight-mcp-connector >"$test_home/mcp.json"
 jq -e '.result.serverInfo.name == "ghostlight" and .result.serverInfo.version == "1.0.0"' \
     "$test_home/mcp.json" >/dev/null
-cleanup_service
-service_pid=
+cleanup_authority
+authority_pid=
 
 DEBIAN_FRONTEND=noninteractive apt-get remove -y ghostlight
 test ! -e /usr/bin/ghostlight

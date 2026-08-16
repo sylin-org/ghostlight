@@ -44,9 +44,6 @@ rmSync(auditFile, { force: true });
 rmSync(leaseFile, { force: true });
 const services = [];
 const cleanup = [runtimeFile, auditFile, leaseFile];
-const service = spawn(ghostlight, ["--headless"], { env: environment, stdio: ["pipe", "pipe", "pipe"] });
-services.push(service);
-service.stderr.on("data", (chunk) => process.stderr.write(`[ghostlight] ${chunk}`));
 
 try {
   const version = spawnSync(ghostlight, ["--version"], { env: environment, encoding: "utf8" });
@@ -56,12 +53,25 @@ try {
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /ghostlight install/);
   assert.match(help.stdout, /ghostlight doctor/);
+  assert.doesNotMatch(help.stdout, /ghostlight service|--headless/);
+  for (const removed of [["service"], ["--headless"]]) {
+    const rejectedLaunch = spawnSync(ghostlight, removed, { env: environment, encoding: "utf8" });
+    assert.notEqual(rejectedLaunch.status, 0, `${removed[0]} must not start an authority`);
+    assert.equal(existsSync(runtimeFile), false, `${removed[0]} must not publish runtime discovery`);
+  }
   const dryRun = spawnSync(ghostlight, ["install", "--dry-run", "--no-clients"], {
     env: environment,
     encoding: "utf8"
   });
   assert.equal(dryRun.status, 0, dryRun.stderr);
   assert.match(dryRun.stdout, /no machine state will change/);
+
+  const authority = spawn(ghostlight, [], {
+    env: environment,
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  services.push(authority);
+  authority.stderr.on("data", (chunk) => process.stderr.write(`[ghostlight] ${chunk}`));
 
   for (let attempt = 0; attempt < 80 && !existsSync(runtimeFile); attempt += 1) await sleep(50);
   assert.equal(existsSync(runtimeFile), true, "the service never published runtime discovery");
@@ -130,7 +140,7 @@ try {
     GHOSTLIGHT_POLICY_FILE: scriptingDisabledPolicyFile
   };
   cleanup.push(governedRuntime, governedAudit, governedRuntime.replace(/\.json$/, ".lock"));
-  const governedService = spawn(ghostlight, ["--headless"], {
+  const governedService = spawn(ghostlight, [], {
     env: governedEnvironment,
     stdio: ["pipe", "pipe", "pipe"]
   });

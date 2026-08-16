@@ -34,8 +34,8 @@ modules inside the orchestrator. The dependency direction points inward to `brid
 orchestrator ports. The orchestrator does not depend on MCP or Chromium APIs.
 
 The `ghostlight` executable also hosts the Tauri 2 desktop event loop. Tauri is a presentation
-adapter inside the modular monolith, not another service or state authority. `--headless` starts
-the same orchestrator without a WebView, tray, or native notifications.
+adapter inside the modular monolith, not another service or state authority. Every supported
+orchestrator start initializes this desktop authority; there is no service-only launch mode.
 
 ## Local lifecycle
 
@@ -54,8 +54,8 @@ the complete desktop authority, creates its tray, and backgrounds the workbench:
 Windows and hidden on Linux. Connectors use that exact no-argument launch. The explicit local-human
 `ghostlight open` intent composes the same bridge lifecycle operation with the same authenticated
 activation request: when absent it demand-starts the ordinary no-argument sibling, waits for its
-runtime, then reveals it. The request admits no workspace and adds no listener. `--headless` is the
-explicit service-only mode and cannot reveal a workbench.
+runtime, then reveals it. The request admits no workspace and adds no listener. No supported launch
+can create an authority that refuses presentation by design.
 
 The tray and authority do not depend on a permanent window. Native close destroys only the
 disposable workbench, and native minimize remains compositor-owned. Windows Open focuses or
@@ -216,7 +216,7 @@ a sandboxed or absent browser look usable.
 Tauri commands form a small typed inbound adapter over `WorkbenchFacade`. File work runs outside
 the UI event loop. The native notification port is best effort and content-free. WebView, tray,
 notification, and recoverable Tauri failures cannot change domain truth; startup or event-loop
-failure leaves the orchestrator running headlessly.
+failure ends the desktop authority instead of leaving an invisible process.
 
 ## Chokepoints and unit of work
 

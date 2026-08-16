@@ -52,9 +52,10 @@ the owner wants, and what this project learned the hard way.
   browser effect, and that stop is terminal and tells the controller
   `The user asked to interrupt the process. Wait for further instructions.` The exact value is
   pinned in `docs/tasks/reference-experience/PINS.md` and owned by that epic's S5.
-- **One normal desktop startup.** Installed Ghostlight always creates its tray and starts the
-  workbench backgrounded: minimized on Windows and hidden on Linux. Connectors launch that same
-  executable with no mode flag. Only explicit `--headless` omits desktop presentation.
+- **One desktop authority startup.** Connectors, CLI demand-start, and direct execution all launch
+  the same no-argument desktop authority. It creates a tray where the desktop offers one and starts
+  the workbench backgrounded: minimized on Windows and hidden on Linux. A session without a tray
+  keeps the Applications entry and `ghostlight open`; there is no service-only launch mode.
 - **Keep the fringes stable.** Product and journey change belongs in the orchestrator. The
   connectors negotiate and relay. The extension owns Chromium, the page, and the drawing, and makes
   no product, workspace, authority, or model-language decision.

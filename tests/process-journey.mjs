@@ -309,7 +309,7 @@ try {
   assert.equal(connector.exitCode, null);
   assert.equal(browserConnector.exitCode, null);
 
-  let service = start(executable("ghostlight"), ["--headless"]);
+  let service = start(executable("ghostlight"));
   await waitForFile(runtimeFile);
   const endpoint = JSON.parse(readFileSync(runtimeFile, "utf8"));
   assert.equal(endpoint.service_bridge_major, 2);
@@ -365,7 +365,7 @@ try {
   assert.match(interruptedResult.error.message, /outcome is unavailable/);
 
   const reconnected = native.waitFor((frame) => frame.kind === "hello_accepted", 10000);
-  service = start(executable("ghostlight"), ["--headless"]);
+  service = start(executable("ghostlight"));
   await waitForFile(runtimeFile);
   const secondBrowserHello = await reconnected;
   assert.equal(secondBrowserHello.kind, "hello_accepted");

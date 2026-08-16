@@ -97,9 +97,9 @@ For Windows and Linux:
 2. Verify the package contains byte-exact Apache, MIT, commercial-module, and plain-language
    licensing files, then verify the published checksum and GitHub build-provenance attestation.
 3. Install as an ordinary user on a clean machine.
-4. Verify tray launch, open/hide/quit, headless fallback, global search, plural snapshots, Status,
-   notifications, MCP integrations connect/disconnect, JSONC/TOML preservation, and no remote
-   WebView access.
+4. Verify tray launch where the desktop provides one, non-tray Open access, open/hide/quit,
+   desktop-startup failure, global search, plural snapshots, Status, notifications, MCP
+   integrations connect/disconnect, JSONC/TOML preservation, and no remote WebView access.
 5. Verify native messaging points at the packaged sibling browser connector.
 6. Upgrade from the latest supported public release without clobbering unrelated state.
 7. Uninstall and prove only Ghostlight-owned files, registrations, desktop entries, and selected

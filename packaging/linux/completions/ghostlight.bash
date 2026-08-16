@@ -5,13 +5,13 @@
 # orchestrator. Adding a subcommand without adding it here fails that test.
 
 _ghostlight() {
-    local commands="open install uninstall doctor status service call policy"
+    local commands="open install uninstall doctor status call policy"
     local current previous
     current="${COMP_WORDS[COMP_CWORD]}"
     previous="${COMP_WORDS[COMP_CWORD - 1]}"
 
     if [ "${COMP_CWORD}" -eq 1 ]; then
-        COMPREPLY=($(compgen -W "${commands} --help --version --headless" -- "${current}"))
+        COMPREPLY=($(compgen -W "${commands} --help --version" -- "${current}"))
         return 0
     fi
 

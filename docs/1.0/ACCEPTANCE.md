@@ -42,8 +42,8 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
      runtime publication or desktop initialization.
 16. An explicit `ghostlight open` reveals the existing authenticated authority's workbench without
     a new listener or workspace. When absent, it asks the shared lifecycle seam to start the same
-    no-argument sibling used by connectors, then activates it. A headless authority refuses that
-    presentation request clearly.
+    no-argument sibling used by connectors, then activates it. No supported launch creates an
+    authority that refuses presentation by design.
 17. An adapter that advertises end-to-end liveness acknowledges content-free heartbeats through the
     unchanged opaque browser connector. A relay socket that stays attached without acknowledgements
     becomes unavailable, while a silent browser operation stays available when its independent
@@ -230,12 +230,13 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 
 ## Desktop workbench gates
 
-1. Normal `ghostlight` startup creates the tray and backgrounds the workbench (minimized on Windows,
-   hidden on Linux), or opens and focuses the running authority's workbench. Windows restores its
-   existing view; Linux coalesces Open requests and reconstructs its disposable view after the old
-   window's destroyed event. `--headless` starts no desktop runtime. Closing destroys only the
-   workbench window, tray Open rebuilds it, and only explicit quit stops the process. Native
-   minimize does not close or hide the window.
+1. Every supported `ghostlight` startup initializes the desktop authority and backgrounds the
+   workbench (minimized on Windows, hidden on Linux), or opens and focuses the running authority's
+   workbench. Windows restores its existing view; Linux coalesces Open requests and reconstructs
+   its disposable view after the old window's destroyed event. A tray is created when the desktop
+   session provides one; the Applications entry and `ghostlight open` remain available when it
+   does not. Closing destroys only the workbench window, tray Open rebuilds it, and only explicit
+   quit stops the process. Native minimize does not close or hide the window.
 2. Home presents plural session, operation, and browser counts plus current work and system health
    at a glance. The persistent lamp band states whether Ghostlight is all-open, has one or more
    policies applied, or has a configured policy issue, and links to Status for detail. Activity,
@@ -268,9 +269,11 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    application service, outside the UI event loop.
 12. The desktop executable, tray, bundle, and workbench use the original Ghostlight icon bytes,
     established palette and spring curve, and a static readable reduced-motion treatment.
-13. Recoverable Tauri setup or event-loop failure leaves the orchestrator service alive in
-    headless mode. The MCP connector, browser connector, shared bridge, and extension have empty
-    diffs for the complete workbench feature.
+13. A Tauri setup or event-loop failure ends the authority instead of leaving an invisible
+    process. A tray-construction failure on a session without tray support is contained when the
+    workbench still gives the Applications entry and `ghostlight open` an interaction route. If
+    neither tray nor workbench can be constructed, startup exits. The MCP connector, browser
+    connector, shared bridge, and extension have empty diffs for the complete workbench feature.
 14. Clear view removes completed actions from the current Monitor surface, preserves running work,
     issues no orchestrator mutation, and leaves the durable audit unchanged. A later action appears
     normally, and a fresh desktop process may reconstruct the cleared history from audit.
@@ -302,5 +305,5 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     fixture, every destination is keyboard reachable, and frontend scripts pass syntax checks.
 11. Release Linux binaries are built on Ubuntu 22.04. The exact Debian candidate installs,
     version-checks, removes, reinstalls, and purges in Debian 12 and Ubuntu 24.04 containers before
-    candidate assembly. Those headless package smokes do not replace the Ubuntu GNOME Wayland
-    L1-L9 lifecycle.
+    candidate assembly. Those virtual-display package smokes do not replace the Ubuntu GNOME
+    Wayland L1-L9 lifecycle.

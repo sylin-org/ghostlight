@@ -15,7 +15,7 @@ use ghostlight_bridge::browser::{BrowserCommand, BrowserEvent};
 use ghostlight_bridge::framing::{read_json_line, read_native, write_json_line, write_native};
 use ghostlight_bridge::lifecycle::ServiceLease;
 use ghostlight_bridge::relay::{BrowserRelayRequest, BrowserRelayResponse, BROWSER_RELAY_MAJOR};
-use ghostlight_bridge::runtime::{read_runtime, runtime_file, write_runtime, RuntimeEndpoint};
+use ghostlight_bridge::runtime::{read_runtime, write_runtime, RuntimeEndpoint};
 use ghostlight_bridge::service::{
     IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
     SERVICE_BRIDGE_MAJOR,
@@ -151,14 +151,6 @@ impl ServiceHost {
         })
     }
 
-    /// Run until the host is dropped or an external caller requests shutdown.
-    pub fn wait(mut self) {
-        while !self.stop.load(Ordering::SeqCst) {
-            thread::park_timeout(Duration::from_secs(1));
-        }
-        self.join();
-    }
-
     fn join(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
         for handle in self.threads.drain(..) {
@@ -176,17 +168,6 @@ impl Drop for ServiceHost {
             let _ = std::fs::remove_file(&self.runtime_path);
         }
     }
-}
-
-/// Run the persistent service using default runtime discovery.
-pub fn run_forever() -> Result<()> {
-    let host = ServiceHost::start(&runtime_file())?;
-    eprintln!(
-        "Ghostlight 1.0 service ready on local ports {} and {}",
-        host.endpoint.service_port, host.endpoint.browser_port
-    );
-    host.wait();
-    Ok(())
 }
 
 /// Ask an already-running authenticated service to reveal its attached desktop workbench.

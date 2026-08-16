@@ -10,8 +10,9 @@ the installed baseline until 1.0 completes its release gates.
   client sessions.
 - Produce signed Windows and Linux packages containing the orchestrator/workbench and both
   version-matched connectors.
-- Verify clean install, upgrade, harness registration, native messaging, tray, notification,
-  headless fallback, and uninstall on each platform.
+- Verify clean install, upgrade, harness registration, native messaging, tray where the desktop
+  provides one, non-tray interaction routes, notification, startup failure, and uninstall on each
+  platform.
 - Complete live-browser verification on supported Chromium families and publish a matching 1.0
   extension only after service compatibility is proven.
 - Reconcile release metadata, compatibility, public status, stores, package registries, and final

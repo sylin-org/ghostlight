@@ -22,11 +22,14 @@ Run the product with its workbench:
 target/debug/ghostlight open
 ```
 
-Run only the persistent orchestrator service:
+Run the complete desktop authority directly:
 
 ```powershell
-target/debug/ghostlight --headless
+target/debug/ghostlight
 ```
+
+There is no service-only or presentation-free launch. MCP, browser, and CLI demand-start invoke
+this same no-argument desktop authority.
 
 The normal no-argument launch always starts the complete desktop authority with its tray and a
 backgrounded workbench: minimized on Windows and hidden on Linux. Connectors demand-start that same

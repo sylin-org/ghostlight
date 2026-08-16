@@ -59,8 +59,8 @@ Open the tray icon and you get three places:
   the runtime session when you want that.
 
 Pause and resume sit in the header beside the lamp, the same control the tray offers. Closing the
-window returns it to the tray and leaves the service running. If the desktop shell cannot start,
-Ghostlight carries on headless so your clients and browser stay connected.
+window returns it to the tray and leaves the authority running. If the desktop shell cannot start,
+Ghostlight exits instead of leaving an invisible authority.
 
 ## Build it
 
@@ -85,10 +85,11 @@ connect the client you want, and restart or reconnect it. [`docs/DEV-LOOP.md`](d
 covers browser registration and the full validation loop.
 
 After that first setup there is no startup ritual: launching a connected MCP client or Chromium
-demand-starts Ghostlight when it is not already running. The normal desktop authority always owns
-the tray and begins with its workbench backgrounded: minimized on Windows and hidden on Linux.
-The installed Applications entry runs `ghostlight open`, so a desktop without a visible tray still
-has a one-click route to the workbench. `--headless` explicitly runs without a desktop.
+demand-starts Ghostlight when it is not already running. The normal desktop authority creates a
+tray where the desktop session provides one and begins with its workbench backgrounded: minimized
+on Windows and hidden on Linux. The installed Applications entry runs `ghostlight open`, so a
+session without a tray still has a one-click route to the workbench. There is no service-only
+launch mode.
 
 For an end-user install, the 1.0 release keeps the 0.8 one-command journey:
 

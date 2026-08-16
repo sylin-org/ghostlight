@@ -78,7 +78,7 @@ action / write / execute), and structured audit logging. The unconstrained engin
 ("all-open stays first-class"); governance is an overlay, never a tax on the ungoverned.
 
 ```
-MCP Client <--stdio--> ghostlight-mcp-connector <--typed IPC--> ghostlight service
+MCP Client <--stdio--> ghostlight-mcp-connector <--typed IPC--> ghostlight orchestrator
     <--browser IPC--> ghostlight-browser-connector <--native messaging--> Extension <--CDP--> Browser
 ```
 

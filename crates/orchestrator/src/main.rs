@@ -26,14 +26,12 @@ const SUBCOMMANDS: &[&str] = &[
     "uninstall",
     "doctor",
     "status",
-    "service",
     "call",
     "policy",
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LaunchMode {
-    Headless,
     Desktop,
     /// Explicit local-human intent to make the workbench visible.
     Open,
@@ -89,7 +87,6 @@ enum ActivationState {
 
 fn main() -> anyhow::Result<()> {
     match launch_mode(std::env::args_os().skip(1))? {
-        LaunchMode::Headless => ghostlight::service::run_forever(),
         LaunchMode::Desktop => start_or_activate_desktop(),
         LaunchMode::Open => open_desktop(),
         LaunchMode::Call => run_call(),
@@ -675,7 +672,7 @@ fn executable_name(name: &str) -> String {
 
 fn help_text() -> String {
     format!(
-        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight service                 Run the local authority without a window\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight policy validate <file>  Validate one schema-3 policy\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight policy validate <file>  Validate one schema-3 policy\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
         version = env!("CARGO_PKG_VERSION")
     )
 }
@@ -823,7 +820,7 @@ fn finish_activation(
     match activation {
         ActivationState::Activated => Ok(()),
         ActivationState::Unavailable => anyhow::bail!(
-            "Ghostlight is running without a desktop workbench; stop the explicit headless engine before opening the desktop"
+            "the running Ghostlight authority has no desktop workbench; stop it before opening Ghostlight again"
         ),
         ActivationState::Unreachable => Err(start_error.unwrap_or_else(|| {
             anyhow::anyhow!("the running Ghostlight authority could not be reached")
@@ -914,12 +911,6 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
             [_, option] if option == "--json" => Ok(LaunchMode::Status { json: true }),
             _ => anyhow::bail!("usage: ghostlight status [--json]"),
         }
-    } else if arguments.len() == 1
-        && arguments
-            .first()
-            .is_some_and(|argument| argument == "service")
-    {
-        Ok(LaunchMode::Headless)
     } else if arguments.len() == 1 && arguments.first().is_some_and(|argument| argument == "open") {
         Ok(LaunchMode::Open)
     } else if arguments.first().is_some_and(|argument| argument == "call") {
@@ -940,12 +931,6 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
         Ok(LaunchMode::Policy(
             ghostlight::governance::inspection::parse(&values)?,
         ))
-    } else if arguments.len() == 1
-        && arguments
-            .first()
-            .is_some_and(|argument| argument == "--headless")
-    {
-        Ok(LaunchMode::Headless)
     } else {
         // Naming what is available beats sending someone to --help to find out.
         anyhow::bail!(
@@ -1214,13 +1199,11 @@ mod tests {
     }
 
     #[test]
-    fn launch_modes_keep_desktop_headless_and_call_intents_distinct() {
+    fn launch_modes_keep_desktop_and_call_intents_distinct() {
         assert_eq!(launch_mode(Vec::new()).unwrap(), LaunchMode::Desktop);
         assert_eq!(launch_mode(["open".into()]).unwrap(), LaunchMode::Open);
-        assert_eq!(
-            launch_mode(["--headless".into()]).unwrap(),
-            LaunchMode::Headless
-        );
+        assert!(launch_mode(["--headless".into()]).is_err());
+        assert!(launch_mode(["service".into()]).is_err());
         assert_eq!(launch_mode(["call".into()]).unwrap(), LaunchMode::Call);
         assert_eq!(
             launch_mode(["policy".into(), "validate".into(), "policy.json".into()]).unwrap(),
@@ -1259,10 +1242,6 @@ mod tests {
         assert_eq!(
             launch_mode(["status".into(), "--json".into()]).unwrap(),
             LaunchMode::Status { json: true }
-        );
-        assert_eq!(
-            launch_mode(["service".into()]).unwrap(),
-            LaunchMode::Headless
         );
         assert_eq!(launch_mode(["--help".into()]).unwrap(), LaunchMode::Help);
         assert_eq!(

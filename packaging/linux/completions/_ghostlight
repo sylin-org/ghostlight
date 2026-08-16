@@ -6,7 +6,7 @@
 # orchestrator. Adding a subcommand without adding it here fails that test.
 
 _ghostlight() {
-    local -a ghostlight_commands=(open install uninstall doctor status service call policy)
+    local -a ghostlight_commands=(open install uninstall doctor status call policy)
 
     if (( CURRENT == 2 )); then
         _describe -t commands 'ghostlight command' ghostlight_commands

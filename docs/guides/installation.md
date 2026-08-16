@@ -82,11 +82,14 @@ Start the workbench:
 target/debug/ghostlight open
 ```
 
-Or start only the persistent service:
+Or start the complete desktop authority directly:
 
 ```sh
-target/debug/ghostlight --headless
+target/debug/ghostlight
 ```
+
+There is no service-only or presentation-free launch. MCP, browser, and CLI demand-start invoke
+this same no-argument desktop authority.
 
 For browser development, load `extension/` unpacked in Chromium 116 or newer. Its pinned key
 preserves the established development identity. The platform native-messaging host must point at
@@ -128,8 +131,9 @@ opens in a dedicated normal window rather than disrupting the user's active wind
   Either connector demand-starts its exact sibling service and keeps retrying.
 - **Workbench window is gone:** launch Ghostlight directly or open it from the tray. Closing the
   window destroys only that disposable surface; browser service and the tray remain available.
-- **Workbench cannot initialize:** the orchestrator continues headlessly; reconnect after fixing
-  the native WebView or tray environment.
+- **Workbench cannot initialize:** the orchestrator exits instead of leaving an invisible
+  authority. Fix the native WebView environment, then launch Ghostlight again. If only the tray is
+  unavailable, use the Applications entry or `ghostlight open`.
 - **Tools are absent:** re-check the registration in MCP integrations, then reconnect that MCP
   server in its own client.
 - **Browser is disconnected:** keep Ghostlight running, enable the matching extension, and inspect
