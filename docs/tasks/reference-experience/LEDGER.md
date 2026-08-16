@@ -6,11 +6,11 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 and S2 COMPLETE. The extension now distinguishes an absent native host.
-- Current stage: S3, adaptive familiarity. Orchestrator only.
-- Next action: add the environment module under `crates/orchestrator/src/language/`, resolve the
-  closed platform and desktop set plus WSL from the rules in `PINS.md`, and route install and
-  `doctor` phrasing through it.
+- State: S1, S2, and S3 COMPLETE.
+- Current stage: S4, terminal citizenship. Orchestrator, installer, and packaging.
+- Next action: implement the `~/.local/bin/ghostlight` ownership decided in ADR-0126 Decision 8,
+  author man pages and completions for the three siblings, make `--json` uniform, honor `NO_COLOR`,
+  and add the guard that every reportable state has a `doctor` line.
 - Blocking condition: none.
 - Source baseline: `dev` at `2f24943fa125d952fce9e4f11086aada762e4cad`.
 - Last green evidence: the baseline's recorded Windows current-source pass
@@ -48,8 +48,8 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 | --- | --- | --- | --- | --- |
 | S1 experience contract | COMPLETE | `9b537a14` | Decisions and pins only | ADR-0126; no behavior change |
 | S2 the second machine | COMPLETE | (this commit) | A new computer explains itself | Extension only |
-| S3 adaptive familiarity | READY | -- | Local desktop language | Includes WSL |
-| S4 terminal citizenship | NOT STARTED | -- | PATH, man, completions, `--json` | Depends on S3 |
+| S3 adaptive familiarity | COMPLETE | (this commit) | Local desktop language | Includes WSL |
+| S4 terminal citizenship | READY | -- | PATH, man, completions, `--json` | Depends on S3 |
 | S5 human runtime control | NOT STARTED | -- | Pause, resume, stop | Semantic change |
 | S6 At a glance | NOT STARTED | -- | One calm window | Depends on S4, S5 |
 | S7 readiness recovery | NOT STARTED | -- | Safe repair, exact refusal | Platform-asymmetric |
@@ -66,7 +66,7 @@ A prose assertion is not evidence. Link a commit, test, fixture, ADR, or dated r
 | --- | --- | --- | --- | --- |
 | Vocabulary and measures | S1 | Accepted ADR; reconciled 1.0 contracts; appended pins | COMPLETE | `9b537a14`: ADR-0126; `docs/1.0/INTENT.md` corrected; `PINS.md` S1 section |
 | Host-absent state | S2 | Distinguished state, both surfaces, offline route, tests | COMPLETE | `shared.linkState`; `extension/setup.html`; `extension/tests/onboarding.test.js`, 9 tests |
-| Platform and desktop table | S3 | One owner, closed set, WSL case, consumer parity, tests | NOT STARTED | -- |
+| Platform and desktop table | S3 | One owner, closed set, WSL case, consumer parity, tests | COMPLETE | `crates/orchestrator/src/language/environment.rs`, 8 tests; install and `doctor` both consume it |
 | Terminal citizenship | S4 | PATH ownership, man pages, completions, `--json`, doctor parity guard | NOT STARTED | -- |
 | Runtime control | S5 | One state machine, effect truth, deadline interaction, plural scopes | NOT STARTED | -- |
 | At a glance | S6 | All states, controls, keyboard, accessibility, redundant surface removed | NOT STARTED | -- |
@@ -108,7 +108,8 @@ stage that owns its removal.
 | Date | Stage | Commit | Automated gates | Live evidence | Result |
 | --- | --- | --- | --- | --- | --- |
 | 2026-08-16 | S1 | `9b537a14` | `cargo fmt --check` and `npm test --prefix extension` passed. Clippy and `cargo test` not rerun: no source changed | None required | PASS, documentation only |
-| 2026-08-16 | S2 | (this commit) | `npm test --prefix extension` 115 pass 0 fail (was 106); `node --check` on all four changed files; `cargo fmt --check`. Clippy and `cargo test` not rerun: no Rust source changed | Not yet observed in a live browser profile; owed before S8 | PASS |
+| 2026-08-16 | S2 | `a46a0db0` | `npm test --prefix extension` 115 pass 0 fail (was 106); `node --check` on all four changed files; `cargo fmt --check`. Clippy and `cargo test` not rerun: no Rust source changed | Not yet observed in a live browser profile; owed before S8 | PASS |
+| 2026-08-16 | S3 | (this commit) | `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test --workspace` 254 orchestrator library, 4 binary, 32 bridge, 6 MCP connector, 0 failed; `npm test --prefix extension` 115 pass; `node tests/process-journey.mjs`; `node tests/cli-journey.mjs` | Live `ghostlight doctor` on the Windows authoring host printed `Environment: Windows -- Ghostlight is in your notification area, and in the Start menu.` | PASS |
 
 ## Deviations and findings
 

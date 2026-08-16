@@ -304,8 +304,16 @@ fn finish_setup(install: bool, options: &SetupOptions, install_usable: bool) -> 
         anyhow::bail!("Ghostlight could not establish a usable browser registration");
     }
 
+    use ghostlight::language::environment;
+
     println!();
     println!("Ghostlight's local connection is ready.");
+    let here = environment::current();
+    println!("{}", here.location());
+    println!("{}", environment::BACKGROUND_POSTURE);
+    if let Some(caveat) = here.caveat() {
+        println!("{caveat}");
+    }
     println!("Browser extension: {EXTENSION_INSTALL_URL}");
     let automated = std::env::var_os("CI").is_some();
     match handoff::offer(options.dry_run, options.no_open, automated, install_usable) {
@@ -359,7 +367,15 @@ fn run_doctor(fix: bool) -> anyhow::Result<()> {
     use ghostlight::install::native_host::NativeHostRegistry;
     use ghostlight::install::HarnessRegistry;
 
+    use ghostlight::language::environment;
+
     println!("Ghostlight {} diagnostics", env!("CARGO_PKG_VERSION"));
+    // Same module as the install summary, so the two can never describe this machine differently.
+    let here = environment::current();
+    println!("Environment: {} -- {}", here.label(), here.location());
+    if let Some(caveat) = here.caveat() {
+        println!("Environment: {caveat}");
+    }
     let executable = std::env::current_exe()?;
     let directory = executable
         .parent()
