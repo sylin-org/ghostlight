@@ -16,6 +16,21 @@ use std::time::Duration;
 const ACTIVATION_RETRY_COUNT: usize = 20;
 const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
 
+/// Every subcommand a person is offered, in help order.
+///
+/// This is the list the shell completions must match. `native-host` is deliberately absent: it is
+/// the package-facing registration seam, not something to suggest at a prompt.
+const SUBCOMMANDS: &[&str] = &[
+    "open",
+    "install",
+    "uninstall",
+    "doctor",
+    "status",
+    "service",
+    "call",
+    "policy",
+];
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LaunchMode {
     Headless,
@@ -163,15 +178,15 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         }
     }
 
-    let man_pages = ghostlight::install::man_pages::ManPages::discover();
+    let user_assets = ghostlight::install::user_assets::UserAssets::discover();
     if !options.dry_run {
         let result = if install {
-            man_pages.install()?
+            user_assets.install()?
         } else {
-            man_pages.uninstall()?
+            user_assets.uninstall()?
         };
-        if result.report.state != ghostlight::install::man_pages::ManPageState::NotApplicable {
-            println!("Manual pages: {}", result.report.detail);
+        if result.report.state != ghostlight::install::user_assets::UserAssetState::NotApplicable {
+            println!("Documentation: {}", result.report.detail);
         }
     }
 
@@ -637,11 +652,15 @@ fn executable_name(name: &str) -> String {
     }
 }
 
-fn print_help() {
-    println!(
+fn help_text() -> String {
+    format!(
         "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight service                 Run the local authority without a window\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight policy validate <file>  Validate one schema-3 policy\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
         version = env!("CARGO_PKG_VERSION")
-    );
+    )
+}
+
+fn print_help() {
+    println!("{}", help_text());
 }
 
 fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
@@ -907,7 +926,11 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
     {
         Ok(LaunchMode::Headless)
     } else {
-        anyhow::bail!("unknown Ghostlight command; run 'ghostlight --help'")
+        // Naming what is available beats sending someone to --help to find out.
+        anyhow::bail!(
+            "unknown Ghostlight command; expected one of: {}",
+            SUBCOMMANDS.join(", ")
+        )
     }
 }
 
@@ -976,6 +999,51 @@ mod tests {
     use super::{
         launch_mode, select_install_browsers, LaunchMode, NativeHostCommand, SetupOptions,
     };
+
+    /// The shell completions offer exactly the subcommands the command line has.
+    ///
+    /// Each completion file declares its command list on one line with a fixed shape, so this reads
+    /// the real list rather than searching for words that might appear in a comment.
+    #[test]
+    fn completion_subcommands_match_the_parser() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packaging/linux/completions")
+            .canonicalize()
+            .expect("completion directory exists");
+        let expected = super::SUBCOMMANDS.join(" ");
+        for (file, prefix, suffix) in [
+            ("ghostlight.bash", "local commands=\"", "\""),
+            ("_ghostlight", "local -a ghostlight_commands=(", ")"),
+            ("ghostlight.fish", "set -l ghostlight_commands ", "\n"),
+        ] {
+            let source = std::fs::read_to_string(root.join(file)).expect("completion is readable");
+            let start = source
+                .find(prefix)
+                .unwrap_or_else(|| panic!("{file} declares no command list"))
+                + prefix.len();
+            let end = start
+                + source[start..]
+                    .find(suffix)
+                    .unwrap_or_else(|| panic!("{file} command list is unterminated"));
+            assert_eq!(
+                source[start..end].trim(),
+                expected,
+                "{file} offers a different command list than the command line has"
+            );
+        }
+    }
+
+    /// Every offered subcommand is documented in help, so the two surfaces cannot drift.
+    #[test]
+    fn help_documents_every_subcommand() {
+        let help = super::help_text();
+        for subcommand in super::SUBCOMMANDS {
+            assert!(
+                help.contains(&format!("ghostlight {subcommand}")),
+                "help does not document {subcommand}"
+            );
+        }
+    }
 
     /// Ghostlight's command line emits plain text on purpose.
     ///

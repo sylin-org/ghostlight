@@ -127,6 +127,27 @@ instead.
 .I ~/.local/share/applications/org.sylin.ghostlight.desktop
 The Applications entry the per-user installation owns.
 .TP
+.I ~/.local/share/man/man1
+Manual pages the per-user installation owns.
+.B man
+finds them because it searches
+.I ../share/man
+for every directory on PATH.
+.TP
+.I ~/.local/share/bash-completion/completions/ghostlight
+.TQ
+.I ~/.local/share/fish/vendor_completions.d/ghostlight.fish
+Shell completions the per-user installation owns. Both shells read these
+locations without configuration.
+.TP
+.I ~/.local/share/zsh/site-functions/_ghostlight
+The zsh completion. Zsh does not read this directory by default; add it to
+.B fpath
+in your
+.I .zshrc
+to use it. The Debian package installs into zsh's vendor directory instead,
+which needs no configuration.
+.TP
 .I $XDG_STATE_HOME/ghostlight
 Local state, including the append-only audit record.
 .TP

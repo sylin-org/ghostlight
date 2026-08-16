@@ -1,0 +1,60 @@
+#compdef ghostlight
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# Zsh completion for ghostlight.
+#
+# The command list below is checked against the command line's own list by a test in the
+# orchestrator. Adding a subcommand without adding it here fails that test.
+
+_ghostlight() {
+    local -a ghostlight_commands=(open install uninstall doctor status service call policy)
+
+    _arguments -C \
+        '1: :->command' \
+        '*:: :->argument'
+
+    case $state in
+        command)
+            _describe -t commands 'ghostlight command' ghostlight_commands
+            ;;
+        argument)
+            case $words[1] in
+                install)
+                    _arguments \
+                        '--dry-run[Show changes without writing them]' \
+                        '--browser[Select one supported browser]:browser:(chrome edge brave chromium)' \
+                        '--all-browsers[Select every supported browser]' \
+                        '--client[Select one MCP client]:client:' \
+                        '--all-clients[Include clients not currently detected]' \
+                        '--no-clients[Leave MCP client configuration unchanged]' \
+                        '--no-open[Do not open the extension walkthrough]'
+                    ;;
+                uninstall)
+                    _arguments \
+                        '--dry-run[Show changes without writing them]' \
+                        '--browser[Select one supported browser]:browser:(chrome edge brave chromium)'
+                    ;;
+                doctor)
+                    _arguments \
+                        '--json[Print one JSON document]' \
+                        '--fix[Apply ownership-safe repairs]' \
+                        '--verbose[Accepted and ignored]'
+                    ;;
+                status)
+                    _arguments '--json[Print one JSON document]'
+                    ;;
+                call)
+                    _arguments \
+                        '--json[Print the structured result]' \
+                        '--stdin[Run a batch over one session]' \
+                        '--output[Write bounded content to a file]:file:_files' \
+                        '--catalog[List the available browser tools]'
+                    ;;
+                policy)
+                    _values 'policy command' validate explain simulate keygen pubkey sign publish
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_ghostlight "$@"

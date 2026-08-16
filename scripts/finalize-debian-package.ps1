@@ -76,6 +76,25 @@ try {
         }
     }
 
+    # Shell completions, in the conventional vendor locations each shell already searches.
+    $completionSource = Join-Path $PSScriptRoot "../packaging/linux/completions"
+    foreach ($completion in @(
+            @{ file = "ghostlight.bash"; target = "usr/share/bash-completion/completions/ghostlight" },
+            @{ file = "_ghostlight"; target = "usr/share/zsh/vendor-completions/_ghostlight" },
+            @{ file = "ghostlight.fish"; target = "usr/share/fish/vendor_completions.d/ghostlight.fish" }
+        )) {
+        $from = Join-Path $completionSource $completion.file
+        if (-not (Test-Path -LiteralPath $from -PathType Leaf)) {
+            throw "Required shell completion is missing: $from"
+        }
+        $to = Join-Path $root $completion.target
+        $toDirectory = Split-Path -Parent $to
+        if (-not (Test-Path -LiteralPath $toDirectory -PathType Container)) {
+            New-Item -ItemType Directory -Path $toDirectory -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $from -Destination $to
+    }
+
     [System.IO.File]::WriteAllLines(
         (Join-Path $controlDirectory "conffiles"),
         $conffiles,
