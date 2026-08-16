@@ -6,12 +6,11 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S6 COMPLETE and gated on a Windows host. Linux verification V1 through V4 is
-  COMPLETE; V5 is next. S7 and S8 are not started.
+- State: S1 through S6 COMPLETE and gated on a Windows host. Linux verification V1 through V5 is
+  COMPLETE. S7 and S8 are not started.
 - Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages.
-- Next action: continue at V5 in [START-HERE-LINUX.md](START-HERE-LINUX.md). V1 proved the command
-  entry, V2 proved manual pages, V3 proved and repaired live shell completion, and V4 proved the
-  second-machine extension handoff. The remaining tasks stay ordered: V5, S7a, S7b, S7c, then S8.
+- Next action: continue at S7a in [START-HERE-LINUX.md](START-HERE-LINUX.md). V1 through V5 are
+  complete. The remaining tasks stay ordered: S7a, S7b, S7c, then S8.
   S7a is a governance-schema change and should start a fresh session.
 - Blocking condition: none.
 - Source baseline when the epic was reworked: `dev` at `2f24943f`.
@@ -156,6 +155,7 @@ than appended to a long session.
 | 2026-08-16 | V2 Linux manual pages | this commit | Rootless network-disabled Ubuntu 22.04 build with Rust 1.95.0 and Tauri CLI 2.11.0; current-source optimized workspace and Debian bundle; finalizer; Debian 12 `lintian`; package and per-user `man` rendering; full repository gate | The finalized 1.0.0 package has SHA-256 `20d85aca6d1932f544b55711d8498af73117a453e4aa98f383c854d4448a6c29`. All three compressed pages are present under `usr/share/man/man1`, and all three are in `md5sums`. Debian 12 `lintian` no longer reports any missing manual page; its remaining findings are the six browser-mandated `/etc/opt` paths and an embedded-libyaml string-table finding. All three package pages rendered. A disposable per-user install rendered all three through the owned PATH entry with `MANPATH` unset | PASS; deviation 5 resolved |
 | 2026-08-16 | V3 Linux shell completions | this commit | Current Debian payload and disposable per-user install; real bash 5.3, fish 4.8.1, and zsh 5.9 completion engines; focused zsh regression; full repository gate | The package contains all three conventional vendor paths and the per-user route contains all three XDG paths. Bash and fish offered exactly the eight accepted subcommands and their doctor flags. Zsh offered the commands but initially no options; tracing found that its first `_arguments -C` call shifted the subcommand context. The completion now captures and shifts the context explicitly, a guard protects that relationship, and real Tab completion offers `--fix`, `--json`, and `--verbose`. The documented `fpath=(~/.local/share/zsh/site-functions $fpath)` plus `compinit` instruction loaded the completer. The rebuilt package contains the byte-exact repaired zsh file and has SHA-256 `dbc2642a7d7f24042d806fd91766ea39a07b444991cd9696d7eb23132cff465b` | PASS; deviation 7 resolved; finding 14 fixed |
 | 2026-08-16 | V4 second-machine extension handoff | this commit | Real Chromium 151 on KDE Wayland; unpacked extension in a throwaway home with no native host; live popup and options pages through the browser debugging protocol; online and emulated-offline setup clicks; ordinary per-user native-host registration and browser restart; active installation diagnosis before and after | Both surfaces showed the exact not-installed sentence and `Set up Ghostlight`, and neither showed the waiting sentence. Online setup opened the canonical walkthrough. With the target offline, setup opened bundled `setup.html`; it reached `complete`, rendered the full instructions, and loaded no network resource. After the ordinary installer registered Chromium and the disposable browser restarted, both surfaces said connected and hid setup. The machine's working registration and service remained current throughout | PASS; deviation 2 resolved; finding 15 resolved |
+| 2026-08-16 | V5 Linux environment rows | this commit | Current debug `ghostlight doctor` on real KDE Plasma 6.7.4 Wayland; the same binary in a shell with unrecognized `XDG_CURRENT_DESKTOP=Hyprland`; full repository gate | The real desktop printed `Environment: Linux (KDE) -- Ghostlight is in your system tray and your Applications menu.` The unrecognized shell printed `Environment: Linux -- Ghostlight is in your Applications menu, and in your system tray if your desktop draws one.` GNOME is not installed on this host, so no live GNOME claim is made; the exhaustive unit guard still proves that its row contains no tray promise. The WSL row remains the Windows lane's evidence | PASS |
 
 ## Deviations and findings
 
