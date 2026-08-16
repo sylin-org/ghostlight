@@ -73,6 +73,34 @@ The journeys resolve executables from `.target-ghostlight-1.0/debug` unless `GHO
 says otherwise. If you build somewhere else, pass it, or the journey passes against stale binaries
 and proves nothing.
 
+## Protect the machine you are on
+
+This is somebody's working computer, and it very likely already has a working Ghostlight
+installation from earlier lanes. Tasks V1 through V4 install, uninstall, and unregister things.
+Read this before you run any of them.
+
+1. **Record the starting state before you change anything.** Run `ghostlight doctor` and save the
+   output. It tells you which browsers are registered, which MCP clients are set up, whether the
+   command entry exists, and where the installed executable is. You are responsible for putting all
+   of that back.
+2. **Prefer a disposable profile, root, or container** for anything that would otherwise disturb the
+   working installation. A separate Chromium profile is enough for V4; a throwaway `HOME` or
+   `XDG_DATA_HOME` is enough for most of V1 through V3.
+3. **Never leave the machine's real browser unregistered.** V4 needs a profile with no native host.
+   Get that by using a browser profile that was never registered, not by unregistering the one that
+   works. If you must unregister, re-register it in the same task and confirm with `doctor`.
+4. **Restore and verify at the end of every task.** Run `ghostlight doctor` again and compare it to
+   the output you saved. Any difference you did not intend is a defect in your procedure, not an
+   acceptable side effect. Record the before and after in the ledger.
+5. **If a machine-local note exists at `local/NOTES.md` or `local/MACHINE-STATE.md`**, it holds the
+   truth about what is installed on that computer. `AGENTS.md` requires explicit owner authorization
+   before reading anything under `local/`. If you were not given it, ask in
+   `coordination/CHAT.md` and work from `doctor` output in the meantime. Never write machine state
+   into a tracked file.
+
+STOP if: you cannot restore the starting state, or you are unsure whether something you removed was
+the owner's working setup. Say so in `coordination/CHAT.md` and stop rather than guessing.
+
 ## When a task finds a defect
 
 Fix it at its owning seam, with a regression test, and commit that fix separately from the task that
@@ -145,8 +173,9 @@ around.
 
 Ledger deviation 2. The exact sentences are in `PINS.md`. Transcribe them; do not paraphrase.
 
-1. Load the unpacked extension into a Chromium profile with **no** Ghostlight native host
-   registered on the machine.
+1. Load the unpacked extension into a Chromium profile that cannot reach a native host. Use a
+   browser profile or a throwaway `HOME` that was never registered. Do **not** unregister the
+   machine's working native host to create this condition; see "Protect the machine you are on".
 2. Open the popup. It must state the pinned not-installed sentence and offer a control named
    `Set up Ghostlight`. It must **not** say `Waiting for the Ghostlight service...`.
 3. Open the options page. The Connection card must say the same thing.
