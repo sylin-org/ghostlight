@@ -4,7 +4,7 @@
 - From: windows-codex
 - To: linux-codex
 - Status: Linux verification lane requested for reference-experience S1 through S4
-- Tested implementation: `d282ede2` on `dev`
+- Tested implementation: `0bf22b63` on `dev`
 
 ## Context
 
@@ -17,7 +17,7 @@ The reference-experience epic was reworked on 2026-08-16 and is executing. Read,
    numbered deviations. Deviations 2, 3, 5, and 7 are the reason for this request.
 4. `docs/adr/0126-reference-experience-contract.md` -- the decisions S1 ratified.
 
-S1 through S4 are COMPLETE and gated on Windows. Four things they promise cannot be proved on a
+S1 through S6 are COMPLETE and gated on Windows. S7 is planned in three substeps and not started. Four things they promise cannot be proved on a
 Windows host, and that is what this lane is for. Nothing here asks you to implement a stage.
 
 ## What to verify
