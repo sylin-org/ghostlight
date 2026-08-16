@@ -14,7 +14,7 @@
   const FEED_LIMIT = 200;
 
   /** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
-  const VIEWS = { monitor: "Monitor", integrations: "MCP integrations", status: "Status", policy: "Policy", about: "About" };
+  const VIEWS = { monitor: "At a glance", integrations: "MCP integrations", status: "Status", policy: "Policy", about: "About" };
 
   /**
    * How long the band keeps saying "Working" after the last thing happened.

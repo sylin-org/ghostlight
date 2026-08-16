@@ -6,11 +6,12 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S5 COMPLETE.
-- Current stage: S6, At a glance. Orchestrator and workbench.
-- Next action: one orchestrator-owned projection for the landing surface, rendering the readiness
-  answer first, with the workbench consuming the S4f state labels so `doctor` and the window use the
-  same words. ADR-0126 Decision 9 makes it the landing destination with no sixth added. S4 does not land coherently in one commit; its ordered substeps are in
+- State: S1 through S6 COMPLETE.
+- Current stage: S7, readiness recovery. Orchestrator.
+- Next action: implement the per-platform posture from ADR-0126 Decision 7. Register
+  `browser.startup` with `on_demand` on Windows and `manual` on Linux, find the one seam that knows
+  readiness failed, and make every wait bounded with an exact named failure. On Linux, diagnosis
+  without a launch is an acceptable completion. S4 does not land coherently in one commit; its ordered substeps are in
   the S4 section further down. Each substep is one commit and leaves a green tree.
 - Blocking condition: none. S4b's central behavior cannot be verified on a Windows host; see the
   substep note.
@@ -53,8 +54,8 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 | S3 adaptive familiarity | COMPLETE | (this commit) | Local desktop language | Includes WSL |
 | S4 terminal citizenship | COMPLETE | (this commit) | PATH, man, completions, `--json` | Six substeps, S4a-S4f |
 | S5 human runtime control | COMPLETE | (this commit) | Pause, resume, stop | Language and state; ADR-0126 D4-D6 |
-| S6 At a glance | READY | -- | One calm window | Depends on S4, S5 |
-| S7 readiness recovery | NOT STARTED | -- | Safe repair, exact refusal | Platform-asymmetric |
+| S6 At a glance | COMPLETE | (this commit) | One calm window | ADR-0126 D9 |
+| S7 readiness recovery | READY | -- | Safe repair, exact refusal | Platform-asymmetric |
 | S8 evaluation | NOT STARTED | -- | Evidence on real desktops | Depends on S1-S7 |
 
 Allowed values: `NOT STARTED`, `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`. At most one stage is
@@ -71,7 +72,7 @@ A prose assertion is not evidence. Link a commit, test, fixture, ADR, or dated r
 | Platform and desktop table | S3 | One owner, closed set, WSL case, consumer parity, tests | COMPLETE | `crates/orchestrator/src/language/environment.rs`, 8 tests; install and `doctor` both consume it |
 | Terminal citizenship | S4 | PATH ownership, man pages, completions, `--json`, doctor parity guard | COMPLETE | `command_path.rs`, `user_assets.rs`, `packaging/linux/{man,completions}`, four guard tests in `main.rs` |
 | Runtime control | S5 | One state machine, effect truth, deadline interaction, plural scopes | COMPLETE | `HUMAN_PAUSE_DIRECTIVE`/`HUMAN_STOP_DIRECTIVE` in `outcome.rs`; three governance tests; four language oracles; popup separation |
-| At a glance | S6 | All states, controls, keyboard, accessibility, redundant surface removed | NOT STARTED | -- |
+| At a glance | S6 | All states, controls, keyboard, accessibility, redundant surface removed | COMPLETE | `language/readiness.rs` with 6 tests; `ReadinessSummary` on the snapshot; three surface-journey assertions |
 | Readiness recovery | S7 | Per-platform posture, single flight, bounded waits, exact failures | NOT STARTED | -- |
 | Evaluation | S8 | Ubuntu GNOME lifecycle, Windows lane, migration cases, dispositions | NOT STARTED | -- |
 
@@ -136,6 +137,7 @@ now; when S6 reshapes the landing surface it must keep this guard passing rather
 | 2026-08-16 | S4e | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/7/32/6, 0 failed; `npm test --prefix extension` 115 pass; `bash -n` on the bash completion; PowerShell parse of the finalize script | An unknown subcommand now names the eight available ones. Completion guard verified against a negative control | PASS |
 | 2026-08-16 | S4f | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/9/32/6, 0 failed; `npm test --prefix extension` 115 pass | Live `ghostlight doctor` reads in plain words: `registered, needs an update` where it used to print `Updatable` | PASS |
 | 2026-08-16 | S5 | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 273/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on popup.js; process and CLI journeys | The two directives are pinned character for character against `PINS.md` | PASS |
+| 2026-08-16 | S6 | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 280/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on view.js and words.js; workbench-surface and process journeys | The vocabulary guard was verified against a negative control: reintroducing one word literal in view.js fails two assertions | PASS |
 
 ## Deviations and findings
 
@@ -201,6 +203,22 @@ and `attention_stays_distinct_from_a_human_pause`.
 `["held", "attention"].includes(...)` as `Agent browsing is PAUSED.`, which tells someone they
 paused Ghostlight when policy stopped it. ADR-0126 Decision 6 keeps the two apart, so attention now
 reads `Agent browsing is STOPPED and needs you.` A test fails if the two states are merged again.
+
+**11. The window was authoring the readiness answer.** `view.js` had `bandClass` and `bandWord`,
+which classified the aggregate state and chose its word in JavaScript. The Policy chip three lines
+below already carried the opposite rule in a comment: a surface that invents its own words is a
+second source of truth about the one thing that must have one. `language/readiness.rs` now owns the
+closed state, the word, the sentence, and the tone; the snapshot carries them; the window renders
+them. A guard fails if any readiness word reappears as a literal in `view.js`.
+
+**12. `doctor` has no readiness line, deliberately.** The S6 prompt asked that every front-door
+state have a `doctor` line in the same words. The aggregate answer needs live facts -- connected
+adapters, running operations, the current control state -- that `doctor` does not have, because it
+deliberately does not start or query the service. Inventing a line from partial facts would be the
+kind of confident wrong answer this epic exists to remove. The parity that was achievable is
+delivered instead: both surfaces draw every state word from Rust, and neither authors its own. If a
+readiness line in `doctor` is wanted later, it needs a decision about whether `doctor` may query a
+running service.
 
 ## Stage close checklist
 

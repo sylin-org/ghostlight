@@ -278,25 +278,15 @@
 
     /* --------------------------------- band ------------------------------- */
 
-    function bandClass(facts) {
-      if (!facts.connected) return "runtime-offline";
-      if (facts.runtime === "held" || facts.runtime === "ended") return "runtime-held";
-      if (facts.runtime === "attention") return "runtime-attention";
-      return facts.working ? "runtime-working" : "runtime-quiet";
-    }
-
-    function bandWord(name, runtime) {
-      if (name === "runtime-offline") return "Not connected";
-      if (name === "runtime-held") return runtime === "ended" ? "Session ended" : "Paused";
-      if (name === "runtime-attention") return "Needs you";
-      if (name === "runtime-working") return "Working";
-      return "Quiet";
-    }
-
+    // The answer and its words are the orchestrator's, not this window's. A surface that classifies
+    // its own readiness is a second source of truth about the one thing that must have exactly one,
+    // which is the same rule the Policy chip below already follows.
     function band(facts) {
-      const name = bandClass(facts);
+      const readiness = facts.snapshot?.readiness;
+      const name = readiness ? `runtime-${readiness.tone}` : "runtime-offline";
       document.body.className = name;
-      el["state-word"].textContent = bandWord(name, facts.runtime);
+      el["state-word"].textContent = readiness ? readiness.word : "";
+      el["state-word"].title = readiness ? readiness.detail : "";
 
       if (!facts.snapshot) {
         el["state-facts"].textContent = "";
@@ -318,7 +308,7 @@
       }
 
       const paused = facts.runtime !== "active";
-      el.wheel.disabled = !facts.connected;
+      el.wheel.disabled = !(facts.snapshot?.readiness?.invites_control ?? false);
       el.wheel.dataset.intent = facts.runtime === "ended" ? "start_session" : paused ? "resume" : "hold";
       el["wheel-label"].textContent = facts.runtime === "ended" ? "Start session" : paused ? "Resume" : "Pause";
       el["wheel-icon"].innerHTML = paused

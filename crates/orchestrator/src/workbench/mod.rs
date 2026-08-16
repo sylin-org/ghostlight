@@ -24,6 +24,7 @@ use crate::install::{
     HarnessSummary,
 };
 use crate::language::outcome::Observed;
+use crate::language::readiness;
 use crate::workspace::WorkspaceStore;
 
 const HISTORY_LIMIT: usize = 500;
@@ -385,14 +386,22 @@ impl WorkbenchFacade {
         // Read the sequence after gathering, so a snapshot never claims to be newer than it is.
         // A change published mid-assembly is re-delivered and applied idempotently by key.
         let seq = self.projection.current_seq();
+        let runtime_state = self.governance.runtime_state();
         WorkbenchSnapshot {
             seq,
             generated_at_ms: unix_ms(),
             service: ServiceSummary {
                 version: env!("CARGO_PKG_VERSION").into(),
                 started_at_ms: self.started_at_ms,
-                runtime_state: self.governance.runtime_state(),
+                runtime_state,
             },
+            readiness: ReadinessSummary::resolve(&readiness::ReadinessFacts {
+                browser_connected: !browsers.is_empty(),
+                session_ended: runtime_state == RuntimeControlState::Ended,
+                paused: runtime_state == RuntimeControlState::Held,
+                needs_attention: runtime_state == RuntimeControlState::Attention,
+                working: !operations.is_empty(),
+            }),
             overview: OverviewSummary {
                 active_sessions: sessions.len(),
                 active_operations: operations.len(),
@@ -432,8 +441,8 @@ impl WorkbenchFacade {
         for (id, title, detail, view) in [
             (
                 "monitor",
-                "Monitor",
-                "Live actions, connected clients and browsers, and recorded work",
+                "At a glance",
+                "Whether Ghostlight is ready, what is running, and what just happened",
                 SearchDestination::Activity,
             ),
             (
@@ -884,6 +893,8 @@ pub struct WorkbenchSnapshot {
     pub generated_at_ms: u64,
     /// Service identity and control state.
     pub service: ServiceSummary,
+    /// The one aggregate answer the front door leads with.
+    pub readiness: ReadinessSummary,
     /// At-a-glance counts.
     pub overview: OverviewSummary,
     /// Admitted MCP sessions.
@@ -911,6 +922,40 @@ pub struct ServiceSummary {
     pub started_at_ms: u64,
     /// Authoritative runtime control state.
     pub runtime_state: RuntimeControlState,
+}
+
+/// The aggregate answer plus the words for it, authored once by the orchestrator.
+///
+/// The surface renders these fields. It does not decide which state holds, and it does not author
+/// the word: a window that invents its own readiness vocabulary is a second source of truth about
+/// the one thing that must have exactly one.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ReadinessSummary {
+    /// The closed state.
+    pub state: readiness::Readiness,
+    /// The word to show.
+    pub word: String,
+    /// One sentence explaining the word.
+    pub detail: String,
+    /// Presentation tone, so the surface styles without classifying.
+    pub tone: String,
+    /// Whether the front door should offer runtime control here.
+    pub invites_control: bool,
+}
+
+impl ReadinessSummary {
+    /// Resolve the answer and carry its words.
+    #[must_use]
+    pub fn resolve(facts: &readiness::ReadinessFacts) -> Self {
+        let state = readiness::resolve(facts);
+        Self {
+            state,
+            word: state.word().to_owned(),
+            detail: state.detail().to_owned(),
+            tone: state.tone().to_owned(),
+            invites_control: state.invites_control(),
+        }
+    }
 }
 
 /// At-a-glance counts.

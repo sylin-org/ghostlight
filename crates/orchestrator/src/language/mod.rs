@@ -3,6 +3,7 @@
 pub mod capability_map;
 pub mod environment;
 pub mod outcome;
+pub mod readiness;
 #[path = "catalog.rs"]
 mod tool_catalog;
 

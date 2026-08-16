@@ -57,6 +57,16 @@ const snapshot = () => ({
     manual_setup: "[mcp_servers.ghostlight]"
   }],
   diagnostics: [],
+  // The aggregate answer is the orchestrator's, exactly like the policy sentence below. The
+  // fixture carries a word the window has no way to compute, so a surface that authored its own
+  // would visibly disagree with this.
+  readiness: {
+    state: "ready",
+    word: "Ready",
+    detail: "Connected and idle. Agents can work when they ask.",
+    tone: "quiet",
+    invites_control: true
+  },
   configuration: {
     local_policy_configured: true,
     local_policy_active: true,
@@ -326,6 +336,27 @@ const checks = [
       && rosterHtml.includes('data-harness-manual="qwen-code"'),
     `roster: ${JSON.stringify(rosterHtml)}`],
   ["failed automatic setup opens the target's manual route", failedSetupManual.open],
+  ["the front door renders the orchestrator's readiness answer and never authors one",
+    nodes.get("state-word").textContent === "Ready"
+      && nodes.get("state-word").title === "Connected and idle. Agents can work when they ask."
+      && sandbox.document.body.className === "runtime-quiet",
+    `readiness: ${JSON.stringify({ word: nodes.get("state-word").textContent, tone: sandbox.document.body.className })}`],
+  ["the window contains no readiness vocabulary of its own",
+    (() => {
+      const source = readFileSync(join(ui, "lib", "view.js"), "utf8");
+      // Every word belongs to crates/orchestrator/src/language/readiness.rs. A literal here would
+      // be a second source of truth for the one answer the front door exists to give.
+      return !["Not connected", "Session ended", "Needs you", "Working", "Quiet"]
+        .some((word) => source.includes(`"${word}"`));
+    })(),
+    "view.js authors a readiness word"],
+  ["control follows the projection rather than a locally derived connection",
+    (() => {
+      const source = readFileSync(join(ui, "lib", "view.js"), "utf8");
+      return source.includes("readiness?.invites_control")
+        && !source.includes("el.wheel.disabled = !facts.connected");
+    })(),
+    "the wheel derives its own availability"],
   ["the policy tab is a tab, keeps its name, and carries the authored state behind it",
     markup.includes('class="tab policy-state"')
       && !ids.includes("policy-state-label")
