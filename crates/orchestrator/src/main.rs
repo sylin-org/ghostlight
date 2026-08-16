@@ -148,6 +148,21 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         print_native_host_report(&result.report);
     }
 
+    let command_path = ghostlight::install::command_path::CommandPath::discover();
+    if options.dry_run {
+        print_command_path_report(&command_path.check()?);
+    } else {
+        let result = if install {
+            command_path.install()?
+        } else {
+            command_path.uninstall()?
+        };
+        if result.report.state != ghostlight::install::command_path::CommandPathState::NotApplicable
+        {
+            print_command_path_report(&result.report);
+        }
+    }
+
     let desktop = DesktopIntegration::discover();
     if options.dry_run {
         print_desktop_integration_report(&desktop.check()?);
@@ -372,6 +387,7 @@ struct DoctorObservation {
     binaries: Vec<(PathBuf, bool)>,
     sibling_set_ready: bool,
     native_host: ghostlight::install::native_host::NativeHostReport,
+    command_path: ghostlight::install::command_path::CommandPathReport,
     desktop: ghostlight::install::desktop_entry::DesktopIntegrationReport,
     harnesses: Vec<ghostlight::install::HarnessSummary>,
     runtime: RuntimeObservation,
@@ -406,6 +422,7 @@ fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         binaries,
         sibling_set_ready,
         native_host: NativeHostRegistry::discover().check()?,
+        command_path: ghostlight::install::command_path::CommandPath::discover().check()?,
         desktop: DesktopIntegration::discover().check()?,
         harnesses: HarnessRegistry::discover().refresh()?,
         runtime: observe_runtime(),
@@ -435,6 +452,7 @@ fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         );
     }
     print_native_host_report(&observation.native_host);
+    print_command_path_report(&observation.command_path);
     print_desktop_integration_report(&observation.desktop);
     for harness in &observation.harnesses {
         println!(
@@ -469,6 +487,7 @@ fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
             .collect::<Vec<_>>(),
         "browser_connector": observation.native_host.connector.display().to_string(),
         "browsers": observation.native_host.browsers,
+        "command": observation.command_path,
         "applications": observation.desktop,
         "mcp_clients": observation.harnesses,
         "service": runtime_document(&observation.runtime),
@@ -569,6 +588,22 @@ fn print_native_host_report(report: &ghostlight::install::native_host::NativeHos
             browser.name, browser.package, browser.package_detail, browser.state, browser.detail
         );
     }
+}
+
+fn print_command_path_report(report: &ghostlight::install::command_path::CommandPathReport) {
+    use ghostlight::install::command_path::CommandPathState;
+
+    if report.state == CommandPathState::NotApplicable {
+        // Still name the executable: a person on a system package or on Windows needs the path as
+        // much as anyone else does.
+        println!("Command: {}", report.executable.display());
+        return;
+    }
+    println!(
+        "Command: {} -- {}",
+        report.executable.display(),
+        report.detail
+    );
 }
 
 fn print_desktop_integration_report(

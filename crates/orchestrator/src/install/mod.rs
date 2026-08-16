@@ -1,6 +1,7 @@
 //! Explicit, ownership-checked development-harness registration owned by the orchestrator.
 
 pub mod browser_package;
+pub mod command_path;
 pub mod desktop_entry;
 pub mod handoff;
 pub mod migration;
