@@ -6,13 +6,17 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S7 and Linux verification V1 through V5 are COMPLETE. S8 is next.
+- State: S1 through S7 and Linux verification V1 through V5 are COMPLETE. S8 is BLOCKED at its
+  mandatory real-desktop boundary.
 - Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages.
-- Next action: execute S8 from [S8-evaluation.md](S8-evaluation.md).
-- Blocking condition: none.
+- Next action: run Ubuntu GNOME Wayland L1-L9 and the clean installed-Windows journey, then resume
+  the remaining S8 migration, accessibility, public-feedback, and disposition rows from
+  [the dated evaluation](../../testing/reference-experience-evaluation-2026-08-16.md).
+- Blocking condition: this CachyOS KDE Wayland host has no GNOME installation and is not Windows.
+  S8 forbids substituting it for either required lane.
 - Source baseline when the epic was reworked: `dev` at `2f24943f`.
-- Last green evidence: every stage commit below passed the gate commands in `PINS.md` on Windows.
-  What a Windows host cannot prove is recorded in the deviations and delegated to the Linux lane.
+- Last green evidence: every implementation and Linux verification commit below passed the gate
+  commands in `PINS.md`; the dated S8 attempt repeated them before recording the desktop blocker.
 
 ## Provenance
 
@@ -49,8 +53,8 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 | S4 terminal citizenship | COMPLETE | `61f18bd9`..`d282ede2` | PATH, man, completions, `--json` | Six substeps, S4a-S4f |
 | S5 human runtime control | COMPLETE | `efc15783` | Pause, resume, stop | Language and state; ADR-0126 D4-D6 |
 | S6 At a glance | COMPLETE | `124a5557` | One calm window | ADR-0126 D9 |
-| S7 readiness recovery | COMPLETE | this commit | Safe repair, exact refusal | Three green substeps, S7a-S7c |
-| S8 evaluation | NOT STARTED | -- | Evidence on real desktops | Depends on S1-S7 |
+| S7 readiness recovery | COMPLETE | `fb9845b` | Safe repair, exact refusal | Three green substeps, S7a-S7c |
+| S8 evaluation | BLOCKED | -- | Evidence on real desktops | Required Ubuntu GNOME and installed Windows lanes unavailable on this host |
 
 Allowed values: `NOT STARTED`, `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`. At most one stage is
 `IN PROGRESS`.
@@ -68,7 +72,7 @@ A prose assertion is not evidence. Link a commit, test, fixture, ADR, or dated r
 | Runtime control | S5 | One state machine, effect truth, deadline interaction, plural scopes | COMPLETE | `HUMAN_PAUSE_DIRECTIVE`/`HUMAN_STOP_DIRECTIVE` in `outcome.rs`; three governance tests; four language oracles; popup separation |
 | At a glance | S6 | All states, controls, keyboard, accessibility, redundant surface removed | COMPLETE | `language/readiness.rs` with 6 tests; `ReadinessSummary` on the snapshot; three surface-journey assertions |
 | Readiness recovery | S7 | Per-platform posture, single flight, bounded waits, exact failures | COMPLETE | S7a: registered startup posture and workbench choice. S7b: one executor seam, deterministic installation diagnosis, per-scope single flight, closed failures, manual-mode outcome, and process-level disabled-launch coverage. S7c: safe owned-registration repair, direct ordinary executable with no arguments, ADR-0082 graphical-session proof on Linux, bounded inbound-adapter wait, and cancellation cleanup |
-| Evaluation | S8 | Ubuntu GNOME lifecycle, Windows lane, migration cases, dispositions | NOT STARTED | -- |
+| Evaluation | S8 | Ubuntu GNOME lifecycle, Windows lane, migration cases, dispositions | BLOCKED | [Dated S8 evaluation](../../testing/reference-experience-evaluation-2026-08-16.md): local evidence inventoried; required desktop lanes and owner disposition remain |
 
 ## Decision register
 
@@ -156,6 +160,7 @@ than appended to a long session.
 | 2026-08-16 | S7a browser startup setting | this commit | `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 291/10/32/6, 0 failed; 116 extension tests; policy-grammar and workbench-surface journeys; isolated workspace build; process and CLI journeys | Schema 3 accepts only `on_demand` and `manual`; non-string and unknown values fail. Defaults are `on_demand` on Windows and `manual` on Linux. The effective projection composes organization and user values, with organization `manual` pinning the result. The workbench renders and authors one closed two-option select. The active guide and organization fixture carry the new grammar. No recovery or browser launch behavior was added in this substep | PASS |
 | 2026-08-16 | S7b browser recovery decision | this commit | `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 299/10/32/6, 0 failed; 116 extension tests; `node --check tests/process-journey.mjs`; isolated workspace build; process and CLI journeys | The executor's browser-target seam is the sole recovery caller. Installation inspection reuses the native package, Snap, and Flatpak diagnosis; ambiguity names candidates; simultaneous requests join one decision attempt per scope; cancellation leaves no active flight; and manual mode performs no launch. A real no-browser CLI call on CachyOS KDE Wayland returned `failed`, `effect: none`, reason `browser_startup_manual`, and one start-browser next step in 53 ms. The active installed service and browser registration were unchanged | PASS |
 | 2026-08-16 | S7c bounded browser launch | this commit | `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 301/10/34/6, 0 failed; 116 extension tests; isolated workspace build; process and CLI journeys | The selected native executable is launched directly with no arguments, preserving the ordinary profile and adding no automation flag. An owned stale registration is the only repairable state. Linux launch requires a graphical display plus a real, owner-private same-user runtime directory resolved at the shared ADR-0082 seam; otherwise it returns an exact no-effect launch diagnosis. Launch and adapter wait remain one per-scope flight inside the caller deadline. Cancellation clears it; exhaustion reports `browser_handshake_timeout`. The Linux default remains manual and its 53 ms live no-browser outcome from S7b is the platform completion allowed by ADR-0126 D7. No Windows host was available for a physical launch; that lane remains explicit S8 evidence | PASS on the Linux completion path; Windows live evidence owed in S8 |
+| 2026-08-16 | S8 evaluation attempt | this commit | `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 301/10/34/6, 0 failed; 116 extension tests; isolated workspace build; process, CLI, and 39-assertion workbench-surface journeys | Host inspection reports CachyOS, KDE, Wayland, with no `gnome-shell`; no Windows host is available. The existing Ubuntu L1-L9 record remains entirely `NOT RUN`, and the existing Windows record explicitly excludes installed lifecycle work. The dated evaluation dispositions every ADR-0126 measure at the evidence currently available and names the exact unblock sequence | BLOCKED by the S8 STOP condition; no platform substitution |
 
 ## Deviations and findings
 
@@ -270,6 +275,12 @@ the browser's ordinary per-user directory. A file-access trace proved the two pa
 final run used a throwaway `HOME` with Chromium's normal profile location, so the ordinary installer
 and browser shared the production path shape. The no-host state, registration, restart, and
 connected state then passed without changing the machine's working registration.
+
+**16. S8 cannot run its required desktops on the current host.** The available machine is CachyOS
+KDE Wayland with no GNOME installation, and it cannot execute the installed Windows lane. The S8
+STOP condition and ADR-0123 forbid treating this complementary desktop as Ubuntu GNOME evidence.
+Disposition: S8 remains `BLOCKED`; the exact missing journeys and acceptance rows are recorded in
+`docs/testing/reference-experience-evaluation-2026-08-16.md`.
 
 ## Stage close checklist
 

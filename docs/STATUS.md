@@ -18,7 +18,7 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 The owner-approved product direction is the staged
 [reference-experience task batch](tasks/reference-experience/). It was authored on 2026-08-15,
 reworked on 2026-08-16, and is executing. The
-[ledger](tasks/reference-experience/LEDGER.md) is the authority on progress and carries fifteen
+[ledger](tasks/reference-experience/LEDGER.md) is the authority on progress and carries sixteen
 numbered deviations; [ADR-0126](adr/0126-reference-experience-contract.md) carries the decisions.
 
 The aim is that Ghostlight behaves as one product across every machine a person uses: the same
@@ -55,8 +55,16 @@ nothing. S7c added the bounded physical attempt: safe repair only for stale Ghos
 registration, direct launch of the chosen installed executable with no arguments, Linux graphical
 session proof through the ADR-0082 seam, and a bounded wait for the inbound adapter. Cancellation
 leaves no recovery flight behind. The Linux default remains manual; a real no-browser call returned
-its exact useful outcome with no effect. S8 is next and is split between the owed Ubuntu GNOME
-Wayland lifecycle and a Windows live-launch lane.
+its exact useful outcome with no effect. S8 is split between the owed Ubuntu GNOME Wayland
+lifecycle and a Windows live-launch lane.
+
+S8 is `BLOCKED`, not complete. The available host is CachyOS KDE Wayland with no GNOME
+installation, and no Windows host is available. Its prompt forbids substituting this host for the
+release-blocking Ubuntu GNOME Wayland L1-L9 or installed-Windows journeys. The
+[dated evaluation](testing/reference-experience-evaluation-2026-08-16.md) inventories the passing
+automated and KDE evidence, dispositions every ADR-0126 acceptance measure at its current level,
+and lists the exact desktop, migration, accessibility, public-feedback, and owner decisions still
+required.
 
 **1.0 waits for this epic.** The owner decided on 2026-08-16 that the release does not go out ahead
 of it, so the epic's completion is a release gate. Practically, that means S8's evidence is release
