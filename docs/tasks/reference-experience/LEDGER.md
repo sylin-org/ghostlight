@@ -8,9 +8,10 @@ every commit, and when closing or blocking a stage.
 
 - State: S1 through S6 COMPLETE.
 - Current stage: S7, readiness recovery. Orchestrator.
-- Next action: S7a, below. S7 does not land coherently in one commit; its ordered substeps are in
-  the S7 section further down. S7a is a governance-schema change and should start a fresh session
-  rather than continue a long one. S4 does not land coherently in one commit; its ordered substeps are in
+- Next action: the Linux lane owns the rest. Its entry point is
+  [START-HERE-LINUX.md](START-HERE-LINUX.md): five verification tasks for work already landed, then
+  S7a, S7b, S7c, then S8. S7a is a governance-schema change and should start a fresh session.
+- Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages. S4 does not land coherently in one commit; its ordered substeps are in
   the S4 section further down. Each substep is one commit and leaves a green tree.
 - Blocking condition: none. S4b's central behavior cannot be verified on a Windows host; see the
   substep note.

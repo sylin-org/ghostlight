@@ -88,6 +88,12 @@ Higher wins. An unanticipated conflict is a STOP condition, not a judgment call.
 - Preserve every supported MCP protocol era. Making a current harness work by breaking an older one
   is a STOP condition.
 
+## Working in parallel
+
+The Linux lane has its own entry point: [START-HERE-LINUX.md](START-HERE-LINUX.md). It is
+self-contained and carries the verification tasks that a Windows host cannot prove, plus S7 and S8.
+Cross-session handoffs go through `coordination/INSTRUCTIONS.md`.
+
 ## Stage sequence
 
 One task, one commit, one green tree. Every prefix of this list leaves the product usable.
