@@ -409,7 +409,7 @@ mod tests {
         assert!(first.changed);
         assert_eq!(first.report.state, DesktopIntegrationState::Current);
         let source = fs::read_to_string(context.desktop_entry()).unwrap();
-        assert!(source.contains(&format!("Exec=\"{}\" open", context.executable.display())));
+        assert_eq!(source, render_desktop_entry(&context.executable));
         assert_eq!(fs::read(context.icon()).unwrap(), ICON);
         assert!(!apply_install(&context).unwrap().changed);
 
@@ -439,9 +439,10 @@ mod tests {
             DesktopIntegrationState::Updatable
         );
         assert!(apply_install(&context).unwrap().changed);
-        assert!(fs::read_to_string(entry)
-            .unwrap()
-            .contains(&context.executable.to_string_lossy().into_owned()));
+        assert_eq!(
+            fs::read_to_string(entry).unwrap(),
+            render_desktop_entry(&context.executable)
+        );
         fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 

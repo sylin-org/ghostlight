@@ -404,7 +404,7 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
         .into_iter()
         .map(|name| context.config.join("kilo").join(name))
         .find(|path| path.exists())
-        .unwrap_or_else(|| context.config.join("kilo/kilo.json"));
+        .unwrap_or_else(|| context.config.join("kilo").join("kilo.json"));
     let cline_file = "settings/cline_mcp_settings.json";
     let mut rows = vec![
         row(
@@ -2051,6 +2051,11 @@ mod tests {
         let directory = temporary("roster-artwork-manual");
         let context = context(&directory);
         let connector = context.connector.to_string_lossy().into_owned();
+        let serialized_connector = serde_json::to_string(&connector).unwrap();
+        let escaped_connector = serialized_connector
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .unwrap();
         let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/integrations");
         let registry = HarnessRegistry::with_context(context);
         for summary in registry.summaries() {
@@ -2061,7 +2066,7 @@ mod tests {
             );
             assert_eq!(summary.connector_command, connector);
             assert!(
-                summary.manual_setup.contains(&connector),
+                summary.manual_setup.contains(escaped_connector),
                 "manual setup for {} omitted the connector",
                 summary.id
             );
@@ -2095,7 +2100,7 @@ mod tests {
     fn kilo_prefers_current_config_names_and_accepts_a_located_jsonc_file() {
         let directory = temporary("kilo-current-config");
         let context = context(&directory);
-        let current = context.config.join("kilo/kilo.jsonc");
+        let current = context.config.join("kilo").join("kilo.jsonc");
         fs::create_dir_all(current.parent().unwrap()).unwrap();
         fs::write(&current, "{}\n").unwrap();
         let registry = HarnessRegistry::with_context(context.clone());
