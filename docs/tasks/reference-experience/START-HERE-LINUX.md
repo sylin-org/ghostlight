@@ -6,6 +6,15 @@ here or in the files this points to.
 
 Work on branch `dev`. Do not create other branches.
 
+## Before your first task
+
+    git fetch origin dev
+    git status --short
+
+If `dev` is behind `origin/dev`, fast-forward it. If the working tree is dirty and the changes are
+not yours, stop and say so in `coordination/CHAT.md` rather than stashing or discarding anything.
+Never reset, clean, or check out over work you did not create.
+
 ## Read these first, in this order, before you touch anything
 
 1. `AGENTS.md` -- how this repository works and what is forbidden in it.
@@ -26,7 +35,7 @@ Higher wins. A conflict you did not expect is a STOP condition, not a judgment c
 4. Accepted ADRs.
 5. This file and the stage prompt it sends you to.
 
-## Environment facts, true as of `51464595` on 2026-08-16
+## Environment facts, true as of `0db4fcab` on 2026-08-16
 
 Re-read the tree before relying on any of these. They are a starting point, not a promise.
 
@@ -63,6 +72,15 @@ When your change touches process startup, the CLI, or the workbench surface, als
 The journeys resolve executables from `.target-ghostlight-1.0/debug` unless `GHOSTLIGHT_BIN_DIR`
 says otherwise. If you build somewhere else, pass it, or the journey passes against stale binaries
 and proves nothing.
+
+## When a task finds a defect
+
+Fix it at its owning seam, with a regression test, and commit that fix separately from the task that
+found it. A verification task that finds a defect has succeeded, not failed.
+
+Do not fix a defect by changing the test, the pin, or the documentation to match the behavior. If
+the behavior and a pin disagree, the pin wins and the behavior is the defect, unless the pin is
+wrong -- in which case STOP and say so in `coordination/CHAT.md` rather than editing it.
 
 ## Your tasks, in this order
 
@@ -166,7 +184,7 @@ Pinned by ADR-0126 Decision 7:
 
 This is the first string-valued setting in the manifest, so you are adding a shape, not just a key.
 Work through: `validate_config` in `manifest.rs`, a string accessor beside `boolean_setting`, the
-effective-authority projection in `governance/effective.rs`, the workbench policy editor, and the
+effective-authority projection in `crates/orchestrator/src/governance/effective.rs`, the workbench policy editor, and the
 policy grammar fixtures under `examples/` and `tests/policy-grammar.mjs`.
 
 Tests to add, by name:
@@ -237,9 +255,14 @@ open and you say so.
 4. Add the named tests with the pinned assertions.
 5. Run every gate command.
 6. Commit once, with a conventional-commit message that says what changed and why.
-7. Update `docs/tasks/reference-experience/LEDGER.md`: the `RESUME HERE` block, the stage or substep
-   row, the evidence matrix, and the gate log with the counts you actually observed. Add a numbered
-   deviation for anything you found, skipped, or could not prove.
+7. Update `docs/tasks/reference-experience/LEDGER.md`:
+   - the `RESUME HERE` block, always;
+   - the gate log, with the counts and evidence you actually observed;
+   - for S7a, S7b, S7c, and S8: the stage or substep row and the evidence matrix;
+   - for V1 through V5: the numbered deviation each one closes. V1 closes deviation 3, V2 closes 5,
+     V3 closes 7, V4 closes 2. Mark it resolved with what you observed, or leave it open and say
+     what is still missing. V5 has no deviation; record it in the gate log.
+   - a new numbered deviation for anything you found, skipped, or could not prove.
 
 ## Never do these
 
