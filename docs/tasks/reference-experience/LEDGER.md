@@ -6,10 +6,11 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: READY. No production behavior has changed through this epic.
-- Current stage: S1, the experience contract.
-- Next action: read the ADRs S1 names, audit the journeys it lists, write the decision record, and
-  append the decided values to `PINS.md`.
+- State: S1 COMPLETE. No production behavior has changed yet.
+- Current stage: S2, the second machine. Extension only.
+- Next action: classify the connection as connected, unreachable, or host-absent in the service
+  worker; render the pinned sentences and the setup route in both surfaces; add the bundled offline
+  setup page; add `extension/tests/onboarding.test.js` with the seven named tests.
 - Blocking condition: none.
 - Source baseline: `dev` at `2f24943fa125d952fce9e4f11086aada762e4cad`.
 - Last green evidence: the baseline's recorded Windows current-source pass
@@ -45,8 +46,8 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 
 | Stage | Status | Closing commit | Checkpoint | Notes |
 | --- | --- | --- | --- | --- |
-| S1 experience contract | READY | -- | Decisions and pins only | No behavior change |
-| S2 the second machine | NOT STARTED | -- | A new computer explains itself | Extension only |
+| S1 experience contract | COMPLETE | (this commit) | Decisions and pins only | ADR-0126; no behavior change |
+| S2 the second machine | READY | -- | A new computer explains itself | Extension only |
 | S3 adaptive familiarity | NOT STARTED | -- | Local desktop language | Includes WSL |
 | S4 terminal citizenship | NOT STARTED | -- | PATH, man, completions, `--json` | Depends on S3 |
 | S5 human runtime control | NOT STARTED | -- | Pause, resume, stop | Semantic change |
@@ -63,7 +64,7 @@ A prose assertion is not evidence. Link a commit, test, fixture, ADR, or dated r
 
 | Area | Stage | Required evidence | Status | Evidence |
 | --- | --- | --- | --- | --- |
-| Vocabulary and measures | S1 | Accepted ADR; reconciled 1.0 contracts; appended pins | NOT STARTED | -- |
+| Vocabulary and measures | S1 | Accepted ADR; reconciled 1.0 contracts; appended pins | COMPLETE | ADR-0126; `docs/1.0/INTENT.md` corrected; `PINS.md` S1 section |
 | Host-absent state | S2 | Distinguished state, both surfaces, offline route, tests | NOT STARTED | -- |
 | Platform and desktop table | S3 | One owner, closed set, WSL case, consumer parity, tests | NOT STARTED | -- |
 | Terminal citizenship | S4 | PATH ownership, man pages, completions, `--json`, doctor parity guard | NOT STARTED | -- |
@@ -78,22 +79,35 @@ Open questions, owned by a stage. Not conclusions to assume early.
 
 | Decision | Stage | State | Resolution |
 | --- | --- | --- | --- |
-| Does a hold keep the caller pending or keep refusing, and what happens at caller timeout | S1/S5 | OPEN | -- |
-| How `Attention` and `StartSession` map onto pause, resume, and stop | S1/S5 | OPEN | -- |
-| How a held operation interacts with the ADR-0113 deadline and quarantine | S1/S5 | OPEN | -- |
-| Whether a held state survives workbench close, reconnect, and restart | S1/S5 | OPEN | -- |
-| Owner and default of the browser-startup preference, and whether it joins registered policy settings | S1/S7 | OPEN | -- |
-| Whether the per-user route owns `~/.local/bin/ghostlight` or only reports the path | S1/S4 | OPEN | -- |
-| Whether At a glance replaces Monitor or becomes a new destination | S1/S6 | OPEN | -- |
-| Acceptance thresholds for first use, recovery, and comprehension | S1/S8 | OPEN | -- |
+| Does a hold keep the caller pending or keep refusing, and what happens at caller timeout | S1/S5 | CLOSED | Refuses, non-terminally, with a pinned directive. ADR-0126 D4 |
+| How `Attention` and `StartSession` map onto pause, resume, and stop | S1/S5 | CLOSED | Kept distinct. ADR-0126 D6 |
+| How a held operation interacts with the ADR-0113 deadline and quarantine | S1/S5 | CLOSED | Not applicable; nothing waits. ADR-0126 D4 |
+| Whether a held state survives workbench close, reconnect, and restart | S1/S5 | CLOSED | Survives close and reconnect, not restart. ADR-0126 D6 |
+| Owner and default of the browser-startup preference, and whether it joins registered policy settings | S1/S7 | CLOSED | `browser.startup`, registered setting, `on_demand` on Windows and `manual` on Linux. ADR-0126 D7 |
+| Whether the per-user route owns `~/.local/bin/ghostlight` or only reports the path | S1/S4 | CLOSED | Owns it, ownership-checked, plus prints the absolute path. ADR-0126 D8 |
+| Whether At a glance replaces Monitor or becomes a new destination | S1/S6 | CLOSED | Replaces the landing; no sixth destination. ADR-0126 D9 |
+| Acceptance thresholds for first use, recovery, and comprehension | S1/S8 | CLOSED | ADR-0126 D10 |
 | Whether 1.0 publishes before this epic lands | owner | PROVISIONAL: yes | -- |
 | Whether the in-page affordance returns | owner | PROVISIONAL: deferred | -- |
+
+## What this epic makes redundant
+
+Recorded by S1 so later stages remove duplication rather than adding to it. Each entry names the
+stage that owns its removal.
+
+| Redundant thing | Where | Owning stage |
+| --- | --- | --- |
+| The undifferentiated `Waiting for the Ghostlight service...` state, once host-absence is a distinct classification | `extension/popup.js`, `extension/options.html` | S2 |
+| Any per-call-site phrasing of where Ghostlight lives or how it starts | install and `doctor` output | S3 |
+| Any second copy of a state's wording that `doctor` and the workbench both need | `doctor` and `crates/orchestrator/ui/` | S4, S6 |
+| The Monitor landing as a separate concept from the readiness answer | `crates/orchestrator/ui/index.html`, `app.js` | S6 |
+| Any surface-local inference about whether Ghostlight is paused | all surfaces | S5 |
 
 ## Gate and evaluation log
 
 | Date | Stage | Commit | Automated gates | Live evidence | Result |
 | --- | --- | --- | --- | --- | --- |
-| -- | -- | -- | -- | -- | -- |
+| 2026-08-16 | S1 | (this commit) | `cargo fmt --check` and `npm test --prefix extension` passed. Clippy and `cargo test` not rerun: no source changed | None required | PASS, documentation only |
 
 ## Deviations and findings
 

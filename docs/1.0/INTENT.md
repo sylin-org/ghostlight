@@ -73,9 +73,13 @@ Internal browser commands are combined when a person experiences them as one job
 - Every Linux install has an Applications entry. It uses the explicit `ghostlight open` intent,
   which demand-starts the same backgrounded authority when absent and then reveals it through the
   existing authenticated activation seam. A tray is never the only route to the workbench.
-- Three destinations and one global search reach every workbench surface and user-visible record.
-  The monitor carries the current action in full and the recent ones beneath it, so a glance is
-  enough.
+- Five destinations and one global search reach every workbench surface and user-visible record:
+  Monitor, Integrations, Status, Policy, and About. Monitor is where the window opens; it carries
+  the current action in full and the recent ones beneath it, so a glance is enough.
+- ADR-0126 Decision 9 accepts that the landing destination becomes At a glance, leading with whether
+  Ghostlight is ready, connected, working, paused, recovering, or in need of attention, with the
+  action queue beneath that answer and no sixth destination added. That is a decision, not yet the
+  tree: it is delivered by the reference-experience epic's S6.
 
 ## Desktop workbench experience
 
@@ -100,6 +104,11 @@ Headless operation is an explicit service-only mode, not the ordinary installed 
   the explicit end-session intent through the same governance owner used by browser and MCP flows.
 - Pause, resume, and start-session apply from the persistent header beside the connection state
   and match the tray, so taking the wheel has one affordance rather than several.
+- A pause prevents the next browser effect by refusing it at the existing final boundary. It does
+  not suspend an invocation or hold a client's request open, because a human-scale pause outlives
+  MCP request timeouts and would compete with the ADR-0113 deadline. The refusal is non-terminal and
+  says so; stop is terminal and says that. ADR-0126 Decisions 4 through 6 fix both directives and
+  keep the four-member state vocabulary, with the wording delivered by the epic's S5.
 - Important blocked and attention-required facts may produce quiet, deduplicated OS notifications.
   Routine successful work does not.
 - The orchestrator publishes sequenced changes, so the surface shows work as it happens instead of

@@ -110,15 +110,47 @@ sufficient.
 recognized entry onto a closed set. Recognize `gnome`, `kde`, `xfce`, `cinnamon`, and `mate`.
 Anything else, including an unset variable, is the unknown case and must have its own honest phrase.
 
-## What is deliberately not pinned
+## Appended by S1 (ADR-0126, 2026-08-16)
 
-S1 decides these and appends them here. No other stage may assume them.
+Every item previously listed as not pinned is decided below. ADR-0126 carries the reasoning; this
+section carries the values.
 
-- Whether a hold keeps the caller pending or continues to refuse, and what happens at the caller's
-  timeout.
-- How `Attention` and `StartSession` map onto the user-visible pause, resume, and stop words.
-- The name, owner, and default of the browser-startup preference, and whether it joins the
-  registered policy settings or is a separate closed choice.
-- The name, owner, and default of any page-presence preference.
-- The exact acceptance thresholds for first use, recovery, and comprehension.
-- Whether the per-user route creates `~/.local/bin/ghostlight` or only reports the absolute path.
+**Pause is a refusal, not a held caller** (ADR-0126 Decision 4). A hold refuses the next effect at
+the existing final boundary. No invocation is suspended and no client request is held open. The
+refusal is non-terminal and begins with exactly:
+
+    The user paused Ghostlight. Wait for further instructions.
+
+A caller timeout and a caller disconnect are terminal for that invocation and may never leave work
+to continue later. There is no deadline reconciliation to implement, because no operation waits.
+
+**State vocabulary** (ADR-0126 Decision 6). The four domain states keep their names and render as:
+
+| State | Word shown to a person |
+| --- | --- |
+| `Active` | working |
+| `Held` | paused |
+| `Attention` | needs attention |
+| `Ended` | stopped |
+
+`Attention` is never collapsed into the human pause. `StartSession` is presented as starting a new
+session, never as resuming. A hold is process-lifetime state: it survives workbench close, browser
+reconnect, and harness reconnect, and does not survive an orchestrator restart.
+
+**Browser startup** (ADR-0126 Decision 7). Registered policy setting `browser.startup`, closed
+values `on_demand` and `manual`, an operational control rather than a security boundary. Default is
+`on_demand` on Windows and `manual` on Linux. A launch uses the person's ordinary profile with no
+automation flags. A sandboxed package is diagnosed, never launched.
+
+**PATH entry** (ADR-0126 Decision 8). The per-user route owns `~/.local/bin/ghostlight`, created
+only when that path is absent or already Ghostlight-owned, byte-identical on repeat install, removed
+on uninstall, never overwriting a foreign file. Shell startup files are never edited. Every
+successful install also prints the absolute command path.
+
+**Landing destination** (ADR-0126 Decision 9). At a glance replaces Monitor as the landing
+destination. The window keeps five destinations; no sixth is added.
+
+**Page presence.** No preference is pinned, because the in-page affordance is deferred out of this
+epic to `docs/design/in-page-affordance-deferred-2026-08.md`.
+
+**Acceptance measures** are ADR-0126 Decision 10. S8 dispositions each one.
