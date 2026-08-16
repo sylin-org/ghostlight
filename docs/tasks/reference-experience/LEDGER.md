@@ -8,10 +8,9 @@ every commit, and when closing or blocking a stage.
 
 - State: S1 through S6 COMPLETE.
 - Current stage: S7, readiness recovery. Orchestrator.
-- Next action: implement the per-platform posture from ADR-0126 Decision 7. Register
-  `browser.startup` with `on_demand` on Windows and `manual` on Linux, find the one seam that knows
-  readiness failed, and make every wait bounded with an exact named failure. On Linux, diagnosis
-  without a launch is an acceptable completion. S4 does not land coherently in one commit; its ordered substeps are in
+- Next action: S7a, below. S7 does not land coherently in one commit; its ordered substeps are in
+  the S7 section further down. S7a is a governance-schema change and should start a fresh session
+  rather than continue a long one. S4 does not land coherently in one commit; its ordered substeps are in
   the S4 section further down. Each substep is one commit and leaves a green tree.
 - Blocking condition: none. S4b's central behavior cannot be verified on a Windows host; see the
   substep note.
@@ -122,6 +121,21 @@ Ordered so every prefix is coherent and green.
 
 S4f is the substep that couples forward to S6. Today's reportable set is what the workbench renders
 now; when S6 reshapes the landing surface it must keep this guard passing rather than weaken it.
+
+## S7 substeps
+
+S7 begins with a policy-schema change and ends with spawning a browser on someone's desktop. Those
+belong in different commits, and the last one cannot be proved by a unit test at all.
+
+| Substep | Scope | Verifiable without a live desktop |
+| --- | --- | --- |
+| S7a | Register `browser.startup` with the closed values `on_demand` and `manual` in the policy manifest, per ADR-0126 Decision 7: typo-closed validation, per-platform defaults, organization ceiling behavior, the workbench editor's grouped toggles, and the policy grammar fixtures | Yes |
+| S7b | The decision layer: find the one seam that learns readiness failed, choose a browser only from deterministic evidence, reuse the existing Snap and Flatpak diagnosis, refuse ambiguity by naming candidates, and return one useful outcome in `manual` mode. Single-flight guard included | Yes |
+| S7c | The launch itself: spawn the chosen browser with the person's ordinary profile and no automation flags, wait bounded for the adapter, and name the exact failure on exhaustion. Windows first; Linux only if a session environment resolves through the ADR-0082 seam, and diagnosis-only is an acceptable Linux completion | **No.** Spawning a browser is not a unit test. Windows live proof is owner or windows-codex; Linux is the S8 lane |
+
+S7a is a governance-surface change: it touches the manifest validator, the effective-authority
+projection, the workbench policy editor, and the documented policy grammar. Start it fresh rather
+than appended to a long session.
 
 ## Gate and evaluation log
 
