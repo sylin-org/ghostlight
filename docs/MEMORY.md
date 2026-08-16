@@ -33,6 +33,17 @@ the owner wants, and what this project learned the hard way.
   seam; change it there. Restore a green checkpoint before proposing the change.
 - **Fewest meaningful moving parts.** A logical boundary does not earn a process, crate, service,
   event bus, actor system, workflow engine, CQRS split, or registry.
+- **Invisible when healthy, legible on demand.** Installation and ordinary browser work should
+  succeed without a workbench ritual. Safe recovery is automatic and bounded at its owning seam;
+  At a glance, controls, preferences, diagnostics, and CLI depth appear progressively. Behavior
+  that can unexpectedly change the user's environment or attention, such as opening a browser or
+  drawing on a page, has one small closed preference.
+- **Ghostlight owns mechanism, not the user's larger intent.** It understands canonical browser
+  operations, authority, lifecycle, observable browser state, and effect truth. It does not infer
+  that a generic click or write means booking, buying, sending, or another task-level consequence.
+- **Human runtime control is authoritative.** Pause prevents the next browser effect and holds the
+  live caller for as long as its transport permits. Stop is terminal and tells the controller:
+  `The user asked to interrupt the process. Wait for further instructions.`
 - **One normal desktop startup.** Installed Ghostlight always creates its tray and starts the
   workbench backgrounded: minimized on Windows and hidden on Linux. Connectors launch that same
   executable with no mode flag. Only explicit `--headless` omits desktop presentation.

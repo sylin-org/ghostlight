@@ -12,8 +12,8 @@ It is a map, not a source of truth: where this table and a ledger disagree, the 
 
 Ghostlight's internals were rebuilt clean-room on 2026-08-10 in `bf4f4724`, which removed the old
 root binary, core, transport, lightbox, and extension mechanisms. **Every batch below except
-`outcome-language` and `executor-split` was authored and executed against those removed
-internals.** Their file paths,
+`reference-experience`, `outcome-language`, and `executor-split` was authored and executed against
+those removed internals.** Their file paths,
 module names, and code excerpts describe an implementation that no longer exists in the working
 tree, though it remains in Git history.
 
@@ -26,7 +26,8 @@ tree.
 
 | Batch | What it was | Where its ledger stops | Last touched |
 | --- | --- | --- | --- |
-| [executor-split](executor-split/) | Splitting `work/mod.rs` (5824 lines) into per-operation-family files | Authored, READY; nothing executed | 2026-08-15 |
+| [reference-experience](reference-experience/) | Progressive reveal, automatic readiness, human runtime control, At a glance, and the branded browser doorway | Authored, READY at S1; nothing executed | 2026-08-16 |
+| [executor-split](executor-split/) | Splitting `work/mod.rs` (5824 lines) into per-operation-family files | Complete | 2026-08-15 |
 | [outcome-language](outcome-language/) | ADR-0103: one module owns what Ghostlight says happened | Complete | 2026-08-11 |
 | [browser-kernel](browser-kernel/) | ADR-0101: canonical browser operations, native surface, compatibility adapter | Open at stage R5 | 2026-08-08 |
 | [public-delight-0.8](public-delight-0.8/) | The public surfaces of the 0.8 release | E1-E6 complete; 0.8 in its observation loop | 2026-08-07 |

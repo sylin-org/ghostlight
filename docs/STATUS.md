@@ -13,6 +13,22 @@ last fetch.
 The repository carries exactly two branches, `main` and `dev`, as of 2026-08-13. The topology is
 linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 
+## Reference experience epic
+
+The owner-approved product direction is captured as the staged
+[reference-experience task batch](tasks/reference-experience/). It is READY at S1 and has not
+changed production behavior.
+
+The epic moves the center of delight away from setup surfaces and toward invisible ordinary use,
+bounded automatic readiness recovery, one truthful pause/resume/stop contract, a calm At a glance
+workbench front door, and a small optional branded doorway on controlled pages. It explicitly keeps
+Ghostlight at the mechanism boundary: canonical browser operations, authority, lifecycle, and
+effect truth belong here; inferred user-task meaning does not.
+
+Execution must keep the DDD modular monolith, the minimum number of meaningful moving parts, and
+complexity centralized at the seam where each fact becomes knowable. S1 is the next action: audit
+the current journeys and ratify the experience contract and measures before implementation.
+
 ## RAWX and managed-policy restoration
 
 The 1.0 policy product is restored on current orchestrator seams through `44f84eae`.
