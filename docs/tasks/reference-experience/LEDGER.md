@@ -6,12 +6,12 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S6 COMPLETE and gated on a Windows host. Linux verification V1 through V3 is
-  COMPLETE; V4 is next. S7 and S8 are not started.
+- State: S1 through S6 COMPLETE and gated on a Windows host. Linux verification V1 through V4 is
+  COMPLETE; V5 is next. S7 and S8 are not started.
 - Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages.
-- Next action: continue at V4 in [START-HERE-LINUX.md](START-HERE-LINUX.md). V1 proved the command
-  entry, V2 proved manual pages, and V3 proved and repaired live shell completion on Linux. The
-  remaining tasks stay ordered: V4, V5, S7a, S7b, S7c, then S8.
+- Next action: continue at V5 in [START-HERE-LINUX.md](START-HERE-LINUX.md). V1 proved the command
+  entry, V2 proved manual pages, V3 proved and repaired live shell completion, and V4 proved the
+  second-machine extension handoff. The remaining tasks stay ordered: V5, S7a, S7b, S7c, then S8.
   S7a is a governance-schema change and should start a fresh session.
 - Blocking condition: none.
 - Source baseline when the epic was reworked: `dev` at `2f24943f`.
@@ -155,6 +155,7 @@ than appended to a long session.
 | 2026-08-16 | V1 Linux command entry | this commit | Seven focused command-entry tests; `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 286/9/32/6, 0 failed; 116 extension tests; isolated workspace build; process, CLI, and workbench-surface journeys | CachyOS KDE Wayland, ordinary per-user install in a disposable home: a new bash process ran `ghostlight doctor --json`; repeat install was byte-identical; foreign file and symlink survived install and uninstall byte-for-byte; uninstall removed only the owned entry; the real bash, zsh, profile, and fish startup-file hashes did not change; the active installed diagnosis matched before and after. No `/usr/bin/ghostlight` package was available, so the already-unit-proved not-applicable package row remains part of V2 | PASS; deviation 3 resolved |
 | 2026-08-16 | V2 Linux manual pages | this commit | Rootless network-disabled Ubuntu 22.04 build with Rust 1.95.0 and Tauri CLI 2.11.0; current-source optimized workspace and Debian bundle; finalizer; Debian 12 `lintian`; package and per-user `man` rendering; full repository gate | The finalized 1.0.0 package has SHA-256 `20d85aca6d1932f544b55711d8498af73117a453e4aa98f383c854d4448a6c29`. All three compressed pages are present under `usr/share/man/man1`, and all three are in `md5sums`. Debian 12 `lintian` no longer reports any missing manual page; its remaining findings are the six browser-mandated `/etc/opt` paths and an embedded-libyaml string-table finding. All three package pages rendered. A disposable per-user install rendered all three through the owned PATH entry with `MANPATH` unset | PASS; deviation 5 resolved |
 | 2026-08-16 | V3 Linux shell completions | this commit | Current Debian payload and disposable per-user install; real bash 5.3, fish 4.8.1, and zsh 5.9 completion engines; focused zsh regression; full repository gate | The package contains all three conventional vendor paths and the per-user route contains all three XDG paths. Bash and fish offered exactly the eight accepted subcommands and their doctor flags. Zsh offered the commands but initially no options; tracing found that its first `_arguments -C` call shifted the subcommand context. The completion now captures and shifts the context explicitly, a guard protects that relationship, and real Tab completion offers `--fix`, `--json`, and `--verbose`. The documented `fpath=(~/.local/share/zsh/site-functions $fpath)` plus `compinit` instruction loaded the completer. The rebuilt package contains the byte-exact repaired zsh file and has SHA-256 `dbc2642a7d7f24042d806fd91766ea39a07b444991cd9696d7eb23132cff465b` | PASS; deviation 7 resolved; finding 14 fixed |
+| 2026-08-16 | V4 second-machine extension handoff | this commit | Real Chromium 151 on KDE Wayland; unpacked extension in a throwaway home with no native host; live popup and options pages through the browser debugging protocol; online and emulated-offline setup clicks; ordinary per-user native-host registration and browser restart; active installation diagnosis before and after | Both surfaces showed the exact not-installed sentence and `Set up Ghostlight`, and neither showed the waiting sentence. Online setup opened the canonical walkthrough. With the target offline, setup opened bundled `setup.html`; it reached `complete`, rendered the full instructions, and loaded no network resource. After the ordinary installer registered Chromium and the disposable browser restarted, both surfaces said connected and hid setup. The machine's working registration and service remained current throughout | PASS; deviation 2 resolved; finding 15 resolved |
 
 ## Deviations and findings
 
@@ -169,9 +170,13 @@ packaging. Disposition: allowlist entry added, plus a test that fails if a futur
 added without packaging it. Evidence: `the bundled setup page is packaged for the store build` in
 `extension/tests/onboarding.test.js`.
 
-**2. S2's live observation is owed.** The prompt asked for an eyes-on check in a Chromium profile
-with no native host registered. The authoring host has Ghostlight installed and registered, so that
-check was not run. Disposition: carried into S8's migration cases, where it is already required.
+**2. RESOLVED by V4 on Linux.** Real Chromium loaded the unpacked extension from a throwaway home
+with no native host. The popup and options page both showed the exact not-installed sentence and a
+`Set up Ghostlight` control, never the waiting sentence. The online control opened the canonical
+walkthrough. The same control with its target offline opened bundled `setup.html`, which reached a
+complete document with the full instructions and no network resources. After an ordinary per-user
+registration and browser restart, both surfaces said connected and hid setup. The machine's real
+registration was never removed or changed, and its diagnosis matched afterward.
 
 **3. RESOLVED by V1 on Linux.** All seven command-entry tests ran on CachyOS rather than returning
 early. An ordinary per-user install in a disposable home created exactly
@@ -258,6 +263,13 @@ subcommand, which shifted `words` and `CURRENT`; the later branch therefore depe
 helper state. The function now chooses `words[2]` first, then shifts once into the subcommand
 context before describing its options. A source guard fails if either relationship regresses, and
 real zsh Tab completion now offers `--fix`, `--json`, and `--verbose`.
+
+**15. V4's first disposable profile used a nonstandard Chromium data directory.** Chromium resolves
+native-host manifests under an explicit `--user-data-dir`, while the installer correctly registers
+the browser's ordinary per-user directory. A file-access trace proved the two paths differed. The
+final run used a throwaway `HOME` with Chromium's normal profile location, so the ordinary installer
+and browser shared the production path shape. The no-host state, registration, restart, and
+connected state then passed without changing the machine's working registration.
 
 ## Stage close checklist
 
