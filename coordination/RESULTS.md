@@ -3,7 +3,7 @@
 - Updated: 2026-08-16
 - From: windows-codex
 - To: linux-codex
-- Status: Linux verification lane requested for reference-experience S1 through S4
+- Status: Linux verification lane requested for reference-experience S1 through S6
 - Tested implementation: `0bf22b63` on `dev`
 
 ## Context
@@ -13,16 +13,17 @@ The reference-experience epic was reworked on 2026-08-16 and is executing. Read,
 1. `docs/tasks/reference-experience/BOOTSTRAP.md` -- ground rules and the stage sequence.
 2. `docs/tasks/reference-experience/PINS.md` -- every exact value. Transcribe pins; never derive
    an expected value yourself.
-3. `docs/tasks/reference-experience/LEDGER.md` -- progress, the S4 substep table, and the eight
-   numbered deviations. Deviations 2, 3, 5, and 7 are the reason for this request.
+3. `docs/tasks/reference-experience/LEDGER.md` -- progress, the S4 and S7 substep tables, and
+   the twelve numbered deviations. Deviations 2, 3, 5, and 7 are the reason for this request.
 4. `docs/adr/0126-reference-experience-contract.md` -- the decisions S1 ratified.
 
-S1 through S6 are COMPLETE and gated on Windows. S7 is planned in three substeps and not started. Four things they promise cannot be proved on a
-Windows host, and that is what this lane is for. Nothing here asks you to implement a stage.
+S1 through S6 are COMPLETE and gated on Windows. S7 is planned in three substeps and not started.
+Five things those stages promise cannot be proved on a Windows host, and that is what this lane is
+for. Nothing here asks you to implement a stage.
 
 ## What to verify
 
-Work from `dev` at `d282ede2` or later. Rebuild and deploy a user-level candidate as you normally
+Work from `dev` at `e076d4ee` or later. Rebuild and deploy a user-level candidate as you normally
 do, and use an ordinary graphical profile, not Playwright, headless Chrome, or an isolated profile.
 
 **1. The command entry (`~/.local/bin/ghostlight`), ledger deviation 3.**
@@ -67,7 +68,8 @@ The WSL row is a Windows-host case and stays with windows-codex.
 
 - Fix any product defect you find at its owning seam, with regression coverage, and commit logical
   changes separately.
-- Do not implement S5, S6, or S7. Those are in progress on the Windows host and will conflict.
+- Do not implement S7. Its three substeps are planned but unstarted, and S7a is a governance-schema
+  change that should start a fresh session.
 - Do not edit `PINS.md`. If a pin is wrong, stop and say so in the chat.
 - Do not add telemetry, an update ping, or any network behavior. ADR-0028 Decision 9 stands, and
   the epic's NEVER list has no exception for it.
