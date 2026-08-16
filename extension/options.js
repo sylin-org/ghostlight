@@ -9,6 +9,14 @@
   const linkPill = document.getElementById("link-pill");
   const linkText = document.getElementById("link-text");
   const linkSub = document.getElementById("link-sub");
+  const setupRoute = document.getElementById("setup-route");
+
+  setupRoute.addEventListener("click", () => {
+    const destination = navigator.onLine
+      ? "https://sylin.org/ghostlight/chromium-extension/post-install/"
+      : chrome.runtime.getURL("setup.html");
+    chrome.tabs.create({ url: destination }).catch(() => {});
+  });
 
   async function request(message) {
     const response = await chrome.runtime.sendMessage(message);
@@ -29,6 +37,10 @@
       linkPill.className = "pill on";
       linkText.textContent = "Connected";
       linkSub.textContent = "The agent can reach this browser.";
+    } else if (snapshot.link_state === "host_absent") {
+      linkPill.className = "pill wait";
+      linkText.textContent = "Not installed here";
+      linkSub.textContent = "Ghostlight is not installed on this computer yet. The extension came with your Chrome profile. Install Ghostlight here to connect it.";
     } else {
       linkPill.className = "pill wait";
       linkText.textContent = snapshot.compatible ? "Waiting" : "Version mismatch";
@@ -36,6 +48,7 @@
         ? "Waiting for the Ghostlight service. Start it, and this turns green on its own."
         : "The extension and Ghostlight service cannot communicate until their adapter contracts match.";
     }
+    setupRoute.hidden = snapshot.link_state !== "host_absent";
   }
 
   async function load() {

@@ -165,6 +165,25 @@
     return chosen ? bounded(chosen, BROWSER_NAME_MAX) : null;
   }
 
+  // Chrome reports a missing native-messaging host through the disconnect reason, which is the one
+  // local signal that separates "Ghostlight was never installed on this computer" from "the service
+  // is not running right now". A browser profile syncs the extension onto a new machine; the native
+  // host does not travel with it, so this is the ordinary state on a second computer, not an edge
+  // case. The match is a narrowing hint on Chrome's wording, never a contract: anything we do not
+  // recognize stays the ordinary unreachable state, because a vague answer beats a wrong one.
+  const NATIVE_HOST_ABSENT_MARKER = "native messaging host not found";
+
+  const LINK_CONNECTED = "connected";
+  const LINK_UNREACHABLE = "unreachable";
+  const LINK_HOST_ABSENT = "host_absent";
+
+  function linkState({ connected, compatible, lastError }) {
+    if (connected && compatible) return LINK_CONNECTED;
+    const reason = typeof lastError === "string" ? lastError.toLowerCase() : "";
+    if (reason.includes(NATIVE_HOST_ABSENT_MARKER)) return LINK_HOST_ABSENT;
+    return LINK_UNREACHABLE;
+  }
+
   function heartbeatAcknowledgement(frame) {
     if (frame?.kind !== "heartbeat"
       || !Number.isSafeInteger(frame.sequence)
@@ -187,6 +206,11 @@
     activityLabel,
     browserEventFrame,
     browserName,
-    heartbeatAcknowledgement
+    heartbeatAcknowledgement,
+    NATIVE_HOST_ABSENT_MARKER,
+    LINK_CONNECTED,
+    LINK_UNREACHABLE,
+    LINK_HOST_ABSENT,
+    linkState
   });
 });

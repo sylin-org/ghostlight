@@ -100,6 +100,13 @@ function uiSnapshot() {
     recording_tabs: recording.count(),
     unseen_denials: presentationQueue.size(),
     activity: Array.from(activity.values()).slice(-8),
+    // Classified from the raw reason before it is generalized below, so surfaces get the closed
+    // value and never the message text.
+    link_state: shared.linkState({
+      connected: liveState.connected,
+      compatible: liveState.compatible,
+      lastError: liveState.last_error
+    }),
     last_error: preferences.diagnostics ? liveState.last_error : liveState.last_error ? "The local Ghostlight service is unavailable." : null
   };
 }

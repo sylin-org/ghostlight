@@ -6,11 +6,11 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 COMPLETE. No production behavior has changed yet.
-- Current stage: S2, the second machine. Extension only.
-- Next action: classify the connection as connected, unreachable, or host-absent in the service
-  worker; render the pinned sentences and the setup route in both surfaces; add the bundled offline
-  setup page; add `extension/tests/onboarding.test.js` with the seven named tests.
+- State: S1 and S2 COMPLETE. The extension now distinguishes an absent native host.
+- Current stage: S3, adaptive familiarity. Orchestrator only.
+- Next action: add the environment module under `crates/orchestrator/src/language/`, resolve the
+  closed platform and desktop set plus WSL from the rules in `PINS.md`, and route install and
+  `doctor` phrasing through it.
 - Blocking condition: none.
 - Source baseline: `dev` at `2f24943fa125d952fce9e4f11086aada762e4cad`.
 - Last green evidence: the baseline's recorded Windows current-source pass
@@ -46,9 +46,9 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 
 | Stage | Status | Closing commit | Checkpoint | Notes |
 | --- | --- | --- | --- | --- |
-| S1 experience contract | COMPLETE | (this commit) | Decisions and pins only | ADR-0126; no behavior change |
-| S2 the second machine | READY | -- | A new computer explains itself | Extension only |
-| S3 adaptive familiarity | NOT STARTED | -- | Local desktop language | Includes WSL |
+| S1 experience contract | COMPLETE | `9b537a14` | Decisions and pins only | ADR-0126; no behavior change |
+| S2 the second machine | COMPLETE | (this commit) | A new computer explains itself | Extension only |
+| S3 adaptive familiarity | READY | -- | Local desktop language | Includes WSL |
 | S4 terminal citizenship | NOT STARTED | -- | PATH, man, completions, `--json` | Depends on S3 |
 | S5 human runtime control | NOT STARTED | -- | Pause, resume, stop | Semantic change |
 | S6 At a glance | NOT STARTED | -- | One calm window | Depends on S4, S5 |
@@ -64,8 +64,8 @@ A prose assertion is not evidence. Link a commit, test, fixture, ADR, or dated r
 
 | Area | Stage | Required evidence | Status | Evidence |
 | --- | --- | --- | --- | --- |
-| Vocabulary and measures | S1 | Accepted ADR; reconciled 1.0 contracts; appended pins | COMPLETE | ADR-0126; `docs/1.0/INTENT.md` corrected; `PINS.md` S1 section |
-| Host-absent state | S2 | Distinguished state, both surfaces, offline route, tests | NOT STARTED | -- |
+| Vocabulary and measures | S1 | Accepted ADR; reconciled 1.0 contracts; appended pins | COMPLETE | `9b537a14`: ADR-0126; `docs/1.0/INTENT.md` corrected; `PINS.md` S1 section |
+| Host-absent state | S2 | Distinguished state, both surfaces, offline route, tests | COMPLETE | `shared.linkState`; `extension/setup.html`; `extension/tests/onboarding.test.js`, 9 tests |
 | Platform and desktop table | S3 | One owner, closed set, WSL case, consumer parity, tests | NOT STARTED | -- |
 | Terminal citizenship | S4 | PATH ownership, man pages, completions, `--json`, doctor parity guard | NOT STARTED | -- |
 | Runtime control | S5 | One state machine, effect truth, deadline interaction, plural scopes | NOT STARTED | -- |
@@ -107,14 +107,25 @@ stage that owns its removal.
 
 | Date | Stage | Commit | Automated gates | Live evidence | Result |
 | --- | --- | --- | --- | --- | --- |
-| 2026-08-16 | S1 | (this commit) | `cargo fmt --check` and `npm test --prefix extension` passed. Clippy and `cargo test` not rerun: no source changed | None required | PASS, documentation only |
+| 2026-08-16 | S1 | `9b537a14` | `cargo fmt --check` and `npm test --prefix extension` passed. Clippy and `cargo test` not rerun: no source changed | None required | PASS, documentation only |
+| 2026-08-16 | S2 | (this commit) | `npm test --prefix extension` 115 pass 0 fail (was 106); `node --check` on all four changed files; `cargo fmt --check`. Clippy and `cargo test` not rerun: no Rust source changed | Not yet observed in a live browser profile; owed before S8 | PASS |
 
 ## Deviations and findings
 
 Number every deviation. Record the owning seam, the disposition, and the evidence. Do not silently
 widen a stage or work around a broken assumption.
 
-None.
+**1. S2 touched a file outside the extension.** The stage was scoped to `extension/`, but
+`extension/setup.html` is a new runtime file and `scripts/package-extension.ps1` builds the store ZIP
+from an explicit allowlist. Without that one-line addition the page would work unpacked and be
+absent from the published extension, which is the worst version of the feature. Owning seam:
+packaging. Disposition: allowlist entry added, plus a test that fails if a future surface file is
+added without packaging it. Evidence: `the bundled setup page is packaged for the store build` in
+`extension/tests/onboarding.test.js`.
+
+**2. S2's live observation is owed.** The prompt asked for an eyes-on check in a Chromium profile
+with no native host registered. The authoring host has Ghostlight installed and registered, so that
+check was not run. Disposition: carried into S8's migration cases, where it is already required.
 
 ## Stage close checklist
 

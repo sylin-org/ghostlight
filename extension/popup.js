@@ -9,7 +9,11 @@
   const releaseDebuggerButton = document.getElementById("release-debugger-button");
   const attentionSection = document.getElementById("attention-section");
   const attentionList = document.getElementById("attention-list");
+  const setupSection = document.getElementById("setup-section");
+  const setupRoute = document.getElementById("setup-route");
   const captions = document.getElementById("captions-toggle");
+  const HOST_ABSENT = "host_absent";
+  const NOT_INSTALLED_HERE = "Ghostlight is not installed on this computer yet.";
   let latestSnapshot = null;
   let latestPreferences = null;
 
@@ -26,10 +30,20 @@
     } else if (snapshot.connected && snapshot.compatible) {
       linkDot.className = "on";
       linkDot.title = "Connected to Ghostlight";
+    } else if (snapshot.link_state === HOST_ABSENT) {
+      linkDot.className = "wait";
+      linkDot.title = NOT_INSTALLED_HERE;
     } else {
       linkDot.className = "wait";
       linkDot.title = snapshot.compatible ? "Waiting for the Ghostlight service..." : "Ghostlight version mismatch";
     }
+  }
+
+  // The extension arrives on a second computer with a synced browser profile; the native host does
+  // not. Until it is installed here, "waiting" would be a lie with no end, so this is the one state
+  // that offers a way out of the popup.
+  function renderSetup(snapshot) {
+    setupSection.hidden = snapshot.link_state !== HOST_ABSENT;
   }
 
   function renderHold(snapshot) {
@@ -61,7 +75,8 @@
     }
     const connectedLine = snapshot.connected && snapshot.compatible
       ? "Connected to Ghostlight."
-      : snapshot.compatible ? "Waiting for the Ghostlight service..." : "Ghostlight version mismatch.";
+      : snapshot.link_state === HOST_ABSENT ? NOT_INSTALLED_HERE
+        : snapshot.compatible ? "Waiting for the Ghostlight service..." : "Ghostlight version mismatch.";
     const recordingLine = snapshot.recording_tabs > 0 ? ` REC on ${snapshot.recording_tabs} tab(s).` : "";
     sessionStatus.textContent = `${connectedLine} Debugger attached to ${snapshot.attached_tabs || 0} tab(s).${recordingLine}`;
     sessionButton.textContent = "End session now";
@@ -135,6 +150,7 @@
     renderSession(snapshot);
     renderReleaseDebugger(snapshot);
     renderAttention(snapshot);
+    renderSetup(snapshot);
   }
 
   async function refresh() {
@@ -198,6 +214,15 @@
       captions.checked = !captions.checked;
       sessionStatus.textContent = String(error?.message ?? error);
     }
+  });
+  // Online, the canonical walkthrough is the better page and stays the one ADR-0070 owns. Offline,
+  // a tab that cannot load is worse than no tab, so the bundled page carries the same instructions
+  // with no network at all.
+  setupRoute.addEventListener("click", () => {
+    const destination = navigator.onLine
+      ? "https://sylin.org/ghostlight/chromium-extension/post-install/"
+      : chrome.runtime.getURL("setup.html");
+    chrome.tabs.create({ url: destination }).catch(() => {});
   });
   document.getElementById("open-options").addEventListener("click", () => chrome.runtime.openOptionsPage());
   chrome.runtime.onMessage.addListener((message) => { if (message?.kind === "ui_state_changed") refresh(); });

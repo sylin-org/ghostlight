@@ -48,6 +48,7 @@ try {
         "popup.html",
         "popup.js",
         "service-worker.js",
+        "setup.html",
         "ui.css"
     )
     foreach ($file in $rootFiles) {
