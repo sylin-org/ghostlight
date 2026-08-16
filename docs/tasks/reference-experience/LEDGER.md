@@ -6,11 +6,12 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S6 COMPLETE and gated on a Windows host. Linux verification V1 is COMPLETE;
-  V2 is next. S7 and S8 are not started.
+- State: S1 through S6 COMPLETE and gated on a Windows host. Linux verification V1 and V2 are
+  COMPLETE; V3 is next. S7 and S8 are not started.
 - Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages.
-- Next action: continue at V2 in [START-HERE-LINUX.md](START-HERE-LINUX.md). V1 proved the command
-  entry on Linux. The remaining tasks stay ordered: V2 through V5, then S7a, S7b, S7c, then S8.
+- Next action: continue at V3 in [START-HERE-LINUX.md](START-HERE-LINUX.md). V1 proved the command
+  entry and V2 proved both Debian and per-user manual pages on Linux. The remaining tasks stay
+  ordered: V3 through V5, then S7a, S7b, S7c, then S8.
   S7a is a governance-schema change and should start a fresh session.
 - Blocking condition: none.
 - Source baseline when the epic was reworked: `dev` at `2f24943f`.
@@ -152,6 +153,7 @@ than appended to a long session.
 | 2026-08-16 | S6 | `124a5557` | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 280/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on view.js and words.js; workbench-surface and process journeys | The vocabulary guard was verified against a negative control: reintroducing one word literal in view.js fails two assertions | PASS |
 | 2026-08-16 | S3 (WSL) | `7a084ae5` | None; observation only | Real WSL2 Debian on the Windows host reports `WSL_DISTRO_NAME=Debian` and `/proc/sys/kernel/osrelease=6.6.87.2-microsoft-standard-WSL2`. Both halves of the pinned WSL rule match independently, and `XDG_CURRENT_DESKTOP` is empty there, which the unknown-row test already covers | PASS, inputs only |
 | 2026-08-16 | V1 Linux command entry | this commit | Seven focused command-entry tests; `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 286/9/32/6, 0 failed; 116 extension tests; isolated workspace build; process, CLI, and workbench-surface journeys | CachyOS KDE Wayland, ordinary per-user install in a disposable home: a new bash process ran `ghostlight doctor --json`; repeat install was byte-identical; foreign file and symlink survived install and uninstall byte-for-byte; uninstall removed only the owned entry; the real bash, zsh, profile, and fish startup-file hashes did not change; the active installed diagnosis matched before and after. No `/usr/bin/ghostlight` package was available, so the already-unit-proved not-applicable package row remains part of V2 | PASS; deviation 3 resolved |
+| 2026-08-16 | V2 Linux manual pages | this commit | Rootless network-disabled Ubuntu 22.04 build with Rust 1.95.0 and Tauri CLI 2.11.0; current-source optimized workspace and Debian bundle; finalizer; Debian 12 `lintian`; package and per-user `man` rendering; full repository gate | The finalized 1.0.0 package has SHA-256 `20d85aca6d1932f544b55711d8498af73117a453e4aa98f383c854d4448a6c29`. All three compressed pages are present under `usr/share/man/man1`, and all three are in `md5sums`. Debian 12 `lintian` no longer reports any missing manual page; its remaining findings are the six browser-mandated `/etc/opt` paths and an embedded-libyaml string-table finding. All three package pages rendered. A disposable per-user install rendered all three through the owned PATH entry with `MANPATH` unset | PASS; deviation 5 resolved |
 
 ## Deviations and findings
 
@@ -186,11 +188,13 @@ environment read would have been dead code. Delivered instead as a guard test th
 is ever introduced, so the next person has to honor `NO_COLOR` in the same change. Verified against
 a negative control.
 
-**5. The Debian man-page injection is unexecuted.** `scripts/finalize-debian-package.ps1` now
-installs the three compressed pages before it recomputes `md5sums`, so they are checksummed like any
-other payload file. That path needs `dpkg-deb` and `gzip` against a real artifact and could not run
-on the Windows authoring host; only a PowerShell parse was performed. It is exercised by the Debian
-build and the package lifecycle smokes, and is a required check in S8.
+**5. RESOLVED by V2 on Linux.** A network-disabled rootless Ubuntu 22.04 builder produced a real
+current-source Debian package, and the finalizer injected all three compressed pages before
+recomputing `md5sums`. Debian 12 found and rendered each page from the extracted package. `lintian`
+reported no missing-manual-page finding; only the browser-mandated `/etc/opt` locations and its
+embedded-libyaml string-table finding remained. A disposable per-user installation also rendered
+all three pages with `MANPATH` unset once the owned `~/.local/bin` entry was present on `PATH`, which
+is the exact relationship the manual and `user_assets.rs` describe.
 
 **6. `man_pages` became `user_assets`.** Shell completions install under the same user data
 directory with the same ownership rules, and a module named `man_pages` that also wrote completions
