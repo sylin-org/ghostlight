@@ -8,10 +8,10 @@ every commit, and when closing or blocking a stage.
 
 - State: S1, S2, and S3 COMPLETE.
 - Current stage: S4, terminal citizenship. Orchestrator, installer, and packaging.
-- Next action: implement the `~/.local/bin/ghostlight` ownership decided in ADR-0126 Decision 8,
-  author man pages and completions for the three siblings, make `--json` uniform, honor `NO_COLOR`,
-  and add the guard that every reportable state has a `doctor` line.
-- Blocking condition: none.
+- Next action: S4a, below. S4 does not land coherently in one commit; its ordered substeps are in
+  the S4 section further down. Each substep is one commit and leaves a green tree.
+- Blocking condition: none. S4b's central behavior cannot be verified on a Windows host; see the
+  substep note.
 - Source baseline: `dev` at `2f24943fa125d952fce9e4f11086aada762e4cad`.
 - Last green evidence: the baseline's recorded Windows current-source pass
   (`docs/testing/windows-current-source-pass-2026-08-15.md`) and CI run `31920645118`. No
@@ -102,6 +102,23 @@ stage that owns its removal.
 | Any second copy of a state's wording that `doctor` and the workbench both need | `doctor` and `crates/orchestrator/ui/` | S4, S6 |
 | The Monitor landing as a separate concept from the readiness answer | `crates/orchestrator/ui/index.html`, `app.js` | S6 |
 | Any surface-local inference about whether Ghostlight is paused | all surfaces | S5 |
+
+## S4 substeps
+
+S4 spans the CLI, the installer, and packaging, and its parts have different verification stories.
+Ordered so every prefix is coherent and green.
+
+| Substep | Scope | Verifiable on the Windows authoring host |
+| --- | --- | --- |
+| S4a | `--json` uniformity across every state-reporting subcommand, through the existing command seam | Yes |
+| S4b | `~/.local/bin/ghostlight` ownership per ADR-0126 D8: create, idempotent repeat, ownership check, removal on uninstall | **No.** Linux-only by definition; the creation path is `cfg(unix)` and only executes in the Linux CI lane and on a Linux host. Inspection and the not-applicable path are cross-platform and testable here |
+| S4c | `NO_COLOR` honored wherever the CLI styles output | Yes |
+| S4d | Man pages for the three siblings, authored, installed by the Debian package and available to the per-user route | Partly: content and packaging wiring here, `man` rendering on Linux |
+| S4e | Shell completions for bash, zsh, and fish, plus the guard comparing their subcommand list against the parser | Yes for the guard; live shell completion on Linux |
+| S4f | `doctor` parity guard: every reportable state has a line in the same words the workbench uses | Yes |
+
+S4f is the substep that couples forward to S6. Today's reportable set is what the workbench renders
+now; when S6 reshapes the landing surface it must keep this guard passing rather than weaken it.
 
 ## Gate and evaluation log
 
