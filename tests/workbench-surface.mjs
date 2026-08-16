@@ -195,7 +195,10 @@ const compiled = (editable) => ({
   layers: [
     { kind: "organization", title: "Example Org", policy_name: "Support", version: "1", mode: "enforce",
       rules: [{ id: "support", description: "Ordinary support work", allow: ["support.example.test"], deny: [], allowed: ["read"], mode: "enforce", note: null }],
-      settings: [{ key: "privacy.preserve_target_names", value: "false", level: "mandatory" }],
+      settings: [
+        { key: "privacy.preserve_target_names", value: "false", level: "mandatory" },
+        { key: "browser.startup", value: '"on_demand"', level: "mandatory" }
+      ],
       path: null, document: '{"schema": 3}' },
     { kind: "user", title: "Your rules", policy_name: "Your rules", version: "1", mode: "enforce",
       rules: [{ id: "leftover", description: null, allow: ["other.test"], deny: [], allowed: ["read"], mode: "enforce", note: "no_effect" }],
@@ -210,6 +213,7 @@ const compiled = (editable) => ({
     path: "state/user-policy.json",
     blocked_reason: editable ? null : "Example Org does not allow rules to be set on this machine."
   },
+  browser_startup: { value: "on_demand", decided_by: "organization", organization_ceiling: "on_demand" },
   passport: { configured: false, contacts: [] }
 });
 
@@ -269,6 +273,8 @@ const editorShown = !nodes.get("policy-editor").hidden;
 // exercises both a person's own toggle and an organization ceiling at once.
 const permissionsOnLoad = nodes.get("setting-groups").innerHTML;
 const authoredOnLoad = JSON.parse(view.draftDocument()).config;
+view.setChoice("browser.startup", "manual");
+const authoredAfterStartup = JSON.parse(view.draftDocument()).config;
 view.setPermission("channels.mcp.enabled", false);
 view.setSacred("vault.example.test, *.finance.example.test");
 const authoredAfterEdit = JSON.parse(view.draftDocument()).config;
@@ -280,6 +286,14 @@ view.toggleRule("org:Example Org:support");
 const openedDetail = nodes.get("rule-list").innerHTML;
 view.toggleRule("org:Example Org:support");
 const closedAgain = nodes.get("rule-list").innerHTML;
+
+const startupPinned = compiled(true);
+startupPinned.layers[0].settings.find((entry) => entry.key === "browser.startup").value = '"manual"';
+startupPinned.browser_startup = {
+  value: "manual", decided_by: "organization", organization_ceiling: "manual"
+};
+view.policy(startupPinned);
+const pinnedStartupControl = nodes.get("setting-groups").innerHTML;
 
 view.policy(compiled(false));
 const editorHiddenWhenRefused = nodes.get("policy-editor").hidden
@@ -428,6 +442,17 @@ const checks = [
       && authoredOnLoad[0].value === false
       && authoredOnLoad[0].level === "mandatory",
     `authored: ${JSON.stringify(authoredOnLoad)}`],
+  ["browser startup is a closed choice that authors one string value",
+    permissionsOnLoad.includes('data-setting-choice="browser.startup"')
+      && permissionsOnLoad.includes('value="on_demand"')
+      && permissionsOnLoad.includes('value="manual"')
+      && authoredAfterStartup.some((entry) =>
+        entry.key === "browser.startup" && entry.value === "manual"),
+    `permissions: ${JSON.stringify(permissionsOnLoad)}, authored: ${JSON.stringify(authoredAfterStartup)}`],
+  ["an organization manual ceiling pins and explains browser startup",
+    /data-setting-choice="browser\.startup"[^>]*disabled/.test(pinnedStartupControl)
+      && pinnedStartupControl.includes("Example Org requires you to start the browser yourself."),
+    `permissions: ${JSON.stringify(pinnedStartupControl)}`],
   ["turning a permission off authors only the tightening value",
     authoredAfterEdit.some((entry) => entry.key === "channels.mcp.enabled" && entry.value === false)
       && authoredAfterEdit.some((entry) =>

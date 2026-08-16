@@ -34,6 +34,11 @@
       "key": "browser.tabs.allow_close",
       "value": false,
       "level": "mandatory"
+    },
+    {
+      "key": "browser.startup",
+      "value": "manual",
+      "level": "mandatory"
     }
   ]
 }

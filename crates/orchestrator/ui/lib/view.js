@@ -614,21 +614,28 @@
 
     /** No opinion on anything, which is what an absent setting means. */
     function emptySettings() {
-      return { restricted: new Set(), sacred: "" };
+      return { restricted: new Set(), sacred: "", startup: null };
     }
 
     /**
      * Read authored settings back into the draft.
      *
-     * A restriction is present in the document or it is not; the permissive value never appears,
-     * because authoring it here would change nothing and imply this layer could hand authority
-     * back. Reading is the mirror of that: only the restricting value switches anything on.
+     * A boolean restriction is present in the document or it is not; the permissive value never
+     * appears. The browser-startup setting is different by design: it is a closed operational
+     * choice, so its authored string is read back directly.
      */
     function settingsFrom(authored) {
       const settings = emptySettings();
       for (const setting of authored) {
         if (setting.key === SACRED_KEY) {
           settings.sacred = parseHostList(setting.value).join(", ");
+        } else if (setting.key === "browser.startup") {
+          try {
+            const value = JSON.parse(setting.value);
+            if (value === "on_demand" || value === "manual") settings.startup = value;
+          } catch (error) {
+            // The orchestrator validates the document. A malformed projected value stays absent.
+          }
         } else if (setting.value === "false") {
           settings.restricted.add(setting.key);
         }
@@ -649,12 +656,12 @@
     /**
      * The permission grid, grouped by what a person actually thinks about.
      *
-     * Every switch here defaults on, because every one of these settings is permissive by default:
-     * absence is what "allowed" means. A switch reads as the permission, not the internal flag --
+     * Every boolean switch here defaults on, because absence is what "allowed" means. A switch
+     * reads as the permission, not the internal flag --
      * "MCP clients" with a checked box, not "turn off MCP clients" with an unchecked one. Unchecking
      * one is the only thing this editor can do to it; the schema underneath is still a restriction
      * that is only ever authored as `false` (ADR-0122 A3), but a person should never have to hold
-     * that inversion in their head to use the page.
+     * that inversion in their head to use the page. The startup choice branches to a closed select.
      */
     function renderSettings() {
       if (!draft) return;
@@ -667,6 +674,7 @@
     }
 
     function settingRow(item) {
+      if (item.kind === "choice") return choiceRow(item);
       const forcedBy = organizationForces(item.key);
       const checked = !forcedBy && !draft.settings.restricted.has(item.key);
       const detail = forcedBy
@@ -686,6 +694,30 @@
         + `<span class="toggle-track"><span class="toggle-thumb"></span></span></label>`
         + `<div class="setting-body"><span class="setting-name">${escapeHtml(item.name)}</span>`
         + `<span class="setting-detail">${detail}</span>${link}</div></div>`;
+    }
+
+    /** Render the first closed string setting without turning it into a free-form field. */
+    function choiceRow(item) {
+      const ceiling = applied?.browser_startup?.organization_ceiling;
+      const forcedBy = ceiling === "manual"
+        ? applied?.organization?.name ?? "Your organization"
+        : null;
+      const selected = forcedBy
+        ? "manual"
+        : draft.settings.startup ?? applied?.browser_startup?.value ?? "manual";
+      const choice = item.choices.find((entry) => entry.value === selected) ?? item.choices[0];
+      const options = item.choices.map((entry) =>
+        `<option value="${escapeHtml(entry.value)}"${entry.value === selected ? " selected" : ""}>`
+        + `${escapeHtml(entry.label)}</option>`).join("");
+      const detail = forcedBy
+        ? `${escapeHtml(forcedBy)} requires you to start the browser yourself.`
+        : escapeHtml(choice.detail);
+      return `<div class="setting-row${forcedBy ? " setting-forced" : ""}">`
+        + `<div class="setting-body"><label class="setting-name" for="setting-browser-startup">`
+        + `${escapeHtml(item.name)}</label>`
+        + `<select class="setting-choice" id="setting-browser-startup" data-setting-choice="${escapeHtml(item.key)}"`
+        + `${forcedBy ? " disabled" : ""}>${options}</select>`
+        + `<span class="setting-detail">${detail}</span></div></div>`;
     }
 
     /**
@@ -722,6 +754,17 @@
       if (!draft) return;
       if (allowed) draft.settings.restricted.delete(key);
       else draft.settings.restricted.add(key);
+      draft.dirty = true;
+      renderSettings();
+      editorReady();
+      el["discard-policy"].hidden = false;
+    }
+
+    /** Select one value from a closed string setting. */
+    function setChoice(key, value) {
+      if (!draft || key !== "browser.startup") return;
+      if (value !== "on_demand" && value !== "manual") return;
+      draft.settings.startup = value;
       draft.dirty = true;
       renderSettings();
       editorReady();
@@ -938,7 +981,7 @@
     }
 
     /**
-     * The settings the draft authors, in the one direction a user layer can mean anything.
+     * The settings the draft authors, in their registered typed shapes.
      *
      * `level` is not a choice offered here. Both levels only tighten in 1.0, and nothing sits below
      * this layer for a recommendation to be relaxed by, so asking would be a word without a
@@ -947,6 +990,9 @@
     function settingEntries() {
       const entries = [...draft.settings.restricted]
         .map((key) => ({ key, value: false, level: "mandatory" }));
+      if (draft.settings.startup) {
+        entries.push({ key: "browser.startup", value: draft.settings.startup, level: "mandatory" });
+      }
       const sacred = splitHosts(draft.settings.sacred);
       if (sacred.length) entries.push({ key: SACRED_KEY, value: sacred, level: "mandatory" });
       return entries;
@@ -1209,7 +1255,7 @@
       hero, row, drop, promote, rebuildFeed, queueCount,
       band, collections, navigate, toast, openHarnessManual,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
-      setPermission, setSacred,
+      setPermission, setChoice, setSacred,
       setObserve, discardDraft, renderRules, previewResult, previewCleared, editorStatus,
       openPalette, closePalette, paletteOpen, paletteQuery, searchResults, searchFailed,
       confirmRemoval, answerConfirmation,

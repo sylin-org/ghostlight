@@ -119,6 +119,17 @@ pub struct SettingView {
     pub level: &'static str,
 }
 
+/// The effective browser-startup preference and the organization ceiling above it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct BrowserStartupView {
+    /// The effective closed value.
+    pub value: manifest::BrowserStartup,
+    /// The authored layer that selected the value, or none for the platform default.
+    pub decided_by: Option<LayerKind>,
+    /// The organization's authored ceiling, when one exists.
+    pub organization_ceiling: Option<manifest::BrowserStartup>,
+}
+
 /// One layer of the compiled policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct LayerView {
@@ -210,6 +221,8 @@ pub struct EffectiveAuthority {
     pub ceilings: Vec<String>,
     /// This person's own layer and what they may do about it.
     pub user_layer: UserLayer,
+    /// Whether missing-browser recovery may start a browser on this platform.
+    pub browser_startup: BrowserStartupView,
     /// Provenance for a signed organization layer.
     pub passport: ManagedPolicyPassport,
 }
@@ -288,6 +301,7 @@ pub(super) struct Inputs<'a> {
     pub(super) user_layer_source: UserLayerSource,
     pub(super) owned_user_path: Option<String>,
     pub(super) authoring_allowed: bool,
+    pub(super) windows: bool,
     pub(super) passport: ManagedPolicyPassport,
 }
 
@@ -362,7 +376,32 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
         layers,
         ceilings: ceilings(&inputs.sacred_hosts),
         user_layer: user_layer(inputs),
+        browser_startup: browser_startup(inputs),
         passport: inputs.passport.clone(),
+    }
+}
+
+/// Resolve the closed startup preference monotonically across platform, organization, and user.
+pub(super) fn browser_startup(inputs: &Inputs<'_>) -> BrowserStartupView {
+    let platform_default = manifest::BrowserStartup::default_for_platform(inputs.windows);
+    let organization = inputs
+        .organization
+        .and_then(manifest::Manifest::browser_startup);
+    let user = inputs.user.and_then(manifest::Manifest::browser_startup);
+    let (value, decided_by) = match (organization, user) {
+        (Some(manifest::BrowserStartup::Manual), _) => (
+            manifest::BrowserStartup::Manual,
+            Some(LayerKind::Organization),
+        ),
+        (Some(manifest::BrowserStartup::OnDemand), Some(user)) => (user, Some(LayerKind::User)),
+        (Some(value), None) => (value, Some(LayerKind::Organization)),
+        (None, Some(value)) => (value, Some(LayerKind::User)),
+        (None, None) => (platform_default, None),
+    };
+    BrowserStartupView {
+        value,
+        decided_by,
+        organization_ceiling: organization,
     }
 }
 
@@ -773,6 +812,7 @@ mod tests {
             },
             owned_user_path: Some("state/user-policy.json".into()),
             authoring_allowed: true,
+            windows: cfg!(windows),
             passport: passport(),
         }
     }
@@ -950,6 +990,28 @@ mod tests {
             .capabilities
             .iter()
             .all(|line| line.state == CapabilityState::Available));
+    }
+
+    #[test]
+    fn an_organization_ceiling_pins_browser_startup() {
+        let organization = policy(
+            r#"{"schema":3,"name":"org","version":"1","grants":[],"config":[{"key":"browser.startup","value":"manual","level":"mandatory"}]}"#,
+        );
+        let user = policy(
+            r#"{"schema":3,"name":"mine","version":"1","grants":[],"config":[{"key":"browser.startup","value":"on_demand","level":"mandatory"}]}"#,
+        );
+        let mut facts = inputs(Some(&organization), Some(&user));
+        facts.windows = true;
+        let view = compile(&facts);
+        assert_eq!(view.browser_startup.value, manifest::BrowserStartup::Manual);
+        assert_eq!(
+            view.browser_startup.decided_by,
+            Some(LayerKind::Organization)
+        );
+        assert_eq!(
+            view.browser_startup.organization_ceiling,
+            Some(manifest::BrowserStartup::Manual)
+        );
     }
 
     #[test]

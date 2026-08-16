@@ -59,7 +59,7 @@ Delivered for real, these are signed into a bundle; the manifest inside is exact
 | File | What it shows |
 | --- | --- |
 | [organization-support.json](organization-support.json) | A worked support-desk policy: named identity, contacts, two rules with a carve-out, and four settings including turning off the command-line channel. |
-| [organization-locked-fleet.json](organization-locked-fleet.json) | `policy.user.enabled: false`, which stops this machine's user from authoring their own rules. It gates authoring, not enforcement, and it is not a security control -- a user layer can only ever tighten. Supply a `statement` when you use it, or the person reads a missing button instead of a reason. |
+| [organization-locked-fleet.json](organization-locked-fleet.json) | `policy.user.enabled: false`, which stops this machine's user from authoring their own rules, plus `browser.startup: manual`, which keeps missing-browser recovery diagnostic-only. The authoring switch gates authoring, not enforcement, and it is not a security control -- a user layer can only ever tighten. Supply a `statement` when you use it, or the person reads a missing button instead of a reason. |
 
 ## Older examples, kept
 
@@ -88,6 +88,8 @@ Delivered for real, these are signed into a bundle; the manifest inside is exact
   broad rule above a narrow one makes the narrow one dead. The workbench marks that in place.
 - Layers intersect and only ever tighten. A user policy cannot re-open anything an organization
   closed, and no policy can reach localhost, loopback, link-local, or non-HTTP(S) addresses.
+- `browser.startup` accepts only `on_demand` or `manual`. Windows defaults to `on_demand`; Linux
+  defaults to `manual`. An organization-authored `manual` value pins the effective choice.
 - `organization` and `policy.user.enabled` are newer than 1.0's first release. A document using
   either is refused by an older Ghostlight, so keep them out of a mixed fleet until it has moved.
 

@@ -38,6 +38,7 @@ capability in its set; Execute does not imply the other three. The exact operati
     {"key": "browser.tabs.allow_close", "value": false, "level": "mandatory"},
     {"key": "privacy.preserve_target_names", "value": false, "level": "mandatory"},
     {"key": "channels.cli.enabled", "value": false, "level": "mandatory"},
+    {"key": "browser.startup", "value": "manual", "level": "mandatory"},
     {"key": "content.security.sacred_domains", "value": ["vault.example.com"], "level": "mandatory"}
   ]
 }
@@ -63,6 +64,7 @@ Supported settings are:
 | `privacy.preserve_target_names` | boolean | `false` keeps page-authored target names out of results and audit. |
 | `channels.mcp.enabled` | boolean | `false` refuses MCP session admission. |
 | `channels.cli.enabled` | boolean | `false` refuses `ghostlight call` admission. |
+| `browser.startup` | `on_demand` or `manual` | Controls whether admitted work may request one bounded browser-startup attempt. Windows defaults to `on_demand`; Linux defaults to `manual`. |
 | `content.security.sacred_domains` | hostname array | Adds never-touch destinations. |
 | `policy.user.enabled` | boolean | `false` stops this machine's user from authoring a local policy. |
 
@@ -72,6 +74,11 @@ user layer can only subtract authority and ignoring it would hand authority back
 security control: a user layer could never widen anything. Use it when a fleet needs to stay
 predictable, and supply an `organization.statement` so the person reads a reason rather than a
 missing button.
+
+`browser.startup` is an operational control, not a security boundary. `on_demand` permits one
+bounded recovery attempt when admitted work finds no connected browser; `manual` returns a
+diagnosis and leaves startup to the person. An organization-authored `manual` value is a ceiling a
+user layer cannot relax.
 
 ## Say who wrote the policy
 
@@ -130,10 +137,10 @@ capabilities an organization refuses are shown refused on the control itself, an
 never fire says so in place. Before applying, the page replays the candidate through the production
 decision engine against this machine's recorded audit and reports what would have been refused.
 
-The same page authors the registered settings, presented as toggles grouped by what they are about
--- where agents may connect, in the browser, privacy -- each starting on, since every one of them
-is permissive by default. Turning one off is the only thing the switch does: the permissive value
-is never written, because a user layer cannot hand authority back, and a switch already forced off
+The same page authors the registered settings, grouped by what they are about -- where agents may
+connect, in the browser, privacy. Boolean permissions start on. Turning one off is the only thing
+its switch does: the permissive value is never written, because a user layer cannot hand authority
+back. Browser startup is a closed two-choice select instead of a free-form field. A control pinned
 by an organization renders disabled and names who set it. `policy.user.enabled` stays
 organization-only and is refused if a user document tries to author it. Sacred destinations are
 edited as a list with the same plain-words readback host patterns get.

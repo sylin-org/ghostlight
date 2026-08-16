@@ -6,12 +6,11 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S6 COMPLETE and gated on a Windows host. Linux verification V1 through V5 is
-  COMPLETE. S7 and S8 are not started.
+- State: S1 through S6 and Linux verification V1 through V5 are COMPLETE. S7a is COMPLETE; S7b is
+  next. S8 is not started.
 - Owner: `linux-codex` from 2026-08-16. The Windows host is not implementing further stages.
-- Next action: continue at S7a in [START-HERE-LINUX.md](START-HERE-LINUX.md). V1 through V5 are
-  complete. The remaining tasks stay ordered: S7a, S7b, S7c, then S8.
-  S7a is a governance-schema change and should start a fresh session.
+- Next action: continue at S7b in [START-HERE-LINUX.md](START-HERE-LINUX.md). The remaining tasks
+  stay ordered: S7b, S7c, then S8.
 - Blocking condition: none.
 - Source baseline when the epic was reworked: `dev` at `2f24943f`.
 - Last green evidence: every stage commit below passed the gate commands in `PINS.md` on Windows.
@@ -52,7 +51,7 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 | S4 terminal citizenship | COMPLETE | `61f18bd9`..`d282ede2` | PATH, man, completions, `--json` | Six substeps, S4a-S4f |
 | S5 human runtime control | COMPLETE | `efc15783` | Pause, resume, stop | Language and state; ADR-0126 D4-D6 |
 | S6 At a glance | COMPLETE | `124a5557` | One calm window | ADR-0126 D9 |
-| S7 readiness recovery | READY | -- | Safe repair, exact refusal | Platform-asymmetric |
+| S7 readiness recovery | IN PROGRESS | -- | Safe repair, exact refusal | S7a complete; S7b next |
 | S8 evaluation | NOT STARTED | -- | Evidence on real desktops | Depends on S1-S7 |
 
 Allowed values: `NOT STARTED`, `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`. At most one stage is
@@ -70,7 +69,7 @@ A prose assertion is not evidence. Link a commit, test, fixture, ADR, or dated r
 | Terminal citizenship | S4 | PATH ownership, man pages, completions, `--json`, doctor parity guard | COMPLETE | `command_path.rs`, `user_assets.rs`, `packaging/linux/{man,completions}`, four guard tests in `main.rs` |
 | Runtime control | S5 | One state machine, effect truth, deadline interaction, plural scopes | COMPLETE | `HUMAN_PAUSE_DIRECTIVE`/`HUMAN_STOP_DIRECTIVE` in `outcome.rs`; three governance tests; four language oracles; popup separation |
 | At a glance | S6 | All states, controls, keyboard, accessibility, redundant surface removed | COMPLETE | `language/readiness.rs` with 6 tests; `ReadinessSummary` on the snapshot; three surface-journey assertions |
-| Readiness recovery | S7 | Per-platform posture, single flight, bounded waits, exact failures | NOT STARTED | -- |
+| Readiness recovery | S7 | Per-platform posture, single flight, bounded waits, exact failures | IN PROGRESS | S7a: `browser.startup` manifest validation, effective projection, organization ceiling, closed workbench choice, and five named Rust tests |
 | Evaluation | S8 | Ubuntu GNOME lifecycle, Windows lane, migration cases, dispositions | NOT STARTED | -- |
 
 ## Decision register
@@ -127,7 +126,7 @@ belong in different commits, and the last one cannot be proved by a unit test at
 
 | Substep | Scope | Verifiable without a live desktop |
 | --- | --- | --- |
-| S7a | Register `browser.startup` with the closed values `on_demand` and `manual` in the policy manifest, per ADR-0126 Decision 7: typo-closed validation, per-platform defaults, organization ceiling behavior, the workbench editor's grouped toggles, and the policy grammar fixtures | Yes |
+| S7a | Register `browser.startup` with the closed values `on_demand` and `manual` in the policy manifest, per ADR-0126 Decision 7: typo-closed validation, per-platform defaults, organization ceiling behavior, the workbench editor's grouped toggles, and the policy grammar fixtures | Yes. **DONE** |
 | S7b | The decision layer: find the one seam that learns readiness failed, choose a browser only from deterministic evidence, reuse the existing Snap and Flatpak diagnosis, refuse ambiguity by naming candidates, and return one useful outcome in `manual` mode. Single-flight guard included | Yes |
 | S7c | The launch itself: spawn the chosen browser with the person's ordinary profile and no automation flags, wait bounded for the adapter, and name the exact failure on exhaustion. Windows first; Linux only if a session environment resolves through the ADR-0082 seam, and diagnosis-only is an acceptable Linux completion | **No.** Spawning a browser is not a unit test. Windows live proof is owner or windows-codex; Linux is the S8 lane |
 
@@ -156,6 +155,7 @@ than appended to a long session.
 | 2026-08-16 | V3 Linux shell completions | this commit | Current Debian payload and disposable per-user install; real bash 5.3, fish 4.8.1, and zsh 5.9 completion engines; focused zsh regression; full repository gate | The package contains all three conventional vendor paths and the per-user route contains all three XDG paths. Bash and fish offered exactly the eight accepted subcommands and their doctor flags. Zsh offered the commands but initially no options; tracing found that its first `_arguments -C` call shifted the subcommand context. The completion now captures and shifts the context explicitly, a guard protects that relationship, and real Tab completion offers `--fix`, `--json`, and `--verbose`. The documented `fpath=(~/.local/share/zsh/site-functions $fpath)` plus `compinit` instruction loaded the completer. The rebuilt package contains the byte-exact repaired zsh file and has SHA-256 `dbc2642a7d7f24042d806fd91766ea39a07b444991cd9696d7eb23132cff465b` | PASS; deviation 7 resolved; finding 14 fixed |
 | 2026-08-16 | V4 second-machine extension handoff | this commit | Real Chromium 151 on KDE Wayland; unpacked extension in a throwaway home with no native host; live popup and options pages through the browser debugging protocol; online and emulated-offline setup clicks; ordinary per-user native-host registration and browser restart; active installation diagnosis before and after | Both surfaces showed the exact not-installed sentence and `Set up Ghostlight`, and neither showed the waiting sentence. Online setup opened the canonical walkthrough. With the target offline, setup opened bundled `setup.html`; it reached `complete`, rendered the full instructions, and loaded no network resource. After the ordinary installer registered Chromium and the disposable browser restarted, both surfaces said connected and hid setup. The machine's working registration and service remained current throughout | PASS; deviation 2 resolved; finding 15 resolved |
 | 2026-08-16 | V5 Linux environment rows | this commit | Current debug `ghostlight doctor` on real KDE Plasma 6.7.4 Wayland; the same binary in a shell with unrecognized `XDG_CURRENT_DESKTOP=Hyprland`; full repository gate | The real desktop printed `Environment: Linux (KDE) -- Ghostlight is in your system tray and your Applications menu.` The unrecognized shell printed `Environment: Linux -- Ghostlight is in your Applications menu, and in your system tray if your desktop draws one.` GNOME is not installed on this host, so no live GNOME claim is made; the exhaustive unit guard still proves that its row contains no tray promise. The WSL row remains the Windows lane's evidence | PASS |
+| 2026-08-16 | S7a browser startup setting | this commit | `cargo fmt --check`; warnings-denied workspace Clippy; `cargo test --workspace` 291/10/32/6, 0 failed; 116 extension tests; policy-grammar and workbench-surface journeys; isolated workspace build; process and CLI journeys | Schema 3 accepts only `on_demand` and `manual`; non-string and unknown values fail. Defaults are `on_demand` on Windows and `manual` on Linux. The effective projection composes organization and user values, with organization `manual` pinning the result. The workbench renders and authors one closed two-option select. The active guide and organization fixture carry the new grammar. No recovery or browser launch behavior was added in this substep | PASS |
 
 ## Deviations and findings
 

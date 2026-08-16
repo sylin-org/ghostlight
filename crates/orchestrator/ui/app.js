@@ -353,6 +353,11 @@ function wire() {
   });
 
   el["setting-groups"].addEventListener("change", (event) => {
+    const choice = event.target.closest("[data-setting-choice]");
+    if (choice) {
+      view.setChoice(choice.dataset.settingChoice, choice.value);
+      return;
+    }
     const box = event.target.closest("[data-restriction]");
     // The checkbox is the permission as the person sees it: checked means allowed. setPermission
     // is the seam that turns that back into the tightening-only value the schema can express.

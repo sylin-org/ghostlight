@@ -72,6 +72,17 @@ check("the capability order matches the orchestrator's",
   words.CAPABILITY_ORDER.join(",") === "read,action,write,execute",
   words.CAPABILITY_ORDER.join(","));
 
+const startup = words.SETTING_GROUPS.flatMap((group) => group.items)
+  .find((item) => item.key === "browser.startup");
+check("browser startup is a closed choice",
+  startup?.kind === "choice"
+    && startup.choices.map((choice) => choice.value).join(",") === "on_demand,manual",
+  JSON.stringify(startup));
+check("browser startup values read as choices rather than raw keys",
+  words.settingWords("browser.startup", "manual") ===
+    "When no browser is connected: I will start it myself",
+  words.settingWords("browser.startup", "manual"));
+
 let failed = 0;
 for (const [what, ok, detail] of checks) {
   if (!ok) failed += 1;

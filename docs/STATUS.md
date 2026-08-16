@@ -18,7 +18,7 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 The owner-approved product direction is the staged
 [reference-experience task batch](tasks/reference-experience/). It was authored on 2026-08-15,
 reworked on 2026-08-16, and is executing. The
-[ledger](tasks/reference-experience/LEDGER.md) is the authority on progress and carries twelve
+[ledger](tasks/reference-experience/LEDGER.md) is the authority on progress and carries fifteen
 numbered deviations; [ADR-0126](adr/0126-reference-experience-contract.md) carries the decisions.
 
 The aim is that Ghostlight behaves as one product across every machine a person uses: the same
@@ -46,9 +46,11 @@ S1 through S6 are complete on the Windows development host:
   `language/readiness.rs`. The landing destination is now called At a glance, and no sixth
   destination was added.
 
-S7 is planned in three substeps: the `browser.startup` policy setting, the decision layer, and the
-launch itself, which needs a live desktop on both platforms. S8 is the evaluation and is split
-between the owed Ubuntu GNOME Wayland lifecycle and a Windows lane.
+S7 is underway in three substeps. S7a registered `browser.startup` with the closed values
+`on_demand` and `manual`, per-platform defaults, monotonic organization ceiling behavior, and a
+closed workbench choice. It added no recovery or launch behavior. S7b is the decision layer; S7c is
+the launch itself. S8 is the evaluation and is split between the owed Ubuntu GNOME Wayland
+lifecycle and a Windows lane.
 
 **1.0 waits for this epic.** The owner decided on 2026-08-16 that the release does not go out ahead
 of it, so the epic's completion is a release gate. Practically, that means S8's evidence is release
@@ -56,11 +58,10 @@ evidence, and a stage that cannot honestly close blocks a release rather than de
 An accurate `BLOCKED` is therefore worth more than an optimistic pass.
 
 Verification boundary: every commit passed formatting, warnings-denied workspace Clippy, the full
-workspace test suite, the extension suite, and the journeys its change touched. What could not be
-proved on a Windows host is delegated to `linux-codex` through `coordination/RESULTS.md`: the
-`~/.local/bin` entry and the four tests that return early off Unix, the Debian man-page and
-completion injection, live shell completion, the extension's not-installed state in a real Chromium
-profile, and the GNOME and KDE environment rows.
+workspace test suite, the extension suite, and the journeys its change touched. The Linux lane has
+proved the owned command entry, Debian and per-user manual pages, packaged and per-user shell
+completion, the extension's second-machine state, and the KDE plus unknown environment rows. GNOME
+is not installed on that host, so the Ubuntu GNOME Wayland lifecycle remains S8 work.
 
 This epic adds no network behavior of any kind. ADR-0028 Decision 9 stands, and the epic's NEVER
 list has no exception for it.
@@ -110,6 +111,9 @@ research input [24-policy-surface-user-delight-2026-08.md](research/24-policy-su
   leave the product failing closed.
 - `policy.user.enabled` is registered. It gates authoring only, never enforcement, and is recorded
   as an operational control rather than a security boundary.
+- `browser.startup` is registered as the first closed string setting. Windows defaults to
+  `on_demand`, Linux to `manual`, and an organization-authored `manual` value pins the effective
+  result. Runtime recovery is not yet implemented.
 - Rules render as one list in evaluation order, organization first, each a single line that opens
   into detail: read-only for a rule this person cannot change, the editor for one they can.
 - A capability line states polarity. Available, some sites blocked, some sites allowed, and not
@@ -117,9 +121,10 @@ research input [24-policy-surface-user-delight-2026-08.md](research/24-policy-su
 - The editor speaks sentences: host readback on every pattern, organization ceilings shown on the
   control itself, redundant and unreachable rules marked in place, watch-only as a plain switch,
   and a dry run against recorded audit before applying.
-- The editor authors the registered settings, presented as three grouped permission toggles --
-  where agents may connect, in the browser, privacy -- each on by default and named by what it
-  does, never by its registered key. The permissive value is still never authored;
+- The editor authors the registered settings as three grouped controls -- where agents may connect,
+  in the browser, privacy. Boolean permissions are on by default and named by what they do, never
+  by their registered key; browser startup is one closed two-option select. A permissive boolean
+  value is still never authored;
   `policy.user.enabled` is still refused from a user document; an organization ceiling on a setting
   disables its switch and names who set it, the same as a capability ceiling does. The two channel
   toggles link to the Integrations destination and the scripting guide instead of restating a

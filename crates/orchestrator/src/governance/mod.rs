@@ -1477,9 +1477,36 @@ impl GovernanceFacade {
             },
             owned_user_path: paths::user_policy_path().map(|path| path.display().to_string()),
             authoring_allowed,
+            windows: cfg!(windows),
             passport: passport.clone(),
         };
         effective::compile(&inputs)
+    }
+
+    /// Resolve the effective missing-browser startup preference.
+    #[must_use]
+    pub fn browser_startup(&self) -> manifest::BrowserStartup {
+        self.refresh_policies();
+        let policies = self
+            .policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inputs = effective::Inputs {
+            organization: policies.managed_manifest(),
+            user: policies.user.active.as_ref(),
+            valid: policies.managed_valid() && policies.user.has_authority(),
+            sacred_hosts: Vec::new(),
+            organization_source: None,
+            organization_document: None,
+            user_source: None,
+            user_document: None,
+            user_layer_source: effective::UserLayerSource::None,
+            owned_user_path: None,
+            authoring_allowed: true,
+            windows: cfg!(windows),
+            passport: policies.managed_passport(),
+        };
+        effective::browser_startup(&inputs).value
     }
 
     /// Build one immutable snapshot and apply caller restrictions by intersection.

@@ -10,6 +10,47 @@ use thiserror::Error;
 
 use super::{Capability, CapabilitySet};
 
+/// Whether Ghostlight may start a browser when admitted work finds none connected.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserStartup {
+    /// Ghostlight may request one bounded recovery attempt.
+    OnDemand,
+    /// Ghostlight diagnoses the missing browser and leaves launching to the person.
+    Manual,
+}
+
+impl BrowserStartup {
+    /// Resolve the platform default without consulting policy.
+    #[must_use]
+    pub const fn default_for_platform(windows: bool) -> Self {
+        if windows {
+            Self::OnDemand
+        } else {
+            Self::Manual
+        }
+    }
+
+    /// Decode the setting's closed string vocabulary.
+    #[must_use]
+    pub const fn from_str(value: &str) -> Option<Self> {
+        match value.as_bytes() {
+            b"on_demand" => Some(Self::OnDemand),
+            b"manual" => Some(Self::Manual),
+            _ => None,
+        }
+    }
+
+    /// Stable policy and presentation vocabulary.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OnDemand => "on_demand",
+            Self::Manual => "manual",
+        }
+    }
+}
+
 /// Whether an ordinary policy denial blocks work or is reported while work continues.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -205,6 +246,22 @@ impl Manifest {
             .iter()
             .find(|entry| entry.key == key)
             .and_then(|entry| entry.value.as_bool())
+    }
+
+    /// Resolve one string setting if this manifest authors it.
+    #[must_use]
+    pub fn string_setting(&self, key: &str) -> Option<&str> {
+        self.config
+            .iter()
+            .find(|entry| entry.key == key)
+            .and_then(|entry| entry.value.as_str())
+    }
+
+    /// Resolve the browser startup setting if this manifest authors it.
+    #[must_use]
+    pub fn browser_startup(&self) -> Option<BrowserStartup> {
+        self.string_setting("browser.startup")
+            .and_then(BrowserStartup::from_str)
     }
 
     /// Resolve one string-array setting if this manifest authors it.
@@ -510,6 +567,14 @@ fn validate_config(entry: &ConfigEntry, index: usize, source: &str) -> Result<()
             }
             validate_patterns(&patterns, source, &path)?;
         }
+        "browser.startup" => {
+            let Some(value) = entry.value.as_str() else {
+                return field(source, &path, "must be a string");
+            };
+            if BrowserStartup::from_str(value).is_none() {
+                return field(source, &path, "must be on_demand or manual");
+            }
+        }
         _ => {
             return field(
                 source,
@@ -614,7 +679,7 @@ fn write_canonical(value: &Value, output: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, valid_host_pattern, PolicyMode};
+    use super::{parse, valid_host_pattern, BrowserStartup, PolicyMode};
 
     #[test]
     fn a_deeply_nested_document_is_rejected_before_it_reaches_the_recursive_parser() {
@@ -729,6 +794,48 @@ mod tests {
             "typed"
         )
         .is_err());
+    }
+
+    #[test]
+    fn browser_startup_accepts_only_the_two_closed_values() {
+        for value in ["on_demand", "manual"] {
+            let document = format!(
+                r#"{{"schema":3,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.startup","value":"{value}","level":"mandatory"}}]}}"#
+            );
+            let policy = parse(&document, "registered").expect("closed value parses");
+            assert_eq!(policy.string_setting("browser.startup"), Some(value));
+            assert_eq!(policy.browser_startup(), BrowserStartup::from_str(value));
+        }
+    }
+
+    #[test]
+    fn browser_startup_refuses_an_unknown_value() {
+        assert!(parse(
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":"browser.startup","value":"automatic","level":"mandatory"}]}"#,
+            "unknown"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn browser_startup_refuses_a_non_string_value() {
+        assert!(parse(
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":"browser.startup","value":true,"level":"mandatory"}]}"#,
+            "typed"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn browser_startup_defaults_per_platform() {
+        assert_eq!(
+            BrowserStartup::default_for_platform(true),
+            BrowserStartup::OnDemand
+        );
+        assert_eq!(
+            BrowserStartup::default_for_platform(false),
+            BrowserStartup::Manual
+        );
     }
 
     #[test]

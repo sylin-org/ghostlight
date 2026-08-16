@@ -134,19 +134,17 @@
    * The settings a policy may author, grouped and worded the way a person actually thinks about
    * them -- not the way the schema stores them.
    *
-   * Internally every one of these is a restriction: the registered key is only ever authored as
-   * `false`, because a user layer cannot hand back authority a higher one removed, so the
-   * permissive value is never written. But "a grid of things to turn off" is the wrong mental
-   * model to hand a person: it reads as a list of dangers, forces them to hold the double negative
-   * ("leaving this unchecked means...") in their head, and gives channels no more weight than tab
-   * closing. What a person actually has is a small number of things that are on by default, grouped
-   * by what they are about, and a toggle should say what it does when it is on, not what an internal
-   * flag is called.
+   * Boolean entries are restrictions: the registered key is only ever authored as `false`, because
+   * a user layer cannot hand back authority a higher one removed. But "a grid of things to turn
+   * off" is the wrong mental model to hand a person. What a person actually has is a small number
+   * of permissions that are on by default, plus one closed browser-startup choice, grouped by what
+   * they are about.
    *
    * So the surface owns a second vocabulary here, built for reading rather than for storage: each
-   * item is `on` (checked, the default) and `off` (what unchecking it does), and the toggle is the
-   * permission itself, not a restriction wearing a costume. `setPermission` in view.js is the seam
-   * that translates a person flipping a switch back into the one thing the schema can express.
+   * A boolean item is `on` (checked, the default) and `off` (what unchecking it does), and the
+   * toggle is the permission itself, not a restriction wearing a costume. The startup item keeps
+   * its two schema values behind direct human choices. `setPermission` and `setChoice` in view.js
+   * are the seams that translate those controls back into the closed schema.
    */
   const SETTING_GROUPS = [
     {
@@ -176,6 +174,23 @@
           name: "Closing tabs",
           on: "Agents may close a tab they control.",
           off: "Closing a tab stays something only you do."
+        },
+        {
+          key: "browser.startup",
+          kind: "choice",
+          name: "When no browser is connected",
+          choices: [
+            {
+              value: "on_demand",
+              label: "Start my browser when needed",
+              detail: "Ghostlight may make one bounded attempt to start the browser you normally use."
+            },
+            {
+              value: "manual",
+              label: "I will start it myself",
+              detail: "Ghostlight names the missing browser and waits for you to start it."
+            }
+          ]
         }
       ]
     },
@@ -210,6 +225,10 @@
       return `Never touched: ${hosts.join(", ")}`;
     }
     const known = SETTING_ITEMS.find((item) => item.key === key);
+    if (known?.kind === "choice") {
+      const choice = known.choices.find((entry) => entry.value === value);
+      return choice ? `${known.name}: ${choice.label}` : `${known.name}: ${JSON.stringify(value)}`;
+    }
     if (known) return value === false ? known.off : `${known.on} (not restricted)`;
     if (ORGANIZATION_SETTINGS[key]) {
       return value === false ? ORGANIZATION_SETTINGS[key] : `${ORGANIZATION_SETTINGS[key]} (allowed)`;
