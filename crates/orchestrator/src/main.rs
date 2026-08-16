@@ -9,7 +9,7 @@
 
 use std::ffi::OsString;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
@@ -35,6 +35,7 @@ enum LaunchMode {
     /// Inspect the complete local connection chain without changing it.
     Doctor {
         fix: bool,
+        json: bool,
     },
     /// Report the local engine endpoint without starting it.
     Status {
@@ -81,7 +82,7 @@ fn main() -> anyhow::Result<()> {
         LaunchMode::NativeHost(command) => run_native_host(command),
         LaunchMode::Install(options) => run_setup(true, &options),
         LaunchMode::Uninstall(options) => run_setup(false, &options),
-        LaunchMode::Doctor { fix } => run_doctor(fix),
+        LaunchMode::Doctor { fix, json } => run_doctor(fix, json),
         LaunchMode::Status { json } => run_status(json),
         LaunchMode::Help => {
             print_help();
@@ -362,25 +363,32 @@ fn select_harnesses(
         .collect())
 }
 
-fn run_doctor(fix: bool) -> anyhow::Result<()> {
+/// Everything `doctor` observed, gathered once.
+///
+/// The text and JSON renderings read the same values, so a script and a person cannot be told
+/// different things about the same machine.
+struct DoctorObservation {
+    environment: ghostlight::language::environment::Environment,
+    binaries: Vec<(PathBuf, bool)>,
+    sibling_set_ready: bool,
+    native_host: ghostlight::install::native_host::NativeHostReport,
+    desktop: ghostlight::install::desktop_entry::DesktopIntegrationReport,
+    harnesses: Vec<ghostlight::install::HarnessSummary>,
+    runtime: RuntimeObservation,
+}
+
+fn observe_doctor() -> anyhow::Result<DoctorObservation> {
     use ghostlight::install::desktop_entry::DesktopIntegration;
     use ghostlight::install::native_host::NativeHostRegistry;
     use ghostlight::install::HarnessRegistry;
-
     use ghostlight::language::environment;
 
-    println!("Ghostlight {} diagnostics", env!("CARGO_PKG_VERSION"));
-    // Same module as the install summary, so the two can never describe this machine differently.
-    let here = environment::current();
-    println!("Environment: {} -- {}", here.label(), here.location());
-    if let Some(caveat) = here.caveat() {
-        println!("Environment: {caveat}");
-    }
     let executable = std::env::current_exe()?;
     let directory = executable
         .parent()
         .ok_or_else(|| anyhow::anyhow!("the Ghostlight executable has no parent directory"))?;
     let mut sibling_set_ready = true;
+    let mut binaries = Vec::new();
     for name in [
         executable_name("ghostlight"),
         executable_name("ghostlight-mcp-connector"),
@@ -389,21 +397,52 @@ fn run_doctor(fix: bool) -> anyhow::Result<()> {
         let path = directory.join(name);
         let ready = path.is_file();
         sibling_set_ready &= ready;
+        binaries.push((path, ready));
+    }
+    Ok(DoctorObservation {
+        // Same module as the install summary, so the two can never describe this machine
+        // differently.
+        environment: environment::current(),
+        binaries,
+        sibling_set_ready,
+        native_host: NativeHostRegistry::discover().check()?,
+        desktop: DesktopIntegration::discover().check()?,
+        harnesses: HarnessRegistry::discover().refresh()?,
+        runtime: observe_runtime(),
+    })
+}
+
+fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
+    let observation = observe_doctor()?;
+    if json {
+        println!("{}", serde_json::to_string(&doctor_document(&observation))?);
+        return Ok(());
+    }
+    println!("Ghostlight {} diagnostics", env!("CARGO_PKG_VERSION"));
+    println!(
+        "Environment: {} -- {}",
+        observation.environment.label(),
+        observation.environment.location()
+    );
+    if let Some(caveat) = observation.environment.caveat() {
+        println!("Environment: {caveat}");
+    }
+    for (path, ready) in &observation.binaries {
         println!(
             "Binary: {} -- {}",
             path.display(),
-            if ready { "ready" } else { "missing" }
+            if *ready { "ready" } else { "missing" }
         );
     }
-    print_native_host_report(&NativeHostRegistry::discover().check()?);
-    print_desktop_integration_report(&DesktopIntegration::discover().check()?);
-    for harness in HarnessRegistry::discover().refresh()? {
+    print_native_host_report(&observation.native_host);
+    print_desktop_integration_report(&observation.desktop);
+    for harness in &observation.harnesses {
         println!(
             "MCP client: {} -- {:?} -- {}",
             harness.name, harness.state, harness.detail
         );
     }
-    print_runtime_status(false, sibling_set_ready);
+    render_runtime_status(&observation.runtime, false, observation.sibling_set_ready);
     if fix {
         println!("Applying ownership-safe repairs.");
         run_setup(true, &SetupOptions::default())?;
@@ -411,54 +450,113 @@ fn run_doctor(fix: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The JSON document `doctor --json` prints, built from the same observation the text path uses.
+fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
+    serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "environment": {
+            "label": observation.environment.label(),
+            "location": observation.environment.location(),
+            "caveat": observation.environment.caveat(),
+        },
+        "binaries": observation
+            .binaries
+            .iter()
+            .map(|(path, ready)| serde_json::json!({
+                "path": path.display().to_string(),
+                "ready": ready,
+            }))
+            .collect::<Vec<_>>(),
+        "browser_connector": observation.native_host.connector.display().to_string(),
+        "browsers": observation.native_host.browsers,
+        "applications": observation.desktop,
+        "mcp_clients": observation.harnesses,
+        "service": runtime_document(&observation.runtime),
+    })
+}
+
 fn run_status(json: bool) -> anyhow::Result<()> {
     if !json {
         println!("Ghostlight {}", env!("CARGO_PKG_VERSION"));
     }
-    print_runtime_status(json, false);
+    render_runtime_status(&observe_runtime(), json, false);
     Ok(())
 }
 
-fn print_runtime_status(json: bool, idle_is_ready: bool) {
-    let runtime_path = ghostlight_bridge::runtime::runtime_file();
-    match ghostlight_bridge::runtime::read_runtime(&runtime_path) {
+/// What the local service endpoint looks like right now.
+struct RuntimeObservation {
+    path: PathBuf,
+    version: Option<String>,
+    service_bridge_major: Option<u16>,
+    browser_relay_major: Option<u16>,
+    running: bool,
+}
+
+fn observe_runtime() -> RuntimeObservation {
+    let path = ghostlight_bridge::runtime::runtime_file();
+    match ghostlight_bridge::runtime::read_runtime(&path) {
         Ok(runtime) => {
-            let reachable = TcpStream::connect_timeout(
+            let running = TcpStream::connect_timeout(
                 &SocketAddrV4::new(Ipv4Addr::LOCALHOST, runtime.service_port).into(),
                 Duration::from_millis(250),
             )
             .is_ok();
-            if json {
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "version": runtime.service_version,
-                        "service_bridge_major": runtime.service_bridge_major,
-                        "browser_relay_major": runtime.browser_relay_major,
-                        "running": reachable,
-                    })
-                );
-            } else {
-                println!(
-                    "Service: {} -- version {} -- bridge {} -- {}",
-                    runtime_path.display(),
-                    runtime.service_version,
-                    runtime.service_bridge_major,
-                    if reachable {
-                        "running"
-                    } else {
-                        "not reachable"
-                    }
-                );
+            RuntimeObservation {
+                path,
+                version: Some(runtime.service_version),
+                service_bridge_major: Some(runtime.service_bridge_major),
+                browser_relay_major: Some(runtime.browser_relay_major),
+                running,
             }
         }
-        Err(_) if json => println!("{}", serde_json::json!({ "running": false })),
-        Err(_) if idle_is_ready => println!(
+        Err(_) => RuntimeObservation {
+            path,
+            version: None,
+            service_bridge_major: None,
+            browser_relay_major: None,
+            running: false,
+        },
+    }
+}
+
+/// The `status --json` document. Its shape is consumed by scripts and does not change here.
+fn runtime_document(observation: &RuntimeObservation) -> serde_json::Value {
+    let Some(version) = observation.version.as_deref() else {
+        return serde_json::json!({ "running": false });
+    };
+    serde_json::json!({
+        "version": version,
+        "service_bridge_major": observation.service_bridge_major,
+        "browser_relay_major": observation.browser_relay_major,
+        "running": observation.running,
+    })
+}
+
+fn render_runtime_status(observation: &RuntimeObservation, json: bool, idle_is_ready: bool) {
+    if json {
+        println!("{}", runtime_document(observation));
+        return;
+    }
+    match observation.version.as_deref() {
+        Some(version) => println!(
+            "Service: {} -- version {} -- bridge {} -- {}",
+            observation.path.display(),
+            version,
+            observation
+                .service_bridge_major
+                .map_or_else(String::new, |major| major.to_string()),
+            if observation.running {
+                "running"
+            } else {
+                "not reachable"
+            }
+        ),
+        None if idle_is_ready => println!(
             "Service: ready on demand -- it starts when Chromium or an MCP client connects."
         ),
-        Err(_) => println!(
+        None => println!(
             "Service: not running (no readable endpoint at {})",
-            runtime_path.display()
+            observation.path.display()
         ),
     }
 }
@@ -494,7 +592,7 @@ fn executable_name(name: &str) -> String {
 
 fn print_help() {
     println!(
-        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor                  Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight service                 Run the local authority without a window\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight policy validate <file>  Validate one schema-3 policy\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight service                 Run the local authority without a window\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight policy validate <file>  Validate one schema-3 policy\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n  ghostlight --headless              Run the local authority without a window\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
         version = env!("CARGO_PKG_VERSION")
     );
 }
@@ -704,15 +802,22 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
         .is_some_and(|argument| argument == "doctor")
     {
         let mut fix = false;
+        let mut json = false;
         for argument in &arguments[1..] {
             match argument.to_str() {
                 Some("--fix") => fix = true,
+                Some("--json") => json = true,
                 Some("--verbose") => {}
                 Some(other) => anyhow::bail!("unknown doctor option {other}"),
                 None => anyhow::bail!("Ghostlight command options must be valid UTF-8"),
             }
         }
-        Ok(LaunchMode::Doctor { fix })
+        // --fix writes; --json is for a script reading the result. Combining them would print a
+        // document describing a state that the repair has already replaced.
+        if fix && json {
+            anyhow::bail!("ghostlight doctor --json reports state; use it without --fix");
+        }
+        Ok(LaunchMode::Doctor { fix, json })
     } else if arguments
         .first()
         .is_some_and(|argument| argument == "status")
@@ -860,12 +965,28 @@ mod tests {
         );
         assert_eq!(
             launch_mode(["doctor".into()]).unwrap(),
-            LaunchMode::Doctor { fix: false }
+            LaunchMode::Doctor {
+                fix: false,
+                json: false
+            }
         );
         assert_eq!(
             launch_mode(["doctor".into(), "--verbose".into(), "--fix".into()]).unwrap(),
-            LaunchMode::Doctor { fix: true }
+            LaunchMode::Doctor {
+                fix: true,
+                json: false
+            }
         );
+        assert_eq!(
+            launch_mode(["doctor".into(), "--json".into()]).unwrap(),
+            LaunchMode::Doctor {
+                fix: false,
+                json: true
+            }
+        );
+        // --fix writes and --json reports; together they would describe a state the repair has
+        // already replaced.
+        assert!(launch_mode(["doctor".into(), "--json".into(), "--fix".into()]).is_err());
         assert_eq!(
             launch_mode(["status".into()]).unwrap(),
             LaunchMode::Status { json: false }

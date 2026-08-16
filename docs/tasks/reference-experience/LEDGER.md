@@ -8,7 +8,7 @@ every commit, and when closing or blocking a stage.
 
 - State: S1, S2, and S3 COMPLETE.
 - Current stage: S4, terminal citizenship. Orchestrator, installer, and packaging.
-- Next action: S4a, below. S4 does not land coherently in one commit; its ordered substeps are in
+- Next action: S4b, below. S4a landed. S4 does not land coherently in one commit; its ordered substeps are in
   the S4 section further down. Each substep is one commit and leaves a green tree.
 - Blocking condition: none. S4b's central behavior cannot be verified on a Windows host; see the
   substep note.
@@ -110,7 +110,7 @@ Ordered so every prefix is coherent and green.
 
 | Substep | Scope | Verifiable on the Windows authoring host |
 | --- | --- | --- |
-| S4a | `--json` uniformity across every state-reporting subcommand, through the existing command seam | Yes |
+| S4a | `--json` uniformity across every state-reporting subcommand, through the existing command seam | Yes. **DONE** |
 | S4b | `~/.local/bin/ghostlight` ownership per ADR-0126 D8: create, idempotent repeat, ownership check, removal on uninstall | **No.** Linux-only by definition; the creation path is `cfg(unix)` and only executes in the Linux CI lane and on a Linux host. Inspection and the not-applicable path are cross-platform and testable here |
 | S4c | `NO_COLOR` honored wherever the CLI styles output | Yes |
 | S4d | Man pages for the three siblings, authored, installed by the Debian package and available to the per-user route | Partly: content and packaging wiring here, `man` rendering on Linux |
@@ -127,6 +127,7 @@ now; when S6 reshapes the landing surface it must keep this guard passing rather
 | 2026-08-16 | S1 | `9b537a14` | `cargo fmt --check` and `npm test --prefix extension` passed. Clippy and `cargo test` not rerun: no source changed | None required | PASS, documentation only |
 | 2026-08-16 | S2 | `a46a0db0` | `npm test --prefix extension` 115 pass 0 fail (was 106); `node --check` on all four changed files; `cargo fmt --check`. Clippy and `cargo test` not rerun: no Rust source changed | Not yet observed in a live browser profile; owed before S8 | PASS |
 | 2026-08-16 | S3 | (this commit) | `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test --workspace` 254 orchestrator library, 4 binary, 32 bridge, 6 MCP connector, 0 failed; `npm test --prefix extension` 115 pass; `node tests/process-journey.mjs`; `node tests/cli-journey.mjs` | Live `ghostlight doctor` on the Windows authoring host printed `Environment: Windows -- Ghostlight is in your notification area, and in the Start menu.` | PASS |
+| 2026-08-16 | S4a | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 254/4/32/6, 0 failed; `npm test --prefix extension` 115 pass; `node tests/cli-journey.mjs` | `ghostlight doctor --json` parsed as JSON on the Windows host; `ghostlight status --json` byte shape unchanged | PASS |
 
 ## Deviations and findings
 
