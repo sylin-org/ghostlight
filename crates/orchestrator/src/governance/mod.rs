@@ -3057,6 +3057,75 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    /// A pause denies before any effect and a resume restores work, without anything waiting.
+    ///
+    /// ADR-0126 Decision 4 chose refusal over a held caller, so this is the whole mechanism: the
+    /// final boundary answers deny while held and allow once resumed. There is no queue to drain
+    /// and no deadline to reconcile.
+    #[test]
+    fn pause_prevents_the_next_browser_effect_and_resume_restores_it() {
+        let facade = GovernanceFacade::new(None, None);
+        assert!(facade.runtime_decision().allowed);
+
+        assert_eq!(
+            facade.apply_runtime_intent(RuntimeControlIntent::Hold),
+            RuntimeControlState::Held
+        );
+        assert_eq!(facade.runtime_decision().reason, ReasonCode::RuntimeHold);
+        assert!(!facade.runtime_decision().allowed);
+        // Idempotent: pausing twice is still one paused state.
+        assert_eq!(
+            facade.apply_runtime_intent(RuntimeControlIntent::Hold),
+            RuntimeControlState::Held
+        );
+
+        assert_eq!(
+            facade.apply_runtime_intent(RuntimeControlIntent::Resume),
+            RuntimeControlState::Active
+        );
+        assert!(facade.runtime_decision().allowed);
+    }
+
+    /// Stop is terminal and idempotent, and a resume cannot undo it.
+    ///
+    /// Only an explicit new session leaves the ended state, so a model that retries after the stop
+    /// directive gets the same refusal rather than quietly resuming the work a person interrupted.
+    #[test]
+    fn stop_is_terminal_and_idempotent() {
+        let facade = GovernanceFacade::new(None, None);
+        assert_eq!(
+            facade.apply_runtime_intent(RuntimeControlIntent::EndSession),
+            RuntimeControlState::Ended
+        );
+        assert_eq!(facade.runtime_decision().reason, ReasonCode::SessionEnded);
+        assert_eq!(
+            facade.apply_runtime_intent(RuntimeControlIntent::EndSession),
+            RuntimeControlState::Ended
+        );
+        assert_eq!(
+            facade.apply_runtime_intent(RuntimeControlIntent::Resume),
+            RuntimeControlState::Ended,
+            "a resume must not undo a stop"
+        );
+        assert_eq!(
+            facade.apply_runtime_intent(RuntimeControlIntent::StartSession),
+            RuntimeControlState::Active
+        );
+    }
+
+    /// A policy attention hold is its own state, not the person's pause.
+    #[test]
+    fn attention_stays_distinct_from_a_human_pause() {
+        let facade = GovernanceFacade::new(None, None);
+        facade.apply_runtime_intent(RuntimeControlIntent::Hold);
+        assert_eq!(facade.runtime_state(), RuntimeControlState::Held);
+        assert_eq!(facade.runtime_decision().reason, ReasonCode::RuntimeHold);
+        assert_ne!(
+            facade.runtime_decision().reason,
+            ReasonCode::RuntimeAttention
+        );
+    }
+
     #[test]
     fn runtime_control_file_is_checked_at_each_final_boundary() {
         let path = temporary("runtime-control");

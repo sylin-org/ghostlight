@@ -55,7 +55,13 @@
       return;
     }
     toggle.disabled = false;
-    if (["held", "attention"].includes(snapshot.control_state)) {
+    // A person's pause and a policy's attention hold both stop work, but they are not the same
+    // thing and ADR-0126 Decision 6 keeps them apart. Saying "PAUSED" for a denial the user never
+    // asked for makes it look like their own doing.
+    if (snapshot.control_state === "attention") {
+      status.textContent = "Agent browsing is STOPPED and needs you.";
+      toggle.textContent = "Resume agent browsing";
+    } else if (snapshot.control_state === "held") {
       status.textContent = "Agent browsing is PAUSED.";
       toggle.textContent = "Resume agent browsing";
     } else {

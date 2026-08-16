@@ -6,11 +6,11 @@ every commit, and when closing or blocking a stage.
 
 ## RESUME HERE
 
-- State: S1 through S4 COMPLETE.
-- Current stage: S5, human runtime control. Orchestrator.
-- Next action: implement ADR-0126 Decisions 4 through 6: the non-terminal pause refusal with its
-  pinned directive, the terminal stop directive, resume revalidation, and explicit scopes for
-  plural work. Nothing waits, so no scheduler and no deadline reconciliation are needed. S4 does not land coherently in one commit; its ordered substeps are in
+- State: S1 through S5 COMPLETE.
+- Current stage: S6, At a glance. Orchestrator and workbench.
+- Next action: one orchestrator-owned projection for the landing surface, rendering the readiness
+  answer first, with the workbench consuming the S4f state labels so `doctor` and the window use the
+  same words. ADR-0126 Decision 9 makes it the landing destination with no sixth added. S4 does not land coherently in one commit; its ordered substeps are in
   the S4 section further down. Each substep is one commit and leaves a green tree.
 - Blocking condition: none. S4b's central behavior cannot be verified on a Windows host; see the
   substep note.
@@ -52,8 +52,8 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 | S2 the second machine | COMPLETE | (this commit) | A new computer explains itself | Extension only |
 | S3 adaptive familiarity | COMPLETE | (this commit) | Local desktop language | Includes WSL |
 | S4 terminal citizenship | COMPLETE | (this commit) | PATH, man, completions, `--json` | Six substeps, S4a-S4f |
-| S5 human runtime control | READY | -- | Pause, resume, stop | Smaller than first scoped: ADR-0126 D4 |
-| S6 At a glance | NOT STARTED | -- | One calm window | Depends on S4, S5 |
+| S5 human runtime control | COMPLETE | (this commit) | Pause, resume, stop | Language and state; ADR-0126 D4-D6 |
+| S6 At a glance | READY | -- | One calm window | Depends on S4, S5 |
 | S7 readiness recovery | NOT STARTED | -- | Safe repair, exact refusal | Platform-asymmetric |
 | S8 evaluation | NOT STARTED | -- | Evidence on real desktops | Depends on S1-S7 |
 
@@ -70,7 +70,7 @@ A prose assertion is not evidence. Link a commit, test, fixture, ADR, or dated r
 | Host-absent state | S2 | Distinguished state, both surfaces, offline route, tests | COMPLETE | `shared.linkState`; `extension/setup.html`; `extension/tests/onboarding.test.js`, 9 tests |
 | Platform and desktop table | S3 | One owner, closed set, WSL case, consumer parity, tests | COMPLETE | `crates/orchestrator/src/language/environment.rs`, 8 tests; install and `doctor` both consume it |
 | Terminal citizenship | S4 | PATH ownership, man pages, completions, `--json`, doctor parity guard | COMPLETE | `command_path.rs`, `user_assets.rs`, `packaging/linux/{man,completions}`, four guard tests in `main.rs` |
-| Runtime control | S5 | One state machine, effect truth, deadline interaction, plural scopes | NOT STARTED | -- |
+| Runtime control | S5 | One state machine, effect truth, deadline interaction, plural scopes | COMPLETE | `HUMAN_PAUSE_DIRECTIVE`/`HUMAN_STOP_DIRECTIVE` in `outcome.rs`; three governance tests; four language oracles; popup separation |
 | At a glance | S6 | All states, controls, keyboard, accessibility, redundant surface removed | NOT STARTED | -- |
 | Readiness recovery | S7 | Per-platform posture, single flight, bounded waits, exact failures | NOT STARTED | -- |
 | Evaluation | S8 | Ubuntu GNOME lifecycle, Windows lane, migration cases, dispositions | NOT STARTED | -- |
@@ -135,6 +135,7 @@ now; when S6 reshapes the landing surface it must keep this guard passing rather
 | 2026-08-16 | S4d | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/5/32/6, 0 failed; `npm test --prefix extension` 115 pass; PowerShell parse of the finalize script | Three man pages authored; per-user install tested; the Debian injection could not run here because `dpkg-deb` and `gzip` are absent on the Windows host | PASS with a recorded limit |
 | 2026-08-16 | S4e | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/7/32/6, 0 failed; `npm test --prefix extension` 115 pass; `bash -n` on the bash completion; PowerShell parse of the finalize script | An unknown subcommand now names the eight available ones. Completion guard verified against a negative control | PASS |
 | 2026-08-16 | S4f | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/9/32/6, 0 failed; `npm test --prefix extension` 115 pass | Live `ghostlight doctor` reads in plain words: `registered, needs an update` where it used to print `Updatable` | PASS |
+| 2026-08-16 | S5 | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 273/9/32/6, 0 failed; `npm test --prefix extension` 116 pass; `node --check` on popup.js; process and CLI journeys | The two directives are pinned character for character against `PINS.md` | PASS |
 
 ## Deviations and findings
 
@@ -186,6 +187,20 @@ completion on this host. zsh additionally needs `fpath` configuration for the pe
 renders those. A guard pins every label and a second guard fails if a doctor line reintroduces debug
 formatting. The workbench still renders its own words from the serialized values; making it consume
 these exact labels is S6's work, and the S4 substep table already recorded that coupling.
+
+**9. Two S5 test names in the prompt no longer apply.** The stage prompt named
+`a_dispatched_effect_settles_truthfully_after_pause` and `held_operation_and_liveness_deadline_agree`.
+Both were written for the held-caller design ADR-0126 Decision 4 rejected. Nothing waits now: a
+pause denies at the final boundary, so there is no held operation to reconcile with the ADR-0113
+deadline, and an already-dispatched effect settles exactly as it did before because the pause never
+touched it. The coverage that replaced them is
+`pause_prevents_the_next_browser_effect_and_resume_restores_it`, `stop_is_terminal_and_idempotent`,
+and `attention_stays_distinct_from_a_human_pause`.
+
+**10. The popup was collapsing attention into the person's pause.** It rendered
+`["held", "attention"].includes(...)` as `Agent browsing is PAUSED.`, which tells someone they
+paused Ghostlight when policy stopped it. ADR-0126 Decision 6 keeps the two apart, so attention now
+reads `Agent browsing is STOPPED and needs you.` A test fails if the two states are merged again.
 
 ## Stage close checklist
 

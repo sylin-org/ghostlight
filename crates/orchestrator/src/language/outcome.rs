@@ -4,6 +4,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::workspace::WorkspaceError;
 
+/// What a controller is told when a person has paused Ghostlight (ADR-0126 Decision 4).
+///
+/// A pause refuses the next browser effect rather than suspending the invocation, because a
+/// human-scale pause outlives an MCP request timeout. The refusal is reversible: a resume restores
+/// ordinary work without the caller doing anything.
+pub const HUMAN_PAUSE_DIRECTIVE: &str =
+    "The user paused Ghostlight. Wait for further instructions.";
+
+/// What a controller is told when a person has stopped the session (ADR-0126 Decision 5).
+///
+/// Terminal. Effect facts follow this sentence where they exist, and no retry is ever suggested.
+pub const HUMAN_STOP_DIRECTIVE: &str =
+    "The user asked to interrupt the process. Wait for further instructions.";
+
 /// The noun named by a target-listing outcome.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TargetNoun {
@@ -983,8 +997,12 @@ fn blocked(reason: BlockedReason, host: &Option<String>) -> String {
         (BlockedReason::InvalidAuthority, _) => {
             "Blocked: the Ghostlight policy could not be read.".into()
         }
-        (BlockedReason::Hold, _) => "Blocked: Ghostlight is paused.".into(),
-        (BlockedReason::SessionEnded, _) => "Blocked: this Ghostlight session was ended.".into(),
+        // The two human controls are the only refusals that speak to the controller rather than
+        // about the request. A model that reads "Blocked: Ghostlight is paused." has been told a
+        // fact and left to guess; these tell it what to do, and are pinned by ADR-0126 Decisions 4
+        // and 5. Pause is reversible and says so by not being terminal; stop ends the session.
+        (BlockedReason::Hold, _) => HUMAN_PAUSE_DIRECTIVE.into(),
+        (BlockedReason::SessionEnded, _) => HUMAN_STOP_DIRECTIVE.into(),
         (BlockedReason::Channel, _) => "Blocked: this intake channel is disabled.".into(),
         (BlockedReason::Unspecified, Some(host)) => format!("Blocked by policy on {host}."),
         (BlockedReason::Unspecified, None) => "Blocked by Ghostlight policy.".into(),
@@ -1101,7 +1119,7 @@ mod tests {
 
     use super::{
         ActionSubject, BlockedReason, Observed, Outcome, Refusal, SavedTo, TargetNoun, TargetRole,
-        WorkspaceReason, TARGET_LABEL_MAX_CHARS,
+        WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
     };
     use crate::workspace::WorkspaceError;
 
@@ -1617,6 +1635,56 @@ mod tests {
         );
     }
 
+    /// The stop directive is exactly what ADR-0126 Decision 5 pins, to the character.
+    #[test]
+    fn stop_outcome_begins_with_the_pinned_directive() {
+        let refusal = Refusal::AuthorityBlocked {
+            reason: BlockedReason::SessionEnded,
+            host: None,
+        };
+        assert_eq!(
+            refusal.summary(),
+            "The user asked to interrupt the process. Wait for further instructions."
+        );
+        assert!(refusal
+            .summary()
+            .starts_with("The user asked to interrupt the process."));
+    }
+
+    /// The pause directive is exactly what ADR-0126 Decision 4 pins, and is not the stop one.
+    #[test]
+    fn pause_outcome_uses_its_own_pinned_directive() {
+        let refusal = Refusal::AuthorityBlocked {
+            reason: BlockedReason::Hold,
+            host: None,
+        };
+        assert_eq!(
+            refusal.summary(),
+            "The user paused Ghostlight. Wait for further instructions."
+        );
+        assert_ne!(refusal.summary(), HUMAN_STOP_DIRECTIVE);
+    }
+
+    /// Neither human control suggests trying again. A retry would fight the person who asked.
+    #[test]
+    fn stop_recommends_no_automatic_retry() {
+        for reason in [BlockedReason::SessionEnded, BlockedReason::Hold] {
+            let refusal = Refusal::AuthorityBlocked { reason, host: None };
+            assert!(
+                refusal.next_steps().is_empty(),
+                "{reason:?} suggested a next step"
+            );
+        }
+    }
+
+    /// A policy attention hold keeps its own words rather than borrowing the person's pause.
+    #[test]
+    fn attention_is_not_worded_as_a_human_pause() {
+        let attention = Refusal::AttentionRequired;
+        assert_ne!(attention.summary(), HUMAN_PAUSE_DIRECTIVE);
+        assert_ne!(attention.summary(), HUMAN_STOP_DIRECTIVE);
+    }
+
     #[test]
     fn refusal_wording_and_recovery_stay_exact() {
         let summaries = vec![
@@ -1638,6 +1706,20 @@ mod tests {
                     host: Some("example.com".into()),
                 },
                 "Blocked: example.com is not an allowed host.",
+            ),
+            (
+                Refusal::AuthorityBlocked {
+                    reason: BlockedReason::Hold,
+                    host: None,
+                },
+                HUMAN_PAUSE_DIRECTIVE,
+            ),
+            (
+                Refusal::AuthorityBlocked {
+                    reason: BlockedReason::SessionEnded,
+                    host: None,
+                },
+                HUMAN_STOP_DIRECTIVE,
             ),
             (
                 Refusal::AttentionRequired,

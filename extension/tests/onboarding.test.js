@@ -110,3 +110,14 @@ test("the snapshot carries the closed classification and never the raw reason", 
   const body = worker.slice(snapshotStart, snapshotEnd);
   assert.ok(body.indexOf("link_state") < body.indexOf("last_error: preferences.diagnostics"));
 });
+
+test("the popup renders control state and computes none of its own", () => {
+  const script = read("popup.js");
+  // A policy attention hold and a person's pause both stop work, but the popup must not tell
+  // someone they paused Ghostlight when policy did (ADR-0126 Decision 6).
+  assert.match(script, /snapshot\.control_state === "attention"/);
+  assert.match(script, /snapshot\.control_state === "held"/);
+  assert.doesNotMatch(script, /\["held", "attention"\]\.includes/);
+  // Control is requested from the orchestrator; the popup never decides the state itself.
+  assert.match(script, /kind: "runtime_control"/);
+});
