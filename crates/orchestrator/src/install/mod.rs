@@ -4,6 +4,7 @@ pub mod browser_package;
 pub mod command_path;
 pub mod desktop_entry;
 pub mod handoff;
+pub mod man_pages;
 pub mod migration;
 pub mod native_host;
 

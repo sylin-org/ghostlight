@@ -54,6 +54,28 @@ try {
         Remove-Item -LiteralPath $displayDocDirectory
     }
 
+    # Tauri does not carry man pages, and lintian reports their absence for every one of the three
+    # executables. They are installed here, before md5sums are recomputed below, so the checksums
+    # cover them like any other payload file.
+    $manSource = Join-Path $PSScriptRoot "../packaging/linux/man"
+    $manDirectory = Join-Path $root "usr/share/man/man1"
+    if (-not (Test-Path -LiteralPath $manDirectory -PathType Container)) {
+        New-Item -ItemType Directory -Path $manDirectory -Force | Out-Null
+    }
+    foreach ($page in @("ghostlight.1", "ghostlight-mcp-connector.1", "ghostlight-browser-connector.1")) {
+        $from = Join-Path $manSource $page
+        if (-not (Test-Path -LiteralPath $from -PathType Leaf)) {
+            throw "Required man page is missing: $from"
+        }
+        # Debian policy expects compressed pages. gzip -n keeps the output reproducible by leaving
+        # the source timestamp and name out of the header.
+        $to = Join-Path $manDirectory ($page + ".gz")
+        & gzip -9 -n -c $from > $to
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not compress man page: $from"
+        }
+    }
+
     [System.IO.File]::WriteAllLines(
         (Join-Path $controlDirectory "conffiles"),
         $conffiles,

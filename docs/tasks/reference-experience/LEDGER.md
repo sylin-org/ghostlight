@@ -8,7 +8,7 @@ every commit, and when closing or blocking a stage.
 
 - State: S1, S2, and S3 COMPLETE.
 - Current stage: S4, terminal citizenship. Orchestrator, installer, and packaging.
-- Next action: S4d, below. S4a, S4b, and S4c landed. S4 does not land coherently in one commit; its ordered substeps are in
+- Next action: S4e, below. S4a through S4d landed. S4 does not land coherently in one commit; its ordered substeps are in
   the S4 section further down. Each substep is one commit and leaves a green tree.
 - Blocking condition: none. S4b's central behavior cannot be verified on a Windows host; see the
   substep note.
@@ -113,7 +113,7 @@ Ordered so every prefix is coherent and green.
 | S4a | `--json` uniformity across every state-reporting subcommand, through the existing command seam | Yes. **DONE** |
 | S4b | `~/.local/bin/ghostlight` ownership per ADR-0126 D8: create, idempotent repeat, ownership check, removal on uninstall | **DONE, with a limit.** Linux-only by definition; the creation path is `cfg(unix)` and only executes in the Linux CI lane and on a Linux host. Inspection and the not-applicable path are cross-platform and testable here |
 | S4c | `NO_COLOR` honored wherever the CLI styles output | Yes. **DONE**, as a guard: nothing is styled |
-| S4d | Man pages for the three siblings, authored, installed by the Debian package and available to the per-user route | Partly: content and packaging wiring here, `man` rendering on Linux |
+| S4d | Man pages for the three siblings, authored, installed by the Debian package and available to the per-user route | Partly. **DONE**: content, per-user install, and deb wiring here; `man` rendering and the deb payload check are Linux |
 | S4e | Shell completions for bash, zsh, and fish, plus the guard comparing their subcommand list against the parser | Yes for the guard; live shell completion on Linux |
 | S4f | `doctor` parity guard: every reportable state has a line in the same words the workbench uses | Yes |
 
@@ -130,6 +130,7 @@ now; when S6 reshapes the landing surface it must keep this guard passing rather
 | 2026-08-16 | S4a | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 254/4/32/6, 0 failed; `npm test --prefix extension` 115 pass; `node tests/cli-journey.mjs` | `ghostlight doctor --json` parsed as JSON on the Windows host; `ghostlight status --json` byte shape unchanged | PASS |
 | 2026-08-16 | S4b | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 261/4/32/6, 0 failed; `npm test --prefix extension` 115 pass; CLI and process journeys | Windows `doctor` reports the command entry as not applicable and still names the absolute executable. The four symlink tests compile here but return early: they prove behavior only in the Linux lane | PASS with a recorded limit |
 | 2026-08-16 | S4c | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 261/5/32/6, 0 failed; `npm test --prefix extension` 115 pass | Source audit found no ANSI escape or color dependency in any crate, the npm launcher, or the shell scripts | PASS |
+| 2026-08-16 | S4d | (this commit) | `cargo fmt --check`; warnings-denied workspace clippy; `cargo test --workspace` 266/5/32/6, 0 failed; `npm test --prefix extension` 115 pass; PowerShell parse of the finalize script | Three man pages authored; per-user install tested; the Debian injection could not run here because `dpkg-deb` and `gzip` are absent on the Windows host | PASS with a recorded limit |
 
 ## Deviations and findings
 
@@ -158,6 +159,12 @@ none: no ANSI escape, no color crate, and no styling in the npm launcher or shel
 environment read would have been dead code. Delivered instead as a guard test that fails if styling
 is ever introduced, so the next person has to honor `NO_COLOR` in the same change. Verified against
 a negative control.
+
+**5. The Debian man-page injection is unexecuted.** `scripts/finalize-debian-package.ps1` now
+installs the three compressed pages before it recomputes `md5sums`, so they are checksummed like any
+other payload file. That path needs `dpkg-deb` and `gzip` against a real artifact and could not run
+on the Windows authoring host; only a PowerShell parse was performed. It is exercised by the Debian
+build and the package lifecycle smokes, and is a required check in S8.
 
 ## Stage close checklist
 

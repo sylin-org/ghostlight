@@ -163,6 +163,18 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         }
     }
 
+    let man_pages = ghostlight::install::man_pages::ManPages::discover();
+    if !options.dry_run {
+        let result = if install {
+            man_pages.install()?
+        } else {
+            man_pages.uninstall()?
+        };
+        if result.report.state != ghostlight::install::man_pages::ManPageState::NotApplicable {
+            println!("Manual pages: {}", result.report.detail);
+        }
+    }
+
     let desktop = DesktopIntegration::discover();
     if options.dry_run {
         print_desktop_integration_report(&desktop.check()?);

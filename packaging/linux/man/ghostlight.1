@@ -1,0 +1,143 @@
+.\" SPDX-License-Identifier: Apache-2.0 OR MIT
+.TH GHOSTLIGHT 1 "2026-08-16" "Ghostlight 1.0.0" "Ghostlight Manual"
+.SH NAME
+ghostlight \- governed browser automation for MCP clients
+.SH SYNOPSIS
+.B ghostlight
+.RI [ command ]
+.RI [ options ]
+.SH DESCRIPTION
+Ghostlight gives an MCP client controlled access to your own visible Chromium
+browser. It runs entirely on this computer: there is no account, no telemetry,
+and no hosted service.
+.PP
+Run with no command, it opens the desktop workbench. Nothing runs in the
+background until an agent or your browser asks for it.
+.SH COMMANDS
+.TP
+.B open
+Open the desktop workbench, starting the local authority if it is not running.
+.TP
+.BR install " [" \-\-dry\-run "] [" \-\-browser " \fIid\fR] [" \-\-all\-browsers "] [" \-\-client " \fIid\fR] [" \-\-all\-clients "] [" \-\-no\-clients "] [" \-\-no\-open ]
+Register the browser native-messaging host and every detected MCP client.
+Repeating an install changes nothing that is already current.
+.TP
+.BR uninstall " [" \-\-dry\-run "] [" \-\-browser " \fIid\fR]"
+Remove only Ghostlight-owned registrations. Foreign configuration is preserved
+byte for byte.
+.TP
+.BR doctor " [" \-\-json "] [" \-\-fix ]
+Report the complete local chain: environment, sibling binaries, browser
+registrations, the command entry, the Applications entry, MCP clients, and the
+service endpoint.
+.B \-\-fix
+applies only ownership-safe repairs.
+.B \-\-json
+prints the same observation as one JSON document and cannot be combined with
+.BR \-\-fix .
+.TP
+.BR status " [" \-\-json ]
+Report the local service endpoint without starting it.
+.TP
+.B service
+Run the local authority without a window. Same as
+.BR \-\-headless .
+.TP
+.BI call " tool" " [json]"
+Run one browser tool and print its outcome.
+.B \-\-stdin
+runs a batch over one session,
+.B \-\-json
+prints the structured result, and
+.BI \-\-output " file"
+writes bounded binary content such as a screenshot.
+.B \-\-catalog
+lists the available tools.
+.TP
+.BI "policy validate" " file"
+Validate one schema-3 policy document.
+.TP
+.BI "policy explain" " file"
+Explain a policy and the RAWX capability map in plain language.
+.TP
+.BI "policy simulate" " file audit.jsonl"
+Preview denials against existing audit records without changing anything.
+.TP
+.BI "policy keygen" " directory"
+Create customer-owned policy signing keys.
+.TP
+.B policy pubkey
+Print the public bootstrap verification keys.
+.TP
+.B policy sign
+Sign a policy document at an explicit sequence.
+.TP
+.B policy publish
+Advance the sequence and prepare a deployment.
+.SH EXIT STATUS
+.B ghostlight call
+maps the terminal outcome to a distinct status. An uncertain effect is never
+reported as success.
+.TP
+.B 0
+The work succeeded.
+.TP
+.B 1
+The command line could not be understood.
+.TP
+.B 2
+Authority blocked the work.
+.TP
+.B 3
+The work needs a person's attention.
+.TP
+.B 4
+The work failed.
+.TP
+.B 5
+The work was cancelled.
+.TP
+.B 6
+The effect is unknown. Do not assume it did or did not happen.
+.SH ENVIRONMENT
+.TP
+.B GHOSTLIGHT_SESSION
+Pin a command-line session explicitly. It is a caller's claim, never an input
+to an authority decision.
+.TP
+.B GHOSTLIGHT_POLICY_FILE
+Use an exact local policy document. It takes precedence over the workbench's
+authored user policy, which is then shown read-only.
+.TP
+.B GHOSTLIGHT_AUDIT_FILE
+Write audit records to an exact path.
+.TP
+.B GHOSTLIGHT_RUNTIME_FILE
+Use an exact runtime discovery document.
+.TP
+.B GHOSTLIGHT_RUNTIME_CONTROL_FILE
+Use an exact runtime-control document.
+.SH FILES
+.TP
+.I ~/.local/bin/ghostlight
+The command entry the per-user installation owns. A system package provides
+.I /usr/bin/ghostlight
+instead.
+.TP
+.I ~/.local/share/applications/org.sylin.ghostlight.desktop
+The Applications entry the per-user installation owns.
+.TP
+.I $XDG_STATE_HOME/ghostlight
+Local state, including the append-only audit record.
+.TP
+.I $XDG_CONFIG_HOME/ghostlight
+Local configuration, including the authored user policy.
+.SH NOTES
+Snap and Flatpak browser packages cannot start a native messaging host, so they
+are detected and refused with a remedy rather than failing silently. Install a
+native Chrome, Edge, Brave, or Chromium package.
+.SH SEE ALSO
+.BR ghostlight-mcp-connector (1),
+.BR ghostlight-browser-connector (1)
+.PP
+https://sylin.org/ghostlight/

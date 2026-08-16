@@ -1,0 +1,42 @@
+.\" SPDX-License-Identifier: Apache-2.0 OR MIT
+.TH GHOSTLIGHT-BROWSER-CONNECTOR 1 "2026-08-16" "Ghostlight 1.0.0" "Ghostlight Manual"
+.SH NAME
+ghostlight-browser-connector \- Chromium native messaging relay for Ghostlight
+.SH SYNOPSIS
+.B ghostlight-browser-connector
+.SH DESCRIPTION
+The browser connector is the native messaging host Chromium starts on behalf of
+the Ghostlight extension. It relays typed frames between the extension and the
+local Ghostlight authority.
+.PP
+It takes no arguments and is not intended to be run by hand. Chromium starts it
+from a native-messaging host manifest that
+.BR ghostlight (1)
+installs, and only for the exact allowed extension.
+.PP
+The connector is deliberately opaque. It does not deserialize adapter commands,
+receipts, events, workspace identifiers, or presentation signals; unknown
+bounded payloads round-trip unchanged. This is what lets the authority gain
+capabilities without changing the relay.
+.PP
+If the local authority is not running, the connector starts the exact sibling
+.B ghostlight
+executable in its own installation directory, with no arguments, and continues
+its ordinary reconnect loop.
+.SH NOTES
+A browser installed from Snap or Flatpak runs confined and cannot start this
+program. That is a sandbox boundary, not a Ghostlight defect. Install a native
+Chrome, Edge, Brave, or Chromium package, then run
+.BR "ghostlight doctor --fix" .
+.SH FILES
+.TP
+.I /etc/opt/chrome/native-messaging-hosts/org.sylin.ghostlight.json
+System manifest installed by the Debian package. Equivalent paths exist for
+Edge, Brave, and Chromium.
+.TP
+.I ~/.config/google-chrome/NativeMessagingHosts/org.sylin.ghostlight.json
+Per-user manifest installed by the per-user route. Equivalent paths exist for
+the other supported browsers.
+.SH SEE ALSO
+.BR ghostlight (1),
+.BR ghostlight-mcp-connector (1)

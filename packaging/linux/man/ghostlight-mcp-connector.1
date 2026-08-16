@@ -1,0 +1,32 @@
+.\" SPDX-License-Identifier: Apache-2.0 OR MIT
+.TH GHOSTLIGHT-MCP-CONNECTOR 1 "2026-08-16" "Ghostlight 1.0.0" "Ghostlight Manual"
+.SH NAME
+ghostlight-mcp-connector \- Model Context Protocol stdio edge for Ghostlight
+.SH SYNOPSIS
+.B ghostlight-mcp-connector
+.SH DESCRIPTION
+The MCP connector is the stdio edge an MCP client launches. It speaks the Model
+Context Protocol on standard input and output and relays to the local
+Ghostlight authority over a typed local connection.
+.PP
+It takes no arguments and is not intended to be run by hand. An MCP client
+starts it, and
+.BR ghostlight (1)
+registers it in that client's configuration.
+.PP
+The connector owns protocol lifecycle, framing, correlation, cancellation
+forwarding, catalog retrieval, and generic rendering. It makes no product
+decisions and holds no policy: what Ghostlight will and will not do is decided
+by the authority, not here.
+.PP
+If the local authority is not running, the connector starts the exact sibling
+.B ghostlight
+executable in its own installation directory, with no arguments, and continues
+its ordinary reconnect loop. It never searches PATH and never accepts an
+executable path over the wire.
+.SH EXIT STATUS
+Exits zero when its client closes the stream. A protocol or transport failure
+exits non-zero.
+.SH SEE ALSO
+.BR ghostlight (1),
+.BR ghostlight-browser-connector (1)
