@@ -154,6 +154,30 @@ or public-release evidence.
   extension still needs its one explicit reload and the historical error card cleared for final
   visible confirmation.
 
+## Windows current-source and local-package pass
+
+The [dated Windows record](testing/windows-current-source-pass-2026-08-15.md) covers revision
+`72402a7d` without changing installed registrations or package state.
+
+- Formatting, locked warnings-denied Clippy, a locked isolated build, all 288 Windows Rust tests,
+  all 106 extension tests, all 10 npm tests, all 4 MCPB tests, every tracked JavaScript and shell
+  syntax check, release truth, 0.8 recovery, repository integrity, dependency policy, and the
+  advisory gate passed. The advisory result retains the same 17 documented allowed warnings.
+- Fresh isolated process, CLI, PowerShell, workbench, and policy journeys passed against the exact
+  build under test. The online public check found GitHub, npm, Chrome, the official MCP Registry,
+  and the website in agreement about the public 0.8 state.
+- An isolated optimized build produced the exact three siblings, a 4,528,043-byte unsigned NSIS
+  package, a deterministic Windows portable archive, and a host-locally reproducible extension
+  ZIP. Native package inspection found the complete sibling and legal payload.
+- Exact HWND inspection proved minimized console-free startup, foreground activation, Close
+  containment, and workbench recreation while one authority stayed alive. The exact test process
+  and its runtime files were removed afterward.
+
+This closes current-source, local-package construction, and non-installed native-window evidence
+on Windows. It does not close clean install, public-0.8 upgrade, uninstall, login/reboot, tray,
+notification, matching-store-adapter, public-harness, provenance-candidate installation, or
+publication gates.
+
 ## Linux 1.0 development-host result
 
 The native CachyOS lane was extended through the current 1.0 source candidate on 2026-08-14. This
