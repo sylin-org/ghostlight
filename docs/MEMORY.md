@@ -35,15 +35,23 @@ the owner wants, and what this project learned the hard way.
   event bus, actor system, workflow engine, CQRS split, or registry.
 - **Invisible when healthy, legible on demand.** Installation and ordinary browser work should
   succeed without a workbench ritual. Safe recovery is automatic and bounded at its owning seam;
-  At a glance, controls, preferences, diagnostics, and CLI depth appear progressively. Behavior
+  the workbench, controls, preferences, diagnostics, and CLI depth appear progressively. Behavior
   that can unexpectedly change the user's environment or attention, such as opening a browser or
   drawing on a page, has one small closed preference.
+- **One product across every machine.** The same words, controls, and truth on each computer a
+  person uses, shaped to the desktop they are on: a tray where the shell has one, an Applications
+  entry everywhere, a notification area on Windows, and never a single one of those as the only
+  route. Platform behavior is a table with a row per platform, so macOS is a later row and some
+  evidence rather than a rewrite. macOS is deferred for want of test hardware, not abandoned.
 - **Ghostlight owns mechanism, not the user's larger intent.** It understands canonical browser
   operations, authority, lifecycle, observable browser state, and effect truth. It does not infer
   that a generic click or write means booking, buying, sending, or another task-level consequence.
-- **Human runtime control is authoritative.** Pause prevents the next browser effect and holds the
-  live caller for as long as its transport permits. Stop is terminal and tells the controller:
-  `The user asked to interrupt the process. Wait for further instructions.`
+- **Human runtime control is authoritative.** This is the reference-experience epic's intent, not
+  current behavior: today a hold refuses at the final boundary rather than holding a caller, and the
+  stop directive does not exist in the tree. The intended contract is that pause prevents the next
+  browser effect, and that stop is terminal and tells the controller
+  `The user asked to interrupt the process. Wait for further instructions.` The exact value is
+  pinned in `docs/tasks/reference-experience/PINS.md` and owned by that epic's S5.
 - **One normal desktop startup.** Installed Ghostlight always creates its tray and starts the
   workbench backgrounded: minimized on Windows and hidden on Linux. Connectors launch that same
   executable with no mode flag. Only explicit `--headless` omits desktop presentation.

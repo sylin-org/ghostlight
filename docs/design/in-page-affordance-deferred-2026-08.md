@@ -1,4 +1,18 @@
-# S5: browser affordance
+# In-page browser affordance (deferred)
+
+Date: 2026-08-16
+
+Status: deferred. Authored on 2026-08-15 as stage S5 of the reference-experience epic, moved here
+unchanged on 2026-08-16 when the epic was reworked. It is not scheduled and not cancelled.
+
+Two facts stand behind the deferral. The tree has no authentic full-vector mascot: every mascot
+asset is raster and the only vector mark is `extension/icons/ghost-mark.svg`, so the stage's own
+stop condition held from the start. And of the five audiences named in
+[the epic bootstrap](../tasks/reference-experience/BOOTSTRAP.md), none both wants presence on its
+pages and is likely to be on Linux, which is where the epic's evaluation runs.
+
+The reasoning below is preserved as written. If the affordance returns, it needs a vector source
+with recorded provenance and a named audience first.
 
 ## Objective
 

@@ -15,19 +15,33 @@ linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
 
 ## Reference experience epic
 
-The owner-approved product direction is captured as the staged
+The owner-approved product direction is the staged
 [reference-experience task batch](tasks/reference-experience/). It is READY at S1 and has not
-changed production behavior.
+changed production behavior. It was authored on 2026-08-15 and reworked on 2026-08-16; the
+[ledger](tasks/reference-experience/LEDGER.md) records what changed and why.
 
-The epic moves the center of delight away from setup surfaces and toward invisible ordinary use,
-bounded automatic readiness recovery, one truthful pause/resume/stop contract, a calm At a glance
-workbench front door, and a small optional branded doorway on controlled pages. It explicitly keeps
-Ghostlight at the mechanism boundary: canonical browser operations, authority, lifecycle, and
-effect truth belong here; inferred user-task meaning does not.
+The epic's aim is that Ghostlight behaves as one product across every machine a person uses: the
+same words, the same controls, and the same truth, shaped to the desktop they are on. Ordinary
+browser work succeeds without opening the workbench, safe recovery happens without ceremony, and
+recovery that is not safe ends in an exact statement of what failed and what to do next. Ghostlight
+stays at the mechanism boundary: canonical browser operations, authority, lifecycle, and effect
+truth belong here; inferred user-task meaning does not.
 
-Execution must keep the DDD modular monolith, the minimum number of meaningful moving parts, and
-complexity centralized at the seam where each fact becomes knowable. S1 is the next action: audit
-the current journeys and ratify the experience contract and measures before implementation.
+Eight stages run in order, each landing on its own: the experience contract; the second machine,
+where an extension arriving by browser sync says the product is not installed here; adaptive
+familiarity, one owner for what the product says about the machine it runs on, including WSL;
+terminal citizenship; human runtime control; At a glance; readiness recovery, applied per platform;
+and evaluation, which runs the Ubuntu GNOME Wayland lifecycle ADR-0123 already made
+release-blocking, a Windows lane, and the migration cases.
+
+Two things this epic deliberately does not do. It adds no network behavior of any kind; ADR-0028
+Decision 9 stands, and adoption signal comes from the Chrome Web Store, npm, the MCP registry, and
+GitHub. And it does not add presence to controlled pages: that work is deferred to
+[a design note](design/in-page-affordance-deferred-2026-08.md) pending a vector asset and a named
+audience.
+
+Execution keeps the DDD modular monolith, the minimum number of meaningful moving parts, and
+complexity centralized at the seam where each fact becomes knowable. S1 is the next action.
 
 ## RAWX and managed-policy restoration
 
