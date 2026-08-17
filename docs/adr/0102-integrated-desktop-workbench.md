@@ -283,3 +283,35 @@ ping, remote application content, or decorative placeholder state.
 13. A projection with no sink attached publishes nothing and leaves its sequence at zero.
 14. One operation lifetime publishes a gapless sequence, and published changes stay payload-free.
 15. The workbench capability grants listen and unlisten, and does not grant emit.
+
+## Amendment (2026-08-17): Decision 9 is a per-feature check, not a standing release gate
+
+Decision 9 and acceptance item 9 disagree, and the stricter wording had escaped into the release
+process. This amendment names the governing reading. It reopens no decision.
+
+Decision 9's body requires an empty diff under `crates/mcp-connector`, `crates/browser-connector`,
+and `extension` when the completed change is compared against its starting revision, and says the
+shared bridge "changes only if an already-real process boundary requires it". Acceptance item 9
+instead lists the shared bridge alongside the other three as unconditionally empty. Read literally,
+that forbids exactly what the body permits.
+
+The body governs. Item 9 records how Decision 9 was satisfied for the workbench feature, which is
+the change this ADR was written about: that feature landed with all four paths untouched, and
+`STATUS.md` records it. It is evidence of one pass, not a permanent constraint on every later
+change.
+
+This matters because the check is per-feature. It compares a completed change against that change's
+starting revision, so it cannot be evaluated against a release candidate at all, which has no single
+starting revision. Work after this ADR has deliberately changed the shared bridge and both
+connectors at their connection-lifetime seam: demand-start, and the ADR-0126 readiness inspection
+that carries an opaque projection across an already-real process boundary. Both are what the body
+allows.
+
+The durable invariant, which does hold at every release, is fringe stability rather than an empty
+diff: the connectors, the shared bridge, and the extension change only when an already-real process
+boundary requires it, never to carry a product feature, and the extension stays policy-free. That is
+the rule a release reviews its diff against.
+
+`docs/RELEASE.md` previously restated Decision 9 as a standing source gate over all four paths,
+including the bridge. It now states the reading above. `docs/1.0/ACCEPTANCE.md` already scoped it
+correctly to the complete workbench feature and is unchanged.

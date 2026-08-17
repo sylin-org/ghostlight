@@ -82,11 +82,10 @@ installed-product observation, or the checklist deadlocks against itself.
 - [ ] Decide how the live lanes obtain a matching 1.0 store adapter, and record it in G3. G4, G5,
   and G7 refuse an unpacked build, so either name a pre-publication route (trusted testers, or an
   unlisted item) or accept that the adapter is submitted and approved before the live lanes run.
-- [ ] Record a marked amendment to ADR-0102 reconciling its Decision 9 body, which permits a shared
-  bridge change when an already-real process boundary requires it, with its acceptance item 9, which
-  reads as an unconditional empty diff. The governing reading is settled in practice and
-  [RELEASE.md](RELEASE.md) now states it; this item only stops the stricter wording from resurfacing
-  as a release gate it was never meant to be.
+- [x] Record a marked amendment to ADR-0102 reconciling its Decision 9 body with its acceptance item
+  9. Resolved 2026-08-17: the amendment names the body as governing, explains that the check is
+  per-feature and therefore cannot be evaluated against a candidate at all, and states the durable
+  fringe-stability invariant a release does review its diff against. No decision was reopened.
 - [x] Decide whether public first-use feedback is part of 1.0 at all. Resolved 2026-08-17: it is out
   of 1.0 entirely. It is not one of the seven ADR-0126 acceptance measures, it repeats the substance
   of [greenfield-first-success.md](testing/greenfield-first-success.md), which the tree marks
