@@ -27,7 +27,9 @@ use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade, Js
 use crate::language::{catalog_for, RequestRestrictions, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::work::{ActiveAuthorityRegistry, ApplicationExecutor, CancellationToken};
-use crate::workbench::{ProjectingAuditSink, WorkbenchFacade, WorkbenchProjection};
+use crate::workbench::{
+    ProjectingAuditSink, ReadinessSummary, WorkbenchFacade, WorkbenchProjection,
+};
 use crate::workspace::{ReleasedTabs, WorkspaceStore};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
@@ -51,6 +53,7 @@ enum ServiceOpening {
         session: Option<SessionMarker>,
     },
     WorkbenchActivation,
+    ReadinessInspection,
 }
 
 impl ServiceHost {
@@ -172,13 +175,7 @@ impl Drop for ServiceHost {
 
 /// Ask an already-running authenticated service to reveal its attached desktop workbench.
 pub fn request_workbench_activation(path: &Path) -> Result<bool> {
-    let endpoint = read_runtime(path).context("read current Ghostlight runtime")?;
-    if endpoint.service_bridge_major != SERVICE_BRIDGE_MAJOR {
-        bail!("running Ghostlight service bridge is incompatible");
-    }
-    let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, endpoint.service_port))
-        .context("connect current Ghostlight service")?;
-    stream.set_nodelay(true)?;
+    let (mut stream, endpoint) = connect_running_service(path)?;
     write_json_line(
         &mut stream,
         &ServiceRequest::ActivateWorkbench {
@@ -193,6 +190,38 @@ pub fn request_workbench_activation(path: &Path) -> Result<bool> {
         Some(ServiceResponse::Error { message, .. }) => bail!(message),
         _ => bail!("service returned an invalid workbench activation response"),
     }
+}
+
+/// Read readiness from an already-running authority without starting it or opening a session.
+pub fn request_readiness(path: &Path) -> Result<ReadinessSummary> {
+    let (mut stream, endpoint) = connect_running_service(path)?;
+    write_json_line(
+        &mut stream,
+        &ServiceRequest::InspectReadiness {
+            major: SERVICE_BRIDGE_MAJOR,
+            token: endpoint.token,
+        },
+    )
+    .context("request readiness inspection")?;
+    let mut reader = BufReader::new(stream);
+    match read_json_line::<ServiceResponse>(&mut reader).context("read readiness inspection")? {
+        Some(ServiceResponse::Readiness { value }) => {
+            serde_json::from_value(value).context("decode readiness inspection")
+        }
+        Some(ServiceResponse::Error { message, .. }) => bail!(message),
+        _ => bail!("service returned an invalid readiness inspection response"),
+    }
+}
+
+fn connect_running_service(path: &Path) -> Result<(TcpStream, RuntimeEndpoint)> {
+    let endpoint = read_runtime(path).context("read current Ghostlight runtime")?;
+    if endpoint.service_bridge_major != SERVICE_BRIDGE_MAJOR {
+        bail!("running Ghostlight service bridge is incompatible");
+    }
+    let stream = TcpStream::connect((Ipv4Addr::LOCALHOST, endpoint.service_port))
+        .context("connect current Ghostlight service")?;
+    stream.set_nodelay(true)?;
+    Ok((stream, endpoint))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -335,6 +364,9 @@ fn serve_session(
         ServiceRequest::ActivateWorkbench { major, token } => {
             (major, token, ServiceOpening::WorkbenchActivation)
         }
+        ServiceRequest::InspectReadiness { major, token } => {
+            (major, token, ServiceOpening::ReadinessInspection)
+        }
         ServiceRequest::Hello {
             major,
             token,
@@ -394,6 +426,12 @@ fn serve_session(
                     available: workbench.reveal().is_ok(),
                 },
             );
+            return Ok(());
+        }
+        ServiceOpening::ReadinessInspection => {
+            let value = serde_json::to_value(workbench.snapshot().readiness)
+                .context("serialize readiness inspection")?;
+            write_response(&writer, &ServiceResponse::Readiness { value });
             return Ok(());
         }
         ServiceOpening::Workspace {
@@ -543,16 +581,16 @@ fn serve_session(
                         token.cancel();
                     }
                 }
-                ServiceRequest::Hello { .. } | ServiceRequest::ActivateWorkbench { .. } => {
-                    write_response(
-                        &writer,
-                        &ServiceResponse::Error {
-                            id: None,
-                            code: "duplicate_hello".into(),
-                            message: "Session is already established.".into(),
-                        },
-                    )
-                }
+                ServiceRequest::Hello { .. }
+                | ServiceRequest::ActivateWorkbench { .. }
+                | ServiceRequest::InspectReadiness { .. } => write_response(
+                    &writer,
+                    &ServiceResponse::Error {
+                        id: None,
+                        code: "duplicate_hello".into(),
+                        message: "Session is already established.".into(),
+                    },
+                ),
             }
         }
         Ok(())
@@ -757,7 +795,9 @@ mod tests {
     };
     use crate::workspace::ReleasedTabs;
 
-    use super::{cleanup_released_tabs, request_workbench_activation, ServiceHost};
+    use super::{
+        cleanup_released_tabs, request_readiness, request_workbench_activation, ServiceHost,
+    };
 
     fn runtime_path(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let directory = std::env::temp_dir().join(format!(
@@ -791,6 +831,34 @@ mod tests {
             matches!(response, ServiceResponse::Error { code, .. } if code == "incompatible_bridge")
         );
         drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn readiness_inspection_is_read_only_and_opens_no_session() {
+        let (directory, path) = runtime_path("readiness-inspection");
+        let host = ServiceHost::start(&path).unwrap();
+        let before = host.workbench.snapshot();
+
+        let observed = request_readiness(&path).unwrap();
+        let after = host.workbench.snapshot();
+
+        assert_eq!(observed, before.readiness);
+        assert_eq!(after.readiness, before.readiness);
+        assert!(after.sessions.is_empty());
+        assert_eq!(after.history, before.history);
+
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn readiness_inspection_never_starts_an_absent_service() {
+        let (directory, path) = runtime_path("readiness-no-start");
+
+        assert!(request_readiness(&path).is_err());
+        assert!(!path.exists());
+
         std::fs::remove_dir_all(directory).unwrap();
     }
 

@@ -97,10 +97,13 @@ use an older adapter for every capability that adapter advertises.
 
 ## Stable bridges
 
-The service bridge has generic messages for hello, catalog, invoke, cancel, result, and error.
-Invocation carries a tool name and JSON input. Catalog and result payloads are opaque to the MCP
-edge. One small typed content vocabulary lets the edge render bounded screenshots and GIFs without
-knowing which tool produced them. MCP request ids and protocol revisions do not cross this bridge.
+The service bridge has generic messages for hello, catalog, invoke, cancel, result, and error, plus
+authenticated pre-session openings for workbench activation and content-free readiness inspection.
+Invocation carries a tool name and JSON input. Catalog, result, and readiness projections are
+opaque to the bridge; their meaning remains in the orchestrator. One small typed content vocabulary
+lets the edge render bounded screenshots and GIFs without knowing which tool produced them. MCP
+request ids and protocol revisions do not cross this bridge. Readiness inspection returns before
+channel admission or workspace creation and never demand-starts the authority or writes audit.
 
 The browser bridge has generic messages for hello, primitive request, receipt, browser event,
 cancel, and presentation. It carries a closed primitive vocabulary but no model-facing tool

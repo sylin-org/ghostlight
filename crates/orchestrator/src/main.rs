@@ -420,6 +420,7 @@ struct DoctorObservation {
     desktop: ghostlight::install::desktop_entry::DesktopIntegrationReport,
     harnesses: Vec<ghostlight::install::HarnessSummary>,
     runtime: RuntimeObservation,
+    readiness: Option<ghostlight::workbench::ReadinessSummary>,
 }
 
 fn observe_doctor() -> anyhow::Result<DoctorObservation> {
@@ -444,6 +445,12 @@ fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         sibling_set_ready &= ready;
         binaries.push((path, ready));
     }
+    let runtime = observe_runtime();
+    let readiness = if runtime.running {
+        ghostlight::service::request_readiness(&runtime.path).ok()
+    } else {
+        None
+    };
     Ok(DoctorObservation {
         // Same module as the install summary, so the two can never describe this machine
         // differently.
@@ -455,7 +462,8 @@ fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         user_assets: ghostlight::install::user_assets::UserAssets::discover().check()?,
         desktop: DesktopIntegration::discover().check()?,
         harnesses: HarnessRegistry::discover().refresh()?,
-        runtime: observe_runtime(),
+        runtime,
+        readiness,
     })
 }
 
@@ -473,6 +481,13 @@ fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     );
     if let Some(caveat) = observation.environment.caveat() {
         println!("Environment: {caveat}");
+    }
+    if let Some(readiness) = &observation.readiness {
+        println!("{}", readiness_line(readiness));
+    } else if observation.runtime.running {
+        println!(
+            "Readiness: unavailable -- The running Ghostlight authority did not report its current state."
+        );
     }
     for (path, ready) in &observation.binaries {
         println!(
@@ -533,7 +548,12 @@ fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
         "applications": observation.desktop,
         "mcp_clients": observation.harnesses,
         "service": runtime_document(&observation.runtime),
+        "readiness": observation.readiness,
     })
+}
+
+fn readiness_line(readiness: &ghostlight::workbench::ReadinessSummary) -> String {
+    format!("Readiness: {} -- {}", readiness.word, readiness.detail)
 }
 
 fn run_status(json: bool) -> anyhow::Result<()> {
@@ -1003,8 +1023,30 @@ mod tests {
     };
 
     use super::{
-        launch_mode, select_install_browsers, LaunchMode, NativeHostCommand, SetupOptions,
+        launch_mode, readiness_line, select_install_browsers, LaunchMode, NativeHostCommand,
+        SetupOptions,
     };
+
+    #[test]
+    fn doctor_renders_every_workbench_readiness_state_in_the_same_words() {
+        use ghostlight::language::readiness::Readiness;
+        use ghostlight::workbench::ReadinessSummary;
+
+        for state in Readiness::ALL {
+            let readiness = ReadinessSummary {
+                state: *state,
+                word: state.word().into(),
+                detail: state.detail().into(),
+                tone: state.tone().into(),
+                invites_control: state.invites_control(),
+            };
+            assert_eq!(
+                readiness_line(&readiness),
+                format!("Readiness: {} -- {}", state.word(), state.detail()),
+                "{state:?}"
+            );
+        }
+    }
 
     /// Every state `doctor` can report has plain words, and they are pinned here.
     ///

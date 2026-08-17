@@ -26,7 +26,7 @@ tree.
 
 | Batch | What it was | Where its ledger stops | Last touched |
 | --- | --- | --- | --- |
-| [reference-experience](reference-experience/) | One product across every machine: the second-machine state, adaptive familiarity, terminal citizenship, runtime control, At a glance, readiness recovery | S1-S6 complete; S7 planned in substeps; S8 split with the Linux lane | 2026-08-16 |
+| [reference-experience](reference-experience/) | One product across every machine: the second-machine state, adaptive familiarity, terminal citizenship, runtime control, At a glance, readiness recovery | S1-S7 and Linux V1-V5 complete; S8 blocked on required real-desktop evidence | 2026-08-17 |
 | [executor-split](executor-split/) | Splitting `work/mod.rs` (5824 lines) into per-operation-family files | Complete | 2026-08-15 |
 | [outcome-language](outcome-language/) | ADR-0103: one module owns what Ghostlight says happened | Complete | 2026-08-11 |
 | [browser-kernel](browser-kernel/) | ADR-0101: canonical browser operations, native surface, compatibility adapter | Open at stage R5 | 2026-08-08 |

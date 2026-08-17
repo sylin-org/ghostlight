@@ -83,6 +83,23 @@ try {
   const statusJson = JSON.parse(status.stdout);
   assert.equal(statusJson.running, true);
   assert.equal("token" in statusJson, false, "status must never reveal local authentication material");
+  const doctor = spawnSync(ghostlight, ["doctor"], {
+    env: environment,
+    encoding: "utf8"
+  });
+  assert.equal(doctor.status, 0, doctor.stderr);
+  assert.match(
+    doctor.stdout,
+    /Readiness: Not connected -- No browser is connected\. Open a supported Chromium browser with the Ghostlight extension installed\./
+  );
+  const doctorJson = spawnSync(ghostlight, ["doctor", "--json"], {
+    env: environment,
+    encoding: "utf8"
+  });
+  assert.equal(doctorJson.status, 0, doctorJson.stderr);
+  const diagnosis = JSON.parse(doctorJson.stdout);
+  assert.equal(diagnosis.readiness.state, "not_connected");
+  assert.equal(diagnosis.readiness.word, "Not connected");
 
   const listed = call(["browser_tabs", '{"action":"list"}']);
   assert.equal(listed.status, 0, listed.stderr);

@@ -171,6 +171,24 @@ call, and no new outbound request. Adoption signal comes from the Chrome Web Sto
 registry, and GitHub, which already count installs and downloads without the product reporting
 anything.
 
+### Amendment: `doctor` reads live readiness without demand-start (2026-08-17)
+
+The owner resolved the open S8 parity question in favor of the literal acceptance measure.
+`ghostlight doctor` may query an already-running local authority for the current content-free
+readiness projection. It uses one authenticated, read-only service opening and returns before
+channel admission, workspace creation, or audit. It does not reveal the workbench and does not
+demand-start an absent authority.
+
+The authority serializes the existing orchestrator-owned `ReadinessSummary`; the calling
+orchestrator executable decodes that same type and prints its word and detail. The service bridge
+transports the opaque projection and owns no readiness classification or product language. If no
+authority is running, `doctor` retains its existing installation and runtime diagnosis rather than
+fabricating live facts. A transient failed inspection is named as unavailable.
+
+Wire round-trip, no-session, no-history-mutation, absent-service, six-state language, and real CLI
+process tests guard the relationship. Installed Windows and Ubuntu GNOME Wayland observation
+remains S8 evidence, not an implementation prerequisite.
+
 ## Consequences
 
 `docs/1.0/INTENT.md` is corrected: the workbench has five destinations, not three, and the landing

@@ -90,6 +90,7 @@ Open questions, owned by a stage. Not conclusions to assume early.
 | Whether At a glance replaces Monitor or becomes a new destination | S1/S6 | CLOSED | Replaces the landing; no sixth destination. ADR-0126 D9 |
 | Acceptance thresholds for first use, recovery, and comprehension | S1/S8 | CLOSED | ADR-0126 D10 |
 | Whether 1.0 publishes before this epic lands | owner | DECIDED 2026-08-16: no | 1.0 waits for this epic. The epic is now on the release critical path; S8 is a release gate, not a nice-to-have |
+| Whether `doctor` may query a running authority for aggregate readiness | owner/S8 | CLOSED 2026-08-17 | Yes, through one authenticated read-only opening that never demand-starts, opens a session, or writes audit. ADR-0126 amendment |
 | Whether the in-page affordance returns | owner | PROVISIONAL: deferred | -- |
 
 ## What this epic makes redundant
@@ -249,14 +250,15 @@ second source of truth about the one thing that must have one. `language/readine
 closed state, the word, the sentence, and the tone; the snapshot carries them; the window renders
 them. A guard fails if any readiness word reappears as a literal in `view.js`.
 
-**12. `doctor` has no readiness line, deliberately.** The S6 prompt asked that every front-door
-state have a `doctor` line in the same words. The aggregate answer needs live facts -- connected
-adapters, running operations, the current control state -- that `doctor` does not have, because it
-deliberately does not start or query the service. Inventing a line from partial facts would be the
-kind of confident wrong answer this epic exists to remove. The parity that was achievable is
-delivered instead: both surfaces draw every state word from Rust, and neither authors its own. If a
-readiness line in `doctor` is wanted later, it needs a decision about whether `doctor` may query a
-running service.
+**12. `doctor` originally had no readiness line; resolved 2026-08-17.** The S6 prompt asked that
+every front-door state have a `doctor` line in the same words. The aggregate answer needs live
+facts -- connected adapters, running operations, and the current control state -- that local file
+inspection cannot supply. Inventing a line from partial facts would be the kind of confident wrong
+answer this epic exists to remove. The owner approved a live query: `doctor` now reads the exact
+orchestrator-owned `ReadinessSummary` through one authenticated read-only service opening. It does
+not demand-start an absent authority, open a session, reveal the workbench, or write audit. Wire,
+no-mutation, absent-service, six-state language, and real CLI process tests pass. Required installed
+desktop observation remains S8 evidence.
 
 **13. The WSL row's rendered line is still unproved.** The detection inputs are now verified
 against a real WSL2 system: `WSL_DISTRO_NAME` is set and the kernel release contains the pinned

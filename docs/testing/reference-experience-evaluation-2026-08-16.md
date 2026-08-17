@@ -39,13 +39,13 @@ without changing this evaluation's `BLOCKED` disposition.
 
 ## Acceptance disposition
 
-| ADR-0126 measure | Disposition on 2026-08-16 | Evidence or missing proof |
+| ADR-0126 measure | Current disposition | Evidence or missing proof |
 | --- | --- | --- |
 | First use | NOT MET as an S8 gate | Development-host journeys exist, but neither required clean installed desktop completed first proof against the candidate and matching store extension |
 | Second machine | PARTIAL | Live KDE Chromium proved both extension surfaces plus online and offline routes; the same-person cross-platform wording comparison is not observed |
 | Recovery | PARTIAL | Closed automated outcomes, caller-local single-flight cancellation/deadlines, a real Windows source-host Chrome/Edge ambiguity, and Linux manual-mode diagnosis pass; physical installed-Windows on-demand startup and the full desktop failure matrix are not observed |
 | Control | PARTIAL | Pause and stop are truth-preserving in automated journeys; keyboard and visible behavior on both required installed desktops are not observed |
-| Parity | NOT MET, owner decision required | The Rust-owned vocabulary guard passes, but deviation 12 records that `doctor` has no live aggregate-readiness line; closing the literal measure requires either an approved amendment or a service-query design |
+| Parity | PARTIAL: implementation met 2026-08-17 | The owner approved the live query. Text and JSON `doctor` now read the exact orchestrator-owned readiness projection through an authenticated no-session, no-audit service opening. Six-state and real-process guards pass; installed Windows and Ubuntu observation remains S8 evidence. See [doctor-readiness-parity-2026-08-17.md](doctor-readiness-parity-2026-08-17.md) |
 | Accessibility | NOT MET | Keyboard-only, screen reader, large text, high contrast, reduced motion, browser zoom, and fractional scaling were not run on GNOME Wayland and KDE Wayland |
 | Evidence | NOT MET | Ubuntu GNOME Wayland L1-L9, the clean Windows lane, the remaining migration observations, and public first-use feedback are missing |
 
@@ -69,5 +69,6 @@ human-visible evidence, and no private browser content or machine-local notes we
    login/reboot, public-0.8 upgrade, S7 on-demand browser startup, and ownership-safe uninstall.
 3. Observe the WSL rendered sentence and compare the same state on the same person's two machines.
 4. Collect consented, content-free first-use feedback through existing public channels.
-5. Disposition every remaining acceptance row and ledger deviation. The owner must resolve the
-   literal `doctor` parity measure before S8 can pass.
+5. Disposition every remaining acceptance row and ledger deviation. The `doctor` parity decision
+   and implementation are closed; observe the line beside the workbench state in both installed
+   desktop lanes.

@@ -929,7 +929,7 @@ pub struct ServiceSummary {
 /// The surface renders these fields. It does not decide which state holds, and it does not author
 /// the word: a window that invents its own readiness vocabulary is a second source of truth about
 /// the one thing that must have exactly one.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ReadinessSummary {
     /// The closed state.
     pub state: readiness::Readiness,

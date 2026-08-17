@@ -9,10 +9,10 @@
 //! pause. Attention comes after a human pause, because a person who paused Ghostlight already knows
 //! why it stopped.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The aggregate answer, in the order it takes precedence.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Readiness {
     /// No browser is connected, so no browser work can happen.

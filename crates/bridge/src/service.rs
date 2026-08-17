@@ -156,12 +156,19 @@ impl SessionMarker {
     }
 }
 
-/// A request sent from the generic MCP edge to the orchestrator.
+/// A request sent across the local service bridge to the orchestrator.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServiceRequest {
     /// Ask an already-running desktop orchestrator to reveal its workbench.
     ActivateWorkbench {
+        /// Bridge major supported by the requesting executable.
+        major: u16,
+        /// Runtime authentication token.
+        token: String,
+    },
+    /// Read the current content-free readiness projection without opening a workspace.
+    InspectReadiness {
         /// Bridge major supported by the requesting executable.
         major: u16,
         /// Runtime authentication token.
@@ -212,6 +219,11 @@ pub enum ServiceResponse {
     WorkbenchActivated {
         /// Whether a native workbench was attached and accepted the request.
         available: bool,
+    },
+    /// The orchestrator-owned readiness projection.
+    Readiness {
+        /// Opaque product projection interpreted only by the orchestrator executable.
+        value: Value,
     },
     /// A compatible session was established.
     HelloAccepted {
@@ -275,6 +287,10 @@ mod tests {
                 major: SERVICE_BRIDGE_MAJOR,
                 token: "token".into(),
             },
+            ServiceRequest::InspectReadiness {
+                major: SERVICE_BRIDGE_MAJOR,
+                token: "token".into(),
+            },
             ServiceRequest::Hello {
                 major: SERVICE_BRIDGE_MAJOR,
                 token: "token".into(),
@@ -306,6 +322,15 @@ mod tests {
 
         let responses = [
             ServiceResponse::WorkbenchActivated { available: true },
+            ServiceResponse::Readiness {
+                value: json!({
+                    "state": "ready",
+                    "word": "Ready",
+                    "detail": "Connected and idle. Agents can work when they ask.",
+                    "tone": "quiet",
+                    "invites_control": true
+                }),
+            },
             ServiceResponse::HelloAccepted {
                 major: SERVICE_BRIDGE_MAJOR,
                 session: "workspace_test".into(),
