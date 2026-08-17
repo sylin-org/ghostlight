@@ -5,6 +5,77 @@ import { extname, join, resolve } from "node:path";
 const repository = resolve(import.meta.dirname, "..");
 const ui = join(repository, "crates", "orchestrator", "ui");
 const port = Number(process.env.GHOSTLIGHT_PREVIEW_PORT || 41737);
+const connectorCommand = "/opt/ghostlight/ghostlight-mcp-connector";
+
+const harnessDetail = Object.freeze({
+  installed: "Ghostlight is registered for this user context.",
+  available: "Detected and ready for an explicit Ghostlight registration.",
+  updatable: "Ghostlight is registered through an older Ghostlight installation or executable.",
+  needs_attention: "The configuration is malformed or has a foreign ghostlight entry; it was left untouched.",
+  not_detected: "Not detected. You can prepare its user configuration before installing it."
+});
+
+const jsonSetup = (collection = "mcpServers") => JSON.stringify({
+  [collection]: { ghostlight: { command: connectorCommand, args: [], env: {} } }
+}, null, 2);
+
+const previewHarness = ({
+  id, productId = id, name, target, icon = `${id}.svg`, state, configPath,
+  canDownload = true, manualSetup = jsonSetup()
+}) => ({
+  id,
+  product_id: productId,
+  name,
+  target,
+  icon,
+  state,
+  detail: harnessDetail[state],
+  can_install: ["available", "updatable", "not_detected"].includes(state),
+  can_uninstall: state === "installed",
+  can_download: canDownload,
+  can_locate: true,
+  config_path: configPath,
+  connector_command: connectorCommand,
+  manual_setup: manualSetup
+});
+
+// This is the complete fixed registry, deliberately shuffled. The surface must form its four
+// semantic groups and alphabetize products without inheriting registry or fixture order.
+const harnesses = [
+  previewHarness({ id: "qwen-code", name: "Qwen Code", target: "CLI", state: "not_detected", configPath: "/home/test/.qwen/settings.json" }),
+  previewHarness({ id: "cline-vscode", productId: "cline", name: "Cline", target: "Visual Studio Code", icon: "cline.svg", state: "available", configPath: "/home/test/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "claude-desktop", name: "Claude Desktop", target: "User", state: "needs_attention", configPath: "/home/test/.config/Claude/claude_desktop_config.json", canDownload: false }),
+  previewHarness({ id: "windsurf", name: "Windsurf", target: "User", state: "available", configPath: "/home/test/.codeium/windsurf/mcp_config.json" }),
+  previewHarness({ id: "crush", name: "Crush", target: "User", state: "not_detected", configPath: "/home/test/.config/crush/crush.json", manualSetup: jsonSetup("mcp") }),
+  previewHarness({ id: "codex", name: "Codex", target: "User", state: "installed", configPath: "/home/test/.codex/config.toml", manualSetup: `[mcp_servers.ghostlight]\ncommand = "${connectorCommand}"\nargs = []\n` }),
+  previewHarness({ id: "continue", name: "Continue", target: "CLI and IDE", state: "updatable", configPath: "/home/test/.continue/config.yaml", manualSetup: `name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: "${connectorCommand}"\n    args: []\n` }),
+  previewHarness({ id: "antigravity", name: "Antigravity", target: "CLI", state: "not_detected", configPath: "/home/test/.gemini/config/mcp_config.json" }),
+  previewHarness({ id: "cline-cursor", productId: "cline", name: "Cline", target: "Cursor", icon: "cline.svg", state: "needs_attention", configPath: "/home/test/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "cursor", name: "Cursor", target: "User", state: "available", configPath: "/home/test/.cursor/mcp.json" }),
+  previewHarness({ id: "zed", name: "Zed", target: "User", state: "installed", configPath: "/home/test/.config/zed/settings.json", manualSetup: jsonSetup("context_servers") }),
+  previewHarness({ id: "goose", name: "goose", target: "CLI and desktop", state: "not_detected", configPath: "/home/test/.config/goose/config.yaml", manualSetup: `extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: "${connectorCommand}"\n    args: []\n    envs: {}\n    timeout: 300\n` }),
+  previewHarness({ id: "copilot-cli", name: "GitHub Copilot CLI", target: "CLI", state: "available", configPath: "/home/test/.copilot/mcp-config.json" }),
+  previewHarness({ id: "cline-cli", productId: "cline", name: "Cline", target: "CLI", icon: "cline.svg", state: "installed", configPath: "/home/test/.cline/data/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "junie", name: "Junie", target: "CLI and JetBrains", state: "needs_attention", configPath: "/home/test/.junie/mcp/mcp.json" }),
+  previewHarness({ id: "opencode", name: "OpenCode", target: "User", state: "not_detected", configPath: "/home/test/.config/opencode/opencode.json", manualSetup: jsonSetup("mcp") }),
+  previewHarness({ id: "kiro", name: "Kiro", target: "CLI and IDE", state: "available", configPath: "/home/test/.kiro/settings/mcp.json" }),
+  previewHarness({ id: "kilo-code", name: "Kilo Code", target: "CLI", state: "needs_attention", configPath: "/home/test/.config/kilo/kilo.json", manualSetup: jsonSetup("mcp") }),
+  previewHarness({ id: "claude-code", name: "Claude Code", target: "User", state: "available", configPath: "/home/test/.claude.json" }),
+  previewHarness({ id: "cline-windsurf", productId: "cline", name: "Cline", target: "Windsurf", icon: "cline.svg", state: "not_detected", configPath: "/home/test/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "vscode", name: "Visual Studio Code", target: "User", state: "available", configPath: "/home/test/.config/Code/User/mcp.json", manualSetup: jsonSetup("servers") })
+];
+
+const expectedHarnessIds = [
+  "antigravity", "claude-code", "claude-desktop", "cline-cli", "cline-cursor",
+  "cline-vscode", "cline-windsurf", "codex", "continue", "copilot-cli", "crush", "cursor",
+  "goose", "junie", "kilo-code", "kiro", "opencode", "qwen-code", "vscode", "windsurf", "zed"
+];
+const actualHarnessIds = harnesses.map((harness) => harness.id).sort();
+const previewProductCount = new Set(harnesses.map((harness) => harness.product_id)).size;
+if (JSON.stringify(actualHarnessIds) !== JSON.stringify(expectedHarnessIds)
+  || previewProductCount !== 18) {
+  throw new Error(`preview harness roster drifted: ${harnesses.length} rows / ${previewProductCount} products`);
+}
 
 const snapshot = {
   seq: 0,
@@ -33,13 +104,7 @@ const snapshot = {
     { id: "browser", label: "Browser adapters", severity: "passing", detail: "Compatible browser adapters are connected." },
     { id: "authority", label: "Authority", severity: "passing", detail: "Configured authority sources are valid." }
   ],
-  harnesses: [
-    { id: "codex", product_id: "codex", name: "Codex", target: "User", icon: "codex.svg", state: "installed", detail: "Ghostlight is registered for this user context.", can_install: false, can_uninstall: true, can_download: true, can_locate: true, config_path: "/home/test/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "[mcp_servers.ghostlight]" },
-    { id: "claude-code", product_id: "claude-code", name: "Claude Code", target: "User", icon: "claude-code.svg", state: "available", detail: "Detected and ready for an explicit Ghostlight registration.", can_install: true, can_uninstall: false, can_download: true, can_locate: true, config_path: "/home/test/.claude.json", connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "{\"mcpServers\":{}}" },
-    { id: "cline-cli", product_id: "cline", name: "Cline", target: "CLI", icon: "cline.svg", state: "available", detail: "Detected and ready for an explicit Ghostlight registration.", can_install: true, can_uninstall: false, can_download: true, can_locate: true, config_path: "/home/test/.cline/data/settings/cline_mcp_settings.json", connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "{\"mcpServers\":{}}" },
-    { id: "cline-vscode", product_id: "cline", name: "Cline", target: "Visual Studio Code", icon: "cline.svg", state: "installed", detail: "Ghostlight is registered for this user context.", can_install: false, can_uninstall: true, can_download: true, can_locate: true, config_path: "/home/test/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json", connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "{\"mcpServers\":{}}" },
-    { id: "cursor", product_id: "cursor", name: "Cursor", target: "User", icon: "cursor.svg", state: "not_detected", detail: "Not detected. Locate it or install it from the official page.", can_install: true, can_uninstall: false, can_download: true, can_locate: true, config_path: "/home/test/.cursor/mcp.json", connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "{\"mcpServers\":{}}" }
-  ],
+  harnesses,
   configuration: {
     runtime_state: "active",
     local_policy_configured: true,
@@ -225,7 +290,9 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
   setTimeout(runOne, 1200);
 })();`;
 
-const types = { ".css": "text/css", ".js": "text/javascript", ".png": "image/png" };
+const types = {
+  ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".svg": "image/svg+xml"
+};
 
 createServer(async (request, response) => {
   try {
@@ -237,7 +304,8 @@ createServer(async (request, response) => {
     }
     const name = pathname === "/" ? "index.html" : pathname.slice(1);
     const served = new Set(["index.html", "styles.css", "app.js", "ghostlight.png"]);
-    if (!served.has(name) && !/^lib\/[a-z]+\.js$/.test(name)) {
+    if (!served.has(name) && !/^lib\/[a-z]+\.js$/.test(name)
+      && !/^integrations\/[a-z0-9-]+\.svg$/.test(name)) {
       response.writeHead(404).end();
       return;
     }

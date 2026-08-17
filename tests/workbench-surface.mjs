@@ -224,22 +224,71 @@ const view = sandbox.globalThis.GhostlightView.create({ onFailure: (what, error)
 view.collections({
   sessions: [], browsers: [], diagnostics: [], history: [], service: { version: "1.0.0" },
   configuration: { managed_policy: { configured: false } },
+  // Deliberately shuffled across every raw target state. Product cards must classify their mixed
+  // targets first, then render the four semantic groups in product-owned order with names sorted
+  // inside each group. Neither registry order nor the order of targets in this fixture may leak.
   harnesses: [
-    { id: "cline-cli", product_id: "cline", name: "Cline", target: "CLI", icon: "cline.svg",
-      state: "installed", detail: "Current.", can_install: false, can_uninstall: true,
-      can_download: true, can_locate: true, config_path: "/tmp/cline-cli.json",
-      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "cli setup" },
+    { id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", target: "CLI",
+      icon: "qwen-code.svg", state: "not_detected", detail: "Not detected.", can_install: true,
+      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/qwen.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "qwen setup" },
+    { id: "windsurf", product_id: "windsurf", name: "Windsurf", target: "User",
+      icon: "windsurf.svg", state: "available", detail: "Detected.", can_install: true,
+      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/windsurf.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "windsurf setup" },
     { id: "cline-vscode", product_id: "cline", name: "Cline", target: "Visual Studio Code",
       icon: "cline.svg", state: "available", detail: "Detected.", can_install: true,
       can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-vscode.json",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "editor setup" },
-    { id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", target: "CLI",
-      icon: "qwen-code.svg", state: "not_detected", detail: "Not detected.", can_install: true,
-      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/qwen.json",
-      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "qwen setup" }
+    { id: "zed", product_id: "zed", name: "Zed", target: "User", icon: "zed.svg",
+      state: "installed", detail: "Current.", can_install: false, can_uninstall: true,
+      can_download: true, can_locate: true, config_path: "/tmp/zed.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "zed setup" },
+    { id: "junie-cli", product_id: "junie", name: "Junie", target: "CLI", icon: "junie.svg",
+      state: "available", detail: "Detected.", can_install: true, can_uninstall: false,
+      can_download: true, can_locate: true, config_path: "/tmp/junie.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "junie setup" },
+    { id: "antigravity", product_id: "antigravity", name: "Antigravity", target: "CLI",
+      icon: "antigravity.svg", state: "not_detected", detail: "Not detected.", can_install: true,
+      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/antigravity.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "antigravity setup" },
+    { id: "codex", product_id: "codex", name: "Codex", target: "User", icon: "codex.svg",
+      state: "updatable", detail: "Old owned connector.", can_install: true, can_uninstall: false,
+      can_download: true, can_locate: true, config_path: "/tmp/codex.toml",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "codex setup" },
+    { id: "cline-cli", product_id: "cline", name: "Cline", target: "CLI", icon: "cline.svg",
+      state: "installed", detail: "Current.", can_install: false, can_uninstall: true,
+      can_download: true, can_locate: true, config_path: "/tmp/cline-cli.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "cli setup" },
+    { id: "claude-code", product_id: "claude-code", name: "Claude Code", target: "User",
+      icon: "claude-code.svg", state: "available", detail: "Detected.", can_install: true,
+      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/claude.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "claude setup" },
+    { id: "junie-jetbrains", product_id: "junie", name: "Junie", target: "JetBrains",
+      icon: "junie.svg", state: "needs_attention", detail: "Foreign entry preserved.", can_install: false,
+      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/junie.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "junie setup" },
+    { id: "cline-cursor", product_id: "cline", name: "Cline", target: "Cursor",
+      icon: "cline.svg", state: "needs_attention", detail: "Foreign entry preserved.", can_install: false,
+      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-cursor.json",
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "cursor setup" }
   ]
 }, new Set());
 const rosterHtml = nodes.get("integration-grid").innerHTML;
+const groupNames = ["ready", "available", "needs-attention", "not-detected"];
+const groupStarts = groupNames.map((name) => rosterHtml.indexOf(`integration-group-${name}`));
+const groupHtml = Object.fromEntries(groupNames.map((name, index) => {
+  const start = groupStarts[index];
+  const next = groupStarts[index + 1];
+  return [name, start < 0 ? "" : rosterHtml.slice(start, next < 0 ? undefined : next)];
+}));
+const occursInOrder = (html, values) => {
+  let cursor = -1;
+  return values.every((value) => {
+    cursor = html.indexOf(value, cursor + 1);
+    return cursor >= 0;
+  });
+};
 
 // A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
 // enforced denial, and an organization that supplied contacts supplied them for this moment.
@@ -332,8 +381,36 @@ const checks = [
     integrationsHtml.includes("Update")
       && integrationsHtml.includes('data-harness-action="install"'),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
+  ["the four nonempty integration groups render in product-owned order",
+    groupStarts.every((position) => position >= 0)
+      && groupStarts.every((position, index) => index === 0 || groupStarts[index - 1] < position)
+      && groupHtml.ready.includes(">Ready<")
+      && groupHtml.available.includes(">Available<")
+      && groupHtml["needs-attention"].includes(">Needs Attention<")
+      && groupHtml["not-detected"].includes(">Not Detected<"),
+    `groups: ${JSON.stringify(groupStarts)} roster: ${JSON.stringify(rosterHtml)}`],
+  ["products are alphabetical inside each semantic group",
+    occursInOrder(groupHtml.ready, ["<h3>Cline</h3>", "<h3>Zed</h3>"])
+      && occursInOrder(groupHtml.available, ["<h3>Claude Code</h3>", "<h3>Windsurf</h3>"])
+      && occursInOrder(groupHtml["needs-attention"], ["<h3>Codex</h3>", "<h3>Junie</h3>"])
+      && occursInOrder(groupHtml["not-detected"], ["<h3>Antigravity</h3>", "<h3>Qwen Code</h3>"]),
+    `roster: ${JSON.stringify(rosterHtml)}`],
+  ["mixed products use Ready before Needs Attention before Available",
+    groupHtml.ready.includes("<h3>Cline</h3>")
+      && groupHtml.ready.includes("Visual Studio Code")
+      && groupHtml.ready.includes("Foreign entry preserved.")
+      && !groupHtml["needs-attention"].includes("<h3>Cline</h3>")
+      && groupHtml["needs-attention"].includes("<h3>Junie</h3>")
+      && groupHtml["needs-attention"].includes("Detected."),
+    `roster: ${JSON.stringify(rosterHtml)}`],
+  ["every semantic group has visible words and a distinct card tone",
+    /class="[^"]*\bintegration-card\b[^"]*\bintegration-ready\b[^"]*"/.test(groupHtml.ready)
+      && /class="[^"]*\bintegration-card\b[^"]*\bintegration-available\b[^"]*"/.test(groupHtml.available)
+      && /class="[^"]*\bintegration-card\b[^"]*\bintegration-needs-attention\b[^"]*"/.test(groupHtml["needs-attention"])
+      && /class="[^"]*\bintegration-card\b[^"]*\bintegration-not-detected\b[^"]*"/.test(groupHtml["not-detected"]),
+    `roster: ${JSON.stringify(rosterHtml)}`],
   ["plural harness targets share one recognizable product card",
-    (rosterHtml.match(/class="tile integration-card/g) ?? []).length === 2
+    (rosterHtml.match(/class="tile integration-card/g) ?? []).length === 8
       && rosterHtml.includes("Visual Studio Code")
       && rosterHtml.includes('src="integrations/cline.svg"'),
     `roster: ${JSON.stringify(rosterHtml)}`],

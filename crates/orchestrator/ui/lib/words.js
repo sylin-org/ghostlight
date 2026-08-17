@@ -34,6 +34,34 @@
     install: "integrations"
   };
 
+  /**
+   * The integration roster's visible groups, in presentation order.
+   *
+   * Product state and presentation order are separate facts: an available product is shown before
+   * one that needs attention, while attention still outranks availability when several concrete
+   * targets share one product card.
+   */
+  const INTEGRATION_GROUPS = Object.freeze([
+    Object.freeze({ id: "ready", label: "Ready" }),
+    Object.freeze({ id: "available", label: "Available" }),
+    Object.freeze({ id: "needs-attention", label: "Needs Attention" }),
+    Object.freeze({ id: "not-detected", label: "Not Detected" })
+  ]);
+
+  /** Map every closed harness state to the one group a product card may occupy. */
+  const INTEGRATION_STATE_GROUP = Object.freeze({
+    installed: "ready",
+    available: "available",
+    updatable: "needs-attention",
+    needs_attention: "needs-attention",
+    not_detected: "not-detected"
+  });
+
+  /** Resolve a plural product card from its strongest concrete target state. */
+  const INTEGRATION_GROUP_PRIORITY = Object.freeze([
+    "ready", "needs-attention", "available", "not-detected"
+  ]);
+
   /* --------------------------------------------------------------------------
    * The medallion vocabulary, keyed by the orchestrator's fixed activity labels.
    * These are the same four shapes the renderer draws inside the page, so the
@@ -400,6 +428,7 @@
   ];
 
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
+    INTEGRATION_GROUPS, INTEGRATION_STATE_GROUP, INTEGRATION_GROUP_PRIORITY,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,

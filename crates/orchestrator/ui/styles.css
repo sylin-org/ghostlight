@@ -308,22 +308,42 @@ body.runtime-offline .state-word { color: var(--muted); }
 
 /* ------------------------------ tiles, cards ---------------------------- */
 .tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px; }
+.integration-roster { display: flex; flex-direction: column; gap: 25px; }
+.integration-group { --integration-tone: var(--ink-3); }
+.integration-group-ready, .integration-ready { --integration-tone: var(--ok); }
+.integration-group-available, .integration-available { --integration-tone: var(--cap-action); }
+.integration-group-needs-attention, .integration-needs-attention { --integration-tone: var(--held); }
+.integration-group-not-detected, .integration-not-detected { --integration-tone: var(--muted); }
+.integration-group-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 1px 9px;
+}
+.integration-group-head h2 {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--integration-tone); font-size: 11px; font-weight: 500;
+  letter-spacing: .11em; text-transform: uppercase;
+}
+.integration-group-marker {
+  width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--integration-tone);
+}
+.integration-group-count { color: var(--muted); font: 400 10px/1 var(--mono); }
+.integration-group-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px;
+}
 .tile {
   position: relative; display: flex; min-width: 0; flex-direction: column; gap: 4px;
   padding: 15px 16px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2);
   transition: border-color .25s var(--calm), background .25s var(--calm);
 }
 .tile:hover { border-color: var(--line-2); background: var(--panel); }
-.tile.connected { border-color: rgba(var(--argb), .3); background: rgba(var(--argb), .045); }
 .tile-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.tile h2 { overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.tile h2, .tile h3 { margin: 0; overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .tile p { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
 .tile-state { flex: none; font: 500 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
-.tile.connected .tile-state { color: var(--a); }
-.tile.attention .tile-state { color: var(--held); }
 .tile-actions { display: flex; gap: 7px; margin-top: 11px; }
 .tile-actions .ghost-button, .tile-actions .danger-button { height: 27px; padding: 0 11px; font-size: 11.5px; }
-.integration-card { gap: 10px; }
+.integration-card { gap: 10px; border-left-color: var(--integration-tone); }
+.integration-card:hover { border-left-color: var(--integration-tone); }
+.integration-card .tile-state { color: var(--integration-tone); }
 .integration-identity { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .integration-identity img {
   width: 28px; height: 28px; flex: none; padding: 4px;

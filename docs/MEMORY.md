@@ -79,6 +79,9 @@ the owner wants, and what this project learned the hard way.
   be green while an older authority is still serving real connectors. Do not call that a full
   integration test. Identify exact live image paths, deploy and restart only the changed component,
   prove its existing shores renegotiate, and name any physical lane that still did not run.
+- **A representative fixture does not prove a fixed roster is complete.** When a surface promises
+  every supported product, assert the exact target ids and product cardinality, then verify the
+  deployed live projection. A small fixture may prove layout, but it cannot prove completeness.
 - **Persist before handoff.** Update STATUS, the relevant ADR or task evidence, and this file when a
   durable fact changes, and commit before writing a restart prompt.
 

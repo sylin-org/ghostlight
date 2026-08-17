@@ -14,6 +14,7 @@
   const {
     VIEWS, GLYPHS, EFFECT_STORY, READINESS_NOTE, DESTINATIONS, glyphFor, capabilityClass,
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
+    INTEGRATION_GROUPS, INTEGRATION_STATE_GROUP, INTEGRATION_GROUP_PRIORITY,
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId
   } = globalThis.GhostlightWords;
@@ -385,23 +386,19 @@
     }
 
     function integrations(snapshot, pending) {
-      const order = { installed: 0, updatable: 1, needs_attention: 2, available: 3, not_detected: 4 };
-      const harnesses = [...snapshot.harnesses].sort((left, right) =>
-        left.name.localeCompare(right.name) || (order[left.state] ?? 9) - (order[right.state] ?? 9)
-        || left.target.localeCompare(right.target));
-
-      if (!harnesses.length) {
+      if (!snapshot.harnesses.length) {
         el["integration-grid"].innerHTML =
           '<div class="empty">No supported MCP client was found for this user.</div>';
         return;
       }
 
       const products = new Map();
-      for (const harness of harnesses) {
+      for (const harness of snapshot.harnesses) {
         const id = harness.product_id ?? harness.id;
         if (!products.has(id)) products.set(id, []);
         products.get(id).push(harness);
       }
+      const groupById = new Map(INTEGRATION_GROUPS.map((group) => [group.id, group]));
       const actionButton = (harness, action, label, kind = "ghost-button") => {
         const waiting = pending.has(harness.id);
         return `<button class="${kind}" type="button" data-harness-operation="manage"`
@@ -414,15 +411,17 @@
         + ` data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}"`
         + `${extra}>${label}</button>`;
 
-      el["integration-grid"].innerHTML = [...products.entries()].map(([productId, targets]) => {
-        const visible = targets.some((target) => target.state !== "not_detected")
-          ? targets.filter((target) => target.state !== "not_detected") : [targets[0]];
-        const best = [...visible].sort((left, right) => (order[left.state] ?? 9) - (order[right.state] ?? 9))[0];
-        const connected = visible.some((target) => target.state === "installed");
-        const attention = visible.some((target) => target.state === "needs_attention");
-        const tone = connected ? " connected" : attention ? " attention" : "";
-        const label = connected ? "Ready" : words(best.state);
-        const icon = escapeHtml(best.icon ?? "generic.svg");
+      const cards = [...products.entries()].map(([productId, targets]) => {
+        const sortedTargets = [...targets].sort((left, right) =>
+          left.target.localeCompare(right.target) || left.id.localeCompare(right.id));
+        const visible = sortedTargets.some((target) => target.state !== "not_detected")
+          ? sortedTargets.filter((target) => target.state !== "not_detected") : [sortedTargets[0]];
+        const targetGroups = new Set(visible.map((target) => INTEGRATION_STATE_GROUP[target.state]));
+        const groupId = INTEGRATION_GROUP_PRIORITY.find((id) => targetGroups.has(id))
+          ?? "needs-attention";
+        const group = groupById.get(groupId);
+        const product = visible[0];
+        const icon = escapeHtml(product.icon ?? "generic.svg");
         const rows = visible.map((harness) => {
           const installed = harness.state === "installed";
           const available = harness.state === "available";
@@ -452,13 +451,29 @@
             + ` data-harness-name="${escapeHtml(first.name)}">Install</button>` : "";
         const locate = missing ? utilityButton(first, "locate", "Locate") : "";
         const command = utilityButton(first, "copy", "Copy MCP command", ' data-copy-kind="command"');
-        return `<article class="tile integration-card${tone}">`
+        const html = `<article class="tile integration-card integration-${group.id}">`
           + `<div class="tile-top"><span class="integration-identity"><img src="integrations/${icon}" alt=""`
-          + ` width="28" height="28"><h2>${escapeHtml(best.name)}</h2></span>`
-          + `<span class="tile-state">${escapeHtml(label)}</span></div>`
+          + ` width="28" height="28"><h3>${escapeHtml(product.name)}</h3></span>`
+          + `<span class="tile-state">${escapeHtml(group.label)}</span></div>`
           + `<div class="integration-targets">${rows}</div>`
           + `<div class="tile-actions integration-product-actions">${install}${locate}${command}</div>`
           + `</article>`;
+        return { groupId, name: product.name, productId, html };
+      });
+
+      el["integration-grid"].innerHTML = INTEGRATION_GROUPS.map((group) => {
+        const grouped = cards.filter((card) => card.groupId === group.id)
+          .sort((left, right) => left.name.localeCompare(right.name)
+            || left.productId.localeCompare(right.productId));
+        if (!grouped.length) return "";
+        const count = `${grouped.length} integration${grouped.length === 1 ? "" : "s"}`;
+        const headingId = `integration-group-${group.id}`;
+        return `<section class="integration-group integration-group-${group.id}"`
+          + ` aria-labelledby="${headingId}"><div class="integration-group-head">`
+          + `<h2 id="${headingId}"><span class="integration-group-marker" aria-hidden="true"></span>`
+          + `${escapeHtml(group.label)}</h2><span class="integration-group-count">${count}</span></div>`
+          + `<div class="integration-group-grid">${grouped.map((card) => card.html).join("")}</div>`
+          + `</section>`;
       }).join("");
     }
 
