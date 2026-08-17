@@ -95,6 +95,16 @@ phases to a live joiner, and rechecks before repair and launch. The Linux defaul
 real no-browser call returned its exact useful outcome with no effect. S8 is split between the owed
 Ubuntu GNOME Wayland lifecycle and a clean installed-Windows live-launch lane.
 
+The corrective Windows source host also replaced its stale live orchestrator through the exact-path
+development swap. The deployed release SHA-256 is
+`CC20AF4A1E6EBF3C120E9CBB30954B7F4B4103C0332FC7AE4E625A9B014EDF7B`. Existing connectors
+converged on one new authority. A real attached Chrome adapter completed open, read, and screenshot;
+the final close was correctly blocked by the person's `preserve-tabs` interlock, and the test tab was
+then closed directly without changing that setting. In a separate isolated authority, the real
+Windows inventory returned `browser_recovery_ambiguous` with exactly Google Chrome and Microsoft
+Edge, no effect, and no launch. All four native-host registrations were missing and were left
+unchanged. This is useful source-host integration evidence, not the clean installed-Windows S8 lane.
+
 S8 is `BLOCKED`, not complete. The required Ubuntu GNOME Wayland and clean installed-Windows
 candidate environments have not run. A Windows source host proved the corrected deterministic
 mechanisms and process boundary, but that is not a substitute for the installed-product journey.

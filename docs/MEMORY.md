@@ -75,6 +75,10 @@ the owner wants, and what this project learned the hard way.
   endpoint.
 - **Outward changes wait for the owner.** Local edits, tests, and commits are normal. Pushes,
   merges, tags, releases, store actions, and anything public are not.
+- **Full integration means the active live graph.** An isolated target and every automated gate can
+  be green while an older authority is still serving real connectors. Do not call that a full
+  integration test. Identify exact live image paths, deploy and restart only the changed component,
+  prove its existing shores renegotiate, and name any physical lane that still did not run.
 - **Persist before handoff.** Update STATUS, the relevant ADR or task evidence, and this file when a
   durable fact changes, and commit before writing a restart prompt.
 
