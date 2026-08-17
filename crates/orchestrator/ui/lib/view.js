@@ -385,18 +385,6 @@
         .join("");
     }
 
-    /*
-     * Master and detail: which clients exist on the left, everything about one of them on the right.
-     *
-     * The list is for finding, so a row carries identity and state and nothing else. The pane is
-     * for acting, so every operation lives there with the facts that justify it -- the exact file,
-     * what Ghostlight would write, and for a blocked target, what it actually found.
-     *
-     * Selection is view state and survives re-render by id. This surface redraws from every
-     * sequenced snapshot, so a selection kept in the DOM would silently reset while someone read.
-     */
-    let selectedProduct = null;
-
     function integrations(snapshot, pending) {
       if (!snapshot.harnesses.length) {
         el["integration-grid"].innerHTML =
@@ -410,165 +398,76 @@
         if (!products.has(id)) products.set(id, []);
         products.get(id).push(harness);
       }
+      const categoryById = new Map(INTEGRATION_CATEGORIES.map((category) => [category.id, category]));
+      const categoryOrder = new Map(INTEGRATION_CATEGORIES.map((category, index) => [category.id, index]));
+      const actionButton = (harness, action, label, kind = "ghost-button") => {
+        const waiting = pending.has(harness.id);
+        return `<button class="${kind}" type="button" data-harness-operation="manage"`
+          + ` data-harness-action="${action}" data-harness="${escapeHtml(harness.id)}"`
+          + ` data-harness-name="${escapeHtml(harness.name)}"${waiting ? " disabled" : ""}>`
+          + `${waiting ? "Working..." : label}</button>`;
+      };
+      const utilityButton = (harness, operation, label, extra = "") =>
+        `<button class="link-button" type="button" data-harness-operation="${operation}"`
+        + ` data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}"`
+        + `${extra}>${label}</button>`;
 
-      const entries = [...products.entries()].map(([productId, all]) => {
-        const targets = [...all].sort((left, right) =>
+      const cards = [...products.entries()].map(([productId, targets]) => {
+        const sortedTargets = [...targets].sort((left, right) =>
           left.target.localeCompare(right.target) || left.id.localeCompare(right.id));
-        const live = targets.filter((target) => target.state !== "not_detected");
-        const categories = new Set((live.length ? live : [targets[0]])
-          .map((target) => INTEGRATION_STATE_CATEGORY[target.state]));
-        const categoryId = INTEGRATION_CATEGORY_PRIORITY.find((id) => categories.has(id))
+        const visible = sortedTargets.some((target) => target.state !== "not_detected")
+          ? sortedTargets.filter((target) => target.state !== "not_detected") : [sortedTargets[0]];
+        const targetCategories = new Set(visible.map((target) => INTEGRATION_STATE_CATEGORY[target.state]));
+        const categoryId = INTEGRATION_CATEGORY_PRIORITY.find((id) => targetCategories.has(id))
           ?? "needs-attention";
-        return {
-          productId,
-          targets,
-          live,
-          categoryId,
-          name: targets[0].name,
-          icon: targets[0].icon ?? "generic.svg"
-        };
-      }).sort((left, right) => left.name.localeCompare(right.name)
-        || left.productId.localeCompare(right.productId));
+        const category = categoryById.get(categoryId);
+        const product = visible[0];
+        const icon = escapeHtml(product.icon ?? "generic.svg");
+        const rows = visible.map((harness) => {
+          const installed = harness.state === "installed";
+          const available = harness.state === "available";
+          const updatable = harness.state === "updatable";
+          let primary = "";
+          if (installed && harness.can_uninstall) {
+            primary = actionButton(harness, "uninstall", "Remove", "danger-button");
+          } else if ((available || updatable) && harness.can_install) {
+            primary = actionButton(harness, "install", updatable ? "Update" : "Set up");
+          }
+          const locate = harness.can_locate && harness.state !== "not_detected"
+            ? utilityButton(harness, "locate", "Locate") : "";
+          const setup = utilityButton(harness, "copy", "Copy setup", ' data-copy-kind="setup"');
+          return `<div class="integration-target">`
+            + `<div class="integration-target-head"><strong>${escapeHtml(harness.target)}</strong>`
+            + `<span>${escapeHtml(words(harness.state))}</span></div>`
+            + `<p>${escapeHtml(harness.detail)}</p>`
+            + `<details class="manual-setup" data-harness-manual="${escapeHtml(harness.id)}"><summary>Manual setup</summary>`
+            + `<code>${escapeHtml(harness.config_path)}</code><pre>${escapeHtml(harness.manual_setup)}</pre></details>`
+            + `<div class="tile-actions">${primary}${locate}${setup}</div></div>`;
+        }).join("");
+        const missing = visible.length === 1 && visible[0].state === "not_detected";
+        const first = visible[0];
+        const install = missing && targets.some((target) => target.can_download)
+          ? `<button class="ghost-button" type="button" data-harness-operation="download"`
+            + ` data-product="${escapeHtml(productId)}" data-harness="${escapeHtml(first.id)}"`
+            + ` data-harness-name="${escapeHtml(first.name)}">Install</button>` : "";
+        const locate = missing ? utilityButton(first, "locate", "Locate") : "";
+        const command = utilityButton(first, "copy", "Copy MCP command", ' data-copy-kind="command"');
+        const html = `<article class="tile integration-card integration-${category.id}">`
+          + `<div class="tile-top"><span class="integration-identity"><img src="integrations/${icon}" alt=""`
+          + ` width="28" height="28"><h3>${escapeHtml(product.name)}</h3></span>`
+          + `<span class="tile-state">${escapeHtml(category.label)}</span></div>`
+          + `<div class="integration-targets">${rows}</div>`
+          + `<div class="tile-actions integration-product-actions">${install}${locate}${command}</div>`
+          + `</article>`;
+        return { categoryId, name: product.name, productId, html };
+      });
 
-      // Land on what needs a person; otherwise keep whatever was open, otherwise the first client.
-      // A foreign entry outranks a merely stale path: one is someone else's file that Ghostlight
-      // refused to touch, the other is a version number.
-      const byId = new Map(entries.map((entry) => [entry.productId, entry]));
-      const blocked = entries.find((entry) =>
-        entry.targets.some((target) => target.state === "needs_attention"));
-      const attention = blocked
-        ?? entries.find((entry) => entry.categoryId === "needs-attention");
-      if (!selectedProduct || !byId.has(selectedProduct)) {
-        selectedProduct = (attention ?? entries[0]).productId;
-      }
-      const selected = byId.get(selectedProduct);
-
-      el["integration-grid"].innerHTML =
-        '<div class="integration-split">'
-        + '<nav class="integration-list" aria-label="MCP clients">' + list(entries) + '</nav>'
-        + '<section class="integration-detail" aria-live="polite">' + detail(selected, pending, snapshot)
-        + '</section></div>';
-    }
-
-    function list(entries) {
-      const groups = INTEGRATION_CATEGORIES
-        .map((category) => [category, entries.filter((entry) => entry.categoryId === category.id)])
-        .filter(([, members]) => members.length > 0);
-      return groups.map(([category, members]) =>
-        '<h2 class="integration-list-heading">' + escapeHtml(category.label)
-        + '<span>' + members.length + '</span></h2>'
-        + members.map((entry) => {
-          // The second line says which context this client is registered in, which is the one
-          // thing the list can add that the group heading has not already said.
-          const shown = entry.live.length ? entry.live : entry.targets;
-          const blocked = shown.filter((target) => target.state === "needs_attention").length;
-          const meta = shown.length === 1
-            ? shown[0].target
-            : shown.length + " targets" + (blocked ? " - " + blocked + " needs attention" : "");
-          return '<button class="integration-list-row integration-' + category.id + '" type="button"'
-            + ' data-harness-select="' + escapeHtml(entry.productId) + '"'
-            + (entry.productId === selectedProduct ? ' aria-current="true"' : "")
-            + '><img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="24" height="24">'
-            + '<span class="integration-list-text">'
-            + '<span class="integration-name">' + escapeHtml(entry.name) + '</span>'
-            + '<span class="integration-list-meta">' + escapeHtml(meta) + '</span></span>'
-            + '<span class="integration-pip" aria-hidden="true"></span></button>';
-        }).join("")
-      ).join("");
-    }
-
-    function detail(entry, pending, snapshot) {
-      if (!entry) return "";
-      const category = INTEGRATION_CATEGORIES.find((item) => item.id === entry.categoryId);
-      const shown = entry.live.length ? entry.live : [entry.targets[0]];
-      return '<header class="integration-detail-head">'
-        + '<img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="34" height="34">'
-        + '<div><h1>' + escapeHtml(entry.name) + '</h1>'
-        + '<p class="integration-detail-state integration-' + escapeHtml(entry.categoryId) + '">'
-        + escapeHtml(category?.label ?? "") + '</p></div></header>'
-        + '<p class="integration-detail-sentence">' + escapeHtml(category?.sentence ?? "") + '</p>'
-        + shown.map((target) => targetBlock(entry, target, pending)).join("")
-        + connectorBlock(snapshot);
-    }
-
-    /* One block per concrete target: what it is, where it lives, and everything you may do to it. */
-    function targetBlock(entry, target, pending) {
-      const waiting = pending.has(target.id);
-      const act = (action, label, kind) =>
-        '<button class="' + kind + '" type="button" data-harness-operation="manage"'
-        + ' data-harness-action="' + action + '" data-harness="' + escapeHtml(target.id) + '"'
-        + ' data-harness-name="' + escapeHtml(target.name) + '"' + (waiting ? " disabled" : "") + '>'
-        + (waiting ? "Working..." : label) + '</button>';
-      const utility = (operation, label, extra = "") =>
-        '<button class="link-button" type="button" data-harness-operation="' + operation + '"'
-        + ' data-harness="' + escapeHtml(target.id) + '" data-harness-name="'
-        + escapeHtml(target.name) + '"' + extra + '>' + label + '</button>';
-
-      let actions = "";
-      if (target.state === "installed" && target.can_uninstall) {
-        actions = act("uninstall", "Remove", "danger-button");
-      } else if (target.state === "updatable" && target.can_install) {
-        actions = act("install", "Update", "ghost-button");
-      } else if (target.state === "available" && target.can_install) {
-        actions = act("install", "Set up", "ghost-button");
-      } else if (target.state === "not_detected" && target.can_download) {
-        actions = '<button class="ghost-button" type="button" data-harness-operation="download"'
-          + ' data-product="' + escapeHtml(entry.productId) + '" data-harness="'
-          + escapeHtml(target.id) + '" data-harness-name="' + escapeHtml(target.name)
-          + '">Install ' + escapeHtml(entry.name) + '</button>';
-      }
-      // A foreign entry is never overwritten, so the routes offered are the ones that write
-      // nothing. ADR-0125's ownership rule is what makes showing the evidence safe at all.
-      const evidence = target.state === "needs_attention"
-        ? '<div class="integration-evidence">'
-          + '<div class="evidence"><span>Found</span><code>'
-          + escapeHtml(target.found_command ?? target.detail) + '</code></div>'
-          + '<div class="evidence"><span>Would write</span><code>'
-          + escapeHtml(target.connector_command) + '</code></div>'
-          + '<p class="integration-untouched">Ghostlight changed nothing.</p></div>'
-        : "";
-      const locate = target.can_locate ? utility("locate", "Open the file") : "";
-      const copy = utility("copy", "Copy what it would write", ' data-copy-kind="setup"'
-        + ' data-harness-manual="' + escapeHtml(target.id) + '"');
-
-      return '<article class="integration-target-block" data-harness-target="'
-        + escapeHtml(target.id) + '">'
-        + '<div class="integration-target-head"><strong>' + escapeHtml(target.target) + '</strong>'
-        + '<span class="integration-target-state">' + escapeHtml(stateWord(target.state))
-        + '</span></div>'
-        + '<p class="integration-target-detail">' + escapeHtml(target.detail) + '</p>'
-        + evidence
-        + '<div class="evidence"><span>File</span><code>' + escapeHtml(target.config_path)
-        + '</code></div>'
-        + '<details class="integration-manual"><summary>What Ghostlight writes</summary>'
-        + '<pre>' + escapeHtml(target.manual_setup) + '</pre></details>'
-        + '<div class="tile-actions">' + actions + locate + copy + '</div></article>';
-    }
-
-    function stateWord(state) {
-      return {
-        installed: "connected",
-        updatable: "needs an update",
-        available: "not connected",
-        needs_attention: "needs attention",
-        not_detected: "not installed here"
-      }[state] ?? state;
-    }
-
-    /* The connector path is one string for every client, so the pane states it once. */
-    function connectorBlock(snapshot) {
-      const first = snapshot.harnesses[0];
-      if (!first?.connector_command) return "";
-      return '<div class="integration-connector"><span>Connector</span>'
-        + '<code>' + escapeHtml(first.connector_command) + '</code>'
-        + '<button class="link-button" type="button" data-harness-operation="copy"'
-        + ' data-harness="' + escapeHtml(first.id) + '" data-harness-name="' + escapeHtml(first.name) + '"'
-        + ' data-copy-kind="command">Copy</button></div>';
-    }
-
-    /* Selection is presentation state; the caller re-renders from the current snapshot. */
-    function selectHarnessProduct(productId) {
-      selectedProduct = productId;
+      el["integration-grid"].innerHTML = cards
+        .sort((left, right) => (categoryOrder.get(left.categoryId) - categoryOrder.get(right.categoryId))
+          || left.name.localeCompare(right.name)
+          || left.productId.localeCompare(right.productId))
+        .map((card) => card.html)
+        .join("");
     }
 
     function status(snapshot) {
@@ -1362,7 +1261,7 @@
     return Object.freeze({
       el, attempt,
       hero, row, drop, promote, rebuildFeed, queueCount,
-      band, collections, navigate, toast, openHarnessManual, selectHarnessProduct,
+      band, collections, navigate, toast, openHarnessManual,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setChoice, setSacred,
       setObserve, discardDraft, renderRules, previewResult, previewCleared, editorStatus,

@@ -307,10 +307,9 @@ body.runtime-offline .state-word { color: var(--muted); }
 @keyframes waitdot { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
 
 /* ------------------------------ tiles, cards ---------------------------- */
-.tile-grid {
+.tile-grid, .integration-roster {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px;
 }
-.integration-roster { display: flex; flex-direction: column; gap: 16px; }
 .integration-ready { --integration-tone: var(--ok); }
 .integration-available { --integration-tone: var(--cap-action); }
 .integration-needs-attention { --integration-tone: var(--held); }
@@ -327,107 +326,21 @@ body.runtime-offline .state-word { color: var(--muted); }
 .tile-state { flex: none; font: 500 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
 .tile-actions { display: flex; gap: 7px; margin-top: 11px; }
 .tile-actions .ghost-button, .tile-actions .danger-button { height: 27px; padding: 0 11px; font-size: 11.5px; }
-/* Master and detail: find on the left, act on the right. */
-.integration-split { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
-@media (max-width: 900px) { .integration-split { grid-template-columns: 1fr; } }
-
-.integration-list { display: flex; flex-direction: column; gap: 1px; }
-.integration-list-heading {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin: 12px 0 4px; color: var(--integration-tone); font: 500 9px/1 var(--mono);
-  letter-spacing: .12em; text-transform: uppercase;
+.integration-card { gap: 10px; border-left-color: var(--integration-tone); }
+.integration-card:hover { border-left-color: var(--integration-tone); }
+.integration-card .tile-state { color: var(--integration-tone); }
+.integration-identity { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.integration-identity img {
+  width: 28px; height: 28px; flex: none; padding: 4px;
+  border: 1px solid var(--line); border-radius: 7px; background: rgba(255, 255, 255, .035);
 }
-.integration-list-heading:first-child { margin-top: 0; }
-.integration-list-heading span { color: var(--faint); font-size: 9px; letter-spacing: 0; }
-.integration-list-row {
-  display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 10px;
-  border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink-2);
-  cursor: pointer; text-align: left; transition: background .18s var(--calm);
+.integration-targets { display: flex; flex-direction: column; gap: 8px; }
+.integration-target {
+  padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0, 0, 0, .1);
 }
-.integration-list-text { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
-.integration-list-meta {
-  overflow: hidden; color: var(--faint); font-size: 10.5px; line-height: 1.4;
-  text-overflow: ellipsis; white-space: nowrap;
-}
-.integration-list-row:hover { background: var(--panel-2); }
-.integration-list-row[aria-current="true"] {
-  border-color: var(--line); background: var(--panel); color: var(--ink);
-}
-.integration-list-row img {
-  width: 24px; height: 24px; flex: none; margin-top: 1px; padding: 2px;
-  border: 1px solid var(--line); border-radius: 5px; background: rgba(255, 255, 255, .035);
-}
-.integration-list-row .integration-name {
-  min-width: 0; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap;
-}
-/* State reaches the list as a mark, never as the only carrier -- the pane names it in words. */
-.integration-pip {
-  width: 7px; height: 7px; flex: none; margin: 5px 0 0 auto; border-radius: 50%;
-  background: var(--integration-tone);
-}
-
-.integration-detail {
-  display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 18px 20px;
-  border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2);
-}
-.integration-detail-head { display: flex; align-items: center; gap: 13px; }
-.integration-detail-head img {
-  width: 34px; height: 34px; flex: none; padding: 4px;
-  border: 1px solid var(--line); border-radius: 9px; background: rgba(255, 255, 255, .035);
-}
-.integration-detail-head h1 { margin: 0; color: var(--ink); font-size: 19px; font-weight: 400; }
-.integration-detail-state {
-  margin: 3px 0 0; color: var(--integration-tone);
-  font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase;
-}
-.integration-detail-sentence { margin: -4px 0 0; color: var(--muted); font-size: 12.5px; }
-
-.integration-target-block {
-  display: flex; flex-direction: column; gap: 9px; padding: 14px;
-  border: 1px solid var(--line); border-radius: 10px; background: var(--ground);
-}
-.integration-target-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.integration-target-head strong { color: var(--ink); font-size: 13px; font-weight: 500; }
-.integration-target-state {
-  color: var(--faint); font: 500 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
-}
-.integration-target-detail { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
-
-/* What Ghostlight found, and what it would have written. The reason the buttons are trustworthy. */
-.integration-evidence {
-  display: flex; flex-direction: column; gap: 6px; padding: 10px;
-  border: 1px solid var(--line); border-left: 2px solid var(--held); border-radius: 8px;
-  background: var(--panel-2);
-}
-.evidence { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.evidence span {
-  flex: none; width: 84px; color: var(--faint);
-  font: 500 8.5px/1.7 var(--mono); letter-spacing: .1em; text-transform: uppercase;
-}
-.evidence code {
-  min-width: 0; overflow: hidden; color: var(--ink-3);
-  font: 400 10.5px/1.5 var(--mono); text-overflow: ellipsis; white-space: nowrap;
-}
-.integration-untouched { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
-
-.integration-manual summary { color: var(--muted); font-size: 11px; cursor: pointer; }
-.integration-manual pre {
-  max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px;
-  border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2);
-  color: var(--ink-3); font: 400 9.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word;
-}
-.integration-target-block .tile-actions { margin-top: 2px; }
-
-/* One connector path for every client, stated once for the pane. */
-.integration-connector {
-  display: flex; align-items: center; gap: 9px; padding-top: 13px; border-top: 1px solid var(--line);
-}
-.integration-connector span { color: var(--faint); font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
-.integration-connector code {
-  min-width: 0; overflow: hidden; color: var(--muted); font: 400 10.5px/1.4 var(--mono);
-  text-overflow: ellipsis; white-space: nowrap;
-}
-.integration-connector button { margin-left: auto; }
+.integration-target-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.integration-target-head strong { color: var(--ink-2); font-size: 11.5px; font-weight: 500; }
+.integration-target-head span { color: var(--faint); font: 500 8.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
 .manual-setup { margin-top: 8px; }
 .manual-setup summary { color: var(--muted); font-size: 10.5px; cursor: pointer; }
 .manual-setup code { display: block; margin-top: 7px; color: var(--faint); font: 400 9.5px/1.4 var(--mono); word-break: break-all; }
@@ -436,6 +349,7 @@ body.runtime-offline .state-word { color: var(--muted); }
   border: 1px solid var(--line); border-radius: 6px; background: var(--ground);
   color: var(--ink-3); font: 400 9.5px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word;
 }
+.integration-product-actions { margin-top: auto; padding-top: 2px; border-top: 1px solid var(--line); }
 
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); gap: 10px; }
 .card { padding: 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }

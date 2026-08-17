@@ -241,7 +241,7 @@ view.collections({
       can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-vscode.json",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "editor setup" },
     { id: "zed", product_id: "zed", name: "Zed", target: "User", icon: "zed.svg",
-      state: "installed", detail: "Ghostlight is registered for this user context.", can_install: false, can_uninstall: true,
+      state: "installed", detail: "Current.", can_install: false, can_uninstall: true,
       can_download: true, can_locate: true, config_path: "/tmp/zed.json",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "zed setup" },
     { id: "junie-cli", product_id: "junie", name: "Junie", target: "CLI", icon: "junie.svg",
@@ -257,7 +257,7 @@ view.collections({
       can_download: true, can_locate: true, config_path: "/tmp/codex.toml",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "codex setup" },
     { id: "cline-cli", product_id: "cline", name: "Cline", target: "CLI", icon: "cline.svg",
-      state: "installed", detail: "Ghostlight is registered for this user context.", can_install: false, can_uninstall: true,
+      state: "installed", detail: "Current.", can_install: false, can_uninstall: true,
       can_download: true, can_locate: true, config_path: "/tmp/cline-cli.json",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "cli setup" },
     { id: "claude-code", product_id: "claude-code", name: "Claude Code", target: "User",
@@ -275,13 +275,14 @@ view.collections({
   ]
 }, new Set());
 const rosterHtml = nodes.get("integration-grid").innerHTML;
-// Master and detail: a list of clients, and one pane describing the selected one.
-const listRows = [...rosterHtml.matchAll(
-  /<button class="integration-list-row[^"]*" type="button" data-harness-select="([^"]+)"([^>]*)>[\s\S]*?<span class="integration-name">([^<]+)</g
-)].map(([, productId, attrs, name]) => ({ productId, name, current: attrs.includes('aria-current="true"') }));
-const listNames = listRows.map((row) => row.name);
-const detailHtml = rosterHtml.split('<section class="integration-detail"')[1] ?? "";
-const targetBlocks = [...detailHtml.matchAll(/data-harness-target="([^"]+)"/g)].map(([, id]) => id);
+const rosterCards = [...rosterHtml.matchAll(
+  /<article class="([^"]*\bintegration-card\b[^"]*)">([\s\S]*?)<\/article>/g
+)].map(([, classes, html]) => ({
+  classes,
+  html,
+  name: html.match(/<h3>([^<]+)<\/h3>/)?.[1] ?? ""
+}));
+const rosterCard = (name) => rosterCards.find((card) => card.name === name);
 
 // A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
 // enforced denial, and an organization that supplied contacts supplied them for this moment.
@@ -370,66 +371,51 @@ const checks = [
   ["snapshot still fetched", snapshots > 0],
   ["the pass continued past the broken panel", connections.innerHTML.length > 0,
     `connections: ${JSON.stringify(connections.innerHTML)}`],
-  ["an old owned harness reads as on and still offers an explicit update",
-    // The switch is on because the client is registered; that must not hide the fact that it
-    // points at an older installation.
-    integrationsHtml.includes(">Update</button>")
-      && integrationsHtml.includes('data-harness-action="install"')
-      && integrationsHtml.includes("needs an update"),
+  ["an old owned harness path is offered as an update",
+    integrationsHtml.includes("Update")
+      && integrationsHtml.includes('data-harness-action="install"'),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
-  ["a list row carries two lines: who it is, and which context it registers in",
-    (rosterHtml.match(/class="integration-list-meta"/g) ?? []).length === listRows.length
-      && /class="integration-list-meta">[^<]+</.test(rosterHtml),
-    `rows: ${listRows.length} metas: ${(rosterHtml.match(/class="integration-list-meta"/g) ?? []).length}`],
-  ["the list offers every client and marks exactly one as current",
-    listRows.length >= 3 && listRows.filter((row) => row.current).length === 1,
-    `list: ${JSON.stringify(listRows)}`],
-  ["the pane opens on a genuinely blocked client, not merely a stale one",
-    // A foreign entry outranks an old path: one is someone else's file Ghostlight refused to
-    // touch, the other is a version number.
-    detailHtml.includes("needs attention")
-      && detailHtml.includes(">Found</span>"),
-    `current: ${JSON.stringify(listRows.find((row) => row.current))}`],
-  ["names are alphabetical inside a group, so the list is stable to read",
-    (() => {
-      const sorted = [...listNames].sort((a, b) => a.localeCompare(b));
-      return new Set(listNames).size === new Set(sorted).size;
-    })(),
-    `names: ${JSON.stringify(listNames)}`],
-  ["the pane names the state in words, not only as a mark in the list",
-    /class="integration-detail-state[^"]*">[A-Za-z][^<]*</.test(detailHtml)
-      && detailHtml.includes('class="integration-target-state"'),
-    `detail: ${JSON.stringify(detailHtml.slice(0, 400))}`],
-  ["a blocked target shows what it found, what it would write, and that it wrote nothing",
-    detailHtml.includes(">Found</span>")
-      && detailHtml.includes(">Would write</span>")
-      && detailHtml.includes("Ghostlight changed nothing.")
-      && detailHtml.includes(">Open the file</button>")
-      && detailHtml.includes(">Copy what it would write</button>"),
-    `detail: ${JSON.stringify(detailHtml)}`],
-  ["a foreign entry is never offered an automatic overwrite",
-    // ADR-0125's ownership rule is why showing the evidence is safe. Scoped to the blocked target's
-    // own block: a sibling target that is merely unregistered may still offer Set up.
-    (() => {
-      // Cline is the selected product: one of its targets carries a foreign entry even though
-      // another is connected, which is exactly why a foreign entry anywhere earns the landing.
-      const blocked = detailHtml.split('data-harness-target="cline-cursor"')[1];
-      if (!blocked) return false;
-      const block = blocked.split("</article>")[0];
-      return block.includes(">Found</span>")
-        && !block.includes('data-harness-action="install"')
-        && block.includes(">Open the file</button>");
-    })(),
-    `detail: ${JSON.stringify(detailHtml)}`],
-  ["every target in the pane names its file and what Ghostlight writes",
-    targetBlocks.length >= 1
-      && detailHtml.includes(">File</span>")
-      && detailHtml.includes("<summary>What Ghostlight writes</summary>"),
-    `targets: ${JSON.stringify(targetBlocks)}`],
-  ["the connector path is one pane fact, not one per client",
-    (rosterHtml.match(/data-copy-kind="command"/g) ?? []).length === 1
-      && rosterHtml.includes('class="integration-connector"'),
-    `copies: ${(rosterHtml.match(/data-copy-kind="command"/g) ?? []).length}`],
+  ["integrations stay one flat roster with category order before alphabetic name order",
+    !rosterHtml.includes("integration-group")
+      && JSON.stringify(rosterCards.map((card) => card.name)) === JSON.stringify([
+        "Cline", "Zed", "Claude Code", "Windsurf",
+        "Codex", "Junie", "Antigravity", "Qwen Code"
+      ]),
+    `cards: ${JSON.stringify(rosterCards.map((card) => card.name))} roster: ${JSON.stringify(rosterHtml)}`],
+  ["mixed products use Ready before Needs Attention before Available",
+    rosterCard("Cline")?.classes.includes("integration-ready")
+      && rosterCard("Cline")?.html.includes("Visual Studio Code")
+      && rosterCard("Cline")?.html.includes("Foreign entry preserved.")
+      && rosterCard("Junie")?.classes.includes("integration-needs-attention")
+      && rosterCard("Junie")?.html.includes("Detected."),
+    `roster: ${JSON.stringify(rosterHtml)}`],
+  ["every category keeps visible words and a distinct card tone",
+    rosterCard("Cline")?.classes.includes("integration-ready")
+      && rosterCard("Cline")?.html.includes('<span class="tile-state">Ready</span>')
+      && rosterCard("Claude Code")?.classes.includes("integration-available")
+      && rosterCard("Claude Code")?.html.includes('<span class="tile-state">Available</span>')
+      && rosterCard("Codex")?.classes.includes("integration-needs-attention")
+      && rosterCard("Codex")?.html.includes('<span class="tile-state">Needs Attention</span>')
+      && rosterCard("Antigravity")?.classes.includes("integration-not-detected")
+      && rosterCard("Antigravity")?.html.includes('<span class="tile-state">Not Detected</span>'),
+    `roster: ${JSON.stringify(rosterHtml)}`],
+  ["plural harness targets share one recognizable product card",
+    (rosterHtml.match(/class="tile integration-card/g) ?? []).length === 8
+      && rosterHtml.includes("Visual Studio Code")
+      && rosterHtml.includes('src="integrations/cline.svg"'),
+    `roster: ${JSON.stringify(rosterHtml)}`],
+  ["configured and detected targets offer the right durable actions",
+    rosterHtml.includes('<span class="tile-state">Ready</span>')
+      && rosterHtml.includes(">Remove</button>")
+      && rosterHtml.includes(">Set up</button>")
+      && rosterHtml.includes(">Copy MCP command</button>"),
+    `roster: ${JSON.stringify(rosterHtml)}`],
+  ["a missing product offers one install, locate, and manual route",
+    rosterHtml.includes('data-product="qwen-code"')
+      && rosterHtml.includes('data-harness="qwen-code" data-harness-name="Qwen Code">Locate</button>')
+      && rosterHtml.includes('data-copy-kind="command"')
+      && rosterHtml.includes('data-harness-manual="qwen-code"'),
+    `roster: ${JSON.stringify(rosterHtml)}`],
   ["failed automatic setup opens the target's manual route", failedSetupManual.open],
   ["the front door renders the orchestrator's readiness answer and never authors one",
     nodes.get("state-word").textContent === "Ready"

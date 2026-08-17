@@ -305,14 +305,6 @@ function wire() {
     if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
     const harness = event.target.closest("[data-harness-operation]");
     if (harness) handleHarnessAction(harness);
-    // Choosing a client is presentation state. The view keeps it by id and redraws from the
-    // current snapshot, so a selection survives the next sequenced change instead of resetting.
-    const pick = event.target.closest("[data-harness-select]");
-    if (pick) {
-      view.selectHarnessProduct(pick.dataset.harnessSelect);
-      const current = store.snapshot();
-      if (current) view.attempt("choosing a client", () => view.collections(current, store.pending()));
-    }
     const destination = event.target.closest("[data-destination]");
     if (destination) openDestination(destination.dataset.destination);
     const hit = event.target.closest("[data-search-view]");

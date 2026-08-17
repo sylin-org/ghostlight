@@ -140,6 +140,8 @@ history live here.
 
 | [0128](0128-integration-master-detail.md) | Integration master and detail: a client list beside one pane that explains and operates the selected client, selection kept by id across sequenced redraws, a landing that prefers a genuinely foreign entry over a stale path, and every target naming its file, its state in words, and what Ghostlight writes | Accepted (supersedes [0127](0127-integration-switches-and-evidence.md) Decisions 1-3 and 5; carries forward its Decision 4) |
 
+| [0129](0129-integration-roster-reverted-to-cards.md) | The integration roster returns to product cards: five shapes were tried in one session and rejected, ADR-0125's card roster governs again, ADR-0127 and ADR-0128 are retained as history, and the unimplemented gap is recorded so the shapes are not rediscovered | Accepted (supersedes [0127](0127-integration-switches-and-evidence.md) and [0128](0128-integration-master-detail.md) in full; restores [0125](0125-recognizable-plural-linux-harness-integrations.md) Decision 2) |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

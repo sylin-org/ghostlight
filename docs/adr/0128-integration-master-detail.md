@@ -1,6 +1,6 @@
 # ADR-0128: Integration master and detail
 
-- Status: Accepted
+- Status: Superseded in full by ADR-0129 on 2026-08-16. Retained as history; does not govern.
 - Date: 2026-08-16
 - Supersedes: ADR-0127 Decisions 1, 2, 3, and 5 (the switch roster). ADR-0127 Decision 4, the
   foreign-entry evidence, is carried forward unchanged and is the substance of this surface.
