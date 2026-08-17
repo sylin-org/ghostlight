@@ -42,9 +42,9 @@ Keep a 0.8 package and a 1.0 source build apart; they are not interchangeable.
 
 ## The workbench
 
-Open the tray icon and you get three places:
+Open the tray icon and you get five places:
 
-- **Monitor** is where you land. The action Ghostlight is taking right now sits at the top in
+- **At a glance** is where you land. The action Ghostlight is taking right now sits at the top in
   full, elapsed time running. When the next one starts, that action freezes and drops into the
   queue below, newest first, so you can watch a session unfold and scroll back through what
   already happened. While nothing is running, the last thing that finished stays on screen.
@@ -57,6 +57,11 @@ Open the tray icon and you get three places:
   not own untouched.
 - **Status** answers whether Ghostlight is healthy, shows which authority sources apply, and ends
   the runtime session when you want that.
+- **Policy** says what the current rules allow, one plain line per capability, naming the layer that
+  decided each one. Where your organization has not set a ceiling, you can author your own layer
+  here instead of editing a file by hand.
+- **About** carries Ghostlight's identity and the promise underneath it: it never phones home, with
+  no telemetry, no activation check, and no update ping.
 
 Pause and resume sit in the header beside the lamp, the same control the tray offers. Closing the
 window returns it to the tray and leaves the authority running. If the desktop shell cannot start,

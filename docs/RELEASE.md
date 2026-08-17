@@ -6,6 +6,10 @@ harvest lives in [`0.8/HARVEST.md`](0.8/HARVEST.md). The old raw-binary packages
 cannot be relabeled as 1.0, but their tests, platform facts, compatibility model, release safety,
 and publication lessons are inputs to this pipeline.
 
+Current gate state and evidence are tracked in the
+[1.0 release checklist](RELEASE-CHECKLIST.md). This file remains the process authority; the
+checklist points here instead of restating the process.
+
 No release action is authorized merely by this document. Tags, pushes, packages, store
 submissions, registry mutations, website publication, and external messages require explicit owner
 approval.
@@ -86,8 +90,18 @@ reconciliation against GitHub, npm, the Chrome update feed, the official MCP Reg
 canonical website; a transient external outage does not make an otherwise valid source commit
 fail CI.
 
-The completed feature diff must remain empty under `crates/mcp-connector`,
-`crates/browser-connector`, `crates/bridge`, and `extension` for ADR-0102.
+ADR-0102 Decision 9's dogfooding boundary is a per-feature review check, not a standing release gate.
+It compared the completed workbench change against that change's starting revision and passed, with
+`crates/mcp-connector`, `crates/browser-connector`, `crates/bridge`, and `extension` untouched by the
+feature. Later work has deliberately changed the shared bridge and both connectors at their
+connection-lifetime seam, which that decision's body expressly permits.
+
+The durable invariant is the one behind it: the connectors, the shared bridge, and the extension
+change only when an already-real process boundary requires it, never to carry a product feature, and
+the extension stays policy-free. Review each release's diff against that rule rather than against an
+empty one. ADR-0102's own acceptance item 9 states the boundary more strictly than its decision body
+does; reconciling the two in a marked amendment is a G0 item in the
+[1.0 release checklist](RELEASE-CHECKLIST.md).
 
 ### Desktop and package
 

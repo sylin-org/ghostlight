@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-16.
+Last updated: 2026-08-17.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -10,8 +10,14 @@ preserved `docs/0.8/` material carry history; this file does not rewrite it.
 Distances below are measured against the local remote-tracking refs, which are only as fresh as the
 last fetch.
 
-The repository carries exactly two branches, `main` and `dev`, as of 2026-08-13. The topology is
-linear: `main` is an ancestor of `dev`, and nothing anywhere needs merging.
+The repository carries exactly two branches, `main` and `dev`. They are no longer linear. That was
+true on 2026-08-13 and is not true now: as of 2026-08-17, `main` carries one commit that `dev` does
+not (`0116feca`, which paused dependency updates while `main` carries 0.8), and `dev` carries 207
+that `main` does not. Something does need merging, and the outcome for `main` is a release decision
+named in G0 of the [1.0 release checklist](RELEASE-CHECKLIST.md) and executed in G10.
+
+Check this rather than trusting the paragraph: `git merge-base --is-ancestor main dev` exits zero
+only while the topology is linear.
 
 ## One invoked desktop authority
 
@@ -131,6 +137,13 @@ required.
 of it, so the epic's completion is a release gate. Practically, that means S8's evidence is release
 evidence, and a stage that cannot honestly close blocks a release rather than deferring a feature.
 An accurate `BLOCKED` is therefore worth more than an optimistic pass.
+
+The owner closed S8's aggregate-readiness decision on 2026-08-17. `ghostlight doctor` now reads the
+exact orchestrator-owned `ReadinessSummary` from an already-running authority through one
+authenticated read-only opening. It never demand-starts, reveals the workbench, admits a channel,
+opens a session, or writes audit. The [dated evidence](testing/doctor-readiness-parity-2026-08-17.md)
+records wire, no-mutation, absent-service, six-state language, and real text/JSON CLI process
+proofs. Installed Windows and Ubuntu observation remains part of S8.
 
 Verification boundary: every commit passed formatting, warnings-denied workspace Clippy, the full
 workspace test suite, the extension suite, and the journeys its change touched. The Linux lane has
@@ -473,6 +486,27 @@ This closes current-source roster compatibility. The source-roster pass itself d
 package provenance; the build-only candidate below now does. Ubuntu GNOME Wayland,
 matching-store-adapter, login/reboot, and publication remain open.
 
+## The integration destination returned to cards
+
+On 2026-08-16 the MCP integrations destination was redesigned five times in one session: product
+cards, compact single-line rows, two-line rows, one switch per client, and a master-and-detail split.
+Each iteration removed a defect the owner had named, and each result was rejected. The owner reverted
+to the card roster it started from, so the compact status-sorted card roster described above is
+current and accurate.
+
+[ADR-0129](adr/0129-integration-roster-reverted-to-cards.md) records the revert and supersedes
+ADR-0127 (integration switches and foreign-entry evidence) and ADR-0128 (master and detail) in full.
+ADR-0125 Decision 2 governs the destination again. Both superseded records are retained as history
+and neither governs. ADR-0129 Decision 3 keeps what the five attempts established, so the same shapes
+are not rediscovered by the next person who opens the surface and sees repetition.
+
+Two different decisions carry the number `0127`:
+[`adr/0127-one-invoked-desktop-authority.md`](adr/0127-one-invoked-desktop-authority.md), which
+governs, and
+[`adr/0127-integration-switches-and-evidence.md`](adr/0127-integration-switches-and-evidence.md),
+which does not. Resolving that collision without deleting or rewriting either record is a G0 item in
+the [1.0 release checklist](RELEASE-CHECKLIST.md).
+
 ## Provenance-bound build-only candidate
 
 The [dated candidate record](testing/release-candidate-2026-08-16.md) carries exact run links,
@@ -648,14 +682,23 @@ full visible browser matrix remain owed.
   default-on preserve-tabs interlock. A refusal stays visible and returns a blocked no-effect
   result.
 - The `ghostlight` executable hosts a Tauri 2 workbench inside the modular monolith, with a tray
-  lifecycle, bounded global search, and content-free native notifications. It presents three
+  lifecycle, bounded global search, and content-free native notifications. Its tab row carries five
   destinations:
-  - **Monitor**, the landing surface. The current action stands in full with its elapsed time,
+  - **At a glance**, the landing surface. The current action stands in full with its elapsed time,
     then settles and drops into a newest-first queue as the next one rises. Connected sessions and
     browser instances sit alongside it, and the last completed action stays on screen while
     nothing is running.
   - **MCP integrations**, which checks, connects, and disconnects Ghostlight's owned registration.
+    The narrow tab row abbreviates its label to Integrations; the destination's name everywhere
+    else, including global search, is MCP integrations.
   - **Status**, which carries diagnostics, authority sources, and the end-session intent.
+  - **Policy**, opened by the state chip that sits between Status and About, described under the
+    readable-policy section above.
+  - **About**.
+
+  The landing destination was renamed from Monitor to At a glance in reference-experience S6. Its
+  internal view id is still `monitor`, so the source name and the product name differ here by
+  design.
 
   Pause and resume live in the persistent header beside the connection state and match the tray.
 - The workbench capability grants the notification plugin only its automatic permission-state
@@ -669,7 +712,7 @@ full visible browser matrix remain owed.
   domain tests with no presentation sink stay free of desktop dependencies.
 - `OperationSummary` carries the governed capability, so live work is classified as plainly as
   completed history.
-- Monitor has a presentation-only Clear view control. It hides completed actions for the current
+- At a glance has a presentation-only Clear view control. It hides completed actions for the current
   desktop surface, keeps running work visible, and never mutates or deletes the durable audit.
 - The workbench follows the published sylin.org palette: Ghostlight's teal accent carried as
   `--a`/`--al`/`--argb`, the night-garden ground, and the five-step ink ramp. The in-page renderer
@@ -744,7 +787,7 @@ full visible browser matrix remain owed.
   the handle the previous one returned. [`scripts/demo-foundry.sh`](../scripts/demo-foundry.sh)
   gives the full Card Foundry story the same Linux-native entry point. All three shell scripts are
   syntax-gated and were verified against visible Chromium.
-- Monitor rows carry the intake between the tool and the description, resolved from the record when
+- At a glance rows carry the intake between the tool and the description, resolved from the record when
   settled and from the still-connected session while running. A guard derives the row's grid track
   count and each width's hidden cells from the stylesheet and compares them to the cells the surface
   renders, so a new column cannot silently shift the ones after it.
@@ -1010,15 +1053,37 @@ The executor-split batch is complete through `4d633fbc`.
   action tagging, and perceptual palettes are still unbuilt. Output size is no longer the pressure
   it was: a browser-local save may spend 16 MiB, and anything over its budget is thinned rather
   than refused.
-- `origin/main` still carries 0.8. Deciding when the 1.0 line is promoted is a release decision.
+- The foreign-entry evidence gap outlived every integration shape. ADR-0125 Decision 2 and the
+  reference-experience epic both require showing what Ghostlight found, what it owns, and what it
+  would change, but a blocked target still asserts that a configuration is malformed or foreign
+  without showing the evidence for it. It was built once during the ADR-0127 and ADR-0128 attempts
+  and was reverted with them
+  ([ADR-0129](adr/0129-integration-roster-reverted-to-cards.md) Decision 4). Re-landing it is
+  independent of whatever layout the destination eventually takes.
+- `origin/main` still carries 0.8, and the two branches have diverged rather than staying linear.
+  Deciding when the 1.0 line is promoted is a release decision; see "Where the branches stand".
 - ADR-0084's complete browser-window attention routing remains deferred; only the narrow Chromium
   slice is implemented.
 
 ## Release gates still requiring an owner or release environment
 
-- Preserve build-only candidate `fd86403` and its verified manifest while the remaining live gates
-  run. CI `31920645118` and candidate workflow `31920647296` are green; all 19 candidate files have
-  repository-, workflow-, source-, and ref-bound provenance.
+The status-bearing route through these gates is the
+[1.0 release checklist](RELEASE-CHECKLIST.md). Its candidate-bound boxes reset when the source
+revision changes; the prose below records the current evidence boundary.
+
+Local pre-freeze evidence on Windows, 2026-08-17, is recorded in
+[the dated release preflight](testing/release-preflight-2026-08-17.md). Formatting,
+warnings-denied Clippy, 356 Rust tests, 116 extension tests, 10 npm launcher tests, 4 MCPB tests,
+the fresh isolated build, process and both CLI journeys, 42 workbench assertions, policy grammar,
+dependency policy, the 17-warning advisory allowance, script syntax, repository integrity, 0.8
+recovery, and offline public truth passed. G0 has not frozen a revision, so this is a source
+preflight rather than a checked candidate gate.
+
+- Build-only candidate `fd86403` is historical evidence, not the publishable 1.0 candidate. It is an
+  ancestor of the current head, so the next candidate is built from the revision G0 freezes. CI
+  `31920645118` and candidate workflow `31920647296` are green; all 19 candidate files have
+  repository-, workflow-, source-, and ref-bound provenance. Its GitHub bundle expires on the
+  workflow's 14-day retention, so anything still wanted from it has to be held locally.
 - Use that provenance-attested bundle to verify clean install, public-0.8 upgrade, and uninstall on
   clean Windows and Linux machines. The Windows development-host package lifecycle and
   virtual-display Debian/Ubuntu smokes do not replace those release-environment rows.

@@ -274,7 +274,7 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     workbench still gives the Applications entry and `ghostlight open` an interaction route. If
     neither tray nor workbench can be constructed, startup exits. The MCP connector, browser
     connector, shared bridge, and extension have empty diffs for the complete workbench feature.
-14. Clear view removes completed actions from the current Monitor surface, preserves running work,
+14. Clear view removes completed actions from the current At a glance surface, preserves running work,
     issues no orchestrator mutation, and leaves the durable audit unchanged. A later action appears
     normally, and a fresh desktop process may reconstruct the cleared history from audit.
 15. A Linux user install owns one XDG Applications entry and one byte-identical icon. The entry
@@ -284,6 +284,10 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 16. Install and doctor distinguish native, Snap, Flatpak, multiple-sandbox, missing, and unchecked
     browser package forms from native-host registration. Default Linux setup selects only detected
     native browsers, while `--all-browsers` remains explicit pre-registration.
+17. When an authority is already running, text and JSON `doctor` read its exact orchestrator-owned
+    readiness projection and use the same word and detail as At a glance. Inspection does not
+    demand-start, reveal the workbench, admit a channel, open a session, or write audit. An absent
+    or lost authority never causes `doctor` to fabricate live readiness.
 
 ## Integration and release-readiness gates
 

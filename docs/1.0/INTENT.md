@@ -74,12 +74,13 @@ Internal browser commands are combined when a person experiences them as one job
   which demand-starts the same backgrounded authority when absent and then reveals it through the
   existing authenticated activation seam. A tray is never the only route to the workbench.
 - Five destinations and one global search reach every workbench surface and user-visible record:
-  Monitor, Integrations, Status, Policy, and About. Monitor is where the window opens; it carries
-  the current action in full and the recent ones beneath it, so a glance is enough.
-- ADR-0126 Decision 9 accepts that the landing destination becomes At a glance, leading with whether
-  Ghostlight is ready, connected, working, paused, recovering, or in need of attention, with the
-  action queue beneath that answer and no sixth destination added. That is a decision, not yet the
-  tree: it is delivered by the reference-experience epic's S6.
+  At a glance, MCP integrations, Status, Policy, and About. At a glance is where the window opens;
+  it carries the current action in full and the recent ones beneath it, so a glance is enough. The
+  narrow tab row abbreviates the integrations label to Integrations.
+- ADR-0126 Decision 9 made the landing destination At a glance, leading with whether Ghostlight is
+  ready, connected, working, paused, recovering, or in need of attention, with the action queue
+  beneath that answer and no sixth destination added. The reference-experience epic's S6 delivered
+  it, and `language/readiness.rs` owns the answer.
 
 ## Desktop workbench experience
 
@@ -89,7 +90,7 @@ Every supported orchestrator start initializes this desktop authority. There is 
 or presentation-free launch mode. A desktop session without a tray retains `ghostlight open` and
 the Applications entry as interaction routes.
 
-- Monitor is where the work becomes visible. The current action stands in full with its elapsed
+- At a glance is where the work becomes visible. The current action stands in full with its elapsed
   time running. When the next one starts, that action settles and drops into a newest-first queue
   beneath it, so a person can watch a session unfold and scroll back through what already happened.
   While nothing is running, the last completed action stays on screen rather than an empty panel.
@@ -97,7 +98,7 @@ the Applications entry as interaction routes.
 - The record beneath the current action is bounded, local, newest first, and content-minimized.
   By default an action keeps the bounded visible name of the element it actually used, such as
   `Clicked the "Save" button`; governance can remove target names without making the action vague.
-- Monitor can clear completed actions from the current view without deleting the local audit.
+- At a glance can clear completed actions from the current view without deleting the local audit.
   Running work remains visible, and a fresh desktop process can reconstruct history from audit.
 - MCP integrations checks, connects, and disconnects Ghostlight's owned registration for explicitly
   supported MCP clients. It never overwrites a foreign entry or exposes a generic file editor or
@@ -116,6 +117,8 @@ the Applications entry as interaction routes.
 - The orchestrator publishes sequenced changes, so the surface shows work as it happens instead of
   sampling for it. A surface that misses a change resynchronizes from a snapshot rather than
   guessing.
+- `ghostlight doctor` reads the same readiness word and detail from an already-running authority.
+  The read is authenticated and content-free, and never starts Ghostlight or creates a session.
 - Closing destroys the workbench window without ending browser service. Linux Open reconstructs
   the disposable WebView on every request; Windows reconstructs after close, renderer failure, or
   reload. Both restore state from the orchestrator.
