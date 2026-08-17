@@ -2,9 +2,12 @@
 
 - Status: Superseded in full by ADR-0129 on 2026-08-16. Retained as history; does not govern.
 - Date: 2026-08-16
-- Supersedes: ADR-0127 Decisions 1, 2, 3, and 5 (the switch roster). ADR-0127 Decision 4, the
+- Supersedes: ADR-0130 Decisions 1, 2, 3, and 5 (the switch roster). ADR-0130 Decision 4, the
   foreign-entry evidence, is carried forward unchanged and is the substance of this surface.
 - Builds on: ADR-0125 (registry, ownership, artwork, Locate), ADR-0126 Decision 9
+- Note: the switch roster this record supersedes was filed as ADR-0130 and renumbered to ADR-0130
+  on 2026-08-17 to clear a duplicate number. Only the references below changed; no decision here
+  was reopened.
 
 ## Context
 
@@ -13,11 +16,11 @@ two-line rows, and one switch per client. Each fixed a real defect in the one be
 rejected by the owner on the same grounds -- the surface read as a dense control strip rather than a
 place to understand and manage something.
 
-The switch model in ADR-0127 was the most compressed of the four. It removed the status taxonomy and
+The switch model in ADR-0130 was the most compressed of the four. It removed the status taxonomy and
 the reordering problem, and it was rejected on sight. That is a legitimate answer: a switch makes
 every client equally weightless, which is efficient and gives a person nothing to look at.
 
-The evidence work from ADR-0127 Decision 4 was not the problem. It was the only part of that ADR
+The evidence work from ADR-0130 Decision 4 was not the problem. It was the only part of that ADR
 with something to read, and it had nowhere good to sit in a row of switches.
 
 ## Decision
@@ -56,7 +59,7 @@ product is connected.
 
 A concrete target's block names the target, its state in words, its sentence, its exact file, what
 Ghostlight writes there, and the operations available on it. A blocked target additionally shows the
-command found under Ghostlight's key and the command Ghostlight would write instead, per ADR-0127
+command found under Ghostlight's key and the command Ghostlight would write instead, per ADR-0130
 Decision 4, with only the routes that write nothing.
 
 The connector path is one string for every client and is stated once in the pane.
@@ -67,7 +70,7 @@ Bulk setup costs a selection per client, which the switch model did not. That is
 surface that shows one thing properly, and it is paid on the rare visit rather than the common one:
 `ghostlight install` already registers every detected client, so the common visit changes nothing.
 
-Four rejected shapes are recorded in ADR-0125, ADR-0127, and this file. The pattern across them is
+Four rejected shapes are recorded in ADR-0125, ADR-0130, and this file. The pattern across them is
 that compaction was never the problem being solved. Each round removed repetition and the surface
 still read wrong, because the destination needed somewhere to explain one client rather than a
 denser way to list eighteen.

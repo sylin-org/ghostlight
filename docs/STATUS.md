@@ -10,11 +10,14 @@ preserved `docs/0.8/` material carry history; this file does not rewrite it.
 Distances below are measured against the local remote-tracking refs, which are only as fresh as the
 last fetch.
 
-The repository carries exactly two branches, `main` and `dev`. They are no longer linear. That was
-true on 2026-08-13 and is not true now: as of 2026-08-17, `main` carries one commit that `dev` does
-not (`0116feca`, which paused dependency updates while `main` carries 0.8), and `dev` carries 207
-that `main` does not. Something does need merging, and the outcome for `main` is a release decision
-named in G0 of the [1.0 release checklist](RELEASE-CHECKLIST.md) and executed in G10.
+The repository carries exactly two branches, `main` and `dev`. They diverged between 2026-08-13 and
+2026-08-17, when `main` took one commit `dev` did not: `0116feca`, which paused dependency updates
+while `main` still carries 0.8.
+
+The owner resolved that on 2026-08-17 by merging `main` into `dev` with the `ours` strategy.
+`main`'s history is now contained in `dev` and none of its 0.8-line content was applied, so `dev`
+keeps its own Dependabot configuration rather than inheriting the 0.8 pause. The merge left the tree
+byte-identical. `main` is an ancestor of `dev` again, so the G10 promotion is a fast-forward.
 
 Check this rather than trusting the paragraph: `git merge-base --is-ancestor main dev` exits zero
 only while the topology is linear.
@@ -495,17 +498,19 @@ to the card roster it started from, so the compact status-sorted card roster des
 current and accurate.
 
 [ADR-0129](adr/0129-integration-roster-reverted-to-cards.md) records the revert and supersedes
-ADR-0127 (integration switches and foreign-entry evidence) and ADR-0128 (master and detail) in full.
+ADR-0130 (integration switches and foreign-entry evidence) and ADR-0128 (master and detail) in full.
 ADR-0125 Decision 2 governs the destination again. Both superseded records are retained as history
 and neither governs. ADR-0129 Decision 3 keeps what the five attempts established, so the same shapes
 are not rediscovered by the next person who opens the surface and sees repetition.
 
-Two different decisions carry the number `0127`:
-[`adr/0127-one-invoked-desktop-authority.md`](adr/0127-one-invoked-desktop-authority.md), which
-governs, and
-[`adr/0127-integration-switches-and-evidence.md`](adr/0127-integration-switches-and-evidence.md),
-which does not. Resolving that collision without deleting or rewriting either record is a G0 item in
-the [1.0 release checklist](RELEASE-CHECKLIST.md).
+Two different decisions were both filed as `0127` on 2026-08-16. The owner resolved the collision on
+2026-08-17 by renumbering the superseded one:
+[`adr/0127-one-invoked-desktop-authority.md`](adr/0127-one-invoked-desktop-authority.md) keeps its
+number and governs, and the switch roster became
+[`adr/0130-integration-switches-and-evidence.md`](adr/0130-integration-switches-and-evidence.md),
+which does not govern. No decision text was reopened. The renumber is marked in ADR-0130's header,
+and the references to it in ADR-0128 and ADR-0129 carry the same note, so the edit is visible rather
+than silent.
 
 ## Provenance-bound build-only candidate
 
@@ -1056,7 +1061,7 @@ The executor-split batch is complete through `4d633fbc`.
 - The foreign-entry evidence gap outlived every integration shape. ADR-0125 Decision 2 and the
   reference-experience epic both require showing what Ghostlight found, what it owns, and what it
   would change, but a blocked target still asserts that a configuration is malformed or foreign
-  without showing the evidence for it. It was built once during the ADR-0127 and ADR-0128 attempts
+  without showing the evidence for it. It was built once during the ADR-0130 and ADR-0128 attempts
   and was reverted with them
   ([ADR-0129](adr/0129-integration-roster-reverted-to-cards.md) Decision 4). Re-landing it is
   independent of whatever layout the destination eventually takes.

@@ -74,9 +74,11 @@ installed-product observation, or the checklist deadlocks against itself.
 - [x] Resolve the literal `doctor` aggregate-readiness parity measure required by S8. The owner
   approved a live read-only query, implemented and source-verified on 2026-08-17; installed-desktop
   observation is evidence and closes under G8.
-- [ ] Resolve the duplicate ADR number `0127` without deleting or silently rewriting either
-  historical decision. Both `0127-integration-switches-and-evidence.md` and
-  `0127-one-invoked-desktop-authority.md` exist.
+- [x] Resolve the duplicate ADR number `0127` without deleting or silently rewriting either
+  historical decision. Resolved 2026-08-17: the governing `0127-one-invoked-desktop-authority.md`
+  keeps its number, and the superseded switch roster became
+  `0130-integration-switches-and-evidence.md`. No decision text was reopened; the renumber is
+  marked in ADR-0130's header and in the ADR-0128 and ADR-0129 references to it.
 - [ ] Decide how the live lanes obtain a matching 1.0 store adapter, and record it in G3. G4, G5,
   and G7 refuse an unpacked build, so either name a pre-publication route (trusted testers, or an
   unlisted item) or accept that the adapter is submitted and approved before the live lanes run.
@@ -85,16 +87,15 @@ installed-product observation, or the checklist deadlocks against itself.
   reads as an unconditional empty diff. The governing reading is settled in practice and
   [RELEASE.md](RELEASE.md) now states it; this item only stops the stricter wording from resurfacing
   as a release gate it was never meant to be.
-- [ ] Decide whether public first-use feedback is part of 1.0 at all. It is not one of the seven
-  ADR-0126 acceptance measures, and it repeats the substance of
-  [greenfield-first-success.md](testing/greenfield-first-success.md), which the tree marks rejected as
-  a release gate. It also cannot precede publication, because no public 1.0 exists to have a first use
-  of. If the owner wants it, it belongs in the post-publication section, with a stated bound and a
-  named judge.
-- [ ] Decide what happens to `main`. It is no longer an ancestor of `dev`: `main` carries one commit
-  that `dev` does not, and `dev` carries 207 that `main` does not. Name the promotion or merge
-  outcome now and execute it in G10. `STATUS.md` still claims the topology is linear and needs
-  correcting in G9.
+- [x] Decide whether public first-use feedback is part of 1.0 at all. Resolved 2026-08-17: it is out
+  of 1.0 entirely. It is not one of the seven ADR-0126 acceptance measures, it repeats the substance
+  of [greenfield-first-success.md](testing/greenfield-first-success.md), which the tree marks
+  rejected as a release gate, and it could not precede publication in any case. ADR-0126 Decision 11
+  already supplies the adoption signal from store, npm, registry, and GitHub counts.
+- [x] Decide what happens to `main`. Resolved 2026-08-17: `main` was merged into `dev` with the
+  `ours` strategy, so its history is contained without importing 0.8-line content, and `dev` keeps
+  its own Dependabot configuration. The tree was byte-identical after the merge. `main` is an
+  ancestor of `dev` again, so G10 promotes it by fast-forward.
 - [ ] Confirm that the non-gating debt under `STATUS.md` "Owed" remains outside 1.0 unless the
   owner explicitly promotes an item.
 - [ ] Confirm that every reference-experience S8 decision that does not require installed-product
@@ -329,9 +330,10 @@ Fill this in once, when the release is called. A GO here is the owner's, not an 
 These belong to the released product, not to the release decision. Nothing here may be promoted into
 a blocking gate without an owner decision recorded in G0.
 
-- Public first-use feedback, consented and content-free, if G0 decided to collect it at all.
 - Adoption signal from the Chrome Web Store, npm, the MCP Registry, and GitHub, which already count
-  installs and downloads without the product reporting anything (ADR-0126 Decision 11).
+  installs and downloads without the product reporting anything (ADR-0126 Decision 11). G0 decided
+  on 2026-08-17 that public first-use feedback is not part of 1.0 in any form, blocking or
+  otherwise, so it is deliberately absent from this list.
 - RPM, AppImage, Snap, Flatpak, AUR, and Nix artifacts, none of which became 1.0 gates merely because
   their packaging tools exist.
 

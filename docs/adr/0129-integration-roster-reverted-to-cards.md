@@ -2,7 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-08-16
-- Supersedes: ADR-0127 and ADR-0128 in full. ADR-0125's card roster is restored and governs again.
+- Supersedes: ADR-0130 and ADR-0128 in full. ADR-0125's card roster is restored and governs again.
+- Note: the switch roster was filed as ADR-0130 and renumbered to ADR-0130 on 2026-08-17 to clear a
+  duplicate number. Only the references below changed; no decision here was reopened.
 
 ## Context
 
@@ -24,9 +26,9 @@ rediscovered by anyone who opens the surface and sees repetition.
 taxonomy, per-card actions, and the compact status-sorted grid recorded in `STATUS.md`. The surface
 files and their journey assertions were restored to that exact state.
 
-### 2. ADR-0127 and ADR-0128 are superseded in full
+### 2. ADR-0130 and ADR-0128 are superseded in full
 
-Both are retained as history and neither governs. That includes ADR-0127 Decision 4, the
+Both are retained as history and neither governs. That includes ADR-0130 Decision 4, the
 foreign-entry evidence: the projection field and its bound were reverted with the interface that
 consumed them, because nothing else rendered them.
 

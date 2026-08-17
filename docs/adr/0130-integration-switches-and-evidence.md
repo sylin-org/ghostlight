@@ -1,7 +1,11 @@
-# ADR-0127: Integration switches and foreign-entry evidence
+# ADR-0130: Integration switches and foreign-entry evidence
 
 - Status: Superseded in full by ADR-0129 on 2026-08-16. Retained as history; does not govern.
 - Date: 2026-08-16
+- Renumbered: filed as ADR-0127 on 2026-08-16, colliding with ADR-0127 (one invoked desktop
+  authority) recorded the same day. Renumbered to 0130 on 2026-08-17 so the two decisions have
+  distinct identities. The decision text below is unchanged. References to it in ADR-0128 and
+  ADR-0129 were updated to 0130 and carry the same note.
 - Supersedes: ADR-0125 Decision 2 (the product-card roster and its status taxonomy). ADR-0125's
   registry, ownership, safety, artwork, and Locate decisions stand unchanged.
 - Builds on: ADR-0126 Decision 9 (lead with the answer)
