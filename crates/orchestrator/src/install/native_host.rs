@@ -128,33 +128,7 @@ impl NativeHostRegistry {
     #[must_use]
     pub fn browser_executable(&self, browser_id: &str) -> Option<PathBuf> {
         let browser = BROWSERS.iter().find(|browser| browser.id == browser_id)?;
-        #[cfg(target_os = "linux")]
-        {
-            browser.package.executables.iter().find_map(|name| {
-                browser_package::native_executable_path(&self.context.browser_packages, name)
-            })
-        }
-        #[cfg(windows)]
-        {
-            let relative = Path::new(browser.windows_vendor)
-                .join("Application")
-                .join(browser.windows_executable);
-            [
-                Some(self.context.local.clone().into_os_string()),
-                env::var_os("PROGRAMFILES"),
-                env::var_os("PROGRAMFILES(X86)"),
-            ]
-            .into_iter()
-            .flatten()
-            .map(PathBuf::from)
-            .map(|base| base.join(&relative))
-            .find(|candidate| candidate.is_file())
-        }
-        #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            let _ = browser;
-            None
-        }
+        browser_executable(&self.context, browser)
     }
 
     /// Install or update every safe per-user registration.
@@ -169,6 +143,16 @@ impl NativeHostRegistry {
     ) -> Result<NativeHostActionResult, NativeHostError> {
         let browsers = select_browsers(browser_ids)?;
         apply_install_for(&self.context, &SystemRegistrationIo, &browsers)
+    }
+
+    /// Ensure one registration is current, repairing it only when fresh inspection still proves
+    /// Ghostlight owns its stale state.
+    pub fn repair_owned_registration(
+        &self,
+        browser_id: &str,
+    ) -> Result<NativeHostActionResult, NativeHostError> {
+        let browsers = select_browsers(&[browser_id.to_owned()])?;
+        apply_owned_repair_for(&self.context, &SystemRegistrationIo, &browsers)
     }
 
     /// Remove only registrations whose manifest proves Ghostlight ownership.
@@ -209,6 +193,7 @@ struct NativeHostContext {
     local: PathBuf,
     connector: PathBuf,
     browser_packages: BrowserPackageContext,
+    windows_browser_roots: Vec<PathBuf>,
 }
 
 impl NativeHostContext {
@@ -235,6 +220,11 @@ impl NativeHostContext {
             .join(executable_name(CONNECTOR_NAME, platform));
         let browser_packages =
             BrowserPackageContext::system(&home, platform == NativeHostPlatform::Linux);
+        let windows_browser_roots = if platform == NativeHostPlatform::Windows {
+            windows_browser_roots(&local)
+        } else {
+            Vec::new()
+        };
         Self {
             platform,
             #[cfg(test)]
@@ -243,6 +233,7 @@ impl NativeHostContext {
             local,
             connector: normalize_path(&connector),
             browser_packages,
+            windows_browser_roots,
         }
     }
 }
@@ -251,8 +242,7 @@ impl NativeHostContext {
 struct BrowserSpec {
     id: &'static str,
     name: &'static str,
-    windows_vendor: &'static str,
-    #[cfg(windows)]
+    windows_vendor: &'static [&'static str],
     windows_executable: &'static str,
     linux_directory: &'static str,
     package: BrowserPackageSpec,
@@ -262,8 +252,7 @@ const BROWSERS: &[BrowserSpec] = &[
     BrowserSpec {
         id: "chrome",
         name: "Google Chrome",
-        windows_vendor: r"Google\Chrome",
-        #[cfg(windows)]
+        windows_vendor: &["Google", "Chrome"],
         windows_executable: "chrome.exe",
         linux_directory: "google-chrome/NativeMessagingHosts",
         package: BrowserPackageSpec {
@@ -275,8 +264,7 @@ const BROWSERS: &[BrowserSpec] = &[
     BrowserSpec {
         id: "edge",
         name: "Microsoft Edge",
-        windows_vendor: r"Microsoft\Edge",
-        #[cfg(windows)]
+        windows_vendor: &["Microsoft", "Edge"],
         windows_executable: "msedge.exe",
         linux_directory: "microsoft-edge/NativeMessagingHosts",
         package: BrowserPackageSpec {
@@ -288,8 +276,7 @@ const BROWSERS: &[BrowserSpec] = &[
     BrowserSpec {
         id: "brave",
         name: "Brave",
-        windows_vendor: r"BraveSoftware\Brave-Browser",
-        #[cfg(windows)]
+        windows_vendor: &["BraveSoftware", "Brave-Browser"],
         windows_executable: "brave.exe",
         linux_directory: "BraveSoftware/Brave-Browser/NativeMessagingHosts",
         package: BrowserPackageSpec {
@@ -301,8 +288,7 @@ const BROWSERS: &[BrowserSpec] = &[
     BrowserSpec {
         id: "chromium",
         name: "Chromium",
-        windows_vendor: "Chromium",
-        #[cfg(windows)]
+        windows_vendor: &["Chromium"],
         windows_executable: "chrome.exe",
         linux_directory: "chromium/NativeMessagingHosts",
         package: BrowserPackageSpec {
@@ -312,6 +298,44 @@ const BROWSERS: &[BrowserSpec] = &[
         },
     },
 ];
+
+fn windows_browser_roots(local: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![local.to_path_buf()];
+    for variable in ["PROGRAMFILES", "PROGRAMFILES(X86)"] {
+        let Some(root) = env::var_os(variable)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+        else {
+            continue;
+        };
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    roots
+}
+
+fn browser_executable(context: &NativeHostContext, browser: &BrowserSpec) -> Option<PathBuf> {
+    match context.platform {
+        NativeHostPlatform::Windows => context
+            .windows_browser_roots
+            .iter()
+            .map(|root| windows_browser_executable_path(root, browser))
+            .find(|candidate| candidate.is_file()),
+        NativeHostPlatform::Linux => browser.package.executables.iter().find_map(|name| {
+            browser_package::native_executable_path(&context.browser_packages, name)
+        }),
+    }
+}
+
+fn windows_browser_executable_path(root: &Path, browser: &BrowserSpec) -> PathBuf {
+    browser
+        .windows_vendor
+        .iter()
+        .fold(root.to_path_buf(), |path, component| path.join(component))
+        .join("Application")
+        .join(browser.windows_executable)
+}
 
 fn select_browsers(ids: &[String]) -> Result<Vec<BrowserSpec>, NativeHostError> {
     let mut selected = Vec::new();
@@ -532,20 +556,62 @@ fn apply_install_for(
     registration_io: &dyn RegistrationIo,
     browsers: &[BrowserSpec],
 ) -> Result<NativeHostActionResult, NativeHostError> {
+    apply_install_for_mode(
+        context,
+        registration_io,
+        browsers,
+        InstallMode::InstallOrUpdate,
+    )
+}
+
+fn apply_owned_repair_for(
+    context: &NativeHostContext,
+    registration_io: &dyn RegistrationIo,
+    browsers: &[BrowserSpec],
+) -> Result<NativeHostActionResult, NativeHostError> {
+    apply_install_for_mode(context, registration_io, browsers, InstallMode::OwnedRepair)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InstallMode {
+    InstallOrUpdate,
+    OwnedRepair,
+}
+
+fn apply_install_for_mode(
+    context: &NativeHostContext,
+    registration_io: &dyn RegistrationIo,
+    browsers: &[BrowserSpec],
+    mode: InstallMode,
+) -> Result<NativeHostActionResult, NativeHostError> {
     if !context.connector.is_file() {
         return Err(NativeHostError::ConnectorMissing(context.connector.clone()));
     }
     let before = inspect(context, registration_io)?;
+    if mode == InstallMode::OwnedRepair {
+        for browser in browsers {
+            let observed = before
+                .browsers
+                .iter()
+                .find(|observed| observed.id == browser.id)
+                .expect("every browser specification has an inspection result");
+            if !matches!(
+                observed.state,
+                NativeHostState::Current | NativeHostState::Updatable
+            ) {
+                return Err(NativeHostError::OwnedRepairUnavailable(browser.id.into()));
+            }
+        }
+    }
     if browsers.iter().all(|browser| {
         let observed = before
             .browsers
             .iter()
             .find(|observed| observed.id == browser.id)
             .expect("every browser specification has an inspection result");
-        matches!(
-            observed.state,
-            NativeHostState::Current | NativeHostState::NeedsAttention
-        )
+        observed.state == NativeHostState::Current
+            || (mode == InstallMode::InstallOrUpdate
+                && observed.state == NativeHostState::NeedsAttention)
     }) {
         return Ok(NativeHostActionResult {
             changed: false,
@@ -610,10 +676,13 @@ fn apply_install_for(
             .iter()
             .find(|observed| observed.id == browser.id)
             .expect("every browser specification has an inspection result");
-        matches!(
-            observed.state,
-            NativeHostState::Missing | NativeHostState::Updatable
-        )
+        match mode {
+            InstallMode::InstallOrUpdate => matches!(
+                observed.state,
+                NativeHostState::Missing | NativeHostState::Updatable
+            ),
+            InstallMode::OwnedRepair => observed.state != NativeHostState::Current,
+        }
     }) {
         return Err(NativeHostError::VerificationFailed);
     }
@@ -728,7 +797,7 @@ fn browser_manifest_path(context: &NativeHostContext, browser: &BrowserSpec) -> 
 fn windows_registry_key(browser: &BrowserSpec) -> String {
     format!(
         r"Software\{}\NativeMessagingHosts\{HOST_NAME}",
-        browser.windows_vendor
+        browser.windows_vendor.join(r"\")
     )
 }
 
@@ -912,6 +981,11 @@ pub enum NativeHostError {
     /// A foreign manifest occupies the current product location.
     #[error("a foreign manifest was left untouched at {0}")]
     ForeignManifest(PathBuf),
+    /// Recovery revalidation no longer proves that the named state is owned and stale.
+    #[error(
+        "browser '{0}' is not an owned stale registration; automatic recovery left it unchanged"
+    )]
+    OwnedRepairUnavailable(String),
     /// An action completed without reaching the required exact state.
     #[error("native-host registration did not reach the expected current state")]
     VerificationFailed,
@@ -1034,15 +1108,21 @@ mod tests {
             std::process::id(),
             Uuid::new_v4().simple()
         ));
+        let local = root.join("AppData/Local");
         NativeHostContext {
             platform,
             home: root.clone(),
             config: root.join(".config"),
-            local: root.join("AppData/Local"),
+            local: local.clone(),
             connector: root
                 .join("Ghostlight/bin")
                 .join(executable_name(CONNECTOR_NAME, platform)),
             browser_packages: BrowserPackageContext::isolated(&root.join("browser-packages")),
+            windows_browser_roots: vec![
+                local,
+                root.join("Program Files"),
+                root.join("Program Files (x86)"),
+            ],
         }
     }
 
@@ -1069,6 +1149,7 @@ mod tests {
             local: PathBuf::from(r"C:\Users\test\AppData\Local"),
             connector: PathBuf::from("/opt/ghostlight/ghostlight-browser-connector"),
             browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
+            windows_browser_roots: Vec::new(),
         };
         assert_eq!(BROWSERS.len(), 4);
         assert_eq!(
@@ -1081,6 +1162,30 @@ mod tests {
             windows_registry_key(&BROWSERS[2]),
             r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\org.sylin.ghostlight"
         );
+    }
+
+    #[test]
+    fn windows_executable_discovery_uses_only_fixed_roots_for_all_families() {
+        let context = context(NativeHostPlatform::Windows);
+        let outside = context.home.join("Portable");
+        let decoy = windows_browser_executable_path(&outside, &BROWSERS[0]);
+        fs::create_dir_all(decoy.parent().unwrap()).unwrap();
+        fs::write(&decoy, b"portable browser").unwrap();
+        assert_eq!(browser_executable(&context, &BROWSERS[0]), None);
+
+        let placements = [(0, 0), (1, 1), (2, 2), (3, 0)];
+        for (browser_index, root_index) in placements {
+            let browser = &BROWSERS[browser_index];
+            let expected = windows_browser_executable_path(
+                &context.windows_browser_roots[root_index],
+                browser,
+            );
+            fs::create_dir_all(expected.parent().unwrap()).unwrap();
+            fs::write(&expected, b"ordinary browser").unwrap();
+            assert_eq!(browser_executable(&context, browser), Some(expected));
+        }
+
+        fs::remove_dir_all(context.home).unwrap();
     }
 
     #[test]
@@ -1204,6 +1309,66 @@ mod tests {
             NativeHostState::NeedsAttention
         );
         assert_eq!(partial.report.browsers[1].state, NativeHostState::Current);
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn windows_owned_repair_revalidates_before_writing() {
+        let context = context(NativeHostPlatform::Windows);
+        let registration_io = MemoryIo::default();
+        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+        fs::write(&context.connector, b"connector").unwrap();
+        let browser = BROWSERS[0];
+        let key = windows_registry_key(&browser);
+        let current_manifest = windows_manifest_path(&context);
+
+        assert!(matches!(
+            apply_owned_repair_for(&context, &registration_io, &[browser]),
+            Err(NativeHostError::OwnedRepairUnavailable(id)) if id == browser.id
+        ));
+        assert!(registration_io.registry().is_empty());
+        assert!(!registration_io.files().contains_key(&current_manifest));
+
+        let occupied = context.local.join("foreign.json");
+        registration_io
+            .registry()
+            .insert(key.clone(), occupied.to_string_lossy().into_owned());
+        registration_io
+            .files()
+            .insert(occupied.clone(), r#"{"name":"org.example.foreign"}"#.into());
+        assert!(matches!(
+            apply_owned_repair_for(&context, &registration_io, &[browser]),
+            Err(NativeHostError::OwnedRepairUnavailable(id)) if id == browser.id
+        ));
+        assert_eq!(
+            registration_io.registry().get(&key),
+            Some(&occupied.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            registration_io.files().get(&occupied).map(String::as_str),
+            Some(r#"{"name":"org.example.foreign"}"#)
+        );
+        assert!(!registration_io.files().contains_key(&current_manifest));
+
+        registration_io.files().insert(
+            occupied,
+            HostManifest::expected(Path::new(r"C:\old\ghostlight-browser-connector.exe"))
+                .to_json()
+                .unwrap(),
+        );
+        let repaired = apply_owned_repair_for(&context, &registration_io, &[browser]).unwrap();
+        assert!(repaired.changed);
+        assert_eq!(repaired.report.browsers[0].state, NativeHostState::Current);
+        assert_eq!(
+            registration_io.registry().get(&key),
+            Some(&current_manifest.to_string_lossy().into_owned())
+        );
+        assert!(
+            !apply_owned_repair_for(&context, &registration_io, &[browser])
+                .unwrap()
+                .changed
+        );
 
         let _ = fs::remove_dir_all(context.home);
     }

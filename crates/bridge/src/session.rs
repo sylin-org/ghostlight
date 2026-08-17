@@ -7,6 +7,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::io;
+#[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
 
 /// Environment values required to place a child in the current graphical user session.

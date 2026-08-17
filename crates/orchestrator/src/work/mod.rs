@@ -1722,8 +1722,8 @@ mod tests {
 
     use super::{
         deregister_active_authority, observation_budget_ms, observed_from, readiness_name,
-        register_active_authority, ApplicationExecutor, CancellationToken, Effect, Readiness,
-        Status,
+        register_active_authority, routing_refusal, ApplicationExecutor, BrowserError,
+        CancellationToken, Effect, Readiness, Status,
     };
 
     #[derive(Default)]
@@ -1906,6 +1906,29 @@ mod tests {
             .and_then(|tail| tail.split("fn observe").next())
             .expect("target-browser seam remains explicit");
         assert!(seam.contains(&marker));
+    }
+
+    #[test]
+    fn manual_recovery_maps_to_stable_facts_summary_and_one_next_step() {
+        let (refusal, facts) = routing_refusal(&BrowserError::RecoveryManual {
+            browser: Some("Chromium".into()),
+        })
+        .expect("manual recovery is a model-facing refusal");
+
+        assert_eq!(
+            facts,
+            json!({"reason":"browser_startup_manual","browser":"Chromium"})
+        );
+        assert_eq!(
+            refusal.summary(),
+            "No browser is connected. Start Chromium to continue."
+        );
+        assert_eq!(
+            refusal.next_steps(),
+            vec![
+                "Start the browser you normally use with the Ghostlight extension installed, then repeat the call."
+            ]
+        );
     }
 
     #[test]

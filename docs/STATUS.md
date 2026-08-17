@@ -88,13 +88,18 @@ single flight, exact closed failures, and a useful no-effect result in manual mo
 nothing. S7c added the bounded physical attempt: safe repair only for stale Ghostlight-owned
 registration, direct launch of the chosen installed executable with no arguments, Linux graphical
 session proof through the ADR-0082 seam, and a bounded wait for the inbound adapter. Cancellation
-leaves no recovery flight behind. The Linux default remains manual; a real no-browser call returned
-its exact useful outcome with no effect. S8 is split between the owed Ubuntu GNOME Wayland
-lifecycle and a Windows live-launch lane.
+leaves no recovery flight behind. A corrective Windows-source pass now keeps all-four-family
+pre-registration but selects recovery candidates only from verified ordinary executables. Its
+per-generation flight state keeps cancellation and deadlines local to each caller, hands unfinished
+phases to a live joiner, and rechecks before repair and launch. The Linux default remains manual; a
+real no-browser call returned its exact useful outcome with no effect. S8 is split between the owed
+Ubuntu GNOME Wayland lifecycle and a clean installed-Windows live-launch lane.
 
-S8 is `BLOCKED`, not complete. The available host is CachyOS KDE Wayland with no GNOME
-installation, and no Windows host is available. Its prompt forbids substituting this host for the
-release-blocking Ubuntu GNOME Wayland L1-L9 or installed-Windows journeys. The
+S8 is `BLOCKED`, not complete. The required Ubuntu GNOME Wayland and clean installed-Windows
+candidate environments have not run. A Windows source host proved the corrected deterministic
+mechanisms and process boundary, but that is not a substitute for the installed-product journey.
+The prompt forbids substituting source or complementary-desktop evidence for the release-blocking
+Ubuntu GNOME Wayland L1-L9 or installed-Windows journeys. The
 [dated evaluation](testing/reference-experience-evaluation-2026-08-16.md) inventories the passing
 automated and KDE evidence, dispositions every ADR-0126 acceptance measure at its current level,
 and lists the exact desktop, migration, accessibility, public-feedback, and owner decisions still
@@ -161,7 +166,9 @@ research input [24-policy-surface-user-delight-2026-08.md](research/24-policy-su
   as an operational control rather than a security boundary.
 - `browser.startup` is registered as the first closed string setting. Windows defaults to
   `on_demand`, Linux to `manual`, and an organization-authored `manual` value pins the effective
-  result. Runtime recovery is not yet implemented.
+  result. Runtime recovery verifies an ordinary executable independently of native-host
+  registration, freshly revalidates ownership before repairing stale registration, and launches
+  only under the effective `on_demand` posture.
 - Rules render as one list in evaluation order, organization first, each a single line that opens
   into detail: read-only for a rule this person cannot change, the editor for one they can.
 - A capability line states polarity. Available, some sites blocked, some sites allowed, and not

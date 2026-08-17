@@ -23,6 +23,7 @@ let createdDeployLock = false;
 // A real one-pixel GIF89a, the shape the extension now hands over already finished.
 const ONE_PIXEL_GIF = "R0lGODlhAQABAPAAAAwiOAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAZAAAACwAAAAAAQABAAAIBAABBAQAOw==";
 const ONE_PIXEL_JPEG = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==";
+const PROCESS_BROWSER = "browser_processjourney";
 
 function executable(name) {
   const path = join(binDir, `${name}${executableSuffix}`);
@@ -261,6 +262,21 @@ async function waitForMcpReady(mcp, timeoutMs = 10000) {
   throw new Error("Timed out waiting for MCP service reconnection");
 }
 
+async function waitForNoBrowsers(mcp, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let browsers = [];
+  while (Date.now() < deadline) {
+    const listed = structured(await mcp.request("tools/call", {
+      name: "browser_tabs",
+      arguments: { action: "list" }
+    }));
+    browsers = listed.facts.browsers;
+    if (Array.isArray(browsers) && browsers.length === 0) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  }
+  throw new Error(`Timed out waiting for the browser registry to empty: ${JSON.stringify(browsers)}`);
+}
+
 try {
   rmSync(runtimeFile, { force: true });
   rmSync(auditFile, { force: true });
@@ -285,7 +301,7 @@ try {
     kind: "hello",
     major: 2,
     adapter_version: "1.0.0",
-    browser_id: "browser_processjourney",
+    browser_id: PROCESS_BROWSER,
     adapter_epoch: "adapter_processjourney",
     capabilities: [
       "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
@@ -445,32 +461,29 @@ try {
   assert.equal(openRecord.observed.readiness, "complete");
   assert.equal(records.some((record) => JSON.stringify(record).includes("Example Domain")), false);
 
-  // A new MCP session has no browser binding. With startup explicitly manual, losing the only
-  // adapter must stop before dispatch and return one useful action instead of trying to launch.
+  // This workspace stays pinned to the fake browser after its last tab closes. Once that adapter
+  // disconnects, recovery must preserve the profile binding and stop before repair, launch, or
+  // adapter dispatch. Injected Rust tests own the exact unpinned startup behavior matrix.
+  const physicalCommandCountBeforeRecovery = physicalCommands.length;
   browserConnector.kill();
   await waitForExit(browserConnector);
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
-  const manualConnector = start(executable("ghostlight-mcp-connector"));
-  const manualMcp = new McpPeer(manualConnector);
-  const manualInitialized = await manualMcp.request("initialize", {
-    protocolVersion: "2025-11-25",
-    capabilities: {},
-    clientInfo: { name: "manual-recovery", version: "1" }
-  });
-  assert.equal(manualInitialized.result.serverInfo.name, "ghostlight");
-  manualMcp.notify("notifications/initialized");
-  const manual = structured(await manualMcp.request("tools/call", {
+  await waitForNoBrowsers(mcp);
+  const disconnected = structured(await mcp.request("tools/call", {
     name: "browser_navigate",
-    arguments: { url: "https://example.com" }
+    arguments: {
+      url: "https://example.com",
+      new_tab: true
+    }
   }));
-  assert.equal(manual.status, "failed");
-  assert.equal(manual.effect, "none");
-  assert.equal(manual.facts.reason, "browser_startup_manual");
-  assert.equal(physicalCommands.filter((command) => command === "open_tab").length, 2);
-  assert.equal(manual.next_steps.length, 1);
-  assert.match(manual.next_steps[0], /Start the browser/);
+  assert.equal(disconnected.status, "failed");
+  assert.equal(disconnected.effect, "none");
+  assert.equal(disconnected.repeat_safe, true);
+  assert.equal(disconnected.facts.reason, "browser_wrong_profile");
+  assert.deepEqual(disconnected.facts.details, [PROCESS_BROWSER]);
+  assert.equal(physicalCommands.length, physicalCommandCountBeforeRecovery);
+  assert.equal(disconnected.next_steps.length, 1);
 
-  console.log("process journey ok: reconnect -> open/read -> recording -> close -> manual no-browser recovery");
+  console.log("process journey ok: reconnect -> open/read -> recording -> close -> pinned no-adapter refusal");
 } finally {
   for (const child of children.reverse()) {
     if (!child.killed) child.kill();

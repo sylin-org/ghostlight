@@ -32,7 +32,7 @@ the reference-experience epic complete.
 | --- | --- | --- |
 | First use | NOT MET as an S8 gate | Development-host journeys exist, but neither required clean installed desktop completed first proof against the candidate and matching store extension |
 | Second machine | PARTIAL | Live KDE Chromium proved both extension surfaces plus online and offline routes; the same-person cross-platform wording comparison is not observed |
-| Recovery | PARTIAL | Closed automated outcomes and Linux manual-mode diagnosis pass; physical Windows on-demand startup and the full desktop failure matrix are not observed |
+| Recovery | PARTIAL | Closed automated outcomes, executable-backed Windows selection, caller-local single-flight cancellation/deadlines, and Linux manual-mode diagnosis pass; physical installed-Windows on-demand startup and the full desktop failure matrix are not observed |
 | Control | PARTIAL | Pause and stop are truth-preserving in automated journeys; keyboard and visible behavior on both required installed desktops are not observed |
 | Parity | NOT MET, owner decision required | The Rust-owned vocabulary guard passes, but deviation 12 records that `doctor` has no live aggregate-readiness line; closing the literal measure requires either an approved amendment or a service-query design |
 | Accessibility | NOT MET | Keyboard-only, screen reader, large text, high contrast, reduced motion, browser zoom, and fractional scaling were not run on GNOME Wayland and KDE Wayland |
