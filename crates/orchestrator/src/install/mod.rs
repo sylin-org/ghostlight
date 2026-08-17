@@ -242,6 +242,12 @@ pub struct HarnessSummary {
     pub connector_command: String,
     /// Smallest complete manual configuration document for this target.
     pub manual_setup: String,
+    /// The command found under Ghostlight's key when something else wrote it.
+    ///
+    /// Present only when this target needs attention because a foreign entry occupies the key.
+    /// A person told their configuration is "foreign" and shown nothing cannot decide whether to
+    /// replace it; this is the evidence, bounded to the one value that matters.
+    pub found_command: Option<String>,
 }
 
 /// Definite result of one explicit harness action.
@@ -728,12 +734,17 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             .iter()
             .any(|name| executable_on_path(context, name));
     let connector_ready = context.connector.is_file();
-    let state = match registration_state(context, definition) {
+    let registration = registration_state(context, definition);
+    let found_command = match &registration {
+        Ok(RegistrationState::Foreign(found)) => found.clone(),
+        _ => None,
+    };
+    let state = match registration {
         Ok(RegistrationState::Missing) if detected => HarnessState::Available,
         Ok(RegistrationState::Missing) => HarnessState::NotDetected,
         Ok(RegistrationState::Current) => HarnessState::Installed,
         Ok(RegistrationState::Updatable) => HarnessState::Updatable,
-        Ok(RegistrationState::Foreign) | Err(_) => HarnessState::NeedsAttention,
+        Ok(RegistrationState::Foreign(_)) | Err(_) => HarnessState::NeedsAttention,
     };
     let mut detail: String = match state {
         HarnessState::Installed => "Ghostlight is registered for this user context.".into(),
@@ -776,6 +787,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         can_locate: true,
         config_path: definition.path.to_string_lossy().into_owned(),
         connector_command: context.connector.to_string_lossy().into_owned(),
+        found_command,
         manual_setup: manual_setup(context, definition).unwrap_or_else(|_| {
             format!(
                 "Use this command as a local stdio MCP server:\n{}",
@@ -785,12 +797,17 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum RegistrationState {
     Missing,
     Current,
     Updatable,
-    Foreign,
+    /// Something under Ghostlight's key that Ghostlight did not write.
+    ///
+    /// Carries the command it found, bounded, so the surface can show the evidence instead of
+    /// asserting "foreign" and leaving the person to open the file themselves. Nothing else from
+    /// the document travels: the rest is the owner's business.
+    Foreign(Option<String>),
 }
 
 fn registration_state(
@@ -829,7 +846,7 @@ fn inspect_json(
         return Ok(RegistrationState::Missing);
     };
     Ok(
-        json_entry_command(entry, dialect).map_or(RegistrationState::Foreign, |command| {
+        json_entry_command(entry, dialect).map_or(RegistrationState::Foreign(None), |command| {
             let args = json_entry_args(entry, dialect);
             command_registration_state(command, args.as_deref(), connector, windows)
         }),
@@ -1095,7 +1112,7 @@ fn edit_yaml(
 ) -> Result<bool, HarnessError> {
     let original = read_or_empty(path)?;
     let state = inspect_yaml(&original, dialect, connector, cfg!(target_os = "windows"))?;
-    if state == RegistrationState::Foreign {
+    if matches!(state, RegistrationState::Foreign(_)) {
         return Err(HarnessError::ForeignEntry);
     }
     if (install && state == RegistrationState::Current)
@@ -1622,6 +1639,26 @@ fn legacy_relay_owned(
     paths_equal(actual_root, expected_root, windows)
 }
 
+/// Longest foreign command Ghostlight will repeat back to a person.
+const FOUND_COMMAND_MAX_CHARS: usize = 200;
+
+/// Render the command found under Ghostlight's key, bounded and whitespace-normalized.
+fn bounded_found_command(command: &str, args: Option<&[&str]>) -> String {
+    let mut rendered = command.split_whitespace().collect::<Vec<_>>().join(" ");
+    for argument in args.unwrap_or_default() {
+        rendered.push(' ');
+        rendered.push_str(&argument.split_whitespace().collect::<Vec<_>>().join(" "));
+    }
+    if rendered.chars().count() > FOUND_COMMAND_MAX_CHARS {
+        rendered = rendered
+            .chars()
+            .take(FOUND_COMMAND_MAX_CHARS)
+            .collect::<String>();
+        rendered.push_str("...");
+    }
+    rendered
+}
+
 fn command_registration_state(
     command: &str,
     args: Option<&[&str]>,
@@ -1629,7 +1666,7 @@ fn command_registration_state(
     windows: bool,
 ) -> RegistrationState {
     if !command_owned(command, args, connector, windows) {
-        return RegistrationState::Foreign;
+        return RegistrationState::Foreign(Some(bounded_found_command(command, args)));
     }
     let actual = fs::canonicalize(command).unwrap_or_else(|_| PathBuf::from(command));
     let expected = fs::canonicalize(connector).unwrap_or_else(|_| connector.to_path_buf());
@@ -1878,10 +1915,11 @@ mod tests {
     use jsonc_parser::parse_to_serde_value;
 
     use super::{
-        command_registration_state, definitions, edit_json, edit_toml, edit_yaml, harness_roots,
-        inspect_json, inspect_toml, inspect_yaml, jsonc_options, manual_json_setup,
-        replace_with_backup, resolve_through_symlink, HarnessAction, HarnessContext, HarnessError,
-        HarnessRegistry, HarnessRoots, HarnessState, JsonDialect, RegistrationState, YamlDialect,
+        bounded_found_command, command_registration_state, definitions, edit_json, edit_toml,
+        edit_yaml, harness_roots, inspect_json, inspect_toml, inspect_yaml, jsonc_options,
+        manual_json_setup, replace_with_backup, resolve_through_symlink, HarnessAction,
+        HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, JsonDialect,
+        RegistrationState, YamlDialect, FOUND_COMMAND_MAX_CHARS,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -2035,6 +2073,18 @@ mod tests {
         assert_eq!(zed.state, HarnessState::Available);
         assert!(zed.can_install);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// Evidence is bounded and normalized, so a pathological config cannot flood the window.
+    #[test]
+    fn a_found_command_is_bounded_and_normalized() {
+        let short = bounded_found_command("  /opt/tool   run  ", Some(&["--flag", "value"]));
+        assert_eq!(short, "/opt/tool run --flag value");
+
+        let long = "x".repeat(FOUND_COMMAND_MAX_CHARS + 50);
+        let bounded = bounded_found_command(&long, None);
+        assert_eq!(bounded.chars().count(), FOUND_COMMAND_MAX_CHARS + 3);
+        assert!(bounded.ends_with("..."));
     }
 
     #[test]
@@ -2418,27 +2468,33 @@ mod tests {
             ),
             RegistrationState::Updatable
         );
-        assert_eq!(
-            command_registration_state(
-                legacy.to_string_lossy().as_ref(),
-                Some(&["--role", "browser"]),
-                &current,
-                cfg!(windows),
-            ),
-            RegistrationState::Foreign
+        // A foreign entry now carries what it found, because "foreign" with no evidence gives a
+        // person nothing to decide with.
+        let browser_role = command_registration_state(
+            legacy.to_string_lossy().as_ref(),
+            Some(&["--role", "browser"]),
+            &current,
+            cfg!(windows),
         );
-        assert_eq!(
-            command_registration_state(
-                directory
-                    .join("foreign/v0")
-                    .join(legacy.file_name().unwrap())
-                    .to_string_lossy()
-                    .as_ref(),
-                Some(&["--role", "agent"]),
-                &current,
-                cfg!(windows),
-            ),
-            RegistrationState::Foreign
+        assert!(
+            matches!(&browser_role, RegistrationState::Foreign(Some(found))
+                if found.contains("--role browser")),
+            "{browser_role:?}"
+        );
+        let stranger = command_registration_state(
+            directory
+                .join("foreign/v0")
+                .join(legacy.file_name().unwrap())
+                .to_string_lossy()
+                .as_ref(),
+            Some(&["--role", "agent"]),
+            &current,
+            cfg!(windows),
+        );
+        assert!(
+            matches!(&stranger, RegistrationState::Foreign(Some(found))
+                if found.contains("foreign") && found.contains("--role agent")),
+            "{stranger:?}"
         );
         fs::remove_dir_all(directory).unwrap();
     }

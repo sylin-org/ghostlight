@@ -305,6 +305,18 @@ function wire() {
     if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
     const harness = event.target.closest("[data-harness-operation]");
     if (harness) handleHarnessAction(harness);
+    // A plural product's targets open in place, the same way a policy rule does. The panel is
+    // presentation state and is deliberately not carried in a snapshot.
+    const harnessDetail = event.target.closest("[data-harness-toggle]");
+    if (harnessDetail) {
+      const panel = document.querySelector(
+        `[data-harness-panel="${harnessDetail.dataset.harnessToggle}"]`
+      );
+      if (panel) {
+        panel.hidden = !panel.hidden;
+        harnessDetail.setAttribute("aria-expanded", String(!panel.hidden));
+      }
+    }
     const destination = event.target.closest("[data-destination]");
     if (destination) openDestination(destination.dataset.destination);
     const hit = event.target.closest("[data-search-view]");

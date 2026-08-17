@@ -386,15 +386,17 @@
     }
 
     /*
-     * The roster answers one question: is my agent connected, and if not, what do I press.
+     * "Which agents can drive your browser?"
      *
-     * Everything identical for every member of a status says itself once, on the group. The
-     * eighteen copies of "Ghostlight is registered for this user context" were not eighteen facts
-     * about eighteen products; they were one fact about being connected. A row keeps its own
-     * sentence only when it differs from its group, which is what an actual problem looks like.
+     * The operation is binary, so the control is a switch and the switch position is the status.
+     * That removes the whole status taxonomy from the page: connected and available were never two
+     * kinds of thing, they were one thing in two positions. It also removes the reason a row moved
+     * when you acted on it -- the list is alphabetical and stable, so flipping a switch changes a
+     * switch and nothing else jumps.
      *
-     * The primary verb follows the same rule: connected always means Remove and available always
-     * means Set up, so the verb belongs to the status rather than to the row.
+     * Two states cannot be a switch and get their own shapes. A blocked target cannot be flipped
+     * on, so it becomes a card carrying the evidence for why. A product that is not on this
+     * computer cannot be flipped at all, so it folds away as discovery rather than status.
      */
     function integrations(snapshot, pending) {
       if (!snapshot.harnesses.length) {
@@ -409,135 +411,209 @@
         if (!products.has(id)) products.set(id, []);
         products.get(id).push(harness);
       }
-      const categoryById = new Map(INTEGRATION_CATEGORIES.map((category) => [category.id, category]));
 
-      const actionButton = (harness, action, label, kind = "ghost-button") => {
-        const waiting = pending.has(harness.id);
-        return '<button class="' + kind + '" type="button" data-harness-operation="manage"'
-          + ' data-harness-action="' + action + '" data-harness="' + escapeHtml(harness.id) + '"'
-          + ' data-harness-name="' + escapeHtml(harness.name) + '"' + (waiting ? " disabled" : "") + '>'
-          + (waiting ? "Working..." : label) + '</button>';
-      };
-      const utilityButton = (harness, operation, label, extra = "") =>
-        '<button class="link-button" type="button" data-harness-operation="' + operation + '"'
-        + ' data-harness="' + escapeHtml(harness.id) + '" data-harness-name="' + escapeHtml(harness.name) + '"'
-        + extra + '>' + label + '</button>';
-
-      const primaryFor = (harness, productId) => {
-        if (harness.state === "installed" && harness.can_uninstall) {
-          return actionButton(harness, "uninstall", "Remove", "danger-button");
-        }
-        if ((harness.state === "available" || harness.state === "updatable") && harness.can_install) {
-          return actionButton(harness, "install", harness.state === "updatable" ? "Update" : "Set up");
-        }
-        if (harness.state === "not_detected" && harness.can_download) {
-          return '<button class="ghost-button" type="button" data-harness-operation="download"'
-            + ' data-product="' + escapeHtml(productId) + '" data-harness="' + escapeHtml(harness.id) + '"'
-            + ' data-harness-name="' + escapeHtml(harness.name) + '">Install</button>';
-        }
-        return "";
-      };
-
-      // Everything a power user occasionally needs, none of it competing for attention. A native
-      // details element keeps this keyboard reachable and dismissible with no new interaction code.
-      const overflow = (harness, plural) => {
-        const locate = harness.can_locate ? utilityButton(harness, "locate", "Locate") : "";
-        const setup = utilityButton(harness, "copy", "Copy setup", ' data-copy-kind="setup"');
-        const target = plural ? "" : '<div class="integration-more-target">' + escapeHtml(harness.target) + '</div>';
-        return '<details class="integration-more" data-harness-manual="' + escapeHtml(harness.id) + '">'
-          + '<summary aria-label="More options for ' + escapeHtml(harness.name) + '">More</summary>'
-          + '<div class="integration-more-body">' + target
-          + '<code>' + escapeHtml(harness.config_path) + '</code>'
-          + '<pre>' + escapeHtml(harness.manual_setup) + '</pre>'
-          + '<div class="tile-actions">' + locate + setup + '</div></div></details>';
-      };
-
-      /*
-       * Two lines, because one was a lie about how much a row has to say. The first carries who
-       * this is and what to press; the second carries the one fact that row owns.
-       *
-       * A single line forced the row that mattered most into an ellipsis: the malformed-config
-       * sentence competed with the name for the same horizontal space and both lost. The second
-       * line is where a row's own detail goes when it differs from its group, and where the
-       * target goes when it does not, so line two is never empty and never a repeat.
-       */
-      const row = (harness, productId, icon, name, plural) => {
-        const group = categoryById.get(INTEGRATION_STATE_CATEGORY[harness.state]);
-        const differs = harness.detail && harness.detail !== group?.sentence;
-        const meta = differs ? harness.detail : harness.target;
-        return '<div class="integration-row" data-harness-row="' + escapeHtml(harness.id) + '">'
-          + '<img src="integrations/' + escapeHtml(icon) + '" alt="" width="22" height="22">'
-          + '<span class="integration-row-text">'
-          + '<span class="integration-name">' + escapeHtml(name)
-          + (plural ? '<span class="integration-target-label">' + escapeHtml(harness.target) + '</span>' : "")
-          + '</span>'
-          + '<span class="integration-row-meta">' + escapeHtml(meta) + '</span>'
-          + '</span>'
-          + '<span class="integration-row-actions">' + primaryFor(harness, productId)
-          + overflow(harness, plural) + '</span></div>';
-      };
-
-      const grouped = new Map(INTEGRATION_CATEGORIES.map((category) => [category.id, []]));
-      for (const [productId, targets] of products) {
-        const sortedTargets = [...targets].sort((left, right) =>
+      const entries = [...products.entries()].map(([productId, all]) => {
+        const targets = [...all].sort((left, right) =>
           left.target.localeCompare(right.target) || left.id.localeCompare(right.id));
-        const visible = sortedTargets.some((target) => target.state !== "not_detected")
-          ? sortedTargets.filter((target) => target.state !== "not_detected") : [sortedTargets[0]];
-        const targetCategories = new Set(visible.map((target) => INTEGRATION_STATE_CATEGORY[target.state]));
-        const categoryId = INTEGRATION_CATEGORY_PRIORITY.find((id) => targetCategories.has(id))
-          ?? "needs-attention";
-        const product = visible[0];
-        const icon = product.icon ?? "generic.svg";
-        const plural = visible.length > 1;
-        grouped.get(categoryId).push({
-          name: product.name,
+        const live = targets.filter((target) => target.state !== "not_detected");
+        const present = live.length > 0;
+        const blocked = live.filter((target) => target.state === "needs_attention");
+        const on = live.filter((target) => target.state === "installed" || target.state === "updatable");
+        return {
           productId,
-          html: visible.map((harness) => row(harness, productId, icon, product.name, plural)).join("")
-        });
-      }
+          targets,
+          live,
+          present,
+          blocked,
+          on,
+          name: targets[0].name,
+          icon: targets[0].icon ?? "generic.svg"
+        };
+      }).sort((left, right) => left.name.localeCompare(right.name)
+        || left.productId.localeCompare(right.productId));
 
-      const counts = new Map([...grouped].map(([id, entries]) => [id, entries.length]));
-      const sections = INTEGRATION_CATEGORIES.filter((category) => counts.get(category.id) > 0)
-        .map((category) => {
-          const entries = [...grouped.get(category.id)]
-            .sort((left, right) => left.name.localeCompare(right.name)
-              || left.productId.localeCompare(right.productId));
-          const body = '<div class="integration-rows">'
-            + entries.map((entry) => entry.html).join("") + '</div>';
-          const count = '<span class="integration-count">' + counts.get(category.id) + '</span>';
-          // A product that is not on this computer is discovery, not status. It stays folded away.
-          if (category.id === "not-detected") {
-            return '<details class="integration-group integration-' + category.id + '">'
-              + '<summary>' + escapeHtml(category.label) + count + '</summary>'
-              + '<p>' + escapeHtml(category.sentence) + '</p>' + body + '</details>';
-          }
-          return '<section class="integration-group integration-' + category.id + '">'
-            + '<h2>' + escapeHtml(category.label) + count + '</h2>'
-            + '<p>' + escapeHtml(category.sentence) + '</p>' + body + '</section>';
-        }).join("");
-
-      el["integration-grid"].innerHTML =
-        rosterAnswer(counts, grouped) + sections + connectorFooter(snapshot);
+      const html = [
+        answer(entries),
+        entries.flatMap((entry) => entry.blocked.map((target) => blockedCard(entry, target, pending))).join(""),
+        switchList(entries.filter((entry) => entry.present), pending),
+        absentList(entries.filter((entry) => !entry.present)),
+        connectorFooter(snapshot)
+      ].join("");
+      el["integration-grid"].innerHTML = html;
     }
 
-    /* The line at the top, in the shape At a glance uses: the answer, not a tally. */
-    function rosterAnswer(counts, grouped) {
-      const attention = grouped.get("needs-attention") ?? [];
-      const connected = counts.get("ready") ?? 0;
-      const available = counts.get("available") ?? 0;
+    /* The delight is that Ghostlight already did this. Say it before anything else. */
+    function answer(entries) {
+      const present = entries.filter((entry) => entry.present);
+      const connected = present.filter((entry) => entry.on.length > 0);
+      const blocked = entries.filter((entry) => entry.blocked.length > 0);
+      const faces = connected.slice(0, 8).map((entry) =>
+        '<img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="26" height="26">').join("");
       let sentence;
-      if (attention.length === 1) {
-        sentence = attention[0].name + " needs attention.";
-      } else if (attention.length > 1) {
-        sentence = attention.length + " clients need attention.";
-      } else if (connected && available) {
-        sentence = connected + " connected, " + available + " more can be set up.";
-      } else if (connected) {
-        sentence = "Every detected client is connected.";
+      if (blocked.length === 1) {
+        sentence = escapeHtml(blocked[0].name) + " needs you.";
+      } else if (blocked.length > 1) {
+        sentence = blocked.length + " clients need you.";
+      } else if (connected.length === 0) {
+        sentence = "No agent can drive your browser yet.";
+      } else if (connected.length === present.length) {
+        sentence = connected.length === 1
+          ? "Your agent can drive your browser."
+          : "All " + connected.length + " of your agents can drive your browser.";
       } else {
-        sentence = "No client is connected yet.";
+        sentence = connected.length + " of your " + present.length + " agents can drive your browser.";
       }
-      return '<p class="integration-answer">' + escapeHtml(sentence) + '</p>';
+      return '<div class="integration-answer"><span class="integration-faces">' + faces + '</span>'
+        + '<p>' + sentence + '</p></div>';
+    }
+
+    /*
+     * The one place a card is justified, because it is the one place with something to read.
+     *
+     * "Foreign entry" is an assertion. This shows the entry, shows what Ghostlight would write
+     * instead, and says plainly that it changed nothing -- which is the whole reason to trust the
+     * button beside it.
+     */
+    function blockedCard(entry, target, pending) {
+      const waiting = pending.has(target.id);
+      const found = target.found_command
+        ? '<div class="evidence"><span>Found</span><code>' + escapeHtml(target.found_command) + '</code></div>'
+        : '<div class="evidence"><span>Found</span><code>' + escapeHtml(target.detail) + '</code></div>';
+      const would = target.connector_command
+        ? '<div class="evidence"><span>Would write</span><code>'
+          + escapeHtml(target.connector_command) + '</code></div>'
+        : "";
+      const replace = target.can_install
+        ? '<button class="ghost-button" type="button" data-harness-operation="manage"'
+          + ' data-harness-action="install" data-harness="' + escapeHtml(target.id) + '"'
+          + ' data-harness-name="' + escapeHtml(target.name) + '"' + (waiting ? " disabled" : "") + '>'
+          + (waiting ? "Working..." : "Replace it") + '</button>'
+        : "";
+      const locate = target.can_locate
+        ? '<button class="link-button" type="button" data-harness-operation="locate"'
+          + ' data-harness="' + escapeHtml(target.id) + '" data-harness-name="'
+          + escapeHtml(target.name) + '">Open the file</button>'
+        : "";
+      // Always available, because it is the route that changes nothing.
+      const copy = '<button class="link-button" type="button" data-harness-operation="copy"'
+        + ' data-harness="' + escapeHtml(target.id) + '" data-harness-name="'
+        + escapeHtml(target.name) + '" data-copy-kind="setup"'
+        + ' data-harness-manual="' + escapeHtml(target.id) + '">Copy what it would write</button>';
+      return '<article class="integration-blocked" data-harness-blocked="' + escapeHtml(target.id) + '">'
+        + '<div class="integration-blocked-head">'
+        + '<img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="22" height="22">'
+        + '<strong>' + escapeHtml(entry.name) + '</strong>'
+        + '<span class="integration-target-label">' + escapeHtml(target.target) + '</span></div>'
+        + found + would
+        + '<p class="integration-untouched">Ghostlight changed nothing. '
+        + escapeHtml(target.config_path) + '</p>'
+        + '<div class="tile-actions">' + replace + locate + copy + '</div></article>';
+    }
+
+    /* One switch per client, alphabetical and stable, so acting on one moves nothing. */
+    function switchList(entries, pending) {
+      if (!entries.length) return "";
+      const rows = entries.map((entry) => {
+        const single = entry.live.length === 1 ? entry.live[0] : null;
+        const waiting = entry.live.some((target) => pending.has(target.id));
+        const mixed = !single && entry.on.length > 0 && entry.on.length < entry.live.length;
+        const checked = single
+          ? (single.state === "installed" || single.state === "updatable")
+          : entry.on.length === entry.live.length && entry.on.length > 0;
+        const note = single
+          ? (single.state === "updatable" ? "needs an update" : "")
+          : entry.on.length + " of " + entry.live.length + " targets";
+        const stale = entry.live.filter((target) => target.state === "updatable" && target.can_install);
+        const update = stale.length
+          ? '<button class="ghost-button integration-update" type="button"'
+            + ' data-harness-operation="manage" data-harness-action="install"'
+            + ' data-harness="' + escapeHtml(stale[0].id) + '"'
+            + ' data-harness-name="' + escapeHtml(entry.name) + '"'
+            + (waiting ? " disabled" : "") + '>' + (waiting ? "Working..." : "Update") + '</button>'
+          : "";
+        return '<div class="integration-switch-row" data-harness-product="' + escapeHtml(entry.productId) + '">'
+          + '<img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="22" height="22">'
+          + '<span class="integration-name">' + escapeHtml(entry.name) + '</span>'
+          + (note ? '<span class="integration-note">' + escapeHtml(note) + '</span>' : "")
+          + update
+          + toggle(entry, single, checked, mixed, waiting)
+          + expander(entry, single)
+          + '</div>'
+          + (single ? "" : targetPanel(entry, pending));
+      }).join("");
+      return '<div class="integration-switches">' + rows + '</div>';
+    }
+
+    function toggle(entry, single, checked, mixed, waiting) {
+      // A real switch, not a styled div: role, state, and keyboard operation come from the platform.
+      const target = single ?? entry.live[0];
+      const action = checked ? "uninstall" : "install";
+      const allowed = single
+        ? (checked ? single.can_uninstall : single.can_install)
+        : entry.live.some((item) => (checked ? item.can_uninstall : item.can_install));
+      return '<button class="integration-toggle" type="button" role="switch"'
+        + ' aria-checked="' + (mixed ? "mixed" : checked) + '"'
+        + ' aria-label="' + escapeHtml(entry.name) + ' can drive your browser"'
+        + ' data-harness-operation="manage" data-harness-action="' + action + '"'
+        + ' data-harness="' + escapeHtml(target.id) + '"'
+        + ' data-harness-name="' + escapeHtml(entry.name) + '"'
+        + (waiting || !allowed ? " disabled" : "") + '><span class="integration-knob"></span></button>';
+    }
+
+    function expander(entry, single) {
+      const id = single ? single.id : entry.productId;
+      return '<button class="integration-expand" type="button" data-harness-toggle="'
+        + escapeHtml(id) + '" aria-expanded="false"'
+        + ' aria-label="Details for ' + escapeHtml(entry.name) + '">Details</button>';
+    }
+
+    /* Plural products finally read properly: one line per target, each with its own switch. */
+    function targetPanel(entry, pending) {
+      const rows = entry.live.map((target) => {
+        const checked = target.state === "installed" || target.state === "updatable";
+        const waiting = pending.has(target.id);
+        const allowed = checked ? target.can_uninstall : target.can_install;
+        return '<div class="integration-target-row">'
+          + '<span class="integration-target-label">' + escapeHtml(target.target) + '</span>'
+          + '<code>' + escapeHtml(target.config_path) + '</code>'
+          + '<button class="integration-toggle" type="button" role="switch"'
+          + ' aria-checked="' + checked + '"'
+          + ' aria-label="' + escapeHtml(entry.name) + ' ' + escapeHtml(target.target) + '"'
+          + ' data-harness-operation="manage" data-harness-action="'
+          + (checked ? "uninstall" : "install") + '"'
+          + ' data-harness="' + escapeHtml(target.id) + '"'
+          + ' data-harness-name="' + escapeHtml(entry.name) + '"'
+          + (waiting || !allowed ? " disabled" : "") + '><span class="integration-knob"></span></button>'
+          + '</div>';
+      }).join("");
+      return '<div class="integration-targets" data-harness-panel="'
+        + escapeHtml(entry.productId) + '" hidden>' + rows + '</div>';
+    }
+
+    /* Not on this computer is discovery, not status. */
+    function absentList(entries) {
+      if (!entries.length) return "";
+      const rows = entries.map((entry) => {
+        const first = entry.targets[0];
+        const install = first.can_download
+          ? '<button class="link-button" type="button" data-harness-operation="download"'
+            + ' data-product="' + escapeHtml(entry.productId) + '" data-harness="'
+            + escapeHtml(first.id) + '" data-harness-name="' + escapeHtml(entry.name)
+            + '">Install</button>'
+          : "";
+        const locate = '<button class="link-button" type="button" data-harness-operation="locate"'
+          + ' data-harness="' + escapeHtml(first.id) + '" data-harness-name="'
+          + escapeHtml(entry.name) + '">Locate</button>';
+        const setup = '<button class="link-button" type="button" data-harness-operation="copy"'
+          + ' data-harness="' + escapeHtml(first.id) + '" data-harness-name="'
+          + escapeHtml(entry.name) + '" data-copy-kind="setup"'
+          + ' data-harness-manual="' + escapeHtml(first.id) + '">Copy setup</button>';
+        return '<div class="integration-absent-row">'
+          + '<img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="18" height="18">'
+          + '<span>' + escapeHtml(entry.name) + '</span>' + install + locate + setup + '</div>';
+      }).join("");
+      return '<details class="integration-absent"><summary>' + entries.length
+        + ' more clients Ghostlight supports</summary>' + rows + '</details>';
     }
 
     /* The connector path is one string for every client, so the page states it once. */

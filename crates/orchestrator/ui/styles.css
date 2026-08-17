@@ -327,77 +327,116 @@ body.runtime-offline .state-word { color: var(--muted); }
 .tile-state { flex: none; font: 500 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
 .tile-actions { display: flex; gap: 7px; margin-top: 11px; }
 .tile-actions .ghost-button, .tile-actions .danger-button { height: 27px; padding: 0 11px; font-size: 11.5px; }
-/* The answer first, in the shape At a glance uses. */
-.integration-answer { margin: 0 0 4px; color: var(--ink); font-size: 13px; }
+/* The answer, and the faces of the agents Ghostlight already wired up. */
+.integration-answer { display: flex; align-items: center; gap: 12px; margin: 0 0 4px; }
+.integration-answer p { margin: 0; color: var(--ink); font-size: 15px; }
+.integration-faces { display: flex; flex: none; }
+.integration-faces img {
+  width: 26px; height: 26px; margin-right: -7px; padding: 3px;
+  border: 1px solid var(--line-2); border-radius: 7px; background: var(--panel);
+}
 
-/* One heading per status carries the word, the count, and the sentence every row in it shares. */
-.integration-group { display: flex; flex-direction: column; gap: 7px; }
-.integration-group > h2, .integration-group > summary {
-  display: flex; align-items: center; gap: 8px; margin: 0;
-  color: var(--integration-tone); font: 500 9.5px/1 var(--mono);
-  letter-spacing: .12em; text-transform: uppercase;
+/* The one place a card is justified: the one place with something to read. */
+.integration-blocked {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px 15px;
+  border: 1px solid var(--line); border-left: 2px solid var(--held); border-radius: 10px;
+  background: var(--panel-2);
 }
-.integration-group > summary { cursor: pointer; }
-.integration-count {
-  min-width: 18px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 999px;
-  background: var(--panel-2); color: var(--muted); font-size: 9.5px; letter-spacing: 0; text-align: center;
-}
-.integration-group > p { margin: 0; color: var(--muted); font-size: 11.5px; }
-
-/* Rows, two across where the window is wide enough. A row is one line: who, and what to press. */
-.integration-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); gap: 5px; }
-/* What needs a person gets the whole width, so its sentence is never the one that gets cut. */
-.integration-needs-attention .integration-rows { grid-template-columns: 1fr; }
-.integration-row {
-  display: flex; min-width: 0; align-items: flex-start; gap: 10px;
-  padding: 9px 11px; border: 1px solid transparent; border-left: 2px solid var(--integration-tone);
-  border-radius: 7px; background: var(--panel-2);
-  transition: border-color .25s var(--calm), background .25s var(--calm);
-}
-.integration-row:hover { border-color: var(--line); border-left-color: var(--integration-tone); background: var(--panel); }
-.integration-row img {
-  width: 22px; height: 22px; flex: none; margin-top: 1px; padding: 2px;
+.integration-blocked-head { display: flex; align-items: center; gap: 9px; }
+.integration-blocked-head img {
+  width: 22px; height: 22px; flex: none; padding: 2px;
   border: 1px solid var(--line); border-radius: 5px; background: rgba(255, 255, 255, .035);
 }
-.integration-row-text { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
-.integration-name {
-  display: flex; min-width: 0; align-items: baseline; gap: 7px;
+.integration-blocked-head strong { color: var(--ink); font-size: 13px; font-weight: 500; }
+.evidence { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.evidence span {
+  flex: none; width: 78px; color: var(--faint);
+  font: 500 9px/1.6 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+}
+.evidence code {
+  min-width: 0; overflow: hidden; color: var(--ink-3);
+  font: 400 10.5px/1.5 var(--mono); text-overflow: ellipsis; white-space: nowrap;
+}
+.integration-untouched { margin: 0; color: var(--muted); font-size: 11px; }
+
+/* One switch per client. Alphabetical and stable, so acting on one moves nothing. */
+.integration-switches { display: flex; flex-direction: column; gap: 2px; }
+.integration-switch-row {
+  display: flex; min-width: 0; align-items: center; gap: 10px;
+  padding: 7px 10px; border: 1px solid transparent; border-radius: 8px;
+  transition: background .2s var(--calm);
+}
+.integration-switch-row:hover { background: var(--panel-2); }
+.integration-switch-row img {
+  width: 22px; height: 22px; flex: none; padding: 2px;
+  border: 1px solid var(--line); border-radius: 5px; background: rgba(255, 255, 255, .035);
+}
+.integration-switch-row .integration-name {
   overflow: hidden; color: var(--ink); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap;
 }
-/* Only a product with more than one target names it beside the product itself. */
-.integration-target-label { flex: none; color: var(--faint); font: 400 10px/1 var(--mono); }
-/* The one fact this row owns: its own detail when it differs from the group, else its target. */
-.integration-row-meta {
-  display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 11px; line-height: 1.45;
-  -webkit-box-orient: vertical; -webkit-line-clamp: 2;
-}
-.integration-row-actions { display: flex; flex: none; align-items: center; gap: 6px; margin-left: auto; }
-.integration-row-actions .ghost-button, .integration-row-actions .danger-button {
-  height: 24px; padding: 0 10px; font-size: 11px;
-}
+.integration-note { flex: none; margin-left: auto; color: var(--faint); font: 400 10px/1 var(--mono); }
+.integration-switch-row .integration-toggle { margin-left: auto; }
+.integration-update { height: 23px; margin-left: auto; padding: 0 10px; font-size: 11px; }
+.integration-update + .integration-toggle { margin-left: 8px; }
+.integration-note + .integration-toggle { margin-left: 0; }
 
-/* Everything occasionally useful, one press away and keyboard reachable without new script. */
-.integration-more { position: relative; }
-.integration-more > summary {
-  padding: 0 6px; color: var(--faint); font-size: 13px; line-height: 24px; cursor: pointer; list-style: none;
+/* A real switch: role, state, and keyboard operation come from the platform, not from styling. */
+.integration-toggle {
+  position: relative; flex: none; width: 38px; height: 21px; padding: 0;
+  border: 1px solid var(--line-2); border-radius: 999px; background: var(--ground);
+  cursor: pointer; transition: background .2s var(--calm), border-color .2s var(--calm);
 }
-.integration-more > summary::-webkit-details-marker { display: none; }
-.integration-more > summary:hover, .integration-more > summary:focus-visible { color: var(--ink-2); }
-.integration-more-body {
-  position: absolute; right: 0; z-index: 5; width: 320px; max-width: 70vw; margin-top: 4px; padding: 10px;
-  border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, .45);
+.integration-toggle:disabled { cursor: default; opacity: .45; }
+.integration-toggle .integration-knob {
+  position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%;
+  background: var(--muted); transition: transform .2s var(--calm), background .2s var(--calm);
 }
-.integration-more-target { margin-bottom: 6px; color: var(--ink-2); font-size: 11.5px; }
-.integration-more-body code {
-  display: block; color: var(--faint); font: 400 9.5px/1.4 var(--mono); word-break: break-all;
+.integration-toggle[aria-checked="true"] { border-color: var(--ok); background: var(--ok-dim, rgba(52, 199, 123, .18)); }
+.integration-toggle[aria-checked="true"] .integration-knob { background: var(--ok); transform: translateX(17px); }
+.integration-toggle[aria-checked="mixed"] { border-color: var(--cap-action); }
+.integration-toggle[aria-checked="mixed"] .integration-knob {
+  background: var(--cap-action); transform: translateX(8.5px);
 }
-.integration-more-body pre {
-  max-height: 150px; overflow: auto; margin: 7px 0 0; padding: 8px;
-  border: 1px solid var(--line); border-radius: 6px; background: var(--ground);
-  color: var(--ink-3); font: 400 9.5px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word;
+/* State must survive high contrast and never rest on color alone. */
+.integration-toggle::after {
+  position: absolute; right: 5px; color: var(--faint); font: 500 8px/21px var(--mono); content: "OFF";
 }
-.integration-more-body .tile-actions { margin-top: 8px; }
+.integration-toggle[aria-checked="true"]::after { right: auto; left: 6px; color: var(--ok); content: "ON"; }
+.integration-toggle[aria-checked="mixed"]::after { right: 4px; color: var(--cap-action); content: "SOME"; font-size: 7px; }
+
+.integration-expand {
+  flex: none; padding: 0 6px; border: 0; background: none; color: var(--faint);
+  font-size: 10px; line-height: 21px; cursor: pointer;
+}
+.integration-expand:hover, .integration-expand:focus-visible { color: var(--ink-2); }
+.integration-expand[aria-expanded="false"] { visibility: visible; }
+
+/* A plural product's targets, one line each, each with its own switch. */
+.integration-targets {
+  display: flex; flex-direction: column; gap: 3px;
+  margin: 0 0 4px 42px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--ground);
+}
+.integration-target-row { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.integration-target-row .integration-target-label { flex: none; min-width: 116px; color: var(--ink-2); font-size: 11.5px; }
+.integration-target-row code {
+  min-width: 0; overflow: hidden; color: var(--faint);
+  font: 400 9.5px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap;
+}
+.integration-target-row .integration-toggle { margin-left: auto; }
+.integration-target-label { color: var(--faint); font: 400 10px/1 var(--mono); }
+
+/* Not on this computer: discovery, folded away. */
+.integration-absent > summary {
+  color: var(--faint); font: 500 9.5px/1 var(--mono); letter-spacing: .1em;
+  text-transform: uppercase; cursor: pointer;
+}
+.integration-absent-row {
+  display: flex; align-items: center; gap: 9px; padding: 5px 0 5px 4px;
+  color: var(--muted); font-size: 11.5px;
+}
+.integration-absent-row img { width: 18px; height: 18px; flex: none; opacity: .8; }
+.integration-absent-row span { min-width: 150px; }
 
 /* One connector path for every client, stated once for the page. */
 .integration-connector {

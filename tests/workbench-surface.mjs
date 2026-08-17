@@ -275,26 +275,20 @@ view.collections({
   ]
 }, new Set());
 const rosterHtml = nodes.get("integration-grid").innerHTML;
-// The roster is grouped rows now, not cards. A group owns the status word, the count, and the one
-// sentence every row in it would otherwise repeat; a row owns identity and the action to press.
-const rosterGroups = [...rosterHtml.matchAll(
-  /<(section|details) class="integration-group integration-([a-z-]+)">([\s\S]*?)<\/\1>/g
-)].map(([, tag, id, html]) => ({
-  id,
-  tag,
-  html,
-  label: html.match(/<(?:h2|summary)>([^<]+)</)?.[1] ?? "",
-  count: Number(html.match(/<span class="integration-count">(\d+)</)?.[1] ?? -1),
-  sentence: html.match(/<p>([^<]+)<\/p>/)?.[1] ?? "",
-  names: [...html.matchAll(/<span class="integration-name">([^<]+)</g)].map(([, name]) => name)
-}));
-const rosterGroup = (id) => rosterGroups.find((group) => group.id === id);
-const rosterRows = rosterHtml.split('<div class="integration-row" ').slice(1)
+// The roster is one switch per client. Switch position is the status, so there is no status
+// vocabulary to parse: what a test can check is the control, its state, and its accessible name.
+const rosterSwitches = rosterHtml.split('<div class="integration-switch-row" ').slice(1)
   .map((chunk) => ({
-    id: chunk.match(/^data-harness-row="([^"]+)"/)?.[1] ?? "",
-    html: chunk.split('<div class="integration-row" ')[0]
+    productId: chunk.match(/^data-harness-product="([^"]+)"/)?.[1] ?? "",
+    html: chunk.split('<div class="integration-switch-row" ')[0]
   }));
-const rosterRow = (id) => rosterRows.find((row) => row.id === id);
+const rosterSwitch = (productId) =>
+  rosterSwitches.find((entry) => entry.productId === productId);
+const switchState = (productId) =>
+  rosterSwitch(productId)?.html.match(/role="switch"[^>]*aria-checked="([a-z]+)"/)?.[1] ?? "";
+const rosterNames = [...rosterHtml.matchAll(
+  /<div class="integration-switch-row"[\s\S]*?<span class="integration-name">([^<]+)</g
+)].map(([, name]) => name);
 
 // A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
 // enforced denial, and an organization that supplied contacts supplied them for this moment.
@@ -383,52 +377,56 @@ const checks = [
   ["snapshot still fetched", snapshots > 0],
   ["the pass continued past the broken panel", connections.innerHTML.length > 0,
     `connections: ${JSON.stringify(connections.innerHTML)}`],
-  ["an old owned harness path is offered as an update",
-    integrationsHtml.includes("Update")
-      && integrationsHtml.includes('data-harness-action="install"'),
+  ["an old owned harness reads as on and still offers an explicit update",
+    // The switch is on because the client is registered; that must not hide the fact that it
+    // points at an older installation.
+    integrationsHtml.includes(">Update</button>")
+      && integrationsHtml.includes('data-harness-action="install"')
+      && integrationsHtml.includes("needs an update"),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
-  ["the roster leads with the answer, not a tally",
-    rosterHtml.includes('<p class="integration-answer">')
-      && /class="integration-answer">[^<]*need(?:s)? attention\./.test(rosterHtml),
-    `answer: ${JSON.stringify(rosterHtml.slice(0, 200))}`],
-  ["groups run in order of what a person can act on",
-    JSON.stringify(rosterGroups.map((group) => group.id))
-      === JSON.stringify(["needs-attention", "available", "ready", "not-detected"]),
-    `groups: ${JSON.stringify(rosterGroups.map((group) => group.id))}`],
-  ["each group states its word, its count, and its shared sentence exactly once",
-    rosterGroups.every((group) => group.label && group.count >= 1 && group.sentence)
-      && rosterGroup("ready")?.sentence === "Ghostlight is registered for this user context."
-      && (rosterHtml.match(/Ghostlight is registered for this user context\./g) ?? []).length === 1,
-    `groups: ${JSON.stringify(rosterGroups.map((g) => [g.id, g.count, g.sentence]))}`],
-  ["a row repeats no sentence its group already said",
-    !rosterRow("zed")?.html.includes("Ghostlight is registered for this user context.")
-      && rosterRow("junie-jetbrains")?.html.includes("Foreign entry preserved.")
-      && rosterRow("codex")?.html.includes("Old owned connector."),
-    `rows: ${JSON.stringify(rosterRows.map((row) => row.id))}`],
-  ["every row has a second line carrying the one fact it owns",
-    rosterRows.every((row) => row.html.includes('class="integration-row-meta"'))
-      // Its own detail when that differs from the group, otherwise its target.
-      && rosterRow("junie-jetbrains")?.html.includes('integration-row-meta">Foreign entry preserved.')
-      && rosterRow("zed")?.html.includes('integration-row-meta">User'),
-    `zed: ${JSON.stringify(rosterRow("zed")?.html)}`],
-  ["only a product with several targets names its target beside the name",
-    rosterRow("cline-vscode")?.html.includes('class="integration-target-label"')
-      && !rosterRow("zed")?.html.includes('class="integration-target-label"'),
-    `cline: ${JSON.stringify(rosterRow("cline-vscode")?.html)}`],
-  ["the verb belongs to the status, and every row in a group offers it",
-    rosterGroup("ready")?.html.includes(">Remove</button>")
-      && rosterGroup("available")?.html.includes(">Set up</button>")
-      && rosterGroup("not-detected")?.html.includes(">Install</button>"),
+  ["the page leads with what Ghostlight already did, or with who needs you",
+    rosterHtml.includes('class="integration-answer"')
+      && /class="integration-faces"/.test(rosterHtml)
+      && /<p>[^<]*(need(?:s)? you|drive your browser)/.test(rosterHtml),
+    `answer: ${JSON.stringify(rosterHtml.slice(0, 300))}`],
+  ["a blocked target shows what it found, what it would write, and that it wrote nothing",
+    rosterHtml.includes('class="integration-blocked"')
+      && rosterHtml.includes(">Found</span>")
+      && rosterHtml.includes(">Would write</span>")
+      && rosterHtml.includes("Ghostlight changed nothing.")
+      && rosterHtml.includes(">Open the file</button>")
+      && rosterHtml.includes(">Copy what it would write</button>"),
+    `blocked: ${JSON.stringify(rosterHtml)}`],
+  ["a foreign entry is never offered an automatic overwrite",
+    // ADR-0125's ownership rule is why showing the evidence is safe. The surface must not offer a
+    // write the installer refuses: these fixtures cannot be installed over, so no button appears.
+    !rosterHtml.includes(">Replace it</button>"),
+    `blocked: ${JSON.stringify(rosterHtml)}`],
+  ["every present client has a real switch with an accessible name",
+    rosterSwitches.length > 0
+      && rosterSwitches.every((entry) => /role="switch"/.test(entry.html)
+        && /aria-checked="(?:true|false|mixed)"/.test(entry.html)
+        && /aria-label="[^"]+can drive your browser"/.test(entry.html)),
+    `switches: ${JSON.stringify(rosterSwitches.map((entry) => entry.productId))}`],
+  ["switch position is the status, so no status word is printed beside it",
+    !rosterHtml.includes("integration-count")
+      && !/>(?:Connected|Ready to set up|Not installed here)</.test(rosterHtml),
     `roster: ${JSON.stringify(rosterHtml)}`],
-  ["occasional actions sit behind one keyboard-reachable control per row",
-    rosterRow("zed")?.html.includes('<details class="integration-more"')
-      && rosterRow("zed")?.html.includes(">Locate</button>")
-      && rosterRow("zed")?.html.includes('data-copy-kind="setup"')
-      && rosterHtml.includes('aria-label="More options for'),
-    `row: ${JSON.stringify(rosterRow("zed")?.html)}`],
-  ["products that are not on this computer stay folded away",
-    rosterGroup("not-detected")?.tag === "details",
-    `not-detected: ${JSON.stringify(rosterGroup("not-detected"))}`],
+  ["the list is alphabetical, so acting on one client moves nothing",
+    JSON.stringify(rosterNames) === JSON.stringify([...rosterNames].sort((a, b) => a.localeCompare(b))),
+    `names: ${JSON.stringify(rosterNames)}`],
+  ["a connected client reads on and a detected one reads off",
+    switchState("zed") === "true" && switchState("windsurf") === "false",
+    `zed=${switchState("zed")} windsurf=${switchState("windsurf")}`],
+  ["a product with targets in different states reads mixed and opens per target",
+    switchState("cline") === "mixed"
+      && rosterHtml.includes('data-harness-panel="cline"')
+      && (rosterHtml.match(/class="integration-target-row"/g) ?? []).length >= 2,
+    `cline=${switchState("cline")}`],
+  ["clients that are not on this computer stay folded away",
+    rosterHtml.includes('<details class="integration-absent">')
+      && rosterHtml.includes("more clients Ghostlight supports"),
+    `absent: ${JSON.stringify(rosterHtml)}`],
   ["the connector path is one page fact, not one per client",
     (rosterHtml.match(/data-copy-kind="command"/g) ?? []).length === 1
       && rosterHtml.includes('class="integration-connector"'),
