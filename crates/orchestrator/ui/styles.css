@@ -307,9 +307,10 @@ body.runtime-offline .state-word { color: var(--muted); }
 @keyframes waitdot { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
 
 /* ------------------------------ tiles, cards ---------------------------- */
-.tile-grid, .integration-roster {
+.tile-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px;
 }
+.integration-roster { display: flex; flex-direction: column; gap: 16px; }
 .integration-ready { --integration-tone: var(--ok); }
 .integration-available { --integration-tone: var(--cap-action); }
 .integration-needs-attention { --integration-tone: var(--held); }
@@ -326,21 +327,83 @@ body.runtime-offline .state-word { color: var(--muted); }
 .tile-state { flex: none; font: 500 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
 .tile-actions { display: flex; gap: 7px; margin-top: 11px; }
 .tile-actions .ghost-button, .tile-actions .danger-button { height: 27px; padding: 0 11px; font-size: 11.5px; }
-.integration-card { gap: 10px; border-left-color: var(--integration-tone); }
-.integration-card:hover { border-left-color: var(--integration-tone); }
-.integration-card .tile-state { color: var(--integration-tone); }
-.integration-identity { display: flex; min-width: 0; align-items: center; gap: 10px; }
-.integration-identity img {
-  width: 28px; height: 28px; flex: none; padding: 4px;
-  border: 1px solid var(--line); border-radius: 7px; background: rgba(255, 255, 255, .035);
+/* The answer first, in the shape At a glance uses. */
+.integration-answer { margin: 0 0 4px; color: var(--ink); font-size: 13px; }
+
+/* One heading per status carries the word, the count, and the sentence every row in it shares. */
+.integration-group { display: flex; flex-direction: column; gap: 7px; }
+.integration-group > h2, .integration-group > summary {
+  display: flex; align-items: center; gap: 8px; margin: 0;
+  color: var(--integration-tone); font: 500 9.5px/1 var(--mono);
+  letter-spacing: .12em; text-transform: uppercase;
 }
-.integration-targets { display: flex; flex-direction: column; gap: 8px; }
-.integration-target {
-  padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0, 0, 0, .1);
+.integration-group > summary { cursor: pointer; }
+.integration-count {
+  min-width: 18px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--panel-2); color: var(--muted); font-size: 9.5px; letter-spacing: 0; text-align: center;
 }
-.integration-target-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.integration-target-head strong { color: var(--ink-2); font-size: 11.5px; font-weight: 500; }
-.integration-target-head span { color: var(--faint); font: 500 8.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.integration-group > p { margin: 0; color: var(--muted); font-size: 11.5px; }
+
+/* Rows, two across where the window is wide enough. A row is one line: who, and what to press. */
+.integration-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 4px; }
+.integration-row {
+  display: flex; min-width: 0; align-items: center; gap: 9px;
+  padding: 6px 10px; border: 1px solid transparent; border-left: 2px solid var(--integration-tone);
+  border-radius: 7px; background: var(--panel-2);
+  transition: border-color .25s var(--calm), background .25s var(--calm);
+}
+.integration-row:hover { border-color: var(--line); border-left-color: var(--integration-tone); background: var(--panel); }
+.integration-row img {
+  width: 20px; height: 20px; flex: none; padding: 2px;
+  border: 1px solid var(--line); border-radius: 5px; background: rgba(255, 255, 255, .035);
+}
+.integration-name {
+  overflow: hidden; color: var(--ink); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Only a product with more than one target needs its target named. */
+.integration-target-label { flex: none; color: var(--faint); font: 400 10px/1 var(--mono); }
+.integration-row-detail {
+  min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.integration-row-actions { display: flex; flex: none; align-items: center; gap: 6px; margin-left: auto; }
+.integration-row-actions .ghost-button, .integration-row-actions .danger-button {
+  height: 24px; padding: 0 10px; font-size: 11px;
+}
+
+/* Everything occasionally useful, one press away and keyboard reachable without new script. */
+.integration-more { position: relative; }
+.integration-more > summary {
+  padding: 0 6px; color: var(--faint); font-size: 13px; line-height: 24px; cursor: pointer; list-style: none;
+}
+.integration-more > summary::-webkit-details-marker { display: none; }
+.integration-more > summary:hover, .integration-more > summary:focus-visible { color: var(--ink-2); }
+.integration-more-body {
+  position: absolute; right: 0; z-index: 5; width: 320px; max-width: 70vw; margin-top: 4px; padding: 10px;
+  border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .45);
+}
+.integration-more-target { margin-bottom: 6px; color: var(--ink-2); font-size: 11.5px; }
+.integration-more-body code {
+  display: block; color: var(--faint); font: 400 9.5px/1.4 var(--mono); word-break: break-all;
+}
+.integration-more-body pre {
+  max-height: 150px; overflow: auto; margin: 7px 0 0; padding: 8px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--ground);
+  color: var(--ink-3); font: 400 9.5px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word;
+}
+.integration-more-body .tile-actions { margin-top: 8px; }
+
+/* One connector path for every client, stated once for the page. */
+.integration-connector {
+  display: flex; align-items: center; gap: 9px; padding-top: 12px; border-top: 1px solid var(--line);
+}
+.integration-connector span { color: var(--faint); font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.integration-connector code {
+  min-width: 0; overflow: hidden; color: var(--muted); font: 400 10.5px/1.4 var(--mono);
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.integration-connector button { margin-left: auto; }
 .manual-setup { margin-top: 8px; }
 .manual-setup summary { color: var(--muted); font-size: 10.5px; cursor: pointer; }
 .manual-setup code { display: block; margin-top: 7px; color: var(--faint); font: 400 9.5px/1.4 var(--mono); word-break: break-all; }
@@ -349,7 +412,6 @@ body.runtime-offline .state-word { color: var(--muted); }
   border: 1px solid var(--line); border-radius: 6px; background: var(--ground);
   color: var(--ink-3); font: 400 9.5px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word;
 }
-.integration-product-actions { margin-top: auto; padding-top: 2px; border-top: 1px solid var(--line); }
 
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); gap: 10px; }
 .card { padding: 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }

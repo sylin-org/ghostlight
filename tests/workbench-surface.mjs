@@ -241,7 +241,7 @@ view.collections({
       can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-vscode.json",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "editor setup" },
     { id: "zed", product_id: "zed", name: "Zed", target: "User", icon: "zed.svg",
-      state: "installed", detail: "Current.", can_install: false, can_uninstall: true,
+      state: "installed", detail: "Ghostlight is registered for this user context.", can_install: false, can_uninstall: true,
       can_download: true, can_locate: true, config_path: "/tmp/zed.json",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "zed setup" },
     { id: "junie-cli", product_id: "junie", name: "Junie", target: "CLI", icon: "junie.svg",
@@ -257,7 +257,7 @@ view.collections({
       can_download: true, can_locate: true, config_path: "/tmp/codex.toml",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "codex setup" },
     { id: "cline-cli", product_id: "cline", name: "Cline", target: "CLI", icon: "cline.svg",
-      state: "installed", detail: "Current.", can_install: false, can_uninstall: true,
+      state: "installed", detail: "Ghostlight is registered for this user context.", can_install: false, can_uninstall: true,
       can_download: true, can_locate: true, config_path: "/tmp/cline-cli.json",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "cli setup" },
     { id: "claude-code", product_id: "claude-code", name: "Claude Code", target: "User",
@@ -275,14 +275,26 @@ view.collections({
   ]
 }, new Set());
 const rosterHtml = nodes.get("integration-grid").innerHTML;
-const rosterCards = [...rosterHtml.matchAll(
-  /<article class="([^"]*\bintegration-card\b[^"]*)">([\s\S]*?)<\/article>/g
-)].map(([, classes, html]) => ({
-  classes,
+// The roster is grouped rows now, not cards. A group owns the status word, the count, and the one
+// sentence every row in it would otherwise repeat; a row owns identity and the action to press.
+const rosterGroups = [...rosterHtml.matchAll(
+  /<(section|details) class="integration-group integration-([a-z-]+)">([\s\S]*?)<\/\1>/g
+)].map(([, tag, id, html]) => ({
+  id,
+  tag,
   html,
-  name: html.match(/<h3>([^<]+)<\/h3>/)?.[1] ?? ""
+  label: html.match(/<(?:h2|summary)>([^<]+)</)?.[1] ?? "",
+  count: Number(html.match(/<span class="integration-count">(\d+)</)?.[1] ?? -1),
+  sentence: html.match(/<p>([^<]+)<\/p>/)?.[1] ?? "",
+  names: [...html.matchAll(/<span class="integration-name">([^<]+)</g)].map(([, name]) => name)
 }));
-const rosterCard = (name) => rosterCards.find((card) => card.name === name);
+const rosterGroup = (id) => rosterGroups.find((group) => group.id === id);
+const rosterRows = rosterHtml.split('<div class="integration-row" ').slice(1)
+  .map((chunk) => ({
+    id: chunk.match(/^data-harness-row="([^"]+)"/)?.[1] ?? "",
+    html: chunk.split('<div class="integration-row" ')[0]
+  }));
+const rosterRow = (id) => rosterRows.find((row) => row.id === id);
 
 // A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
 // enforced denial, and an organization that supplied contacts supplied them for this moment.
@@ -375,45 +387,49 @@ const checks = [
     integrationsHtml.includes("Update")
       && integrationsHtml.includes('data-harness-action="install"'),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
-  ["integrations stay one flat roster with category order before alphabetic name order",
-    !rosterHtml.includes("integration-group")
-      && JSON.stringify(rosterCards.map((card) => card.name)) === JSON.stringify([
-        "Cline", "Zed", "Claude Code", "Windsurf",
-        "Codex", "Junie", "Antigravity", "Qwen Code"
-      ]),
-    `cards: ${JSON.stringify(rosterCards.map((card) => card.name))} roster: ${JSON.stringify(rosterHtml)}`],
-  ["mixed products use Ready before Needs Attention before Available",
-    rosterCard("Cline")?.classes.includes("integration-ready")
-      && rosterCard("Cline")?.html.includes("Visual Studio Code")
-      && rosterCard("Cline")?.html.includes("Foreign entry preserved.")
-      && rosterCard("Junie")?.classes.includes("integration-needs-attention")
-      && rosterCard("Junie")?.html.includes("Detected."),
+  ["the roster leads with the answer, not a tally",
+    rosterHtml.includes('<p class="integration-answer">')
+      && /class="integration-answer">[^<]*need(?:s)? attention\./.test(rosterHtml),
+    `answer: ${JSON.stringify(rosterHtml.slice(0, 200))}`],
+  ["groups run in order of what a person can act on",
+    JSON.stringify(rosterGroups.map((group) => group.id))
+      === JSON.stringify(["needs-attention", "available", "ready", "not-detected"]),
+    `groups: ${JSON.stringify(rosterGroups.map((group) => group.id))}`],
+  ["each group states its word, its count, and its shared sentence exactly once",
+    rosterGroups.every((group) => group.label && group.count >= 1 && group.sentence)
+      && rosterGroup("ready")?.sentence === "Ghostlight is registered for this user context."
+      && (rosterHtml.match(/Ghostlight is registered for this user context\./g) ?? []).length === 1,
+    `groups: ${JSON.stringify(rosterGroups.map((g) => [g.id, g.count, g.sentence]))}`],
+  ["a row repeats no sentence its group already said",
+    !rosterRow("zed")?.html.includes("Ghostlight is registered for this user context.")
+      && rosterRow("junie-jetbrains")?.html.includes("Foreign entry preserved.")
+      && rosterRow("codex")?.html.includes("Old owned connector."),
+    `rows: ${JSON.stringify(rosterRows.map((row) => row.id))}`],
+  ["only a product with several targets names its target",
+    rosterRow("cline-vscode")?.html.includes('class="integration-target-label"')
+      && !rosterRow("zed")?.html.includes('class="integration-target-label"'),
+    `cline: ${JSON.stringify(rosterRow("cline-vscode")?.html)}`],
+  ["the verb belongs to the status, and every row in a group offers it",
+    rosterGroup("ready")?.html.includes(">Remove</button>")
+      && rosterGroup("available")?.html.includes(">Set up</button>")
+      && rosterGroup("not-detected")?.html.includes(">Install</button>"),
     `roster: ${JSON.stringify(rosterHtml)}`],
-  ["every category keeps visible words and a distinct card tone",
-    rosterCard("Cline")?.classes.includes("integration-ready")
-      && rosterCard("Cline")?.html.includes('<span class="tile-state">Ready</span>')
-      && rosterCard("Claude Code")?.classes.includes("integration-available")
-      && rosterCard("Claude Code")?.html.includes('<span class="tile-state">Available</span>')
-      && rosterCard("Codex")?.classes.includes("integration-needs-attention")
-      && rosterCard("Codex")?.html.includes('<span class="tile-state">Needs Attention</span>')
-      && rosterCard("Antigravity")?.classes.includes("integration-not-detected")
-      && rosterCard("Antigravity")?.html.includes('<span class="tile-state">Not Detected</span>'),
-    `roster: ${JSON.stringify(rosterHtml)}`],
-  ["plural harness targets share one recognizable product card",
-    (rosterHtml.match(/class="tile integration-card/g) ?? []).length === 8
-      && rosterHtml.includes("Visual Studio Code")
-      && rosterHtml.includes('src="integrations/cline.svg"'),
-    `roster: ${JSON.stringify(rosterHtml)}`],
-  ["configured and detected targets offer the right durable actions",
-    rosterHtml.includes('<span class="tile-state">Ready</span>')
-      && rosterHtml.includes(">Remove</button>")
-      && rosterHtml.includes(">Set up</button>")
-      && rosterHtml.includes(">Copy MCP command</button>"),
-    `roster: ${JSON.stringify(rosterHtml)}`],
-  ["a missing product offers one install, locate, and manual route",
+  ["occasional actions sit behind one keyboard-reachable control per row",
+    rosterRow("zed")?.html.includes('<details class="integration-more"')
+      && rosterRow("zed")?.html.includes(">Locate</button>")
+      && rosterRow("zed")?.html.includes('data-copy-kind="setup"')
+      && rosterHtml.includes('aria-label="More options for'),
+    `row: ${JSON.stringify(rosterRow("zed")?.html)}`],
+  ["products that are not on this computer stay folded away",
+    rosterGroup("not-detected")?.tag === "details",
+    `not-detected: ${JSON.stringify(rosterGroup("not-detected"))}`],
+  ["the connector path is one page fact, not one per client",
+    (rosterHtml.match(/data-copy-kind="command"/g) ?? []).length === 1
+      && rosterHtml.includes('class="integration-connector"'),
+    `copies: ${(rosterHtml.match(/data-copy-kind="command"/g) ?? []).length}`],
+  ["a missing product still offers install, locate, and a manual route",
     rosterHtml.includes('data-product="qwen-code"')
       && rosterHtml.includes('data-harness="qwen-code" data-harness-name="Qwen Code">Locate</button>')
-      && rosterHtml.includes('data-copy-kind="command"')
       && rosterHtml.includes('data-harness-manual="qwen-code"'),
     `roster: ${JSON.stringify(rosterHtml)}`],
   ["failed automatic setup opens the target's manual route", failedSetupManual.open],

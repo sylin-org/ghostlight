@@ -385,6 +385,17 @@
         .join("");
     }
 
+    /*
+     * The roster answers one question: is my agent connected, and if not, what do I press.
+     *
+     * Everything identical for every member of a status says itself once, on the group. The
+     * eighteen copies of "Ghostlight is registered for this user context" were not eighteen facts
+     * about eighteen products; they were one fact about being connected. A row keeps its own
+     * sentence only when it differs from its group, which is what an actual problem looks like.
+     *
+     * The primary verb follows the same rule: connected always means Remove and available always
+     * means Set up, so the verb belongs to the status rather than to the row.
+     */
     function integrations(snapshot, pending) {
       if (!snapshot.harnesses.length) {
         el["integration-grid"].innerHTML =
@@ -399,20 +410,62 @@
         products.get(id).push(harness);
       }
       const categoryById = new Map(INTEGRATION_CATEGORIES.map((category) => [category.id, category]));
-      const categoryOrder = new Map(INTEGRATION_CATEGORIES.map((category, index) => [category.id, index]));
+
       const actionButton = (harness, action, label, kind = "ghost-button") => {
         const waiting = pending.has(harness.id);
-        return `<button class="${kind}" type="button" data-harness-operation="manage"`
-          + ` data-harness-action="${action}" data-harness="${escapeHtml(harness.id)}"`
-          + ` data-harness-name="${escapeHtml(harness.name)}"${waiting ? " disabled" : ""}>`
-          + `${waiting ? "Working..." : label}</button>`;
+        return '<button class="' + kind + '" type="button" data-harness-operation="manage"'
+          + ' data-harness-action="' + action + '" data-harness="' + escapeHtml(harness.id) + '"'
+          + ' data-harness-name="' + escapeHtml(harness.name) + '"' + (waiting ? " disabled" : "") + '>'
+          + (waiting ? "Working..." : label) + '</button>';
       };
       const utilityButton = (harness, operation, label, extra = "") =>
-        `<button class="link-button" type="button" data-harness-operation="${operation}"`
-        + ` data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}"`
-        + `${extra}>${label}</button>`;
+        '<button class="link-button" type="button" data-harness-operation="' + operation + '"'
+        + ' data-harness="' + escapeHtml(harness.id) + '" data-harness-name="' + escapeHtml(harness.name) + '"'
+        + extra + '>' + label + '</button>';
 
-      const cards = [...products.entries()].map(([productId, targets]) => {
+      const primaryFor = (harness, productId) => {
+        if (harness.state === "installed" && harness.can_uninstall) {
+          return actionButton(harness, "uninstall", "Remove", "danger-button");
+        }
+        if ((harness.state === "available" || harness.state === "updatable") && harness.can_install) {
+          return actionButton(harness, "install", harness.state === "updatable" ? "Update" : "Set up");
+        }
+        if (harness.state === "not_detected" && harness.can_download) {
+          return '<button class="ghost-button" type="button" data-harness-operation="download"'
+            + ' data-product="' + escapeHtml(productId) + '" data-harness="' + escapeHtml(harness.id) + '"'
+            + ' data-harness-name="' + escapeHtml(harness.name) + '">Install</button>';
+        }
+        return "";
+      };
+
+      // Everything a power user occasionally needs, none of it competing for attention. A native
+      // details element keeps this keyboard reachable and dismissible with no new interaction code.
+      const overflow = (harness, plural) => {
+        const locate = harness.can_locate ? utilityButton(harness, "locate", "Locate") : "";
+        const setup = utilityButton(harness, "copy", "Copy setup", ' data-copy-kind="setup"');
+        const target = plural ? "" : '<div class="integration-more-target">' + escapeHtml(harness.target) + '</div>';
+        return '<details class="integration-more" data-harness-manual="' + escapeHtml(harness.id) + '">'
+          + '<summary aria-label="More options for ' + escapeHtml(harness.name) + '">More</summary>'
+          + '<div class="integration-more-body">' + target
+          + '<code>' + escapeHtml(harness.config_path) + '</code>'
+          + '<pre>' + escapeHtml(harness.manual_setup) + '</pre>'
+          + '<div class="tile-actions">' + locate + setup + '</div></div></details>';
+      };
+
+      const row = (harness, productId, icon, name, plural) => {
+        const group = categoryById.get(INTEGRATION_STATE_CATEGORY[harness.state]);
+        const differs = harness.detail && harness.detail !== group?.sentence;
+        return '<div class="integration-row" data-harness-row="' + escapeHtml(harness.id) + '">'
+          + '<img src="integrations/' + escapeHtml(icon) + '" alt="" width="20" height="20">'
+          + '<span class="integration-name">' + escapeHtml(name) + '</span>'
+          + (plural ? '<span class="integration-target-label">' + escapeHtml(harness.target) + '</span>' : "")
+          + (differs ? '<span class="integration-row-detail">' + escapeHtml(harness.detail) + '</span>' : "")
+          + '<span class="integration-row-actions">' + primaryFor(harness, productId)
+          + overflow(harness, plural) + '</span></div>';
+      };
+
+      const grouped = new Map(INTEGRATION_CATEGORIES.map((category) => [category.id, []]));
+      for (const [productId, targets] of products) {
         const sortedTargets = [...targets].sort((left, right) =>
           left.target.localeCompare(right.target) || left.id.localeCompare(right.id));
         const visible = sortedTargets.some((target) => target.state !== "not_detected")
@@ -420,54 +473,69 @@
         const targetCategories = new Set(visible.map((target) => INTEGRATION_STATE_CATEGORY[target.state]));
         const categoryId = INTEGRATION_CATEGORY_PRIORITY.find((id) => targetCategories.has(id))
           ?? "needs-attention";
-        const category = categoryById.get(categoryId);
         const product = visible[0];
-        const icon = escapeHtml(product.icon ?? "generic.svg");
-        const rows = visible.map((harness) => {
-          const installed = harness.state === "installed";
-          const available = harness.state === "available";
-          const updatable = harness.state === "updatable";
-          let primary = "";
-          if (installed && harness.can_uninstall) {
-            primary = actionButton(harness, "uninstall", "Remove", "danger-button");
-          } else if ((available || updatable) && harness.can_install) {
-            primary = actionButton(harness, "install", updatable ? "Update" : "Set up");
-          }
-          const locate = harness.can_locate && harness.state !== "not_detected"
-            ? utilityButton(harness, "locate", "Locate") : "";
-          const setup = utilityButton(harness, "copy", "Copy setup", ' data-copy-kind="setup"');
-          return `<div class="integration-target">`
-            + `<div class="integration-target-head"><strong>${escapeHtml(harness.target)}</strong>`
-            + `<span>${escapeHtml(words(harness.state))}</span></div>`
-            + `<p>${escapeHtml(harness.detail)}</p>`
-            + `<details class="manual-setup" data-harness-manual="${escapeHtml(harness.id)}"><summary>Manual setup</summary>`
-            + `<code>${escapeHtml(harness.config_path)}</code><pre>${escapeHtml(harness.manual_setup)}</pre></details>`
-            + `<div class="tile-actions">${primary}${locate}${setup}</div></div>`;
-        }).join("");
-        const missing = visible.length === 1 && visible[0].state === "not_detected";
-        const first = visible[0];
-        const install = missing && targets.some((target) => target.can_download)
-          ? `<button class="ghost-button" type="button" data-harness-operation="download"`
-            + ` data-product="${escapeHtml(productId)}" data-harness="${escapeHtml(first.id)}"`
-            + ` data-harness-name="${escapeHtml(first.name)}">Install</button>` : "";
-        const locate = missing ? utilityButton(first, "locate", "Locate") : "";
-        const command = utilityButton(first, "copy", "Copy MCP command", ' data-copy-kind="command"');
-        const html = `<article class="tile integration-card integration-${category.id}">`
-          + `<div class="tile-top"><span class="integration-identity"><img src="integrations/${icon}" alt=""`
-          + ` width="28" height="28"><h3>${escapeHtml(product.name)}</h3></span>`
-          + `<span class="tile-state">${escapeHtml(category.label)}</span></div>`
-          + `<div class="integration-targets">${rows}</div>`
-          + `<div class="tile-actions integration-product-actions">${install}${locate}${command}</div>`
-          + `</article>`;
-        return { categoryId, name: product.name, productId, html };
-      });
+        const icon = product.icon ?? "generic.svg";
+        const plural = visible.length > 1;
+        grouped.get(categoryId).push({
+          name: product.name,
+          productId,
+          html: visible.map((harness) => row(harness, productId, icon, product.name, plural)).join("")
+        });
+      }
 
-      el["integration-grid"].innerHTML = cards
-        .sort((left, right) => (categoryOrder.get(left.categoryId) - categoryOrder.get(right.categoryId))
-          || left.name.localeCompare(right.name)
-          || left.productId.localeCompare(right.productId))
-        .map((card) => card.html)
-        .join("");
+      const counts = new Map([...grouped].map(([id, entries]) => [id, entries.length]));
+      const sections = INTEGRATION_CATEGORIES.filter((category) => counts.get(category.id) > 0)
+        .map((category) => {
+          const entries = [...grouped.get(category.id)]
+            .sort((left, right) => left.name.localeCompare(right.name)
+              || left.productId.localeCompare(right.productId));
+          const body = '<div class="integration-rows">'
+            + entries.map((entry) => entry.html).join("") + '</div>';
+          const count = '<span class="integration-count">' + counts.get(category.id) + '</span>';
+          // A product that is not on this computer is discovery, not status. It stays folded away.
+          if (category.id === "not-detected") {
+            return '<details class="integration-group integration-' + category.id + '">'
+              + '<summary>' + escapeHtml(category.label) + count + '</summary>'
+              + '<p>' + escapeHtml(category.sentence) + '</p>' + body + '</details>';
+          }
+          return '<section class="integration-group integration-' + category.id + '">'
+            + '<h2>' + escapeHtml(category.label) + count + '</h2>'
+            + '<p>' + escapeHtml(category.sentence) + '</p>' + body + '</section>';
+        }).join("");
+
+      el["integration-grid"].innerHTML =
+        rosterAnswer(counts, grouped) + sections + connectorFooter(snapshot);
+    }
+
+    /* The line at the top, in the shape At a glance uses: the answer, not a tally. */
+    function rosterAnswer(counts, grouped) {
+      const attention = grouped.get("needs-attention") ?? [];
+      const connected = counts.get("ready") ?? 0;
+      const available = counts.get("available") ?? 0;
+      let sentence;
+      if (attention.length === 1) {
+        sentence = attention[0].name + " needs attention.";
+      } else if (attention.length > 1) {
+        sentence = attention.length + " clients need attention.";
+      } else if (connected && available) {
+        sentence = connected + " connected, " + available + " more can be set up.";
+      } else if (connected) {
+        sentence = "Every detected client is connected.";
+      } else {
+        sentence = "No client is connected yet.";
+      }
+      return '<p class="integration-answer">' + escapeHtml(sentence) + '</p>';
+    }
+
+    /* The connector path is one string for every client, so the page states it once. */
+    function connectorFooter(snapshot) {
+      const first = snapshot.harnesses[0];
+      if (!first?.connector_command) return "";
+      return '<div class="integration-connector"><span>Connector</span>'
+        + '<code>' + escapeHtml(first.connector_command) + '</code>'
+        + '<button class="link-button" type="button" data-harness-operation="copy"'
+        + ' data-harness="' + escapeHtml(first.id) + '" data-harness-name="' + escapeHtml(first.name) + '"'
+        + ' data-copy-kind="command">Copy</button></div>';
     }
 
     function status(snapshot) {

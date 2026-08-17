@@ -42,10 +42,33 @@
    * targets share one product card.
    */
   const INTEGRATION_CATEGORIES = Object.freeze([
-    Object.freeze({ id: "ready", label: "Ready" }),
-    Object.freeze({ id: "available", label: "Available" }),
-    Object.freeze({ id: "needs-attention", label: "Needs Attention" }),
-    Object.freeze({ id: "not-detected", label: "Not Detected" })
+    Object.freeze({
+      id: "needs-attention",
+      label: "Needs attention",
+      // One sentence per group, said once, instead of the same sentence on every row in it. A row
+      // whose own detail differs from its group -- which is what a real problem looks like --
+      // still shows that detail; identical repetition does not.
+      sentence: "These need you before Ghostlight can use them.",
+      verb: "Fix"
+    }),
+    Object.freeze({
+      id: "available",
+      label: "Ready to set up",
+      sentence: "Detected and ready for an explicit Ghostlight registration.",
+      verb: "Set up"
+    }),
+    Object.freeze({
+      id: "ready",
+      label: "Connected",
+      sentence: "Ghostlight is registered for this user context.",
+      verb: "Remove"
+    }),
+    Object.freeze({
+      id: "not-detected",
+      label: "Not installed here",
+      sentence: "Ghostlight supports these, but none was found on this computer.",
+      verb: "Install"
+    })
   ]);
 
   /** Map every closed harness state to the one category a product card may occupy. */
