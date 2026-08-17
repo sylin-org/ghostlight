@@ -138,6 +138,8 @@ history live here.
 
 | [0127](0127-integration-switches-and-evidence.md) | Integration switches and foreign-entry evidence: one `role="switch"` per client instead of a four-category card roster, the page leading with what Ghostlight already connected, blocked and absent clients as the only exception shapes, and a foreign entry showing the command it found beside the one Ghostlight would write while still never overwriting it | Accepted (supersedes [0125](0125-recognizable-plural-linux-harness-integrations.md) Decision 2's roster presentation; builds on [0126](0126-reference-experience-contract.md) Decision 9) |
 
+| [0128](0128-integration-master-detail.md) | Integration master and detail: a client list beside one pane that explains and operates the selected client, selection kept by id across sequenced redraws, a landing that prefers a genuinely foreign entry over a stale path, and every target naming its file, its state in words, and what Ghostlight writes | Accepted (supersedes [0127](0127-integration-switches-and-evidence.md) Decisions 1-3 and 5; carries forward its Decision 4) |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

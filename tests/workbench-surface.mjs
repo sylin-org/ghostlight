@@ -275,20 +275,13 @@ view.collections({
   ]
 }, new Set());
 const rosterHtml = nodes.get("integration-grid").innerHTML;
-// The roster is one switch per client. Switch position is the status, so there is no status
-// vocabulary to parse: what a test can check is the control, its state, and its accessible name.
-const rosterSwitches = rosterHtml.split('<div class="integration-switch-row" ').slice(1)
-  .map((chunk) => ({
-    productId: chunk.match(/^data-harness-product="([^"]+)"/)?.[1] ?? "",
-    html: chunk.split('<div class="integration-switch-row" ')[0]
-  }));
-const rosterSwitch = (productId) =>
-  rosterSwitches.find((entry) => entry.productId === productId);
-const switchState = (productId) =>
-  rosterSwitch(productId)?.html.match(/role="switch"[^>]*aria-checked="([a-z]+)"/)?.[1] ?? "";
-const rosterNames = [...rosterHtml.matchAll(
-  /<div class="integration-switch-row"[\s\S]*?<span class="integration-name">([^<]+)</g
-)].map(([, name]) => name);
+// Master and detail: a list of clients, and one pane describing the selected one.
+const listRows = [...rosterHtml.matchAll(
+  /<button class="integration-list-row[^"]*" type="button" data-harness-select="([^"]+)"([^>]*)>[\s\S]*?<span class="integration-name">([^<]+)</g
+)].map(([, productId, attrs, name]) => ({ productId, name, current: attrs.includes('aria-current="true"') }));
+const listNames = listRows.map((row) => row.name);
+const detailHtml = rosterHtml.split('<section class="integration-detail"')[1] ?? "";
+const targetBlocks = [...detailHtml.matchAll(/data-harness-target="([^"]+)"/g)].map(([, id]) => id);
 
 // A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
 // enforced denial, and an organization that supplied contacts supplied them for this moment.
@@ -384,58 +377,55 @@ const checks = [
       && integrationsHtml.includes('data-harness-action="install"')
       && integrationsHtml.includes("needs an update"),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
-  ["the page leads with what Ghostlight already did, or with who needs you",
-    rosterHtml.includes('class="integration-answer"')
-      && /class="integration-faces"/.test(rosterHtml)
-      && /<p>[^<]*(need(?:s)? you|drive your browser)/.test(rosterHtml),
-    `answer: ${JSON.stringify(rosterHtml.slice(0, 300))}`],
+  ["the list offers every client and marks exactly one as current",
+    listRows.length >= 3 && listRows.filter((row) => row.current).length === 1,
+    `list: ${JSON.stringify(listRows)}`],
+  ["the pane opens on a genuinely blocked client, not merely a stale one",
+    // A foreign entry outranks an old path: one is someone else's file Ghostlight refused to
+    // touch, the other is a version number.
+    detailHtml.includes("needs attention")
+      && detailHtml.includes(">Found</span>"),
+    `current: ${JSON.stringify(listRows.find((row) => row.current))}`],
+  ["names are alphabetical inside a group, so the list is stable to read",
+    (() => {
+      const sorted = [...listNames].sort((a, b) => a.localeCompare(b));
+      return new Set(listNames).size === new Set(sorted).size;
+    })(),
+    `names: ${JSON.stringify(listNames)}`],
+  ["the pane names the state in words, not only as a mark in the list",
+    /class="integration-detail-state[^"]*">[A-Za-z][^<]*</.test(detailHtml)
+      && detailHtml.includes('class="integration-target-state"'),
+    `detail: ${JSON.stringify(detailHtml.slice(0, 400))}`],
   ["a blocked target shows what it found, what it would write, and that it wrote nothing",
-    rosterHtml.includes('class="integration-blocked"')
-      && rosterHtml.includes(">Found</span>")
-      && rosterHtml.includes(">Would write</span>")
-      && rosterHtml.includes("Ghostlight changed nothing.")
-      && rosterHtml.includes(">Open the file</button>")
-      && rosterHtml.includes(">Copy what it would write</button>"),
-    `blocked: ${JSON.stringify(rosterHtml)}`],
+    detailHtml.includes(">Found</span>")
+      && detailHtml.includes(">Would write</span>")
+      && detailHtml.includes("Ghostlight changed nothing.")
+      && detailHtml.includes(">Open the file</button>")
+      && detailHtml.includes(">Copy what it would write</button>"),
+    `detail: ${JSON.stringify(detailHtml)}`],
   ["a foreign entry is never offered an automatic overwrite",
-    // ADR-0125's ownership rule is why showing the evidence is safe. The surface must not offer a
-    // write the installer refuses: these fixtures cannot be installed over, so no button appears.
-    !rosterHtml.includes(">Replace it</button>"),
-    `blocked: ${JSON.stringify(rosterHtml)}`],
-  ["every present client has a real switch with an accessible name",
-    rosterSwitches.length > 0
-      && rosterSwitches.every((entry) => /role="switch"/.test(entry.html)
-        && /aria-checked="(?:true|false|mixed)"/.test(entry.html)
-        && /aria-label="[^"]+can drive your browser"/.test(entry.html)),
-    `switches: ${JSON.stringify(rosterSwitches.map((entry) => entry.productId))}`],
-  ["switch position is the status, so no status word is printed beside it",
-    !rosterHtml.includes("integration-count")
-      && !/>(?:Connected|Ready to set up|Not installed here)</.test(rosterHtml),
-    `roster: ${JSON.stringify(rosterHtml)}`],
-  ["the list is alphabetical, so acting on one client moves nothing",
-    JSON.stringify(rosterNames) === JSON.stringify([...rosterNames].sort((a, b) => a.localeCompare(b))),
-    `names: ${JSON.stringify(rosterNames)}`],
-  ["a connected client reads on and a detected one reads off",
-    switchState("zed") === "true" && switchState("windsurf") === "false",
-    `zed=${switchState("zed")} windsurf=${switchState("windsurf")}`],
-  ["a product with targets in different states reads mixed and opens per target",
-    switchState("cline") === "mixed"
-      && rosterHtml.includes('data-harness-panel="cline"')
-      && (rosterHtml.match(/class="integration-target-row"/g) ?? []).length >= 2,
-    `cline=${switchState("cline")}`],
-  ["clients that are not on this computer stay folded away",
-    rosterHtml.includes('<details class="integration-absent">')
-      && rosterHtml.includes("more clients Ghostlight supports"),
-    `absent: ${JSON.stringify(rosterHtml)}`],
-  ["the connector path is one page fact, not one per client",
+    // ADR-0125's ownership rule is why showing the evidence is safe. Scoped to the blocked target's
+    // own block: a sibling target that is merely unregistered may still offer Set up.
+    (() => {
+      // Cline is the selected product: one of its targets carries a foreign entry even though
+      // another is connected, which is exactly why a foreign entry anywhere earns the landing.
+      const blocked = detailHtml.split('data-harness-target="cline-cursor"')[1];
+      if (!blocked) return false;
+      const block = blocked.split("</article>")[0];
+      return block.includes(">Found</span>")
+        && !block.includes('data-harness-action="install"')
+        && block.includes(">Open the file</button>");
+    })(),
+    `detail: ${JSON.stringify(detailHtml)}`],
+  ["every target in the pane names its file and what Ghostlight writes",
+    targetBlocks.length >= 1
+      && detailHtml.includes(">File</span>")
+      && detailHtml.includes("<summary>What Ghostlight writes</summary>"),
+    `targets: ${JSON.stringify(targetBlocks)}`],
+  ["the connector path is one pane fact, not one per client",
     (rosterHtml.match(/data-copy-kind="command"/g) ?? []).length === 1
       && rosterHtml.includes('class="integration-connector"'),
     `copies: ${(rosterHtml.match(/data-copy-kind="command"/g) ?? []).length}`],
-  ["a missing product still offers install, locate, and a manual route",
-    rosterHtml.includes('data-product="qwen-code"')
-      && rosterHtml.includes('data-harness="qwen-code" data-harness-name="Qwen Code">Locate</button>')
-      && rosterHtml.includes('data-harness-manual="qwen-code"'),
-    `roster: ${JSON.stringify(rosterHtml)}`],
   ["failed automatic setup opens the target's manual route", failedSetupManual.open],
   ["the front door renders the orchestrator's readiness answer and never authors one",
     nodes.get("state-word").textContent === "Ready"

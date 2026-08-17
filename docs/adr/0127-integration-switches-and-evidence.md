@@ -1,6 +1,7 @@
 # ADR-0127: Integration switches and foreign-entry evidence
 
-- Status: Accepted
+- Status: Decisions 1, 2, 3, and 5 superseded by ADR-0128 on 2026-08-16. Decision 4 (foreign-entry
+  evidence) remains accepted and is carried forward unchanged.
 - Date: 2026-08-16
 - Supersedes: ADR-0125 Decision 2 (the product-card roster and its status taxonomy). ADR-0125's
   registry, ownership, safety, artwork, and Locate decisions stand unchanged.

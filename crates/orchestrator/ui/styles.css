@@ -327,120 +327,95 @@ body.runtime-offline .state-word { color: var(--muted); }
 .tile-state { flex: none; font: 500 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
 .tile-actions { display: flex; gap: 7px; margin-top: 11px; }
 .tile-actions .ghost-button, .tile-actions .danger-button { height: 27px; padding: 0 11px; font-size: 11.5px; }
-/* The answer, and the faces of the agents Ghostlight already wired up. */
-.integration-answer { display: flex; align-items: center; gap: 12px; margin: 0 0 4px; }
-.integration-answer p { margin: 0; color: var(--ink); font-size: 15px; }
-.integration-faces { display: flex; flex: none; }
-.integration-faces img {
-  width: 26px; height: 26px; margin-right: -7px; padding: 3px;
-  border: 1px solid var(--line-2); border-radius: 7px; background: var(--panel);
-}
+/* Master and detail: find on the left, act on the right. */
+.integration-split { display: grid; grid-template-columns: 268px 1fr; gap: 18px; align-items: start; }
+@media (max-width: 900px) { .integration-split { grid-template-columns: 1fr; } }
 
-/* The one place a card is justified: the one place with something to read. */
-.integration-blocked {
-  display: flex; flex-direction: column; gap: 8px; padding: 14px 15px;
-  border: 1px solid var(--line); border-left: 2px solid var(--held); border-radius: 10px;
-  background: var(--panel-2);
+.integration-list { display: flex; flex-direction: column; gap: 1px; }
+.integration-list-heading {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 12px 0 4px; color: var(--integration-tone); font: 500 9px/1 var(--mono);
+  letter-spacing: .12em; text-transform: uppercase;
 }
-.integration-blocked-head { display: flex; align-items: center; gap: 9px; }
-.integration-blocked-head img {
-  width: 22px; height: 22px; flex: none; padding: 2px;
+.integration-list-heading:first-child { margin-top: 0; }
+.integration-list-heading span { color: var(--faint); font-size: 9px; letter-spacing: 0; }
+.integration-list-row {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px;
+  border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink-2);
+  cursor: pointer; text-align: left; transition: background .18s var(--calm);
+}
+.integration-list-row:hover { background: var(--panel-2); }
+.integration-list-row[aria-current="true"] {
+  border-color: var(--line); background: var(--panel); color: var(--ink);
+}
+.integration-list-row img {
+  width: 20px; height: 20px; flex: none; padding: 2px;
   border: 1px solid var(--line); border-radius: 5px; background: rgba(255, 255, 255, .035);
 }
-.integration-blocked-head strong { color: var(--ink); font-size: 13px; font-weight: 500; }
-.evidence { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.integration-list-row .integration-name {
+  min-width: 0; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap;
+}
+/* State reaches the list as a mark, never as the only carrier -- the pane names it in words. */
+.integration-pip {
+  width: 7px; height: 7px; flex: none; margin-left: auto; border-radius: 50%;
+  background: var(--integration-tone);
+}
+
+.integration-detail {
+  display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 18px 20px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2);
+}
+.integration-detail-head { display: flex; align-items: center; gap: 13px; }
+.integration-detail-head img {
+  width: 34px; height: 34px; flex: none; padding: 4px;
+  border: 1px solid var(--line); border-radius: 9px; background: rgba(255, 255, 255, .035);
+}
+.integration-detail-head h1 { margin: 0; color: var(--ink); font-size: 19px; font-weight: 400; }
+.integration-detail-state {
+  margin: 3px 0 0; color: var(--integration-tone);
+  font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+}
+.integration-detail-sentence { margin: -4px 0 0; color: var(--muted); font-size: 12.5px; }
+
+.integration-target-block {
+  display: flex; flex-direction: column; gap: 9px; padding: 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--ground);
+}
+.integration-target-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.integration-target-head strong { color: var(--ink); font-size: 13px; font-weight: 500; }
+.integration-target-state {
+  color: var(--faint); font: 500 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+}
+.integration-target-detail { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+
+/* What Ghostlight found, and what it would have written. The reason the buttons are trustworthy. */
+.integration-evidence {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px;
+  border: 1px solid var(--line); border-left: 2px solid var(--held); border-radius: 8px;
+  background: var(--panel-2);
+}
+.evidence { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .evidence span {
-  flex: none; width: 78px; color: var(--faint);
-  font: 500 9px/1.6 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  flex: none; width: 84px; color: var(--faint);
+  font: 500 8.5px/1.7 var(--mono); letter-spacing: .1em; text-transform: uppercase;
 }
 .evidence code {
   min-width: 0; overflow: hidden; color: var(--ink-3);
   font: 400 10.5px/1.5 var(--mono); text-overflow: ellipsis; white-space: nowrap;
 }
-.integration-untouched { margin: 0; color: var(--muted); font-size: 11px; }
+.integration-untouched { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
 
-/* One switch per client. Alphabetical and stable, so acting on one moves nothing. */
-.integration-switches { display: flex; flex-direction: column; gap: 2px; }
-.integration-switch-row {
-  display: flex; min-width: 0; align-items: center; gap: 10px;
-  padding: 7px 10px; border: 1px solid transparent; border-radius: 8px;
-  transition: background .2s var(--calm);
+.integration-manual summary { color: var(--muted); font-size: 11px; cursor: pointer; }
+.integration-manual pre {
+  max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2);
+  color: var(--ink-3); font: 400 9.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word;
 }
-.integration-switch-row:hover { background: var(--panel-2); }
-.integration-switch-row img {
-  width: 22px; height: 22px; flex: none; padding: 2px;
-  border: 1px solid var(--line); border-radius: 5px; background: rgba(255, 255, 255, .035);
-}
-.integration-switch-row .integration-name {
-  overflow: hidden; color: var(--ink); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap;
-}
-.integration-note { flex: none; margin-left: auto; color: var(--faint); font: 400 10px/1 var(--mono); }
-.integration-switch-row .integration-toggle { margin-left: auto; }
-.integration-update { height: 23px; margin-left: auto; padding: 0 10px; font-size: 11px; }
-.integration-update + .integration-toggle { margin-left: 8px; }
-.integration-note + .integration-toggle { margin-left: 0; }
+.integration-target-block .tile-actions { margin-top: 2px; }
 
-/* A real switch: role, state, and keyboard operation come from the platform, not from styling. */
-.integration-toggle {
-  position: relative; flex: none; width: 38px; height: 21px; padding: 0;
-  border: 1px solid var(--line-2); border-radius: 999px; background: var(--ground);
-  cursor: pointer; transition: background .2s var(--calm), border-color .2s var(--calm);
-}
-.integration-toggle:disabled { cursor: default; opacity: .45; }
-.integration-toggle .integration-knob {
-  position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%;
-  background: var(--muted); transition: transform .2s var(--calm), background .2s var(--calm);
-}
-.integration-toggle[aria-checked="true"] { border-color: var(--ok); background: var(--ok-dim, rgba(52, 199, 123, .18)); }
-.integration-toggle[aria-checked="true"] .integration-knob { background: var(--ok); transform: translateX(17px); }
-.integration-toggle[aria-checked="mixed"] { border-color: var(--cap-action); }
-.integration-toggle[aria-checked="mixed"] .integration-knob {
-  background: var(--cap-action); transform: translateX(8.5px);
-}
-/* State must survive high contrast and never rest on color alone. */
-.integration-toggle::after {
-  position: absolute; right: 5px; color: var(--faint); font: 500 8px/21px var(--mono); content: "OFF";
-}
-.integration-toggle[aria-checked="true"]::after { right: auto; left: 6px; color: var(--ok); content: "ON"; }
-.integration-toggle[aria-checked="mixed"]::after { right: 4px; color: var(--cap-action); content: "SOME"; font-size: 7px; }
-
-.integration-expand {
-  flex: none; padding: 0 6px; border: 0; background: none; color: var(--faint);
-  font-size: 10px; line-height: 21px; cursor: pointer;
-}
-.integration-expand:hover, .integration-expand:focus-visible { color: var(--ink-2); }
-.integration-expand[aria-expanded="false"] { visibility: visible; }
-
-/* A plural product's targets, one line each, each with its own switch. */
-.integration-targets {
-  display: flex; flex-direction: column; gap: 3px;
-  margin: 0 0 4px 42px; padding: 8px 10px;
-  border: 1px solid var(--line); border-radius: 8px; background: var(--ground);
-}
-.integration-target-row { display: flex; min-width: 0; align-items: center; gap: 10px; }
-.integration-target-row .integration-target-label { flex: none; min-width: 116px; color: var(--ink-2); font-size: 11.5px; }
-.integration-target-row code {
-  min-width: 0; overflow: hidden; color: var(--faint);
-  font: 400 9.5px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap;
-}
-.integration-target-row .integration-toggle { margin-left: auto; }
-.integration-target-label { color: var(--faint); font: 400 10px/1 var(--mono); }
-
-/* Not on this computer: discovery, folded away. */
-.integration-absent > summary {
-  color: var(--faint); font: 500 9.5px/1 var(--mono); letter-spacing: .1em;
-  text-transform: uppercase; cursor: pointer;
-}
-.integration-absent-row {
-  display: flex; align-items: center; gap: 9px; padding: 5px 0 5px 4px;
-  color: var(--muted); font-size: 11.5px;
-}
-.integration-absent-row img { width: 18px; height: 18px; flex: none; opacity: .8; }
-.integration-absent-row span { min-width: 150px; }
-
-/* One connector path for every client, stated once for the page. */
+/* One connector path for every client, stated once for the pane. */
 .integration-connector {
-  display: flex; align-items: center; gap: 9px; padding-top: 12px; border-top: 1px solid var(--line);
+  display: flex; align-items: center; gap: 9px; padding-top: 13px; border-top: 1px solid var(--line);
 }
 .integration-connector span { color: var(--faint); font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
 .integration-connector code {

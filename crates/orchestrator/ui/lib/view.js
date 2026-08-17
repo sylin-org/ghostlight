@@ -386,18 +386,17 @@
     }
 
     /*
-     * "Which agents can drive your browser?"
+     * Master and detail: which clients exist on the left, everything about one of them on the right.
      *
-     * The operation is binary, so the control is a switch and the switch position is the status.
-     * That removes the whole status taxonomy from the page: connected and available were never two
-     * kinds of thing, they were one thing in two positions. It also removes the reason a row moved
-     * when you acted on it -- the list is alphabetical and stable, so flipping a switch changes a
-     * switch and nothing else jumps.
+     * The list is for finding, so a row carries identity and state and nothing else. The pane is
+     * for acting, so every operation lives there with the facts that justify it -- the exact file,
+     * what Ghostlight would write, and for a blocked target, what it actually found.
      *
-     * Two states cannot be a switch and get their own shapes. A blocked target cannot be flipped
-     * on, so it becomes a card carrying the evidence for why. A product that is not on this
-     * computer cannot be flipped at all, so it folds away as discovery rather than status.
+     * Selection is view state and survives re-render by id. This surface redraws from every
+     * sequenced snapshot, so a selection kept in the DOM would silently reset while someone read.
      */
+    let selectedProduct = null;
+
     function integrations(snapshot, pending) {
       if (!snapshot.harnesses.length) {
         el["integration-grid"].innerHTML =
@@ -416,208 +415,138 @@
         const targets = [...all].sort((left, right) =>
           left.target.localeCompare(right.target) || left.id.localeCompare(right.id));
         const live = targets.filter((target) => target.state !== "not_detected");
-        const present = live.length > 0;
-        const blocked = live.filter((target) => target.state === "needs_attention");
-        const on = live.filter((target) => target.state === "installed" || target.state === "updatable");
+        const categories = new Set((live.length ? live : [targets[0]])
+          .map((target) => INTEGRATION_STATE_CATEGORY[target.state]));
+        const categoryId = INTEGRATION_CATEGORY_PRIORITY.find((id) => categories.has(id))
+          ?? "needs-attention";
         return {
           productId,
           targets,
           live,
-          present,
-          blocked,
-          on,
+          categoryId,
           name: targets[0].name,
           icon: targets[0].icon ?? "generic.svg"
         };
       }).sort((left, right) => left.name.localeCompare(right.name)
         || left.productId.localeCompare(right.productId));
 
-      const html = [
-        answer(entries),
-        entries.flatMap((entry) => entry.blocked.map((target) => blockedCard(entry, target, pending))).join(""),
-        switchList(entries.filter((entry) => entry.present), pending),
-        absentList(entries.filter((entry) => !entry.present)),
-        connectorFooter(snapshot)
-      ].join("");
-      el["integration-grid"].innerHTML = html;
-    }
-
-    /* The delight is that Ghostlight already did this. Say it before anything else. */
-    function answer(entries) {
-      const present = entries.filter((entry) => entry.present);
-      const connected = present.filter((entry) => entry.on.length > 0);
-      const blocked = entries.filter((entry) => entry.blocked.length > 0);
-      const faces = connected.slice(0, 8).map((entry) =>
-        '<img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="26" height="26">').join("");
-      let sentence;
-      if (blocked.length === 1) {
-        sentence = escapeHtml(blocked[0].name) + " needs you.";
-      } else if (blocked.length > 1) {
-        sentence = blocked.length + " clients need you.";
-      } else if (connected.length === 0) {
-        sentence = "No agent can drive your browser yet.";
-      } else if (connected.length === present.length) {
-        sentence = connected.length === 1
-          ? "Your agent can drive your browser."
-          : "All " + connected.length + " of your agents can drive your browser.";
-      } else {
-        sentence = connected.length + " of your " + present.length + " agents can drive your browser.";
+      // Land on what needs a person; otherwise keep whatever was open, otherwise the first client.
+      // A foreign entry outranks a merely stale path: one is someone else's file that Ghostlight
+      // refused to touch, the other is a version number.
+      const byId = new Map(entries.map((entry) => [entry.productId, entry]));
+      const blocked = entries.find((entry) =>
+        entry.targets.some((target) => target.state === "needs_attention"));
+      const attention = blocked
+        ?? entries.find((entry) => entry.categoryId === "needs-attention");
+      if (!selectedProduct || !byId.has(selectedProduct)) {
+        selectedProduct = (attention ?? entries[0]).productId;
       }
-      return '<div class="integration-answer"><span class="integration-faces">' + faces + '</span>'
-        + '<p>' + sentence + '</p></div>';
+      const selected = byId.get(selectedProduct);
+
+      el["integration-grid"].innerHTML =
+        '<div class="integration-split">'
+        + '<nav class="integration-list" aria-label="MCP clients">' + list(entries) + '</nav>'
+        + '<section class="integration-detail" aria-live="polite">' + detail(selected, pending, snapshot)
+        + '</section></div>';
     }
 
-    /*
-     * The one place a card is justified, because it is the one place with something to read.
-     *
-     * "Foreign entry" is an assertion. This shows the entry, shows what Ghostlight would write
-     * instead, and says plainly that it changed nothing -- which is the whole reason to trust the
-     * button beside it.
-     */
-    function blockedCard(entry, target, pending) {
-      const waiting = pending.has(target.id);
-      const found = target.found_command
-        ? '<div class="evidence"><span>Found</span><code>' + escapeHtml(target.found_command) + '</code></div>'
-        : '<div class="evidence"><span>Found</span><code>' + escapeHtml(target.detail) + '</code></div>';
-      const would = target.connector_command
-        ? '<div class="evidence"><span>Would write</span><code>'
-          + escapeHtml(target.connector_command) + '</code></div>'
-        : "";
-      const replace = target.can_install
-        ? '<button class="ghost-button" type="button" data-harness-operation="manage"'
-          + ' data-harness-action="install" data-harness="' + escapeHtml(target.id) + '"'
-          + ' data-harness-name="' + escapeHtml(target.name) + '"' + (waiting ? " disabled" : "") + '>'
-          + (waiting ? "Working..." : "Replace it") + '</button>'
-        : "";
-      const locate = target.can_locate
-        ? '<button class="link-button" type="button" data-harness-operation="locate"'
-          + ' data-harness="' + escapeHtml(target.id) + '" data-harness-name="'
-          + escapeHtml(target.name) + '">Open the file</button>'
-        : "";
-      // Always available, because it is the route that changes nothing.
-      const copy = '<button class="link-button" type="button" data-harness-operation="copy"'
-        + ' data-harness="' + escapeHtml(target.id) + '" data-harness-name="'
-        + escapeHtml(target.name) + '" data-copy-kind="setup"'
-        + ' data-harness-manual="' + escapeHtml(target.id) + '">Copy what it would write</button>';
-      return '<article class="integration-blocked" data-harness-blocked="' + escapeHtml(target.id) + '">'
-        + '<div class="integration-blocked-head">'
-        + '<img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="22" height="22">'
-        + '<strong>' + escapeHtml(entry.name) + '</strong>'
-        + '<span class="integration-target-label">' + escapeHtml(target.target) + '</span></div>'
-        + found + would
-        + '<p class="integration-untouched">Ghostlight changed nothing. '
-        + escapeHtml(target.config_path) + '</p>'
-        + '<div class="tile-actions">' + replace + locate + copy + '</div></article>';
-    }
-
-    /* One switch per client, alphabetical and stable, so acting on one moves nothing. */
-    function switchList(entries, pending) {
-      if (!entries.length) return "";
-      const rows = entries.map((entry) => {
-        const single = entry.live.length === 1 ? entry.live[0] : null;
-        const waiting = entry.live.some((target) => pending.has(target.id));
-        const mixed = !single && entry.on.length > 0 && entry.on.length < entry.live.length;
-        const checked = single
-          ? (single.state === "installed" || single.state === "updatable")
-          : entry.on.length === entry.live.length && entry.on.length > 0;
-        const note = single
-          ? (single.state === "updatable" ? "needs an update" : "")
-          : entry.on.length + " of " + entry.live.length + " targets";
-        const stale = entry.live.filter((target) => target.state === "updatable" && target.can_install);
-        const update = stale.length
-          ? '<button class="ghost-button integration-update" type="button"'
-            + ' data-harness-operation="manage" data-harness-action="install"'
-            + ' data-harness="' + escapeHtml(stale[0].id) + '"'
-            + ' data-harness-name="' + escapeHtml(entry.name) + '"'
-            + (waiting ? " disabled" : "") + '>' + (waiting ? "Working..." : "Update") + '</button>'
-          : "";
-        return '<div class="integration-switch-row" data-harness-product="' + escapeHtml(entry.productId) + '">'
-          + '<img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="22" height="22">'
+    function list(entries) {
+      const groups = INTEGRATION_CATEGORIES
+        .map((category) => [category, entries.filter((entry) => entry.categoryId === category.id)])
+        .filter(([, members]) => members.length > 0);
+      return groups.map(([category, members]) =>
+        '<h2 class="integration-list-heading">' + escapeHtml(category.label)
+        + '<span>' + members.length + '</span></h2>'
+        + members.map((entry) =>
+          '<button class="integration-list-row integration-' + category.id + '" type="button"'
+          + ' data-harness-select="' + escapeHtml(entry.productId) + '"'
+          + (entry.productId === selectedProduct ? ' aria-current="true"' : "")
+          + '><img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="20" height="20">'
           + '<span class="integration-name">' + escapeHtml(entry.name) + '</span>'
-          + (note ? '<span class="integration-note">' + escapeHtml(note) + '</span>' : "")
-          + update
-          + toggle(entry, single, checked, mixed, waiting)
-          + expander(entry, single)
-          + '</div>'
-          + (single ? "" : targetPanel(entry, pending));
-      }).join("");
-      return '<div class="integration-switches">' + rows + '</div>';
+          + '<span class="integration-pip" aria-hidden="true"></span></button>').join("")
+      ).join("");
     }
 
-    function toggle(entry, single, checked, mixed, waiting) {
-      // A real switch, not a styled div: role, state, and keyboard operation come from the platform.
-      const target = single ?? entry.live[0];
-      const action = checked ? "uninstall" : "install";
-      const allowed = single
-        ? (checked ? single.can_uninstall : single.can_install)
-        : entry.live.some((item) => (checked ? item.can_uninstall : item.can_install));
-      return '<button class="integration-toggle" type="button" role="switch"'
-        + ' aria-checked="' + (mixed ? "mixed" : checked) + '"'
-        + ' aria-label="' + escapeHtml(entry.name) + ' can drive your browser"'
-        + ' data-harness-operation="manage" data-harness-action="' + action + '"'
-        + ' data-harness="' + escapeHtml(target.id) + '"'
-        + ' data-harness-name="' + escapeHtml(entry.name) + '"'
-        + (waiting || !allowed ? " disabled" : "") + '><span class="integration-knob"></span></button>';
+    function detail(entry, pending, snapshot) {
+      if (!entry) return "";
+      const category = INTEGRATION_CATEGORIES.find((item) => item.id === entry.categoryId);
+      const shown = entry.live.length ? entry.live : [entry.targets[0]];
+      return '<header class="integration-detail-head">'
+        + '<img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="34" height="34">'
+        + '<div><h1>' + escapeHtml(entry.name) + '</h1>'
+        + '<p class="integration-detail-state integration-' + escapeHtml(entry.categoryId) + '">'
+        + escapeHtml(category?.label ?? "") + '</p></div></header>'
+        + '<p class="integration-detail-sentence">' + escapeHtml(category?.sentence ?? "") + '</p>'
+        + shown.map((target) => targetBlock(entry, target, pending)).join("")
+        + connectorBlock(snapshot);
     }
 
-    function expander(entry, single) {
-      const id = single ? single.id : entry.productId;
-      return '<button class="integration-expand" type="button" data-harness-toggle="'
-        + escapeHtml(id) + '" aria-expanded="false"'
-        + ' aria-label="Details for ' + escapeHtml(entry.name) + '">Details</button>';
+    /* One block per concrete target: what it is, where it lives, and everything you may do to it. */
+    function targetBlock(entry, target, pending) {
+      const waiting = pending.has(target.id);
+      const act = (action, label, kind) =>
+        '<button class="' + kind + '" type="button" data-harness-operation="manage"'
+        + ' data-harness-action="' + action + '" data-harness="' + escapeHtml(target.id) + '"'
+        + ' data-harness-name="' + escapeHtml(target.name) + '"' + (waiting ? " disabled" : "") + '>'
+        + (waiting ? "Working..." : label) + '</button>';
+      const utility = (operation, label, extra = "") =>
+        '<button class="link-button" type="button" data-harness-operation="' + operation + '"'
+        + ' data-harness="' + escapeHtml(target.id) + '" data-harness-name="'
+        + escapeHtml(target.name) + '"' + extra + '>' + label + '</button>';
+
+      let actions = "";
+      if (target.state === "installed" && target.can_uninstall) {
+        actions = act("uninstall", "Remove", "danger-button");
+      } else if (target.state === "updatable" && target.can_install) {
+        actions = act("install", "Update", "ghost-button");
+      } else if (target.state === "available" && target.can_install) {
+        actions = act("install", "Set up", "ghost-button");
+      } else if (target.state === "not_detected" && target.can_download) {
+        actions = '<button class="ghost-button" type="button" data-harness-operation="download"'
+          + ' data-product="' + escapeHtml(entry.productId) + '" data-harness="'
+          + escapeHtml(target.id) + '" data-harness-name="' + escapeHtml(target.name)
+          + '">Install ' + escapeHtml(entry.name) + '</button>';
+      }
+      // A foreign entry is never overwritten, so the routes offered are the ones that write
+      // nothing. ADR-0125's ownership rule is what makes showing the evidence safe at all.
+      const evidence = target.state === "needs_attention"
+        ? '<div class="integration-evidence">'
+          + '<div class="evidence"><span>Found</span><code>'
+          + escapeHtml(target.found_command ?? target.detail) + '</code></div>'
+          + '<div class="evidence"><span>Would write</span><code>'
+          + escapeHtml(target.connector_command) + '</code></div>'
+          + '<p class="integration-untouched">Ghostlight changed nothing.</p></div>'
+        : "";
+      const locate = target.can_locate ? utility("locate", "Open the file") : "";
+      const copy = utility("copy", "Copy what it would write", ' data-copy-kind="setup"'
+        + ' data-harness-manual="' + escapeHtml(target.id) + '"');
+
+      return '<article class="integration-target-block" data-harness-target="'
+        + escapeHtml(target.id) + '">'
+        + '<div class="integration-target-head"><strong>' + escapeHtml(target.target) + '</strong>'
+        + '<span class="integration-target-state">' + escapeHtml(stateWord(target.state))
+        + '</span></div>'
+        + '<p class="integration-target-detail">' + escapeHtml(target.detail) + '</p>'
+        + evidence
+        + '<div class="evidence"><span>File</span><code>' + escapeHtml(target.config_path)
+        + '</code></div>'
+        + '<details class="integration-manual"><summary>What Ghostlight writes</summary>'
+        + '<pre>' + escapeHtml(target.manual_setup) + '</pre></details>'
+        + '<div class="tile-actions">' + actions + locate + copy + '</div></article>';
     }
 
-    /* Plural products finally read properly: one line per target, each with its own switch. */
-    function targetPanel(entry, pending) {
-      const rows = entry.live.map((target) => {
-        const checked = target.state === "installed" || target.state === "updatable";
-        const waiting = pending.has(target.id);
-        const allowed = checked ? target.can_uninstall : target.can_install;
-        return '<div class="integration-target-row">'
-          + '<span class="integration-target-label">' + escapeHtml(target.target) + '</span>'
-          + '<code>' + escapeHtml(target.config_path) + '</code>'
-          + '<button class="integration-toggle" type="button" role="switch"'
-          + ' aria-checked="' + checked + '"'
-          + ' aria-label="' + escapeHtml(entry.name) + ' ' + escapeHtml(target.target) + '"'
-          + ' data-harness-operation="manage" data-harness-action="'
-          + (checked ? "uninstall" : "install") + '"'
-          + ' data-harness="' + escapeHtml(target.id) + '"'
-          + ' data-harness-name="' + escapeHtml(entry.name) + '"'
-          + (waiting || !allowed ? " disabled" : "") + '><span class="integration-knob"></span></button>'
-          + '</div>';
-      }).join("");
-      return '<div class="integration-targets" data-harness-panel="'
-        + escapeHtml(entry.productId) + '" hidden>' + rows + '</div>';
+    function stateWord(state) {
+      return {
+        installed: "connected",
+        updatable: "needs an update",
+        available: "not connected",
+        needs_attention: "needs attention",
+        not_detected: "not installed here"
+      }[state] ?? state;
     }
 
-    /* Not on this computer is discovery, not status. */
-    function absentList(entries) {
-      if (!entries.length) return "";
-      const rows = entries.map((entry) => {
-        const first = entry.targets[0];
-        const install = first.can_download
-          ? '<button class="link-button" type="button" data-harness-operation="download"'
-            + ' data-product="' + escapeHtml(entry.productId) + '" data-harness="'
-            + escapeHtml(first.id) + '" data-harness-name="' + escapeHtml(entry.name)
-            + '">Install</button>'
-          : "";
-        const locate = '<button class="link-button" type="button" data-harness-operation="locate"'
-          + ' data-harness="' + escapeHtml(first.id) + '" data-harness-name="'
-          + escapeHtml(entry.name) + '">Locate</button>';
-        const setup = '<button class="link-button" type="button" data-harness-operation="copy"'
-          + ' data-harness="' + escapeHtml(first.id) + '" data-harness-name="'
-          + escapeHtml(entry.name) + '" data-copy-kind="setup"'
-          + ' data-harness-manual="' + escapeHtml(first.id) + '">Copy setup</button>';
-        return '<div class="integration-absent-row">'
-          + '<img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="18" height="18">'
-          + '<span>' + escapeHtml(entry.name) + '</span>' + install + locate + setup + '</div>';
-      }).join("");
-      return '<details class="integration-absent"><summary>' + entries.length
-        + ' more clients Ghostlight supports</summary>' + rows + '</details>';
-    }
-
-    /* The connector path is one string for every client, so the page states it once. */
-    function connectorFooter(snapshot) {
+    /* The connector path is one string for every client, so the pane states it once. */
+    function connectorBlock(snapshot) {
       const first = snapshot.harnesses[0];
       if (!first?.connector_command) return "";
       return '<div class="integration-connector"><span>Connector</span>'
@@ -625,6 +554,11 @@
         + '<button class="link-button" type="button" data-harness-operation="copy"'
         + ' data-harness="' + escapeHtml(first.id) + '" data-harness-name="' + escapeHtml(first.name) + '"'
         + ' data-copy-kind="command">Copy</button></div>';
+    }
+
+    /* Selection is presentation state; the caller re-renders from the current snapshot. */
+    function selectHarnessProduct(productId) {
+      selectedProduct = productId;
     }
 
     function status(snapshot) {
@@ -1418,7 +1352,7 @@
     return Object.freeze({
       el, attempt,
       hero, row, drop, promote, rebuildFeed, queueCount,
-      band, collections, navigate, toast, openHarnessManual,
+      band, collections, navigate, toast, openHarnessManual, selectHarnessProduct,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setChoice, setSacred,
       setObserve, discardDraft, renderRules, previewResult, previewCleared, editorStatus,
