@@ -133,8 +133,10 @@ The prompt forbids substituting source or complementary-desktop evidence for the
 Ubuntu GNOME Wayland L1-L9 or installed-Windows journeys. The
 [dated evaluation](testing/reference-experience-evaluation-2026-08-16.md) inventories the passing
 automated and KDE evidence, dispositions every ADR-0126 acceptance measure at its current level,
-and lists the exact desktop, migration, accessibility, public-feedback, and owner decisions still
-required.
+and lists the exact desktop, migration, accessibility, and owner decisions still required. It also
+sorts, under "What is decidable without a new machine", the rows that never needed a real desktop
+at all. Public first-use feedback is no longer among the required rows; G0 removed it from 1.0 on
+2026-08-17.
 
 **1.0 waits for this epic.** The owner decided on 2026-08-16 that the release does not go out ahead
 of it, so the epic's completion is a release gate. Practically, that means S8's evidence is release

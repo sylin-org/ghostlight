@@ -97,8 +97,13 @@ installed-product observation, or the checklist deadlocks against itself.
   ancestor of `dev` again, so G10 promotes it by fast-forward.
 - [ ] Confirm that the non-gating debt under `STATUS.md` "Owed" remains outside 1.0 unless the
   owner explicitly promotes an item.
-- [ ] Confirm that every reference-experience S8 decision that does not require installed-product
-  observation is closed. The observation-dependent rows are evidence and close under G8.
+- [x] Confirm that every reference-experience S8 decision that does not require installed-product
+  observation is closed. Resolved 2026-08-17 and recorded in the dated evaluation under "What is
+  decidable without a new machine": public feedback is out, the parity decision is closed, the
+  cross-platform wording comparison needs no third environment because one guard-tested closed
+  table supplies the words to both install and `doctor`, the KDE accessibility half runs on the
+  existing host, and the WSL sentence needs a WSL harness rather than the clean Windows machine.
+  The observation-dependent rows are evidence and close under G8.
 - [ ] Name one final source revision and stop product and packaging changes while its candidate is
   evaluated.
 
@@ -189,6 +194,8 @@ per-lane result table. This checklist does not repeat those rows.
   ownership-safe uninstall.
 - [ ] Verify native window, tray where GNOME provides it, Applications activation, notifications,
   and no resident supervisor.
+- [ ] Run the GNOME half of the G8 accessibility matrix here, and record the rendered environment
+  sentence for the G8 desk check.
 
 Evidence: [Linux live lifecycle](testing/linux-live-lifecycle.md), completed for the current
 candidate.
@@ -211,6 +218,7 @@ Ghostlight state, and no developer toolchain. The development host does not sati
   service.
 - [ ] Upgrade from public 0.8 without clobbering user or foreign state.
 - [ ] Uninstall twice and prove only Ghostlight-owned state changed.
+- [ ] Record the rendered environment sentence for the G8 desk check.
 
 Evidence: add a dated installed-Windows candidate record under `docs/testing/`.
 
@@ -256,12 +264,19 @@ Evidence: add a dated candidate-bound browser and harness record under `docs/tes
 This gate consumes the installed-product evidence produced by G4, G5, and G7, which is why it sits
 after them rather than inside the freeze.
 
-- [ ] Observe the extension-arrived-by-sync state with no native host and its online recovery route.
-- [ ] Repeat with the walkthrough host unreachable and verify the bundled offline route.
-- [ ] Observe the WSL sentence with the browser on Windows.
-- [ ] Compare the same state on the same person's two machines and confirm the same product words.
-- [ ] Run keyboard-only, screen-reader-name, large-text, high-contrast, reduced-motion, browser-zoom,
-  and fractional-scaling checks on GNOME Wayland and KDE Wayland.
+- [ ] Disposition the extension-arrived-by-sync state. Live KDE Chromium already proved both
+  surfaces and the online and offline recovery routes against the production extension id, so what
+  remains is deciding whether that development-host evidence stands or must repeat against the
+  store build.
+- [ ] Run the KDE Wayland half of the accessibility matrix on the existing host: keyboard-only,
+  screen-reader-name, large-text, high-contrast, reduced-motion, browser-zoom, and
+  fractional-scaling. This needs no new machine and must not queue behind G4.
+- [ ] Run the GNOME Wayland half of the same matrix inside G4.
+- [ ] Observe the WSL sentence with the browser on Windows. This needs a WSL harness, not the clean
+  installed-Windows machine, so it does not wait for G5.
+- [ ] Compare the environment sentences recorded by G4, G5, and the WSL run. Those are the same
+  person's machines, and `language/environment.rs` is one guard-tested closed table feeding both
+  install and `doctor`, so this is a desk check rather than a separate run.
 - [ ] Mark each of the seven ADR-0126 acceptance measures, and every reference-experience deviation,
   met, accepted by the owner, or not met with a named follow-up.
 - [ ] Mark S8 and the reference-experience epic complete only after all mandatory rows close.
