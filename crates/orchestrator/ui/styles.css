@@ -328,7 +328,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 .tile-actions { display: flex; gap: 7px; margin-top: 11px; }
 .tile-actions .ghost-button, .tile-actions .danger-button { height: 27px; padding: 0 11px; font-size: 11.5px; }
 /* Master and detail: find on the left, act on the right. */
-.integration-split { display: grid; grid-template-columns: 268px 1fr; gap: 18px; align-items: start; }
+.integration-split { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
 @media (max-width: 900px) { .integration-split { grid-template-columns: 1fr; } }
 
 .integration-list { display: flex; flex-direction: column; gap: 1px; }
@@ -340,16 +340,21 @@ body.runtime-offline .state-word { color: var(--muted); }
 .integration-list-heading:first-child { margin-top: 0; }
 .integration-list-heading span { color: var(--faint); font-size: 9px; letter-spacing: 0; }
 .integration-list-row {
-  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px;
+  display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 10px;
   border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink-2);
   cursor: pointer; text-align: left; transition: background .18s var(--calm);
+}
+.integration-list-text { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+.integration-list-meta {
+  overflow: hidden; color: var(--faint); font-size: 10.5px; line-height: 1.4;
+  text-overflow: ellipsis; white-space: nowrap;
 }
 .integration-list-row:hover { background: var(--panel-2); }
 .integration-list-row[aria-current="true"] {
   border-color: var(--line); background: var(--panel); color: var(--ink);
 }
 .integration-list-row img {
-  width: 20px; height: 20px; flex: none; padding: 2px;
+  width: 24px; height: 24px; flex: none; margin-top: 1px; padding: 2px;
   border: 1px solid var(--line); border-radius: 5px; background: rgba(255, 255, 255, .035);
 }
 .integration-list-row .integration-name {
@@ -357,7 +362,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 }
 /* State reaches the list as a mark, never as the only carrier -- the pane names it in words. */
 .integration-pip {
-  width: 7px; height: 7px; flex: none; margin-left: auto; border-radius: 50%;
+  width: 7px; height: 7px; flex: none; margin: 5px 0 0 auto; border-radius: 50%;
   background: var(--integration-tone);
 }
 

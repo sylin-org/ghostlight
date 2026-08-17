@@ -457,13 +457,23 @@
       return groups.map(([category, members]) =>
         '<h2 class="integration-list-heading">' + escapeHtml(category.label)
         + '<span>' + members.length + '</span></h2>'
-        + members.map((entry) =>
-          '<button class="integration-list-row integration-' + category.id + '" type="button"'
-          + ' data-harness-select="' + escapeHtml(entry.productId) + '"'
-          + (entry.productId === selectedProduct ? ' aria-current="true"' : "")
-          + '><img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="20" height="20">'
-          + '<span class="integration-name">' + escapeHtml(entry.name) + '</span>'
-          + '<span class="integration-pip" aria-hidden="true"></span></button>').join("")
+        + members.map((entry) => {
+          // The second line says which context this client is registered in, which is the one
+          // thing the list can add that the group heading has not already said.
+          const shown = entry.live.length ? entry.live : entry.targets;
+          const blocked = shown.filter((target) => target.state === "needs_attention").length;
+          const meta = shown.length === 1
+            ? shown[0].target
+            : shown.length + " targets" + (blocked ? " - " + blocked + " needs attention" : "");
+          return '<button class="integration-list-row integration-' + category.id + '" type="button"'
+            + ' data-harness-select="' + escapeHtml(entry.productId) + '"'
+            + (entry.productId === selectedProduct ? ' aria-current="true"' : "")
+            + '><img src="integrations/' + escapeHtml(entry.icon) + '" alt="" width="24" height="24">'
+            + '<span class="integration-list-text">'
+            + '<span class="integration-name">' + escapeHtml(entry.name) + '</span>'
+            + '<span class="integration-list-meta">' + escapeHtml(meta) + '</span></span>'
+            + '<span class="integration-pip" aria-hidden="true"></span></button>';
+        }).join("")
       ).join("");
     }
 

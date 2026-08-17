@@ -377,6 +377,10 @@ const checks = [
       && integrationsHtml.includes('data-harness-action="install"')
       && integrationsHtml.includes("needs an update"),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
+  ["a list row carries two lines: who it is, and which context it registers in",
+    (rosterHtml.match(/class="integration-list-meta"/g) ?? []).length === listRows.length
+      && /class="integration-list-meta">[^<]+</.test(rosterHtml),
+    `rows: ${listRows.length} metas: ${(rosterHtml.match(/class="integration-list-meta"/g) ?? []).length}`],
   ["the list offers every client and marks exactly one as current",
     listRows.length >= 3 && listRows.filter((row) => row.current).length === 1,
     `list: ${JSON.stringify(listRows)}`],
