@@ -105,14 +105,17 @@ Windows inventory returned `browser_recovery_ambiguous` with exactly Google Chro
 Edge, no effect, and no launch. All four native-host registrations were missing and were left
 unchanged. This is useful source-host integration evidence, not the clean installed-Windows S8 lane.
 
-A later orchestrator-only workbench swap deployed the grouped MCP integrations surface at SHA-256
-`7CF5343388709140B9BD6AFA972AF6653119832A3BA7F94209C0D0052BD450AD`. The exact live
+A later orchestrator-only workbench swap deployed the compact status-sorted MCP integrations
+surface at SHA-256
+`D2D61F74AECAF82FB0935FA5EB4C8A75D9A8110884DACE20C2A4813265B46445`. The exact live
 `Ghostlight` / `Tauri Window` was visible and responsive. Its 21 concrete registry rows rendered as
-18 product cards: 6 Ready, 6 Available, 1 Needs Attention, and 5 Not Detected. Each group was
-alphabetical, the four semantic colors remained paired with visible words, and the already-running
-browser connector plus all ten observed MCP connectors survived the authority replacement and
-reconnected. This is live Windows source-host workbench evidence, not the clean installed-Windows
-S8 lane.
+18 product cards: 6 Ready, 6 Available, 1 Needs Attention, and 5 Not Detected. The compact roster is
+one flat grid in that status order, with names alphabetical inside each status. Every card pairs its
+visible status label with its semantic color; there are no status headings or counts. The
+already-running browser connector plus all nine observed MCP connectors survived the authority
+replacement and reconnected. The old authority PID 34920 was gone and the replacement ran only
+from the expected release path as PID 33708. This is live Windows source-host workbench evidence,
+not the clean installed-Windows S8 lane.
 
 S8 is `BLOCKED`, not complete. The required Ubuntu GNOME Wayland and clean installed-Windows
 candidate environments have not run. A Windows source host proved the corrected deterministic
@@ -436,11 +439,12 @@ roster pass and its release boundary.
   products offer an official Install destination, Locate, Copy MCP command, and target-specific
   Copy setup. Detected targets offer Set up or Update; current targets offer Remove. Automatic
   setup failure opens the same manual route.
-- The workbench now groups every product as Ready, Available, Needs Attention, or Not Detected in
-  that order and alphabetizes names inside each group. Updatable and malformed or foreign targets
+- The workbench renders one compact flat grid ordered Ready, Available, Needs Attention, and Not
+  Detected, with names alphabetical inside each status. Updatable and malformed or foreign targets
   require attention. A ready target wins for a plural product; otherwise attention wins over an
-  available sibling so the card cannot conceal a repair. Headings, counts, card labels, and
-  green/blue/amber/neutral treatments keep status legible without relying on color alone.
+  available sibling so the card cannot conceal a repair. Each card pairs its status label with a
+  green, blue, amber, or neutral treatment. The roster has no status headings or counts, and it
+  never relies on color alone.
 - Locate is one bounded native picker. Download URLs and clipboard material resolve in Rust from
   closed ids. The WebView has no generic dialog, clipboard, opener, shell, or filesystem grant.
 - JSON, JSONC, TOML, and the new shared YAML seam preserve unrelated configuration. YAML tests cover
@@ -459,9 +463,9 @@ roster pass and its release boundary.
   10 npm, and 4 MCPB tests; every tracked JavaScript syntax check; process, native CLI, PowerShell,
   workbench (34 assertions), and policy journeys; repository integrity; dependency license, ban,
   and source policy; and `cargo audit` with the same 17 documented GTK/Tauri-chain warnings.
-- The grouped-roster follow-up passed formatting, warnings-denied workspace/all-target Clippy, all
-  356 Rust tests, 116 extension tests, 10 npm launcher tests, 4 MCPB tests, all 45 tracked
-  JavaScript syntax checks, the 43-assertion workbench surface journey, policy grammar, and fresh
+- The status-sorted roster follow-up passed formatting, warnings-denied workspace/all-target
+  Clippy, all 356 Rust tests, 116 extension tests, 10 npm launcher tests, 4 MCPB tests, all 43 tracked
+  JavaScript syntax checks, the 42-assertion workbench surface journey, policy grammar, and fresh
   isolated process, native CLI, and PowerShell journeys. Its preview serves the complete 21-target,
   18-product roster and refuses to start if either the exact id set or product count drifts.
 

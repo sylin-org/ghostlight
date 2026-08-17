@@ -14,7 +14,7 @@
   const {
     VIEWS, GLYPHS, EFFECT_STORY, READINESS_NOTE, DESTINATIONS, glyphFor, capabilityClass,
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
-    INTEGRATION_GROUPS, INTEGRATION_STATE_GROUP, INTEGRATION_GROUP_PRIORITY,
+    INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId
   } = globalThis.GhostlightWords;
@@ -398,7 +398,8 @@
         if (!products.has(id)) products.set(id, []);
         products.get(id).push(harness);
       }
-      const groupById = new Map(INTEGRATION_GROUPS.map((group) => [group.id, group]));
+      const categoryById = new Map(INTEGRATION_CATEGORIES.map((category) => [category.id, category]));
+      const categoryOrder = new Map(INTEGRATION_CATEGORIES.map((category, index) => [category.id, index]));
       const actionButton = (harness, action, label, kind = "ghost-button") => {
         const waiting = pending.has(harness.id);
         return `<button class="${kind}" type="button" data-harness-operation="manage"`
@@ -416,10 +417,10 @@
           left.target.localeCompare(right.target) || left.id.localeCompare(right.id));
         const visible = sortedTargets.some((target) => target.state !== "not_detected")
           ? sortedTargets.filter((target) => target.state !== "not_detected") : [sortedTargets[0]];
-        const targetGroups = new Set(visible.map((target) => INTEGRATION_STATE_GROUP[target.state]));
-        const groupId = INTEGRATION_GROUP_PRIORITY.find((id) => targetGroups.has(id))
+        const targetCategories = new Set(visible.map((target) => INTEGRATION_STATE_CATEGORY[target.state]));
+        const categoryId = INTEGRATION_CATEGORY_PRIORITY.find((id) => targetCategories.has(id))
           ?? "needs-attention";
-        const group = groupById.get(groupId);
+        const category = categoryById.get(categoryId);
         const product = visible[0];
         const icon = escapeHtml(product.icon ?? "generic.svg");
         const rows = visible.map((harness) => {
@@ -451,30 +452,22 @@
             + ` data-harness-name="${escapeHtml(first.name)}">Install</button>` : "";
         const locate = missing ? utilityButton(first, "locate", "Locate") : "";
         const command = utilityButton(first, "copy", "Copy MCP command", ' data-copy-kind="command"');
-        const html = `<article class="tile integration-card integration-${group.id}">`
+        const html = `<article class="tile integration-card integration-${category.id}">`
           + `<div class="tile-top"><span class="integration-identity"><img src="integrations/${icon}" alt=""`
           + ` width="28" height="28"><h3>${escapeHtml(product.name)}</h3></span>`
-          + `<span class="tile-state">${escapeHtml(group.label)}</span></div>`
+          + `<span class="tile-state">${escapeHtml(category.label)}</span></div>`
           + `<div class="integration-targets">${rows}</div>`
           + `<div class="tile-actions integration-product-actions">${install}${locate}${command}</div>`
           + `</article>`;
-        return { groupId, name: product.name, productId, html };
+        return { categoryId, name: product.name, productId, html };
       });
 
-      el["integration-grid"].innerHTML = INTEGRATION_GROUPS.map((group) => {
-        const grouped = cards.filter((card) => card.groupId === group.id)
-          .sort((left, right) => left.name.localeCompare(right.name)
-            || left.productId.localeCompare(right.productId));
-        if (!grouped.length) return "";
-        const count = `${grouped.length} integration${grouped.length === 1 ? "" : "s"}`;
-        const headingId = `integration-group-${group.id}`;
-        return `<section class="integration-group integration-group-${group.id}"`
-          + ` aria-labelledby="${headingId}"><div class="integration-group-head">`
-          + `<h2 id="${headingId}"><span class="integration-group-marker" aria-hidden="true"></span>`
-          + `${escapeHtml(group.label)}</h2><span class="integration-group-count">${count}</span></div>`
-          + `<div class="integration-group-grid">${grouped.map((card) => card.html).join("")}</div>`
-          + `</section>`;
-      }).join("");
+      el["integration-grid"].innerHTML = cards
+        .sort((left, right) => (categoryOrder.get(left.categoryId) - categoryOrder.get(right.categoryId))
+          || left.name.localeCompare(right.name)
+          || left.productId.localeCompare(right.productId))
+        .map((card) => card.html)
+        .join("");
     }
 
     function status(snapshot) {

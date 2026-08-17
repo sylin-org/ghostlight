@@ -35,21 +35,21 @@
   };
 
   /**
-   * The integration roster's visible groups, in presentation order.
+   * The integration roster's card categories, in presentation order.
    *
    * Product state and presentation order are separate facts: an available product is shown before
    * one that needs attention, while attention still outranks availability when several concrete
    * targets share one product card.
    */
-  const INTEGRATION_GROUPS = Object.freeze([
+  const INTEGRATION_CATEGORIES = Object.freeze([
     Object.freeze({ id: "ready", label: "Ready" }),
     Object.freeze({ id: "available", label: "Available" }),
     Object.freeze({ id: "needs-attention", label: "Needs Attention" }),
     Object.freeze({ id: "not-detected", label: "Not Detected" })
   ]);
 
-  /** Map every closed harness state to the one group a product card may occupy. */
-  const INTEGRATION_STATE_GROUP = Object.freeze({
+  /** Map every closed harness state to the one category a product card may occupy. */
+  const INTEGRATION_STATE_CATEGORY = Object.freeze({
     installed: "ready",
     available: "available",
     updatable: "needs-attention",
@@ -58,7 +58,7 @@
   });
 
   /** Resolve a plural product card from its strongest concrete target state. */
-  const INTEGRATION_GROUP_PRIORITY = Object.freeze([
+  const INTEGRATION_CATEGORY_PRIORITY = Object.freeze([
     "ready", "needs-attention", "available", "not-detected"
   ]);
 
@@ -428,7 +428,7 @@
   ];
 
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
-    INTEGRATION_GROUPS, INTEGRATION_STATE_GROUP, INTEGRATION_GROUP_PRIORITY,
+    INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,

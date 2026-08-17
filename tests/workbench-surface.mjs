@@ -275,20 +275,14 @@ view.collections({
   ]
 }, new Set());
 const rosterHtml = nodes.get("integration-grid").innerHTML;
-const groupNames = ["ready", "available", "needs-attention", "not-detected"];
-const groupStarts = groupNames.map((name) => rosterHtml.indexOf(`integration-group-${name}`));
-const groupHtml = Object.fromEntries(groupNames.map((name, index) => {
-  const start = groupStarts[index];
-  const next = groupStarts[index + 1];
-  return [name, start < 0 ? "" : rosterHtml.slice(start, next < 0 ? undefined : next)];
+const rosterCards = [...rosterHtml.matchAll(
+  /<article class="([^"]*\bintegration-card\b[^"]*)">([\s\S]*?)<\/article>/g
+)].map(([, classes, html]) => ({
+  classes,
+  html,
+  name: html.match(/<h3>([^<]+)<\/h3>/)?.[1] ?? ""
 }));
-const occursInOrder = (html, values) => {
-  let cursor = -1;
-  return values.every((value) => {
-    cursor = html.indexOf(value, cursor + 1);
-    return cursor >= 0;
-  });
-};
+const rosterCard = (name) => rosterCards.find((card) => card.name === name);
 
 // A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
 // enforced denial, and an organization that supplied contacts supplied them for this moment.
@@ -381,33 +375,29 @@ const checks = [
     integrationsHtml.includes("Update")
       && integrationsHtml.includes('data-harness-action="install"'),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
-  ["the four nonempty integration groups render in product-owned order",
-    groupStarts.every((position) => position >= 0)
-      && groupStarts.every((position, index) => index === 0 || groupStarts[index - 1] < position)
-      && groupHtml.ready.includes(">Ready<")
-      && groupHtml.available.includes(">Available<")
-      && groupHtml["needs-attention"].includes(">Needs Attention<")
-      && groupHtml["not-detected"].includes(">Not Detected<"),
-    `groups: ${JSON.stringify(groupStarts)} roster: ${JSON.stringify(rosterHtml)}`],
-  ["products are alphabetical inside each semantic group",
-    occursInOrder(groupHtml.ready, ["<h3>Cline</h3>", "<h3>Zed</h3>"])
-      && occursInOrder(groupHtml.available, ["<h3>Claude Code</h3>", "<h3>Windsurf</h3>"])
-      && occursInOrder(groupHtml["needs-attention"], ["<h3>Codex</h3>", "<h3>Junie</h3>"])
-      && occursInOrder(groupHtml["not-detected"], ["<h3>Antigravity</h3>", "<h3>Qwen Code</h3>"]),
-    `roster: ${JSON.stringify(rosterHtml)}`],
+  ["integrations stay one flat roster with category order before alphabetic name order",
+    !rosterHtml.includes("integration-group")
+      && JSON.stringify(rosterCards.map((card) => card.name)) === JSON.stringify([
+        "Cline", "Zed", "Claude Code", "Windsurf",
+        "Codex", "Junie", "Antigravity", "Qwen Code"
+      ]),
+    `cards: ${JSON.stringify(rosterCards.map((card) => card.name))} roster: ${JSON.stringify(rosterHtml)}`],
   ["mixed products use Ready before Needs Attention before Available",
-    groupHtml.ready.includes("<h3>Cline</h3>")
-      && groupHtml.ready.includes("Visual Studio Code")
-      && groupHtml.ready.includes("Foreign entry preserved.")
-      && !groupHtml["needs-attention"].includes("<h3>Cline</h3>")
-      && groupHtml["needs-attention"].includes("<h3>Junie</h3>")
-      && groupHtml["needs-attention"].includes("Detected."),
+    rosterCard("Cline")?.classes.includes("integration-ready")
+      && rosterCard("Cline")?.html.includes("Visual Studio Code")
+      && rosterCard("Cline")?.html.includes("Foreign entry preserved.")
+      && rosterCard("Junie")?.classes.includes("integration-needs-attention")
+      && rosterCard("Junie")?.html.includes("Detected."),
     `roster: ${JSON.stringify(rosterHtml)}`],
-  ["every semantic group has visible words and a distinct card tone",
-    /class="[^"]*\bintegration-card\b[^"]*\bintegration-ready\b[^"]*"/.test(groupHtml.ready)
-      && /class="[^"]*\bintegration-card\b[^"]*\bintegration-available\b[^"]*"/.test(groupHtml.available)
-      && /class="[^"]*\bintegration-card\b[^"]*\bintegration-needs-attention\b[^"]*"/.test(groupHtml["needs-attention"])
-      && /class="[^"]*\bintegration-card\b[^"]*\bintegration-not-detected\b[^"]*"/.test(groupHtml["not-detected"]),
+  ["every category keeps visible words and a distinct card tone",
+    rosterCard("Cline")?.classes.includes("integration-ready")
+      && rosterCard("Cline")?.html.includes('<span class="tile-state">Ready</span>')
+      && rosterCard("Claude Code")?.classes.includes("integration-available")
+      && rosterCard("Claude Code")?.html.includes('<span class="tile-state">Available</span>')
+      && rosterCard("Codex")?.classes.includes("integration-needs-attention")
+      && rosterCard("Codex")?.html.includes('<span class="tile-state">Needs Attention</span>')
+      && rosterCard("Antigravity")?.classes.includes("integration-not-detected")
+      && rosterCard("Antigravity")?.html.includes('<span class="tile-state">Not Detected</span>'),
     `roster: ${JSON.stringify(rosterHtml)}`],
   ["plural harness targets share one recognizable product card",
     (rosterHtml.match(/class="tile integration-card/g) ?? []).length === 8
