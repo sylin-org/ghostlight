@@ -452,14 +452,27 @@
           + '<div class="tile-actions">' + locate + setup + '</div></div></details>';
       };
 
+      /*
+       * Two lines, because one was a lie about how much a row has to say. The first carries who
+       * this is and what to press; the second carries the one fact that row owns.
+       *
+       * A single line forced the row that mattered most into an ellipsis: the malformed-config
+       * sentence competed with the name for the same horizontal space and both lost. The second
+       * line is where a row's own detail goes when it differs from its group, and where the
+       * target goes when it does not, so line two is never empty and never a repeat.
+       */
       const row = (harness, productId, icon, name, plural) => {
         const group = categoryById.get(INTEGRATION_STATE_CATEGORY[harness.state]);
         const differs = harness.detail && harness.detail !== group?.sentence;
+        const meta = differs ? harness.detail : harness.target;
         return '<div class="integration-row" data-harness-row="' + escapeHtml(harness.id) + '">'
-          + '<img src="integrations/' + escapeHtml(icon) + '" alt="" width="20" height="20">'
-          + '<span class="integration-name">' + escapeHtml(name) + '</span>'
+          + '<img src="integrations/' + escapeHtml(icon) + '" alt="" width="22" height="22">'
+          + '<span class="integration-row-text">'
+          + '<span class="integration-name">' + escapeHtml(name)
           + (plural ? '<span class="integration-target-label">' + escapeHtml(harness.target) + '</span>' : "")
-          + (differs ? '<span class="integration-row-detail">' + escapeHtml(harness.detail) + '</span>' : "")
+          + '</span>'
+          + '<span class="integration-row-meta">' + escapeHtml(meta) + '</span>'
+          + '</span>'
           + '<span class="integration-row-actions">' + primaryFor(harness, productId)
           + overflow(harness, plural) + '</span></div>';
       };

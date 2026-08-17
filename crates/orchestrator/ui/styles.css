@@ -345,26 +345,31 @@ body.runtime-offline .state-word { color: var(--muted); }
 .integration-group > p { margin: 0; color: var(--muted); font-size: 11.5px; }
 
 /* Rows, two across where the window is wide enough. A row is one line: who, and what to press. */
-.integration-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 4px; }
+.integration-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); gap: 5px; }
+/* What needs a person gets the whole width, so its sentence is never the one that gets cut. */
+.integration-needs-attention .integration-rows { grid-template-columns: 1fr; }
 .integration-row {
-  display: flex; min-width: 0; align-items: center; gap: 9px;
-  padding: 6px 10px; border: 1px solid transparent; border-left: 2px solid var(--integration-tone);
+  display: flex; min-width: 0; align-items: flex-start; gap: 10px;
+  padding: 9px 11px; border: 1px solid transparent; border-left: 2px solid var(--integration-tone);
   border-radius: 7px; background: var(--panel-2);
   transition: border-color .25s var(--calm), background .25s var(--calm);
 }
 .integration-row:hover { border-color: var(--line); border-left-color: var(--integration-tone); background: var(--panel); }
 .integration-row img {
-  width: 20px; height: 20px; flex: none; padding: 2px;
+  width: 22px; height: 22px; flex: none; margin-top: 1px; padding: 2px;
   border: 1px solid var(--line); border-radius: 5px; background: rgba(255, 255, 255, .035);
 }
+.integration-row-text { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
 .integration-name {
+  display: flex; min-width: 0; align-items: baseline; gap: 7px;
   overflow: hidden; color: var(--ink); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap;
 }
-/* Only a product with more than one target needs its target named. */
+/* Only a product with more than one target names it beside the product itself. */
 .integration-target-label { flex: none; color: var(--faint); font: 400 10px/1 var(--mono); }
-.integration-row-detail {
-  min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px;
-  text-overflow: ellipsis; white-space: nowrap;
+/* The one fact this row owns: its own detail when it differs from the group, else its target. */
+.integration-row-meta {
+  display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 11px; line-height: 1.45;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
 .integration-row-actions { display: flex; flex: none; align-items: center; gap: 6px; margin-left: auto; }
 .integration-row-actions .ghost-button, .integration-row-actions .danger-button {

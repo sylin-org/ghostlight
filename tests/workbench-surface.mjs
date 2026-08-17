@@ -405,7 +405,13 @@ const checks = [
       && rosterRow("junie-jetbrains")?.html.includes("Foreign entry preserved.")
       && rosterRow("codex")?.html.includes("Old owned connector."),
     `rows: ${JSON.stringify(rosterRows.map((row) => row.id))}`],
-  ["only a product with several targets names its target",
+  ["every row has a second line carrying the one fact it owns",
+    rosterRows.every((row) => row.html.includes('class="integration-row-meta"'))
+      // Its own detail when that differs from the group, otherwise its target.
+      && rosterRow("junie-jetbrains")?.html.includes('integration-row-meta">Foreign entry preserved.')
+      && rosterRow("zed")?.html.includes('integration-row-meta">User'),
+    `zed: ${JSON.stringify(rosterRow("zed")?.html)}`],
+  ["only a product with several targets names its target beside the name",
     rosterRow("cline-vscode")?.html.includes('class="integration-target-label"')
       && !rosterRow("zed")?.html.includes('class="integration-target-label"'),
     `cline: ${JSON.stringify(rosterRow("cline-vscode")?.html)}`],
