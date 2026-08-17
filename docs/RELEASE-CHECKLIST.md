@@ -155,10 +155,19 @@ both operating-system passes cover that exact revision.
   version, and source revision.
 - [ ] GitHub provenance verifies for all 17 assets, the manifest, and the checksum file against the
   exact repository, workflow, source revision, and source ref.
-- [ ] Take local custody of the complete candidate and of the native-package and extension inputs,
-  then re-verify every hash from the local copy. Do this within 7 days of the run: retention is 7
-  days on `native-*` and `chrome-extension` and 14 days on the candidate bundle, and the live gates
-  outlast both. Record the local location in machine-local notes, never here.
+- [ ] Take local custody of the candidate and re-verify it from the local copy, because the live
+  gates outlast GitHub's retention: 7 days on the `native-*` and `chrome-extension` inputs, 14 days
+  on the assembled bundle. Losing them means rebuilding, and a rebuild is a new revision, which
+  reopens G1 through G8. Do this on the day the workflow finishes:
+
+  ```sh
+  gh run download <candidate-run-id> --dir <local-durable-path>
+  pwsh -File scripts/check-release-candidate.ps1 -CandidateDirectory <local-durable-path>/release-candidate
+  ```
+
+  The verifier already checks manifest validity, the exact 17-artifact count, every name, length,
+  and hash, and that `SHA256SUMS` is the exact sorted manifest. Record the local path in
+  machine-local notes, never here.
 
 Evidence: replace the stale candidate reference with a new dated candidate record.
 
