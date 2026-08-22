@@ -152,7 +152,10 @@ if ($statusResponse.StatusCode -ne 200) {
     throw "Chrome status check failed with HTTP $($statusResponse.StatusCode)"
 }
 $status = $statusResponse.Content | ConvertFrom-Json
-if ($status.takenDown -or $status.warned) {
+$takenDown = $status.PSObject.Properties["takenDown"]
+$warned = $status.PSObject.Properties["warned"]
+if (($null -ne $takenDown -and [bool]$takenDown.Value) -or
+    ($null -ne $warned -and [bool]$warned.Value)) {
     throw "Chrome item is taken down or warned; inspect the dashboard before submission"
 }
 

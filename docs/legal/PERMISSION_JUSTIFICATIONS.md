@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Permission Justifications
 
-Last updated: 2026-08-22 for the planned 1.0 manifest
+Last updated: 2026-08-22
 
 These blocks correspond exactly to `extension/manifest.json`. Recheck store field names and length
 limits at submission time.

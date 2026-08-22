@@ -1099,10 +1099,14 @@ and carries the four exact inherited icons. This is local source evidence, not t
 provenance-bound G2 artifact. The exact comparison, fixes, checks, and remaining public-policy
 handoff are in
 [the dated extension release preparation](testing/extension-release-preparation-2026-08-22.md).
-The owner subsequently authorized store work. API V2 accepted that exact local ZIP as the existing
-item's `1.0.0` draft with upload state `SUCCEEDED`. It has not been submitted or made public, and it
-does not close G3 until the frozen provenance-bound candidate matches its bytes. The public privacy
-page and manual dashboard disclosures remain open before submission.
+The owner subsequently authorized store and public-policy work. API V2 accepted that exact local
+ZIP as the existing item's `1.0.0` draft with upload state `SUCCEEDED`. The public privacy page now
+serves the current browser-local recording and diagnostic disclosures with a greenfield date-only
+header, and the owner manually reconciled and saved the dashboard-only permission, remote-code,
+data-use, certification, and privacy URL fields. API V2 then submitted the draft with state
+`PENDING_REVIEW` and publish type `STAGED_PUBLISH`. It is not public and approval will not publish
+it automatically. This pre-freeze submission does not close G3 until the frozen provenance-bound
+candidate matches its bytes and the reviewed store installation is verified.
 
 - Build-only candidate `fd86403` is historical evidence, not the publishable 1.0 candidate. It is an
   ancestor of the current head, so the next candidate is built from the revision G0 freezes. CI
@@ -1122,9 +1126,9 @@ page and manual dashboard disclosures remain open before submission.
   does not replace that release-environment gate.
 - Reconcile release metadata, public status, store submission, compatibility, distribution, and
   the final public documentation only when the 1.0 artifacts exist.
-- Chrome API V2 access is restored and the local prepared ZIP is the current 1.0 draft. Publish the
-  corrected privacy policy, complete the dashboard-only disclosure check, and replace or verify the
-  draft against the exact G2 candidate before staged submission.
+- Chrome API V2 access is restored, the public policy and dashboard disclosures are current, and
+  the local prepared ZIP is pending staged review. Replace or verify the draft against the exact G2
+  candidate before claiming G3, then obtain separate owner authorization for public publication.
 - Re-run the Linux lifecycle and visible-browser policy matrix on the current policy-restoration
   revision using the `test-01` development host.
 - Publish the candidate-bound `ghostlight@1.0.0` tarball only after its six raw GitHub assets are

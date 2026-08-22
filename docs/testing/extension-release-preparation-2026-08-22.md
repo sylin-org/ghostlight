@@ -1,13 +1,14 @@
 # Ghostlight 1.0 extension release preparation -- 2026-08-22
 
-Status: local package and disclosure preparation passed; no store or website mutation performed.
+Status: local preparation passed; public policy current; staged Chrome review pending.
 
 ## Boundary
 
 This record compares the exact published 0.8 extension artifact with the current 1.0 source and
 records the local 1.0 package produced after fixing the differences that were actual release
-issues. It does not claim Chrome review, public website synchronization, store installation, or
-GitHub build provenance.
+issues. Later sections record the authorized public-policy synchronization and staged Chrome
+review submission. It does not claim store installation, public store publication, or GitHub
+build provenance.
 
 The shipped-byte baseline is release commit
 `993135b048b60622157266b53b21f1719c9df4b3` and the public GitHub asset
@@ -102,20 +103,13 @@ a source-version mismatch, a development key, or repository-only test and packag
 
 ## Remaining owner-controlled boundaries
 
-- The canonical policy is ready in `docs/legal/PRIVACY.md`, but the public
-  `https://sylin.org/ghostlight/privacy/` fallback remains the 0.8 text in the separate website
-  repository. Update that fallback and rebuild the website before Chrome submission. This is an
-  outward website action and was not performed here.
-- Review the signed-in Chrome dashboard fields against the prepared listing, privacy, and
-  permission text. Reuse the current screenshots and promotional assets unless inspection finds a
-  material inaccuracy.
 - Build or adopt the exact ZIP from the final frozen, committed revision through the candidate
   workflow before claiming GitHub provenance. The local ZIP is ready for byte comparison but is
   not itself a provenance attestation.
-- Upload, submit for staged review, and publish only with explicit owner approval. No Chrome Web
-  Store request was made in this preparation.
+- Replace or verify the store draft against that exact candidate before G3 can close.
+- Public store publication remains a separate owner-authorized action after review approval.
 
-## Store draft update -- 2026-08-22
+## Store submission update -- 2026-08-22
 
 The owner later authorized Chrome publication work. The signed-in Developer Dashboard exposed the
 non-secret publisher id, but Google does not allow that dashboard to be scripted. The API V2 path
@@ -130,9 +124,19 @@ The prepared local ZIP above was uploaded to the existing item through API V2. G
 `SUCCEEDED` and draft version `1.0.0`. The uploaded hash was
 `ccb48577a93995b1eaaf9b13fab75313a347483553782d178187e1ea8ceb0923`.
 
-This is a draft upload only. It has not been submitted for review or made public, and it does not
-close G3 because G0 has not frozen a revision and G2 has not produced the exact provenance-bound
-candidate. The public privacy page still carries materially stale 0.8 recording text. Publishing
-the corrected policy to the separate website repository requires its own owner approval. Chrome
-Store disclosure fields also remain a manual dashboard check because API V2 exposes package,
-status, submission, and rollout operations but not listing-field editing.
+The owner then approved the separate public-policy update. The website now serves the current
+policy at `https://sylin.org/ghostlight/privacy/`, including browser-local recording boundaries,
+and its public header contains only the update date. Website commits
+`525471d096227870d1aff7d436aad5c50de30b76` and
+`6017958af5b6f96a57f9b8376184a2d12cb0b2fc` made and verified that change.
+
+The owner manually reconciled and saved the dashboard-only permission justifications, remote-code
+disclosure, data-use declarations, certifications, and privacy-policy URL. The existing accurate
+screenshots and promotional assets were retained. No change was needed solely because the version
+changed.
+
+After explicit approval, API V2 submitted the uploaded `1.0.0` draft with staged publication.
+Google returned submission state `PENDING_REVIEW` and publish type `STAGED_PUBLISH`. This does not
+make the extension public, and review approval will not publish it automatically. G3 remains open
+because G0 has not frozen a revision, G2 has not produced the exact provenance-bound candidate,
+and no reviewed store installation has been verified.

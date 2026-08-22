@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Privacy Policy
 
-Last updated: 2026-08-22 for the planned 1.0 adapter
+Last updated: 2026-08-22
 
 Canonical public URL: https://sylin.org/ghostlight/privacy/
 
