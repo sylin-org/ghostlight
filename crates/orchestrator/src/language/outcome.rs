@@ -29,6 +29,19 @@ pub enum TargetNoun {
     Item,
 }
 
+/// The user-visible scope of one screenshot capture.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CaptureKind {
+    /// Current visual viewport.
+    Viewport,
+    /// Full document surface.
+    FullPage,
+    /// One semantic target.
+    Target,
+    /// One magnified region from a current screenshot view.
+    Region,
+}
+
 /// What kind of thing an action touched, in words Ghostlight is willing to put in an audit.
 ///
 /// A page authors its own `role` attribute, so the string that arrives is page content and can
@@ -206,7 +219,7 @@ pub enum Outcome {
     },
     /// A screenshot was captured.
     Captured {
-        full_page: bool,
+        scope: CaptureKind,
         width: u32,
         height: u32,
     },
@@ -370,12 +383,17 @@ impl Outcome {
                 place(host, "the page")
             ),
             Self::Captured {
-                full_page,
+                scope,
                 width,
                 height,
             } => format!(
                 "Captured the {} at {width}x{height}.",
-                if *full_page { "full page" } else { "viewport" }
+                match scope {
+                    CaptureKind::Viewport => "viewport",
+                    CaptureKind::FullPage => "full page",
+                    CaptureKind::Target => "target",
+                    CaptureKind::Region => "magnified region",
+                }
             ),
             Self::TargetClicked { host, subject } => {
                 format!(
@@ -998,7 +1016,9 @@ impl From<WorkspaceError> for WorkspaceReason {
                 Self::TabUnavailable
             }
             WorkspaceError::StaleTarget => Self::StaleTarget,
-            WorkspaceError::StaleView | WorkspaceError::ViewPointOutOfBounds => Self::StaleView,
+            WorkspaceError::StaleView
+            | WorkspaceError::ViewPointOutOfBounds
+            | WorkspaceError::ViewRegionOutOfBounds => Self::StaleView,
             WorkspaceError::Held => Self::TabHeld,
             WorkspaceError::Busy => Self::WorkspaceBusy,
             WorkspaceError::NotOwnedTab
@@ -1207,8 +1227,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ActionSubject, BlockedReason, Observed, Outcome, Refusal, SavedTo, TargetNoun, TargetRole,
-        WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
+        ActionSubject, BlockedReason, CaptureKind, Observed, Outcome, Refusal, SavedTo, TargetNoun,
+        TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE,
+        TARGET_LABEL_MAX_CHARS,
     };
     use crate::workspace::WorkspaceError;
 
@@ -1289,7 +1310,7 @@ mod tests {
             ),
             (
                 Outcome::Captured {
-                    full_page: false,
+                    scope: CaptureKind::Viewport,
                     width: 1280,
                     height: 720,
                 },
@@ -1713,7 +1734,7 @@ mod tests {
         assert_eq!(sequence.observed().count, Some(3));
 
         let capture = Outcome::Captured {
-            full_page: false,
+            scope: CaptureKind::Viewport,
             width: 1280,
             height: 720,
         };

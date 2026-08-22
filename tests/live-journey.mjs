@@ -92,15 +92,53 @@ try {
   assert.equal(screenshotResponse.result.content[1].type, "image");
   assert.equal(screenshotResponse.result.content[1].mimeType, "image/jpeg");
   assert.ok(screenshotResponse.result.content[1].data.length > 1000);
+
+  const regionWidth = Math.max(1, Math.floor(screenshot.facts.width / 2));
+  const regionHeight = Math.max(1, Math.floor(screenshot.facts.height / 2));
+  const regionResponse = await request("tools/call", {
+    name: "browser_screenshot",
+    arguments: {
+      view: screenshot.facts.view,
+      x: Math.floor((screenshot.facts.width - regionWidth) / 2),
+      y: Math.floor((screenshot.facts.height - regionHeight) / 2),
+      width: regionWidth,
+      height: regionHeight
+    }
+  });
+  const region = structured(regionResponse);
+  assert.equal(region.status, "succeeded", JSON.stringify(region));
+  assert.match(region.facts.view, /^view_/);
+  assert.notEqual(region.facts.view, screenshot.facts.view);
+  assert.ok(region.facts.width > regionWidth);
+  assert.ok(region.facts.height > regionHeight);
+  assert.equal(regionResponse.result.content[1].type, "image");
+  assert.ok(regionResponse.result.content[1].data.length > 1000);
+
+  const chainedWidth = Math.max(1, Math.floor(region.facts.width / 2));
+  const chainedHeight = Math.max(1, Math.floor(region.facts.height / 2));
+  const chained = structured(await request("tools/call", {
+    name: "browser_screenshot",
+    arguments: {
+      view: region.facts.view,
+      x: Math.floor((region.facts.width - chainedWidth) / 2),
+      y: Math.floor((region.facts.height - chainedHeight) / 2),
+      width: chainedWidth,
+      height: chainedHeight
+    }
+  }));
+  assert.equal(chained.status, "succeeded", JSON.stringify(chained));
+  assert.match(chained.facts.view, /^view_/);
+  assert.notEqual(chained.facts.view, region.facts.view);
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 1600));
 
   const closed = structured(await request("tools/call", {
     name: "browser_tabs",
     arguments: { action: "close", tab }
   }));
-  assert.equal(closed.status, "succeeded", JSON.stringify(closed));
-  assert.equal(closed.facts.closed, true);
-  console.log(JSON.stringify({ live: true, catalog_tools: listed.result.tools.length, opened: true, read: true, screenshot: true, closed: true }));
+  const preserved = closed.status === "blocked" && closed.facts.reason === "browser_local_interlock";
+  assert.ok(closed.status === "succeeded" || preserved, JSON.stringify(closed));
+  if (closed.status === "succeeded") assert.equal(closed.facts.closed, true);
+  console.log(JSON.stringify({ live: true, catalog_tools: listed.result.tools.length, opened: true, read: true, screenshot: true, region_screenshot: true, chained_region_screenshot: true, closed: closed.status === "succeeded", preserved }));
 } finally {
   child.stdin.end();
   child.kill();

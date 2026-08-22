@@ -31,7 +31,8 @@ navigation makes prior target handles stale.
 View handles are returned by screenshots. They bind rendered coordinates to one tab, document
 generation, viewport origin, viewport size, device scale, and zoom. Coordinate input is rejected
 when that binding is no longer current. Coordinates use the returned image dimensions, with the
-top-left pixel at `(0, 0)`.
+top-left pixel at `(0, 0)`. A bounded region screenshot returns a new view with its own transform,
+so another region can be selected from the magnified image.
 
 Timeouts are bounded from 100 to 30000 milliseconds and default to 8000 milliseconds. Text is
 UTF-8 and bounded. URLs must be absolute `http` or `https` URLs.
@@ -153,13 +154,15 @@ state.
 
 ### `browser_screenshot`
 
-Capture the viewport, full page, or one target and return a view handle for coordinate actions.
-Shortest call: `{}`.
+Capture the viewport, full page, one target, or a magnified region from a current view. Every
+capture returns a view handle for later coordinate actions or another region capture. Shortest
+call: `{}`.
 
-Inputs use one of three schema branches: optional `tab` only for viewport capture; optional `tab`
-plus required `full_page:true`; or optional `tab` plus required `target`. Optional `timeout_ms` and
-restrictions apply to every branch. Target and full-page capture cannot be combined. Capability:
-`read`.
+Inputs use one of four schema branches: optional `tab` only for viewport capture; optional `tab`
+plus required `full_page:true`; optional `tab` plus required `target`; or optional `tab` plus
+required `view`, `x`, `y`, `width`, and `height`. Region coordinates are image pixels and must form
+a positive rectangle wholly inside the current view. Optional `timeout_ms` and restrictions apply
+to every branch. Target, full-page, and region capture cannot be combined. Capability: `read`.
 
 Facts: `tab`, `view`, `mime_type`, `width`, and `height`, plus one bounded MCP image content block.
 

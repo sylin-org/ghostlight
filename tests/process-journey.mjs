@@ -19,6 +19,7 @@ const environment = {
 };
 const children = [];
 const physicalCommands = [];
+const physicalRequests = [];
 let createdDeployLock = false;
 // A real one-pixel GIF89a, the shape the extension now hands over already finished.
 const ONE_PIXEL_GIF = "R0lGODlhAQABAPAAAAwiOAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAZAAAACwAAAAAAQABAAAIBAABBAQAOw==";
@@ -183,6 +184,7 @@ async function runAdapter(peer) {
     const request = frame.request;
     const command = request.command;
     physicalCommands.push(command.command);
+    physicalRequests.push(command);
     let result;
     if (command.command === "present") result = { outcome: "presented", rendered: true };
     else if (command.command === "open_tab") {
@@ -190,6 +192,58 @@ async function runAdapter(peer) {
       result = { outcome: "tab_opened", tab, committed_urls: [tab.url] };
     } else if (command.command === "read_text") {
       result = { outcome: "text", tab_id: tab.tab_id, text: "Example Domain", truncated: false, title: tab.title, url: tab.url };
+    } else if (command.command === "screenshot") {
+      result = {
+        outcome: "screenshot",
+        tab_id: tab.tab_id,
+        mime_type: "image/jpeg",
+        data: ONE_PIXEL_JPEG,
+        width: 400,
+        height: 300,
+        viewport: {
+          scope: "viewport",
+          page_x: 10,
+          page_y: 20,
+          css_width: 800,
+          css_height: 600,
+          visual_page_x: 10,
+          visual_page_y: 20,
+          visual_css_width: 800,
+          visual_css_height: 600,
+          device_scale: 1,
+          zoom: 1,
+          output_scale: 0.5
+        }
+      };
+    } else if (command.command === "screenshot_region") {
+      const { region, expected_viewport: expected } = command;
+      const scale = Math.min(
+        2400 / region.width,
+        2400 / region.height,
+        Math.sqrt(4_000_000 / (region.width * region.height))
+      );
+      result = {
+        outcome: "screenshot",
+        tab_id: tab.tab_id,
+        mime_type: "image/jpeg",
+        data: ONE_PIXEL_JPEG,
+        width: Math.round(region.width * scale),
+        height: Math.round(region.height * scale),
+        viewport: {
+          scope: "region",
+          page_x: region.x,
+          page_y: region.y,
+          css_width: region.width,
+          css_height: region.height,
+          visual_page_x: expected.visual_page_x,
+          visual_page_y: expected.visual_page_y,
+          visual_css_width: expected.visual_css_width,
+          visual_css_height: expected.visual_css_height,
+          device_scale: expected.device_scale,
+          zoom: expected.zoom,
+          output_scale: scale
+        }
+      };
     } else if (command.command === "observe") {
       setTimeout(() => peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: { outcome: "observed", tab_id: command.tab_id, satisfied: true, elapsed_ms: 1000, readiness: "complete" } } }), 1000);
       continue;
@@ -400,6 +454,34 @@ try {
   assert.equal(read.facts.text, "Example Domain");
   assert.equal(read.summary, "Read 2 words from example.com.");
 
+  const screenshotResponse = await mcp.request("tools/call", {
+    name: "browser_screenshot",
+    arguments: { tab: restartedHandle }
+  });
+  const screenshot = structured(screenshotResponse);
+  assert.equal(screenshot.status, "succeeded");
+  assert.match(screenshot.facts.view, /^view_/);
+  assert.equal(screenshotResponse.result.content.some((item) => item.type === "image"), true);
+
+  const firstRegion = structured(await mcp.request("tools/call", {
+    name: "browser_screenshot",
+    arguments: { view: screenshot.facts.view, x: 100, y: 50, width: 100, height: 50 }
+  }));
+  assert.equal(firstRegion.status, "succeeded");
+  assert.equal(firstRegion.summary, "Captured the magnified region at 2400x1200.");
+  const firstRegionCommand = physicalRequests.findLast((command) => command.command === "screenshot_region");
+  assert.deepEqual(firstRegionCommand.region, { x: 210, y: 120, width: 200, height: 100 });
+  assert.equal(firstRegionCommand.expected_viewport.output_scale, 0.5);
+
+  const secondRegion = structured(await mcp.request("tools/call", {
+    name: "browser_screenshot",
+    arguments: { view: firstRegion.facts.view, x: 1200, y: 600, width: 600, height: 300 }
+  }));
+  assert.equal(secondRegion.status, "succeeded");
+  const secondRegionCommand = physicalRequests.findLast((command) => command.command === "screenshot_region");
+  assert.deepEqual(secondRegionCommand.region, { x: 310, y: 170, width: 50, height: 25 });
+  assert.equal(secondRegionCommand.expected_viewport.scope, "region");
+
   const startedRecording = structured(await mcp.request("tools/call", {
     name: "browser_record",
     arguments: { action: "start", tab: restartedHandle }
@@ -483,7 +565,7 @@ try {
   assert.equal(physicalCommands.length, physicalCommandCountBeforeRecovery);
   assert.equal(disconnected.next_steps.length, 1);
 
-  console.log("process journey ok: reconnect -> open/read -> recording -> close -> pinned no-adapter refusal");
+  console.log("process journey ok: reconnect -> open/read -> screenshot/region/chain -> recording -> close -> pinned no-adapter refusal");
 } finally {
   for (const child of children.reverse()) {
     if (!child.killed) child.kill();

@@ -42,6 +42,15 @@ evidence.
 
 ## Test evidence
 
+### Region screenshot parity correction
+
+The published `v0.8.0` extension supported a bounded `computer` zoom action that cropped a region,
+magnified it, retained the new coordinate transform, and allowed another region to be selected
+from the result. The initial 1.0 harvest inventory retained its tests but failed to turn that user
+capability into an explicit parity disposition. ADR-0131 corrects the gap on current seams through
+the `browser_screenshot` view branch. The old action name, tuple signature, and implementation do
+not return.
+
 [`test-inventory.json`](test-inventory.json) is generated from `c01cc327` by
 `scripts/harvest-0.8-test-inventory.ps1`. It records every Rust test attribute, every JavaScript
 `test` or `it` declaration, and every named Lightbox scenario in the source registries.

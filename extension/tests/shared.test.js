@@ -299,6 +299,9 @@ test("adapter protocol two wires the new physical mechanisms at the Chrome seam"
   const root = join(__dirname, "..");
   const worker = readFileSync(join(root, "service-worker.js"), "utf8");
   assert.match(worker, /command\.command === "resize_window"/);
+  assert.match(worker, /command\.command === "screenshot_region"/);
+  assert.match(worker, /command\.command === "screenshot_region"[\s\S]*?validateView\(command\.tab_id, command\.expected_viewport\)/);
+  assert.match(worker, /screenshotApi\.regionClip\(command\.region\)/);
   assert.match(worker, /command\.command === "read_diagnostics"/);
   assert.match(worker, /command\.command === "clear_diagnostics"/);
   assert.match(worker, /command\.command === "start_recording"/);

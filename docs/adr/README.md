@@ -142,6 +142,8 @@ history live here.
 
 | [0130](0130-integration-switches-and-evidence.md) | Integration switches and foreign-entry evidence: one `role="switch"` per client instead of a four-category card roster, the page leading with what Ghostlight already connected, blocked and absent clients as the only exception shapes, and a foreign entry showing the command it found beside the one Ghostlight would write while still never overwriting it | Superseded in full by [0129](0129-integration-roster-reverted-to-cards.md); retained as history and does not govern. Filed as 0127 on 2026-08-16 and renumbered to 0130 on 2026-08-17 to clear a duplicate number (superseded [0125](0125-recognizable-plural-linux-harness-integrations.md) Decision 2's roster presentation; built on [0126](0126-reference-experience-contract.md) Decision 9) |
 
+| [0131](0131-view-bound-region-screenshots.md) | View-bound region screenshots: the current screenshot tool accepts a bounded image rectangle, the workspace resolves and chains its transform, and a distinct physical primitive fails safely on an older adapter | Accepted (amends [0107](0107-terse-native-browser-language.md); builds on [0010](0010-coordinate-model-official.md)/[0101](0101-adaptive-tool-surfaces-canonical-operations-and-browser-mechanisms.md)) |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ghostlight_bridge::browser::{
-    BrowserReadiness, ObservedTarget, PhysicalPoint, PhysicalTab, ViewportGeometry,
+    BrowserReadiness, ObservedTarget, PhysicalPoint, PhysicalRectangle, PhysicalTab,
+    ViewportGeometry,
 };
 
 use crate::language::outcome::TargetRole;
@@ -950,6 +951,76 @@ impl WorkspaceLease {
         Ok((selected, point))
     }
 
+    /// Resolve an image rectangle to page CSS coordinates with ownership and generation checks.
+    pub fn resolve_view_region(
+        &self,
+        requested: &str,
+        selected_tab: Option<&SelectedTab>,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> Result<(SelectedView, PhysicalRectangle), WorkspaceError> {
+        let state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let handle = ViewHandle(requested.into());
+        let Some(view) = workspace.views.get(&handle) else {
+            let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
+                id != &self.workspace && candidate.views.contains_key(&handle)
+            });
+            return Err(if owned_elsewhere {
+                WorkspaceError::NotOwnedView
+            } else {
+                WorkspaceError::StaleView
+            });
+        };
+        let tab = workspace
+            .tabs
+            .get(&view.tab)
+            .ok_or(WorkspaceError::StaleView)?;
+        if view.generation != tab.generation {
+            return Err(WorkspaceError::StaleView);
+        }
+        if selected_tab.is_some_and(|selected| selected.handle != view.tab) {
+            return Err(WorkspaceError::ViewTabMismatch);
+        }
+        let right = x + width;
+        let bottom = y + height;
+        if !x.is_finite()
+            || !y.is_finite()
+            || !width.is_finite()
+            || !height.is_finite()
+            || x < 0.0
+            || y < 0.0
+            || width <= 0.0
+            || height <= 0.0
+            || !right.is_finite()
+            || !bottom.is_finite()
+            || right > f64::from(view.width)
+            || bottom > f64::from(view.height)
+            || view.viewport.output_scale <= 0.0
+        {
+            return Err(WorkspaceError::ViewRegionOutOfBounds);
+        }
+        let selected = SelectedView {
+            handle,
+            tab: view.tab.clone(),
+            viewport: view.viewport,
+            width: view.width,
+            height: view.height,
+        };
+        let region = PhysicalRectangle {
+            x: view.viewport.page_x + x / view.viewport.output_scale,
+            y: view.viewport.page_y + y / view.viewport.output_scale,
+            width: width / view.viewport.output_scale,
+            height: height / view.viewport.output_scale,
+        };
+        Ok((selected, region))
+    }
+
     /// Invalidate screenshot coordinates after a viewport-changing operation.
     pub fn invalidate_views(&self, tab: &TabHandle) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
@@ -1066,6 +1137,9 @@ pub enum WorkspaceError {
     /// Image coordinate is not finite or is outside the captured view.
     #[error("view coordinate is outside the captured image")]
     ViewPointOutOfBounds,
+    /// Image rectangle is invalid or extends outside the captured view.
+    #[error("view region is outside the captured image")]
+    ViewRegionOutOfBounds,
     /// Runtime governance holds the tab.
     #[error("tab is held by runtime governance")]
     Held,
@@ -1307,12 +1381,54 @@ mod tests {
                 .unwrap_err(),
             WorkspaceError::ViewPointOutOfBounds
         );
+        let (_, region) = lease
+            .resolve_view_region(view.as_str(), Some(&tab), 100.0, 50.0, 200.0, 100.0)
+            .unwrap();
+        assert_eq!(region.x, 210.0);
+        assert_eq!(region.y, 120.0);
+        assert_eq!(region.width, 400.0);
+        assert_eq!(region.height, 200.0);
+        assert_eq!(
+            lease
+                .resolve_view_region(view.as_str(), Some(&tab), 300.0, 0.0, 101.0, 10.0)
+                .unwrap_err(),
+            WorkspaceError::ViewRegionOutOfBounds
+        );
+        let magnified = lease
+            .register_view(
+                &tab,
+                ViewportGeometry {
+                    scope: CaptureScope::Region,
+                    page_x: region.x,
+                    page_y: region.y,
+                    css_width: region.width,
+                    css_height: region.height,
+                    output_scale: 4.0,
+                    ..geometry
+                },
+                1600,
+                800,
+            )
+            .unwrap();
+        assert_eq!(
+            lease
+                .resolve_view_region(view.as_str(), None, 0.0, 0.0, 1.0, 1.0)
+                .unwrap_err(),
+            WorkspaceError::StaleView
+        );
+        let (_, chained) = lease
+            .resolve_view_region(magnified.as_str(), Some(&tab), 400.0, 200.0, 400.0, 200.0)
+            .unwrap();
+        assert_eq!(chained.x, 310.0);
+        assert_eq!(chained.y, 170.0);
+        assert_eq!(chained.width, 100.0);
+        assert_eq!(chained.height, 50.0);
         let _ = lease
             .apply_landing(&tab.handle, &physical(7, "https://example.org"))
             .unwrap();
         assert_eq!(
             lease
-                .resolve_view_point(view.as_str(), None, 1.0, 1.0)
+                .resolve_view_point(magnified.as_str(), None, 1.0, 1.0)
                 .unwrap_err(),
             WorkspaceError::StaleView
         );

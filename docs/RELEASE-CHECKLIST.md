@@ -145,7 +145,8 @@ Extension-specific pre-freeze evidence:
 compared the exact published 0.8 ZIP with 1.0, fixed the real package and disclosure gaps, and
 produced a byte-reproducible local ZIP. Its later store update records the current public policy,
 the manually saved dashboard disclosures, and a successful `1.0.0` staged submission with state
-`PENDING_REVIEW`. It does not close G1, G2, or G3 for an unfrozen revision.
+`PENDING_REVIEW`. ADR-0131 changed the package afterward, so that review now contains the earlier
+bytes and must be replaced before release. It does not close G1, G2, or G3 for an unfrozen revision.
 
 ### G2. Assemble, verify, and take custody of the candidate
 

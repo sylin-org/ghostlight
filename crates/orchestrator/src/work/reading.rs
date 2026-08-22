@@ -5,12 +5,12 @@ use ghostlight_bridge::service::ServiceContent;
 use serde_json::{json, Value};
 
 use crate::governance::Capability;
-use crate::language::outcome::{Outcome, Refusal, TargetNoun};
+use crate::language::outcome::{CaptureKind, Outcome, Refusal, TargetNoun};
 use crate::workspace::WorkspaceLease;
 
 use super::{
     bounded, observed_host, readiness, word_count, ApplicationExecutor, Effect, InvocationContext,
-    Terminal,
+    TakeScreenshot, Terminal,
 };
 
 impl ApplicationExecutor {
@@ -209,15 +209,73 @@ impl ApplicationExecutor {
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
-        requested_tab: Option<&str>,
-        target: Option<&str>,
-        full_page: bool,
+        value: &TakeScreenshot,
     ) -> Terminal {
-        let (selected, locator, _) =
-            match self.resolve_optional_target(lease, requested_tab, target) {
+        let (selected, command, scope) = if let Some(view_handle) = value.view.as_deref() {
+            let resolved = if let Some(requested) = value.tab.as_deref() {
+                let selected = match lease.select_tab(Some(requested)) {
+                    Ok(selected) => selected,
+                    Err(error) => return self.workspace_failure(context, error),
+                };
+                match lease.resolve_view_region(
+                    view_handle,
+                    Some(&selected),
+                    value.x.expect("language validated x"),
+                    value.y.expect("language validated y"),
+                    value.width.expect("language validated width"),
+                    value.height.expect("language validated height"),
+                ) {
+                    Ok((view, region)) => (selected, view, region),
+                    Err(error) => return self.workspace_failure(context, error),
+                }
+            } else {
+                let (view, region) = match lease.resolve_view_region(
+                    view_handle,
+                    None,
+                    value.x.expect("language validated x"),
+                    value.y.expect("language validated y"),
+                    value.width.expect("language validated width"),
+                    value.height.expect("language validated height"),
+                ) {
+                    Ok(resolved) => resolved,
+                    Err(error) => return self.workspace_failure(context, error),
+                };
+                let selected = match lease.select_tab(Some(view.tab.as_str())) {
+                    Ok(selected) => selected,
+                    Err(error) => return self.workspace_failure(context, error),
+                };
+                (selected, view, region)
+            };
+            let (selected, view, region) = resolved;
+            let command = BrowserCommand::ScreenshotRegion {
+                tab_id: selected.physical_id,
+                region,
+                expected_viewport: view.viewport,
+            };
+            (selected, command, CaptureKind::Region)
+        } else {
+            let (selected, locator, _) = match self.resolve_optional_target(
+                lease,
+                value.tab.as_deref(),
+                value.target.as_deref(),
+            ) {
                 Ok(value) => value,
                 Err(error) => return self.workspace_failure(context, error),
             };
+            let scope = if value.full_page {
+                CaptureKind::FullPage
+            } else if value.target.is_some() {
+                CaptureKind::Target
+            } else {
+                CaptureKind::Viewport
+            };
+            let command = BrowserCommand::Screenshot {
+                tab_id: selected.physical_id,
+                locator,
+                full_page: value.full_page,
+            };
+            (selected, command, scope)
+        };
         let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
@@ -229,14 +287,7 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        match self.dispatch(
-            context,
-            BrowserCommand::Screenshot {
-                tab_id: selected.physical_id,
-                locator,
-                full_page,
-            },
-        ) {
+        match self.dispatch(context, command) {
             Ok(BrowserOutcome::Screenshot {
                 tab_id,
                 mime_type,
@@ -259,7 +310,7 @@ impl ApplicationExecutor {
                     Err(error) => return self.workspace_failure(context, error),
                 };
                 let outcome = Outcome::Captured {
-                    full_page,
+                    scope,
                     width,
                     height,
                 };

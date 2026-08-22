@@ -262,7 +262,8 @@ client success. Reactions are direct typed function calls over the closed enum, 
 ## Browser primitives
 
 The closed adapter vocabulary is: list tabs, focus tab, atomically open and group a URL, navigate,
-traverse history, reload, close tab, read text, inspect, find, screenshot, describe targets,
+traverse history, reload, close tab, read text, inspect, find, screenshot, screenshot region,
+describe targets,
 activate a locator or physical point, scroll, set zoom, resize a window, hover, fill, type text,
 press key, drag, upload supplied bytes, evaluate script, observe condition, inspect dialog, handle
 dialog, start and stop screencast capture, observe bounded console and network entries, cancel, and
@@ -275,9 +276,10 @@ change requires a new physical Chromium capability or a bridge protocol requirem
 
 Screenshot receipts include the exact CSS viewport origin, CSS dimensions, device scale, zoom,
 and output scale used for the image. The workspace context turns that physical transform into an
-opaque short-lived view handle. The executor resolves image coordinates back to CSS coordinates
-before sending a pointer primitive. A commit, zoom change, viewport mismatch, or newer screenshot
-invalidates the old view.
+opaque short-lived view handle. The executor resolves image points and rectangles back to CSS
+coordinates before sending pointer or region-capture primitives. A region capture validates the
+source viewport and returns a new transform, which makes another region capture chainable. A
+commit, zoom change, viewport mismatch, or newer screenshot invalidates the old view.
 
 File upload is a cross-boundary capability with explicit owners. The language accepts bounded
 absolute paths. The orchestrator validates and reads only those files after governance admission,

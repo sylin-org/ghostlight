@@ -44,7 +44,7 @@ use crate::language::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, Observed, Outcome, Refusal,
         TargetRole, WorkspaceReason,
     },
-    Operation, Record, SequenceStep,
+    Operation, Record, SequenceStep, TakeScreenshot,
 };
 use crate::presentation::PresentationReactor;
 use crate::workbench::WorkbenchProjection;
@@ -451,13 +451,7 @@ impl ApplicationExecutor {
                 &value.scope,
                 value.max_results,
             ),
-            Operation::TakeScreenshot(value) => self.screenshot(
-                context,
-                lease,
-                value.tab.as_deref(),
-                value.target.as_deref(),
-                value.full_page,
-            ),
+            Operation::TakeScreenshot(value) => self.screenshot(context, lease, value),
             Operation::Click(value) => self.perform_click(context, lease, value),
             Operation::ScrollPage(value) => self.perform_scroll(context, lease, value),
             Operation::SetZoom(value) => {
@@ -3259,7 +3253,7 @@ mod tests {
     }
 
     #[test]
-    fn screenshot_coordinates_are_resolved_once_and_expire_on_navigation() {
+    fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
             tab: tab(7, "https://example.com/"),
@@ -3328,6 +3322,80 @@ mod tests {
                 if point.x == 210.0 && point.y == 120.0 && *expected_viewport == viewport
         )));
 
+        let first_region_viewport = ViewportGeometry {
+            scope: CaptureScope::Region,
+            page_x: 210.0,
+            page_y: 120.0,
+            css_width: 400.0,
+            css_height: 200.0,
+            output_scale: 4.0,
+            ..viewport
+        };
+        browser.push(Ok(BrowserOutcome::Screenshot {
+            tab_id: 7,
+            mime_type: "image/jpeg".into(),
+            data: "magnified".into(),
+            width: 1600,
+            height: 800,
+            viewport: first_region_viewport,
+        }));
+        let first_region = executor.execute(
+            &workspace,
+            "browser_screenshot",
+            json!({"tab":tab_handle,"view":view,"x":100,"y":50,"width":200,"height":100}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(
+            first_region.summary,
+            "Captured the magnified region at 1600x800."
+        );
+        let first_region_view = first_region.facts["view"].as_str().unwrap().to_owned();
+        assert!(browser.calls().iter().any(|call| matches!(
+            call,
+            BrowserCommand::ScreenshotRegion { region, expected_viewport, .. }
+                if region.x == 210.0
+                    && region.y == 120.0
+                    && region.width == 400.0
+                    && region.height == 200.0
+                    && *expected_viewport == viewport
+        )));
+
+        browser.push(Ok(BrowserOutcome::Screenshot {
+            tab_id: 7,
+            mime_type: "image/jpeg".into(),
+            data: "magnified-again".into(),
+            width: 1600,
+            height: 800,
+            viewport: ViewportGeometry {
+                scope: CaptureScope::Region,
+                page_x: 310.0,
+                page_y: 170.0,
+                css_width: 100.0,
+                css_height: 50.0,
+                output_scale: 16.0,
+                ..viewport
+            },
+        }));
+        let second_region = executor.execute(
+            &workspace,
+            "browser_screenshot",
+            json!({"view":first_region_view,"x":400,"y":200,"width":400,"height":200}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(second_region.status, Status::Succeeded);
+        let current_view = second_region.facts["view"].as_str().unwrap().to_owned();
+        assert!(matches!(
+            browser.calls().last(),
+            Some(BrowserCommand::ScreenshotRegion { region, expected_viewport, .. })
+                if region.x == 310.0
+                    && region.y == 170.0
+                    && region.width == 100.0
+                    && region.height == 50.0
+                    && *expected_viewport == first_region_viewport
+        ));
+
         browser.push(Ok(BrowserOutcome::Navigated {
             tab: tab(7, "https://example.org/"),
             committed_urls: vec!["https://example.org/".into()],
@@ -3343,7 +3411,7 @@ mod tests {
         let stale = executor.execute(
             &workspace,
             "browser_click",
-            json!({"tab":tab_handle,"view":view,"x":1,"y":1}),
+            json!({"tab":tab_handle,"view":current_view,"x":1,"y":1}),
             None,
             &CancellationToken::default(),
         );

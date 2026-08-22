@@ -1092,10 +1092,11 @@ artwork, the visible product surfaces, installer-owned native-host generation, a
 behavior dispositions remain present. The comparison found and fixed three real release gaps: the
 missing `downloads` and `offscreen` justifications, the omitted 1.0 recording and diagnostics
 privacy disclosure, and an overbroad store-package icon copy that included 1.34 MB of unreferenced
-source artwork. Store instructions no longer treat unchanged screenshots as a blocker. The local
-1.0 ZIP is a reproducible 85,835-byte, 30-entry package with SHA-256
-`ccb48577a93995b1eaaf9b13fab75313a347483553782d178187e1ea8ceb0923`; it has no development key
-and carries the four exact inherited icons. This is local source evidence, not the final
+source artwork. Store instructions no longer treat unchanged screenshots as a blocker. The current
+local 1.0 ZIP is a reproducible 86,729-byte, 31-entry package with SHA-256
+`46507cede88b590f8e029b6cb5603e3103a6e3237ef11357d5fa786f64d307fa`; it has no development key,
+carries the four exact inherited icons, and adds only the bounded screenshot geometry library to
+the previous package surface. This is local source evidence, not the final
 provenance-bound G2 artifact. The exact comparison, fixes, checks, and remaining public-policy
 handoff are in
 [the dated extension release preparation](testing/extension-release-preparation-2026-08-22.md).
@@ -1103,10 +1104,23 @@ The owner subsequently authorized store and public-policy work. API V2 accepted 
 ZIP as the existing item's `1.0.0` draft with upload state `SUCCEEDED`. The public privacy page now
 serves the current browser-local recording and diagnostic disclosures with a greenfield date-only
 header, and the owner manually reconciled and saved the dashboard-only permission, remote-code,
-data-use, certification, and privacy URL fields. API V2 then submitted the draft with state
-`PENDING_REVIEW` and publish type `STAGED_PUBLISH`. It is not public and approval will not publish
-it automatically. This pre-freeze submission does not close G3 until the frozen provenance-bound
-candidate matches its bytes and the reviewed store installation is verified.
+data-use, certification, and privacy URL fields. API V2 then submitted that earlier package, hash
+`ccb48577a93995b1eaaf9b13fab75313a347483553782d178187e1ea8ceb0923`, with state `PENDING_REVIEW`
+and publish type `STAGED_PUBLISH`. It is not public and approval will not publish it automatically.
+ADR-0131 subsequently restored current-view region screenshot magnification, so the pending review
+is stale relative to the current 1.0 package and must be replaced before release. No Store mutation
+was made during that correction. This pre-freeze submission does not close G3 until the frozen
+provenance-bound candidate matches its bytes and the reviewed store installation is verified.
+
+The ADR-0131 implementation passes formatting, warnings-denied workspace Clippy, all 361 Rust
+tests, all 119 extension tests, JavaScript and shell syntax, the 42-assertion workbench surface,
+and a fresh isolated process journey. The process journey exercises viewport capture, region
+magnification, and a second region through the real MCP, service, browser-relay, and receipt
+boundaries. The exact repository release orchestrator and browser connector were replaced for the
+live Windows lane. After the unpacked extension's explicit reload, real attached Chrome advertised
+the exact 22-tool catalog and completed open, read, viewport JPEG, region JPEG, and chained-region
+JPEG work. The final model-driven close was correctly blocked by the person's preserve-tabs
+setting; both disposable Example Domain tabs were then closed directly without changing it.
 
 - Build-only candidate `fd86403` is historical evidence, not the publishable 1.0 candidate. It is an
   ancestor of the current head, so the next candidate is built from the revision G0 freezes. CI
@@ -1126,9 +1140,10 @@ candidate matches its bytes and the reviewed store installation is verified.
   does not replace that release-environment gate.
 - Reconcile release metadata, public status, store submission, compatibility, distribution, and
   the final public documentation only when the 1.0 artifacts exist.
-- Chrome API V2 access is restored, the public policy and dashboard disclosures are current, and
-  the local prepared ZIP is pending staged review. Replace or verify the draft against the exact G2
-  candidate before claiming G3, then obtain separate owner authorization for public publication.
+- Chrome API V2 access is restored, and the public policy and dashboard disclosures are current.
+  The pending staged review contains the earlier package and must be replaced by the current local
+  ZIP, then verified against the exact G2 candidate before claiming G3. Obtain separate owner
+  authorization for Store mutation and later public publication.
 - Re-run the Linux lifecycle and visible-browser policy matrix on the current policy-restoration
   revision using the `test-01` development host.
 - Publish the candidate-bound `ghostlight@1.0.0` tarball only after its six raw GitHub assets are

@@ -359,6 +359,16 @@ pub struct TakeScreenshot {
     pub target: Option<String>,
     #[serde(default)]
     pub full_page: bool,
+    #[serde(default)]
+    pub view: Option<String>,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    #[serde(default)]
+    pub width: Option<f64>,
+    #[serde(default)]
+    pub height: Option<f64>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
@@ -728,18 +738,18 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_screenshot" => Operation::TakeScreenshot(parse(
             input,
-            &["tab", "target", "full_page", "timeout_ms"],
-            |value: &TakeScreenshot| {
-                validate_optional_handle(value.tab.as_deref(), "tab_")?;
-                validate_optional_handle(value.target.as_deref(), "target_")?;
-                if value.target.is_some() && value.full_page {
-                    return Err(LanguageError::Invalid(
-                        "target and full_page cannot be combined".into(),
-                    ));
-                }
-                validate_timeout(value.timeout_ms)?;
-                validate_restrictions(&value.restrictions)
-            },
+            &[
+                "tab",
+                "target",
+                "full_page",
+                "view",
+                "x",
+                "y",
+                "width",
+                "height",
+                "timeout_ms",
+            ],
+            validate_screenshot,
         )?)
         .into_ok(),
         "browser_click" => Operation::Click(parse(
@@ -1152,6 +1162,50 @@ fn validate_click(value: &Click) -> Result<(), LanguageError> {
     validate_restrictions(&value.restrictions)
 }
 
+fn validate_screenshot(value: &TakeScreenshot) -> Result<(), LanguageError> {
+    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    let region_requested = value.view.is_some()
+        || value.x.is_some()
+        || value.y.is_some()
+        || value.width.is_some()
+        || value.height.is_some();
+    if region_requested {
+        if value.target.is_some() || value.full_page {
+            return Err(LanguageError::Invalid(
+                "view region cannot be combined with target or full_page".into(),
+            ));
+        }
+        validate_handle(
+            value
+                .view
+                .as_deref()
+                .ok_or_else(|| LanguageError::Invalid("view is required".into()))?,
+            "view_",
+        )?;
+        for (name, coordinate) in [("x", value.x), ("y", value.y)] {
+            validate_coordinate(
+                coordinate.ok_or_else(|| LanguageError::Invalid(format!("{name} is required")))?,
+                name,
+            )?;
+        }
+        for (name, extent) in [("width", value.width), ("height", value.height)] {
+            validate_extent(
+                extent.ok_or_else(|| LanguageError::Invalid(format!("{name} is required")))?,
+                name,
+            )?;
+        }
+    } else {
+        validate_optional_handle(value.target.as_deref(), "target_")?;
+        if value.target.is_some() && value.full_page {
+            return Err(LanguageError::Invalid(
+                "target and full_page cannot be combined".into(),
+            ));
+        }
+    }
+    validate_timeout(value.timeout_ms)?;
+    validate_restrictions(&value.restrictions)
+}
+
 fn validate_hover(value: &Hover) -> Result<(), LanguageError> {
     validate_location(
         value.target.as_deref(),
@@ -1304,6 +1358,16 @@ fn validate_coordinate(value: f64, field: &str) -> Result<(), LanguageError> {
     } else {
         Err(LanguageError::Invalid(format!(
             "{field} must be a finite non-negative coordinate"
+        )))
+    }
+}
+
+fn validate_extent(value: f64, field: &str) -> Result<(), LanguageError> {
+    if value.is_finite() && (0.0..=1_000_000.0).contains(&value) && value > 0.0 {
+        Ok(())
+    } else {
+        Err(LanguageError::Invalid(format!(
+            "{field} must be a finite positive extent"
         )))
     }
 }
@@ -1702,6 +1766,27 @@ mod tests {
             json!({"target":"target_x","full_page":true})
         )
         .is_err());
+    }
+
+    #[test]
+    fn screenshot_region_uses_one_complete_current_view_rectangle() {
+        let Operation::TakeScreenshot(capture) = decode(
+            "browser_screenshot",
+            json!({"view":"view_x","x":10.5,"y":20.25,"width":300,"height":200}),
+        )
+        .unwrap() else {
+            panic!("wrong operation")
+        };
+        assert_eq!(capture.view.as_deref(), Some("view_x"));
+        assert_eq!(capture.width, Some(300.0));
+        for invalid in [
+            json!({"view":"view_x","x":0,"y":0,"width":300}),
+            json!({"view":"view_x","x":0,"y":0,"width":0,"height":200}),
+            json!({"view":"view_x","x":0,"y":0,"width":300,"height":200,"full_page":true}),
+            json!({"view":"view_x","x":0,"y":0,"width":300,"height":200,"target":"target_x"}),
+        ] {
+            assert!(decode("browser_screenshot", invalid).is_err());
+        }
     }
 
     #[test]

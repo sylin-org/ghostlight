@@ -144,6 +144,20 @@ pub struct PhysicalPoint {
     pub y: f64,
 }
 
+/// One physical rectangle in page CSS coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicalRectangle {
+    /// Horizontal page coordinate of the rectangle origin.
+    pub x: f64,
+    /// Vertical page coordinate of the rectangle origin.
+    pub y: f64,
+    /// Rectangle width in page CSS pixels.
+    pub width: f64,
+    /// Rectangle height in page CSS pixels.
+    pub height: f64,
+}
+
 /// The browser geometry used to render one screenshot.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -184,6 +198,8 @@ pub enum CaptureScope {
     FullPage,
     /// One semantic target rectangle.
     Target,
+    /// One rectangle resolved from a current screenshot view.
+    Region,
 }
 
 /// One bounded file payload selected by the orchestrator.
@@ -560,6 +576,12 @@ pub enum BrowserCommand {
         locator: Option<String>,
         full_page: bool,
     },
+    /// Capture and magnify one page rectangle resolved from a governed view handle.
+    ScreenshotRegion {
+        tab_id: u64,
+        region: PhysicalRectangle,
+        expected_viewport: ViewportGeometry,
+    },
     /// Recheck credential classification immediately before a fill.
     DescribeTargets { tab_id: u64, locators: Vec<String> },
     /// Activate one target.
@@ -722,7 +744,7 @@ impl BrowserCommand {
             | Self::Inspect { .. }
             | Self::Find { .. }
             | Self::DescribeTargets { .. } => capability::SEMANTIC_DOCUMENT,
-            Self::Screenshot { .. } => capability::CAPTURE,
+            Self::Screenshot { .. } | Self::ScreenshotRegion { .. } => capability::CAPTURE,
             Self::Activate { .. }
             | Self::ActivatePoint { .. }
             | Self::Scroll { .. }
@@ -1095,10 +1117,11 @@ pub enum BrowserFrame {
 mod tests {
     use super::{
         adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
-        BrowserOutcome, BrowserReceipt, BrowserRequest, DiagnosticDetail, DiagnosticEntry,
-        DiagnosticSource, EncodedRecording, PhysicalActionSubject, PhysicalRecordingSummary,
-        PhysicalTab, PresentationActivity, PresentationKind, PresentationSignal, RecordingDelivery,
-        RecordingDestination, RecordingState, RecordingStopReason, ADAPTER_PROTOCOL_MAJOR,
+        BrowserOutcome, BrowserReceipt, BrowserRequest, CaptureScope, DiagnosticDetail,
+        DiagnosticEntry, DiagnosticSource, EncodedRecording, PhysicalActionSubject,
+        PhysicalRecordingSummary, PhysicalRectangle, PhysicalTab, PresentationActivity,
+        PresentationKind, PresentationSignal, RecordingDelivery, RecordingDestination,
+        RecordingState, RecordingStopReason, ViewportGeometry, ADAPTER_PROTOCOL_MAJOR,
         COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
         RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES,
     };
@@ -1397,6 +1420,66 @@ mod tests {
             }
             .required_capability(),
             adapter_capability::DIAGNOSTICS
+        );
+        assert_eq!(
+            BrowserCommand::ScreenshotRegion {
+                tab_id: 1,
+                region: PhysicalRectangle {
+                    x: 10.0,
+                    y: 20.0,
+                    width: 300.0,
+                    height: 200.0,
+                },
+                expected_viewport: ViewportGeometry {
+                    scope: CaptureScope::Viewport,
+                    page_x: 0.0,
+                    page_y: 0.0,
+                    css_width: 800.0,
+                    css_height: 600.0,
+                    visual_page_x: 0.0,
+                    visual_page_y: 0.0,
+                    visual_css_width: 800.0,
+                    visual_css_height: 600.0,
+                    device_scale: 1.0,
+                    zoom: 1.0,
+                    output_scale: 1.0,
+                },
+            }
+            .required_capability(),
+            adapter_capability::CAPTURE
+        );
+    }
+
+    #[test]
+    fn screenshot_region_command_round_trips_without_weakening_the_old_primitive() {
+        let command = BrowserCommand::ScreenshotRegion {
+            tab_id: 7,
+            region: PhysicalRectangle {
+                x: 120.5,
+                y: 80.25,
+                width: 400.0,
+                height: 300.0,
+            },
+            expected_viewport: ViewportGeometry {
+                scope: CaptureScope::Viewport,
+                page_x: 10.0,
+                page_y: 20.0,
+                css_width: 800.0,
+                css_height: 600.0,
+                visual_page_x: 10.0,
+                visual_page_y: 20.0,
+                visual_css_width: 800.0,
+                visual_css_height: 600.0,
+                device_scale: 2.0,
+                zoom: 1.0,
+                output_scale: 0.5,
+            },
+        };
+        let encoded = serde_json::to_value(&command).expect("region command serializes");
+        assert_eq!(encoded["command"], "screenshot_region");
+        assert_eq!(
+            serde_json::from_value::<BrowserCommand>(encoded).expect("region command deserializes"),
+            command
         );
     }
 

@@ -25,7 +25,8 @@ Ghostlight supports these distinct jobs:
 6. Read useful bounded text from a page or target.
 7. Inspect page structure and actionable controls, including open shadow trees.
 8. Find semantic targets and receive short-lived opaque handles.
-9. Capture a viewport, page, or target screenshot and receive a short-lived view handle.
+9. Capture a viewport, page, target, or magnified current-view region and receive a short-lived
+   view handle that can drive coordinate actions or another region capture.
 10. Activate a semantic target or a point in a current captured view.
 11. Scroll the page or reveal a semantic target.
 12. Set the visible tab zoom.

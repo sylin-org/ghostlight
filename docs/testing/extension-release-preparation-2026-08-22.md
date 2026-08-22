@@ -1,6 +1,6 @@
 # Ghostlight 1.0 extension release preparation -- 2026-08-22
 
-Status: local preparation passed; public policy current; staged Chrome review pending.
+Status: local preparation passed; public policy current; earlier staged Chrome review pending replacement.
 
 ## Boundary
 
@@ -62,14 +62,17 @@ contracts are represented on current seams.
 
 ## Prepared local artifact
 
-`dist/ghostlight-extension-v1.0.0.zip` was built twice from the same source. The two files were
-byte-identical:
+`dist/ghostlight-extension-v1.0.0.zip` was rebuilt twice from the current source after region
+screenshot parity was completed. The two files were byte-identical:
 
-- SHA-256: `ccb48577a93995b1eaaf9b13fab75313a347483553782d178187e1ea8ceb0923`
-- length: 85,835 bytes
-- entries: 30
+- SHA-256: `46507cede88b590f8e029b6cb5603e3103a6e3237ef11357d5fa786f64d307fa`
+- length: 86,729 bytes
+- entries: 31
 - manifest version: `1.0.0`
 - development key present: no
+
+The additional entry is `lib/screenshot.js`, the bounded browser-local geometry implementation
+for current-view region magnification. The package contains no tests or development metadata.
 
 The four packaged icon hashes are:
 
@@ -89,14 +92,16 @@ a source-version mismatch, a development key, or repository-only test and packag
 
 - `cargo fmt --all -- --check`;
 - `cargo clippy --workspace --all-targets -- -D warnings`;
-- all 359 Rust workspace tests;
-- all 116 extension tests;
+- all 361 Rust workspace tests;
+- all 119 extension tests;
 - changed PowerShell parser checks;
 - repository integrity, including exact permission/justification correspondence;
 - all 809 historical artifact dispositions;
 - all 1,388 historical behavior dispositions and 34 process-scenario dispositions;
 - deterministic package construction across two builds;
 - packaged version, key absence, exact entry count, and exact icon hashes;
+- a real attached-Chrome journey through viewport capture, region magnification, and a second
+  region from the returned view; preserve-tabs produced its expected typed cleanup refusal;
 - offline public-surface truth; and
 - the Chrome publication adapter in non-mutating `Plan` mode with an explicitly absent credential
   fixture.
@@ -120,9 +125,14 @@ was recovered instead:
 - two dormant PowerShell runtime bugs found by the live recovery path were fixed; and
 - the read-only item check returned `CHROME_WEB_STORE=v2-item-valid`.
 
-The prepared local ZIP above was uploaded to the existing item through API V2. Google returned
+The earlier prepared local ZIP was uploaded to the existing item through API V2. Google returned
 `SUCCEEDED` and draft version `1.0.0`. The uploaded hash was
 `ccb48577a93995b1eaaf9b13fab75313a347483553782d178187e1ea8ceb0923`.
+
+That sentence records the submitted bytes, not the current local package. The parity correction
+above produced hash `46507cede88b590f8e029b6cb5603e3103a6e3237ef11357d5fa786f64d307fa` after submission. The
+pending review is therefore stale and must be replaced with the current package before release.
+No store mutation was made as part of the parity work.
 
 The owner then approved the separate public-policy update. The website now serves the current
 policy at `https://sylin.org/ghostlight/privacy/`, including browser-local recording boundaries,

@@ -70,7 +70,8 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 7. Lower-capability-model fixtures succeed with every documented shortest call, choose the correct
    sibling among related tools, and recover from deliberately stale and ambiguous handles.
 8. A screenshot view handle resolves image coordinates only while its tab, document generation,
-   viewport, and zoom still match; stale views fail before pointer dispatch.
+   viewport, and zoom still match; stale views fail before pointer or region-capture dispatch. A
+   bounded region returns a magnified image and fresh view, and a second region chains from it.
 9. File paths are validated and bounded before reading, and no file bytes cross the browser bridge
    until governance and credential preflight succeed.
 10. The extension alone owns recording identity, frame acceptance, deadlines, memory bounds, stop,
@@ -135,7 +136,8 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 2. List tabs, navigate one, inspect controls, find a target, activate it, and recover from the old
    target becoming stale after a document commit.
 3. Capture a screenshot only through `browser_screenshot`, verify bounded dimensions and one
-   MCP image content block, and verify base64 image data is absent from structured facts.
+   MCP image content block, and verify base64 image data is absent from structured facts. Capture
+   and magnify one bounded view region, then repeat against the returned view.
 4. Fill multiple ordinary fields, but stop before dispatch and request user handoff when any
    described target is credential-class.
 5. Wait for success and timeout branches of each condition family.
@@ -147,8 +149,9 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    same landing-governance path as explicit navigation.
 10. Traverse controls inside an open shadow root and perform semantic click, fill, type, hover,
     scroll-to-target, and drag journeys with actionability checked at dispatch time.
-11. Capture a screenshot, click and hover through its view handle, then verify document commit,
-    zoom, and viewport changes make the old view stale.
+11. Capture a screenshot, click and hover through its view handle, magnify a bounded region and
+    chain another region from the result, then verify document commit, zoom, and viewport changes
+    make the old view stale.
 12. Scroll in four directions, reveal a target, and set zoom while returning observed viewport
     facts rather than assumed effects.
 13. Upload one and several bounded local files to an ordinary file input. Reject credential-class,

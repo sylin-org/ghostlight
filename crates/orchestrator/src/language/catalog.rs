@@ -65,7 +65,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_screenshot",
             "Take screenshot",
-            "Capture the viewport, full page, or one semantic target. The result includes a view_ handle for coordinate actions.",
+            "Capture the viewport, full page, one semantic target, or a magnified region from a current view_. The result includes a fresh view_ handle.",
             screenshot_schema(),
             Hints::browser_read(),
         ),
@@ -526,11 +526,33 @@ fn screenshot_schema() -> Value {
                 ],
                 vec!["target"],
             ),
+            object(
+                vec![
+                    ("tab", tab()),
+                    (
+                        "view",
+                        handle(
+                            "view_",
+                            "Current screenshot view that defines the region coordinates.",
+                        ),
+                    ),
+                    (
+                        "x",
+                        coordinate("Horizontal image coordinate of the region."),
+                    ),
+                    ("y", coordinate("Vertical image coordinate of the region.")),
+                    ("width", extent("Region width in image pixels.")),
+                    ("height", extent("Region height in image pixels.")),
+                    ("timeout_ms", timeout()),
+                ],
+                vec!["view", "x", "y", "width", "height"],
+            ),
         ],
         vec![
             json!({}),
             json!({"full_page":true}),
             json!({"target":"target_..."}),
+            json!({"view":"view_...","x":120,"y":80,"width":400,"height":300}),
         ],
     )
 }
@@ -1356,6 +1378,10 @@ fn timeout() -> Value {
 
 fn coordinate(description: &str) -> Value {
     json!({"type":"number","minimum":0,"maximum":1_000_000,"description":description})
+}
+
+fn extent(description: &str) -> Value {
+    json!({"type":"number","exclusiveMinimum":0,"maximum":1_000_000,"description":description})
 }
 
 #[cfg(test)]

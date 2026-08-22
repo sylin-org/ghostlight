@@ -1,7 +1,8 @@
-importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/debugger.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js");
+importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/debugger.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js");
 
 const shared = globalThis.GhostlightShared;
 const stateApi = globalThis.GhostlightState;
+const screenshotApi = globalThis.GhostlightScreenshot;
 const HOST_NAME = shared.NATIVE_HOST_NAME;
 const SERVICE_INSTALL_URL = "https://sylin.org/ghostlight/chromium-extension/post-install/";
 const adapterEpoch = `adapter_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -513,6 +514,7 @@ async function dispatch(request) {
     return { outcome: "targets_described", tab_id: command.tab_id, targets: result.targets };
   }
   if (command.command === "screenshot") return screenshot(command);
+  if (command.command === "screenshot_region") return screenshot(command);
   if (command.command === "activate") return activate(request.correlation, command);
   if (command.command === "activate_point") return activatePoint(request.correlation, command);
   if (command.command === "scroll") {
@@ -1255,22 +1257,24 @@ async function screenshot(command) {
     const visual = metrics.cssVisualViewport || metrics.visualViewport;
     let clip;
     let scope;
-    if (command.locator) {
+    if (command.command === "screenshot_region") {
+      await validateView(command.tab_id, command.expected_viewport);
+      clip = screenshotApi.regionClip(command.region);
+      scope = "region";
+    } else if (command.locator) {
       const rect = await content(command.tab_id, { kind: "geometry", locator: command.locator });
-      clip = { x: Math.max(0, rect.x), y: Math.max(0, rect.y), width: Math.max(1, rect.width), height: Math.max(1, rect.height), scale: 1 };
+      clip = screenshotApi.ordinaryClip(Math.max(0, rect.x), Math.max(0, rect.y), Math.max(1, rect.width), Math.max(1, rect.height));
       scope = "target";
     } else if (command.full_page) {
       const size = metrics.cssContentSize || metrics.contentSize;
-      clip = { x: 0, y: 0, width: Math.max(1, size.width), height: Math.max(1, size.height), scale: 1 };
+      clip = screenshotApi.ordinaryClip(0, 0, Math.max(1, size.width), Math.max(1, size.height));
       scope = "full_page";
     } else {
-      clip = { x: visual.pageX ?? 0, y: visual.pageY ?? 0, width: Math.max(1, visual.clientWidth), height: Math.max(1, visual.clientHeight), scale: 1 };
+      clip = screenshotApi.ordinaryClip(visual.pageX ?? 0, visual.pageY ?? 0, Math.max(1, visual.clientWidth), Math.max(1, visual.clientHeight));
       scope = "viewport";
     }
-    const scale = Math.min(1, 2400 / clip.width, 2400 / clip.height, Math.sqrt(4000000 / (clip.width * clip.height)));
-    clip.scale = Math.max(0.05, scale);
-    let capture = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.captureScreenshot", { format: "jpeg", quality: 55, clip, captureBeyondViewport: true, fromSurface: true });
-    if (capture.data.length > 6000000) capture = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.captureScreenshot", { format: "jpeg", quality: 30, clip, captureBeyondViewport: true, fromSurface: true });
+    let capture = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.captureScreenshot", { format: "jpeg", quality: screenshotApi.JPEG_QUALITY, clip, captureBeyondViewport: true, fromSurface: true });
+    if (capture.data.length > screenshotApi.MAX_BASE64_CHARS) capture = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.captureScreenshot", { format: "jpeg", quality: screenshotApi.FALLBACK_JPEG_QUALITY, clip, captureBeyondViewport: true, fromSurface: true });
     const ratio = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Runtime.evaluate", { expression: "window.devicePixelRatio", returnByValue: true });
     const dimensions = await imageDimensions(capture.data, clip);
     return {
