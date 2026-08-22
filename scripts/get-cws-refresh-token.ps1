@@ -34,7 +34,10 @@ function Get-QueryValue {
     foreach ($pair in $Query.TrimStart("?").Split("&")) {
         $parts = $pair.Split("=", 2)
         if ([uri]::UnescapeDataString($parts[0]) -eq $Name) {
-            return if ($parts.Count -eq 2) { [uri]::UnescapeDataString($parts[1]) } else { "" }
+            if ($parts.Count -eq 2) {
+                return [uri]::UnescapeDataString($parts[1])
+            }
+            return ""
         }
     }
     return $null

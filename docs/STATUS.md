@@ -629,10 +629,10 @@ full visible browser matrix remain owed.
   One-line installers, deterministic portable archives, the self-contained MCPB, and
   candidate-derived Scoop and WinGet 1.12 metadata are present and tested.
 - Release access was recovered without exposing values. GitHub and npm authentication work, and
-  the MCP DNS key and official publisher binary are present. Chrome API automation is incomplete,
-  but 0.8 treated it as optional and used the Developer Dashboard when necessary. Ghostlight has no
-  Windows code-signing certificate; 0.8 used checksums plus keyless GitHub provenance, and 1.0 now
-  retains that model instead of inventing a signing gate.
+  the MCP DNS key and official publisher binary are present. Chrome API V2 access now validates the
+  exact existing item after a PKCE refresh-token renewal and a non-secret publisher-id override.
+  Ghostlight has no Windows code-signing certificate; 0.8 used checksums plus keyless GitHub
+  provenance, and 1.0 now retains that model instead of inventing a signing gate.
 
 ## Implemented
 
@@ -1099,6 +1099,10 @@ and carries the four exact inherited icons. This is local source evidence, not t
 provenance-bound G2 artifact. The exact comparison, fixes, checks, and remaining public-policy
 handoff are in
 [the dated extension release preparation](testing/extension-release-preparation-2026-08-22.md).
+The owner subsequently authorized store work. API V2 accepted that exact local ZIP as the existing
+item's `1.0.0` draft with upload state `SUCCEEDED`. It has not been submitted or made public, and it
+does not close G3 until the frozen provenance-bound candidate matches its bytes. The public privacy
+page and manual dashboard disclosures remain open before submission.
 
 - Build-only candidate `fd86403` is historical evidence, not the publishable 1.0 candidate. It is an
   ancestor of the current head, so the next candidate is built from the revision G0 freezes. CI
@@ -1118,8 +1122,9 @@ handoff are in
   does not replace that release-environment gate.
 - Reconcile release metadata, public status, store submission, compatibility, distribution, and
   the final public documentation only when the 1.0 artifacts exist.
-- Use the Chrome Developer Dashboard for store submission. Repair API V2 access only if its optional
-  automation is worth the effort; it is not a release gate.
+- Chrome API V2 access is restored and the local prepared ZIP is the current 1.0 draft. Publish the
+  corrected privacy policy, complete the dashboard-only disclosure check, and replace or verify the
+  draft against the exact G2 candidate before staged submission.
 - Re-run the Linux lifecycle and visible-browser policy matrix on the current policy-restoration
   revision using the `test-01` development host.
 - Publish the candidate-bound `ghostlight@1.0.0` tarball only after its six raw GitHub assets are

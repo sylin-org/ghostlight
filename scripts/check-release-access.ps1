@@ -2,6 +2,7 @@
 
 param(
     [string]$CredentialFile = (Join-Path $HOME ".ghostlight-release.env"),
+    [string]$PublisherId,
     [switch]$Online,
     [switch]$RequireReady
 )
@@ -17,6 +18,12 @@ if (Test-Path -LiteralPath $CredentialFile -PathType Leaf) {
             $values[$Matches[1]] = $Matches[2]
         }
     }
+}
+if (-not [string]::IsNullOrWhiteSpace($PublisherId)) {
+    if ($PublisherId -notmatch '^[A-Za-z0-9._-]+$') {
+        throw "Chrome publisher identifier has an invalid shape"
+    }
+    $values["CWS_PUBLISHER_ID"] = $PublisherId
 }
 
 function Test-Present {
@@ -94,7 +101,8 @@ if ($Online) {
         if ($tokenResponse.StatusCode -eq 200) {
             $token = $tokenResponse.Content | ConvertFrom-Json
             $chromeState = "oauth-valid"
-            if (Test-Present -Name "CWS_PUBLISHER_ID" -and Test-Present -Name "CWS_ITEM_ID") {
+            if ((Test-Present -Name "CWS_PUBLISHER_ID") -and
+                (Test-Present -Name "CWS_ITEM_ID")) {
                 $resource = "publishers/$($values.CWS_PUBLISHER_ID)/items/$($values.CWS_ITEM_ID)"
                 $statusResponse = Invoke-WebRequest `
                     -SkipHttpErrorCheck `

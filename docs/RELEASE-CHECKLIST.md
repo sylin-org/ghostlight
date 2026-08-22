@@ -143,7 +143,8 @@ both operating-system passes cover that exact revision.
 Extension-specific pre-freeze evidence:
 [2026-08-22 extension release preparation](testing/extension-release-preparation-2026-08-22.md)
 compared the exact published 0.8 ZIP with 1.0, fixed the real package and disclosure gaps, and
-produced a byte-reproducible local ZIP. It does not close G1, G2, or G3 for an unfrozen revision.
+produced a byte-reproducible local ZIP. Its later store update records a successful `1.0.0` draft
+upload through recovered API V2 access. It does not close G1, G2, or G3 for an unfrozen revision.
 
 ### G2. Assemble, verify, and take custody of the candidate
 

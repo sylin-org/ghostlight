@@ -114,3 +114,25 @@ a source-version mismatch, a development key, or repository-only test and packag
   not itself a provenance attestation.
 - Upload, submit for staged review, and publish only with explicit owner approval. No Chrome Web
   Store request was made in this preparation.
+
+## Store draft update -- 2026-08-22
+
+The owner later authorized Chrome publication work. The signed-in Developer Dashboard exposed the
+non-secret publisher id, but Google does not allow that dashboard to be scripted. The API V2 path
+was recovered instead:
+
+- the access and publication scripts now accept `-PublisherId` without copying OAuth secrets;
+- the protected OAuth refresh token was renewed through the existing PKCE helper;
+- two dormant PowerShell runtime bugs found by the live recovery path were fixed; and
+- the read-only item check returned `CHROME_WEB_STORE=v2-item-valid`.
+
+The prepared local ZIP above was uploaded to the existing item through API V2. Google returned
+`SUCCEEDED` and draft version `1.0.0`. The uploaded hash was
+`ccb48577a93995b1eaaf9b13fab75313a347483553782d178187e1ea8ceb0923`.
+
+This is a draft upload only. It has not been submitted for review or made public, and it does not
+close G3 because G0 has not frozen a revision and G2 has not produced the exact provenance-bound
+candidate. The public privacy page still carries materially stale 0.8 recording text. Publishing
+the corrected policy to the separate website repository requires its own owner approval. Chrome
+Store disclosure fields also remain a manual dashboard check because API V2 exposes package,
+status, submission, and rollout operations but not listing-field editing.

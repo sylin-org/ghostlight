@@ -62,6 +62,8 @@ fallback used by 0.8. API V2 automation requires `CWS_CLIENT_ID`, `CWS_CLIENT_SE
 `CWS_REFRESH_TOKEN`, `CWS_ITEM_ID`, and `CWS_PUBLISHER_ID`. If desired, a revoked refresh token can
 be replaced with `scripts/get-cws-refresh-token.ps1`; the helper validates OAuth state and PKCE,
 stores the token in the machine-local credential file, and never prints it.
+The non-secret publisher id may instead be supplied to the Chrome access and publication scripts
+with `-PublisherId`; OAuth secrets remain in the machine-local credential file.
 
 ### Source
 

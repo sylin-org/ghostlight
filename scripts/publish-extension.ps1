@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ZipPath,
     [string]$CredentialFile = (Join-Path $HOME ".ghostlight-release.env"),
+    [string]$PublisherId,
     [ValidateSet("Plan", "Upload", "Submit")]
     [string]$Action = "Plan",
     [ValidateSet("STAGED_PUBLISH", "DEFAULT_PUBLISH")]
@@ -59,6 +60,9 @@ if (Test-Path -LiteralPath $CredentialFile -PathType Leaf) {
             $values[$Matches[1]] = $Matches[2]
         }
     }
+}
+if (-not [string]::IsNullOrWhiteSpace($PublisherId)) {
+    $values["CWS_PUBLISHER_ID"] = $PublisherId
 }
 $required = @(
     "CWS_CLIENT_ID",
