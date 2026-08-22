@@ -1122,6 +1122,27 @@ the exact 22-tool catalog and completed open, read, viewport JPEG, region JPEG, 
 JPEG work. The final model-driven close was correctly blocked by the person's preserve-tabs
 setting; both disposable Example Domain tabs were then closed directly without changing it.
 
+ADR-0132 fixes a client-compatibility failure discovered during that live browser check. The
+orchestrator already returned complete bounded `browser_execute` values and `browser_find` matches,
+but the MCP edge exposed them only through `structuredContent`; clients that displayed ordinary
+content showed only the authored summary. The generic edge now appends the complete compact opaque
+result envelope to that text while preserving identical `structuredContent`, `isError`, and image
+blocks. The process journey covers both reported tools using only ordinary content. This is a
+connector change, not an extension change: the 86,729-byte extension ZIP and its SHA-256 remain
+unchanged, though the pending store review remains stale for the earlier ADR-0131 package reason.
+Formatting, warnings-denied Clippy, all 362 Rust tests, all 119 extension tests, all 10 npm launcher
+tests, all 4 MCPB tests, JavaScript syntax, the 42-assertion workbench surface, offline public truth,
+complete 0.8 recovery, and a fresh isolated process journey pass. The exact repository release MCP
+connector was replaced and hash-matched. A direct invocation through that deployed binary against
+the live service and attached Chrome returned the complete browser inventory in ordinary text and
+preserved the structured envelope. The replaced harness transports must reconnect once; the
+orchestrator, browser connector, extension, and Chrome were not restarted.
+After VS Code restarted its harness, the refreshed catalog exposed the region screenshot branch.
+A live disposable Example Domain journey returned the exact JavaScript value and one semantic find
+match in ordinary text, captured a viewport JPEG, and captured a 2400 by 1600 magnified region JPEG.
+Model-driven cleanup was correctly blocked by the person's preserve-tabs setting, leaving that one
+test tab for direct closure.
+
 - Build-only candidate `fd86403` is historical evidence, not the publishable 1.0 candidate. It is an
   ancestor of the current head, so the next candidate is built from the revision G0 freezes. CI
   `31920645118` and candidate workflow `31920647296` are green; all 19 candidate files have

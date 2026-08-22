@@ -52,11 +52,14 @@ Every invocation returns one envelope:
 | `facts` | object | Tool-specific canonical facts. |
 | `next_steps` | string array | Zero to two Ghostlight-authored safe suggestions. |
 
-The MCP edge renders this envelope as text plus `structuredContent`. Bounded rich content crosses
+The MCP edge renders the complete envelope twice for client compatibility: `structuredContent`
+retains the machine-readable object, and the ordinary text block contains the authored summary and
+safe next steps followed by compact JSON for the same opaque envelope. A client that ignores
+`structuredContent` therefore still receives every canonical fact. Bounded rich content crosses
 the bridge in a separate generic content vocabulary. `browser_screenshot` returns an image block.
 `browser_record` save returns a GIF image block only when the caller asked for the replay itself;
 a save that stays inside the browser returns none. Image bytes are not copied into structured
-facts.
+facts or the textual JSON projection.
 
 The language context produces `summary`, `next_steps`, and the content-minimized observation
 projection from one typed outcome or refusal. A sentence that names a host, count, or capture size

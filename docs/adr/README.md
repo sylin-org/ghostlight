@@ -144,6 +144,8 @@ history live here.
 
 | [0131](0131-view-bound-region-screenshots.md) | View-bound region screenshots: the current screenshot tool accepts a bounded image rectangle, the workspace resolves and chains its transform, and a distinct physical primitive fails safely on an older adapter | Accepted (amends [0107](0107-terse-native-browser-language.md); builds on [0010](0010-coordinate-model-official.md)/[0101](0101-adaptive-tool-surfaces-canonical-operations-and-browser-mechanisms.md)) |
 
+| [0132](0132-complete-textual-mcp-results.md) | Complete textual MCP results: ordinary content carries the authored summary plus the compact opaque result envelope while `structuredContent` and rich content remain intact | Accepted (amends [0096](0096-protocol-versioned-mcp-edge-and-neutral-service.md) result rendering and the 1.0 result-envelope contract; builds on [0038](0038-structured-results.md)/[0103](0103-language-owned-outcome-voice.md)) |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

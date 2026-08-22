@@ -324,7 +324,8 @@ fn render_result(
     is_error: bool,
     content: Vec<ServiceContent>,
 ) -> Value {
-    let mut rendered = vec![json!({"type":"text","text":text})];
+    let textual_result = format!("{text}\n\nResult:\n{result}");
+    let mut rendered = vec![json!({"type":"text","text":textual_result})];
     for item in content {
         match item {
             ServiceContent::Image { mime_type, data } => {
@@ -390,7 +391,10 @@ mod tests {
         );
         assert_eq!(rendered["structuredContent"], structured);
         assert_eq!(rendered["content"][0]["type"], "text");
-        assert_eq!(rendered["content"][0]["text"], "Opened the page.");
+        assert_eq!(
+            rendered["content"][0]["text"],
+            "Opened the page.\n\nResult:\n{\"facts\":{\"view\":\"view_1\"},\"status\":\"succeeded\"}"
+        );
         assert_eq!(rendered["content"][1]["type"], "image");
         assert_eq!(rendered["content"][1]["mimeType"], "image/jpeg");
         assert_eq!(rendered["content"][1]["data"], "base64-image");
@@ -409,8 +413,30 @@ mod tests {
         assert_eq!(rendered["structuredContent"], structured);
         assert_eq!(
             rendered["content"][0]["text"],
-            "Refused navigation because the host is not allowed."
+            "Refused navigation because the host is not allowed.\n\nResult:\n{\"reason\":\"host_not_allowed\",\"status\":\"refused\"}"
         );
         assert_eq!(rendered["isError"], true);
+    }
+
+    #[test]
+    fn opaque_nested_results_remain_visible_without_structured_content_support() {
+        let structured = json!({
+            "status":"succeeded",
+            "facts":{
+                "value":{"title":"Example Domain","count":2},
+                "matches":[{"target":"target_1","name":"Example Domain"}]
+            }
+        });
+        let rendered = render_result(
+            "Completed the request.".into(),
+            structured.clone(),
+            false,
+            vec![],
+        );
+        let text = rendered["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("Completed the request.\n\nResult:\n"));
+        assert!(text.contains("\"title\":\"Example Domain\""));
+        assert!(text.contains("\"target\":\"target_1\""));
+        assert_eq!(rendered["structuredContent"], structured);
     }
 }

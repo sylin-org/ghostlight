@@ -192,6 +192,20 @@ async function runAdapter(peer) {
       result = { outcome: "tab_opened", tab, committed_urls: [tab.url] };
     } else if (command.command === "read_text") {
       result = { outcome: "text", tab_id: tab.tab_id, text: "Example Domain", truncated: false, title: tab.title, url: tab.url };
+    } else if (command.command === "find") {
+      result = {
+        outcome: "targets",
+        tab_id: tab.tab_id,
+        targets: [{ locator: "heading-1", role: "heading", name: "Example Domain", state: [], credential_class: false }]
+      };
+    } else if (command.command === "evaluate_script") {
+      result = {
+        outcome: "script_evaluated",
+        tab,
+        value: JSON.stringify({ title: "Example Domain", visible: true }),
+        truncated: false,
+        committed_urls: []
+      };
     } else if (command.command === "screenshot") {
       result = {
         outcome: "screenshot",
@@ -304,6 +318,13 @@ async function runAdapter(peer) {
 function structured(response) {
   assert.equal(response.error, undefined, JSON.stringify(response.error));
   return response.result.structuredContent;
+}
+
+function textual(response) {
+  assert.equal(response.error, undefined, JSON.stringify(response.error));
+  const item = response.result.content.find((content) => content.type === "text");
+  assert.equal(typeof item?.text, "string");
+  return item.text;
 }
 
 async function waitForMcpReady(mcp, timeoutMs = 10000) {
@@ -454,6 +475,23 @@ try {
   assert.equal(read.facts.text, "Example Domain");
   assert.equal(read.summary, "Read 2 words from example.com.");
 
+  const foundResponse = await mcp.request("tools/call", {
+    name: "browser_find",
+    arguments: { tab: restartedHandle, text: "Example Domain", max_results: 3 }
+  });
+  const found = structured(foundResponse);
+  assert.equal(found.status, "succeeded");
+  assert.equal(found.facts.matches[0].name, "Example Domain");
+  assert.match(textual(foundResponse), /\"matches\":\[\{[^\n]*\"name\":\"Example Domain\"/);
+
+  const executedResponse = await mcp.request("tools/call", {
+    name: "browser_execute",
+    arguments: { tab: restartedHandle, script: "({ title: document.title, visible: true })" }
+  });
+  const executed = structured(executedResponse);
+  assert.deepEqual(executed.facts.value, { title: "Example Domain", visible: true });
+  assert.match(textual(executedResponse), /\"value\":\{\"title\":\"Example Domain\",\"visible\":true\}/);
+
   const screenshotResponse = await mcp.request("tools/call", {
     name: "browser_screenshot",
     arguments: { tab: restartedHandle }
@@ -565,7 +603,7 @@ try {
   assert.equal(physicalCommands.length, physicalCommandCountBeforeRecovery);
   assert.equal(disconnected.next_steps.length, 1);
 
-  console.log("process journey ok: reconnect -> open/read -> screenshot/region/chain -> recording -> close -> pinned no-adapter refusal");
+  console.log("process journey ok: reconnect -> open/read/find/execute -> screenshot/region/chain -> recording -> close -> pinned no-adapter refusal");
 } finally {
   for (const child of children.reverse()) {
     if (!child.killed) child.kill();

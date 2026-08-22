@@ -58,6 +58,10 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     sole connected browser. Two connected browsers with no evidence produce a refusal naming both
     candidates, with no dispatch and no binding. Listing a workspace's tabs succeeds with no browser
     connected.
+21. Every tool result keeps its canonical envelope in `structuredContent` and repeats that complete
+    opaque envelope after the authored ordinary-text summary. A client that reads only normal MCP
+    content can recover nested script values and find-match handles. The edge has no tool-name or
+    result-field dispatch, and image content remains separate.
 
 ## Executor and truth gates
 
