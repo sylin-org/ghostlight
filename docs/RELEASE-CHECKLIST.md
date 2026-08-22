@@ -1,6 +1,6 @@
 # Ghostlight 1.0 release checklist
 
-Last updated: 2026-08-17.
+Last updated: 2026-08-22.
 
 This is the one status-bearing checklist for the 1.0 release. It routes work to the authoritative
 process in [RELEASE.md](RELEASE.md), current implementation truth in [STATUS.md](STATUS.md), the
@@ -139,6 +139,11 @@ Evidence: add a dated record under `docs/testing/` and link it here.
 Pre-freeze evidence: [2026-08-17 local release preflight](testing/release-preflight-2026-08-17.md)
 passed every locally runnable source check. G1 remains open until G0 names the frozen revision and
 both operating-system passes cover that exact revision.
+
+Extension-specific pre-freeze evidence:
+[2026-08-22 extension release preparation](testing/extension-release-preparation-2026-08-22.md)
+compared the exact published 0.8 ZIP with 1.0, fixed the real package and disclosure gaps, and
+produced a byte-reproducible local ZIP. It does not close G1, G2, or G3 for an unfrozen revision.
 
 ### G2. Assemble, verify, and take custody of the candidate
 

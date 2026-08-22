@@ -76,8 +76,10 @@ Manual Chrome Web Store submission:
   2. On Package, upload: $ZipPath
   3. Review changed listing fields against docs/legal/STORE_LISTING.md,
      docs/legal/PRIVACY.md, and docs/legal/PERMISSION_JUSTIFICATIONS.md.
-  4. Submit for review. Google controls review and rollout timing.
-  5. After acceptance, run scripts/reconcile-chrome-store.ps1 for version $($manifest.version).
+  4. Submit for review with deferred publication. Google controls review timing.
+  5. Keep an approved build staged until the owner authorizes public publication.
+  6. After the public update is observable, run:
+       pwsh -File scripts/reconcile-chrome-store.ps1 -WriteObservedState
 "@
 
 Write-Output "Chrome Web Store action: $Action"

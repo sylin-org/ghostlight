@@ -51,6 +51,12 @@ try {
         "setup.html",
         "ui.css"
     )
+    $iconFiles = @(
+        "icon16.png",
+        "icon32.png",
+        "icon48.png",
+        "icon128.png"
+    )
     foreach ($file in $rootFiles) {
         $from = Join-Path $source $file
         if (-not (Test-Path -LiteralPath $from)) {
@@ -58,7 +64,16 @@ try {
         }
         Copy-Item -LiteralPath $from -Destination (Join-Path $stage $file)
     }
-    foreach ($directory in @("icons", "lib", "vendor")) {
+    $stagedIcons = Join-Path $stage "icons"
+    New-Item -ItemType Directory -Path $stagedIcons | Out-Null
+    foreach ($file in $iconFiles) {
+        $from = Join-Path (Join-Path $source "icons") $file
+        if (-not (Test-Path -LiteralPath $from -PathType Leaf)) {
+            throw "Required extension icon is missing: $file"
+        }
+        Copy-Item -LiteralPath $from -Destination (Join-Path $stagedIcons $file)
+    }
+    foreach ($directory in @("lib", "vendor")) {
         Copy-Item -LiteralPath (Join-Path $source $directory) -Destination $stage -Recurse
     }
     $licenseDirectory = Join-Path $stage "licenses"
@@ -111,7 +126,7 @@ try {
 
     $zip = [System.IO.Compression.ZipFile]::OpenRead($OutputPath)
     try {
-        $names = @($zip.Entries | ForEach-Object { $_.FullName.Replace("\", "/") })
+        $names = @($zip.Entries | ForEach-Object { $_.FullName.Replace("\", "/") } | Sort-Object)
         if ($names -notcontains "manifest.json") {
             throw "extension ZIP does not contain manifest.json at its root"
         }
@@ -126,6 +141,45 @@ try {
         })
         if ($forbidden.Count -gt 0) {
             throw "extension ZIP contains development files: $($forbidden -join ', ')"
+        }
+
+        $expectedNames = [System.Collections.Generic.List[string]]::new()
+        foreach ($file in $rootFiles) {
+            $expectedNames.Add($file)
+        }
+        foreach ($file in $iconFiles) {
+            $expectedNames.Add("icons/$file")
+        }
+        foreach ($directory in @("lib", "vendor")) {
+            Get-ChildItem -LiteralPath (Join-Path $source $directory) -File -Recurse |
+                ForEach-Object {
+                    $relative = [System.IO.Path]::GetRelativePath(
+                        (Join-Path $source $directory),
+                        $_.FullName
+                    ).Replace("\", "/")
+                    $expectedNames.Add("$directory/$relative")
+                }
+        }
+        $expectedNames.Add("licenses/Apache-2.0.txt")
+        $expectedNames.Add("licenses/MIT.txt")
+        $expected = @($expectedNames | Sort-Object)
+        if (($names -join "`n") -ne ($expected -join "`n")) {
+            throw "extension ZIP contents differ from the explicit store package surface"
+        }
+
+        $manifestEntry = $zip.GetEntry("manifest.json")
+        $reader = [System.IO.StreamReader]::new($manifestEntry.Open())
+        try {
+            $packagedManifest = $reader.ReadToEnd() | ConvertFrom-Json
+        }
+        finally {
+            $reader.Dispose()
+        }
+        if ($packagedManifest.version -ne $manifest.version) {
+            throw "extension ZIP manifest version differs from source"
+        }
+        if ($null -ne $packagedManifest.PSObject.Properties["key"]) {
+            throw "extension ZIP contains the development key"
         }
     }
     finally {

@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Permission Justifications
 
-Last updated: 2026-08-10 for the planned 1.0 manifest
+Last updated: 2026-08-22 for the planned 1.0 manifest
 
 These blocks correspond exactly to `extension/manifest.json`. Recheck store field names and length
 limits at submission time.
@@ -17,10 +17,22 @@ The alarms permission schedules local reconnection and lifecycle checks for the 
 The debugger permission attaches Chrome DevTools Protocol only to Ghostlight-controlled tabs. It captures requested screenshots, dispatches pointer and keyboard input, scrolls, drags, changes zoom, handles page navigation state, and evaluates an explicitly requested bounded page script. Chrome displays its normal debugging indicator. Ghostlight detaches when the controlled relationship ends.
 ```
 
+## downloads
+
+```text
+The downloads permission is used only when the user explicitly asks to save a completed Ghostlight recording through the browser's normal download mechanism. The extension creates the finished GIF locally, gives Chrome a temporary object URL, observes only that download until it settles, and then revokes the URL. It does not browse existing downloads, choose an arbitrary filesystem path, or fetch a recording from a remote server.
+```
+
 ## nativeMessaging
 
 ```text
 The nativeMessaging permission connects the extension to the separately installed local Ghostlight browser connector. This on-device channel carries typed browser instructions and results. Without it the extension cannot receive work. The channel does not send browser data to Sylin.
+```
+
+## offscreen
+
+```text
+The offscreen permission creates a local extension document only while encoding an explicitly requested browser recording as an animated GIF. Manifest V3 service workers may be suspended during encoding, so the document provides the browser media environment needed to complete the operation reliably. It loads only code bundled in the reviewed extension, makes no network request, has no visible UI, and closes after encoding.
 ```
 
 ## storage

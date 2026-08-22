@@ -1,6 +1,6 @@
 # Ghostlight in Browser: planned 1.0 store listing
 
-Last updated: 2026-08-10
+Last updated: 2026-08-22
 
 This is repository-local candidate copy. Do not change the public listing or submit a package until
 the owner approves the provenance-verified 1.0 artifacts and compatibility evidence. Recheck the
@@ -75,8 +75,8 @@ policy decision and sends no telemetry or browser data to Sylin.
 
 Use the exact blocks in
 [`PERMISSION_JUSTIFICATIONS.md`](PERMISSION_JUSTIFICATIONS.md) for `alarms`, `debugger`,
-`nativeMessaging`, `storage`, `tabGroups`, `tabs`, `webNavigation`, `windows`, HTTP/HTTPS host
-permissions, and explicit page-context JavaScript.
+`downloads`, `nativeMessaging`, `offscreen`, `storage`, `tabGroups`, `tabs`, `webNavigation`,
+`windows`, HTTP/HTTPS host permissions, and explicit page-context JavaScript.
 
 **Privacy policy**
 
@@ -99,14 +99,16 @@ or sync-storage access and does not maintain a browsing-history database.
 ## Assets
 
 - Use `extension/icons/icon128.png` as the store icon. Do not redraw or recolor it.
-- Capture screenshots externally so the extension's intentional screenshot suppression does not
-  hide its visible cursor, highlights, receipts, and ribbons.
-- Show the real browser chrome, named Ghostlight group, current popup/options visual identity, a
+- A version change alone does not require new screenshots or promotional assets. Reuse the current
+  store assets while they remain accurate; update only an asset that materially misrepresents the
+  submitted extension.
+- If an asset does need replacement, capture it externally so the extension's intentional
+  screenshot suppression does not hide its visible cursor, highlights, receipts, and ribbons.
+  Show the real browser chrome, named Ghostlight group, current popup/options visual identity, a
   safe browser action, and a blocked action with its visible explanation.
 - Use only safe demo content. Remove accounts, notifications, personal tabs, paths, ids, and other
-  private material.
-- Do not invent a demo CLI. Record the real packaged product through a supported MCP harness and
-  the public safe demo forms.
+  private material. Do not invent a demo CLI; record the real packaged product through a supported
+  MCP harness and the public safe demo forms.
 
 ## Submission gate
 
@@ -118,8 +120,9 @@ Before owner submission:
    source and exact 1.0 adapter version.
 3. Complete the extension product and visible-browser gates in `docs/1.0/ACCEPTANCE.md`.
 4. Verify the privacy policy public URL already carries the matching 1.0 text.
-5. Upload assets and copy, review every disclosure in the live dashboard, then submit with the
-   owner's explicit approval.
+5. Review the existing assets and listing fields, change only what the submitted extension makes
+   inaccurate, review every disclosure in the live dashboard, then submit with the owner's
+   explicit approval.
 6. Use deferred publication where available. Publish the service and adapter in the compatibility
    order recorded by the final release plan.
 

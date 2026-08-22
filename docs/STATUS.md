@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-17.
+Last updated: 2026-08-22.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -1085,6 +1085,20 @@ the fresh isolated build, process and both CLI journeys, 42 workbench assertions
 dependency policy, the 17-warning advisory allowance, script syntax, repository integrity, 0.8
 recovery, and offline public truth passed. G0 has not frozen a revision, so this is a source
 preflight rather than a checked candidate gate.
+
+Extension-specific release preparation was repeated on Windows on 2026-08-22 after an exact
+comparison with the published 0.8 ZIP. Product identity, both extension identities, all inherited
+artwork, the visible product surfaces, installer-owned native-host generation, and historical
+behavior dispositions remain present. The comparison found and fixed three real release gaps: the
+missing `downloads` and `offscreen` justifications, the omitted 1.0 recording and diagnostics
+privacy disclosure, and an overbroad store-package icon copy that included 1.34 MB of unreferenced
+source artwork. Store instructions no longer treat unchanged screenshots as a blocker. The local
+1.0 ZIP is a reproducible 85,835-byte, 30-entry package with SHA-256
+`ccb48577a93995b1eaaf9b13fab75313a347483553782d178187e1ea8ceb0923`; it has no development key
+and carries the four exact inherited icons. This is local source evidence, not the final
+provenance-bound G2 artifact. The exact comparison, fixes, checks, and remaining public-policy
+handoff are in
+[the dated extension release preparation](testing/extension-release-preparation-2026-08-22.md).
 
 - Build-only candidate `fd86403` is historical evidence, not the publishable 1.0 candidate. It is an
   ancestor of the current head, so the next candidate is built from the revision G0 freezes. CI

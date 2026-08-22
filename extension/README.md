@@ -11,15 +11,18 @@ copied. See [../docs/adr/](../docs/adr/) for the decisions behind it.
 
 ## Files
 - `manifest.json`: MV3 manifest (permissions, native-messaging host, background SW, content script).
-- `lib/presentation-broker.js`: bounded document-aware state/effect delivery, exact acknowledgements,
-  navigation replay, and on-demand renderer activation (ADR-0081).
+- `lib/presentation.js`: bounded document-aware state/effect delivery, exact acknowledgements,
+  navigation replay, and content-free visual rendering.
 - `service-worker.js`: native messaging, CDP primitive execution, tab-group management, and
   keepalive/recovery.
 - `lib/chunks.js`: bounded SHA-256-verified reassembly for large service-to-extension commands.
 - `lib/diagnostics.js`: opt-in, memory-only console and sanitized network observation.
 - `lib/recording.js`: plural bounded volatile recording registry and capture lifecycle.
+- `offscreen.html` and `offscreen.js`: bundled browser-local GIF encoding that closes after use.
 - `content.js`: DOM reads (accessibility tree, `find`, `form_input` (shadow DOM), `get_page_text`).
-- `native-messaging-host.json`: host-manifest template (fill in the binary path + extension ID).
+
+Native-messaging manifests are generated and ownership-checked by the native installer. They do
+not belong in the extension source or Chrome Web Store package.
 
 ## Source-development setup
 

@@ -124,5 +124,19 @@ if ($extension.version -ne $sourceVersion -or $tauri.version -ne $sourceVersion)
     throw "Source, extension, and desktop versions differ"
 }
 
+$permissionDocument = Get-Content -LiteralPath (
+    Join-Path $repo "docs/legal/PERMISSION_JUSTIFICATIONS.md"
+) -Raw
+$documentedPermissions = @(
+    [regex]::Matches($permissionDocument, '(?m)^## (?<permission>[A-Za-z][A-Za-z0-9]*)\r?$') |
+        ForEach-Object { $_.Groups["permission"].Value } |
+        Sort-Object
+)
+$manifestPermissions = @($extension.permissions | Sort-Object)
+if (($documentedPermissions -join "`n") -ne ($manifestPermissions -join "`n")) {
+    throw "Extension manifest permissions and Chrome Web Store justifications differ"
+}
+
 Write-Output "Repository integrity: $($tracked.Count) tracked files readable; local links valid; source version $sourceVersion aligned."
 Write-Output "Historical ASCII exceptions remain fixed at $($expectedNonAscii.Count) named files; no new exception is allowed."
+Write-Output "Every extension manifest permission has exactly one Chrome Web Store justification."
