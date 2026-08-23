@@ -184,3 +184,10 @@ Rejected. ADR-0043 held that line and named its triggers, and they fired. Record
 destination now costs nothing and is revisable by a newer ADR, while designing during
 implementation would spend the integration window on decisions that deserve calm attention
 first.
+
+## Amendment 2026-08-22: development exposure
+
+Approved by the owner on 2026-08-22. Decision 9's stable-exposure requirement governs
+release evidence only. Development and CI may target flag-enabled or origin-trial Chromium
+builds against the bundled fixture pages. Before any release claim, the original gate
+applies in full: a stable-channel exposure path, or a durable extension or CDP contract.
