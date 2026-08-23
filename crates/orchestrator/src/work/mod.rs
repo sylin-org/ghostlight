@@ -1682,7 +1682,8 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::LocalInterlock(_) => "browser_local_interlock",
         BrowserError::Protocol(_)
         | BrowserError::Authentication
-        | BrowserError::Incompatible { .. } => "browser_contract_failed",
+        | BrowserError::Incompatible { .. }
+        | BrowserError::CapabilityVersion { .. } => "browser_contract_failed",
         _ => "browser_effect_unknown",
     }
 }

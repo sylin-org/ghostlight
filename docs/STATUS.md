@@ -18,8 +18,11 @@ view-point input; unambiguous semantic action and form loops; article and hierar
 reads with bounded diffs; inline and captured-image upload; guarded beforeunload navigation; and
 one result-aware `browser_flow`. Old names, narration prose, destructive diagnostics, client plan
 mutation, and UDP syslog do not return. The [ledger](tasks/capability-restoration/LEDGER.md) is the
-authority on progress. It is READY at R1; none of the planned production behavior is implemented
-or claimed yet.
+authority on progress. R1 is complete: every browser command now declares a minimum capability
+revision at one bridge seam, an old adapter refuses `browser_execute` before dispatch with the typed
+`CapabilityVersion` error, and page scripts evaluate with REPL semantics (`replMode`, promise
+waiting, user gesture, by-value return, and exactly one diagnosed bare-return retry). Parse failures
+now refuse decisively without inventing an effect; runtime failures remain unknown. R2 is next.
 
 This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
 pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no

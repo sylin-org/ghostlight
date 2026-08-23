@@ -32,6 +32,9 @@ pub mod adapter_capability {
     pub const FILES: &str = "files";
     /// Explicit page script evaluation.
     pub const SCRIPT: &str = "script";
+    /// Script revision implementing REPL-grade evaluation: top-level await,
+    /// promise waiting, user gesture, and bare-return recovery.
+    pub const SCRIPT_REVISION_REPL: u16 = 2;
     /// Browser-local condition observation.
     pub const OBSERVATION: &str = "observation";
     /// JavaScript dialog observation and handling.
@@ -769,6 +772,16 @@ impl BrowserCommand {
             Self::Present { .. } => capability::PRESENTATION,
         }
     }
+
+    /// Return the minimum advertised revision of [`Self::required_capability`]
+    /// this command accepts. Families without a stated upgrade remain at 1.
+    #[must_use]
+    pub const fn required_revision(&self) -> u16 {
+        match self {
+            Self::EvaluateScript { .. } => adapter_capability::SCRIPT_REVISION_REPL,
+            _ => 1,
+        }
+    }
 }
 
 /// A correlated physical primitive request.
@@ -1447,6 +1460,32 @@ mod tests {
             }
             .required_capability(),
             adapter_capability::CAPTURE
+        );
+    }
+
+    #[test]
+    fn commands_declare_the_minimum_revision_that_implements_them() {
+        assert_eq!(
+            BrowserCommand::EvaluateScript {
+                tab_id: 1,
+                script: "1+1".into(),
+                max_result_chars: 1000,
+            }
+            .required_revision(),
+            adapter_capability::SCRIPT_REVISION_REPL
+        );
+        assert_eq!(
+            BrowserCommand::ListTabs.required_revision(),
+            1,
+            "families without a stated upgrade stay at revision 1"
+        );
+        assert_eq!(
+            BrowserCommand::Navigate {
+                tab_id: 1,
+                url: "https://example.com/".into(),
+            }
+            .required_revision(),
+            1
         );
     }
 

@@ -5,12 +5,12 @@ file before work, after every material finding, and when a task completes or blo
 
 ## RESUME HERE
 
-- State: READY. Planning is complete; no production restoration task has started.
-- Next task: R1, [capability revisions and REPL-grade execute](R1-negotiated-repl.md).
+- State: READY. R1 is complete; no task is in progress.
+- Next task: R2, [precision input](R2-precision-input.md).
 - Implementation baseline: `dev` at
   `c8a181cc15e39b25b2cdc6864c8303efe345f561` before this batch's planning commit.
 - Required first action: confirm the current head contains ADR-0133 and this batch, confirm no
-  overlapping worktree changes, then execute R1 only.
+  overlapping worktree changes, then execute R2 only.
 - Current catalog: 22 tools. Planned catalog after R6: 23 tools with `browser_flow` added.
 - Release state: the staged Chrome review is stale already due ADR-0131 and will become stale again
   as this batch changes extension bytes. Do not mutate the Store during R1-R8.
@@ -25,7 +25,7 @@ Allowed states: `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`.
 
 | Task | State | Commit subject | Required evidence | Evidence |
 | --- | --- | --- | --- | --- |
-| R1 negotiated REPL | READY | `feat(browser): restore repl-grade execution` | Old-adapter refusal; REPL extension tests; process execute value | -- |
+| R1 negotiated REPL | COMPLETE | `feat(browser): restore repl-grade execution` | Old-adapter refusal; REPL extension tests; process execute value | Bridge `required_revision` + `CapabilityVersion` refusal tests; orchestrator revision-1 refusal-before-dispatch test with per-command dispatch proof; 8 new evaluator tests (repl flags, top-level await, bare-return retry, parse-vs-runtime effect truth, bounded descriptions); process journey value assertion at script revision 2 |
 | R2 precision input | READY | `feat(browser): restore precision input` | Decoder, work, wire, extension, and process input journeys | -- |
 | R3 semantic actions | READY | `feat(browser): restore semantic action loops` | Ambiguity no-effect; credential handoff; typed form and expectation journeys | -- |
 | R4 document reading | READY | `feat(browser): restore rich document reading` | Article fallback; tree bounds; subtree ownership; snapshot diff journeys | -- |
@@ -47,7 +47,7 @@ linked current evidence.
 | Type into focused editable control | `browser_type_text` focused branch with credential preflight | R2 | READY | -- |
 | Fixed duration wait | `browser_wait` duration branch | R2 | READY | -- |
 | Coordinate wheel ticks | `browser_scroll` current-view point branch | R2 | READY | -- |
-| Top-level await and bare return | REPL-grade `browser_execute` | R1 | READY | -- |
+| Top-level await and bare return | REPL-grade `browser_execute` | R1 | COMPLETE | R1 evidence: repl-mode evaluation, one diagnosed bare-return retry, decisive parse-failure class |
 | Label, placeholder, name, role, and form scope | Semantic selector alternatives on narrow tools | R3 | READY | -- |
 | Find-act-expect closed loop | Optional postcondition on narrow effect tools | R3 | READY | -- |
 | Typed form values and contained submit | Extended `browser_fill_form` | R3 | READY | -- |
@@ -84,11 +84,17 @@ linked current evidence.
 
 ## Deviations
 
-None.
+- R1: the survey found the revision dimension already present end to end; no architectural rework
+  was needed. The evaluator moved from an inline service-worker function to
+  `extension/lib/script-evaluator.js` so the required extension tests can exercise it directly,
+  following the established `lib/*.js` factory pattern. Parse failures now carry a decisive
+  `effect_unknown=false` where the old handler marked every failure uncertain; runtime failures
+  remain unknown.
 
 ## Task log
 
 | Task | Date | Status | Findings and deviations |
 | --- | --- | --- | --- |
 | Planning | 2026-08-22 | COMPLETE | ADR-0133 accepted; nine-task execution plan created from the exact published 0.8 behavioral audit. No production behavior changed. |
+| R1 | 2026-08-22 | COMPLETE | Gates: fmt, warnings-denied Clippy, 364 Rust tests (311 orchestrator library), 127 extension tests, JavaScript syntax, process journey, CLI PowerShell journey, repository integrity -- all against the isolated `.target-capability-restoration` build. |
 

@@ -26,7 +26,7 @@ tree.
 
 | Batch | What it was | Where its ledger stops | Last touched |
 | --- | --- | --- | --- |
-| [capability-restoration](capability-restoration/) | ADR-0133: restore genuine published 0.8 browser behaviors through the current 1.0 language and typed seams | Ready at R1; no production task started | 2026-08-22 |
+| [capability-restoration](capability-restoration/) | ADR-0133: restore genuine published 0.8 browser behaviors through the current 1.0 language and typed seams | R1 complete; R2 next | 2026-08-22 |
 | [reference-experience](reference-experience/) | One product across every machine: the second-machine state, adaptive familiarity, terminal citizenship, runtime control, At a glance, readiness recovery | S1-S7 and Linux V1-V5 complete; S8 blocked on required real-desktop evidence | 2026-08-17 |
 | [executor-split](executor-split/) | Splitting `work/mod.rs` (5824 lines) into per-operation-family files | Complete | 2026-08-15 |
 | [outcome-language](outcome-language/) | ADR-0103: one module owns what Ghostlight says happened | Complete | 2026-08-11 |

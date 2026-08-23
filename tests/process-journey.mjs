@@ -383,7 +383,7 @@ try {
       "keyboard_input", "files", "script", "observation", "dialogs",
       "operation_recovery", "presentation", "window_geometry", "diagnostics", "recording",
       "chunked_commands", "adapter_liveness"
-    ].map((name) => ({ name, revision: 1 }))
+    ].map((name) => ({ name, revision: name === "script" ? 2 : 1 }))
   });
   assert.deepEqual(await native.next(), { kind: "backend_unavailable" });
 

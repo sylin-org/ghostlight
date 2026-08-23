@@ -1,8 +1,9 @@
-importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/debugger.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js");
+importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/debugger.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js");
 
 const shared = globalThis.GhostlightShared;
 const stateApi = globalThis.GhostlightState;
 const screenshotApi = globalThis.GhostlightScreenshot;
+const scriptEvaluator = globalThis.GhostlightScriptEvaluator;
 const HOST_NAME = shared.NATIVE_HOST_NAME;
 const SERVICE_INSTALL_URL = "https://sylin.org/ghostlight/chromium-extension/post-install/";
 const adapterEpoch = `adapter_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -1214,26 +1215,23 @@ async function dragPoints(correlation, command) {
   }
 }
 
+const SCRIPT_SETTLE_MS = 100;
+
 async function evaluateScript(correlation, command) {
   await ensureDebugger(command.tab_id);
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
+  const send = (method, params) => chrome.debugger.sendCommand({ tabId: command.tab_id }, method, params);
   try {
-    const evaluated = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Runtime.evaluate", {
-      expression: command.script,
-      awaitPromise: true,
-      returnByValue: true,
-      userGesture: true
-    });
-    if (evaluated.exceptionDetails) throw new Error(evaluated.exceptionDetails.text || "page script failed");
-    const serialized = JSON.stringify(evaluated.result?.value ?? null);
-    const value = serialized.slice(0, command.max_result_chars);
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const value = await scriptEvaluator.evaluate(send, command.script, command.max_result_chars);
+    const serialized = JSON.stringify(value ?? null);
+    const bounded = serialized.slice(0, command.max_result_chars);
+    await new Promise((resolve) => setTimeout(resolve, SCRIPT_SETTLE_MS));
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
-    return { outcome: "script_evaluated", tab: physicalTab(tab), value, truncated: serialized.length > value.length, committed_urls: commits };
+    return { outcome: "script_evaluated", tab: physicalTab(tab), value: bounded, truncated: serialized.length > bounded.length, committed_urls: commits };
   } catch (error) {
-    error.effectUnknown = true;
+    if (error.effectUnknown === undefined) error.effectUnknown = true;
     throw error;
   } finally {
     navigationWatchers.delete(command.tab_id);

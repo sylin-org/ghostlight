@@ -569,16 +569,17 @@ impl RelayBrowserPort {
             }) {
                 return Err(BrowserError::DisconnectedBeforeDispatch);
             }
-            if connection
+            let advertised = connection
                 .capabilities
                 .get(required_capability)
                 .copied()
-                .unwrap_or_default()
-                < 1
-            {
-                return Err(BrowserError::Primitive(format!(
-                    "adapter does not support physical capability {required_capability} revision 1"
-                )));
+                .unwrap_or_default();
+            if advertised < command.required_revision() {
+                return Err(BrowserError::CapabilityVersion {
+                    capability: required_capability.to_string(),
+                    required: command.required_revision(),
+                    advertised,
+                });
             }
             (
                 Arc::clone(&connection.writer),
@@ -1056,6 +1057,18 @@ pub enum BrowserError {
     /// Browser adapter protocol major is incompatible.
     #[error("browser adapter protocol major {offered} is incompatible with required {required}")]
     Incompatible { offered: u16, required: u16 },
+    /// The adapter advertises an older revision of a physical capability than the command requires.
+    #[error(
+        "adapter supports {capability} revision {advertised}, command requires revision {required}"
+    )]
+    CapabilityVersion {
+        /// Physical capability family that is too old.
+        capability: String,
+        /// Minimum revision the command requires.
+        required: u16,
+        /// Highest revision the adapter advertised.
+        advertised: u16,
+    },
 }
 
 impl BrowserError {
@@ -1177,6 +1190,65 @@ mod contract_tests {
                 required: ADAPTER_PROTOCOL_MAJOR
             })
         );
+        client.join().unwrap();
+    }
+
+    #[test]
+    fn an_older_capability_revision_refuses_before_dispatch() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (release, hold) = mpsc::channel();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            announce_adapter(
+                &mut stream,
+                vec![
+                    capability(adapter_capability::TABS),
+                    AdapterCapability {
+                        name: adapter_capability::SCRIPT.into(),
+                        revision: 1,
+                    },
+                ],
+            );
+            hold.recv().unwrap();
+        });
+        let (stream, _) = listener.accept().unwrap();
+        let port =
+            RelayBrowserPort::with_heartbeat_settings("service_test".into(), short_heartbeat());
+        port.attach(stream).unwrap();
+
+        assert_eq!(
+            port.call(
+                TEST_BROWSER,
+                "workspace_test",
+                BrowserCommand::EvaluateScript {
+                    tab_id: 1,
+                    script: "1+1".into(),
+                    max_result_chars: 1000,
+                },
+                Instant::now() + Duration::from_millis(200),
+                &AtomicBool::new(false),
+            ),
+            Err(BrowserError::CapabilityVersion {
+                capability: adapter_capability::SCRIPT.into(),
+                required: adapter_capability::SCRIPT_REVISION_REPL,
+                advertised: 1,
+            })
+        );
+
+        // A revision-1 command still dispatches against the same connection,
+        // so the refusal is per command, not per adapter.
+        assert!(matches!(
+            port.call(
+                TEST_BROWSER,
+                "workspace_test",
+                BrowserCommand::ListTabs,
+                Instant::now() + Duration::from_millis(100),
+                &AtomicBool::new(false),
+            ),
+            Err(BrowserError::DeadlineAfterDispatch)
+        ));
+        release.send(()).unwrap();
         client.join().unwrap();
     }
 

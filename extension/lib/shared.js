@@ -9,6 +9,7 @@
 
   const NATIVE_HOST_NAME = "org.sylin.ghostlight";
   const ADAPTER_PROTOCOL_MAJOR = 2;
+  const ADAPTER_CAPABILITY_REVISIONS = Object.freeze({ script: 2 });
   const ADAPTER_CAPABILITIES = Object.freeze([
     "tabs",
     "atomic_tab_open",
@@ -29,7 +30,7 @@
     "chunked_commands",
     "adapter_liveness",
     "adapter_attention"
-  ].map((name) => Object.freeze({ name, revision: 1 })));
+  ].map((name) => Object.freeze({ name, revision: ADAPTER_CAPABILITY_REVISIONS[name] ?? 1 })));
   const CREDENTIAL_AUTOCOMPLETE = new Set([
     "current-password",
     "new-password",

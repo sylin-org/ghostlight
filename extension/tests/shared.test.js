@@ -150,6 +150,7 @@ test("browser events use the nested typed bridge envelope", () => {
 
 test("the adapter advertises stable versioned physical capabilities", () => {
   assert.equal(shared.ADAPTER_PROTOCOL_MAJOR, 2);
+  const revisionFor = (name) => (name === "script" ? 2 : 1);
   assert.deepEqual(shared.ADAPTER_CAPABILITIES, [
     "tabs",
     "atomic_tab_open",
@@ -170,7 +171,7 @@ test("the adapter advertises stable versioned physical capabilities", () => {
     "chunked_commands",
     "adapter_liveness",
     "adapter_attention"
-  ].map((name) => ({ name, revision: 1 })));
+  ].map((name) => ({ name, revision: revisionFor(name) })));
 });
 
 test("adapter liveness acknowledgements echo only bounded heartbeat sequences", () => {
