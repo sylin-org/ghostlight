@@ -175,6 +175,12 @@ pub const DIRECTORY: &[CapabilityVariant] = &[
         "Compose independently governed steps.",
     ),
     variant(
+        "browser_flow",
+        None,
+        CapabilitySet::EMPTY,
+        "Compose result-aware governed steps; each child authorizes normally.",
+    ),
+    variant(
         "browser_dialog",
         Some("status"),
         CapabilitySet::READ,
@@ -251,6 +257,8 @@ pub fn requirements(operation: &Operation) -> CapabilitySet {
         Operation::UploadFiles(_) => CapabilitySet::WRITE,
         Operation::RunScript(_) => CapabilitySet::EXECUTE,
         Operation::RunSequence(_) => CapabilitySet::EMPTY,
+        // A flow classifies nothing itself; every child step authorizes normally.
+        Operation::RunFlow(_) => CapabilitySet::EMPTY,
         Operation::HandleDialog(value) if value.action == "status" => CapabilitySet::READ,
         Operation::HandleDialog(_) => CapabilitySet::ACTION,
         Operation::Record(value) if value.action == "start" => CapabilitySet::READ,
@@ -337,6 +345,9 @@ mod tests {
                 {"action":"wait","condition":"load_ready"},
                 {"action":"hover","target":"target_1"}
             ]}),
+            ("browser_flow", None) => json!({"steps":[
+                {"id":"list","tool":"browser_tabs","arguments":{"action":"list"}}
+            ]}),
             ("browser_dialog", Some("status")) => json!({"action":"status"}),
             ("browser_dialog", Some("resolve")) => json!({"action":"accept"}),
             ("browser_record", Some("start")) => json!({"action":"start"}),
@@ -375,6 +386,7 @@ mod tests {
             "browser_execute",
             "browser_wait",
             "browser_sequence",
+            "browser_flow",
             "browser_dialog",
             "browser_record",
             "browser_diagnose",

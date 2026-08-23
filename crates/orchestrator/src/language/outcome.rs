@@ -196,6 +196,14 @@ pub enum Outcome {
     TabsListed { count: usize },
     /// A semantic selector matched zero or several visible controls.
     SelectorUnresolved { matched: usize },
+    /// One governed result-aware flow finished.
+    FlowRan {
+        completed: usize,
+        total: usize,
+        stopped: bool,
+    },
+    /// One flow decoded and classified without dispatching.
+    FlowDecoded { steps: usize },
     /// One bounded document-tree observation was recorded.
     DocumentInspected {
         nodes: usize,
@@ -349,6 +357,20 @@ impl Outcome {
                 } else {
                     format!("Recorded the document tree: {counted}.")
                 }
+            }
+            Self::FlowRan {
+                completed,
+                total,
+                stopped,
+            } => {
+                if *stopped {
+                    format!("Stopped at step {completed} of {total}.")
+                } else {
+                    format!("Completed {total} flow steps.")
+                }
+            }
+            Self::FlowDecoded { steps } => {
+                format!("Decoded {steps} flow steps; nothing was dispatched.")
             }
             Self::SelectorUnresolved { matched } => {
                 if *matched == 0 {
@@ -663,6 +685,10 @@ impl Outcome {
             },
             Self::DocumentInspected { nodes, .. } => Observed {
                 count: measured(*nodes),
+                ..Observed::default()
+            },
+            Self::FlowRan { completed, .. } | Self::FlowDecoded { steps: completed } => Observed {
+                count: measured(*completed),
                 ..Observed::default()
             },
             Self::SelectorUnresolved { matched: count } => Observed {

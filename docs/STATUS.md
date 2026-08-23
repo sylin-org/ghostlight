@@ -40,6 +40,12 @@ inline base64 files, or one captured image_ handle; inline bytes decode only aft
 and credential preflight; each capture holds one volatile reuse asset beside its view, refused
 above the upload ceiling and erased by supersession or tab closure; captured images attach to
 file inputs through target or selector and drop at view points through a revision-gated command.
+R6 is complete: browser_flow joins the catalog as its twenty-third tool, composing one to twenty
+uniquely named steps whose arguments may reference earlier canonical result envelopes through
+bounded JSON Pointers; references resolve before the ordinary child decoder runs again, children
+authorize normally under the immutable invocation ceiling, dry run dispatches nothing, stop or
+continue governs failures, per-step envelopes are captured under a bounded budget, and aggregates
+report applied, partial, or unknown effects truthfully. R7 is next.
 
 This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
 pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no
@@ -209,7 +215,7 @@ The 1.0 policy product is restored on current orchestrator seams through `44f84e
   intersection, sacred destinations, stable denial ids, grant attribution, and managed publish
   sequence are live.
 - Policy-aware catalog projection emits the standard MCP tool-list change notification while
-  all-open remains the exact 22-tool catalog.
+  all-open remains the exact 23-tool catalog.
 - Local and managed policy reload atomically for future snapshots. Bad replacements keep last
   valid; configured cold start without authority fails closed.
 - Customer-hosted file or HTTPS delivery uses signed monotonic bundles, required Ed25519, optional
@@ -678,7 +684,7 @@ full visible browser matrix remain owed.
 
 - One Rust 2021 workspace builds four roles: the shared typed bridge, `ghostlight` orchestrator,
   generic MCP connector, and opaque browser connector.
-- The orchestrator owns the 22-tool model-facing catalog, workspace aggregate, one executor and
+- The orchestrator owns the 23-tool model-facing catalog, workspace aggregate, one executor and
   completion path, immutable authority snapshots, runtime controls, content-minimized audit,
   browser port, and content-free presentation decisions.
 - The page-context JavaScript tool is `browser_execute`, not `browser_evaluate`. The execute name
@@ -1078,7 +1084,7 @@ The executor-split batch is complete through `4d633fbc`.
 ## Owed
 
 - ADR-0121 Decision 3's always-available policy explain operation still exists only as a CLI command
-  over a file path. The 22-tool catalog has no policy tool, so the model cannot ask what current
+  over a file path. The 23-tool catalog has no policy tool, so the model cannot ask what current
   authority permits, even though a person now can.
   [ADR-0122](adr/0122-readable-policy-destination-and-authored-user-layer.md) Decision 9 defers the
   model-facing rendering to a later ADR; the projection it would use exists.

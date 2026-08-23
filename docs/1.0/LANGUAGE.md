@@ -2,7 +2,7 @@
 
 ## Contract rules
 
-The 22 tools below are the complete 1.0 catalog. Input objects and nested objects set
+The 23 tools below are the complete 1.0 catalog. Input objects and nested objects set
 `additionalProperties` to `false`. Every input schema is a top-level object without root-level
 `oneOf`, `allOf`, or `anyOf`, because current Kiro and Bedrock reject those otherwise valid JSON
 Schema forms. Conditional inputs advertise one portable teaching envelope; the typed decoder
@@ -12,6 +12,17 @@ defaults stated here.
 Each declaration includes concise field descriptions, one shortest valid example, a truthful
 output schema, and standard MCP annotations. The implementation owns bounds and defaults as named
 constants shared by schema rendering and decoding.
+
+### browser_flow
+
+`browser_flow` composes one to twenty uniquely named steps. Each step names a current advertised
+non-composite tool and supplies its argument object; any argument value may be an explicit
+`{"flow_ref":{"step","pointer"}}` reference into an earlier step's canonical result envelope.
+References resolve before the ordinary child decoder runs again on the substituted arguments.
+Children classify and authorize normally under the invocation's immutable authority snapshot;
+steps may not carry their own restriction fields. `on_error` defaults to `stop`, `dry_run` decodes
+and classifies without dispatching, and captured step envelopes stop being recorded past a bounded
+total budget while execution continues to a truthful terminal aggregate.
 
 Every tool may accept these flat request restrictions:
 

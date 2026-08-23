@@ -368,6 +368,7 @@
     browser_upload: "workwheel",
     browser_execute: "workwheel",
     browser_sequence: "workwheel",
+    browser_flow: "workwheel",
     browser_record: "camera",
     browser_diagnose: "scan"
   };

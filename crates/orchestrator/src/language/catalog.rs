@@ -154,6 +154,13 @@ pub fn catalog() -> Vec<ToolDefinition> {
             Hints::browser_action(true),
         ),
         tool(
+            "browser_flow",
+            "Run flow",
+            "Run one to twenty fully specified steps on one tab. Each step names a current tool and supplies its arguments; later arguments may reference earlier step results. Supports dry run and a bounded result budget.",
+            flow_schema(),
+            Hints::browser_action(true),
+        ),
+        tool(
             "browser_record",
             "Record browser",
             "Start, inspect, stop, save, or discard a bounded memory-only browser recording. Save auto-stops; omit recording only when exactly one is eligible.",
@@ -1092,6 +1099,41 @@ fn evaluate_schema() -> Value {
     )
 }
 
+fn flow_schema() -> Value {
+    examples(
+        object(
+            vec![
+                (
+                    "steps",
+                    json!({"type":"array","minItems":1,"maxItems":20,"description":"Uniquely named steps executed in order.","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":64,"description":"Unique step id within this flow."},"tool":{"type":"string","description":"Current advertised non-composite Ghostlight tool."},"arguments":{"type":"object","description":"Arguments for that tool. Any value may be an explicit reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["id","tool"]}}),
+                ),
+                (
+                    "on_error",
+                    enumeration(
+                        &["stop", "continue"],
+                        Some("stop"),
+                        "Whether later steps run after a failed step.",
+                    ),
+                ),
+                (
+                    "dry_run",
+                    boolean(
+                        false,
+                        "Decode and classify every step without dispatching anything.",
+                    ),
+                ),
+                ("tab", tab()),
+                ("timeout_ms", timeout()),
+            ],
+            vec!["steps"],
+        ),
+        vec![
+            json!({"steps":[{"id":"open","tool":"browser_navigate","arguments":{"url":"https://example.com"}},{"id":"read","tool":"browser_read","arguments":{"max_chars":2000}}]}),
+            json!({"steps":[{"id":"inspect","tool":"browser_inspect","arguments":{"scope":"document"}}],"dry_run":true}),
+        ],
+    )
+}
+
 fn sequence_call_schema() -> Value {
     examples(
         object(
@@ -1542,7 +1584,7 @@ mod tests {
     use crate::governance::GovernanceFacade;
     use crate::language::RequestRestrictions;
 
-    const EXPECTED_TOOL_NAMES: [&str; 22] = [
+    const EXPECTED_TOOL_NAMES: [&str; 23] = [
         "browser_tabs",
         "browser_navigate",
         "browser_history",
@@ -1563,6 +1605,7 @@ mod tests {
         "browser_upload",
         "browser_execute",
         "browser_sequence",
+        "browser_flow",
         "browser_record",
         "browser_diagnose",
     ];
@@ -1652,6 +1695,7 @@ mod tests {
             ("browser_upload", false, true, false, true),
             ("browser_execute", false, true, false, true),
             ("browser_sequence", false, true, false, true),
+            ("browser_flow", false, true, false, true),
             ("browser_record", false, true, false, true),
             ("browser_diagnose", true, false, true, true),
         ];

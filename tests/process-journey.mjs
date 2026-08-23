@@ -430,7 +430,7 @@ try {
   mcp.notify("notifications/initialized");
 
   const listed = await mcp.request("tools/list");
-  assert.equal(listed.result.tools.length, 22);
+  assert.equal(listed.result.tools.length, 23);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_execute"), true);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_evaluate"), false);
@@ -464,7 +464,7 @@ try {
   assert.equal(connector.exitCode, null);
   assert.equal(browserConnector.exitCode, null);
   const relisted = await waitForMcpReady(mcp);
-  assert.equal(relisted.result.tools.length, 22);
+  assert.equal(relisted.result.tools.length, 23);
 
   const reopened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com" } }));
   assert.equal(reopened.status, "succeeded");

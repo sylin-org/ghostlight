@@ -124,6 +124,8 @@ pub enum Operation {
     Wait(Wait),
     /// Run a short known sequence.
     RunSequence(RunSequence),
+    /// Run one governed result-aware flow of decoded steps.
+    RunFlow(RunFlow),
     /// Resolve a browser dialog.
     HandleDialog(HandleDialog),
     /// Control one memory-only browser recording.
@@ -161,6 +163,7 @@ impl Operation {
             Self::RunScript(value) => &value.restrictions,
             Self::Wait(value) => &value.restrictions,
             Self::RunSequence(value) => &value.restrictions,
+            Self::RunFlow(value) => &value.restrictions,
             Self::HandleDialog(value) => &value.restrictions,
             Self::Record(value) => &value.restrictions,
             Self::Diagnose(value) => &value.restrictions,
@@ -190,6 +193,7 @@ impl Operation {
             Self::RunScript(_) => "browser_execute",
             Self::Wait(_) => "browser_wait",
             Self::RunSequence(_) => "browser_sequence",
+            Self::RunFlow(_) => "browser_flow",
             Self::HandleDialog(_) => "browser_dialog",
             Self::Record(_) => "browser_record",
             Self::Diagnose(_) => "browser_diagnose",
@@ -775,6 +779,47 @@ pub struct RunSequence {
     pub restrictions: RequestRestrictions,
 }
 
+/// One explicit result reference embedded in a flow argument.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ResultReference {
+    /// Earlier step id whose canonical result envelope is read.
+    pub step: String,
+    /// JSON Pointer into that envelope's structured content.
+    pub pointer: String,
+}
+
+/// One named step of a governed flow.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct FlowStep {
+    /// Unique step id within this flow.
+    pub id: String,
+    /// Current advertised non-composite Ghostlight tool.
+    pub tool: String,
+    /// Argument object; values may embed `{"flow_ref":{"step","pointer"}}`.
+    #[serde(default)]
+    pub arguments: Value,
+}
+
+/// Input for one governed result-aware flow.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct RunFlow {
+    pub steps: Vec<FlowStep>,
+    #[serde(default = "default_on_error")]
+    pub on_error: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub tab: Option<String>,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
+    #[serde(flatten)]
+    pub restrictions: RequestRestrictions,
+}
+
+fn default_on_error() -> String {
+    "stop".into()
+}
+
 /// Input for dialog handling.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct HandleDialog {
@@ -1044,6 +1089,12 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             input,
             &["steps", "tab", "timeout_ms"],
             validate_sequence,
+        )?)
+        .into_ok(),
+        "browser_flow" => Operation::RunFlow(parse(
+            input,
+            &["steps", "on_error", "dry_run", "tab", "timeout_ms"],
+            validate_flow,
         )?)
         .into_ok(),
         "browser_dialog" => decode_dialog(input),
@@ -1357,6 +1408,117 @@ fn validate_selector(selector: &SemanticSelector) -> Result<(), LanguageError> {
         validate_choice(role, SEMANTIC_ROLES, "role")?;
     }
     Ok(())
+}
+
+/// Composite tools a flow step may never name.
+const FLOW_FORBIDDEN_TOOLS: &[&str] = &["browser_flow", "browser_sequence"];
+const FLOW_STEP_LIMIT: usize = 20;
+const FLOW_REF_POINTER_LIMIT: usize = 512;
+const FLOW_REF_DEPTH_LIMIT: usize = 32;
+
+fn validate_flow(value: &RunFlow) -> Result<(), LanguageError> {
+    validate_range(value.steps.len(), 1, FLOW_STEP_LIMIT, "steps")?;
+    validate_choice(&value.on_error, &["stop", "continue"], "on_error")?;
+    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_timeout(value.timeout_ms)?;
+    let mut seen: Vec<&str> = Vec::with_capacity(value.steps.len());
+    for (index, step) in value.steps.iter().enumerate() {
+        validate_text(&step.id, 64, "id")?;
+        if seen.contains(&step.id.as_str()) {
+            return Err(LanguageError::Invalid(format!(
+                "step id `{}` is not unique",
+                step.id
+            )));
+        }
+        seen.push(&step.id);
+        if FLOW_FORBIDDEN_TOOLS.contains(&step.tool.as_str()) {
+            return Err(LanguageError::Invalid(
+                "a flow step may not name a composite tool".into(),
+            ));
+        }
+        if !crate::language::capability_map::DIRECTORY
+            .iter()
+            .any(|entry| entry.tool == step.tool)
+        {
+            return Err(LanguageError::Invalid(format!(
+                "step tool `{}` is not an advertised Ghostlight tool",
+                step.tool
+            )));
+        }
+        if !step.arguments.is_object() {
+            return Err(LanguageError::Invalid(
+                "step arguments must be an object".into(),
+            ));
+        }
+        if has_restriction_fields(&step.arguments) {
+            return Err(LanguageError::Invalid(
+                "flow steps do not accept their own restrictions; the flow's apply".into(),
+            ));
+        }
+        validate_flow_references(&step.arguments, &seen[..seen.len() - 1], index)?;
+    }
+    validate_restrictions(&value.restrictions)
+}
+
+fn has_restriction_fields(input: &Value) -> bool {
+    input
+        .as_object()
+        .is_some_and(|object| object.contains_key("restrict_hosts"))
+        || input
+            .as_object()
+            .is_some_and(|object| object.contains_key("restrict_capabilities"))
+}
+
+fn validate_flow_references(
+    input: &Value,
+    earlier: &[&str],
+    index: usize,
+) -> Result<(), LanguageError> {
+    match input {
+        Value::Object(object) => {
+            if let Some(reference) = object.get("flow_ref") {
+                if object.len() != 1 {
+                    return Err(LanguageError::Invalid(
+                        "a flow reference object must contain only `flow_ref`".into(),
+                    ));
+                }
+                let parsed: ResultReference =
+                    serde_json::from_value(reference.clone()).map_err(|_| {
+                        LanguageError::Invalid(
+                            "flow_ref requires `step` and `pointer` strings".into(),
+                        )
+                    })?;
+                if !earlier.contains(&parsed.step.as_str()) {
+                    return Err(LanguageError::Invalid(format!(
+                        "step {index} references `{}`, which is missing or later",
+                        parsed.step
+                    )));
+                }
+                let pointer = parsed.pointer.as_bytes();
+                if pointer.is_empty()
+                    || pointer[0] != b'/'
+                    || parsed.pointer.len() > FLOW_REF_POINTER_LIMIT
+                    || parsed.pointer.matches('/').count() > FLOW_REF_DEPTH_LIMIT
+                {
+                    return Err(LanguageError::Invalid(
+                        "flow_ref pointer must be a bounded JSON Pointer starting with `/`".into(),
+                    ));
+                }
+                return Ok(());
+            }
+            for nested in object.values() {
+                validate_flow_references(nested, earlier, index)?;
+            }
+            Ok(())
+        }
+        Value::Array(items) => {
+            for item in items {
+                validate_flow_references(item, earlier, index)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_expect(expect: &Option<Postcondition>) -> Result<(), LanguageError> {
@@ -2148,11 +2310,11 @@ mod tests {
     #[test]
     fn catalog_has_unique_exact_tools_and_typo_closed_schemas() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 22);
+        assert_eq!(catalog.len(), 23);
         let mut names: Vec<_> = catalog.iter().map(|tool| tool.name.as_str()).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 22);
+        assert_eq!(names.len(), 23);
         for tool in catalog {
             assert!(tool.input_schema.is_object());
             assert!(tool.output_schema.is_some());
@@ -2289,5 +2451,40 @@ mod tests {
             json!({"action":"stop","target":"target_x"})
         )
         .is_err());
+    }
+
+    #[test]
+    fn flows_validate_steps_and_references_before_dispatch() {
+        let ok = decode(
+            "browser_flow",
+            json!({"steps":[
+                {"id":"list","tool":"browser_tabs","arguments":{"action":"list"}},
+                {"id":"read","tool":"browser_read","arguments":{"max_chars":{"flow_ref":{"step":"list","pointer":"/facts/tab"}}}}
+            ]}),
+        );
+        assert!(ok.is_ok(), "backward references are accepted: {ok:?}");
+        for invalid in [
+            json!({"steps":[
+                {"id":"a","tool":"browser_read","arguments":{"max_chars":{"flow_ref":{"step":"b","pointer":"/x"}}}},
+                {"id":"b","tool":"browser_tabs","arguments":{"action":"list"}}
+            ]}),
+            json!({"steps":[
+                {"id":"a","tool":"browser_read","arguments":{"max_chars":{"flow_ref":{"step":"ghost","pointer":"/x"}}}}
+            ]}),
+            json!({"steps":[{"id":"a","tool":"browser_read","arguments":{"max_chars":{"flow_ref":{"step":"a","pointer":"no-slash"}}}}]}),
+            json!({"steps":[{"id":"a","tool":"browser_flow","arguments":{}}]}),
+            json!({"steps":[
+                {"id":"dup","tool":"browser_tabs","arguments":{"action":"list"}},
+                {"id":"dup","tool":"browser_read","arguments":{}}
+            ]}),
+            json!({"steps":[
+                {"id":"a","tool":"browser_read","arguments":{"restrict_hosts":["example.com"]}}
+            ]}),
+        ] {
+            assert!(
+                decode("browser_flow", invalid.clone()).is_err(),
+                "expected rejection: {invalid}"
+            );
+        }
     }
 }

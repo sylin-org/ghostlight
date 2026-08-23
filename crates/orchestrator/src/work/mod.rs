@@ -1,5 +1,6 @@
 //! Invocation lifecycle, cancellation, deadlines, the one executor, and the one completion path.
 
+mod flow;
 mod forms;
 mod navigation;
 mod pointer;
@@ -476,6 +477,7 @@ impl ApplicationExecutor {
             Operation::RunScript(value) => self.run_script(context, lease, value),
             Operation::Wait(value) => self.perform_wait(context, lease, value),
             Operation::RunSequence(value) => self.sequence(context, lease, value),
+            Operation::RunFlow(value) => self.flow(context, lease, value),
             Operation::HandleDialog(value) => self.handle_dialog(context, lease, value),
             Operation::Diagnose(value) => self.diagnose(context, lease, value),
             Operation::Record(value) => self.perform_record(context, Some(lease), value),
@@ -1488,6 +1490,7 @@ fn operation_activity(operation: &Operation) -> PresentationActivity {
         Operation::RunScript(_) => PresentationActivity::Script,
         Operation::Wait(_) => PresentationActivity::Wait,
         Operation::RunSequence(_) => PresentationActivity::Quiet,
+        Operation::RunFlow(_) => PresentationActivity::Quiet,
         Operation::HandleDialog(_) => PresentationActivity::Dialog,
         Operation::Diagnose(_) => PresentationActivity::Quiet,
         Operation::Record(value) if value.action == "start" => PresentationActivity::Screenshot,
@@ -1581,6 +1584,7 @@ fn operation_timeout(operation: &Operation) -> u64 {
         Operation::RunScript(value) => value.timeout_ms,
         Operation::Wait(value) => value.timeout_ms,
         Operation::RunSequence(value) => value.timeout_ms,
+        Operation::RunFlow(value) => value.timeout_ms,
         Operation::Record(_) => 30_000,
         _ => 8_000,
     }

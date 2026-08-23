@@ -5,8 +5,8 @@ file before work, after every material finding, and when a task completes or blo
 
 ## RESUME HERE
 
-- State: READY. R1 through R5 are complete; no task is in progress.
-- Next task: R6, [browser flow](R6-browser-flow.md).
+- State: READY. R1 through R6 are complete; no task is in progress.
+- Next task: R7, [guarded navigation](R7-guarded-navigation.md).
 - Implementation baseline: `dev` at
   `c8a181cc15e39b25b2cdc6864c8303efe345f561` before this batch's planning commit.
 - Required first action: confirm the current head contains ADR-0133 and this batch, confirm no
@@ -30,7 +30,7 @@ Allowed states: `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`.
 | R3 semantic actions | COMPLETE | `feat(browser): restore semantic action loops` | Ambiguity no-effect; credential handoff; typed form and expectation journeys | QuerySemantic at SEMANTIC_DOCUMENT rev 2; resolve_semantic zero/one/many with SelectorUnresolved outcome; selectors on click/type_text/per-field fill; typed FormFieldValue rendered to canonical wire strings (Fill stays rev 1); Postcondition `expect` on click/type_text/press_key/fill_form with applied-but-failed = Failed/Applied/non-repeat-safe; contained-form submit guard in content.js fill |
 | R4 document reading | COMPLETE | `feat(browser): restore rich document reading` | Article fallback; tree bounds; subtree ownership; snapshot diff journeys | ReadDocument/InspectTree at SEMANTIC_DOCUMENT rev 3; article-first with visible fallback in content.js; depth/node-bounded structure-only tree (no values, hidden excluded, shadow-aware); SnapshotHandle superseded per tab with generation-stale resolution and closed-tab removal; bounded 50-path diff in facts; read ceiling 50,000 |
 | R5 image and file flow | COMPLETE | `feat(browser): restore captured image upload` | Memory lifecycle; inline bounds; attach and coordinate-drop journeys | UploadFiles accepts exactly one of paths / inline base64 files / image_ handle; target-or-selector attach; view-point drop via DropImageAt at FILES rev 2; volatile image_ asset superseded per tab, refused above the 5 MB ceiling, generation-stale on take, removed on tab closure; inline validation in language plus strict decode after authorize and credential preflight |
-| R6 browser flow | READY | `feat(browser): add governed result-aware flows` | Schema/decode parity; references; dry run; per-step RAWX; partial truth | -- |
+| R6 browser flow | COMPLETE | `feat(browser): add governed result-aware flows` | Schema/decode parity; references; dry run; per-step RAWX; partial truth | browser_flow as tool 23 (catalog/annotations/capability-map/medallion pins swept); FlowStep ids unique 1..=20, composite tools forbidden, per-step restriction fields rejected; backward-only bounded JSON-Pointer refs validated at decode and resolved before the ordinary child decode re-runs via run(); children authorize under the immutable snapshot; on_error stop|continue; dry_run decodes with zero dispatch; 100 KB envelope budget omits rather than lies; aggregate Applied/Partial/Unknown truthfulness; decoder test covering every invalid-reference family |
 | R7 guarded navigation | READY | `feat(browser): restore guarded navigation` | Default stop; beforeunload-only discard; landing governance | -- |
 | R8 integration and parity | READY | `test(browser): prove restored capability parity` | Full gate; process graph; live Chrome; checked behavioral matrix | -- |
 | R9 release handoff | READY | `chore(release): prepare restored extension candidate` | Deterministic ZIP; manifest/package diff; release documents | -- |
@@ -160,6 +160,12 @@ linked current evidence.
   view_ stale-geometry protection. Names/paths/media types/bytes stay out of audit facts.
   Owed to R8 parity review: inline/duplicate/malformed bound unit tests, image ownership tests,
   and live attach/drop journey beats.
+- R6 (COMPLETE): children dispatch through the existing run() seam under one invocation, lease,
+  event stream, and completion gate -- no recursive execute(), no second lease. Per-step
+  restrictions are rejected at decode (the flow's ceiling applies; tightening deferred by design
+  and recorded here). Process-journey tool-count pins moved to 23 and both journeys pass.
+  Owed to R8 parity review: per-step RAWX/audit/stale-handle unit journeys, stop-vs-continue
+  aggregate tests beyond the decoder family, and the find-reference-read journey beat.
 
 ## Task log
 
@@ -171,4 +177,5 @@ linked current evidence.
 | R3 | 2026-08-22 | COMPLETE | Same gate set: fmt, warnings-denied Clippy, 364 Rust tests, extension suite, JavaScript syntax, process journey, PowerShell journey, repository integrity at semantic_document revision-2 hellos. |
 | R4 | 2026-08-22 | COMPLETE | Same gate set at semantic_document revision 3; journeys re-run green. |
 | R5 | 2026-08-22 | COMPLETE | Same gate set with files at revision 2; journeys and repository integrity green. |
+| R6 | 2026-08-22 | COMPLETE | Same gate set at the 23-tool catalog: fmt, warnings-denied Clippy, workspace tests including the new flow decoder family, extension suite, both journeys, repository integrity. A stale-binary journey failure was diagnosed to an unisolated rebuild and re-proven against `.target-capability-restoration`. |
 
