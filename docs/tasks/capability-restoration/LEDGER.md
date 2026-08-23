@@ -3,7 +3,14 @@
 Durable progress for [ADR-0133](../../adr/0133-behavioral-capability-restoration.md). Update this
 file before work, after every material finding, and when a task completes or blocks.
 
-## RESUME HERE
+- State: BATCH COMPLETE. R1 through R9 are done. The exact handoff artifact is
+  `dist/r8-candidate-run1.zip` (byte-identical to `run2`), built from source revision
+  `3c820a98`. The pending Chrome Store review is stale against these bytes. NEXT OWNER ACTION,
+  requiring explicit approval and no agent involvement: replace the Store draft with this ZIP via
+  the Developer Dashboard (or the API sequence in `scripts/publish-extension.ps1`), which
+  supersedes the staged review; then clear the extension-errors card noted in STATUS.
+
+## RESUME HERE marker retained for provenance; no task remains.
 
 - State: READY. R1 through R8 are complete; only R9 remains.
 - Next task: R9, [release handoff](R9-release-handoff.md).
@@ -33,7 +40,7 @@ Allowed states: `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`.
 | R6 browser flow | COMPLETE | `feat(browser): add governed result-aware flows` | Schema/decode parity; references; dry run; per-step RAWX; partial truth | browser_flow as tool 23 (catalog/annotations/capability-map/medallion pins swept); FlowStep ids unique 1..=20, composite tools forbidden, per-step restriction fields rejected; backward-only bounded JSON-Pointer refs validated at decode and resolved before the ordinary child decode re-runs via run(); children authorize under the immutable snapshot; on_error stop|continue; dry_run decodes with zero dispatch; 100 KB envelope budget omits rather than lies; aggregate Applied/Partial/Unknown truthfulness; decoder test covering every invalid-reference family |
 | R7 guarded navigation | COMPLETE | `feat(browser): restore guarded navigation` | Default stop; beforeunload-only discard; landing governance | NavigateDiscardingBeforeUnload at NAVIGATION rev 2; extension accepts only Page.javascriptDialogOpening type=beforeunload while this navigation's acceptor is armed; discard flows through ordinary commit + landing governance; default navigation unchanged at rev 1 |
 | R8 integration and parity | COMPLETE | `test(browser): prove restored capability parity` | Full gate; process graph; live Chrome; checked behavioral matrix | Checked `tests/capability-matrix.mjs` in repository integrity (21 COMPLETE + 4 SUPERSEDED rows, all evidenced; it caught ten stale rows on first run); process journey through every family incl. referenced flow, ambiguity refusal, wheel, inline/image upload, drop, guarded navigation; live Chrome lanes on the swapped dev authority: REPL, semantic click, article, tree+diff (execute mutation -> added:1 at /+1), wheel, image drop (23,550 bytes, subject named), guarded discard, referenced flow; two live-found defects fixed: inspect_tree wire encoding (object vs string) and flow on_error:stop continuing after a failed step | -- |
-| R9 release handoff | READY | `chore(release): prepare restored extension candidate` | Deterministic ZIP; manifest/package diff; release documents | -- |
+| R9 release handoff | COMPLETE | `chore(release): prepare restored extension candidate` | Deterministic ZIP; manifest/package diff; release documents | Two independent runs byte-identical: SHA-256 97bd48165ab9b0796a3ce93fcab063aa64f3e27977063b1b73409729bcae49a6, 89,441 bytes, 32 entries, v1.0.0 MV3, development key stripped, icons 16/32/48/128, source revision 3c820a98; permissions diff vs published 0.8 explained in the task log; artifact at `dist/r8-candidate-run1.zip` pending separate owner Store approval |
 
 ## Behavioral restoration matrix
 
@@ -200,6 +207,15 @@ linked current evidence.
   input remains process-journey-proven; example.com offers no file input for a live attach.
   Owed to R9 handoff notes: CDP-order extension unit tests and the dirty-form fixture journey
   stay listed as future hardening, honestly incomplete rather than silently dropped.
+- R9 (COMPLETE): the deterministic packager (fixed timestamps, sorted entries, explicit
+  allowlist, dev key stripped, forbidden-pattern guard) produced byte-identical ZIPs across two
+  runs. Permission diff vs published 0.8 (tabs, debugger, scripting, nativeMessaging): added
+  alarms (liveness/reconnect fallback), downloads (recording save destination), offscreen (GIF
+  encode per ADR-0109), storage (adapter identity/preferences/journal), tabGroups (workspace
+  grouping), webNavigation (landing observation), windows (dedicated placement); removed
+  scripting (CDP via chrome.debugger replaced injection). Store justifications cover every
+  permission one-for-one (repository integrity gate). No upload, review submission, or external
+  mutation performed.
 
 ## Task log
 
@@ -214,4 +230,5 @@ linked current evidence.
 | R6 | 2026-08-22 | COMPLETE | Same gate set at the 23-tool catalog: fmt, warnings-denied Clippy, workspace tests including the new flow decoder family, extension suite, both journeys, repository integrity. A stale-binary journey failure was diagnosed to an unisolated rebuild and re-proven against `.target-capability-restoration`. |
 | R7 | 2026-08-22 | COMPLETE | Same gate set at navigation revision 2; journeys and repository integrity green. |
 | R8 | 2026-08-22 | COMPLETE | Full gate from `.target-capability-restoration`: fmt, warnings-denied Clippy, 7/7 workspace suites green, 127 extension tests, JavaScript syntax, process journey (extended through every family), PowerShell journey, capability matrix, repository integrity. Live: orchestrator swapped onto the daily-Chrome graph; every family exercised through real MCP calls; two live-found defects fixed and re-proven. |
+| R9 | 2026-08-22 | COMPLETE | Two-run byte-identical package at source revision 3c820a98; manifest/allowlist inspection clean (no dev key, no tests/maps/sources); permission diff documented; repository integrity green including the capability-matrix gate; no Store mutation. |
 

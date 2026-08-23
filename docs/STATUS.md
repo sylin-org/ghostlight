@@ -56,7 +56,11 @@ the development-swapped daily-Chrome authority proved REPL execution, semantic s
 none-chosen refusal, article reading, tree snapshot with a real-mutation diff, coordinate wheel,
 captured-image drop, guarded discard, and a referenced flow -- finding and fixing two genuine
 defects (inspect_tree wire encoding; flow stop continuing past a failed step). R9 prepares the
-replacement extension package.
+replacement extension package. R9 is complete: the deterministic packager produced a
+byte-identical candidate across two runs (SHA-256 97bd4816...49a6, 89,441 bytes, 32 entries,
+v1.0.0 MV3, development key stripped) from source revision 3c820a98, with the permission diff
+against published 0.8 documented in the batch ledger. The pending Store review is stale against
+these bytes; replacing the draft is an explicit owner action and was not performed.
 
 This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
 pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no
