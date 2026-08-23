@@ -5,6 +5,26 @@ Last updated: 2026-08-22.
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
 
+## Published capability restoration
+
+The owner accepted [ADR-0133](adr/0133-behavioral-capability-restoration.md) after a direct
+behavioral comparison with the exact published 0.8 source. The checked recovery inventory had
+correctly preserved and dispositioned historical evidence, but its behavior-group coverage did
+not prove that every published browser job remained reachable through the current 1.0 catalog.
+
+The accepted [capability-restoration batch](tasks/capability-restoration/) restores the genuine
+contractions through current seams: REPL-grade execution; modified, repeated, focused, timed, and
+view-point input; unambiguous semantic action and form loops; article and hierarchical document
+reads with bounded diffs; inline and captured-image upload; guarded beforeunload navigation; and
+one result-aware `browser_flow`. Old names, narration prose, destructive diagnostics, client plan
+mutation, and UDP syslog do not return. The [ledger](tasks/capability-restoration/LEDGER.md) is the
+authority on progress. It is READY at R1; none of the planned production behavior is implemented
+or claimed yet.
+
+This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
+pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no
+authority to upload, resubmit, publish, push, or tag it.
+
 ## Where the branches stand
 
 Distances below are measured against the local remote-tracking refs, which are only as fresh as the

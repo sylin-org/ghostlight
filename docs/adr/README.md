@@ -146,6 +146,8 @@ history live here.
 
 | [0132](0132-complete-textual-mcp-results.md) | Complete textual MCP results: ordinary content carries the authored summary plus the compact opaque result envelope while `structuredContent` and rich content remain intact | Accepted (amends [0096](0096-protocol-versioned-mcp-edge-and-neutral-service.md) result rendering and the 1.0 result-envelope contract; builds on [0038](0038-structured-results.md)/[0103](0103-language-owned-outcome-voice.md)) |
 
+| [0133](0133-behavioral-capability-restoration.md) | Published browser capability restoration through the 1.0 language: semantic selectors below narrow tools, precision input, rich reading, captured-image upload, REPL execution, guarded navigation, and one governed result-aware flow | Accepted (amends [0107](0107-terse-native-browser-language.md) and the active 1.0 language contract; builds on [0035](0035-script-tool.md)/[0036](0036-form-fill-tool.md)/[0037](0037-page-state-awareness.md)/[0050](0050-official-rebaseline-and-file-tools.md)/[0078](0078-closed-loop-browser-core.md)/[0080](0080-resource-scoped-browser-command-scheduling.md)/[0101](0101-adaptive-tool-surfaces-canonical-operations-and-browser-mechanisms.md)/[0111](0111-execute-javascript-tool-name.md)/[0131](0131-view-bound-region-screenshots.md)) |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

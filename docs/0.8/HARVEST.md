@@ -42,6 +42,18 @@ evidence.
 
 ## Test evidence
 
+### Behavioral capability restoration
+
+The recovery inventory gives every historical test and artifact a disposition, but that does not
+by itself prove that every published user capability remains reachable. A later direct comparison
+of the exact published 0.8 catalog with the current 1.0 language found genuine contractions beyond
+the already corrected region screenshot path.
+
+[ADR-0133](../adr/0133-behavioral-capability-restoration.md) defines their 1.0 expression, and the
+[capability-restoration ledger](../tasks/capability-restoration/LEDGER.md) records implementation
+and evidence. Until a ledger row is complete, its planned mapping is not an implemented parity
+claim. The old names and source remain historical evidence only.
+
 ### Region screenshot parity correction
 
 The published `v0.8.0` extension supported a bounded `computer` zoom action that cropped a region,
