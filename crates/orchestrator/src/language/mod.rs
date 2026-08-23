@@ -885,6 +885,19 @@ pub enum LanguageError {
     Invalid(String),
 }
 
+impl LanguageError {
+    /// The bare expectation or problem, phrased for use inside a next-step sentence.
+    #[must_use]
+    pub fn guidance(&self) -> String {
+        match self {
+            Self::UnknownTool(name) => {
+                format!("`{name}` is not a Ghostlight tool; pick one from the advertised catalog.")
+            }
+            Self::Invalid(message) => message.clone(),
+        }
+    }
+}
+
 /// Decode and validate one catalog invocation.
 pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
     match name {
@@ -2404,6 +2417,24 @@ mod tests {
             json!({"target":"target_x","full_page":true})
         )
         .is_err());
+    }
+
+    #[test]
+    fn invalid_input_guidance_teaches_the_expectation_without_the_diagnostic_prefix() {
+        let error = decode(
+            "browser_screenshot",
+            json!({"tab":"tab_x","x":0,"y":0,"width":300,"height":200}),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.guidance(),
+            "region work needs a current view handle: take a screenshot, then pass its view with these coordinates"
+        );
+        assert!(error.to_string().starts_with("invalid input: "));
+        assert_eq!(
+            LanguageError::UnknownTool("browser_evaluate".into()).guidance(),
+            "`browser_evaluate` is not a Ghostlight tool; pick one from the advertised catalog."
+        );
     }
 
     #[test]
