@@ -140,3 +140,6 @@ if (($documentedPermissions -join "`n") -ne ($manifestPermissions -join "`n")) {
 Write-Output "Repository integrity: $($tracked.Count) tracked files readable; local links valid; source version $sourceVersion aligned."
 Write-Output "Historical ASCII exceptions remain fixed at $($expectedNonAscii.Count) named files; no new exception is allowed."
 Write-Output "Every extension manifest permission has exactly one Chrome Web Store justification."
+# The behavioral-parity matrix must stay closed and evidenced.
+node (Join-Path $PSScriptRoot ".." "tests" "capability-matrix.mjs")
+

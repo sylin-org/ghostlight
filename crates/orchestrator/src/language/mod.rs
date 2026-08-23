@@ -970,6 +970,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             input,
             &[
                 "target",
+                "selector",
                 "view",
                 "x",
                 "y",
@@ -1894,40 +1895,43 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
             ));
         }
     }
-    validate_range(value.paths.len(), 1, 5, "paths")?;
-    if has_duplicates(&value.paths) {
-        return Err(LanguageError::Invalid("paths must be unique".into()));
-    }
-    for path in &value.paths {
-        validate_text(path, 4_096, "path")?;
-        if !Path::new(path).is_absolute() {
-            return Err(LanguageError::Invalid("paths must be absolute".into()));
+    if !value.paths.is_empty() {
+        validate_range(value.paths.len(), 1, 5, "paths")?;
+        if has_duplicates(&value.paths) {
+            return Err(LanguageError::Invalid("paths must be unique".into()));
         }
-    }
-    validate_range(value.files.len(), 0, INLINE_FILE_LIMIT, "files")?;
-    let mut aggregate = 0usize;
-    for file in &value.files {
-        validate_text(&file.name, 255, "name")?;
-        validate_text(&file.media_type, 100, "media_type")?;
-        let data = file.data_base64.as_bytes();
-        if data.is_empty() || data.len() % 4 != 0 {
+        for path in &value.paths {
+            validate_text(path, 4_096, "path")?;
+            if !Path::new(path).is_absolute() {
+                return Err(LanguageError::Invalid("paths must be absolute".into()));
+            }
+        }
+    } else {
+        validate_range(value.files.len(), 0, INLINE_FILE_LIMIT, "files")?;
+        let mut aggregate = 0usize;
+        for file in &value.files {
+            validate_text(&file.name, 255, "name")?;
+            validate_text(&file.media_type, 100, "media_type")?;
+            let data = file.data_base64.as_bytes();
+            if data.is_empty() || data.len() % 4 != 0 {
+                return Err(LanguageError::Invalid(
+                    "data_base64 must be non-empty valid base64".into(),
+                ));
+            }
+            if !data.iter().all(|byte| {
+                byte.is_ascii_alphanumeric() || *byte == b'+' || *byte == b'/' || *byte == b'='
+            }) {
+                return Err(LanguageError::Invalid(
+                    "data_base64 must be standard base64".into(),
+                ));
+            }
+            aggregate = aggregate.saturating_add(data.len() / 4 * 3);
+        }
+        if aggregate > UPLOAD_AGGREGATE_BYTES {
             return Err(LanguageError::Invalid(
-                "data_base64 must be non-empty valid base64".into(),
+                "inline files exceed the 5,000,000-byte upload ceiling".into(),
             ));
         }
-        if !data.iter().all(|byte| {
-            byte.is_ascii_alphanumeric() || *byte == b'+' || *byte == b'/' || *byte == b'='
-        }) {
-            return Err(LanguageError::Invalid(
-                "data_base64 must be standard base64".into(),
-            ));
-        }
-        aggregate = aggregate.saturating_add(data.len() / 4 * 3);
-    }
-    if aggregate > UPLOAD_AGGREGATE_BYTES {
-        return Err(LanguageError::Invalid(
-            "inline files exceed the 5,000,000-byte upload ceiling".into(),
-        ));
     }
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_timeout(value.timeout_ms)?;

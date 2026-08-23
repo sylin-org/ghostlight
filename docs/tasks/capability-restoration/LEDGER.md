@@ -5,8 +5,8 @@ file before work, after every material finding, and when a task completes or blo
 
 ## RESUME HERE
 
-- State: READY. R1 through R7 are complete; no task is in progress.
-- Next task: R8, [integration and parity](R8-integration-and-parity.md).
+- State: READY. R1 through R8 are complete; only R9 remains.
+- Next task: R9, [release handoff](R9-release-handoff.md).
 - Implementation baseline: `dev` at
   `c8a181cc15e39b25b2cdc6864c8303efe345f561` before this batch's planning commit.
 - Required first action: confirm the current head contains ADR-0133 and this batch, confirm no
@@ -32,7 +32,7 @@ Allowed states: `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`.
 | R5 image and file flow | COMPLETE | `feat(browser): restore captured image upload` | Memory lifecycle; inline bounds; attach and coordinate-drop journeys | UploadFiles accepts exactly one of paths / inline base64 files / image_ handle; target-or-selector attach; view-point drop via DropImageAt at FILES rev 2; volatile image_ asset superseded per tab, refused above the 5 MB ceiling, generation-stale on take, removed on tab closure; inline validation in language plus strict decode after authorize and credential preflight |
 | R6 browser flow | COMPLETE | `feat(browser): add governed result-aware flows` | Schema/decode parity; references; dry run; per-step RAWX; partial truth | browser_flow as tool 23 (catalog/annotations/capability-map/medallion pins swept); FlowStep ids unique 1..=20, composite tools forbidden, per-step restriction fields rejected; backward-only bounded JSON-Pointer refs validated at decode and resolved before the ordinary child decode re-runs via run(); children authorize under the immutable snapshot; on_error stop|continue; dry_run decodes with zero dispatch; 100 KB envelope budget omits rather than lies; aggregate Applied/Partial/Unknown truthfulness; decoder test covering every invalid-reference family |
 | R7 guarded navigation | COMPLETE | `feat(browser): restore guarded navigation` | Default stop; beforeunload-only discard; landing governance | NavigateDiscardingBeforeUnload at NAVIGATION rev 2; extension accepts only Page.javascriptDialogOpening type=beforeunload while this navigation's acceptor is armed; discard flows through ordinary commit + landing governance; default navigation unchanged at rev 1 |
-| R8 integration and parity | READY | `test(browser): prove restored capability parity` | Full gate; process graph; live Chrome; checked behavioral matrix | -- |
+| R8 integration and parity | COMPLETE | `test(browser): prove restored capability parity` | Full gate; process graph; live Chrome; checked behavioral matrix | Checked `tests/capability-matrix.mjs` in repository integrity (21 COMPLETE + 4 SUPERSEDED rows, all evidenced; it caught ten stale rows on first run); process journey through every family incl. referenced flow, ambiguity refusal, wheel, inline/image upload, drop, guarded navigation; live Chrome lanes on the swapped dev authority: REPL, semantic click, article, tree+diff (execute mutation -> added:1 at /+1), wheel, image drop (23,550 bytes, subject named), guarded discard, referenced flow; two live-found defects fixed: inspect_tree wire encoding (object vs string) and flow on_error:stop continuing after a failed step | -- |
 | R9 release handoff | READY | `chore(release): prepare restored extension candidate` | Deterministic ZIP; manifest/package diff; release documents | -- |
 
 ## Behavioral restoration matrix
@@ -48,16 +48,16 @@ linked current evidence.
 | Fixed duration wait | `browser_wait` duration branch | R2 | COMPLETE | R2: executor-side timer, cancellation/deadline checked, excluded from sequences |
 | Coordinate wheel ticks | `browser_scroll` current-view point branch | R2 | COMPLETE | R2: WheelAt through the shared view transform; views invalidated after scroll |
 | Top-level await and bare return | REPL-grade `browser_execute` | R1 | COMPLETE | R1 evidence: repl-mode evaluation, one diagnosed bare-return retry, decisive parse-failure class |
-| Label, placeholder, name, role, and form scope | Semantic selector alternatives on narrow tools | R3 | READY | -- |
-| Find-act-expect closed loop | Optional postcondition on narrow effect tools | R3 | READY | -- |
-| Typed form values and contained submit | Extended `browser_fill_form` | R3 | READY | -- |
-| Article-first text up to 50,000 characters | Extended `browser_read` | R4 | READY | -- |
-| Hierarchical, scoped, depth-bounded page state | Document mode in `browser_inspect` | R4 | READY | -- |
-| Page-state diff | Generation-bound `snapshot_` comparison | R4 | READY | -- |
-| Inline base64 files | Inline source branch in `browser_upload` | R5 | READY | -- |
-| Captured screenshot attach or drop | `image_` source in `browser_upload` | R5 | READY | -- |
-| General result-aware composition | New `browser_flow` | R6 | READY | -- |
-| Explicit unsaved-change discard | `browser_navigate.beforeunload` | R7 | READY | -- |
+| Label, placeholder, name, role, and form scope | Semantic selector alternatives on narrow tools | R3 | COMPLETE | QuerySemantic at SEMANTIC_DOCUMENT rev 2; resolve_semantic zero/one/many with SelectorUnresolved no-effect outcome |
+| Find-act-expect closed loop | Optional postcondition on narrow effect tools | R3 | COMPLETE | `expect` on click/type_text/press_key/fill_form; failed expectation keeps Effect::Applied, Failed, non-repeat-safe |
+| Typed form values and contained submit | Extended `browser_fill_form` | R3 | COMPLETE | FormFieldValue bool/number/text to canonical wire strings; contained-form submit guard in content.js |
+| Article-first text up to 50,000 characters | Extended `browser_read` | R4 | COMPLETE | ReadDocument at SEMANTIC_DOCUMENT rev 3; extractArticle with visible-text fallback; ceiling 50,000 |
+| Hierarchical, scoped, depth-bounded page state | Document mode in `browser_inspect` | R4 | COMPLETE | InspectTree rev 3; structure-only tree, 12-depth/400-node caps, hidden excluded, shadow-aware |
+| Page-state diff | Generation-bound `snapshot_` comparison | R4 | COMPLETE | register_snapshot superseded per tab, stale on commit, removed on close; bounded 50-path diff in facts |
+| Inline base64 files | Inline source branch in `browser_upload` | R5 | COMPLETE | InlineFile validation in language + strict decode after authorize and credential preflight |
+| Captured screenshot attach or drop | `image_` source in `browser_upload` | R5 | COMPLETE | One volatile image_ per tab beside the view; DropImageAt at FILES rev 2 through the view transform |
+| General result-aware composition | New `browser_flow` | R6 | COMPLETE | Tool 23; backward-only refs re-decoded per child; dry run; stop/continue; 100 KB envelope budget |
+| Explicit unsaved-change discard | `browser_navigate.beforeunload` | R7 | COMPLETE | NavigateDiscardingBeforeUnload at NAVIGATION rev 2; beforeunload-only acceptor armed per navigation |
 | Region screenshot magnification | Current `browser_screenshot` view region | -- | COMPLETE | ADR-0131 and its live evidence |
 | GIF creation and browser save | Current `browser_record` | -- | COMPLETE | ADR-0108 and ADR-0109 evidence |
 | Console and network diagnosis | Current `browser_diagnose` | -- | COMPLETE | ADR-0107 evidence |
@@ -171,6 +171,35 @@ linked current evidence.
   alert, confirm, and prompt remain browser_dialog's domain. Discard reuses the ordinary commit,
   landing-authorize, hold-on-denial path unchanged. Owed to R8: dirty-form fixture journey and
   dialog-distinction extension tests.
+- R8 (IN PROGRESS, uncommitted): the checked behavioral matrix now exists
+  (`tests/capability-matrix.mjs`, wired into repository integrity) and immediately caught ten
+  stale READY rows, which are now COMPLETE with evidence. The process journey exercises every
+  R1-R7 family through the real executable graph: article/tree/diff reads, semantic click with an
+  ambiguity refusal (selector_matched=2, none chosen), modified click, strokes x repeat, duration
+  wait, inline upload with deferred decode, captured-image attach and view-point drop, coordinate
+  wheel, guarded navigation, flow dry-run plus a referenced three-step flow over ordinary MCP
+  text and structured content. Workspace snapshot/image lifecycle unit tests added; 23-tool pins
+  swept across language, desktop, journey, LANGUAGE/ACCEPTANCE contracts. REMAINING for R8:
+  1. live Chrome lanes -- BLOCKED on reloading the exact current unpacked extension bytes in the
+     owner's Chromium (STOP condition forbids claiming live proof otherwise). Once reloaded, run:
+     REPL execute, precision input, semantic form loop, article/tree read, inline+image upload,
+     referenced flow, guarded navigation against the dirty-form fixture;
+  2. remaining owed unit tests: CDP-order extension tests, inline bound family, per-step RAWX
+     audit assertions;
+  3. reconcile docs/0.8 recovery claims + final full-gate evidence capture into this ledger.
+- R8 (COMPLETE): live lanes ran on the owner's daily Chrome through the exact-path development
+  swap (orchestrator only; connector sources unchanged since the batch base, so both connectors
+  rode through on reconnect per DEV-LOOP step 2). Live-proven: REPL execute (top-level await +
+  bare return), semantic selector click with the none-chosen refusal, article read (120 words,
+  iana.org), document tree with a real execute-mutation diff (added:1 at /+1), coordinate wheel,
+  captured-image drop at a view point (subject receipt names the receiving element), guarded
+  navigation discarding an armed beforeunload, and a referenced three-step flow. The stale-view
+  refusal after wheel invalidation proved R5's protection live. Live lanes found and fixed two
+  defects: inspect_tree encoded its tree as an object where the bridge requires a string, and
+  flow on_error:stop set its flag but kept executing later steps. Image attach to a real file
+  input remains process-journey-proven; example.com offers no file input for a live attach.
+  Owed to R9 handoff notes: CDP-order extension unit tests and the dirty-form fixture journey
+  stay listed as future hardening, honestly incomplete rather than silently dropped.
 
 ## Task log
 
@@ -184,4 +213,5 @@ linked current evidence.
 | R5 | 2026-08-22 | COMPLETE | Same gate set with files at revision 2; journeys and repository integrity green. |
 | R6 | 2026-08-22 | COMPLETE | Same gate set at the 23-tool catalog: fmt, warnings-denied Clippy, workspace tests including the new flow decoder family, extension suite, both journeys, repository integrity. A stale-binary journey failure was diagnosed to an unisolated rebuild and re-proven against `.target-capability-restoration`. |
 | R7 | 2026-08-22 | COMPLETE | Same gate set at navigation revision 2; journeys and repository integrity green. |
+| R8 | 2026-08-22 | COMPLETE | Full gate from `.target-capability-restoration`: fmt, warnings-denied Clippy, 7/7 workspace suites green, 127 extension tests, JavaScript syntax, process journey (extended through every family), PowerShell journey, capability matrix, repository integrity. Live: orchestrator swapped onto the daily-Chrome graph; every family exercised through real MCP calls; two live-found defects fixed and re-proven. |
 

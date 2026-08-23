@@ -1599,6 +1599,95 @@ mod tests {
     }
 
     #[test]
+    fn snapshots_supersede_per_tab_go_stale_on_commit_and_die_with_the_tab() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        let _first = lease
+            .register_snapshot(&tab, serde_json::json!({"n":1}))
+            .unwrap();
+        assert_eq!(
+            lease.previous_snapshot(&tab),
+            Some(serde_json::json!({"n":1})),
+            "the just-registered tree is the current one"
+        );
+        let _second = lease
+            .register_snapshot(&tab, serde_json::json!({"n":2}))
+            .unwrap();
+        assert_eq!(
+            lease.previous_snapshot(&tab),
+            Some(serde_json::json!({"n":2})),
+            "a new snapshot supersedes the earlier one per tab"
+        );
+        let landed = lease
+            .apply_landing(&tab.handle, &physical(7, "https://example.com"))
+            .unwrap();
+        assert_eq!(
+            lease.previous_snapshot(&landed),
+            None,
+            "commit stales snapshots"
+        );
+        assert!(lease
+            .register_snapshot(&landed, serde_json::json!({}))
+            .is_ok());
+        lease.confirm_tab_closed(&landed.handle).unwrap();
+        assert_eq!(
+            lease.previous_snapshot(&landed),
+            None,
+            "closure removes snapshots"
+        );
+        let other = admit_in_browser(&store);
+        let other_lease = store.acquire(&other).unwrap();
+        let stranger = other_lease.add_tab(&physical(9, "about:blank")).unwrap();
+        assert_eq!(
+            other_lease.previous_snapshot(&stranger),
+            None,
+            "a foreign workspace never sees another workspace's snapshots"
+        );
+    }
+
+    #[test]
+    fn captured_images_supersede_respect_the_ceiling_and_expire() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        let first = lease
+            .register_image(&tab, "image/jpeg", "AAAA", 3)
+            .unwrap()
+            .expect("under the ceiling");
+        assert_eq!(
+            lease.take_image(first.as_str(), &tab),
+            Some(("image/jpeg".into(), "AAAA".into()))
+        );
+        let _second = lease
+            .register_image(&tab, "image/jpeg", "BBBB", 3)
+            .unwrap()
+            .expect("superseding capture");
+        assert_eq!(
+            lease.take_image(first.as_str(), &tab),
+            None,
+            "a superseded asset is erased, not served"
+        );
+        let oversized = lease
+            .register_image(&tab, "image/jpeg", "QAAA", 6_000_000)
+            .unwrap();
+        assert!(
+            oversized.is_none(),
+            "captures above the upload ceiling are refused"
+        );
+        let landed = lease
+            .apply_landing(&tab.handle, &physical(7, "https://example.com"))
+            .unwrap();
+        assert_eq!(
+            lease.take_image(first.as_str(), &landed),
+            None,
+            "commit stales assets"
+        );
+    }
+
+    #[test]
     fn child_tabs_are_adopted_only_through_an_owned_opener() {
         let store = WorkspaceStore::default();
         let workspace = admit_in_browser(&store);

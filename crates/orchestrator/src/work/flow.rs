@@ -95,6 +95,7 @@ impl ApplicationExecutor {
                     rows.push(json!({"id":step.id,"error":"a result reference did not resolve"}));
                     if value.on_error == "stop" {
                         stopped = true;
+                        break;
                     }
                     continue;
                 }
@@ -102,6 +103,7 @@ impl ApplicationExecutor {
                     rows.push(json!({"id":step.id,"error":reason}));
                     if value.on_error == "stop" {
                         stopped = true;
+                        break;
                     }
                     continue;
                 }

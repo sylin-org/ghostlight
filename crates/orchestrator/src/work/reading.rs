@@ -409,17 +409,29 @@ impl ApplicationExecutor {
                 // One volatile reuse asset beside the view; superseded by the
                 // next capture and refused above the upload ceiling.
                 let decoded_bytes = data.len() / 4 * 3;
-                if let Ok(Some(_image)) =
-                    lease.register_image(&selected, &mime_type, &data, decoded_bytes)
-                {
-                    // Registration is best effort; the client result never changes.
-                }
+                let image_handle = lease
+                    .register_image(&selected, &mime_type, &data, decoded_bytes)
+                    .ok()
+                    .flatten();
                 let outcome = Outcome::Captured {
                     scope,
                     width,
                     height,
                 };
-                let mut terminal = self.succeeded(context, decision, Some(tab_id), Effect::None, readiness(selected.readiness), true, outcome, json!({"tab":selected.handle.as_str(),"view":view.as_str(),"mime_type":mime_type,"width":width,"height":height}));
+                let mut facts = json!({"tab":selected.handle.as_str(),"view":view.as_str(),"mime_type":mime_type,"width":width,"height":height});
+                if let Some(image) = &image_handle {
+                    facts["image"] = json!(image.as_str());
+                }
+                let mut terminal = self.succeeded(
+                    context,
+                    decision,
+                    Some(tab_id),
+                    Effect::None,
+                    readiness(selected.readiness),
+                    true,
+                    outcome,
+                    facts,
+                );
                 terminal.result = terminal
                     .result
                     .with_content(ServiceContent::Image { mime_type, data });

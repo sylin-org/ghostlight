@@ -19,6 +19,7 @@ const environment = {
 };
 const children = [];
 const physicalCommands = [];
+let queryCount = 0;
 const physicalRequests = [];
 let createdDeployLock = false;
 // A real one-pixel GIF89a, the shape the extension now hands over already finished.
@@ -310,6 +311,31 @@ async function runAdapter(peer) {
       }
     } else if (command.command === "close_tab") result = { outcome: "tab_closed", tab_id: command.tab_id };
     else if (command.command === "cancel") result = { outcome: "cancelled" };
+    else if (command.command === "read_document") {
+      result = { outcome: "text", tab_id: command.tab_id, text: "Article body describing Example Domain and its purpose in depth.", truncated: false, title: "Example Domain", url: "https://example.com/" };
+    } else if (command.command === "inspect_tree") {
+      result = { outcome: "document_tree", tab_id: command.tab_id, tree: JSON.stringify({ kind: "container", label: "Example Domain", children: [{ kind: "heading", label: "Example Domain", children: [] }] }), truncated: false };
+    } else if (command.command === "query_semantic") {
+      queryCount += 1;
+      const one = [{ locator: `locator_${queryCount}`, role: "link", name: "More information...", state: [], credential_class: false }];
+      result = { outcome: "targets", tab_id: command.tab_id, targets: queryCount === 2 ? [...one, { ...one[0], locator: `${one[0].locator}b` }] : one };
+    } else if (command.command === "describe_targets") {
+      result = { outcome: "targets_described", tab_id: command.tab_id, targets: command.locators.map((locator) => ({ locator, role: "textbox", name: "Notes", state: [], credential_class: false })) };
+    } else if (command.command === "activate" || command.command === "activate_modified") {
+      tab = { ...tab, title: "Example Domain", url: "https://example.com/", readiness: "complete" };
+      result = { outcome: "activated", tab, subject: { role: "link", name: "More information..." }, committed_urls: [] };
+    } else if (command.command === "press_key") {
+      tab = { ...tab, readiness: "complete" };
+      result = { outcome: "key_pressed", tab, key: command.key, subject: null, committed_urls: [] };
+    } else if (command.command === "wheel_at") {
+      result = { outcome: "scrolled", tab_id: command.tab_id, x: 100, y: 50, subject: null };
+    } else if (command.command === "navigate_discarding_before_unload") {
+      tab = { ...tab, title: "Submitted", url: "https://example.com/submitted", readiness: "complete" };
+      result = { outcome: "navigated", tab, committed_urls: ["https://example.com/submitted"] };
+    } else if (command.command === "upload_files" || command.command === "drop_image_at") {
+      const files = command.files ?? [command.file];
+      result = { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: files.length, uploaded_bytes: files.reduce((sum, file) => sum + file.size, 0), subject: null };
+    }
     else throw new Error(`Unexpected physical primitive ${command.command}`);
     peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result } });
   }
@@ -383,7 +409,7 @@ try {
       "keyboard_input", "files", "script", "observation", "dialogs",
       "operation_recovery", "presentation", "window_geometry", "diagnostics", "recording",
       "chunked_commands", "adapter_liveness"
-    ].map((name) => ({ name, revision: ["script", "pointer_input", "keyboard_input", "semantic_document", "navigation"].includes(name) ? 2 : 1 }))
+    ].map((name) => ({ name, revision: { script: 2, pointer_input: 2, keyboard_input: 2, semantic_document: 3, navigation: 2, files: 2 }[name] ?? 1 }))
   });
   assert.deepEqual(await native.next(), { kind: "backend_unavailable" });
 
@@ -520,6 +546,132 @@ try {
   assert.deepEqual(secondRegionCommand.region, { x: 310, y: 170, width: 50, height: 25 });
   assert.equal(secondRegionCommand.expected_viewport.scope, "region");
 
+  // R4: article-first reading and document-tree snapshots with a diff.
+  const article = structured(await mcp.request("tools/call", {
+    name: "browser_read",
+    arguments: { mode: "article", max_chars: 5000 }
+  }));
+  assert.equal(article.status, "succeeded");
+  assert.match(article.facts.text, /Article body/);
+  const treeFirst = structured(await mcp.request("tools/call", {
+    name: "browser_inspect",
+    arguments: { scope: "document", max_depth: 4 }
+  }));
+  assert.equal(treeFirst.status, "succeeded");
+  assert.match(treeFirst.facts.snapshot, /^snapshot_/);
+  const treeSecond = structured(await mcp.request("tools/call", {
+    name: "browser_inspect",
+    arguments: { scope: "document", max_depth: 4 }
+  }));
+  assert.deepEqual(treeSecond.facts.diff, { added: 0, removed: 0, changed: 0, paths: [] });
+
+  // R3: semantic selector click, ambiguity refusal without effect, modified click.
+  queryCount = 0;
+  const selectorClick = structured(await mcp.request("tools/call", {
+    name: "browser_click",
+    arguments: { tab: restartedHandle, selector: { name: "More information..." } }
+  }));
+  if (selectorClick.status !== "succeeded") console.log("SELECTOR_CLICK", JSON.stringify(selectorClick));
+  assert.equal(selectorClick.status, "succeeded");
+  const ambiguous = structured(await mcp.request("tools/call", {
+    name: "browser_click",
+    arguments: { tab: restartedHandle, selector: { name: "More information..." } }
+  }));
+  assert.equal(ambiguous.status, "failed");
+  assert.match(ambiguous.summary, /none was chosen/);
+  assert.equal(ambiguous.facts.selector_matched, 2);
+  const modifiedClick = structured(await mcp.request("tools/call", {
+    name: "browser_click",
+    arguments: { tab: restartedHandle, selector: { name: "More information..." }, modifiers: ["Control"] }
+  }));
+  assert.equal(modifiedClick.status, "succeeded");
+  assert.equal(physicalCommands.findLast((command) => command.startsWith("activate")), "activate_modified");
+
+  // R2: stroke sequences with repeats and a duration wait.
+  const strokes = structured(await mcp.request("tools/call", {
+    name: "browser_press_key",
+    arguments: { tab: restartedHandle, strokes: ["a", "b"], repeat: 2 }
+  }));
+  assert.equal(strokes.status, "succeeded");
+  assert.equal(physicalCommands.filter((command) => command === "press_key").length >= 4, true);
+  const durationWait = structured(await mcp.request("tools/call", {
+    name: "browser_wait",
+    arguments: { condition: "duration", value: "50" }
+  }));
+  assert.equal(durationWait.status, "succeeded");
+
+  // R5: inline upload to a found target; captured-image attach and view drop.
+  const inlineUpload = structured(await mcp.request("tools/call", {
+    name: "browser_upload",
+    arguments: {
+      target: found.facts.matches[0].target,
+      files: [{ name: "notes.txt", media_type: "text/plain", data_base64: Buffer.from("hello").toString("base64") }]
+    }
+  }));
+  if (inlineUpload.status !== "succeeded") console.log("UPLOAD", JSON.stringify(inlineUpload));
+  assert.equal(inlineUpload.status, "succeeded");
+  assert.equal(inlineUpload.facts.uploaded_bytes, 5);
+  const freshShot = structured(await mcp.request("tools/call", {
+    name: "browser_screenshot",
+    arguments: { tab: restartedHandle }
+  }));
+  assert.match(freshShot.facts.image, /^image_/);
+  const imageAttach = structured(await mcp.request("tools/call", {
+    name: "browser_upload",
+    arguments: { target: found.facts.matches[0].target, source_image: freshShot.facts.image }
+  }));
+  assert.equal(imageAttach.status, "succeeded");
+  const imageDrop = structured(await mcp.request("tools/call", {
+    name: "browser_upload",
+    arguments: { source_image: freshShot.facts.image, view: freshShot.facts.view, x: 100, y: 50 }
+  }));
+  if (imageDrop.status !== "succeeded") console.log("DROP", JSON.stringify(imageDrop));
+  assert.equal(imageDrop.status, "succeeded");
+
+  // R2 coordinate wheel through the governed view transform.
+  const wheel = structured(await mcp.request("tools/call", {
+    name: "browser_scroll",
+    arguments: { view: freshShot.facts.view, x: 100, y: 50, direction: "down", ticks: 2 }
+  }));
+  assert.equal(wheel.status, "succeeded");
+
+  // R7: guarded navigation discarding only its own beforeunload prompt.
+  const guarded = structured(await mcp.request("tools/call", {
+    name: "browser_navigate",
+    arguments: { url: "https://example.com/submitted", beforeunload: "discard" }
+  }));
+  assert.equal(guarded.status, "succeeded");
+
+  // R6: flow dry run plus a referenced three-step flow over ordinary results.
+  const flowDry = structured(await mcp.request("tools/call", {
+    name: "browser_flow",
+    arguments: {
+      dry_run: true,
+      steps: [
+        { id: "list", tool: "browser_tabs", arguments: { action: "list" } },
+        { id: "read", tool: "browser_read", arguments: { mode: "article" } }
+      ]
+    }
+  }));
+  assert.equal(flowDry.status, "succeeded");
+  assert.equal(flowDry.facts.steps[0].capabilities.includes("read"), true);
+  assert.equal(flowDry.facts.steps[1].capabilities.includes("execute"), false);
+  const flowResponse = await mcp.request("tools/call", {
+    name: "browser_flow",
+    arguments: {
+      steps: [
+        { id: "find", tool: "browser_find", arguments: { text: "More information...", max_results: 1 } },
+        { id: "click", tool: "browser_click", arguments: { target: { flow_ref: { step: "find", pointer: "/facts/matches/0/target" } } } },
+        { id: "read", tool: "browser_read", arguments: { max_chars: 500 } }
+      ]
+    }
+  });
+  const flow = structured(flowResponse);
+  if (flow.status !== "succeeded") console.log("FLOW", JSON.stringify(flow));
+  assert.equal(flow.status, "succeeded");
+  assert.equal(flow.facts.completed, 3);
+  assert.match(textual(flowResponse), /Completed 3 flow steps\./);
+
   const startedRecording = structured(await mcp.request("tools/call", {
     name: "browser_record",
     arguments: { action: "start", tab: restartedHandle }
@@ -574,7 +726,9 @@ try {
   const records = readFileSync(auditFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   const readRecord = records.findLast((record) => record.tool === "browser_read");
   assert.equal(readRecord.observed.host, "example.com");
-  assert.equal(readRecord.observed.count, 2);
+  // Flow children share one invocation audit row; the last read on file is the
+  // journey's article-mode read.
+  assert.equal(readRecord.observed.count, 10);
   assert.equal(readRecord.observed.readiness, null);
   const openRecord = records.findLast((record) => record.tool === "browser_navigate");
   assert.equal(openRecord.observed.host, "example.com");
@@ -603,7 +757,7 @@ try {
   assert.equal(physicalCommands.length, physicalCommandCountBeforeRecovery);
   assert.equal(disconnected.next_steps.length, 1);
 
-  console.log("process journey ok: reconnect -> open/read/find/execute -> screenshot/region/chain -> recording -> close -> pinned no-adapter refusal");
+  console.log("process journey ok: reconnect -> open/read/find/flow(execute/article/tree/wheel/upload/drop/guarded) -> screenshot/region/chain -> recording -> close -> pinned no-adapter refusal");
 } finally {
   for (const child of children.reverse()) {
     if (!child.killed) child.kill();

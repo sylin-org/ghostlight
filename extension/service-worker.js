@@ -520,7 +520,7 @@ async function dispatch(request) {
   }
   if (command.command === "inspect_tree") {
     const result = await content(command.tab_id, { kind: "inspect_tree", locator: command.locator, max_depth: command.max_depth });
-    return { outcome: "document_tree", tab_id: command.tab_id, tree: result.tree, truncated: result.truncated };
+    return { outcome: "document_tree", tab_id: command.tab_id, tree: JSON.stringify(result.tree), truncated: result.truncated };
   }
   if (command.command === "find") {
     const result = await content(command.tab_id, { kind: "find", text: command.text, find_kind: command.kind, max_results: command.max_results });
@@ -1492,7 +1492,8 @@ async function dropImageAt(correlation, command) {
     );
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
-    return { outcome: "files_uploaded", tab: physicalTab(tab), uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes, subject: point.subject, committed_urls: [] };
+    void tab;
+    return { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes, subject: point.subject };
   } catch (error) { error.effectUnknown = true; throw error; }
   finally { await detachDebugger(command.tab_id); }
 }

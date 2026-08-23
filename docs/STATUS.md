@@ -49,7 +49,14 @@ report applied, partial, or unknown effects truthfully. R7 is complete: browser_
 beforeunload:discard, which accepts only that navigation's own beforeunload prompt through a
 revision-gated mechanism and then follows the ordinary commit and landing-governance path; the
 default still stops and reports a blocking prompt without accepting it, and unrelated dialogs
-remain browser_dialog's domain. R8 is next.
+remain browser_dialog's domain. R8 is complete: a checked behavioral matrix in repository
+integrity maps all 25 published behaviors to evidence or explicit supersession, the extended
+process journey drives every restored family through the real executable graph, and live lanes on
+the development-swapped daily-Chrome authority proved REPL execution, semantic selection with its
+none-chosen refusal, article reading, tree snapshot with a real-mutation diff, coordinate wheel,
+captured-image drop, guarded discard, and a referenced flow -- finding and fixing two genuine
+defects (inspect_tree wire encoding; flow stop continuing past a failed step). R9 prepares the
+replacement extension package.
 
 This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
 pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no
