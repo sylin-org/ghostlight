@@ -202,7 +202,7 @@ impl ApplicationExecutor {
                     true,
                     &summary,
                     json!({"reason":"invalid_input","detail":error.to_string()}),
-                    refusal.next_steps(),
+                    vec![error.to_string()],
                 );
                 let terminal = Terminal {
                     result,

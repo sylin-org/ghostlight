@@ -1614,7 +1614,7 @@ fn validate_screenshot(value: &TakeScreenshot) -> Result<(), LanguageError> {
             value
                 .view
                 .as_deref()
-                .ok_or_else(|| LanguageError::Invalid("view is required".into()))?,
+                .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
             "view_",
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
@@ -1698,7 +1698,7 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
             value
                 .view
                 .as_deref()
-                .ok_or_else(|| LanguageError::Invalid("view is required".into()))?,
+                .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
             "view_",
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
@@ -1814,7 +1814,7 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
             value
                 .view
                 .as_deref()
-                .ok_or_else(|| LanguageError::Invalid("view is required".into()))?,
+                .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
             "view_",
         )?;
         for (name, coordinate) in [
@@ -1878,7 +1878,7 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
             value
                 .view
                 .as_deref()
-                .ok_or_else(|| LanguageError::Invalid("view is required".into()))?,
+                .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
             "view_",
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
