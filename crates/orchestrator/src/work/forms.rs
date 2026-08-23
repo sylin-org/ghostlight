@@ -14,9 +14,11 @@ use crate::language::{
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
-    action_subject, load_physical_files, named_key, observation_budget_ms, observed_host,
-    readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult, Status, Terminal,
+    action_subject, bounded, load_physical_files, named_key, observation_budget_ms, observed_host,
+    readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult, ResolvedLocation,
+    Status, Terminal,
 };
+use ghostlight_bridge::browser::PhysicalFile;
 
 impl ApplicationExecutor {
     pub(super) fn perform_fill(
@@ -275,11 +277,50 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         value: &UploadFiles,
     ) -> Terminal {
-        let (selected, target) =
-            match self.resolve_target(lease, value.tab.as_deref(), &value.target) {
+        let dropping = value.view.is_some();
+        let (selected, target_locator, target_role, drop) = if dropping {
+            let location = match self.resolve_location(
+                lease,
+                value.tab.as_deref(),
+                None,
+                value.view.as_deref(),
+                value.x,
+                value.y,
+            ) {
                 Ok(value) => value,
                 Err(error) => return self.workspace_failure(context, error),
             };
+            match location {
+                ResolvedLocation::Point { tab, view, point } => {
+                    (tab, None, None, Some((point, view.viewport)))
+                }
+                ResolvedLocation::Target { .. } => {
+                    unreachable!("a view input resolves to a point")
+                }
+            }
+        } else if let Some(selector) = &value.selector {
+            match self.resolve_semantic(context, lease, value.tab.as_deref(), selector, true) {
+                Ok((tab, target)) => {
+                    let locator = target.locator.clone();
+                    let role = target.role;
+                    (tab, Some(locator), Some(role), None)
+                }
+                Err(terminal) => return terminal,
+            }
+        } else {
+            match self.resolve_target(
+                lease,
+                value.tab.as_deref(),
+                value.target.as_deref().expect("validated target"),
+            ) {
+                Ok((tab, target)) => {
+                    let locator = target.locator.clone();
+                    let role = target.role;
+                    (tab, Some(locator), Some(role), None)
+                }
+                Err(error) => return self.workspace_failure(context, error),
+            }
+        };
         let decision = self.authorize(context, Capability::Write, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
@@ -291,52 +332,113 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        match self.dispatch(
-            context,
-            BrowserCommand::DescribeTargets {
-                tab_id: selected.physical_id,
-                locators: vec![target.locator.clone()],
-            },
-        ) {
-            Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
-                if tab_id == selected.physical_id && targets.len() == 1 =>
-            {
-                if targets[0].credential_class {
-                    return self.credential_handoff(context, decision, &selected);
+        if !dropping {
+            match self.dispatch(
+                context,
+                BrowserCommand::DescribeTargets {
+                    tab_id: selected.physical_id,
+                    locators: vec![target_locator.clone().expect("attach has a locator")],
+                },
+            ) {
+                Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
+                    if tab_id == selected.physical_id && targets.len() == 1 =>
+                {
+                    if targets[0].credential_class {
+                        return self.credential_handoff(context, decision, &selected);
+                    }
+                }
+                Ok(_) => {
+                    return self.protocol_failure(context, decision, Some(selected.physical_id))
+                }
+                Err(error) => {
+                    return self.browser_failure(
+                        context,
+                        decision,
+                        error,
+                        Some(selected.physical_id),
+                    )
                 }
             }
-            Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
-            Err(error) => {
-                return self.browser_failure(context, decision, error, Some(selected.physical_id))
-            }
         }
-        let (files, total) = match load_physical_files(&value.paths) {
-            Ok(value) => value,
-            Err(reason) => {
-                return self.failed(
-                    context,
-                    decision,
-                    Some(selected.physical_id),
-                    Refusal::FilesUnreadable,
-                    json!({"reason":reason}),
-                )
+        let (files, total) = if !value.paths.is_empty() {
+            match load_physical_files(&value.paths) {
+                Ok(value) => value,
+                Err(reason) => {
+                    return self.failed(
+                        context,
+                        decision,
+                        Some(selected.physical_id),
+                        Refusal::FilesUnreadable,
+                        json!({"reason":reason}),
+                    )
+                }
+            }
+        } else if !value.files.is_empty() {
+            match decode_inline_files(&value.files) {
+                Ok(value) => value,
+                Err(reason) => {
+                    return self.failed(
+                        context,
+                        decision,
+                        Some(selected.physical_id),
+                        Refusal::FilesUnreadable,
+                        json!({"reason":reason}),
+                    )
+                }
+            }
+        } else {
+            let image = value
+                .source_image
+                .as_deref()
+                .expect("validated source_image");
+            match lease.take_image(image, &selected) {
+                Some((mime_type, data)) => {
+                    let decoded = (data.len() / 4 * 3) as u64;
+                    (
+                        vec![PhysicalFile {
+                            name: "capture".into(),
+                            media_type: mime_type,
+                            data,
+                            size: decoded,
+                        }],
+                        decoded,
+                    )
+                }
+                None => {
+                    return self.failed(
+                        context,
+                        decision,
+                        Some(selected.physical_id),
+                        Refusal::FilesUnreadable,
+                        json!({"reason":"the captured image is stale or belongs elsewhere"}),
+                    )
+                }
             }
         };
-        match self.dispatch(
-            context,
+        let expected_count = files.len();
+        let dispatch = if dropping {
+            let (point, viewport) = drop.expect("validated drop geometry");
+            BrowserCommand::DropImageAt {
+                tab_id: selected.physical_id,
+                point,
+                expected_viewport: viewport,
+                file: files.into_iter().next().expect("one image"),
+            }
+        } else {
             BrowserCommand::UploadFiles {
                 tab_id: selected.physical_id,
-                locator: target.locator,
+                locator: target_locator.expect("attach has a locator"),
                 files,
-            },
-        ) {
+            }
+        };
+        match self.dispatch(context, dispatch) {
             Ok(BrowserOutcome::FilesUploaded {
                 tab_id,
                 uploaded_count,
                 uploaded_bytes,
                 subject,
             }) if tab_id == selected.physical_id
-                && uploaded_count == value.paths.len()
+                && uploaded_count == expected_count
                 && uploaded_bytes == total =>
             {
                 self.succeeded(
@@ -349,9 +451,9 @@ impl ApplicationExecutor {
                     Outcome::FilesUploaded {
                         count: uploaded_count,
                         host: observed_host(&selected.url),
-                        subject: action_subject(context, subject, Some(target.role)),
+                        subject: action_subject(context, subject, target_role),
                     },
-                    json!({"tab":selected.handle.as_str(),"target":target.handle.as_str(),"uploaded_count":uploaded_count,"uploaded_bytes":uploaded_bytes}),
+                    json!({"tab":selected.handle.as_str(),"dropped":dropping,"uploaded_count":uploaded_count,"uploaded_bytes":uploaded_bytes}),
                 )
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -765,4 +867,29 @@ fn form_field_wire(value: &crate::language::FormFieldValue) -> String {
             }
         }
     }
+}
+
+fn decode_inline_files(
+    files: &[crate::language::InlineFile],
+) -> Result<(Vec<PhysicalFile>, u64), String> {
+    use base64::Engine as _;
+    const UPLOAD_AGGREGATE_BYTES: usize = 5_000_000;
+    let mut decoded = Vec::with_capacity(files.len());
+    let mut total = 0u64;
+    for file in files {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&file.data_base64)
+            .map_err(|_| "an inline file is not valid base64".to_string())?;
+        total = total.saturating_add(bytes.len() as u64);
+        if total > UPLOAD_AGGREGATE_BYTES as u64 {
+            return Err("inline files exceed the upload ceiling".into());
+        }
+        decoded.push(PhysicalFile {
+            name: bounded(&file.name, 255),
+            media_type: bounded(&file.media_type, 100),
+            data: file.data_base64.clone(),
+            size: bytes.len() as u64,
+        });
+    }
+    Ok((decoded, total))
 }

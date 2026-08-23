@@ -639,14 +639,48 @@ pub struct Drag {
 /// Input for bounded local file upload.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct UploadFiles {
-    pub target: String,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub selector: Option<SemanticSelector>,
+    /// Absolute local paths.
+    #[serde(default)]
     pub paths: Vec<String>,
+    /// Bounded inline files supplied by the caller.
+    #[serde(default)]
+    pub files: Vec<InlineFile>,
+    /// One captured image handle to attach or drop.
+    #[serde(default)]
+    pub source_image: Option<String>,
+    /// Drop-point view; only valid with source_image.
+    #[serde(default)]
+    pub view: Option<String>,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
     pub restrictions: RequestRestrictions,
+}
+
+/// One bounded inline file supplied directly by the caller.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct InlineFile {
+    /// Bounded file name.
+    pub name: String,
+    /// Bounded media type.
+    #[serde(default = "default_media_type")]
+    pub media_type: String,
+    /// Base64-encoded bytes.
+    pub data_base64: String,
+}
+
+fn default_media_type() -> String {
+    "application/octet-stream".into()
 }
 
 /// Input for explicit page script evaluation.
@@ -973,7 +1007,18 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_upload" => Operation::UploadFiles(parse(
             input,
-            &["target", "paths", "tab", "timeout_ms"],
+            &[
+                "target",
+                "selector",
+                "paths",
+                "files",
+                "source_image",
+                "view",
+                "x",
+                "y",
+                "tab",
+                "timeout_ms",
+            ],
             validate_upload,
         )?)
         .into_ok(),
@@ -1600,8 +1645,67 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
     validate_restrictions(&value.restrictions)
 }
 
+const INLINE_FILE_LIMIT: usize = 5;
+const UPLOAD_AGGREGATE_BYTES: usize = 5_000_000;
+
 fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
-    validate_handle(&value.target, "target_")?;
+    let sources = usize::from(!value.paths.is_empty())
+        + usize::from(!value.files.is_empty())
+        + usize::from(value.source_image.is_some());
+    if sources != 1 {
+        return Err(LanguageError::Invalid(
+            "provide exactly one of paths, files, or source_image".into(),
+        ));
+    }
+    let dropping = value.view.is_some() || value.x.is_some() || value.y.is_some();
+    if !value.paths.is_empty() || !value.files.is_empty() {
+        if dropping {
+            return Err(LanguageError::Invalid(
+                "only a source_image may be dropped at a view point".into(),
+            ));
+        }
+        let branches = usize::from(value.target.is_some()) + usize::from(value.selector.is_some());
+        if branches != 1 {
+            return Err(LanguageError::Invalid(
+                "provide exactly one of target or selector".into(),
+            ));
+        }
+    }
+    if let Some(selector) = &value.selector {
+        validate_selector(selector)?;
+    }
+    if dropping {
+        if value.source_image.is_none() {
+            return Err(LanguageError::Invalid(
+                "a drop requires source_image".into(),
+            ));
+        }
+        if value.target.is_some() || value.selector.is_some() {
+            return Err(LanguageError::Invalid(
+                "a drop provides a view point, not target or selector".into(),
+            ));
+        }
+        validate_handle(
+            value
+                .view
+                .as_deref()
+                .ok_or_else(|| LanguageError::Invalid("view is required".into()))?,
+            "view_",
+        )?;
+        for (name, coordinate) in [("x", value.x), ("y", value.y)] {
+            validate_coordinate(
+                coordinate.ok_or_else(|| LanguageError::Invalid(format!("{name} is required")))?,
+                name,
+            )?;
+        }
+    } else if let Some(image) = &value.source_image {
+        validate_handle(image, "image_")?;
+        if value.target.is_none() && value.selector.is_none() {
+            return Err(LanguageError::Invalid(
+                "attaching an image requires target or selector".into(),
+            ));
+        }
+    }
     validate_range(value.paths.len(), 1, 5, "paths")?;
     if has_duplicates(&value.paths) {
         return Err(LanguageError::Invalid("paths must be unique".into()));
@@ -1611,6 +1715,31 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
         if !Path::new(path).is_absolute() {
             return Err(LanguageError::Invalid("paths must be absolute".into()));
         }
+    }
+    validate_range(value.files.len(), 0, INLINE_FILE_LIMIT, "files")?;
+    let mut aggregate = 0usize;
+    for file in &value.files {
+        validate_text(&file.name, 255, "name")?;
+        validate_text(&file.media_type, 100, "media_type")?;
+        let data = file.data_base64.as_bytes();
+        if data.is_empty() || data.len() % 4 != 0 {
+            return Err(LanguageError::Invalid(
+                "data_base64 must be non-empty valid base64".into(),
+            ));
+        }
+        if !data.iter().all(|byte| {
+            byte.is_ascii_alphanumeric() || *byte == b'+' || *byte == b'/' || *byte == b'='
+        }) {
+            return Err(LanguageError::Invalid(
+                "data_base64 must be standard base64".into(),
+            ));
+        }
+        aggregate = aggregate.saturating_add(data.len() / 4 * 3);
+    }
+    if aggregate > UPLOAD_AGGREGATE_BYTES {
+        return Err(LanguageError::Invalid(
+            "inline files exceed the 5,000,000-byte upload ceiling".into(),
+        ));
     }
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_timeout(value.timeout_ms)?;

@@ -35,7 +35,11 @@ optional postconditions report an applied effect truthfully when the expectation
 visible-text mode and a 50,000-character ceiling falls back to visible text, document-scope inspect
 returns a bounded structure-only tree (no editable values, hidden content excluded, shadow-aware)
 with a generation-bound snapshot_ handle superseded per tab, and a current prior snapshot yields a
-bounded structural diff. R5 is next.
+bounded structural diff. R5 is complete: uploads accept exactly one of absolute paths, bounded
+inline base64 files, or one captured image_ handle; inline bytes decode only after authorization
+and credential preflight; each capture holds one volatile reuse asset beside its view, refused
+above the upload ceiling and erased by supersession or tab closure; captured images attach to
+file inputs through target or selector and drop at view points through a revision-gated command.
 
 This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
 pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no

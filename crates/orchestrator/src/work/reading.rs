@@ -87,7 +87,13 @@ impl ApplicationExecutor {
         max_items: usize,
     ) -> Terminal {
         if kind == "document" {
-            return self.inspect_document(context, lease, requested_tab, root, max_depth.unwrap_or(6));
+            return self.inspect_document(
+                context,
+                lease,
+                requested_tab,
+                root,
+                max_depth.unwrap_or(6),
+            );
         }
         self.targets_operation(
             context,
@@ -115,11 +121,11 @@ impl ApplicationExecutor {
         root: Option<&str>,
         max_depth: usize,
     ) -> Terminal {
-        let (selected, locator, _) =
-            match self.resolve_optional_target(lease, requested_tab, root) {
-                Ok(value) => value,
-                Err(error) => return self.workspace_failure(context, error),
-            };
+        let (selected, locator, _) = match self.resolve_optional_target(lease, requested_tab, root)
+        {
+            Ok(value) => value,
+            Err(error) => return self.workspace_failure(context, error),
+        };
         let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
@@ -160,7 +166,8 @@ impl ApplicationExecutor {
                     "document_generation":selected.generation,
                 });
                 if let Some((added, removed, changed, paths)) = &diff {
-                    facts["diff"] = json!({"added":added,"removed":removed,"changed":changed,"paths":paths});
+                    facts["diff"] =
+                        json!({"added":added,"removed":removed,"changed":changed,"paths":paths});
                 }
                 self.succeeded(
                     context,
@@ -169,7 +176,11 @@ impl ApplicationExecutor {
                     Effect::None,
                     readiness(selected.readiness),
                     true,
-                    Outcome::DocumentInspected { nodes, truncated, compared: diff.is_some() },
+                    Outcome::DocumentInspected {
+                        nodes,
+                        truncated,
+                        compared: diff.is_some(),
+                    },
                     facts,
                 )
             }
@@ -395,6 +406,14 @@ impl ApplicationExecutor {
                     Ok(view) => view,
                     Err(error) => return self.workspace_failure(context, error),
                 };
+                // One volatile reuse asset beside the view; superseded by the
+                // next capture and refused above the upload ceiling.
+                let decoded_bytes = data.len() / 4 * 3;
+                if let Ok(Some(_image)) =
+                    lease.register_image(&selected, &mime_type, &data, decoded_bytes)
+                {
+                    // Registration is best effort; the client result never changes.
+                }
                 let outcome = Outcome::Captured {
                     scope,
                     width,
@@ -441,7 +460,17 @@ fn diff_trees(old: &Value, new: &Value) -> (usize, usize, usize, Vec<String>) {
             paths.push(path);
         }
     };
-    compare_nodes(old, new, String::new(), &mut added, &mut removed, &mut changed, &mut paths, &mut record, 0);
+    compare_nodes(
+        old,
+        new,
+        String::new(),
+        &mut added,
+        &mut removed,
+        &mut changed,
+        &mut paths,
+        &mut record,
+        0,
+    );
     (added, removed, changed, paths)
 }
 
@@ -471,7 +500,17 @@ fn compare_nodes(
             let shared = old_children.len().min(new_children.len());
             for index in 0..shared {
                 let child_path = format!("{path}/{index}");
-                compare_nodes(&old_children[index], &new_children[index], child_path, added, removed, changed, paths, record, depth + 1);
+                compare_nodes(
+                    &old_children[index],
+                    &new_children[index],
+                    child_path,
+                    added,
+                    removed,
+                    changed,
+                    paths,
+                    record,
+                    depth + 1,
+                );
             }
             for index in shared..old_children.len() {
                 *removed += 1;

@@ -59,6 +59,8 @@ pub mod adapter_capability {
     pub const RECORDING: &str = "recording";
     /// Bounded host-to-adapter command reassembly.
     pub const CHUNKED_COMMANDS: &str = "chunked_commands";
+    /// Files revision adding coordinate image drops.
+    pub const FILES_REVISION_DROP: u16 = 2;
     /// End-to-end adapter availability probes independent of browser work.
     pub const ADAPTER_LIVENESS: &str = "adapter_liveness";
     /// Reported browser-level attention, so bootstrap routing never guesses.
@@ -735,6 +737,13 @@ pub enum BrowserCommand {
         locator: String,
         files: Vec<PhysicalFile>,
     },
+    /// Drop one bounded image at a page point resolved from a governed view handle.
+    DropImageAt {
+        tab_id: u64,
+        point: PhysicalPoint,
+        expected_viewport: ViewportGeometry,
+        file: PhysicalFile,
+    },
     /// Evaluate an explicit script in the page's main world.
     EvaluateScript {
         tab_id: u64,
@@ -832,7 +841,7 @@ impl BrowserCommand {
             | Self::DescribeFocused { .. }
             | Self::TypeFocused { .. }
             | Self::PressKey { .. } => capability::KEYBOARD_INPUT,
-            Self::UploadFiles { .. } => capability::FILES,
+            Self::UploadFiles { .. } | Self::DropImageAt { .. } => capability::FILES,
             Self::EvaluateScript { .. } => capability::SCRIPT,
             Self::Observe { .. } => capability::OBSERVATION,
             Self::InspectDialog { .. } | Self::HandleDialog { .. } => capability::DIALOGS,
@@ -853,6 +862,7 @@ impl BrowserCommand {
     pub const fn required_revision(&self) -> u16 {
         match self {
             Self::EvaluateScript { .. } => adapter_capability::SCRIPT_REVISION_REPL,
+            Self::DropImageAt { .. } => adapter_capability::FILES_REVISION_DROP,
             Self::QuerySemantic { .. } => adapter_capability::SEMANTIC_DOCUMENT_REVISION_SELECTOR,
             Self::ReadDocument { .. } | Self::InspectTree { .. } => {
                 adapter_capability::SEMANTIC_DOCUMENT_REVISION_ARTICLE

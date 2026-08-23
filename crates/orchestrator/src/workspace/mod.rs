@@ -110,6 +110,31 @@ pub struct SnapshotState {
     pub tree: serde_json::Value,
 }
 
+/// Opaque handle to one volatile captured-image asset.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ImageHandle(String);
+
+impl ImageHandle {
+    /// String form returned to the model.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// One volatile captured-image asset held beside its view.
+#[derive(Clone, Debug)]
+pub struct ImageState {
+    /// Owning controlled tab.
+    pub tab: TabHandle,
+    /// Document generation captured.
+    pub generation: u64,
+    /// Bounded media type of the capture.
+    pub mime_type: String,
+    /// Base64-encoded image bytes; never persisted anywhere else.
+    pub data: String,
+}
+
 /// Immutable selected controlled-tab facts used by the executor.
 #[derive(Clone, Debug)]
 pub struct SelectedTab {
@@ -235,6 +260,7 @@ struct WorkspaceState {
     targets: HashMap<TargetHandle, TargetState>,
     views: HashMap<ViewHandle, ViewState>,
     snapshots: HashMap<SnapshotHandle, SnapshotState>,
+    images: HashMap<ImageHandle, ImageState>,
 }
 
 #[derive(Debug, Default)]
@@ -365,6 +391,7 @@ impl WorkspaceStore {
                 targets: HashMap::new(),
                 views: HashMap::new(),
                 snapshots: HashMap::new(),
+                images: HashMap::new(),
             },
         );
         id
@@ -835,6 +862,65 @@ impl WorkspaceLease {
             .map(|snapshot| snapshot.tree.clone())
     }
 
+    /// Store one volatile captured image for a tab, superseding any earlier asset.
+    /// The capture is refused when it exceeds the upload ceiling.
+    pub fn register_image(
+        &self,
+        tab: &SelectedTab,
+        mime_type: &str,
+        data: &str,
+        decoded_bytes: usize,
+    ) -> Result<Option<ImageHandle>, WorkspaceError> {
+        const UPLOAD_AGGREGATE_BYTES: usize = 5_000_000;
+        if decoded_bytes > UPLOAD_AGGREGATE_BYTES {
+            return Ok(None);
+        }
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let known = workspace
+            .tabs
+            .get(&tab.handle)
+            .ok_or(WorkspaceError::StaleTab)?;
+        if known.generation != tab.generation {
+            return Err(WorkspaceError::StaleTab);
+        }
+        workspace.images.retain(|_, image| image.tab != tab.handle);
+        let handle = ImageHandle(format!("image_{}", Uuid::new_v4().simple()));
+        workspace.images.insert(
+            handle.clone(),
+            ImageState {
+                tab: tab.handle.clone(),
+                generation: known.generation,
+                mime_type: mime_type.to_string(),
+                data: data.to_string(),
+            },
+        );
+        Ok(Some(handle))
+    }
+
+    /// Return one current-generation captured image, if it is still owned here.
+    #[must_use]
+    pub fn take_image(&self, handle: &str, tab: &SelectedTab) -> Option<(String, String)> {
+        let state = self.store.lock();
+        let workspace = state.workspaces.get(&self.workspace)?;
+        let known = workspace.tabs.get(&tab.handle)?;
+        if known.generation != tab.generation {
+            return None;
+        }
+        workspace
+            .images
+            .iter()
+            .find(|(asset_handle, image)| {
+                asset_handle.as_str() == handle
+                    && image.tab == tab.handle
+                    && image.generation == known.generation
+            })
+            .map(|(_, image)| (image.mime_type.clone(), image.data.clone()))
+    }
+
     pub fn confirm_tab_closed(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
         let workspace = state
@@ -844,7 +930,10 @@ impl WorkspaceLease {
         workspace.tabs.remove(handle);
         workspace.targets.retain(|_, target| &target.tab != handle);
         workspace.views.retain(|_, view| &view.tab != handle);
-        workspace.snapshots.retain(|_, snapshot| &snapshot.tab != handle);
+        workspace
+            .snapshots
+            .retain(|_, snapshot| &snapshot.tab != handle);
+        workspace.images.retain(|_, image| &image.tab != handle);
         Ok(())
     }
 
@@ -940,7 +1029,8 @@ impl WorkspaceLease {
         viewport: ViewportGeometry,
         width: u32,
         height: u32,
-    ) -> Result<ViewHandle, WorkspaceError> {        let mut state = self.store.lock();
+    ) -> Result<ViewHandle, WorkspaceError> {
+        let mut state = self.store.lock();
         let workspace = state
             .workspaces
             .get_mut(&self.workspace)

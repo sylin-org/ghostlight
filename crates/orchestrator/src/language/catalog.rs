@@ -135,7 +135,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_upload",
             "Upload files",
-            "Upload one to five explicitly named absolute local paths to an ordinary file input target.",
+            "Upload explicitly supplied local paths, bounded inline files, or one captured image to an ordinary file input, or drop one captured image at a current-view point.",
             upload_schema(),
             Hints::browser_action(true),
         ),
@@ -1030,16 +1030,35 @@ fn upload_schema() -> Value {
                     "target",
                     handle("target_", "Current ordinary file-input target."),
                 ),
+                ("selector", semantic_selector()),
                 (
                     "paths",
                     json!({"type":"array","minItems":1,"maxItems":5,"uniqueItems":true,"description":"Absolute local file paths selected explicitly for upload.","items":{"type":"string","minLength":1,"maxLength":4096}}),
                 ),
+                (
+                    "files",
+                    json!({"type":"array","minItems":1,"maxItems":5,"description":"Bounded inline files supplied directly.","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":255},"media_type":{"type":"string","maxLength":100},"data_base64":{"type":"string","description":"Standard base64 file bytes."}},"required":["name","data_base64"]}}),
+                ),
+                (
+                    "source_image",
+                    handle("image_","One captured image handle to attach, or to drop at a view point."),
+                ),
+                (
+                    "view",
+                    handle("view_","Current screenshot view that defines the drop coordinates; requires source_image."),
+                ),
+                ("x", coordinate("Horizontal CSS coordinate in the view.")),
+                ("y", coordinate("Vertical CSS coordinate in the view.")),
                 ("tab", tab()),
                 ("timeout_ms", timeout()),
             ],
-            vec!["target", "paths"],
+            vec![],
         ),
-        vec![json!({"target":"target_...","paths":["C:\\absolute\\file.txt"]})],
+        vec![
+            json!({"target":"target_...","paths":["C:\\absolute\\file.txt"]}),
+            json!({"target":"target_...","files":[{"name":"notes.txt","media_type":"text/plain","data_base64":"SGk="}]}),
+            json!({"source_image":"image_...","view":"view_...","x":120,"y":80}),
+        ],
     )
 }
 

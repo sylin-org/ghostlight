@@ -558,6 +558,7 @@ async function dispatch(request) {
     const result = await content(command.tab_id, { kind: "upload_files", locator: command.locator, files: command.files });
     return { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes, subject: result.subject };
   }
+  if (command.command === "drop_image_at") return dropImageAt(request.correlation, command);
   if (command.command === "evaluate_script") return evaluateScript(request.correlation, command);
   if (command.command === "observe") {
     const result = await content(command.tab_id, { kind: "observe", condition: command.condition, value: command.value, locator: command.locator, timeout_ms: command.timeout_ms });
@@ -1452,8 +1453,23 @@ async function pressKey(correlation, command) {
   finally { navigationWatchers.delete(command.tab_id); await detachDebugger(command.tab_id); }
 }
 
-async function wheelAt(correlation, command) {
+async function dropImageAt(correlation, command) {
   await ensureDebugger(command.tab_id);
+  try {
+    await validateView(command.tab_id, command.expected_viewport);
+    const point = await pointInViewport(command.tab_id, command.point);
+    const result = await content(
+      command.tab_id,
+      { kind: "drop_files", x: point.x, y: point.y, files: [command.file] }
+    );
+    const tab = await chrome.tabs.get(command.tab_id);
+    if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
+    return { outcome: "files_uploaded", tab: physicalTab(tab), uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes, subject: point.subject, committed_urls: [] };
+  } catch (error) { error.effectUnknown = true; throw error; }
+  finally { await detachDebugger(command.tab_id); }
+}
+
+async function wheelAt(correlation, command) {  await ensureDebugger(command.tab_id);
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
