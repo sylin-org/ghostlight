@@ -26,7 +26,12 @@ now refuse decisively without inventing an effect; runtime failures remain unkno
 modified and triple clicks ride POINTER_INPUT revision 2, stroke sequences repeat with cancellation
 observed between repetitions, focused typing describes the control and keeps credential handoff,
 duration waits run executor-side, and coordinate wheel scrolling reuses the governed view transform.
-R3 is next.
+R3 is complete: one typed semantic selector resolves through a single revision-gated adapter query
+with zero-or-many failing without effect, selectors work as alternatives on click, type_text, and
+per-field fill, form fields accept boolean and finite-number values rendered to canonical wire
+strings so older adapters keep working, contained-form submit is verified before clicking, and
+optional postconditions report an applied effect truthfully when the expectation fails
+(Status::Failed, Effect::Applied, never repeat-safe). R4 is next.
 
 This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
 pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no

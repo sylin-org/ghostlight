@@ -185,6 +185,32 @@
     return matches;
   }
 
+  function matchesSemanticSelector(element, message) {
+    const needle = String(message.name ?? "").trim().toLocaleLowerCase();
+    if (!needle) return false;
+    const name = accessibleName(element).toLocaleLowerCase();
+    const hit = message.exact ? name === needle : name.includes(needle);
+    if (!hit) return false;
+    if (message.role && roleFor(element) !== message.role) return false;
+    if (message.form_scope) {
+      const labeledInForm = Array.from(element.labels ?? []).some((label) => label.closest("form"));
+      if (!(element.closest && element.closest("form")) && !labeledInForm) return false;
+    }
+    return true;
+  }
+
+  function querySemanticTargets(message) {
+    const matches = [];
+    for (const element of candidates("controls").slice(0, 3000)) {
+      if (!element.isConnected) continue;
+      if (matchesSemanticSelector(element, message)) {
+        matches.push(observation(element));
+        if (matches.length >= 8) break;
+      }
+    }
+    return matches;
+  }
+
   function setNativeValue(element, value) {
     const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
@@ -307,6 +333,7 @@
       if (message.kind === "inspect") return { targets: inspect(message.inspect_kind, message.max_items) };
       if (message.kind === "find") return { targets: findTargets(message.text, message.find_kind, message.max_results) };
       if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
+      if (message.kind === "query_semantic") return { targets: querySemanticTargets(message) };
       if (message.kind === "describe_focused") { const element = document.activeElement; if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
       if (message.kind === "clear_focused") { const element = requireActionable(document.activeElement, "type"); if (credentialClass(element)) throw new Error("credential-class target requires user handoff"); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
       if (message.kind === "geometry") return geometry(resolve(message.locator));
@@ -323,8 +350,14 @@
         return { activated: true, subject };
       }
       if (message.kind === "fill") {
-        for (const field of message.fields) fillElement(resolve(field.locator), field.value);
-        if (message.submit_locator) resolve(message.submit_locator).click();
+        const elements = message.fields.map((field) => resolve(field.locator));
+        elements.forEach((element, index) => fillElement(element, message.fields[index].value));
+        if (message.submit_locator) {
+          const submitElement = resolve(message.submit_locator);
+          const owner = elements[0]?.closest?.("form") ?? null;
+          if (!owner || !owner.contains(submitElement)) throw new Error("submit control is not contained in the resolved form");
+          submitElement.click();
+        }
         return { filled_count: message.fields.length, submitted: Boolean(message.submit_locator) };
       }
       if (message.kind === "scroll") {

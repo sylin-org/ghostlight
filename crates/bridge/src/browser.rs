@@ -39,6 +39,8 @@ pub mod adapter_capability {
     pub const POINTER_INPUT_REVISION_PRECISION: u16 = 2;
     /// Keyboard revision adding focused-control description and typing.
     pub const KEYBOARD_INPUT_REVISION_FOCUSED: u16 = 2;
+    /// Semantic-document revision adding typed semantic-selector queries.
+    pub const SEMANTIC_DOCUMENT_REVISION_SELECTOR: u16 = 2;
     /// Browser-local condition observation.
     pub const OBSERVATION: &str = "observation";
     /// JavaScript dialog observation and handling.
@@ -591,6 +593,18 @@ pub enum BrowserCommand {
     },
     /// Recheck credential classification immediately before a fill.
     DescribeTargets { tab_id: u64, locators: Vec<String> },
+    /// Resolve one typed semantic selector against visible targets.
+    QuerySemantic {
+        tab_id: u64,
+        /// Required accessible-name text.
+        name: String,
+        /// Optional closed role filter.
+        role: Option<String>,
+        /// Require the whole accessible name to equal the text.
+        exact: bool,
+        /// Restrict to controls associated with a form.
+        form_scope: bool,
+    },
     /// Activate one target.
     Activate {
         tab_id: u64,
@@ -783,7 +797,8 @@ impl BrowserCommand {
             Self::ReadText { .. }
             | Self::Inspect { .. }
             | Self::Find { .. }
-            | Self::DescribeTargets { .. } => capability::SEMANTIC_DOCUMENT,
+            | Self::DescribeTargets { .. }
+            | Self::QuerySemantic { .. } => capability::SEMANTIC_DOCUMENT,
             Self::Screenshot { .. } | Self::ScreenshotRegion { .. } => capability::CAPTURE,
             Self::Activate { .. }
             | Self::ActivatePoint { .. }
@@ -821,6 +836,7 @@ impl BrowserCommand {
     pub const fn required_revision(&self) -> u16 {
         match self {
             Self::EvaluateScript { .. } => adapter_capability::SCRIPT_REVISION_REPL,
+            Self::QuerySemantic { .. } => adapter_capability::SEMANTIC_DOCUMENT_REVISION_SELECTOR,
             Self::ActivateModified { .. }
             | Self::ActivatePointModified { .. }
             | Self::WheelAt { .. } => adapter_capability::POINTER_INPUT_REVISION_PRECISION,

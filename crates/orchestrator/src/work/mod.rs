@@ -617,6 +617,163 @@ impl ApplicationExecutor {
         }
     }
 
+    /// Check one optional postcondition after an applied effect. A failed
+    /// expectation leaves the effect applied, failed, and never repeat-safe.
+    #[allow(clippy::too_many_arguments)]
+    fn finish_with_expectation(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        decision: Decision,
+        landing_requirements: impl Into<CapabilitySet>,
+        selected: &SelectedTab,
+        physical: &PhysicalTab,
+        commits: &[String],
+        outcome: Outcome,
+        facts: Value,
+        expect: Option<&crate::language::Postcondition>,
+    ) -> Terminal {
+        if let Some(expectation) = expect {
+            let remaining = context.deadline.saturating_duration_since(Instant::now());
+            let budget = remaining
+                .min(std::time::Duration::from_millis(2_000))
+                .as_millis() as u64;
+            match self.dispatch(
+                context,
+                BrowserCommand::Observe {
+                    tab_id: selected.physical_id,
+                    condition: expectation.condition.clone(),
+                    value: expectation.value.clone(),
+                    locator: None,
+                    timeout_ms: budget,
+                },
+            ) {
+                Ok(BrowserOutcome::Observed { satisfied, .. }) => {
+                    if !satisfied {
+                        let mut steps = outcome.next_steps();
+                        steps.push(
+                            "The effect was applied, but the expected condition did not hold. Inspect the page before repeating.".into(),
+                        );
+                        return Terminal {
+                            result: InvocationResult::new(
+                                context.invocation,
+                                Status::Failed,
+                                Effect::Applied,
+                                readiness(selected.readiness),
+                                false,
+                                outcome.summary().as_str(),
+                                facts,
+                                steps,
+                            ),
+                            decision,
+                            physical_id: Some(selected.physical_id),
+                            observed: outcome.observed(),
+                        };
+                    }
+                }
+                Ok(_) => {
+                    return self.protocol_failure(context, decision, Some(selected.physical_id))
+                }
+                Err(error) => {
+                    return self.browser_failure(
+                        context,
+                        decision,
+                        error,
+                        Some(selected.physical_id),
+                    )
+                }
+            }
+        }
+        self.action_success(
+            context,
+            lease,
+            decision,
+            landing_requirements,
+            selected,
+            physical,
+            commits,
+            outcome,
+            facts,
+        )
+    }
+
+    #[allow(clippy::result_large_err)]
+    /// Resolve one typed semantic selector through a single adapter query.
+    /// Zero or several matches fail without any effect; exactly one match is
+    /// registered as an ordinary generation-bound target.
+    fn resolve_semantic(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        requested_tab: Option<&str>,
+        selector: &crate::language::SemanticSelector,
+        form_scope: bool,
+    ) -> Result<(SelectedTab, SelectedTarget), Terminal> {
+        let selected = match lease.select_tab(requested_tab) {
+            Ok(tab) => tab,
+            Err(error) => return Err(self.workspace_failure(context, error)),
+        };
+        let read_decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
+        if !read_decision.allowed {
+            return Err(self.blocked(
+                context,
+                read_decision,
+                Some(selected.physical_id),
+                Effect::None,
+                true,
+                json!({"reason":read_decision.reason.as_str()}),
+            ));
+        }
+        match self.dispatch(
+            context,
+            BrowserCommand::QuerySemantic {
+                tab_id: selected.physical_id,
+                name: selector.name.clone(),
+                role: selector.role.clone(),
+                exact: selector.exact,
+                form_scope,
+            },
+        ) {
+            Ok(BrowserOutcome::Targets { tab_id, targets }) if tab_id == selected.physical_id => {
+                if targets.len() != 1 {
+                    let matched = targets.len();
+                    let outcome = Outcome::SelectorUnresolved { matched };
+                    return Err(Terminal {
+                        result: InvocationResult::new(
+                            context.invocation,
+                            Status::Failed,
+                            Effect::None,
+                            readiness(selected.readiness),
+                            true,
+                            outcome.summary().as_str(),
+                            json!({"tab":selected.handle.as_str(),"selector_matched":matched}),
+                            outcome.next_steps(),
+                        ),
+                        decision: read_decision,
+                        physical_id: Some(selected.physical_id),
+                        observed: outcome.observed(),
+                    });
+                }
+                let observed = &targets[0];
+                let registered = lease
+                    .register_targets(&selected, std::slice::from_ref(observed))
+                    .map_err(|error| self.workspace_failure(context, error))?;
+                let (handle, _) = registered
+                    .into_iter()
+                    .next()
+                    .expect("one observed target registers one handle");
+                match self.resolve_target(lease, Some(selected.handle.as_str()), handle.as_str()) {
+                    Ok(value) => Ok(value),
+                    Err(error) => Err(self.workspace_failure(context, error)),
+                }
+            }
+            Ok(_) => Err(self.protocol_failure(context, read_decision, Some(selected.physical_id))),
+            Err(error) => {
+                Err(self.browser_failure(context, read_decision, error, Some(selected.physical_id)))
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn resolve_location(
         &self,

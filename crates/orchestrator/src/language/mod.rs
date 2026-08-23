@@ -25,6 +25,26 @@ const COMMON_FIELDS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
 /// Model-facing instructions supplied to every protocol edge by the orchestrator.
 pub const SERVER_INSTRUCTIONS: &str = "Ghostlight controls the user's visible Chromium browser. Use the advertised short calls and inspect current handles after navigation.";
 const CAPABILITIES: &[&str] = &["read", "action", "write", "execute"];
+/// Closed role vocabulary a semantic selector may filter on.
+const SEMANTIC_ROLES: &[&str] = &[
+    "button",
+    "link",
+    "checkbox",
+    "radio",
+    "textbox",
+    "searchbox",
+    "combobox",
+    "listbox",
+    "select",
+    "slider",
+    "spinbutton",
+    "tab",
+    "menuitem",
+    "option",
+    "heading",
+    "image",
+];
+
 const NAMED_KEYS: &[&str] = &[
     "Enter",
     "Tab",
@@ -375,11 +395,36 @@ pub struct TakeScreenshot {
     pub restrictions: RequestRestrictions,
 }
 
+/// One typed semantic selector resolved against the live document.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct SemanticSelector {
+    /// Required accessible-name text.
+    pub name: String,
+    /// Optional closed role filter.
+    #[serde(default)]
+    pub role: Option<String>,
+    /// Require the whole accessible name to equal the text.
+    #[serde(default)]
+    pub exact: bool,
+}
+
+/// One optional typed expectation checked after an applied effect.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Postcondition {
+    /// Closed observable condition from the shared wait vocabulary.
+    pub condition: String,
+    /// Required by the textual conditions.
+    #[serde(default)]
+    pub value: Option<String>,
+}
+
 /// Input for semantic activation.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Click {
     #[serde(default)]
     pub target: Option<String>,
+    #[serde(default)]
+    pub selector: Option<SemanticSelector>,
     #[serde(default)]
     pub view: Option<String>,
     #[serde(default)]
@@ -394,6 +439,9 @@ pub struct Click {
     pub click_count: u8,
     #[serde(default)]
     pub modifiers: Vec<String>,
+    /// Optional expectation checked after the applied effect.
+    #[serde(default)]
+    pub expect: Option<Postcondition>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
@@ -469,8 +517,23 @@ pub struct Hover {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FormField {
-    pub target: String,
-    pub value: String,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub selector: Option<SemanticSelector>,
+    pub value: FormFieldValue,
+}
+
+/// One typed ordinary form value.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum FormFieldValue {
+    /// Checkbox or radio truth.
+    Flag(bool),
+    /// Finite number for numeric inputs.
+    Number(f64),
+    /// Literal text, select option value or label.
+    Text(String),
 }
 
 /// Input for grouped form filling.
@@ -481,6 +544,9 @@ pub struct FillForm {
     pub tab: Option<String>,
     #[serde(default)]
     pub submit_target: Option<String>,
+    /// Optional expectation checked after the applied effect.
+    #[serde(default)]
+    pub expect: Option<Postcondition>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
@@ -495,11 +561,17 @@ pub struct TypeText {
     /// Type into the currently focused editable control instead of `target`.
     #[serde(default)]
     pub focused: bool,
+    /// Resolve this semantic selector instead of using `target`.
+    #[serde(default)]
+    pub selector: Option<SemanticSelector>,
     pub text: String,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
     pub clear_first: bool,
+    /// Optional expectation checked after the applied effect.
+    #[serde(default)]
+    pub expect: Option<Postcondition>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
@@ -523,6 +595,9 @@ pub struct PressKey {
     pub target: Option<String>,
     #[serde(default)]
     pub modifiers: Vec<String>,
+    /// Optional expectation checked after the applied effect.
+    #[serde(default)]
+    pub expect: Option<Postcondition>,
     #[serde(flatten)]
     pub restrictions: RequestRestrictions,
 }
@@ -784,6 +859,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "button",
                 "click_count",
                 "modifiers",
+                "expect",
                 "timeout_ms",
             ],
             validate_click,
@@ -813,7 +889,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_fill_form" => Operation::FillForm(parse(
             input,
-            &["fields", "tab", "submit_target", "timeout_ms"],
+            &["fields", "tab", "submit_target", "expect", "timeout_ms"],
             validate_fill,
         )?)
         .into_ok(),
@@ -822,9 +898,11 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             &[
                 "target",
                 "focused",
+                "selector",
                 "text",
                 "tab",
                 "clear_first",
+                "expect",
                 "timeout_ms",
             ],
             validate_type_text,
@@ -832,7 +910,15 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_press_key" => Operation::PressKey(parse(
             input,
-            &["key", "strokes", "repeat", "tab", "target", "modifiers"],
+            &[
+                "key",
+                "strokes",
+                "repeat",
+                "tab",
+                "target",
+                "modifiers",
+                "expect",
+            ],
             validate_press_key,
         )?)
         .into_ok(),
@@ -1187,17 +1273,59 @@ fn ensure_fields(input: &Value, fields: &[&str]) -> Result<(), LanguageError> {
     Ok(())
 }
 
+fn validate_selector(selector: &SemanticSelector) -> Result<(), LanguageError> {
+    validate_text(&selector.name, 500, "name")?;
+    if let Some(role) = &selector.role {
+        validate_choice(role, SEMANTIC_ROLES, "role")?;
+    }
+    Ok(())
+}
+
+fn validate_expect(expect: &Option<Postcondition>) -> Result<(), LanguageError> {
+    let Some(expectation) = expect else {
+        return Ok(());
+    };
+    match expectation.condition.as_str() {
+        "load_ready" => {
+            if expectation.value.is_some() {
+                return Err(LanguageError::Invalid("load_ready accepts no value".into()));
+            }
+            Ok(())
+        }
+        "url_contains" | "text_present" | "text_absent" => {
+            let value = expectation.value.as_deref().ok_or_else(|| {
+                LanguageError::Invalid(format!("{} requires value", expectation.condition))
+            })?;
+            validate_text(value, 2_000, "value")
+        }
+        _ => Err(LanguageError::Invalid(
+            "expect supports load_ready, url_contains, text_present, or text_absent".into(),
+        )),
+    }
+}
+
 fn validate_click(value: &Click) -> Result<(), LanguageError> {
-    validate_location(
-        value.target.as_deref(),
-        value.view.as_deref(),
-        value.x,
-        value.y,
-    )?;
+    if let Some(selector) = &value.selector {
+        if value.target.is_some() || value.view.is_some() || value.x.is_some() || value.y.is_some()
+        {
+            return Err(LanguageError::Invalid(
+                "selector cannot be combined with target, view, or coordinates".into(),
+            ));
+        }
+        validate_selector(selector)?;
+    } else {
+        validate_location(
+            value.target.as_deref(),
+            value.view.as_deref(),
+            value.x,
+            value.y,
+        )?;
+    }
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_choice(&value.button, &["primary", "middle", "secondary"], "button")?;
     validate_range(usize::from(value.click_count), 1, 3, "click_count")?;
     validate_modifiers(&value.modifiers)?;
+    validate_expect(&value.expect)?;
     validate_timeout(value.timeout_ms)?;
     validate_restrictions(&value.restrictions)
 }
@@ -1338,28 +1466,42 @@ fn validate_fill(value: &FillForm) -> Result<(), LanguageError> {
     validate_range(value.fields.len(), 1, 30, "fields")?;
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_optional_handle(value.submit_target.as_deref(), "target_")?;
+    validate_expect(&value.expect)?;
     validate_timeout(value.timeout_ms)?;
     for field in &value.fields {
-        validate_handle(&field.target, "target_")?;
-        validate_text_allow_empty(&field.value, 8_000, "field value")?;
+        let branches = usize::from(field.target.is_some()) + usize::from(field.selector.is_some());
+        if branches != 1 {
+            return Err(LanguageError::Invalid(
+                "each field provides exactly one of target or selector".into(),
+            ));
+        }
+        if let Some(target) = &field.target {
+            validate_handle(target, "target_")?;
+        }
+        if let Some(selector) = &field.selector {
+            validate_selector(selector)?;
+        }
+        if let FormFieldValue::Text(text) = &field.value {
+            validate_text_allow_empty(text, 8_000, "field value")?;
+        }
     }
     validate_restrictions(&value.restrictions)
 }
 
 fn validate_type_text(value: &TypeText) -> Result<(), LanguageError> {
-    if value.focused {
-        if !value.target.is_empty() {
-            return Err(LanguageError::Invalid(
-                "focused cannot be combined with target".into(),
-            ));
-        }
-    } else {
-        if value.target.is_empty() {
-            return Err(LanguageError::Invalid(
-                "provide exactly target, or focused true".into(),
-            ));
-        }
+    let branches = usize::from(!value.target.is_empty())
+        + usize::from(value.focused)
+        + usize::from(value.selector.is_some());
+    if branches != 1 {
+        return Err(LanguageError::Invalid(
+            "provide exactly one of target, focused, or selector".into(),
+        ));
+    }
+    if !value.target.is_empty() {
         validate_handle(&value.target, "target_")?;
+    }
+    if let Some(selector) = &value.selector {
+        validate_selector(selector)?;
     }
     if value.text.is_empty() && !value.clear_first {
         return Err(LanguageError::Invalid(
@@ -1368,6 +1510,7 @@ fn validate_type_text(value: &TypeText) -> Result<(), LanguageError> {
     }
     validate_text_allow_empty(&value.text, 8_000, "text")?;
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_expect(&value.expect)?;
     validate_timeout(value.timeout_ms)?;
     validate_restrictions(&value.restrictions)
 }
@@ -1484,6 +1627,7 @@ fn validate_press_key(value: &PressKey) -> Result<(), LanguageError> {
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_optional_handle(value.target.as_deref(), "target_")?;
     validate_modifiers(&value.modifiers)?;
+    validate_expect(&value.expect)?;
     validate_restrictions(&value.restrictions)
 }
 

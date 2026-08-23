@@ -576,6 +576,7 @@ fn click_schema() -> Value {
             "modifiers",
             json!({"type":"array","uniqueItems":true,"default":[],"description":"Held modifier keys.","items":{"enum":["Alt","Control","Meta","Shift"]}}),
         ),
+        ("selector", semantic_selector()),
         ("timeout_ms", timeout()),
     ];
     union(
@@ -613,6 +614,20 @@ fn click_schema() -> Value {
             json!({"view":"view_...","x":120,"y":80}),
         ],
     )
+}
+
+fn semantic_selector() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Typed semantic selector resolved against the live document.",
+        "properties": {
+            "name": {"type": "string", "minLength": 1, "maxLength": 500, "description": "Required accessible-name text."},
+            "role": {"type": "string", "enum": ["button","link","checkbox","radio","textbox","searchbox","combobox","listbox","select","slider","spinbutton","tab","menuitem","option","heading","image"], "description": "Optional closed role filter."},
+            "exact": {"type": "boolean", "default": false, "description": "Require the whole accessible name to equal the text."}
+        },
+        "required": ["name"]
+    })
 }
 
 fn scroll_schema() -> Value {
@@ -722,7 +737,7 @@ fn fill_schema() -> Value {
     examples(
         object(
             vec![
-                ("fields", json!({"type":"array","minItems":1,"maxItems":30,"description":"Ordinary form values to set.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_","Current form-control target."),"value":{"type":"string","maxLength":8000,"description":"Literal value, including an empty value to clear."}},"required":["target","value"]}})),
+                ("fields", json!({"type":"array","minItems":1,"maxItems":30,"description":"Ordinary form values to set. Each field provides exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_","Current form-control target."),"selector":semantic_selector(),"value":{"description":"Literal value, including an empty value to clear. Checkboxes and radios accept booleans; numeric inputs accept finite numbers.","anyOf":[{"type":"string","maxLength":8000},{"type":"boolean"},{"type":"number"}]}},"required":["value"]}})),
                 ("tab", tab()),
                 ("submit_target", handle("target_", "Optional current submit control. Supplying it may produce an external effect.")),
                 ("timeout_ms", timeout()),
@@ -791,6 +806,20 @@ fn type_schema() -> Value {
                     ("timeout_ms", timeout()),
                 ],
                 vec!["focused", "text"],
+            ),
+            object(
+                with_many(
+                    vec![("tab", tab()), ("timeout_ms", timeout())],
+                    vec![
+                        ("selector", semantic_selector()),
+                        ("text", text(1, 8_000, "Literal text to type.")),
+                        (
+                            "clear_first",
+                            boolean(false, "Clear the current value before typing."),
+                        ),
+                    ],
+                ),
+                vec!["selector", "text"],
             ),
         ],
         vec![

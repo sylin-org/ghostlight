@@ -194,6 +194,8 @@ pub enum SavedTo {
 pub enum Outcome {
     /// Controlled tabs were listed.
     TabsListed { count: usize },
+    /// A semantic selector matched zero or several visible controls.
+    SelectorUnresolved { matched: usize },
     /// One controlled tab was brought into view.
     TabActivated { host: Option<String> },
     /// A requested page was opened.
@@ -330,6 +332,15 @@ impl Outcome {
     #[must_use]
     pub fn summary(&self) -> String {
         match self {
+            Self::SelectorUnresolved { matched } => {
+                if *matched == 0 {
+                    "No visible control matched the semantic selector.".into()
+                } else {
+                    format!(
+                        "{matched} visible controls matched the semantic selector; none was chosen."
+                    )
+                }
+            }
             Self::TabsListed { count } => format!(
                 "Listed {}.",
                 counted(*count, "controlled tab", "controlled tabs")
@@ -600,6 +611,9 @@ impl Outcome {
     #[must_use]
     pub fn next_steps(&self) -> Vec<String> {
         match self {
+            Self::SelectorUnresolved { .. } => vec![
+                "Inspect the page or use browser_find to register an explicit target, or narrow the selector with role and exact.".into(),
+            ],
             Self::Waited {
                 satisfied: false, ..
             } => vec!["Inspect the current page before choosing another action.".into()],
@@ -623,6 +637,10 @@ impl Outcome {
             | Self::SequenceRan {
                 completed: count, ..
             } => Observed {
+                count: measured(*count),
+                ..Observed::default()
+            },
+            Self::SelectorUnresolved { matched: count } => Observed {
                 count: measured(*count),
                 ..Observed::default()
             },

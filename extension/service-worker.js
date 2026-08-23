@@ -514,6 +514,10 @@ async function dispatch(request) {
     const result = await content(command.tab_id, { kind: "describe", locators: command.locators });
     return { outcome: "targets_described", tab_id: command.tab_id, targets: result.targets };
   }
+  if (command.command === "query_semantic") {
+    const result = await content(command.tab_id, { kind: "query_semantic", name: command.name, role: command.role, exact: command.exact, form_scope: command.form_scope });
+    return { outcome: "targets", tab_id: command.tab_id, targets: result.targets };
+  }
   if (command.command === "screenshot") return screenshot(command);
   if (command.command === "screenshot_region") return screenshot(command);
   if (command.command === "activate") return activate(request.correlation, command);

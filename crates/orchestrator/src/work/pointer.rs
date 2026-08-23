@@ -23,16 +23,23 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         value: &Click,
     ) -> Terminal {
-        let location = match self.resolve_location(
-            lease,
-            value.tab.as_deref(),
-            value.target.as_deref(),
-            value.view.as_deref(),
-            value.x,
-            value.y,
-        ) {
-            Ok(value) => value,
-            Err(error) => return self.workspace_failure(context, error),
+        let location = if let Some(selector) = &value.selector {
+            match self.resolve_semantic(context, lease, value.tab.as_deref(), selector, false) {
+                Ok((tab, target)) => ResolvedLocation::Target { tab, target },
+                Err(terminal) => return terminal,
+            }
+        } else {
+            match self.resolve_location(
+                lease,
+                value.tab.as_deref(),
+                value.target.as_deref(),
+                value.view.as_deref(),
+                value.x,
+                value.y,
+            ) {
+                Ok(value) => value,
+                Err(error) => return self.workspace_failure(context, error),
+            }
         };
         let selected = location.tab();
         let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
@@ -127,7 +134,7 @@ impl ApplicationExecutor {
                         subject: action_subject(context, subject, None),
                     },
                 };
-                self.action_success(
+                self.finish_with_expectation(
                     context,
                     lease,
                     decision,
@@ -137,6 +144,7 @@ impl ApplicationExecutor {
                     &committed_urls,
                     outcome,
                     facts,
+                    value.expect.as_ref(),
                 )
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),

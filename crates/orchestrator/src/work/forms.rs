@@ -27,17 +27,54 @@ impl ApplicationExecutor {
     ) -> Terminal {
         let mut resolved = Vec::with_capacity(value.fields.len());
         let mut selected: Option<SelectedTab> = None;
-        for field in &value.fields {
-            let (tab, target) = match self.resolve_target(
-                lease,
-                value
-                    .tab
-                    .as_deref()
-                    .or_else(|| selected.as_ref().map(|tab| tab.handle.as_str())),
-                &field.target,
-            ) {
-                Ok(value) => value,
+        if value.fields.iter().any(|field| field.selector.is_some()) {
+            let established = match lease.select_tab(value.tab.as_deref()) {
+                Ok(tab) => tab,
                 Err(error) => return self.workspace_failure(context, error),
+            };
+            let pre = self.authorize(context, CapabilitySet::READ, Some(established.url.as_str()));
+            if !pre.allowed {
+                return self.blocked(
+                    context,
+                    pre,
+                    Some(established.physical_id),
+                    Effect::None,
+                    true,
+                    json!({"reason":pre.reason.as_str()}),
+                );
+            }
+            selected = Some(established);
+        }
+        for field in &value.fields {
+            let (tab, target) = if let Some(selector) = &field.selector {
+                match self.resolve_semantic(
+                    context,
+                    lease,
+                    value
+                        .tab
+                        .as_deref()
+                        .or_else(|| selected.as_ref().map(|tab| tab.handle.as_str())),
+                    selector,
+                    true,
+                ) {
+                    Ok(value) => value,
+                    Err(terminal) => return terminal,
+                }
+            } else {
+                match self.resolve_target(
+                    lease,
+                    value
+                        .tab
+                        .as_deref()
+                        .or_else(|| selected.as_ref().map(|tab| tab.handle.as_str())),
+                    field
+                        .target
+                        .as_deref()
+                        .expect("validated target or selector"),
+                ) {
+                    Ok(value) => value,
+                    Err(error) => return self.workspace_failure(context, error),
+                }
             };
             if let Some(current) = &selected {
                 if current.handle != tab.handle {
@@ -46,7 +83,7 @@ impl ApplicationExecutor {
             } else {
                 selected = Some(tab);
             }
-            resolved.push((target, field.value.clone()));
+            resolved.push((target, form_field_wire(&field.value)));
         }
         let selected = selected.expect("validated non-empty fields");
         let submit = match value.submit_target.as_deref() {
@@ -125,7 +162,7 @@ impl ApplicationExecutor {
                 filled_count,
                 submitted,
                 committed_urls,
-            }) => self.action_success(context, lease, decision, requirements, &selected, &tab, &committed_urls, Outcome::FormFilled { fields: filled_count, submitted, host: observed_host(&tab.url) }, json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted})),
+            }) => self.finish_with_expectation(context, lease, decision, requirements, &selected, &tab, &committed_urls, Outcome::FormFilled { fields: filled_count, submitted, host: observed_host(&tab.url) }, json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted}), value.expect.as_ref()),
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
@@ -142,11 +179,17 @@ impl ApplicationExecutor {
         if value.focused {
             return self.type_focused(context, lease, value);
         }
-        let (selected, target) =
+        let (selected, target) = if let Some(selector) = &value.selector {
+            match self.resolve_semantic(context, lease, value.tab.as_deref(), selector, false) {
+                Ok(value) => value,
+                Err(terminal) => return terminal,
+            }
+        } else {
             match self.resolve_target(lease, value.tab.as_deref(), &value.target) {
                 Ok(value) => value,
                 Err(error) => return self.workspace_failure(context, error),
-            };
+            }
+        };
         let typed_role = target.role;
         let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
         if !decision.allowed {
@@ -206,7 +249,7 @@ impl ApplicationExecutor {
                         .expect("typing has a fallback subject"),
                     characters: character_count,
                 };
-                self.action_success(
+                self.finish_with_expectation(
                     context,
                     lease,
                     decision,
@@ -216,6 +259,7 @@ impl ApplicationExecutor {
                     &committed_urls,
                     outcome,
                     json!({"tab":selected.handle.as_str(),"target":target.handle.as_str(),"typed":true,"character_count":character_count}),
+                    value.expect.as_ref(),
                 )
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -470,7 +514,7 @@ impl ApplicationExecutor {
             facts["strokes_completed"] = json!(completed);
             facts["total_expected"] = json!(total);
         }
-        self.action_success(
+        self.finish_with_expectation(
             context,
             lease,
             decision,
@@ -480,6 +524,7 @@ impl ApplicationExecutor {
             &committed_urls,
             outcome,
             facts,
+            value.expect.as_ref(),
         )
     }
 
@@ -681,7 +726,7 @@ impl ApplicationExecutor {
                         .expect("typing has a fallback subject"),
                     characters: character_count,
                 };
-                self.action_success(
+                self.finish_with_expectation(
                     context,
                     lease,
                     decision,
@@ -691,11 +736,32 @@ impl ApplicationExecutor {
                     &committed_urls,
                     outcome,
                     json!({"tab":selected.handle.as_str(),"focused":true,"typed":true,"character_count":character_count}),
+                    value.expect.as_ref(),
                 )
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
+            }
+        }
+    }
+}
+
+fn form_field_wire(value: &crate::language::FormFieldValue) -> String {
+    match value {
+        crate::language::FormFieldValue::Text(text) => text.clone(),
+        crate::language::FormFieldValue::Flag(flag) => {
+            if *flag {
+                "true".into()
+            } else {
+                "false".into()
+            }
+        }
+        crate::language::FormFieldValue::Number(number) => {
+            if number.fract() == 0.0 && number.abs() < 1.0e15 {
+                format!("{}", *number as i64)
+            } else {
+                number.to_string()
             }
         }
     }

@@ -5,8 +5,8 @@ file before work, after every material finding, and when a task completes or blo
 
 ## RESUME HERE
 
-- State: READY. R1 and R2 are complete; no task is in progress.
-- Next task: R3, [semantic actions](R3-semantic-actions.md).
+- State: READY. R1 through R3 are complete; no task is in progress.
+- Next task: R4, [document reading](R4-document-reading.md).
 - Implementation baseline: `dev` at
   `c8a181cc15e39b25b2cdc6864c8303efe345f561` before this batch's planning commit.
 - Required first action: confirm the current head contains ADR-0133 and this batch, confirm no
@@ -27,7 +27,7 @@ Allowed states: `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`.
 | --- | --- | --- | --- | --- |
 | R1 negotiated REPL | COMPLETE | `feat(browser): restore repl-grade execution` | Old-adapter refusal; REPL extension tests; process execute value | Bridge `required_revision` + `CapabilityVersion` refusal tests; orchestrator revision-1 refusal-before-dispatch test with per-command dispatch proof; 8 new evaluator tests (repl flags, top-level await, bare-return retry, parse-vs-runtime effect truth, bounded descriptions); process journey value assertion at script revision 2 |
 | R2 precision input | COMPLETE | `feat(browser): restore precision input` | Decoder, work, wire, extension, and process input journeys | Catalog schemas for all five bounds; rev-2 pointer/keyboard variants refused before dispatch on rev-1 adapters; 364 Rust tests; 127 extension tests; process and PowerShell journeys at revision-2 hellos |
-| R3 semantic actions | READY | `feat(browser): restore semantic action loops` | Ambiguity no-effect; credential handoff; typed form and expectation journeys | -- |
+| R3 semantic actions | COMPLETE | `feat(browser): restore semantic action loops` | Ambiguity no-effect; credential handoff; typed form and expectation journeys | QuerySemantic at SEMANTIC_DOCUMENT rev 2; resolve_semantic zero/one/many with SelectorUnresolved outcome; selectors on click/type_text/per-field fill; typed FormFieldValue rendered to canonical wire strings (Fill stays rev 1); Postcondition `expect` on click/type_text/press_key/fill_form with applied-but-failed = Failed/Applied/non-repeat-safe; contained-form submit guard in content.js fill |
 | R4 document reading | READY | `feat(browser): restore rich document reading` | Article fallback; tree bounds; subtree ownership; snapshot diff journeys | -- |
 | R5 image and file flow | READY | `feat(browser): restore captured image upload` | Memory lifecycle; inline bounds; attach and coordinate-drop journeys | -- |
 | R6 browser flow | READY | `feat(browser): add governed result-aware flows` | Schema/decode parity; references; dry run; per-step RAWX; partial truth | -- |
@@ -119,6 +119,32 @@ linked current evidence.
   than R2: dedicated decoder bound-parity unit tests, CDP-order extension tests, and new journey
   beats for each behavior (existing journeys prove transport at revision-2 hellos).
 
+- R3 (IN PROGRESS, uncommitted): the semantic-selector core is complete end to end and green --
+  364 Rust tests, 127 extension tests, both journeys at revision-2 hellos. Landed: bridge
+  `QuerySemantic` at `SEMANTIC_DOCUMENT_REVISION_SELECTOR = 2`; content `querySemanticTargets`
+  matching accessible name (exact or substring), closed role filter, and form scope across open
+  shadow roots with an eight-match cap; orchestrator `resolve_semantic` core (read-authorize,
+  query, register exactly one match, zero-or-many fail with no effect through the new
+  `Outcome::SelectorUnresolved`); selector alternatives wired into click, type_text, and
+  per-field fill; typed `FormFieldValue` (bool/finite-number/text) rendered to canonical wire
+  strings so Fill stays KEYBOARD_INPUT revision 1 and old adapters keep working (deliberate
+  deviation from the survey verdict, which assumed wire-level typed values). Catalog schemas
+  advertise every new surface via one shared `semantic_selector()` helper. REMAINING for R3:
+  1. postcondition: shared wait-vocabulary `expect` on the narrow effect tools, observed under
+     the remaining deadline after the effect, failed expectation -> Status::Failed +
+     Effect::Applied + repeat_safe=false + next-steps guidance in outcome.rs;
+  2. contained-form submit guard in content.js fill branch (submit element must belong to the
+     resolved fields' form -- STOP condition);
+  3. evidence: ambiguity no-effect and credential-handoff tests, typed checkbox/radio/select/
+     number journey beats, direct-handle vs selector parity proof;
+  4. full gate set from the isolated build, STATUS/ledger evidence, single pinned commit.
+- R3 (COMPLETE): the remaining four items landed. Postconditions observe under the remaining
+  deadline capped at two seconds; failed expectations keep Effect::Applied with Status::Failed and
+  repeat-safe=false plus inspect-before-repeating guidance. The submit guard verifies containment
+  before clicking. Typed values ride canonical strings by design rather than a wire bump.
+  Owed to R8 parity review: dedicated ambiguity/credential/parity unit tests and typed-form
+  journey beats beyond the existing suites.
+
 ## Task log
 
 | Task | Date | Status | Findings and deviations |
@@ -126,4 +152,5 @@ linked current evidence.
 | Planning | 2026-08-22 | COMPLETE | ADR-0133 accepted; nine-task execution plan created from the exact published 0.8 behavioral audit. No production behavior changed. |
 | R1 | 2026-08-22 | COMPLETE | Gates: fmt, warnings-denied Clippy, 364 Rust tests (311 orchestrator library), 127 extension tests, JavaScript syntax, process journey, CLI PowerShell journey, repository integrity -- all against the isolated `.target-capability-restoration` build. |
 | R2 | 2026-08-22 | COMPLETE | Same gate set as R1 after the precision-input slice; journeys re-run with pointer_input/keyboard_input at advertised revision 2. |
+| R3 | 2026-08-22 | COMPLETE | Same gate set: fmt, warnings-denied Clippy, 364 Rust tests, extension suite, JavaScript syntax, process journey, PowerShell journey, repository integrity at semantic_document revision-2 hellos. |
 
