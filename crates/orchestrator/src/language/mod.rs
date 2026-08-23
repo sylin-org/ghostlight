@@ -235,6 +235,9 @@ pub struct NavigateRequest {
     pub browser: Option<String>,
     #[serde(default)]
     pub new_tab: bool,
+    /// Explicitly discard a blocking unsaved-change prompt from this navigation.
+    #[serde(default)]
+    pub beforeunload: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
@@ -293,6 +296,9 @@ pub struct OpenPage {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct NavigatePage {
     pub url: String,
+    /// Discard this navigation's own beforeunload prompt.
+    #[serde(default)]
+    pub beforeunload_discard: bool,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_timeout")]
@@ -1152,7 +1158,14 @@ fn decode_tabs(input: Value) -> Result<Operation, LanguageError> {
 fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
     let value: NavigateRequest = parse(
         input,
-        &["url", "tab", "browser", "new_tab", "timeout_ms"],
+        &[
+            "url",
+            "tab",
+            "browser",
+            "new_tab",
+            "beforeunload",
+            "timeout_ms",
+        ],
         |value: &NavigateRequest| {
             validate_url(&value.url)?;
             validate_optional_handle(value.tab.as_deref(), "tab_")?;
@@ -1161,6 +1174,18 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
                 return Err(LanguageError::Invalid(
                     "tab and new_tab cannot be combined".into(),
                 ));
+            }
+            if value.beforeunload.is_some() {
+                if value.new_tab || value.browser.is_some() {
+                    return Err(LanguageError::Invalid(
+                        "beforeunload applies only to same-tab navigation".into(),
+                    ));
+                }
+                validate_choice(
+                    value.beforeunload.as_deref().expect("validated presence"),
+                    &["discard"],
+                    "beforeunload",
+                )?;
             }
             if value.browser.is_some() && !value.new_tab {
                 return Err(LanguageError::Invalid(
@@ -1180,6 +1205,7 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
         })
     } else {
         Operation::NavigatePage(NavigatePage {
+            beforeunload_discard: value.beforeunload.as_deref() == Some("discard"),
             url: value.url,
             tab: value.tab,
             timeout_ms: value.timeout_ms,

@@ -420,9 +420,13 @@ impl ApplicationExecutor {
             Operation::ListTabs(_) => self.list_tabs(context, lease),
             Operation::ActivateTab(value) => self.activate_tab(context, lease, &value.tab),
             Operation::OpenPage(value) => self.open_page(context, lease, &value.url),
-            Operation::NavigatePage(value) => {
-                self.navigate_page(context, lease, value.tab.as_deref(), &value.url)
-            }
+            Operation::NavigatePage(value) => self.navigate_page(
+                context,
+                lease,
+                value.tab.as_deref(),
+                &value.url,
+                value.beforeunload_discard,
+            ),
             Operation::NavigateHistory(value) => {
                 self.navigate_history(context, lease, value.tab.as_deref(), &value.direction)
             }

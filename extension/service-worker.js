@@ -28,6 +28,7 @@ const commandChunks = globalThis.GhostlightCommandChunks.create({
 const navigationWatchers = new Map();
 const dragInterceptions = new Map();
 const cancelled = new Set();
+const beforeUnloadAcceptors = new Map();
 const activity = new Map();
 const topology = globalThis.GhostlightTopology.create(chrome, stateApi.TOPOLOGY_KEY);
 const presentationQueue = globalThis.GhostlightPresentationQueue.create();
@@ -278,6 +279,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId) return;
+  if (method === "Page.javascriptDialogOpening") {
+    if (beforeUnloadAcceptors.get(source.tabId) && params.type === "beforeunload") {
+      chrome.debugger.sendCommand({ tabId: source.tabId }, "Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
+    }
+    return;
+  }
   if (method === "Input.dragIntercepted") {
     dragInterceptions.get(source.tabId)?.resolve(params.data);
     return;
@@ -486,6 +493,7 @@ async function dispatch(request) {
   }
   if (command.command === "open_tab") return openTab(request.correlation, request.workspace, command);
   if (command.command === "navigate") return navigate(request.correlation, command);
+  if (command.command === "navigate_discarding_before_unload") return navigateDiscardingBeforeUnload(request.correlation, command);
   if (command.command === "traverse_history") return traverseHistory(request.correlation, command);
   if (command.command === "reload") return reload(request.correlation, command);
   if (command.command === "close_tab") {
@@ -1006,6 +1014,26 @@ async function navigate(correlation, command) {
     throw error;
   } finally {
     navigationWatchers.delete(command.tab_id);
+  }
+}
+
+async function navigateDiscardingBeforeUnload(correlation, command) {
+  await ensureDebugger(command.tab_id);
+  const commits = [];
+  navigationWatchers.set(command.tab_id, { correlation, commits });
+  try {
+    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.enable");
+    beforeUnloadAcceptors.set(command.tab_id, true);
+    await chrome.tabs.update(command.tab_id, { url: command.url, active: true });
+    const tab = await waitForReady(command.tab_id, correlation);
+    return { outcome: "navigated", tab: physicalTab(tab), committed_urls: commits };
+  } catch (error) {
+    if (!error.effectUnknown) error.effectUnknown = true;
+    throw error;
+  } finally {
+    beforeUnloadAcceptors.delete(command.tab_id);
+    navigationWatchers.delete(command.tab_id);
+    await detachDebugger(command.tab_id);
   }
 }
 

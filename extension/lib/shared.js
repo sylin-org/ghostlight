@@ -14,6 +14,7 @@
     pointer_input: 2,
     keyboard_input: 2,
     semantic_document: 3,
+    navigation: 2,
     files: 2
   });
   const ADAPTER_CAPABILITIES = Object.freeze([

@@ -45,7 +45,11 @@ uniquely named steps whose arguments may reference earlier canonical result enve
 bounded JSON Pointers; references resolve before the ordinary child decoder runs again, children
 authorize normally under the immutable invocation ceiling, dry run dispatches nothing, stop or
 continue governs failures, per-step envelopes are captured under a bounded budget, and aggregates
-report applied, partial, or unknown effects truthfully. R7 is next.
+report applied, partial, or unknown effects truthfully. R7 is complete: browser_navigate accepts
+beforeunload:discard, which accepts only that navigation's own beforeunload prompt through a
+revision-gated mechanism and then follows the ordinary commit and landing-governance path; the
+default still stops and reports a blocking prompt without accepting it, and unrelated dialogs
+remain browser_dialog's domain. R8 is next.
 
 This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
 pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no

@@ -43,6 +43,8 @@ pub mod adapter_capability {
     pub const SEMANTIC_DOCUMENT_REVISION_SELECTOR: u16 = 2;
     /// Semantic-document revision adding article reading and document trees.
     pub const SEMANTIC_DOCUMENT_REVISION_ARTICLE: u16 = 3;
+    /// Navigation revision adding guarded beforeunload discard.
+    pub const NAVIGATION_REVISION_GUARDED: u16 = 2;
     /// Browser-local condition observation.
     pub const OBSERVATION: &str = "observation";
     /// JavaScript dialog observation and handling.
@@ -562,6 +564,8 @@ pub enum BrowserCommand {
     Reload { tab_id: u64, bypass_cache: bool },
     /// Close a physical tab.
     CloseTab { tab_id: u64 },
+    /// Navigate, accepting only this navigation's own beforeunload prompt.
+    NavigateDiscardingBeforeUnload { tab_id: u64, url: String },
     /// Read bounded useful text.
     ReadText {
         tab_id: u64,
@@ -815,9 +819,10 @@ impl BrowserCommand {
             | Self::SetZoom { .. } => capability::TABS,
             Self::ResizeWindow { .. } => capability::WINDOW_GEOMETRY,
             Self::OpenTab { .. } => capability::ATOMIC_TAB_OPEN,
-            Self::Navigate { .. } | Self::TraverseHistory { .. } | Self::Reload { .. } => {
-                capability::NAVIGATION
-            }
+            Self::Navigate { .. }
+            | Self::NavigateDiscardingBeforeUnload { .. }
+            | Self::TraverseHistory { .. }
+            | Self::Reload { .. } => capability::NAVIGATION,
             Self::ReadText { .. }
             | Self::ReadDocument { .. }
             | Self::Inspect { .. }
@@ -863,6 +868,9 @@ impl BrowserCommand {
         match self {
             Self::EvaluateScript { .. } => adapter_capability::SCRIPT_REVISION_REPL,
             Self::DropImageAt { .. } => adapter_capability::FILES_REVISION_DROP,
+            Self::NavigateDiscardingBeforeUnload { .. } => {
+                adapter_capability::NAVIGATION_REVISION_GUARDED
+            }
             Self::QuerySemantic { .. } => adapter_capability::SEMANTIC_DOCUMENT_REVISION_SELECTOR,
             Self::ReadDocument { .. } | Self::InspectTree { .. } => {
                 adapter_capability::SEMANTIC_DOCUMENT_REVISION_ARTICLE

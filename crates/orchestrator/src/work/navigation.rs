@@ -212,6 +212,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         url: &str,
+        discard_beforeunload: bool,
     ) -> Terminal {
         let decision = self.authorize(context, Capability::Read, Some(url));
         if !decision.allowed {
@@ -232,13 +233,18 @@ impl ApplicationExecutor {
             }
             Err(error) => return self.workspace_failure(context, error),
         };
-        match self.dispatch(
-            context,
+        let command = if discard_beforeunload {
+            BrowserCommand::NavigateDiscardingBeforeUnload {
+                tab_id: selected.physical_id,
+                url: url.into(),
+            }
+        } else {
             BrowserCommand::Navigate {
                 tab_id: selected.physical_id,
                 url: url.into(),
-            },
-        ) {
+            }
+        };
+        match self.dispatch(context, command) {
             Ok(BrowserOutcome::Navigated {
                 tab,
                 committed_urls,

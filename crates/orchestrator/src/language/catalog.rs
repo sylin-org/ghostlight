@@ -314,6 +314,14 @@ fn navigate_schema() -> Value {
                 vec![
                     ("url", url()),
                     ("tab", handle("tab_", "Optional exact tab. Omit to use the only or sole active controlled tab.")),
+                    (
+                        "beforeunload",
+                        enumeration(
+                            &["discard"],
+                            None,
+                            "Explicitly discard a blocking unsaved-change prompt produced by this navigation. Default stops and reports it.",
+                        ),
+                    ),
                     ("new_tab", constant_bool(false, "Reuse a tab. Omit this field for the normal call.")),
                     ("timeout_ms", timeout()),
                 ],
