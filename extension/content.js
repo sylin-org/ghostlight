@@ -211,6 +211,43 @@
     return matches;
   }
 
+  function extractArticle() {
+    const candidates = Array.from(document.querySelectorAll("article, main, [role='main'], [itemprop='articleBody']"));
+    for (const element of candidates) {
+      const text = String(element.innerText ?? "").trim();
+      if (text.length >= 80) return text;
+    }
+    return String((document.body || document.documentElement)?.innerText ?? "").trim();
+  }
+
+  function inspectTree(rootElement, maxDepth) {
+    const controlRoles = ["button", "link", "textbox", "checkbox", "radio", "combobox", "tab", "menuitem", "option", "slider"];
+    let count = 0;
+    function visible(element) {
+      if (!(element instanceof HTMLElement)) return false;
+      if (element.hidden || element.getAttribute?.("aria-hidden") === "true") return false;
+      const style = window.getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden";
+    }
+    function build(element, depth) {
+      count += 1;
+      const role = roleFor(element);
+      const kind = controlRoles.includes(role) ? "control" : /^h[1-6]$/.test(element.tagName.toLowerCase()) ? "heading" : "container";
+      const node = { kind, label: shared.bounded(accessibleName(element), 120), children: [] };
+      if (depth < maxDepth && count < 400) {
+        for (const child of element.children) {
+          if (count >= 400) break;
+          if (!visible(child)) continue;
+          node.children.push(build(child, depth + 1));
+        }
+        if (element.shadowRoot && count < 400) node.children.push(build(element.shadowRoot, depth + 1));
+      }
+      return node;
+    }
+    const tree = build(rootElement, 1);
+    return { tree, truncated: count >= 400 };
+  }
+
   function setNativeValue(element, value) {
     const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
@@ -326,9 +363,16 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     Promise.resolve().then(async () => {
       if (message.kind === "read_text") {
-        const source = message.locator ? resolve(message.locator) : document.body || document.documentElement;
-        const whole = String(source.innerText ?? source.textContent ?? "");
+        let whole;
+        if (message.locator) whole = String(resolve(message.locator).innerText ?? "");
+        else if (message.mode === "article") whole = extractArticle();
+        else whole = String((document.body || document.documentElement)?.innerText ?? "");
         return { text: whole.slice(0, message.max_chars), truncated: whole.length > message.max_chars, title: shared.bounded(document.title, 500), url: location.href };
+      }
+      if (message.kind === "inspect_tree") {
+        const root = message.locator ? resolve(message.locator) : document.body || document.documentElement;
+        const built = inspectTree(root, message.max_depth ?? 6);
+        return { tree: built.tree, truncated: built.truncated };
       }
       if (message.kind === "inspect") return { targets: inspect(message.inspect_kind, message.max_items) };
       if (message.kind === "find") return { targets: findTargets(message.text, message.find_kind, message.max_results) };

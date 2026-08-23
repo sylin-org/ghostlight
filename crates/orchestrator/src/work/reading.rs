@@ -20,6 +20,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         target: Option<&str>,
+        mode: Option<&str>,
         max_chars: usize,
     ) -> Terminal {
         let (selected, locator, _) =
@@ -38,14 +39,20 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        match self.dispatch(
-            context,
+        let command = if let Some(document_mode) = mode.filter(|_| target.is_none()) {
+            BrowserCommand::ReadDocument {
+                tab_id: selected.physical_id,
+                mode: document_mode.to_string(),
+                max_chars,
+            }
+        } else {
             BrowserCommand::ReadText {
                 tab_id: selected.physical_id,
                 locator,
                 max_chars,
-            },
-        ) {
+            }
+        };
+        match self.dispatch(context, command) {
             Ok(BrowserOutcome::Text {
                 tab_id,
                 text,
@@ -68,14 +75,20 @@ impl ApplicationExecutor {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn inspect_page(
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         kind: &str,
+        root: Option<&str>,
+        max_depth: Option<usize>,
         max_items: usize,
     ) -> Terminal {
+        if kind == "document" {
+            return self.inspect_document(context, lease, requested_tab, root, max_depth.unwrap_or(6));
+        }
         self.targets_operation(
             context,
             lease,
@@ -92,6 +105,79 @@ impl ApplicationExecutor {
                 TargetNoun::Item
             },
         )
+    }
+
+    pub(super) fn inspect_document(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        requested_tab: Option<&str>,
+        root: Option<&str>,
+        max_depth: usize,
+    ) -> Terminal {
+        let (selected, locator, _) =
+            match self.resolve_optional_target(lease, requested_tab, root) {
+                Ok(value) => value,
+                Err(error) => return self.workspace_failure(context, error),
+            };
+        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Effect::None,
+                true,
+                json!({"reason":decision.reason.as_str()}),
+            );
+        }
+        match self.dispatch(
+            context,
+            BrowserCommand::InspectTree {
+                tab_id: selected.physical_id,
+                locator,
+                max_depth,
+            },
+        ) {
+            Ok(BrowserOutcome::DocumentTree {
+                tab_id,
+                tree,
+                truncated,
+            }) if tab_id == selected.physical_id => {
+                let parsed: Value = serde_json::from_str(&tree).unwrap_or(Value::Null);
+                let nodes = count_tree_nodes(&parsed);
+                let prior = lease.previous_snapshot(&selected);
+                let diff = prior.as_ref().map(|old| diff_trees(old, &parsed));
+                let handle = match lease.register_snapshot(&selected, parsed) {
+                    Ok(handle) => handle,
+                    Err(error) => return self.workspace_failure(context, error),
+                };
+                let mut facts = json!({
+                    "tab":selected.handle.as_str(),
+                    "snapshot":handle.as_str(),
+                    "nodes":nodes,
+                    "truncated":truncated,
+                    "document_generation":selected.generation,
+                });
+                if let Some((added, removed, changed, paths)) = &diff {
+                    facts["diff"] = json!({"added":added,"removed":removed,"changed":changed,"paths":paths});
+                }
+                self.succeeded(
+                    context,
+                    decision,
+                    Some(tab_id),
+                    Effect::None,
+                    readiness(selected.readiness),
+                    true,
+                    Outcome::DocumentInspected { nodes, truncated, compared: diff.is_some() },
+                    facts,
+                )
+            }
+            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+            Err(error) => {
+                self.browser_failure(context, decision, error, Some(selected.physical_id))
+            }
+        }
     }
 
     pub(super) fn find(
@@ -325,5 +411,85 @@ impl ApplicationExecutor {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
         }
+    }
+}
+
+fn count_tree_nodes(tree: &Value) -> usize {
+    let mut count = 0;
+    let mut stack = vec![tree];
+    while let Some(node) = stack.pop() {
+        count += 1;
+        if let Some(children) = node.get("children").and_then(Value::as_array) {
+            for child in children {
+                stack.push(child);
+            }
+        }
+    }
+    count
+}
+
+const DIFF_PATH_LIMIT: usize = 50;
+const DIFF_DEPTH_LIMIT: usize = 24;
+
+fn diff_trees(old: &Value, new: &Value) -> (usize, usize, usize, Vec<String>) {
+    let mut added = 0;
+    let mut removed = 0;
+    let mut changed = 0;
+    let mut paths = Vec::new();
+    let mut record = |paths: &mut Vec<String>, path: String| {
+        if paths.len() < DIFF_PATH_LIMIT {
+            paths.push(path);
+        }
+    };
+    compare_nodes(old, new, String::new(), &mut added, &mut removed, &mut changed, &mut paths, &mut record, 0);
+    (added, removed, changed, paths)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compare_nodes(
+    old: &Value,
+    new: &Value,
+    path: String,
+    added: &mut usize,
+    removed: &mut usize,
+    changed: &mut usize,
+    paths: &mut Vec<String>,
+    record: &mut dyn FnMut(&mut Vec<String>, String),
+    depth: usize,
+) {
+    if depth > DIFF_DEPTH_LIMIT {
+        return;
+    }
+    let old_children = old.get("children").and_then(Value::as_array);
+    let new_children = new.get("children").and_then(Value::as_array);
+    match (old_children, new_children) {
+        (Some(old_children), Some(new_children)) => {
+            if old.get("kind") != new.get("kind") || old.get("label") != new.get("label") {
+                *changed += 1;
+                record(paths, path.clone());
+            }
+            let shared = old_children.len().min(new_children.len());
+            for index in 0..shared {
+                let child_path = format!("{path}/{index}");
+                compare_nodes(&old_children[index], &new_children[index], child_path, added, removed, changed, paths, record, depth + 1);
+            }
+            for index in shared..old_children.len() {
+                *removed += 1;
+                record(paths, format!("{path}/-{index}"));
+            }
+            for index in shared..new_children.len() {
+                *added += 1;
+                record(paths, format!("{path}/+{index}"));
+            }
+        }
+        (None, Some(new_children)) => {
+            *added += new_children.len();
+            record(paths, path.clone());
+        }
+        (Some(old_children), None) => {
+            *removed += old_children.len();
+            record(paths, path.clone());
+        }
+        (None, None) => {}
     }
 }

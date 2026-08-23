@@ -337,6 +337,9 @@ pub struct ReadPage {
     pub tab: Option<String>,
     #[serde(default)]
     pub target: Option<String>,
+    /// Article-first (default) or visible-text document reading; target reads ignore it.
+    #[serde(default)]
+    pub mode: Option<String>,
     #[serde(default = "default_max_chars")]
     pub max_chars: usize,
     #[serde(flatten)]
@@ -350,6 +353,12 @@ pub struct InspectPage {
     pub tab: Option<String>,
     #[serde(default = "default_inspect_kind")]
     pub scope: String,
+    /// Optional subtree root for document scope.
+    #[serde(default)]
+    pub root: Option<String>,
+    /// Optional bounded depth for document scope.
+    #[serde(default)]
+    pub max_depth: Option<usize>,
     #[serde(default = "default_max_items")]
     pub max_items: usize,
     #[serde(flatten)]
@@ -800,21 +809,45 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_window" => decode_window(input),
         "browser_read" => Operation::ReadPage(parse(
             input,
-            &["tab", "target", "max_chars"],
+            &["tab", "target", "mode", "max_chars"],
             |value: &ReadPage| {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
                 validate_optional_handle(value.target.as_deref(), "target_")?;
-                validate_range(value.max_chars, 500, 20_000, "max_chars")?;
+                if let Some(mode) = &value.mode {
+                    if value.target.is_some() {
+                        return Err(LanguageError::Invalid(
+                            "mode cannot be combined with target".into(),
+                        ));
+                    }
+                    validate_choice(mode, &["article", "visible"], "mode")?;
+                }
+                validate_range(value.max_chars, 500, 50_000, "max_chars")?;
                 validate_restrictions(&value.restrictions)
             },
         )?)
         .into_ok(),
         "browser_inspect" => Operation::InspectPage(parse(
             input,
-            &["tab", "scope", "max_items"],
+            &["tab", "scope", "root", "max_depth", "max_items"],
             |value: &InspectPage| {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
-                validate_choice(&value.scope, &["controls", "structure", "all"], "scope")?;
+                validate_choice(
+                    &value.scope,
+                    &["controls", "structure", "all", "document"],
+                    "scope",
+                )?;
+                if value.scope == "document" {
+                    validate_optional_handle(value.root.as_deref(), "target_")?;
+                    if let Some(depth) = value.max_depth {
+                        validate_range(depth, 1, 12, "max_depth")?;
+                    }
+                } else {
+                    if value.root.is_some() || value.max_depth.is_some() {
+                        return Err(LanguageError::Invalid(
+                            "root and max_depth apply only to document scope".into(),
+                        ));
+                    }
+                }
                 validate_range(value.max_items, 1, 200, "max_items")?;
                 validate_restrictions(&value.restrictions)
             },

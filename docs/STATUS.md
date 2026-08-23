@@ -31,7 +31,11 @@ with zero-or-many failing without effect, selectors work as alternatives on clic
 per-field fill, form fields accept boolean and finite-number values rendered to canonical wire
 strings so older adapters keep working, contained-form submit is verified before clicking, and
 optional postconditions report an applied effect truthfully when the expectation fails
-(Status::Failed, Effect::Applied, never repeat-safe). R4 is next.
+(Status::Failed, Effect::Applied, never repeat-safe). R4 is complete: article-first reading with a
+visible-text mode and a 50,000-character ceiling falls back to visible text, document-scope inspect
+returns a bounded structure-only tree (no editable values, hidden content excluded, shadow-aware)
+with a generation-bound snapshot_ handle superseded per tab, and a current prior snapshot yields a
+bounded structural diff. R5 is next.
 
 This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
 pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no

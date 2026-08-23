@@ -424,13 +424,21 @@ fn read_schema() -> Value {
                     ),
                 ),
                 (
+                    "mode",
+                    enumeration(
+                        &["article", "visible"],
+                        None,
+                        "Document reading mode; article-first is the default and falls back to visible text. Ignored with target.",
+                    ),
+                ),
+                (
                     "max_chars",
-                    integer(500, 20_000, Some(8_000), "Maximum returned characters."),
+                    integer(500, 50_000, Some(8_000), "Maximum returned characters."),
                 ),
             ],
             vec![],
         ),
-        vec![json!({}), json!({"target":"target_..."})],
+        vec![json!({}), json!({"mode":"article","max_chars":50_000}), json!({"target":"target_..."})],
     )
 }
 
@@ -442,10 +450,21 @@ fn inspect_schema() -> Value {
                 (
                     "scope",
                     enumeration(
-                        &["controls", "structure", "all"],
+                        &["controls", "structure", "all", "document"],
                         Some("controls"),
-                        "What semantic facts to return.",
+                        "What semantic facts to return. Document returns one bounded hierarchical tree plus a snapshot handle and a diff when a prior snapshot exists.",
                     ),
+                ),
+                (
+                    "root",
+                    handle(
+                        "target_",
+                        "Optional subtree root for document scope.",
+                    ),
+                ),
+                (
+                    "max_depth",
+                    integer(1, 12, None, "Optional bounded depth for document scope."),
                 ),
                 (
                     "max_items",
@@ -454,7 +473,7 @@ fn inspect_schema() -> Value {
             ],
             vec![],
         ),
-        vec![json!({}), json!({"scope":"all"})],
+        vec![json!({}), json!({"scope":"all"}), json!({"scope":"document","max_depth":8}), json!({"scope":"document","root":"target_..."})],
     )
 }
 

@@ -506,6 +506,14 @@ async function dispatch(request) {
     const result = await content(command.tab_id, { kind: "inspect", inspect_kind: command.kind, max_items: command.max_items });
     return { outcome: "targets", tab_id: command.tab_id, targets: result.targets };
   }
+  if (command.command === "read_document") {
+    const result = await content(command.tab_id, { kind: "read_text", locator: null, mode: command.mode, max_chars: command.max_chars });
+    return { outcome: "text", tab_id: command.tab_id, ...result };
+  }
+  if (command.command === "inspect_tree") {
+    const result = await content(command.tab_id, { kind: "inspect_tree", locator: command.locator, max_depth: command.max_depth });
+    return { outcome: "document_tree", tab_id: command.tab_id, tree: result.tree, truncated: result.truncated };
+  }
   if (command.command === "find") {
     const result = await content(command.tab_id, { kind: "find", text: command.text, find_kind: command.kind, max_results: command.max_results });
     return { outcome: "targets", tab_id: command.tab_id, targets: result.targets };

@@ -41,6 +41,8 @@ pub mod adapter_capability {
     pub const KEYBOARD_INPUT_REVISION_FOCUSED: u16 = 2;
     /// Semantic-document revision adding typed semantic-selector queries.
     pub const SEMANTIC_DOCUMENT_REVISION_SELECTOR: u16 = 2;
+    /// Semantic-document revision adding article reading and document trees.
+    pub const SEMANTIC_DOCUMENT_REVISION_ARTICLE: u16 = 3;
     /// Browser-local condition observation.
     pub const OBSERVATION: &str = "observation";
     /// JavaScript dialog observation and handling.
@@ -571,6 +573,19 @@ pub enum BrowserCommand {
         kind: String,
         max_items: usize,
     },
+    /// Read one document with article-first or visible-text extraction.
+    ReadDocument {
+        tab_id: u64,
+        mode: String,
+        max_chars: usize,
+    },
+    /// Observe one bounded hierarchical document tree.
+    InspectTree {
+        tab_id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        locator: Option<String>,
+        max_depth: usize,
+    },
     /// Find semantic targets.
     Find {
         tab_id: u64,
@@ -795,7 +810,9 @@ impl BrowserCommand {
                 capability::NAVIGATION
             }
             Self::ReadText { .. }
+            | Self::ReadDocument { .. }
             | Self::Inspect { .. }
+            | Self::InspectTree { .. }
             | Self::Find { .. }
             | Self::DescribeTargets { .. }
             | Self::QuerySemantic { .. } => capability::SEMANTIC_DOCUMENT,
@@ -837,6 +854,9 @@ impl BrowserCommand {
         match self {
             Self::EvaluateScript { .. } => adapter_capability::SCRIPT_REVISION_REPL,
             Self::QuerySemantic { .. } => adapter_capability::SEMANTIC_DOCUMENT_REVISION_SELECTOR,
+            Self::ReadDocument { .. } | Self::InspectTree { .. } => {
+                adapter_capability::SEMANTIC_DOCUMENT_REVISION_ARTICLE
+            }
             Self::ActivateModified { .. }
             | Self::ActivatePointModified { .. }
             | Self::WheelAt { .. } => adapter_capability::POINTER_INPUT_REVISION_PRECISION,
@@ -898,6 +918,13 @@ pub enum BrowserOutcome {
     Targets {
         tab_id: u64,
         targets: Vec<ObservedTarget>,
+    },
+    /// One bounded hierarchical document tree.
+    DocumentTree {
+        tab_id: u64,
+        /// JSON-encoded semantic tree, bounded and structure-only.
+        tree: String,
+        truncated: bool,
     },
     /// JPEG screenshot bytes encoded as base64.
     Screenshot {

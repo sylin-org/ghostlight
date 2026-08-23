@@ -13,7 +13,7 @@
     script: 2,
     pointer_input: 2,
     keyboard_input: 2,
-    semantic_document: 2
+    semantic_document: 3
   });
   const ADAPTER_CAPABILITIES = Object.freeze([
     "tabs",

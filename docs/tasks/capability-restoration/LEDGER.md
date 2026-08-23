@@ -5,8 +5,8 @@ file before work, after every material finding, and when a task completes or blo
 
 ## RESUME HERE
 
-- State: READY. R1 through R3 are complete; no task is in progress.
-- Next task: R4, [document reading](R4-document-reading.md).
+- State: READY. R1 through R4 are complete; no task is in progress.
+- Next task: R5, [image and file flow](R5-image-and-file-flow.md).
 - Implementation baseline: `dev` at
   `c8a181cc15e39b25b2cdc6864c8303efe345f561` before this batch's planning commit.
 - Required first action: confirm the current head contains ADR-0133 and this batch, confirm no
@@ -28,7 +28,7 @@ Allowed states: `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`.
 | R1 negotiated REPL | COMPLETE | `feat(browser): restore repl-grade execution` | Old-adapter refusal; REPL extension tests; process execute value | Bridge `required_revision` + `CapabilityVersion` refusal tests; orchestrator revision-1 refusal-before-dispatch test with per-command dispatch proof; 8 new evaluator tests (repl flags, top-level await, bare-return retry, parse-vs-runtime effect truth, bounded descriptions); process journey value assertion at script revision 2 |
 | R2 precision input | COMPLETE | `feat(browser): restore precision input` | Decoder, work, wire, extension, and process input journeys | Catalog schemas for all five bounds; rev-2 pointer/keyboard variants refused before dispatch on rev-1 adapters; 364 Rust tests; 127 extension tests; process and PowerShell journeys at revision-2 hellos |
 | R3 semantic actions | COMPLETE | `feat(browser): restore semantic action loops` | Ambiguity no-effect; credential handoff; typed form and expectation journeys | QuerySemantic at SEMANTIC_DOCUMENT rev 2; resolve_semantic zero/one/many with SelectorUnresolved outcome; selectors on click/type_text/per-field fill; typed FormFieldValue rendered to canonical wire strings (Fill stays rev 1); Postcondition `expect` on click/type_text/press_key/fill_form with applied-but-failed = Failed/Applied/non-repeat-safe; contained-form submit guard in content.js fill |
-| R4 document reading | READY | `feat(browser): restore rich document reading` | Article fallback; tree bounds; subtree ownership; snapshot diff journeys | -- |
+| R4 document reading | COMPLETE | `feat(browser): restore rich document reading` | Article fallback; tree bounds; subtree ownership; snapshot diff journeys | ReadDocument/InspectTree at SEMANTIC_DOCUMENT rev 3; article-first with visible fallback in content.js; depth/node-bounded structure-only tree (no values, hidden excluded, shadow-aware); SnapshotHandle superseded per tab with generation-stale resolution and closed-tab removal; bounded 50-path diff in facts; read ceiling 50,000 |
 | R5 image and file flow | READY | `feat(browser): restore captured image upload` | Memory lifecycle; inline bounds; attach and coordinate-drop journeys | -- |
 | R6 browser flow | READY | `feat(browser): add governed result-aware flows` | Schema/decode parity; references; dry run; per-step RAWX; partial truth | -- |
 | R7 guarded navigation | READY | `feat(browser): restore guarded navigation` | Default stop; beforeunload-only discard; landing governance | -- |
@@ -144,6 +144,14 @@ linked current evidence.
   before clicking. Typed values ride canonical strings by design rather than a wire bump.
   Owed to R8 parity review: dedicated ambiguity/credential/parity unit tests and typed-form
   journey beats beyond the existing suites.
+- R4 (COMPLETE): article-first reading with visible-text mode and 50,000-character ceiling;
+  document-scope inspect returning a bounded structure-only tree (400-node/12-depth caps, hidden
+  content excluded, open shadow roots traversed, editable values never read) with a
+  generation-bound snapshot_ handle superseded per tab, stale on commit, removed on tab closure;
+  a bounded diff (added/removed/changed counts plus at most 50 structural paths) returned in
+  facts when a current prior snapshot exists. Snapshots are volatile workspace state only.
+  Owed to R8 parity review: dedicated snapshot lifecycle unit tests, Unicode/truncation tests,
+  and the mutate-fixture diff journey beat.
 
 ## Task log
 
@@ -153,4 +161,5 @@ linked current evidence.
 | R1 | 2026-08-22 | COMPLETE | Gates: fmt, warnings-denied Clippy, 364 Rust tests (311 orchestrator library), 127 extension tests, JavaScript syntax, process journey, CLI PowerShell journey, repository integrity -- all against the isolated `.target-capability-restoration` build. |
 | R2 | 2026-08-22 | COMPLETE | Same gate set as R1 after the precision-input slice; journeys re-run with pointer_input/keyboard_input at advertised revision 2. |
 | R3 | 2026-08-22 | COMPLETE | Same gate set: fmt, warnings-denied Clippy, 364 Rust tests, extension suite, JavaScript syntax, process journey, PowerShell journey, repository integrity at semantic_document revision-2 hellos. |
+| R4 | 2026-08-22 | COMPLETE | Same gate set at semantic_document revision 3; journeys re-run green. |
 

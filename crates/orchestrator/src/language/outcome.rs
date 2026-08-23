@@ -196,6 +196,12 @@ pub enum Outcome {
     TabsListed { count: usize },
     /// A semantic selector matched zero or several visible controls.
     SelectorUnresolved { matched: usize },
+    /// One bounded document-tree observation was recorded.
+    DocumentInspected {
+        nodes: usize,
+        truncated: bool,
+        compared: bool,
+    },
     /// One controlled tab was brought into view.
     TabActivated { host: Option<String> },
     /// A requested page was opened.
@@ -332,6 +338,18 @@ impl Outcome {
     #[must_use]
     pub fn summary(&self) -> String {
         match self {
+            Self::DocumentInspected {
+                nodes,
+                truncated: _,
+                compared,
+            } => {
+                let counted = counted(*nodes, "node", "nodes");
+                if *compared {
+                    format!("Compared the document tree: {counted}.")
+                } else {
+                    format!("Recorded the document tree: {counted}.")
+                }
+            }
             Self::SelectorUnresolved { matched } => {
                 if *matched == 0 {
                     "No visible control matched the semantic selector.".into()
@@ -611,6 +629,9 @@ impl Outcome {
     #[must_use]
     pub fn next_steps(&self) -> Vec<String> {
         match self {
+            Self::DocumentInspected {
+                truncated: true, ..
+            } => vec!["Narrow the subtree root or depth to capture the rest.".into()],
             Self::SelectorUnresolved { .. } => vec![
                 "Inspect the page or use browser_find to register an explicit target, or narrow the selector with role and exact.".into(),
             ],
@@ -638,6 +659,10 @@ impl Outcome {
                 completed: count, ..
             } => Observed {
                 count: measured(*count),
+                ..Observed::default()
+            },
+            Self::DocumentInspected { nodes, .. } => Observed {
+                count: measured(*nodes),
                 ..Observed::default()
             },
             Self::SelectorUnresolved { matched: count } => Observed {

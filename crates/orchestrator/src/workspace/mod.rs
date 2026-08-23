@@ -87,6 +87,29 @@ impl ViewHandle {
     }
 }
 
+/// Opaque generation-bound handle to one semantic document-tree snapshot.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct SnapshotHandle(String);
+
+impl SnapshotHandle {
+    /// String form returned to the model.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// One stored semantic document-tree snapshot for a controlled tab.
+#[derive(Clone, Debug)]
+pub struct SnapshotState {
+    /// Owning controlled tab.
+    pub tab: TabHandle,
+    /// Document generation observed.
+    pub generation: u64,
+    /// Bounded structure-only tree.
+    pub tree: serde_json::Value,
+}
+
 /// Immutable selected controlled-tab facts used by the executor.
 #[derive(Clone, Debug)]
 pub struct SelectedTab {
@@ -211,6 +234,7 @@ struct WorkspaceState {
     tabs: HashMap<TabHandle, TabState>,
     targets: HashMap<TargetHandle, TargetState>,
     views: HashMap<ViewHandle, ViewState>,
+    snapshots: HashMap<SnapshotHandle, SnapshotState>,
 }
 
 #[derive(Debug, Default)]
@@ -340,6 +364,7 @@ impl WorkspaceStore {
                 tabs: HashMap::new(),
                 targets: HashMap::new(),
                 views: HashMap::new(),
+                snapshots: HashMap::new(),
             },
         );
         id
@@ -761,6 +786,55 @@ impl WorkspaceLease {
     }
 
     /// Confirm decisive physical closure, tolerating its earlier asynchronous close event.
+    /// Store one semantic tree for a tab, superseding any earlier snapshot.
+    pub fn register_snapshot(
+        &self,
+        tab: &SelectedTab,
+        tree: serde_json::Value,
+    ) -> Result<SnapshotHandle, WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let known = workspace
+            .tabs
+            .get(&tab.handle)
+            .ok_or(WorkspaceError::StaleTab)?;
+        if known.generation != tab.generation {
+            return Err(WorkspaceError::StaleTab);
+        }
+        workspace
+            .snapshots
+            .retain(|_, snapshot| snapshot.tab != tab.handle);
+        let handle = SnapshotHandle(format!("snapshot_{}", Uuid::new_v4().simple()));
+        workspace.snapshots.insert(
+            handle.clone(),
+            SnapshotState {
+                tab: tab.handle.clone(),
+                generation: known.generation,
+                tree,
+            },
+        );
+        Ok(handle)
+    }
+
+    /// Return the current-generation tree for a tab, if one is recorded.
+    #[must_use]
+    pub fn previous_snapshot(&self, tab: &SelectedTab) -> Option<serde_json::Value> {
+        let state = self.store.lock();
+        let workspace = state.workspaces.get(&self.workspace)?;
+        let known = workspace.tabs.get(&tab.handle)?;
+        if known.generation != tab.generation {
+            return None;
+        }
+        workspace
+            .snapshots
+            .values()
+            .find(|snapshot| snapshot.tab == tab.handle && snapshot.generation == known.generation)
+            .map(|snapshot| snapshot.tree.clone())
+    }
+
     pub fn confirm_tab_closed(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
         let workspace = state
@@ -770,6 +844,7 @@ impl WorkspaceLease {
         workspace.tabs.remove(handle);
         workspace.targets.retain(|_, target| &target.tab != handle);
         workspace.views.retain(|_, view| &view.tab != handle);
+        workspace.snapshots.retain(|_, snapshot| &snapshot.tab != handle);
         Ok(())
     }
 
@@ -865,8 +940,7 @@ impl WorkspaceLease {
         viewport: ViewportGeometry,
         width: u32,
         height: u32,
-    ) -> Result<ViewHandle, WorkspaceError> {
-        let mut state = self.store.lock();
+    ) -> Result<ViewHandle, WorkspaceError> {        let mut state = self.store.lock();
         let workspace = state
             .workspaces
             .get_mut(&self.workspace)

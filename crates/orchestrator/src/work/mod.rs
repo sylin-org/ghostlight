@@ -434,6 +434,7 @@ impl ApplicationExecutor {
                 lease,
                 value.tab.as_deref(),
                 value.target.as_deref(),
+                value.mode.as_deref(),
                 value.max_chars,
             ),
             Operation::InspectPage(value) => self.inspect_page(
@@ -441,6 +442,8 @@ impl ApplicationExecutor {
                 lease,
                 value.tab.as_deref(),
                 &value.scope,
+                value.root.as_deref(),
+                value.max_depth,
                 value.max_items,
             ),
             Operation::Find(value) => self.find(
@@ -1756,6 +1759,7 @@ fn observed_from(outcome: &BrowserOutcome) -> Observed {
             host: observed_host(url),
             ..Observed::default()
         },
+        BrowserOutcome::DocumentTree { .. } => Observed::default(),
         BrowserOutcome::Observed {
             readiness: observed,
             ..
