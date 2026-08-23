@@ -570,7 +570,11 @@ fn click_schema() -> Value {
         ),
         (
             "click_count",
-            integer(1, 2, Some(1), "Single or double click."),
+            integer(1, 3, Some(1), "Single, double, or triple click."),
+        ),
+        (
+            "modifiers",
+            json!({"type":"array","uniqueItems":true,"default":[],"description":"Held modifier keys.","items":{"enum":["Alt","Control","Meta","Shift"]}}),
         ),
         ("timeout_ms", timeout()),
     ];
@@ -648,11 +652,33 @@ fn scroll_schema() -> Value {
                 ],
                 vec![],
             ),
+            object(
+                vec![
+                    ("tab", tab()),
+                    (
+                        "direction",
+                        enumeration(&["up", "down"], Some("down"), "Wheel direction."),
+                    ),
+                    (
+                        "view",
+                        handle(
+                            "view_",
+                            "Current screenshot view that defines the coordinates.",
+                        ),
+                    ),
+                    ("x", coordinate("Horizontal CSS coordinate in the view.")),
+                    ("y", coordinate("Vertical CSS coordinate in the view.")),
+                    ("ticks", integer(1, 10, None, "Wheel ticks to send.")),
+                    ("timeout_ms", timeout()),
+                ],
+                vec!["direction", "view", "x", "y", "ticks"],
+            ),
         ],
         vec![
             json!({}),
             json!({"direction":"down","amount":"page"}),
             json!({"target":"target_..."}),
+            json!({"view":"view_...","x":120,"y":80,"direction":"down","ticks":3}),
         ],
     )
 }
@@ -744,34 +770,84 @@ fn type_schema() -> Value {
                 ),
                 vec!["target", "text", "clear_first"],
             ),
+            object(
+                vec![
+                    (
+                        "focused",
+                        constant_bool(
+                            true,
+                            "Type into the currently focused editable control instead of `target`.",
+                        ),
+                    ),
+                    (
+                        "text",
+                        text(0, 8_000, "Literal text to type; empty text only clears."),
+                    ),
+                    (
+                        "clear_first",
+                        boolean(false, "Clear the current value before typing."),
+                    ),
+                    ("tab", tab()),
+                    ("timeout_ms", timeout()),
+                ],
+                vec!["focused", "text"],
+            ),
         ],
-        vec![json!({"target":"target_...","text":"hello"})],
+        vec![
+            json!({"target":"target_...","text":"hello"}),
+            json!({"focused":true,"text":"hello"}),
+        ],
     )
 }
 
 fn key_schema() -> Value {
-    examples(
-        object(
-            vec![
-                (
-                    "key",
-                    json!({"description":"One literal character or supported named key.","oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]}),
-                ),
-                ("tab", tab()),
-                (
-                    "target",
-                    handle("target_", "Optional current target to receive the key."),
-                ),
-                (
-                    "modifiers",
-                    json!({"type":"array","uniqueItems":true,"default":[],"description":"Held modifier keys.","items":{"enum":["Alt","Control","Meta","Shift"]}}),
-                ),
-            ],
-            vec!["key"],
+    let modifiers = (
+        "modifiers",
+        json!({"type":"array","uniqueItems":true,"default":[],"description":"Held modifier keys.","items":{"enum":["Alt","Control","Meta","Shift"]}}),
+    );
+    let shared = vec![
+        ("tab", tab()),
+        (
+            "target",
+            handle("target_", "Optional current target to receive the key."),
         ),
+        modifiers,
+    ];
+    let stroke_item = json!({"description":"One literal character or supported named key.","oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]});
+    union(
+        vec![
+            object(
+                with(
+                    shared.clone(),
+                    (
+                        "key",
+                        json!({"description":"One literal character or supported named key.","oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]}),
+                    ),
+                ),
+                vec!["key"],
+            ),
+            object(
+                with_many(
+                    shared,
+                    vec![
+                        (
+                            "strokes",
+                            json!({"type":"array","minItems":1,"maxItems":20,"description":"Ordered keystroke sequence replacing `key`.","items":stroke_item}),
+                        ),
+                        (
+                            "repeat",
+                            integer(1, 100, Some(1), "Repetitions of the whole stroke sequence."),
+                        ),
+                    ],
+                ),
+                vec!["strokes"],
+            ),
+        ],
         vec![
             json!({"key":"Enter"}),
             json!({"key":"a","modifiers":["Control"]}),
+            json!({"strokes":["Control","a","c"]}),
+            json!({"strokes":["ArrowDown"],"repeat":5}),
         ],
     )
 }
@@ -831,6 +907,11 @@ fn wait_schema() -> Value {
                 "target_absent",
                 None,
                 Some("Current target that must disappear."),
+            ),
+            wait_branch(
+                "duration",
+                Some("Whole milliseconds, zero through ten thousand."),
+                None,
             ),
         ],
         vec![

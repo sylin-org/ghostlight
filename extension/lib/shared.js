@@ -9,7 +9,11 @@
 
   const NATIVE_HOST_NAME = "org.sylin.ghostlight";
   const ADAPTER_PROTOCOL_MAJOR = 2;
-  const ADAPTER_CAPABILITY_REVISIONS = Object.freeze({ script: 2 });
+  const ADAPTER_CAPABILITY_REVISIONS = Object.freeze({
+    script: 2,
+    pointer_input: 2,
+    keyboard_input: 2
+  });
   const ADAPTER_CAPABILITIES = Object.freeze([
     "tabs",
     "atomic_tab_open",

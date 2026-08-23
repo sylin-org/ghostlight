@@ -517,7 +517,10 @@ async function dispatch(request) {
   if (command.command === "screenshot") return screenshot(command);
   if (command.command === "screenshot_region") return screenshot(command);
   if (command.command === "activate") return activate(request.correlation, command);
+  if (command.command === "activate_modified") return activate(request.correlation, command);
   if (command.command === "activate_point") return activatePoint(request.correlation, command);
+  if (command.command === "activate_point_modified") return activatePoint(request.correlation, command);
+  if (command.command === "wheel_at") return wheelAt(request.correlation, command);
   if (command.command === "scroll") {
     const result = await content(command.tab_id, { kind: "scroll", locator: command.locator, direction: command.direction, amount: command.amount });
     return { outcome: "scrolled", tab_id: command.tab_id, x: result.x, y: result.y, subject: result.subject };
@@ -531,6 +534,11 @@ async function dispatch(request) {
   if (command.command === "hover_point") return hoverPoint(command);
   if (command.command === "fill") return fill(request.correlation, command);
   if (command.command === "type_text") return typeText(request.correlation, command);
+  if (command.command === "type_focused") return typeFocused(request.correlation, command);
+  if (command.command === "describe_focused") {
+    const result = await content(command.tab_id, { kind: "describe_focused" });
+    return { outcome: "targets_described", tab_id: command.tab_id, targets: result.targets };
+  }
   if (command.command === "press_key") return pressKey(request.correlation, command);
   if (command.command === "drag") return dragLocators(request.correlation, command);
   if (command.command === "drag_points") return dragPoints(request.correlation, command);
@@ -1026,7 +1034,7 @@ async function activate(correlation, command) {
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
-    const result = await content(command.tab_id, { kind: "activate", locator: command.locator, button: command.button, click_count: command.click_count });
+    const result = await content(command.tab_id, { kind: "activate", locator: command.locator, button: command.button, click_count: command.click_count, modifiers: command.modifiers ?? [] });
     await new Promise((resolve) => setTimeout(resolve, 250));
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
@@ -1356,12 +1364,13 @@ async function pointInViewport(tabId, point) {
   return content(tabId, { kind: "scroll_point", x: point.x, y: point.y });
 }
 
-async function dispatchClick(tabId, point, button, clickCount) {
+async function dispatchClick(tabId, point, button, clickCount, modifierFlags) {
   const name = button === "middle" ? "middle" : button === "secondary" ? "right" : "left";
+  const modifiers = modifierFlags ?? 0;
   for (let count = 1; count <= clickCount; count += 1) {
-    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y, button: name });
-    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: name, clickCount: count });
-    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: name, clickCount: count });
+    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y, button: name, modifiers });
+    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: name, clickCount: count, modifiers });
+    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: name, clickCount: count, modifiers });
   }
 }
 
@@ -1372,7 +1381,7 @@ async function activatePoint(correlation, command) {
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
-    await dispatchClick(command.tab_id, point, command.button, command.click_count);
+    await dispatchClick(command.tab_id, point, command.button, command.click_count, shared.modifierMask(command.modifiers ?? []));
     await new Promise((resolve) => setTimeout(resolve, 250));
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
@@ -1427,6 +1436,38 @@ async function pressKey(correlation, command) {
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "key_pressed", tab: physicalTab(tab), key: command.key, subject: target?.subject, committed_urls: commits };
+  } catch (error) { error.effectUnknown = true; throw error; }
+  finally { navigationWatchers.delete(command.tab_id); await detachDebugger(command.tab_id); }
+}
+
+async function wheelAt(correlation, command) {
+  await ensureDebugger(command.tab_id);
+  try {
+    await validateView(command.tab_id, command.expected_viewport);
+    const point = await pointInViewport(command.tab_id, command.point);
+    const deltaY = command.direction === "up" ? -120 : 120;
+    for (let tick = 0; tick < command.ticks; tick += 1) {
+      if (cancelled.has(correlation)) throw Object.assign(new Error("cancelled during wheel"), { effectUnknown: true });
+      await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX: 0, deltaY });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
+    return { outcome: "scrolled", tab_id: command.tab_id, x: point.x, y: point.y, subject: point.subject };
+  } finally {
+    await detachDebugger(command.tab_id);
+  }
+}
+
+async function typeFocused(correlation, command) {
+  const commits = [];
+  navigationWatchers.set(command.tab_id, { correlation, commits });
+  try {
+    if (command.clear_first) await content(command.tab_id, { kind: "clear_focused" });
+    await ensureDebugger(command.tab_id);
+    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
+    const tab = await chrome.tabs.get(command.tab_id);
+    if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
+    return { outcome: "typed", tab: physicalTab(tab), character_count: Array.from(command.text).length, subject: null, committed_urls: commits };
   } catch (error) { error.effectUnknown = true; throw error; }
   finally { navigationWatchers.delete(command.tab_id); await detachDebugger(command.tab_id); }
 }

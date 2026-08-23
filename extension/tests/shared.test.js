@@ -150,7 +150,7 @@ test("browser events use the nested typed bridge envelope", () => {
 
 test("the adapter advertises stable versioned physical capabilities", () => {
   assert.equal(shared.ADAPTER_PROTOCOL_MAJOR, 2);
-  const revisionFor = (name) => (name === "script" ? 2 : 1);
+  const revisionFor = (name) => ({ script: 2, pointer_input: 2, keyboard_input: 2 }[name] ?? 1);
   assert.deepEqual(shared.ADAPTER_CAPABILITIES, [
     "tabs",
     "atomic_tab_open",

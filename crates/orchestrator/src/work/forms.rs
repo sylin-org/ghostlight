@@ -139,6 +139,9 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         value: &TypeText,
     ) -> Terminal {
+        if value.focused {
+            return self.type_focused(context, lease, value);
+        }
         let (selected, target) =
             match self.resolve_target(lease, value.tab.as_deref(), &value.target) {
                 Ok(value) => value,
@@ -397,43 +400,87 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        match self.dispatch(
-            context,
-            BrowserCommand::PressKey {
-                tab_id: selected.physical_id,
-                locator,
-                key: value.key.clone(),
-                modifiers: value.modifiers.clone(),
-            },
-        ) {
-            Ok(BrowserOutcome::KeyPressed {
-                tab,
-                key,
-                subject,
-                committed_urls,
-            }) => {
-                let outcome = Outcome::KeyboardSent {
-                    host: observed_host(&tab.url),
-                    key: named_key(&key),
-                    subject: action_subject(context, subject, focused_role),
-                };
-                self.action_success(
+        let strokes: Vec<String> = if value.strokes.is_empty() {
+            vec![value.key.clone()]
+        } else {
+            value.strokes.clone()
+        };
+        let repetitions = usize::from(value.repeat.max(1));
+        let total = strokes.len().saturating_mul(repetitions);
+        let mut completed = 0usize;
+        let mut last = None;
+        for _ in 0..repetitions {
+            for stroke in &strokes {
+                if context.cancellation.is_cancelled() {
+                    let error = if completed == 0 {
+                        crate::browser::BrowserError::CancelledBeforeDispatch
+                    } else {
+                        crate::browser::BrowserError::CancelledAfterDispatch
+                    };
+                    return self.browser_failure(
+                        context,
+                        decision,
+                        error,
+                        Some(selected.physical_id),
+                    );
+                }
+                match self.dispatch(
                     context,
-                    lease,
-                    decision,
-                    Capability::Action,
-                    &selected,
-                    &tab,
-                    &committed_urls,
-                    outcome,
-                    json!({"tab":selected.handle.as_str(),"key":key,"pressed":true}),
-                )
-            }
-            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
-            Err(error) => {
-                self.browser_failure(context, decision, error, Some(selected.physical_id))
+                    BrowserCommand::PressKey {
+                        tab_id: selected.physical_id,
+                        locator: locator.clone(),
+                        key: stroke.clone(),
+                        modifiers: value.modifiers.clone(),
+                    },
+                ) {
+                    Ok(receipt @ BrowserOutcome::KeyPressed { .. }) => {
+                        last = Some(receipt);
+                        completed += 1;
+                    }
+                    Ok(_) => {
+                        return self.protocol_failure(context, decision, Some(selected.physical_id))
+                    }
+                    Err(error) => {
+                        return self.browser_failure(
+                            context,
+                            decision,
+                            error,
+                            Some(selected.physical_id),
+                        )
+                    }
+                }
             }
         }
+        let BrowserOutcome::KeyPressed {
+            tab,
+            key,
+            subject,
+            committed_urls,
+        } = last.expect("at least one stroke is dispatched")
+        else {
+            unreachable!("the stroke loop produced a key receipt");
+        };
+        let outcome = Outcome::KeyboardSent {
+            host: observed_host(&tab.url),
+            key: named_key(&key),
+            subject: action_subject(context, subject, focused_role),
+        };
+        let mut facts = json!({"tab":selected.handle.as_str(),"key":key,"pressed":true});
+        if total > 1 {
+            facts["strokes_completed"] = json!(completed);
+            facts["total_expected"] = json!(total);
+        }
+        self.action_success(
+            context,
+            lease,
+            decision,
+            Capability::Action,
+            &selected,
+            &tab,
+            &committed_urls,
+            outcome,
+            facts,
+        )
     }
 
     pub(super) fn perform_wait(
@@ -460,6 +507,61 @@ impl ApplicationExecutor {
                 true,
                 json!({"reason":decision.reason.as_str()}),
             );
+        }
+        if value.condition == "duration" {
+            let milliseconds: u64 = value
+                .value
+                .as_deref()
+                .and_then(|raw| raw.parse().ok())
+                .unwrap_or(0);
+            let started = Instant::now();
+            loop {
+                if context.cancellation.is_cancelled() {
+                    return self.browser_failure(
+                        context,
+                        decision,
+                        crate::browser::BrowserError::CancelledBeforeDispatch,
+                        Some(selected.physical_id),
+                    );
+                }
+                if started.elapsed().as_millis() >= u128::from(milliseconds) {
+                    break;
+                }
+                if Instant::now() >= context.deadline {
+                    return self.browser_failure(
+                        context,
+                        decision,
+                        crate::browser::BrowserError::DeadlineAfterDispatch,
+                        Some(selected.physical_id),
+                    );
+                }
+                std::thread::sleep(std::cmp::min(
+                    std::time::Duration::from_millis(20),
+                    context.deadline.saturating_duration_since(Instant::now()),
+                ));
+            }
+            let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let outcome = Outcome::Waited {
+                condition: value.condition.clone(),
+                elapsed_ms,
+                satisfied: true,
+                host: observed_host(&selected.url),
+            };
+            return Terminal {
+                result: InvocationResult::new(
+                    context.invocation,
+                    Status::Succeeded,
+                    Effect::None,
+                    readiness(selected.readiness),
+                    true,
+                    outcome.summary().as_str(),
+                    json!({"tab":selected.handle.as_str(),"condition":"duration","satisfied":true,"elapsed_ms":elapsed_ms,"readiness":readiness(selected.readiness)}),
+                    outcome.next_steps(),
+                ),
+                decision,
+                physical_id: Some(selected.physical_id),
+                observed: outcome.observed(),
+            };
         }
         match self.dispatch(
             context,
@@ -512,6 +614,84 @@ impl ApplicationExecutor {
                     physical_id: Some(tab_id),
                     observed: outcome_observed,
                 }
+            }
+            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+            Err(error) => {
+                self.browser_failure(context, decision, error, Some(selected.physical_id))
+            }
+        }
+    }
+
+    fn type_focused(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        value: &TypeText,
+    ) -> Terminal {
+        let selected = match lease.select_tab(value.tab.as_deref()) {
+            Ok(tab) => tab,
+            Err(error) => return self.workspace_failure(context, error),
+        };
+        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Effect::None,
+                true,
+                json!({"reason":decision.reason.as_str()}),
+            );
+        }
+        match self.dispatch(
+            context,
+            BrowserCommand::DescribeFocused {
+                tab_id: selected.physical_id,
+            },
+        ) {
+            Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
+                if tab_id == selected.physical_id && targets.len() == 1 =>
+            {
+                if targets[0].credential_class {
+                    return self.credential_handoff(context, decision, &selected);
+                }
+            }
+            Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
+            Err(error) => {
+                return self.browser_failure(context, decision, error, Some(selected.physical_id))
+            }
+        }
+        match self.dispatch(
+            context,
+            BrowserCommand::TypeFocused {
+                tab_id: selected.physical_id,
+                text: value.text.clone(),
+                clear_first: value.clear_first,
+            },
+        ) {
+            Ok(BrowserOutcome::Typed {
+                tab,
+                character_count,
+                subject,
+                committed_urls,
+            }) => {
+                let outcome = Outcome::TextTyped {
+                    host: observed_host(&tab.url),
+                    subject: action_subject(context, subject, None)
+                        .expect("typing has a fallback subject"),
+                    characters: character_count,
+                };
+                self.action_success(
+                    context,
+                    lease,
+                    decision,
+                    Capability::Write,
+                    &selected,
+                    &tab,
+                    &committed_urls,
+                    outcome,
+                    json!({"tab":selected.handle.as_str(),"focused":true,"typed":true,"character_count":character_count}),
+                )
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {

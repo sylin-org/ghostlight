@@ -59,28 +59,53 @@ impl ApplicationExecutor {
                         button: value.button.clone(),
                     }),
                 });
-                (
+                let command = if value.modifiers.is_empty() {
                     BrowserCommand::Activate {
                         tab_id: tab.physical_id,
                         locator: target.locator,
                         button: value.button.clone(),
                         click_count: value.click_count,
-                    },
+                    }
+                } else {
+                    BrowserCommand::ActivateModified {
+                        tab_id: tab.physical_id,
+                        locator: target.locator,
+                        button: value.button.clone(),
+                        click_count: value.click_count,
+                        modifiers: value.modifiers.clone(),
+                    }
+                };
+                (
+                    command,
                     json!({"tab":tab.handle.as_str(),"target":target.handle.as_str(),"activated":true}),
                     clicked,
                 )
             }
-            ResolvedLocation::Point { tab, view, point } => (
-                BrowserCommand::ActivatePoint {
-                    tab_id: tab.physical_id,
-                    point,
-                    expected_viewport: view.viewport,
-                    button: value.button.clone(),
-                    click_count: value.click_count,
-                },
-                json!({"tab":tab.handle.as_str(),"view":view.handle.as_str(),"activated":true}),
-                Clicked::Point(point),
-            ),
+            ResolvedLocation::Point { tab, view, point } => {
+                let command = if value.modifiers.is_empty() {
+                    BrowserCommand::ActivatePoint {
+                        tab_id: tab.physical_id,
+                        point,
+                        expected_viewport: view.viewport,
+                        button: value.button.clone(),
+                        click_count: value.click_count,
+                    }
+                } else {
+                    BrowserCommand::ActivatePointModified {
+                        tab_id: tab.physical_id,
+                        point,
+                        expected_viewport: view.viewport,
+                        button: value.button.clone(),
+                        click_count: value.click_count,
+                        modifiers: value.modifiers.clone(),
+                    }
+                };
+                (
+                    command,
+                    json!({"tab":tab.handle.as_str(),"view":view.handle.as_str(),"activated":true}),
+                    Clicked::Point(point),
+                )
+            }
         };
         match self.dispatch(context, command) {
             Ok(BrowserOutcome::Activated {
@@ -127,6 +152,9 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         value: &ScrollPage,
     ) -> Terminal {
+        if let Some(view_handle) = value.view.as_deref() {
+            return self.perform_wheel(context, lease, value, view_handle);
+        }
         let (selected, locator, revealed_role) = match self.resolve_optional_target(
             lease,
             value.tab.as_deref(),
@@ -197,6 +225,86 @@ impl ApplicationExecutor {
                         }
                     },
                     json!({"tab":selected.handle.as_str(),"target":value.target,"scrolled":true,"x":x,"y":y}),
+                )
+            }
+            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+            Err(error) => {
+                self.browser_failure(context, decision, error, Some(selected.physical_id))
+            }
+        }
+    }
+
+    fn perform_wheel(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        value: &ScrollPage,
+        view_handle: &str,
+    ) -> Terminal {
+        let location = match self.resolve_location(
+            lease,
+            value.tab.as_deref(),
+            None,
+            Some(view_handle),
+            value.x,
+            value.y,
+        ) {
+            Ok(value) => value,
+            Err(error) => return self.workspace_failure(context, error),
+        };
+        let ResolvedLocation::Point {
+            tab: selected,
+            view,
+            point,
+        } = location
+        else {
+            unreachable!("a view input resolves to a point")
+        };
+        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Effect::None,
+                true,
+                json!({"reason":decision.reason.as_str()}),
+            );
+        }
+        match self.dispatch(
+            context,
+            BrowserCommand::WheelAt {
+                tab_id: selected.physical_id,
+                point,
+                expected_viewport: view.viewport,
+                direction: value
+                    .direction
+                    .clone()
+                    .expect("language validated direction"),
+                ticks: value.ticks.expect("language validated ticks"),
+            },
+        ) {
+            Ok(BrowserOutcome::Scrolled {
+                tab_id,
+                x,
+                y,
+                subject: _,
+            }) if tab_id == selected.physical_id => {
+                if let Err(error) = lease.invalidate_views(&selected.handle) {
+                    return self.workspace_failure(context, error);
+                }
+                self.succeeded(
+                    context,
+                    decision,
+                    Some(tab_id),
+                    Effect::Applied,
+                    readiness(selected.readiness),
+                    false,
+                    Outcome::PageScrolled {
+                        host: observed_host(&selected.url),
+                        direction: value.direction.clone().expect("language validated direction"),
+                    },
+                    json!({"tab":selected.handle.as_str(),"view":view.handle.as_str(),"wheel":true,"ticks":value.ticks,"scrolled":true,"x":x,"y":y}),
                 )
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),

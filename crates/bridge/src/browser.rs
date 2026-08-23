@@ -35,6 +35,10 @@ pub mod adapter_capability {
     /// Script revision implementing REPL-grade evaluation: top-level await,
     /// promise waiting, user gesture, and bare-return recovery.
     pub const SCRIPT_REVISION_REPL: u16 = 2;
+    /// Pointer revision adding held-modifier activation and coordinate wheel input.
+    pub const POINTER_INPUT_REVISION_PRECISION: u16 = 2;
+    /// Keyboard revision adding focused-control description and typing.
+    pub const KEYBOARD_INPUT_REVISION_FOCUSED: u16 = 2;
     /// Browser-local condition observation.
     pub const OBSERVATION: &str = "observation";
     /// JavaScript dialog observation and handling.
@@ -602,6 +606,31 @@ pub enum BrowserCommand {
         button: String,
         click_count: u8,
     },
+    /// Activate one target with held keyboard modifiers.
+    ActivateModified {
+        tab_id: u64,
+        locator: String,
+        button: String,
+        click_count: u8,
+        modifiers: Vec<String>,
+    },
+    /// Activate one page point with held keyboard modifiers.
+    ActivatePointModified {
+        tab_id: u64,
+        point: PhysicalPoint,
+        expected_viewport: ViewportGeometry,
+        button: String,
+        click_count: u8,
+        modifiers: Vec<String>,
+    },
+    /// Wheel-scroll at one page point resolved from a governed view handle.
+    WheelAt {
+        tab_id: u64,
+        point: PhysicalPoint,
+        expected_viewport: ViewportGeometry,
+        direction: String,
+        ticks: u8,
+    },
     /// Scroll the page or reveal a locator.
     Scroll {
         tab_id: u64,
@@ -639,6 +668,14 @@ pub enum BrowserCommand {
     TypeText {
         tab_id: u64,
         locator: String,
+        text: String,
+        clear_first: bool,
+    },
+    /// Describe the currently focused editable control before typing.
+    DescribeFocused { tab_id: u64 },
+    /// Type into the currently focused editable control after credential preflight.
+    TypeFocused {
+        tab_id: u64,
         text: String,
         clear_first: bool,
     },
@@ -750,14 +787,19 @@ impl BrowserCommand {
             Self::Screenshot { .. } | Self::ScreenshotRegion { .. } => capability::CAPTURE,
             Self::Activate { .. }
             | Self::ActivatePoint { .. }
+            | Self::ActivateModified { .. }
+            | Self::ActivatePointModified { .. }
+            | Self::WheelAt { .. }
             | Self::Scroll { .. }
             | Self::Hover { .. }
             | Self::HoverPoint { .. }
             | Self::Drag { .. }
             | Self::DragPoints { .. } => capability::POINTER_INPUT,
-            Self::Fill { .. } | Self::TypeText { .. } | Self::PressKey { .. } => {
-                capability::KEYBOARD_INPUT
-            }
+            Self::Fill { .. }
+            | Self::TypeText { .. }
+            | Self::DescribeFocused { .. }
+            | Self::TypeFocused { .. }
+            | Self::PressKey { .. } => capability::KEYBOARD_INPUT,
             Self::UploadFiles { .. } => capability::FILES,
             Self::EvaluateScript { .. } => capability::SCRIPT,
             Self::Observe { .. } => capability::OBSERVATION,
@@ -779,6 +821,12 @@ impl BrowserCommand {
     pub const fn required_revision(&self) -> u16 {
         match self {
             Self::EvaluateScript { .. } => adapter_capability::SCRIPT_REVISION_REPL,
+            Self::ActivateModified { .. }
+            | Self::ActivatePointModified { .. }
+            | Self::WheelAt { .. } => adapter_capability::POINTER_INPUT_REVISION_PRECISION,
+            Self::DescribeFocused { .. } | Self::TypeFocused { .. } => {
+                adapter_capability::KEYBOARD_INPUT_REVISION_FOCUSED
+            }
             _ => 1,
         }
     }

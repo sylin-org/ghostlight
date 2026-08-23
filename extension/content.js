@@ -307,6 +307,8 @@
       if (message.kind === "inspect") return { targets: inspect(message.inspect_kind, message.max_items) };
       if (message.kind === "find") return { targets: findTargets(message.text, message.find_kind, message.max_results) };
       if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
+      if (message.kind === "describe_focused") { const element = document.activeElement; if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
+      if (message.kind === "clear_focused") { const element = requireActionable(document.activeElement, "type"); if (credentialClass(element)) throw new Error("credential-class target requires user handoff"); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
       if (message.kind === "geometry") return geometry(resolve(message.locator));
       if (message.kind === "focus") { const element = requireActionable(resolve(message.locator), "focus"); const subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center" }); element.focus({ preventScroll: true }); return { focused: true, subject }; }
       if (message.kind === "clear") { const element = requireActionable(resolve(message.locator), "type"); if (credentialClass(element)) throw new Error("credential-class target requires user handoff"); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
@@ -314,8 +316,10 @@
         const element = requireActionable(resolve(message.locator), "activate");
         const subject = actionSubject(element);
         element.scrollIntoView({ block: "center", inline: "center" });
-        if (message.button === "primary" && message.click_count === 1) element.click();
-        else for (let count = 0; count < message.click_count; count += 1) element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, button: message.button === "middle" ? 1 : 2, detail: message.click_count }));
+        const modifiers = Array.isArray(message.modifiers) ? message.modifiers : [];
+        const modifierInit = { ctrlKey: modifiers.includes("Control"), metaKey: modifiers.includes("Meta"), shiftKey: modifiers.includes("Shift"), altKey: modifiers.includes("Alt") };
+        if (message.button === "primary" && message.click_count === 1 && modifiers.length === 0) element.click();
+        else for (let count = 0; count < message.click_count; count += 1) element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, button: message.button === "middle" ? 1 : 2, detail: message.click_count, ...modifierInit }));
         return { activated: true, subject };
       }
       if (message.kind === "fill") {

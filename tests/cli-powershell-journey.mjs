@@ -158,7 +158,7 @@ try {
       "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
       "keyboard_input", "files", "script", "observation", "dialogs",
       "operation_recovery", "presentation"
-    ].map((name) => ({ name, revision: name === "script" ? 2 : 1 }))
+    ].map((name) => ({ name, revision: ["script", "pointer_input", "keyboard_input"].includes(name) ? 2 : 1 }))
   });
   // Wait for the relay's own handshake rather than guessing: until the connector answers
   // hello_accepted there is no adapter, and every browser call would fail as disconnected.

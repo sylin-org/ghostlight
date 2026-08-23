@@ -392,6 +392,8 @@ pub struct Click {
     pub button: String,
     #[serde(default = "default_click_count")]
     pub click_count: u8,
+    #[serde(default)]
+    pub modifiers: Vec<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
@@ -409,6 +411,14 @@ pub struct ScrollPage {
     pub direction: Option<String>,
     #[serde(default)]
     pub amount: Option<String>,
+    #[serde(default)]
+    pub view: Option<String>,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    #[serde(default)]
+    pub ticks: Option<u8>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
@@ -480,7 +490,11 @@ pub struct FillForm {
 /// Input for typing ordinary text through browser input events.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct TypeText {
+    #[serde(default)]
     pub target: String,
+    /// Type into the currently focused editable control instead of `target`.
+    #[serde(default)]
+    pub focused: bool,
     pub text: String,
     #[serde(default)]
     pub tab: Option<String>,
@@ -495,7 +509,14 @@ pub struct TypeText {
 /// Input for one keyboard action.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct PressKey {
+    #[serde(default)]
     pub key: String,
+    /// Ordered keystroke sequence replacing `key`; at most twenty entries.
+    #[serde(default)]
+    pub strokes: Vec<String>,
+    /// Repetitions of the whole stroke sequence, one through one hundred.
+    #[serde(default = "default_repeat")]
+    pub repeat: u16,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
@@ -762,6 +783,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "tab",
                 "button",
                 "click_count",
+                "modifiers",
                 "timeout_ms",
             ],
             validate_click,
@@ -769,7 +791,17 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_scroll" => Operation::ScrollPage(parse(
             input,
-            &["tab", "target", "direction", "amount", "timeout_ms"],
+            &[
+                "tab",
+                "target",
+                "direction",
+                "amount",
+                "view",
+                "x",
+                "y",
+                "ticks",
+                "timeout_ms",
+            ],
             validate_scroll,
         )?)
         .into_ok(),
@@ -787,13 +819,20 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_type_text" => Operation::TypeText(parse(
             input,
-            &["target", "text", "tab", "clear_first", "timeout_ms"],
+            &[
+                "target",
+                "focused",
+                "text",
+                "tab",
+                "clear_first",
+                "timeout_ms",
+            ],
             validate_type_text,
         )?)
         .into_ok(),
         "browser_press_key" => Operation::PressKey(parse(
             input,
-            &["key", "tab", "target", "modifiers"],
+            &["key", "strokes", "repeat", "tab", "target", "modifiers"],
             validate_press_key,
         )?)
         .into_ok(),
@@ -1157,7 +1196,8 @@ fn validate_click(value: &Click) -> Result<(), LanguageError> {
     )?;
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_choice(&value.button, &["primary", "middle", "secondary"], "button")?;
-    validate_range(usize::from(value.click_count), 1, 2, "click_count")?;
+    validate_range(usize::from(value.click_count), 1, 3, "click_count")?;
+    validate_modifiers(&value.modifiers)?;
     validate_timeout(value.timeout_ms)?;
     validate_restrictions(&value.restrictions)
 }
@@ -1239,13 +1279,49 @@ fn validate_location(
 
 fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    let wheel =
+        value.view.is_some() || value.x.is_some() || value.y.is_some() || value.ticks.is_some();
     if let Some(target) = &value.target {
+        if wheel {
+            return Err(LanguageError::Invalid(
+                "target cannot be combined with a view point".into(),
+            ));
+        }
         validate_handle(target, "target_")?;
         if value.direction.is_some() || value.amount.is_some() {
             return Err(LanguageError::Invalid(
                 "target cannot be combined with direction or amount".into(),
             ));
         }
+    } else if wheel {
+        let direction = value
+            .direction
+            .as_deref()
+            .ok_or_else(|| LanguageError::Invalid("wheel scrolling requires direction".into()))?;
+        validate_choice(direction, &["up", "down"], "direction")?;
+        validate_handle(
+            value
+                .view
+                .as_deref()
+                .ok_or_else(|| LanguageError::Invalid("view is required".into()))?,
+            "view_",
+        )?;
+        for (name, coordinate) in [("x", value.x), ("y", value.y)] {
+            validate_coordinate(
+                coordinate.ok_or_else(|| LanguageError::Invalid(format!("{name} is required")))?,
+                name,
+            )?;
+        }
+        validate_range(
+            usize::from(
+                value
+                    .ticks
+                    .ok_or_else(|| LanguageError::Invalid("ticks is required".into()))?,
+            ),
+            1,
+            10,
+            "ticks",
+        )?;
     } else {
         if let Some(direction) = &value.direction {
             validate_choice(direction, &["up", "down", "left", "right"], "direction")?;
@@ -1271,7 +1347,20 @@ fn validate_fill(value: &FillForm) -> Result<(), LanguageError> {
 }
 
 fn validate_type_text(value: &TypeText) -> Result<(), LanguageError> {
-    validate_handle(&value.target, "target_")?;
+    if value.focused {
+        if !value.target.is_empty() {
+            return Err(LanguageError::Invalid(
+                "focused cannot be combined with target".into(),
+            ));
+        }
+    } else {
+        if value.target.is_empty() {
+            return Err(LanguageError::Invalid(
+                "provide exactly target, or focused true".into(),
+            ));
+        }
+        validate_handle(&value.target, "target_")?;
+    }
     if value.text.is_empty() && !value.clear_first {
         return Err(LanguageError::Invalid(
             "text cannot be empty unless clear_first is true".into(),
@@ -1373,7 +1462,25 @@ fn validate_extent(value: f64, field: &str) -> Result<(), LanguageError> {
 }
 
 fn validate_press_key(value: &PressKey) -> Result<(), LanguageError> {
-    validate_key(&value.key)?;
+    if value.strokes.is_empty() {
+        validate_key(&value.key)?;
+        if value.repeat != 1 {
+            return Err(LanguageError::Invalid(
+                "repeat applies to a stroke sequence".into(),
+            ));
+        }
+    } else {
+        if !value.key.is_empty() {
+            return Err(LanguageError::Invalid(
+                "provide exactly key or strokes".into(),
+            ));
+        }
+        validate_range(value.strokes.len(), 1, 20, "strokes")?;
+        for stroke in &value.strokes {
+            validate_key(stroke)?;
+        }
+        validate_range(usize::from(value.repeat), 1, 100, "repeat")?;
+    }
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_optional_handle(value.target.as_deref(), "target_")?;
     validate_modifiers(&value.modifiers)?;
@@ -1442,6 +1549,10 @@ fn validate_sequence(value: &RunSequence) -> Result<(), LanguageError> {
                     target: target.clone(),
                     direction: direction.clone(),
                     amount: amount.clone(),
+                    view: None,
+                    x: None,
+                    y: None,
+                    ticks: None,
                     timeout_ms: DEFAULT_TIMEOUT_MS,
                     restrictions: RequestRestrictions::default(),
                 };
@@ -1452,7 +1563,14 @@ fn validate_sequence(value: &RunSequence) -> Result<(), LanguageError> {
                 condition,
                 value,
                 target,
-            } => validate_condition(condition, value.as_deref(), target.as_deref())?,
+            } => {
+                if condition == "duration" {
+                    return Err(LanguageError::Invalid(
+                        "duration waits do not run inside sequences".into(),
+                    ));
+                }
+                validate_condition(condition, value.as_deref(), target.as_deref())?
+            }
         }
     }
     validate_restrictions(&value.restrictions)
@@ -1472,9 +1590,27 @@ fn validate_condition(
             "text_absent",
             "target_present",
             "target_absent",
+            "duration",
         ],
         "condition",
     )?;
+    if condition == "duration" {
+        let raw = value.ok_or_else(|| LanguageError::Invalid("duration requires value".into()))?;
+        if target.is_some() {
+            return Err(LanguageError::Invalid(
+                "duration does not accept target".into(),
+            ));
+        }
+        let milliseconds = raw
+            .parse::<u64>()
+            .map_err(|_| LanguageError::Invalid("duration requires whole milliseconds".into()))?;
+        return validate_range(
+            usize::try_from(milliseconds).unwrap_or(usize::MAX),
+            0,
+            10_000,
+            "duration",
+        );
+    }
     match condition {
         "load_ready" if value.is_some() || target.is_some() => Err(LanguageError::Invalid(
             "load_ready accepts neither value nor target".into(),
@@ -1681,6 +1817,10 @@ fn default_button() -> String {
     "primary".into()
 }
 fn default_click_count() -> u8 {
+    1
+}
+
+fn default_repeat() -> u16 {
     1
 }
 fn default_diagnostic_source() -> String {

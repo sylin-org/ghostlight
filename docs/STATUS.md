@@ -22,7 +22,11 @@ authority on progress. R1 is complete: every browser command now declares a mini
 revision at one bridge seam, an old adapter refuses `browser_execute` before dispatch with the typed
 `CapabilityVersion` error, and page scripts evaluate with REPL semantics (`replMode`, promise
 waiting, user gesture, by-value return, and exactly one diagnosed bare-return retry). Parse failures
-now refuse decisively without inventing an effect; runtime failures remain unknown. R2 is next.
+now refuse decisively without inventing an effect; runtime failures remain unknown. R2 is complete:
+modified and triple clicks ride POINTER_INPUT revision 2, stroke sequences repeat with cancellation
+observed between repetitions, focused typing describes the control and keeps credential handoff,
+duration waits run executor-side, and coordinate wheel scrolling reuses the governed view transform.
+R3 is next.
 
 This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
 pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no

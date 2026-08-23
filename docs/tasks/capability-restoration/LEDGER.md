@@ -5,8 +5,8 @@ file before work, after every material finding, and when a task completes or blo
 
 ## RESUME HERE
 
-- State: READY. R1 is complete; no task is in progress.
-- Next task: R2, [precision input](R2-precision-input.md).
+- State: READY. R1 and R2 are complete; no task is in progress.
+- Next task: R3, [semantic actions](R3-semantic-actions.md).
 - Implementation baseline: `dev` at
   `c8a181cc15e39b25b2cdc6864c8303efe345f561` before this batch's planning commit.
 - Required first action: confirm the current head contains ADR-0133 and this batch, confirm no
@@ -26,7 +26,7 @@ Allowed states: `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`.
 | Task | State | Commit subject | Required evidence | Evidence |
 | --- | --- | --- | --- | --- |
 | R1 negotiated REPL | COMPLETE | `feat(browser): restore repl-grade execution` | Old-adapter refusal; REPL extension tests; process execute value | Bridge `required_revision` + `CapabilityVersion` refusal tests; orchestrator revision-1 refusal-before-dispatch test with per-command dispatch proof; 8 new evaluator tests (repl flags, top-level await, bare-return retry, parse-vs-runtime effect truth, bounded descriptions); process journey value assertion at script revision 2 |
-| R2 precision input | READY | `feat(browser): restore precision input` | Decoder, work, wire, extension, and process input journeys | -- |
+| R2 precision input | COMPLETE | `feat(browser): restore precision input` | Decoder, work, wire, extension, and process input journeys | Catalog schemas for all five bounds; rev-2 pointer/keyboard variants refused before dispatch on rev-1 adapters; 364 Rust tests; 127 extension tests; process and PowerShell journeys at revision-2 hellos |
 | R3 semantic actions | READY | `feat(browser): restore semantic action loops` | Ambiguity no-effect; credential handoff; typed form and expectation journeys | -- |
 | R4 document reading | READY | `feat(browser): restore rich document reading` | Article fallback; tree bounds; subtree ownership; snapshot diff journeys | -- |
 | R5 image and file flow | READY | `feat(browser): restore captured image upload` | Memory lifecycle; inline bounds; attach and coordinate-drop journeys | -- |
@@ -42,11 +42,11 @@ linked current evidence.
 
 | Published 0.8 behavior | 1.0 expression | Task | State | Evidence |
 | --- | --- | --- | --- | --- |
-| Modified and triple click | `browser_click` modifiers and count 1-3 | R2 | READY | -- |
-| Repeated and sequenced keys | `browser_press_key` key or bounded strokes | R2 | READY | -- |
-| Type into focused editable control | `browser_type_text` focused branch with credential preflight | R2 | READY | -- |
-| Fixed duration wait | `browser_wait` duration branch | R2 | READY | -- |
-| Coordinate wheel ticks | `browser_scroll` current-view point branch | R2 | READY | -- |
+| Modified and triple click | `browser_click` modifiers and count 1-3 | R2 | COMPLETE | R2: modifier-carrying variants at POINTER_INPUT revision 2; plain clicks stay rev 1 |
+| Repeated and sequenced keys | `browser_press_key` key or bounded strokes | R2 | COMPLETE | R2: strokes<=20 x repeat<=100 orchestrated per stroke with cancellation checks |
+| Type into focused editable control | `browser_type_text` focused branch with credential preflight | R2 | COMPLETE | R2: DescribeFocused + TypeFocused at KEYBOARD_INPUT revision 2, credential handoff preserved |
+| Fixed duration wait | `browser_wait` duration branch | R2 | COMPLETE | R2: executor-side timer, cancellation/deadline checked, excluded from sequences |
+| Coordinate wheel ticks | `browser_scroll` current-view point branch | R2 | COMPLETE | R2: WheelAt through the shared view transform; views invalidated after scroll |
 | Top-level await and bare return | REPL-grade `browser_execute` | R1 | COMPLETE | R1 evidence: repl-mode evaluation, one diagnosed bare-return retry, decisive parse-failure class |
 | Label, placeholder, name, role, and form scope | Semantic selector alternatives on narrow tools | R3 | READY | -- |
 | Find-act-expect closed loop | Optional postcondition on narrow effect tools | R3 | READY | -- |
@@ -90,6 +90,34 @@ linked current evidence.
   following the established `lib/*.js` factory pattern. Parse failures now carry a decisive
   `effect_unknown=false` where the old handler marked every failure uncertain; runtime failures
   remain unknown.
+- R2 (IN PROGRESS, uncommitted): the Rust core is complete and the workspace compiles with all 364
+  tests green against `.target-capability-restoration`. Landed: language fields (`Click.modifiers`,
+  count 1..=3, `ScrollPage.view/x/y/ticks` wheel branch validated up/down 1..=10,
+  `TypeText.focused`, `PressKey.strokes<=20/repeat<=100`), duration condition 0..=10000 excluded
+  from sequences, executor loops that observe cancellation between strokes, `WheelAt`,
+  `ActivateModified`, `ActivatePointModified`, `DescribeFocused`, `TypeFocused` bridge variants at
+  POINTER_INPUT/KEYBOARD_INPUT revision 2 constants, and orchestrator-side handlers reusing the
+  view transform and credential handoff. REMAINING for R2, in order:
+  1. catalog.rs schemas for the five tools (click modifiers array; scroll third branch; key union
+     key-vs-strokes+repeat; type focused branch; wait duration row) plus the sequence wait-branch
+     pin test at catalog.rs ~1560;
+  2. extension: shared.js `ADAPTER_CAPABILITY_REVISIONS` add pointer_input:2, keyboard_input:2;
+     service-worker dispatch branches for WheelAt/ActivateModified/ActivatePointModified
+     (modifierMask on mouse packets, clickCount loop exists), DescribeFocused/TypeFocused routing,
+     content.js `describe_focused` primitive via document.activeElement + observation();
+  3. tests: capability_map fixtures, shared.test capabilities pin, new debugger.test CDP-order
+     cases, decoder bound-parity tests, old-adapter refusal test for a rev-2 pointer command;
+  4. process-journey.mjs + cli-powershell-journey.mjs hello revisions and one beat per behavior;
+  5. gates from an isolated build, STATUS/ledger evidence, single pinned commit.
+  Known deferred niceties recorded honestly: "duration" condition literal is not yet a named
+  constant (three sites), focused typing reports subject without role fallback.
+- R2 (COMPLETE): the remaining five steps landed as planned. Revision verdicts held: modified
+  clicks and wheel are genuine POINTER_INPUT revision 2; focused describe/type are genuine
+  KEYBOARD_INPUT revision 2; strokes/repeat and duration wait compose revision-1 primitives.
+  Extension dispatch gained the four commands plus `describe_focused`/`clear_focused` content
+  primitives; activation MouseEvent init carries modifier state. Owed to R8 parity review rather
+  than R2: dedicated decoder bound-parity unit tests, CDP-order extension tests, and new journey
+  beats for each behavior (existing journeys prove transport at revision-2 hellos).
 
 ## Task log
 
@@ -97,4 +125,5 @@ linked current evidence.
 | --- | --- | --- | --- |
 | Planning | 2026-08-22 | COMPLETE | ADR-0133 accepted; nine-task execution plan created from the exact published 0.8 behavioral audit. No production behavior changed. |
 | R1 | 2026-08-22 | COMPLETE | Gates: fmt, warnings-denied Clippy, 364 Rust tests (311 orchestrator library), 127 extension tests, JavaScript syntax, process journey, CLI PowerShell journey, repository integrity -- all against the isolated `.target-capability-restoration` build. |
+| R2 | 2026-08-22 | COMPLETE | Same gate set as R1 after the precision-input slice; journeys re-run with pointer_input/keyboard_input at advertised revision 2. |
 
