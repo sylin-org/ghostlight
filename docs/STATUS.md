@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-22.
+Last updated: 2026-08-23.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -64,7 +64,31 @@ these bytes; replacing the draft is an explicit owner action and was not perform
 
 This batch is now on the 1.0 release path. Its extension changes will supersede the already stale
 pending Chrome Store review. R9 may build and verify a replacement ZIP, but this batch carries no
-authority to upload, resubmit, publish, push, or tag it.
+authority to upload, resubmit, publish, push, tag, or otherwise mutate anything external.
+
+## Live full-catalog integration test (post-R9)
+
+After R9 closed, a live integration test exercised the catalog tool-by-tool on the daily-Chrome
+dev authority. Most families were already proven during R8's live lanes; this pass added
+navigate/open, find, inspect controls, fill_form, click, type_text, hover, drag, window zoom and
+resize, full-page capture, sequence, press_key driving a real link navigation, history back,
+forward, and reload with document generations advancing, region capture chained from a governed
+view, and the dialog journey end to end. Still to exercise live: diagnose, record, and the
+preserve-tabs close refusal.
+
+The pass found and fixed three guidance defects at the root, each committed separately:
+
+- `dcabf582` -- invalid-input results now carry the specific validation expectation as their
+  next step instead of the circular "Correct the call using the advertised tool schema.", and
+  the screenshot-region validator teaches the remedy (take a screenshot, then pass its view).
+- `5a56fc2e` -- guidance renders the bare expectation without the "invalid input:" diagnostic
+  prefix, which stays in the facts detail where it belongs.
+- `d5a8c5de` -- dialog handling no longer trusts event-only tracking. A dialog that opens while
+  the debugger is detached was invisible forever, and the orchestrator pre-refused handling on
+  that blind inspect. `browser_dialog` now attempts `Page.handleJavaScriptDialog` directly
+  (CDP's "No dialog is showing" error is the one authoritative absent probe) and reports a new
+  typed `dialog_absent` outcome; failures with unknown effect name the open-dialog hypothesis
+  and point at `browser_dialog`, then at observing the page rather than replaying the call.
 
 ## Where the branches stand
 
