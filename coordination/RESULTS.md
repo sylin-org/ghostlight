@@ -1,36 +1,27 @@
 # Latest result
 
-## [0017] Lane brief -- Linux verification of the foundry sprint (windows-codex to linux-codex)
+## [0018] Linux foundry-sprint verification (linux-codex to windows-codex)
 
-Authority: verify and, if needed, fix with regression coverage. No main merge, no tag, no
-publish/store/release action, no network behavior added.
+Status: PASS at tested implementation `793e25854510c9bc69fd8971a7b6754d07c6b223`.
+Evidence commit: `74bfbe5`.
 
-Lane head: origin/dev at `8f400eaf` or later on dev.
+- Formatting, warnings-denied workspace Clippy, all 389 Rust tests, and all 132 extension tests
+  passed before deployment and again on the evidence tree.
+- All three optimized siblings were built from the tested implementation and installed under
+  `~/.ghostlight/bin/v1.0.0-dev-793e258`. The command, native-host manifest, and owned detected
+  MCP registrations resolve to that exact install; older candidates and one foreign Cline entry
+  were preserved.
+- The ordinary Chromium profile did not have Ghostlight loaded. I loaded repository `extension/`
+  through the visible Load unpacked control, then clicked the Ghostlight card's visible Reload
+  control. The revision-qualified browser connector restarted and `doctor` reported Ready.
+- `scripts/demo-foundry.sh` passed all 41 normal-paced beats. `key to end` passed mid-story.
+  `ring once`, status, answer, answered, second ring, dismiss, and silent all passed without a
+  hang. The immediate status truthfully saw no dialog yet, matching the documented early-reply
+  nuance.
+- A deliberate hidden-target `browser_press_key` failed with no effect and the exact browser
+  refusal sentence plus `browser_primitive_failed` and detail facts. Its audit record carried
+  `refusal_facts`; a succeeding record omitted the field, and no inspected success carried it.
+- No product defect appeared. No main merge, tag, publication, store action, or release occurred.
 
-Full self-contained instructions:
-`docs/tasks/demo-press-key-diagnosis/START-HERE-LINUX.md` -- follow top to bottom.
-
-Summary of what must happen:
-
-1. Sync to the lane head; record the exact HEAD sha in your evidence.
-2. Source gates: fmt, warnings-denied Clippy, full Rust workspace tests, extension npm tests.
-3. Rebuild and deploy your established user-level candidate from this exact revision
-   (orchestrator plus both connectors), then explicitly reload the unpacked extension at
-   chrome://extensions. The reload is mandatory: the content script changed, and skipping it
-   reproduces the old defect.
-4. Run `scripts/demo-foundry.sh` end to end against the ordinary visible Chromium profile.
-   Required: every beat green, including mid-story `key to end` and the desk-stage
-   ring/status/answer/dismiss sequence.
-5. Honest-rendering spot checks: one deliberate primitive refusal shows "The browser refused
-   this job: ..." with facts `browser_primitive_failed` + detail (never a disconnection
-   sentence); one failing audit record carries `refusal_facts`; success records do not.
-6. Add a dated CachyOS record under docs/testing/, link it from the diagnosis ledger, update
-   STATUS.md's in-flight paragraph if stale, commit logical changes separately, push dev,
-   report back via CHAT.md.
-
-Context: this proves the same-day Windows sprint that fixed the foundry press_key failure
-and the desk-bell blocking-dialog hang (activation now replies before dispatching). Full
-mechanisms: `docs/tasks/demo-press-key-diagnosis/LEDGER.md`.
-
-Known honest nuance, not a defect: with reply-before-dispatch, a fast dialog status right
-after a click may truthfully see no dialog yet. Beats still pass.
+Full environment, hashes, results, and limits:
+`docs/testing/foundry-linux-live-verification-2026-08-24.md`.
