@@ -440,6 +440,10 @@
             + `<div class="integration-target-head"><strong>${escapeHtml(harness.target)}</strong>`
             + `<span>${escapeHtml(words(harness.state))}</span></div>`
             + `<p>${escapeHtml(harness.detail)}</p>`
+            // ADR-0135: the orchestrator precomposed this proof for a blocked target; it is
+            // rendered verbatim and the surface adds no words of its own.
+            + (harness.state === "needs_attention" && harness.evidence
+              ? `<p class="integration-evidence">${escapeHtml(harness.evidence)}</p>` : "")
             + `<details class="manual-setup" data-harness-manual="${escapeHtml(harness.id)}"><summary>Manual setup</summary>`
             + `<code>${escapeHtml(harness.config_path)}</code><pre>${escapeHtml(harness.manual_setup)}</pre></details>`
             + `<div class="tile-actions">${primary}${locate}${setup}</div></div>`;

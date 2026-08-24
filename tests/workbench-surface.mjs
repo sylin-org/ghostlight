@@ -267,7 +267,8 @@ view.collections({
     { id: "junie-jetbrains", product_id: "junie", name: "Junie", target: "JetBrains",
       icon: "junie.svg", state: "needs_attention", detail: "Foreign entry preserved.", can_install: false,
       can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/junie.json",
-      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "junie setup" },
+      connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "junie setup",
+      evidence: "Found `alien-agent --serve` where Ghostlight's connector belongs; Ghostlight maintains `/opt/ghostlight/ghostlight-mcp-connector` there and changed nothing." },
     { id: "cline-cursor", product_id: "cline", name: "Cline", target: "Cursor",
       icon: "cline.svg", state: "needs_attention", detail: "Foreign entry preserved.", can_install: false,
       can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-cursor.json",
@@ -389,6 +390,12 @@ const checks = [
       && rosterCard("Junie")?.classes.includes("integration-needs-attention")
       && rosterCard("Junie")?.html.includes("Detected."),
     `roster: ${JSON.stringify(rosterHtml)}`],
+  ["a blocked target shows the orchestrator's precomposed evidence and other targets show none",
+    rosterCard("Junie")?.html.includes('<p class="integration-evidence">')
+      && rosterCard("Junie")?.html.includes("`alien-agent --serve`")
+      && rosterCard("Junie")?.html.includes("changed nothing.")
+      && !rosterCard("Cline")?.html.includes("integration-evidence"),
+    `junie: ${JSON.stringify(rosterCard("Junie")?.html)}`],
   ["every category keeps visible words and a distinct card tone",
     rosterCard("Cline")?.classes.includes("integration-ready")
       && rosterCard("Cline")?.html.includes('<span class="tile-state">Ready</span>')
