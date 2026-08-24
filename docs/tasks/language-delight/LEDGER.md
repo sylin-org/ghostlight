@@ -16,7 +16,7 @@ task boundary. `RESUME HERE` names the only next task.
 | Task | State | Commit subject | Evidence |
 | --- | --- | --- | --- |
 | D1 validation messages | COMPLETE | `feat(language): teach through validation messages` | `1a138a87`; 19 message families rewritten (shared validators name the allowed set and received value; every "X is required" site states the expected shape and where the value comes from); new pin test `validation_messages_teach_the_expected_shape`; full gate green (316 lib tests). |
-| D2 tool descriptions | COMPLETE | `feat(language): delight tool descriptions` | -- |
+| D2 tool descriptions | COMPLETE | `feat(language): delight tool descriptions` | `af1ef36b`; 23 descriptions revoiced, 7 field-description families taught, 2 new pin tests, gate green. |
 | D3 result guidance | READY | `feat(language): delight result guidance` | -- |
 | D4 live proof + close | READY | `test(language): prove delighted guidance live` | -- |
 
