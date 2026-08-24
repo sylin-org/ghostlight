@@ -12,8 +12,13 @@ enumeration decision if the owner ever wants unbound-tab visibility.
 
 ### T1 -- reply-before-dispatch for the remaining dispatch-tail paths
 
-Status: COMPLETE (windows-codex, 2026-08-24). Extension commit; live proof pending the
-unpackaged-adapter reload, as BOOTSTRAP requires stating.
+Status: COMPLETE and proven live (windows-codex, 2026-08-24). After the owner reloaded the
+unpacked adapter, a live probe injected a form whose submit handler opens a synchronous
+`window.confirm()`, then drove `browser_fill_form` with a verified submit against it: the
+call succeeded in 995 ms (the pre-fix shape hung about 8 s and ended unknown), `dialog
+respond` accepted the real dialog, and the page handler recorded `sent:true`. The dialog
+status race appeared here too -- two immediate status reads truthfully saw no dialog before
+the accept landed -- consistent with the bell-path nuance documented above.
 
 Verdicts per content-script branch:
 
