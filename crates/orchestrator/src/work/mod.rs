@@ -403,7 +403,10 @@ impl ApplicationExecutor {
         )
         .from_channel(channel)
         .with_policy(snapshot, terminal.decision)
-        .with_observation(observed);
+        .with_observation(observed)
+        // Refusal facts are mechanism metadata authored by the language layer; success facts
+        // can carry page-derived values and stay out of the content-minimized audit.
+        .with_refusal_facts((status != "succeeded").then(|| terminal.result.facts.clone()));
         let _ = self.audit.record(&record);
         gate.complete(terminal.result)
             .expect("single executor completion path");
@@ -911,6 +914,15 @@ impl ApplicationExecutor {
             context.deadline,
             context.cancellation.flag(),
         );
+        // An adapter that reports effect-unknown has answered honestly. Route it through the
+        // truthful unknown rendering instead of letting per-family receipt matching mistake it
+        // for an incompatible receipt.
+        let outcome = match outcome {
+            Ok(BrowserOutcome::EffectUnknown { reason }) => {
+                Err(BrowserError::EffectUnknown(reason))
+            }
+            outcome => outcome,
+        };
         if let Ok(outcome) = &outcome {
             self.observe(context.invocation, observed_from(outcome));
         }
@@ -1258,12 +1270,18 @@ impl ApplicationExecutor {
             };
         }
         if error.effect_unknown() {
+            let facts = match &error {
+                BrowserError::EffectUnknown(detail) => {
+                    json!({"reason":"browser_effect_unknown","detail":detail})
+                }
+                _ => json!({"reason":"browser_effect_unknown"}),
+            };
             return self.unknown(
                 context,
                 decision,
                 physical_id,
                 Refusal::EffectUnknown,
-                json!({"reason":"browser_effect_unknown"}),
+                facts,
             );
         }
         let status = if matches!(error, BrowserError::CancelledBeforeDispatch) {
@@ -1892,9 +1910,9 @@ mod tests {
     use crate::workspace::WorkspaceStore;
 
     use super::{
-        deregister_active_authority, observation_budget_ms, observed_from, readiness_name,
-        register_active_authority, routing_refusal, ApplicationExecutor, BrowserError,
-        CancellationToken, Effect, Readiness, Status,
+        browser_reason, deregister_active_authority, observation_budget_ms, observed_from,
+        readiness_name, register_active_authority, routing_refusal, ApplicationExecutor,
+        BrowserError, CancellationToken, Effect, Readiness, Status,
     };
 
     #[derive(Default)]
@@ -1941,6 +1959,149 @@ mod tests {
         assert_eq!(detail, "target is not visible for focus");
         assert_eq!(facts["reason"], "browser_primitive_failed");
         assert_eq!(facts["detail"], "target is not visible for focus");
+    }
+
+    /// Only a true pre-dispatch disconnection may claim disconnection in the reason vocabulary,
+    /// and exactly the after-dispatch classes may claim an unknown effect. One evening of
+    /// debugging a phantom "disconnected" sentence bought this pin.
+    #[test]
+    fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
+        use crate::browser::recovery::RecoveryFailure;
+        let cases: Vec<(&str, BrowserError)> = vec![
+            ("before_dispatch", BrowserError::DisconnectedBeforeDispatch),
+            ("after_dispatch", BrowserError::DisconnectedAfterDispatch),
+            ("cancelled_before", BrowserError::CancelledBeforeDispatch),
+            ("cancelled_after", BrowserError::CancelledAfterDispatch),
+            ("deadline_before", BrowserError::DeadlineBeforeDispatch),
+            ("deadline_after", BrowserError::DeadlineAfterDispatch),
+            ("primitive", BrowserError::Primitive("x".into())),
+            ("interlock", BrowserError::LocalInterlock("x".into())),
+            ("effect_unknown", BrowserError::EffectUnknown("x".into())),
+            ("protocol", BrowserError::Protocol("x".into())),
+            ("authentication", BrowserError::Authentication),
+            (
+                "unknown_browser",
+                BrowserError::UnknownBrowser("browser_x".into()),
+            ),
+            ("pinned", BrowserError::BrowserPinned),
+            (
+                "ambiguous",
+                BrowserError::AmbiguousBrowser(vec!["a".into()]),
+            ),
+            ("manual", BrowserError::RecoveryManual { browser: None }),
+            (
+                "recovery_failed",
+                BrowserError::RecoveryFailed {
+                    reason: RecoveryFailure::LaunchFailed,
+                    details: vec![],
+                },
+            ),
+            (
+                "incompatible",
+                BrowserError::Incompatible {
+                    offered: 1,
+                    required: 2,
+                },
+            ),
+            (
+                "capability_version",
+                BrowserError::CapabilityVersion {
+                    capability: "pointer_input".into(),
+                    required: 2,
+                    advertised: 1,
+                },
+            ),
+        ];
+        for (name, error) in &cases {
+            let claims = browser_reason(error) == "browser_disconnected";
+            let truth = matches!(error, BrowserError::DisconnectedBeforeDispatch);
+            assert_eq!(
+                claims, truth,
+                "{name} must not claim disconnection dishonestly"
+            );
+            assert_eq!(
+                error.effect_unknown(),
+                matches!(
+                    error,
+                    BrowserError::DisconnectedAfterDispatch
+                        | BrowserError::CancelledAfterDispatch
+                        | BrowserError::DeadlineAfterDispatch
+                        | BrowserError::EffectUnknown(_)
+                ),
+                "{name} effect-unknown classification drifted"
+            );
+        }
+    }
+
+    /// An adapter's honest effect-unknown receipt renders as unknown with the browser's own
+    /// reason, never as an incompatible receipt.
+    #[test]
+    fn effect_unknown_receipts_render_as_unknown_with_the_browser_reason() {
+        let (executor, browser, _workspaces, workspace, _) = fixture();
+        browser.connect(vec![summary("browser_chrome", true)]);
+        browser.push(Ok(BrowserOutcome::EffectUnknown {
+            reason: "the page stopped responding after dispatch".into(),
+        }));
+
+        let terminal = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com"}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(terminal.status, Status::Unknown);
+        assert_eq!(terminal.facts["reason"], "browser_effect_unknown");
+        assert_eq!(
+            terminal.facts["detail"],
+            "the page stopped responding after dispatch"
+        );
+    }
+
+    /// The audit carries bounded refusal facts for non-successes and stays free of them on
+    /// successes, whose facts can carry page-derived values.
+    #[test]
+    fn audit_records_carry_refusal_facts_for_failures_and_omit_them_for_successes() {
+        let (executor, browser, _workspaces, workspace, audit) = fixture();
+        browser.connect(vec![summary("browser_chrome", true)]);
+
+        browser.push(Err(BrowserError::Primitive(
+            "target is not visible for focus".into(),
+        )));
+        let _ = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com"}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let _ = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        let records = audit.0.lock().unwrap();
+        assert_eq!(records.len(), 2);
+        let failure = &records[0];
+        assert_eq!(failure.status, "failed");
+        let facts = failure
+            .refusal_facts
+            .as_ref()
+            .expect("failure carries facts");
+        assert_eq!(facts["reason"], "browser_primitive_failed");
+        assert_eq!(facts["detail"], "target is not visible for focus");
+        let success = &records[1];
+        assert_eq!(success.status, "succeeded");
+        assert!(success.refusal_facts.is_none());
     }
 
     fn recording_summary(state: RecordingState, source_url: &str) -> PhysicalRecordingSummary {

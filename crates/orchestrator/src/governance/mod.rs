@@ -1965,6 +1965,11 @@ pub struct AuditRecord {
     /// Ghostlight-authored sentence naming what happened, with an optional governed target name.
     #[serde(default)]
     pub summary: String,
+    /// Bounded language-authored refusal facts, present only when the terminal was not a
+    /// success. These are mechanism facts such as reason codes and browser handles, never page
+    /// content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal_facts: Option<serde_json::Value>,
     /// How long the invocation took, from decode to terminal outcome.
     ///
     /// For a navigation this is the time to a governed, settled landing.
@@ -2016,6 +2021,7 @@ impl AuditRecord {
             status: status.into(),
             effect: effect.into(),
             summary: summary.into(),
+            refusal_facts: None,
             duration_ms,
             observed: Observed::default(),
             channel: None,
@@ -2055,6 +2061,13 @@ impl AuditRecord {
     #[must_use]
     pub fn with_observation(mut self, observed: Observed) -> Self {
         self.observed = observed;
+        self
+    }
+
+    /// Attach bounded language-authored refusal facts for a terminal that was not a success.
+    #[must_use]
+    pub fn with_refusal_facts(mut self, facts: Option<serde_json::Value>) -> Self {
+        self.refusal_facts = facts;
         self
     }
 }
