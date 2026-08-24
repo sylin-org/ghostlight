@@ -73,8 +73,9 @@ dev authority. Most families were already proven during R8's live lanes; this pa
 navigate/open, find, inspect controls, fill_form, click, type_text, hover, drag, window zoom and
 resize, full-page capture, sequence, press_key driving a real link navigation, history back,
 forward, and reload with document generations advancing, region capture chained from a governed
-view, and the dialog journey end to end. Still to exercise live: diagnose, record, and the
-preserve-tabs close refusal.
+view, and the dialog journey end to end. The pass closed with diagnose, a record start/save
+returning a real GIF replay, and the truthful preserve-tabs close refusal. Every catalog tool
+has now been exercised live on the daily-Chrome authority.
 
 The pass found and fixed three guidance defects at the root, each committed separately:
 
