@@ -839,6 +839,8 @@ pub enum Refusal {
     CredentialHandoff,
     /// The browser returned a receipt outside the negotiated contract.
     IncompatibleReceipt,
+    /// The browser answered the job with its own bounded refusal.
+    BrowserPrimitive { detail: String },
     /// The browser stopped before a physical effect.
     BrowserStopped { reconnect: bool },
     /// Several browsers are connected and the call did not say which one it meant.
@@ -887,6 +889,9 @@ impl Refusal {
             }
             Self::IncompatibleReceipt => {
                 "The browser answered in a form Ghostlight does not recognize."
+            }
+            Self::BrowserPrimitive { detail } => {
+                return format!("The browser refused this job: {detail}.");
             }
             Self::BrowserStopped { .. } => "The browser disconnected before anything happened.",
             Self::BrowserAmbiguous => {
@@ -965,6 +970,10 @@ impl Refusal {
             Self::BrowserStopped { reconnect: true } => {
                 vec!["Reconnect the Ghostlight browser adapter.".into()]
             }
+            Self::BrowserPrimitive { .. } => vec![
+                "Read the browser's stated reason, adjust the call or the page, then repeat."
+                    .into(),
+            ],
             Self::BrowserAmbiguous | Self::BrowserUnknown => vec![
                 "Call browser_tabs with action list to see the connected browsers.".into(),
                 "Repeat the call with the browser handle you want it to open in.".into(),
@@ -2053,6 +2062,22 @@ mod tests {
         );
         assert_eq!(refusal.observed().host.as_deref(), Some("localhost"));
         assert!(Refusal::InvalidRequest.observed().host.is_none());
+    }
+
+    /// A primitive adapter refusal speaks the browser's own reason and never masquerades as a
+    /// disconnection.
+    #[test]
+    fn primitive_refusal_carries_the_browser_reason_without_claiming_a_disconnection() {
+        let refusal = Refusal::BrowserPrimitive {
+            detail: "target is not visible for focus".into(),
+        };
+        let summary = refusal.summary();
+        assert!(summary.contains("target is not visible for focus"));
+        assert!(!summary.to_lowercase().contains("disconnected"));
+        assert_eq!(
+            refusal.next_steps(),
+            vec!["Read the browser's stated reason, adjust the call or the page, then repeat."]
+        );
     }
 
     /// Every workspace reason names its own way back, or deliberately none.

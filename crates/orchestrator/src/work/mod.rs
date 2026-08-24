@@ -1531,6 +1531,12 @@ fn routing_refusal(error: &BrowserError) -> Option<(Refusal, Value)> {
         BrowserError::BrowserPinned => {
             Some((Refusal::BrowserPinned, json!({"reason":"browser_pinned"})))
         }
+        BrowserError::Primitive(detail) => Some((
+            Refusal::BrowserPrimitive {
+                detail: detail.clone(),
+            },
+            json!({"reason":"browser_primitive_failed","detail":detail}),
+        )),
         BrowserError::RecoveryManual { browser } => Some((
             Refusal::BrowserStartupManual {
                 browser: browser.clone(),
@@ -1919,6 +1925,22 @@ mod tests {
             active: true,
             readiness: BrowserReadiness::Complete,
         }
+    }
+
+    /// A primitive adapter error routes to an honest refusal that carries the browser's own
+    /// detail, instead of falling through to the browser-stopped rendering.
+    #[test]
+    fn primitive_adapter_errors_route_to_an_honest_refusal_with_detail() {
+        let (refusal, facts) = routing_refusal(&BrowserError::Primitive(
+            "target is not visible for focus".into(),
+        ))
+        .expect("primitive errors route to a refusal");
+        let crate::language::outcome::Refusal::BrowserPrimitive { detail } = refusal else {
+            panic!("primitive errors must route to BrowserPrimitive");
+        };
+        assert_eq!(detail, "target is not visible for focus");
+        assert_eq!(facts["reason"], "browser_primitive_failed");
+        assert_eq!(facts["detail"], "target is not visible for focus");
     }
 
     fn recording_summary(state: RecordingState, source_url: &str) -> PhysicalRecordingSummary {
