@@ -79,9 +79,14 @@ installed-product observation, or the checklist deadlocks against itself.
   keeps its number, and the superseded switch roster became
   `0130-integration-switches-and-evidence.md`. No decision text was reopened; the renumber is
   marked in ADR-0130's header and in the ADR-0128 and ADR-0129 references to it.
-- [ ] Decide how the live lanes obtain a matching 1.0 store adapter, and record it in G3. G4, G5,
+- [x] Decide how the live lanes obtain a matching 1.0 store adapter, and record it in G3. G4, G5,
   and G7 refuse an unpacked build, so either name a pre-publication route (trusted testers, or an
   unlisted item) or accept that the adapter is submitted and approved before the live lanes run.
+  Resolved 2026-08-24: submit-and-wait staged. The live lanes wait for the already-pending
+  STAGED_PUBLISH review of the exact candidate bytes to clear, rather than opening a trusted-tester
+  or unlisted route; no store mutation beyond that review is authorized. Recorded against G3's
+  distribution-state row. Evidence:
+  [extension-store-submission-2026-08-24](testing/extension-store-submission-2026-08-24.md).
 - [x] Record a marked amendment to ADR-0102 reconciling its Decision 9 body with its acceptance item
   9. Resolved 2026-08-17: the amendment names the body as governing, explains that the check is
   per-feature and therefore cannot be evaluated against a candidate at all, and states the durable
@@ -95,8 +100,13 @@ installed-product observation, or the checklist deadlocks against itself.
   `ours` strategy, so its history is contained without importing 0.8-line content, and `dev` keeps
   its own Dependabot configuration. The tree was byte-identical after the merge. `main` is an
   ancestor of `dev` again, so G10 promotes it by fast-forward.
-- [ ] Confirm that the non-gating debt under `STATUS.md` "Owed" remains outside 1.0 unless the
-  owner explicitly promotes an item.
+- [x] Confirm that the non-gating debt under `STATUS.md` "Owed" remains outside 1.0 unless the
+  owner explicitly promotes an item. Confirmed 2026-08-24 with one promotion: the owner moved four
+  non-extension items into a pre-freeze window while the store review pends (mcp-connector
+  ServiceClient adoption, unsettled-row color treatment, model-facing policy explain per a new ADR,
+  ADR-0105 stages 2 and 3 through one audited FFI crate). The extension-touching debt stays owed;
+  everything else listed under "Owed" stays outside 1.0. Evidence:
+  [pre-freeze-debt ledger](tasks/pre-freeze-debt/LEDGER.md).
 - [x] Confirm that every reference-experience S8 decision that does not require installed-product
   observation is closed. Resolved 2026-08-17 and recorded in the dated evaluation under "What is
   decidable without a new machine": public feedback is out, the parity decision is closed, the

@@ -17,11 +17,14 @@ review replaces the stale one -- see
 Release tooling now exists: scripts/release-preflight.ps1 (one-command G1 gates plus
 evidence skeleton), declare-freeze/assert-freeze (G0), verify-custody.ps1 (G2).
 
-Next: the owner closes the two open G0 decisions (store-adapter route for live lanes is
-decided -- submit-and-wait staged; Owed-exclusions confirmation remains) and names the
-frozen revision. Then G1 runs at the frozen sha (preflight plus the Linux verification
-lane via coordination/CHAT.md), G2 assembles and takes custody, and the environment lanes
-follow. Live authority swaps go through scripts/dev-loop.ps1 only.
+Next: G0 is one box from closed. The store-adapter route and the Owed disposition are recorded
+(2026-08-24): the live lanes wait for the pending staged review, and four non-extension Owed items
+were promoted into a pre-freeze window running now under
+[tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md). The freeze follows that batch's last
+commit; `b9a017a1` stays the extension-byte floor matching the submitted review bytes. Then G1 runs
+at the frozen sha (preflight plus the Linux verification lane via coordination/CHAT.md), G2
+assembles and takes custody, and the environment lanes follow. Live authority swaps go through
+scripts/dev-loop.ps1 only.
 
 ## Published capability restoration
 
@@ -1156,6 +1159,12 @@ The executor-split batch is complete through `4d633fbc`.
   The durable task record is [docs/tasks/executor-split/LEDGER.md](tasks/executor-split/LEDGER.md).
 
 ## Owed
+
+On 2026-08-24 the owner promoted four items below into the pre-freeze window
+([tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md)): the ServiceClient adoption, the
+unsettled-row color treatment, the model-facing policy explain operation, and ADR-0105 stages 2
+and 3. They remain listed here until their tasks land; everything else in this section stays
+outside 1.0.
 
 - ADR-0121 Decision 3's always-available policy explain operation still exists only as a CLI command
   over a file path. The 23-tool catalog has no policy tool, so the model cannot ask what current
