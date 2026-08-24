@@ -1236,10 +1236,15 @@ header, and the owner manually reconciled and saved the dashboard-only permissio
 data-use, certification, and privacy URL fields. API V2 then submitted that earlier package, hash
 `ccb48577a93995b1eaaf9b13fab75313a347483553782d178187e1ea8ceb0923`, with state `PENDING_REVIEW`
 and publish type `STAGED_PUBLISH`. It is not public and approval will not publish it automatically.
-ADR-0131 subsequently restored current-view region screenshot magnification, so the pending review
-is stale relative to the current 1.0 package and must be replaced before release. No Store mutation
-was made during that correction. This pre-freeze submission does not close G3 until the frozen
-provenance-bound candidate matches its bytes and the reviewed store installation is verified.
+ADR-0131 made that review stale, and on 2026-08-24 it was replaced: the foundry-sprint source was
+repackaged (byte-identical across two runs, sha256
+`f7b9a6adbf94bf5b1dcc158a3548501ff230ad4d39e72a5c878bde8d2d284d68`), uploaded, and resubmitted
+staged -- see [the dated submission record](testing/extension-store-submission-2026-08-24.md).
+The review now carries the reply-before-dispatch and fill submit-leg fixes. No store mutation was
+made beyond that replacement, the public listing still serves 0.8.0, and this pre-freeze submission
+does not close G3 until the frozen provenance-bound candidate matches its bytes and the reviewed
+store installation is verified. If the extension source changes before G0 freeze, the submission
+is replaced the same way.
 
 The ADR-0131 implementation passes formatting, warnings-denied workspace Clippy, all 361 Rust
 tests, all 119 extension tests, JavaScript and shell syntax, the 42-assertion workbench surface,
