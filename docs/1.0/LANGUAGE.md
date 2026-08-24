@@ -102,7 +102,9 @@ each with `tab`, bounded `title`, governed `url`, `active`, and `readiness`. Foc
 Navigate to a governed URL. Shortest call: `{"url":"https://example.com"}`.
 
 Inputs: required `url`; optional `tab`; optional `new_tab`, default `false`; optional
-`timeout_ms`; optional restrictions. `tab` and `new_tab:true` cannot be combined.
+`beforeunload` whose only value is `discard`, accepting just that navigation's own unsaved-change
+prompt; optional `timeout_ms`; optional restrictions. `tab` and `new_tab:true` cannot be combined.
+Without `beforeunload`, a blocking prompt stops the navigation and is reported, never accepted.
 
 With `new_tab:true`, Ghostlight creates and navigates a new controlled tab. With `tab`, it
 navigates that exact tab. With neither, it uses the unambiguous controlled tab, creates one when
@@ -138,8 +140,9 @@ action, requested dimensions or zoom, and observed geometry.
 Read useful bounded prose from a page or target. Use `browser_inspect` or `browser_find` when an
 action target is needed. Shortest call: `{}`.
 
-Inputs: optional `tab`; optional `target`; optional `max_chars` from 500 to 20000, default 8000;
-optional restrictions. Capability: `read`.
+Inputs: optional `tab`; optional `target`; optional `mode` of `article` or `visible` (article text
+first, falling back to visible text; ignored with `target`); optional `max_chars` from 500 to 50000,
+default 8000; optional restrictions. Capability: `read`.
 
 Facts: `tab`, governed `url`, bounded `title`, `text`, `truncated`, and
 `document_generation`.
@@ -148,11 +151,15 @@ Facts: `tab`, governed `url`, bounded `title`, `text`, `truncated`, and
 
 Inspect semantic controls or page structure and return fresh target handles. Shortest call: `{}`.
 
-Inputs: optional `tab`; optional `scope` of `controls`, `structure`, or `all`, default `controls`;
+Inputs: optional `tab`; optional `scope` of `controls`, `structure`, `all`, or `document`, default
+`controls`; with `document`, an optional bounded subtree `root` handle and `max_depth` from 1 to 12;
 optional `max_items` from 1 to 200, default 80; optional restrictions. Capability: `read`.
 
 Facts: `tab`, `document_generation`, and `items`. Each item has a target handle, semantic role,
-bounded accessible name, state, and credential-class flag. Selectors are not exposed.
+bounded accessible name, state, and credential-class flag. Selectors are not exposed. A
+`document` scope returns one bounded structure-only tree, records it under a snapshot handle that
+is superseded per tab, and reports a structural diff against the current prior snapshot when one
+exists. Editable values are never returned; hidden content is excluded.
 
 ### `browser_find`
 
@@ -187,8 +194,8 @@ Click a current semantic target or a point in a current screenshot. Shortest cal
 
 Inputs use exactly one location branch: required `target`, or required `view`, `x`, and `y`.
 Optional `tab`; optional `button` of `primary`, `middle`, or `secondary`, default `primary`;
-optional `click_count` of 1 or 2, default 1; optional `timeout_ms`; optional restrictions.
-Capability: `action`.
+optional `click_count` from 1 to 3 for single, double, or triple, default 1; optional `timeout_ms`;
+optional restrictions. Capability: `action`.
 
 Facts: `tab`, optional `target`, optional `view`, `activated`, and any governed committed landing.
 
@@ -197,10 +204,11 @@ Facts: `tab`, optional `target`, optional `view`, `activated`, and any governed 
 Scroll in a direction or reveal a semantic target. Shortest call: `{}`, which scrolls down by a
 medium amount.
 
-Inputs use one branch: optional `tab` plus required `target`; or optional `tab`, optional
+Inputs use one of three branches: required `target` to reveal; or optional `tab`, optional
 `direction` of `up`, `down`, `left`, or `right` defaulting to `down`, and optional `amount` of
-`small`, `medium`, `large`, or `page` defaulting to `medium`. Optional `timeout_ms` and restrictions
-apply to both. Capability: `read`.
+`small`, `medium`, `large`, or `page` defaulting to `medium`; or coordinate wheel input with
+required `view`, `x`, `y`, and `ticks` from 1 to 10 plus a two-way `direction` of `up` or `down`.
+Optional `timeout_ms` and restrictions apply to every branch. Capability: `read`.
 
 Facts: `tab`, optional `target`, `scrolled`, and observed horizontal and vertical offsets.
 
@@ -220,8 +228,10 @@ Fill one or more ordinary controls. It does not submit unless `submit_target` is
 `browser_type_text` when per-character input events matter. Shortest call:
 `{"fields":[{"target":"target_...","value":"Ada"}]}`.
 
-Inputs: required `fields` array of 1 to 30 typo-closed objects with required `target` and `value`;
-optional `tab`; optional `submit_target`; optional `timeout_ms`; optional restrictions.
+Inputs: required `fields` array of 1 to 30 typo-closed objects, each with required `value` and
+exactly one location (`target` or typed semantic `selector`); a value is a bounded string, a boolean
+for checkboxes and radios, or a finite number for numeric inputs; optional `tab`; optional
+`submit_target`; optional `timeout_ms`; optional restrictions.
 Capabilities: `read + write` without submit and `read + write + action` with `submit_target`.
 
 Credential-class targets stop before any value dispatch and request visible user handoff. Facts:
@@ -232,9 +242,10 @@ Credential-class targets stop before any value dispatch and request visible user
 Type ordinary text through browser input events. Shortest call:
 `{"target":"target_...","text":"Ada"}`.
 
-Inputs: required `target`; required bounded `text`; optional `tab`; optional `clear_first`, default
-`false`; optional `timeout_ms`; optional restrictions. Empty text is valid only with
-`clear_first:true`. Capability: `action`.
+Inputs use one location: `target` with bounded `text`; or `selector` with `text`; or
+`focused:true` to type into the currently focused editable control. Optional `clear_first`, default
+`false`; optional `tab`; optional `timeout_ms`; optional restrictions. Empty text is valid only as an
+explicit clear together with `clear_first:true`. Capability: `action`.
 
 Credential-class targets stop before text dispatch. Facts: `tab`, `target`, `typed`,
 `character_count`, and any governed committed landing.
@@ -243,10 +254,10 @@ Credential-class targets stop before text dispatch. Facts: `tab`, `target`, `typ
 
 Send one explicit keyboard action. Shortest call: `{"key":"Enter"}`.
 
-Inputs: required `key` as one character or one of `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`,
-`ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, `Home`, `End`, `PageUp`, `PageDown`, or `Space`;
-optional `tab`; optional `target`; optional unique `modifiers` from `Alt`, `Control`, `Meta`, and
-`Shift`; optional restrictions. Capability: `action`.
+Inputs: exactly one of required `key` as one character or one named key from the closed list, or
+required `strokes`, an ordered sequence of 1 to 20 of the same items, with optional `repeat` from 1
+to 100 defaulting to 1; optional `tab`; optional `target`; optional unique `modifiers` from `Alt`,
+`Control`, `Meta`, and `Shift`; optional restrictions. Capability: `action`.
 
 Facts: `tab`, `key`, `pressed`, and any governed committed landing.
 
@@ -267,8 +278,9 @@ Wait for one explicit observable condition. Shortest call: `{"condition":"load_r
 
 Inputs use one condition-specific branch: `load_ready` accepts neither value nor target;
 `url_contains`, `text_present`, and `text_absent` require `value`; `target_present` and
-`target_absent` require `target`. Every branch accepts optional `tab`, `timeout_ms`, and
-restrictions. Capability: `read`.
+`target_absent` require `target`; `duration` requires a whole millisecond `value` from 0 to 10000
+and waits executor-side. Every branch accepts optional `tab`, `timeout_ms`, and restrictions.
+Capability: `read`.
 
 Facts: `tab`, `condition`, `satisfied`, `elapsed_ms`, and governed readiness.
 
@@ -287,15 +299,21 @@ as applicable. Dialog text is never audited.
 
 ### `browser_upload`
 
-Upload explicitly named bounded local files to one ordinary file input. Shortest call:
+Attach explicitly supplied files or one captured image to one ordinary file input, or drop one
+captured image at a point in a current view. Shortest call:
 `{"target":"target_...","paths":["C:\\path\\document.pdf"]}`.
 
-Inputs: required `target`; required `paths` array of one to five unique absolute local paths;
-optional `tab`; optional `timeout_ms`; optional restrictions. Capability: `write`.
+Inputs: exactly one source of required `paths`, an array of 1 to 5 unique absolute local paths;
+or `files`, 1 to 5 inline objects with `name` and base64 `data_base64`; or one `source_image`
+handle from an earlier capture, optionally with `view`, `x`, and `y` to drop it at a point instead
+of attaching. The destination is optional `target` or typed semantic `selector`. Optional `tab`,
+`timeout_ms`, and restrictions. Capability: `write`.
 
-Ghostlight rejects directories, missing files, files larger than 5,000,000 bytes, and a combined
-payload larger than 5,000,000 bytes before browser dispatch. File paths, names, and contents never
-enter audit or presentation. Facts: `tab`, `target`, `uploaded_count`, and `uploaded_bytes`.
+Ghostlight rejects directories, missing files, any file larger than 5,000,000 bytes, and a combined
+payload larger than 5,000,000 bytes before browser dispatch, and refuses an upload above the
+capture-reuse ceiling. Inline bytes decode only after authorization and credential preflight. File
+paths, names, and contents never enter audit or presentation. Facts: `tab`, `target`,
+`uploaded_count`, and `uploaded_bytes`.
 
 ### `browser_execute`
 
@@ -323,6 +341,29 @@ through the same executor path as a direct call.
 Direct and sequence steps use the same operation executor and browser port. Facts: `tab`,
 `completed_steps`, `total_steps`, and bounded per-step statuses. Execution stops at the first
 non-success. Partial sequences are never repeat-safe.
+
+### `browser_flow`
+
+Compose one to twenty steps on one controlled tab. Shortest useful call:
+`{"steps":[{"id":"open","tool":"browser_navigate","arguments":{"url":"https://example.com"}}]}`.
+
+Inputs: required `steps` array of 1 to 20 uniquely named objects, each with a required bounded
+`id`, a required `tool` naming one current advertised non-composite Ghostlight tool, and an
+optional `arguments` object; optional `on_error` of `stop` or `continue`, default `stop`; optional
+`dry_run`, default `false`; optional `tab`, `timeout_ms`, and restrictions. The wrapper requires no
+RAWX capability; every child step classifies, admits, and audits independently under the same
+immutable invocation snapshot. Steps carry no restriction fields of their own.
+
+Any argument value may be an explicit reference object,
+`{"flow_ref":{"step":"earlier_id","pointer":"/facts/..."}}`, resolved from that step's canonical
+result envelope by JSON Pointer before the ordinary child decoder runs on the substituted
+arguments. A reference that does not resolve fails its step without effect.
+
+`dry_run:true` decodes and classifies every step without dispatching anything. Captured per-step
+envelopes stop being recorded past a bounded byte budget while execution continues to a truthful
+terminal aggregate; the aggregate reports applied, partial, or unknown effects. A flow with failed
+or unknown work is never repeat-safe. Facts: `completed`, `total`, `stopped`, and bounded per-step
+rows with each step's envelope where the budget allowed.
 
 ### `browser_record`
 
