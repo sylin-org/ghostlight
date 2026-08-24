@@ -362,6 +362,11 @@ test("browser actions return the subject in the effect receipt without a describ
     /sendResponse\(\{ ok: true, result: \{ activated: true, subject \} \}\)[\s\S]*?element\.click\(\)/,
     "the activation reply must cross to the worker before the blocking dispatch runs"
   );
+  assert.match(
+    content,
+    /sendResponse\(\{ ok: true, result: \{ filled_count: message\.fields\.length, submitted: Boolean\(submitElement\) \} \}\)[\s\S]*?submitElement\.click\(\)/,
+    "the fill reply must cross to the worker before the verified submit runs"
+  );
   assert.match(content, /source_subject: actionSubject\(source\)/);
   assert.match(content, /destination_subject: actionSubject\(destination\)/);
   assert.match(worker, /outcome: "activated"[\s\S]*?subject: result\.subject/);

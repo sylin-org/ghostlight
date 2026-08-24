@@ -380,6 +380,27 @@
       }
       return false;
     }
+    // Form fill with a submit control follows the same rule as activation: the submit click is
+    // the dispatch tail, and a submit handler that opens a page-blocking dialog would freeze
+    // this thread mid-click. Everything that can fail or throw runs first; the reply crosses to
+    // the service worker while the thread is still live; only the verified submit follows.
+    if (message.kind === "fill") {
+      try {
+        const elements = message.fields.map((field) => resolve(field.locator));
+        elements.forEach((element, index) => fillElement(element, message.fields[index].value));
+        let submitElement = null;
+        if (message.submit_locator) {
+          submitElement = resolve(message.submit_locator);
+          const owner = elements[0]?.closest?.("form") ?? null;
+          if (!owner || !owner.contains(submitElement)) throw new Error("submit control is not contained in the resolved form");
+        }
+        sendResponse({ ok: true, result: { filled_count: message.fields.length, submitted: Boolean(submitElement) } });
+        if (submitElement) submitElement.click();
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message ?? error) });
+      }
+      return false;
+    }
     Promise.resolve().then(async () => {
       if (message.kind === "read_text") {
         let whole;
@@ -410,17 +431,6 @@
       if (message.kind === "geometry") return geometry(resolve(message.locator));
       if (message.kind === "focus") { const element = requireActionable(resolve(message.locator), "focus"); const subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center" }); element.focus({ preventScroll: true }); return { focused: true, subject }; }
       if (message.kind === "clear") { const element = requireActionable(resolve(message.locator), "type"); if (credentialClass(element)) throw new Error("credential-class target requires user handoff"); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
-      if (message.kind === "fill") {
-        const elements = message.fields.map((field) => resolve(field.locator));
-        elements.forEach((element, index) => fillElement(element, message.fields[index].value));
-        if (message.submit_locator) {
-          const submitElement = resolve(message.submit_locator);
-          const owner = elements[0]?.closest?.("form") ?? null;
-          if (!owner || !owner.contains(submitElement)) throw new Error("submit control is not contained in the resolved form");
-          submitElement.click();
-        }
-        return { filled_count: message.fields.length, submitted: Boolean(message.submit_locator) };
-      }
       if (message.kind === "scroll") {
         let subject = null;
         if (message.locator) { const element = requireActionable(resolve(message.locator), "scroll"); subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); }

@@ -44,6 +44,7 @@ function contentHarness() {
     matches() { return true; }
     dispatchEvent(event) { this.events.push(event.type); return true; }
     click() { this.events.push("click"); }
+    focus() {}
     scrollIntoView() {}
   }
 
@@ -296,6 +297,57 @@ test("an unactionable activation target still refuses before any reply", async (
 
   assert.equal(refused.ok, false);
   assert.match(refused.error, /disabled/);
+});
+
+test("form fill reports the verified fields without a submit", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "text";
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const locator = inspected.result.targets[0].locator;
+
+  const filled = await harness.send({ kind: "fill", fields: [{ locator, value: "Aurora Drop 01" }] });
+
+  assert.equal(filled.result.filled_count, 1);
+  assert.equal(filled.result.submitted, false);
+});
+
+test("the fill reply crosses to the worker before the verified submit fires", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "text";
+  harness.input.closest = (selector) => (selector === "form" ? { contains: () => true } : null);
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const locator = inspected.result.targets[0].locator;
+  const order = [];
+  harness.input.click = () => order.push("submit");
+
+  const response = await harness.send(
+    { kind: "fill", fields: [{ locator, value: "Aurora Drop 01" }], submit_locator: locator },
+    (phase) => order.push(phase)
+  );
+
+  assert.deepEqual(order, ["reply", "submit"]);
+  assert.equal(response.result.filled_count, 1);
+  assert.equal(response.result.submitted, true);
+  assert.ok(harness.input.events.includes("input"), "the field value change still fired its input event");
+});
+
+test("a submit control outside the resolved form refuses before any reply", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "text";
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const locator = inspected.result.targets[0].locator;
+
+  const refused = await harness.send({
+    kind: "fill",
+    fields: [{ locator, value: "x" }],
+    submit_locator: locator
+  });
+
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /not contained/);
 });
 
 test("observation polling stops at its physical timeout without overshooting", async () => {
