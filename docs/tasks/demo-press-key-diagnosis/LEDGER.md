@@ -70,21 +70,41 @@ Mechanism, verified to the wire:
 1. The desk stage's bell handler calls `window.prompt()` synchronously
    (`/assets/demo.js`, `on("desk-bell", "click", ...)`; the page's own comment calls it "a
    real page-blocking dialog").
-2. Extension activation confirms through the content script
+2. Extension activation confirmed through the content script
    (`service-worker.js activate()` -> `content(tab_id, {kind:"activate"...})`), which lives
-   on the page's blocked main thread. The reply is physically impossible once the dialog is
-   open.
-3. No receipt and no error frame arrive; the trace shows only the orchestrator's own
-   cancellation being acknowledged after the 8 s default deadline
-   (`operation_timeout` fallback). `DeadlineAfterDispatch` then renders honestly as
-   "Sent, but the browser never confirmed what happened." -- the rendering path is correct;
-   the extension behavior is not.
+   on the page's blocked main thread. The reply was physically impossible once the dialog
+   opened.
+3. No receipt and no error frame arrived; the trace showed only the orchestrator's own
+   cancellation being acknowledged after the 8 s default deadline. `DeadlineAfterDispatch`
+   then rendered as "Sent, but the browser never confirmed what happened."
 
-Fix direction sketched (needs its own pass, owner eyes, and tests): during activation, race
-the content-script reply against the debugger-side dialog-opened event that
-`lib/debugger.js` already tracks browser-process-side; a dialog opening for the target's tab
-during the click window IS activation evidence and can complete the receipt (subject may be
-absent; `Activated.subject` is already optional). Never treat dialog-open as failure.
+### Sprint fix landed (2026-08-24, commit e5b21195)
+
+The content script now replies to `activate` BEFORE dispatching the click. Validation,
+subject computation, scroll-into-view, and event planning all run first; `sendResponse`
+crosses to the worker while the thread is still live; only the validated dispatch follows.
+A handler that freezes the page can no longer swallow the receipt -- the orchestrator gets
+its `Activated` outcome immediately and `browser_dialog` takes over from there. The event
+planning lives in `shared.activationPlan` (node-tested), which also corrects a latent bug:
+modified primary clicks previously synthesized `button: 2` (right-click) instead of `0`.
+Pins include a behavioral ordering test (reply strictly before dispatch) and a source pin
+that will fail if anyone reintroduces reply-after-dispatch.
+
+Live verification is pending one owner action: reload the unpacked extension at
+`chrome://extensions`, then rerun `scripts/demo-foundry.ps1` end to end -- the desk-stage
+beats should now pass.
+
+## Sprint companions landed the same day
+
+- `a7c7da4f` -- effect-unknown truthfulness: adapter `EffectUnknown` receipts route through
+  the unknown rendering with the browser's own reason in facts (`detail`) instead of
+  per-family receipt matching calling them incompatible receipts; an exhaustive table test
+  pins that only a true pre-dispatch disconnection may claim disconnection, and exactly the
+  four after-dispatch classes claim unknown effects. The audit now records bounded refusal
+  facts for every non-success terminal (`refusal_facts`) and stays free of them on
+  successes, whose facts can carry page-derived values.
+- RELEASE-CHECKLIST G1 gained the whole-catalog foundry demo as a standing candidate gate,
+  required again after any input-path, extension, or browser-relay batch.
 
 ## Environment state
 

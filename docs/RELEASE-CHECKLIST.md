@@ -129,6 +129,11 @@ Linux.
   policy-free.
 - [ ] Fresh isolated workspace build and process, CLI, PowerShell, policy, and workbench journeys
   pass on both Windows and Linux.
+- [ ] The whole-catalog foundry demo (`scripts/demo-foundry.ps1` or `demo-foundry.sh`) runs green
+  end to end against the deployed release graph, including the desk-stage dialog beats. Rerun it
+  whenever an input-path, extension, or browser-relay batch lands: automated suites have missed
+  page-state interactions that this rehearsal catches (foundry press_key and desk-bell defects,
+  2026-08-24).
 - [ ] Dependency license, ban, source, and advisory gates pass. The 17 accepted GTK/Tauri-chain
   warnings are rechecked against the frozen graph rather than assumed.
 - [ ] Release truth, repository integrity, documentation links, ASCII policy, and the complete 0.8

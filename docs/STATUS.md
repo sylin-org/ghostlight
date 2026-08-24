@@ -7,15 +7,15 @@ preserved `docs/0.8/` material carry history; this file does not rewrite it.
 
 ## In flight: foundry demo follow-ups
 
-The foundry demo's press_key failure is resolved: the beat now runs while the packet form is
-still visible, and primitive adapter refusals render the browser's own reason instead of a
-phantom disconnection (see
-[demo-press-key-diagnosis](tasks/demo-press-key-diagnosis/LEDGER.md) for the full trail).
-One follow-up defect is documented there and still open: clicks into page-blocking dialogs
-(the desk stage bell) never confirm, because content-script activation cannot reply once a
-synchronous `prompt()` has frozen the page. Live authority swaps on development machines go
-through `scripts/dev-loop.ps1` only; hand swaps race connector demand-start and produce
-duplicate instances.
+The foundry demo's press_key failure is resolved, and the desk-stage blocking-dialog click
+defect has its extension fix landed: activation now replies before dispatching, so a
+`window.prompt()`-opening handler can no longer swallow the receipt. Live proof of the desk
+beats is pending one unpacked-extension reload at `chrome://extensions`, then a full
+`scripts/demo-foundry.ps1` run. Effect-unknown receipts render truthfully with the browser's
+own reason, the audit carries bounded refusal facts for non-successes, and RELEASE-CHECKLIST
+G1 gained the whole-catalog demo as a standing gate. See
+[demo-press-key-diagnosis](tasks/demo-press-key-diagnosis/LEDGER.md). Live authority swaps on
+development machines go through `scripts/dev-loop.ps1` only.
 
 ## Published capability restoration
 
