@@ -88,10 +88,20 @@ Deviations: none yet.
 
 ### T7 -- uniform workspace tab echo
 
-Status: NOT STARTED.
+Status: NOT STARTED. Worklist enumerated 2026-08-24 by scanning every `succeeded` call for
+a `"tab"` key in its facts window. Sites WITHOUT a tab echo, to be fixed additively (add
+`"tab": <workspace handle>`; keep existing keys):
 
-Every tab-scoped success envelope echoes `"tab": <workspace handle>` under that key.
-Additive; existing keys stay so no consumer breaks.
+- forms.rs:447
+- pointer.rs:211, 307, 362, 423, 506
+- reading.rs:172, 287, 426
+- navigation.rs:134, 524, 605
+- recording.rs:106, 151, 386, 435, 460
+- sequence.rs:264, 359
+
+Deliberate exemptions: navigation.rs:84 (list_tabs -- no single tab), recording.rs:435/460
+(recording status/discard -- not tab-scoped). Each fix should reuse the already-selected
+binding's handle; where only a physical id exists, resolve through the lease first.
 
 Deviations: none yet.
 
