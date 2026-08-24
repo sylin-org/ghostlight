@@ -227,5 +227,29 @@ else
   outcome='Story complete: inspected, rejected, revised, evidenced, refused off-domain, and replayed. Recording retained until expiry.'
 fi
 
+# Whole-catalog coda. The story above is the narrative; this is the rehearsal, so one script
+# exercises every tool in the catalog. The dialog beats ring the desk stage's bell, whose
+# prompt() gives browser_dialog something honest to status, answer, and dismiss.
+step 'scroll stage' browser_scroll "$(jq -nc --arg tab "$tab" '{tab:$tab,direction:"down",amount:"page"}')" succeeded
+step 'scroll back' browser_scroll "$(jq -nc --arg tab "$tab" '{tab:$tab,direction:"up",amount:"medium"}')" succeeded
+step 'key to end' browser_press_key "$(jq -nc --arg tab "$tab" --arg target "$release_name" '{tab:$tab,target:$target,key:"End"}')" succeeded
+step 'read title' browser_execute "$(jq -nc --arg tab "$tab" '{tab:$tab,script:"document.title"}')" succeeded
+step 'seq scroll-wait' browser_sequence "$(jq -nc --arg tab "$tab" '{tab:$tab,steps:[{action:"scroll",direction:"down",amount:"small"},{action:"wait",condition:"text_present",value:"SYLIN"}]}')" succeeded
+step 'flow title-find' browser_flow "$(jq -nc --arg tab "$tab" '{tab:$tab,steps:[{id:"title",tool:"browser_execute",arguments:{script:"document.title"}},{id:"find it",tool:"browser_find",arguments:{text:{flow_ref:{step:"title",pointer:"/facts/value"}}}}]}')" succeeded
+step 'demo index' browser_navigate "$(jq -nc --arg tab "$tab" --arg index 'https://sylin.org/ghostlight/demo/' '{tab:$tab,url:$index}')" succeeded
+step 'history back' browser_history "$(jq -nc --arg tab "$tab" '{tab:$tab,action:"back"}')" succeeded
+
+step 'desk stage' browser_navigate "$(jq -nc --arg tab "$tab" --arg desk 'https://sylin.org/ghostlight/demo/desk/' '{tab:$tab,url:$desk}')" succeeded
+find_target "$tab" 'Ring the bell' button
+bell=$found_target
+step 'ring once' browser_click "$(jq -nc --arg tab "$tab" --arg target "$bell" '{tab:$tab,target:$target}')" succeeded
+step 'dialog status' browser_dialog "$(jq -nc --arg tab "$tab" '{tab:$tab,action:"status"}')" succeeded
+step 'dialog answer' browser_dialog "$(jq -nc --arg tab "$tab" '{tab:$tab,action:"respond",text:"Ghostlight was here"}')" succeeded
+step 'bell answered' browser_wait "$(jq -nc --arg tab "$tab" '{tab:$tab,condition:"text_present",value:"the bell says"}')" succeeded
+step 'ring again' browser_click "$(jq -nc --arg tab "$tab" --arg target "$bell" '{tab:$tab,target:$target}')" succeeded
+step 'dialog dismiss' browser_dialog "$(jq -nc --arg tab "$tab" '{tab:$tab,action:"dismiss"}')" succeeded
+step 'bell silent' browser_wait "$(jq -nc --arg tab "$tab" '{tab:$tab,condition:"text_present",value:"dismissed without an answer"}')" succeeded
+
 printf '\n%s\n' "$outcome"
+echo 'Whole catalog rehearsed, ending with the desk bell answering and dismissing.'
 echo 'The tab stays open for your capture; close it when you are done.'

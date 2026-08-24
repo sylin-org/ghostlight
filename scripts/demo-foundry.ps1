@@ -251,8 +251,53 @@ if (-not $KeepRecording) {
     $null = Step 'erase bytes' 'browser_record' @{ action = 'discard' }
 }
 
+# 8. Whole-catalog coda. The story above is the narrative; this is the rehearsal, so one script
+# exercises every tool in the catalog. The dialog beats ring the desk stage's bell, whose
+# prompt() gives browser_dialog something honest to status, answer, and dismiss.
+$null = Step 'scroll stage' 'browser_scroll' @{ tab = $tab; direction = 'down'; amount = 'page' }
+$null = Step 'scroll back' 'browser_scroll' @{ tab = $tab; direction = 'up'; amount = 'medium' }
+$null = Step 'key to end' 'browser_press_key' @{
+    tab = $tab; target = (Target $after 'textbox' 'Release name'); key = 'End'
+}
+$null = Step 'read title' 'browser_execute' @{ tab = $tab; script = 'document.title' }
+$null = Step 'seq scroll-wait' 'browser_sequence' @{
+    tab = $tab
+    steps = @(
+        @{ action = 'scroll'; direction = 'down'; amount = 'small' }
+        @{ action = 'wait'; condition = 'text_present'; value = 'SYLIN' }
+    )
+}
+$null = Step 'flow title-find' 'browser_flow' @{
+    tab = $tab
+    steps = @(
+        @{ id = 'title'; tool = 'browser_execute'; arguments = @{ script = 'document.title' } }
+        @{ id = 'find it'; tool = 'browser_find'; arguments = @{
+            text = @{ flow_ref = @{ step = 'title'; pointer = '/facts/value' } }
+        } }
+    )
+}
+$null = Step 'demo index' 'browser_navigate' @{ tab = $tab; url = 'https://sylin.org/ghostlight/demo/' }
+$null = Step 'history back' 'browser_history' @{ tab = $tab; action = 'back' }
+
+$null = Step 'desk stage' 'browser_navigate' @{ tab = $tab; url = 'https://sylin.org/ghostlight/demo/desk/' }
+$bell = Found $tab 'Ring the bell' 'button'
+$null = Step 'ring once' 'browser_click' @{ tab = $tab; target = $bell }
+$null = Step 'dialog status' 'browser_dialog' @{ tab = $tab; action = 'status' }
+$null = Step 'dialog answer' 'browser_dialog' @{
+    tab = $tab; action = 'respond'; text = 'Ghostlight was here'
+}
+$null = Step 'bell answered' 'browser_wait' @{
+    tab = $tab; condition = 'text_present'; value = 'the bell says'
+}
+$null = Step 'ring again' 'browser_click' @{ tab = $tab; target = $bell }
+$null = Step 'dialog dismiss' 'browser_dialog' @{ tab = $tab; action = 'dismiss' }
+$null = Step 'bell silent' 'browser_wait' @{
+    tab = $tab; condition = 'text_present'; value = 'dismissed without an answer'
+}
+
 Remove-Item -LiteralPath $shot -Force -ErrorAction SilentlyContinue
 Write-Host ''
 Write-Host 'Story complete: inspected, rejected, revised, evidenced, refused off-domain, replayed, erased.'
+Write-Host 'Whole catalog rehearsed, ending with the desk bell answering and dismissing.'
 Write-Host 'The tab stays open for your capture; close it when you are done.'
 exit 0
