@@ -2,7 +2,7 @@
 
 ## Contract rules
 
-The 23 tools below are the complete 1.0 catalog. Input objects and nested objects set
+The 24 tools below are the complete 1.0 catalog. Input objects and nested objects set
 `additionalProperties` to `false`. Every input schema is a top-level object without root-level
 `oneOf`, `allOf`, or `anyOf`, because current Kiro and Bedrock reject those otherwise valid JSON
 Schema forms. Conditional inputs advertise one portable teaching envelope; the typed decoder
@@ -426,3 +426,18 @@ post data, query strings, and fragments. Results contain ordered bounded entries
 cursor, truncation and eviction facts, and counts of host-filtered entries. Diagnostic evidence is
 untrusted model-visible content. It is never policy input, audit payload, persistent storage, or
 page presentation.
+
+### `policy_explain`
+
+Read the authority in force as one compiled answer: situation sentence, one line per capability
+stating its polarity and deciding layer, the rules behind those lines, authored settings,
+permanent ceilings, browser startup posture, organization identity, and passport provenance.
+Available under every authority including all-open; use it to learn why another call was refused
+or what is allowed before acting.
+
+Inputs: none beyond optional restrictions. Capability: empty requirement set (always available).
+Read-only, never dispatches a browser, holds no workspace lease, and writes nothing.
+
+The result carries the orchestrator's compiled projection -- the same compilation the workbench
+Policy destination renders -- with layer document texts and filesystem paths withheld from model
+results. The summary names its measurement: capability areas explained over layers in force.

@@ -4,6 +4,7 @@ mod flow;
 mod forms;
 mod navigation;
 mod pointer;
+mod policy;
 mod reading;
 mod recording;
 pub mod result;
@@ -497,6 +498,7 @@ impl ApplicationExecutor {
             Operation::HandleDialog(value) => self.handle_dialog(context, lease, value),
             Operation::Diagnose(value) => self.diagnose(context, lease, value),
             Operation::Record(value) => self.perform_record(context, Some(lease), value),
+            Operation::ExplainPolicy(_) => self.explain_policy(context),
         }
     }
 
@@ -507,6 +509,7 @@ impl ApplicationExecutor {
     ) -> Terminal {
         match operation {
             Operation::Record(value) => self.perform_record(context, None, value),
+            Operation::ExplainPolicy(_) => self.explain_policy(context),
             _ => {
                 unreachable!("only recording cleanup and client export bypass the workspace lease")
             }
@@ -1567,7 +1570,7 @@ fn operation_requires_workspace_lease(operation: &Operation) -> bool {
             target: None,
             ..
         }) if matches!(action.as_str(), "status" | "stop" | "save" | "discard")
-    )
+    ) && !matches!(operation, Operation::ExplainPolicy(_))
 }
 
 fn permitted() -> Decision {
@@ -1646,6 +1649,7 @@ fn operation_activity(operation: &Operation) -> PresentationActivity {
         Operation::RunFlow(_) => PresentationActivity::Quiet,
         Operation::HandleDialog(_) => PresentationActivity::Dialog,
         Operation::Diagnose(_) => PresentationActivity::Quiet,
+        Operation::ExplainPolicy(_) => PresentationActivity::Quiet,
         Operation::Record(value) if value.action == "start" => PresentationActivity::Screenshot,
         Operation::Record(_) => PresentationActivity::Quiet,
     }

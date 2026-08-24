@@ -152,7 +152,7 @@ whose heartbeat was acknowledged does not. The browser connector remains unaware
 
 ### Language
 
-Owns the one 23-tool catalog, JSON schemas, descriptions, examples, MCP annotations, decoder
+Owns the one 24-tool catalog, JSON schemas, descriptions, examples, MCP annotations, decoder
 defaults, validation, typed operations, output schemas, and mapping of domain outcomes to language
 facts. Nothing outside this context defines a tool or an alternate client dialect. Conditional
 requirements are present in the advertised schema rather than left only to runtime validation.

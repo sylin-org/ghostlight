@@ -290,7 +290,7 @@ listed here.
   and two supported Chromium families where available.
 - [ ] Exercise at least three public MCP harnesses against the packaged connector. Include a
   portability-sensitive client such as Kiro/Bedrock.
-- [ ] Verify the exact 22-tool catalog and compatible MCP revision negotiation.
+- [ ] Verify the exact 24-tool catalog and compatible MCP revision negotiation.
 - [ ] Verify popup and options disconnected, incompatible, setup, connected, and hold states plus
   extension identity across reload.
 - [ ] Add a focused regression proof for every defect found and rerun its visible journey.

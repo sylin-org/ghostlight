@@ -8,7 +8,7 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 
 ## Contract gates
 
-1. The catalog contains exactly the 23 tools in `LANGUAGE.md`, in documented order, with no
+1. The catalog contains exactly the 24 tools in `LANGUAGE.md`, in documented order, with no
    simultaneously advertised legacy dialect or client-selected profile. Page JavaScript is
    `browser_execute`; the unreleased `browser_evaluate` name is neither advertised nor decoded.
 2. Catalog schemas are typo-closed at every object level and match every decoder requirement,
@@ -129,7 +129,7 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 20. The Policy Passport shows organization, verification, sequence, freshness, source class,
     timing, rationale, and contacts without source address, credentials, keys, or rules.
 21. Authority changes update policy-aware catalog discovery and emit one MCP tool-list change;
-    all-open remains the exact canonical 23-tool catalog.
+    all-open remains the exact canonical 24-tool catalog.
 
 ## Browser job journeys
 
@@ -304,7 +304,7 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 4. The full Rust workspace and extension test suites pass in isolated build output.
 5. Real MCP stdio, service IPC, browser relay, native messaging, and visible Chromium complete the
    open, read, close journey.
-6. The repo-built stack starts, the MCP client sees the exact 23-tool catalog, and the directly loaded
+6. The repo-built stack starts, the MCP client sees the exact 24-tool catalog, and the directly loaded
    unpacked extension reports a compatible adapter connection.
 7. Every defect found in visible-browser use has a focused regression proof and is reverified.
 8. The unpacked extension renders the correct toolbar icon, opens a usable popup, opens settings,

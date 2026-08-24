@@ -222,6 +222,12 @@ pub const DIRECTORY: &[CapabilityVariant] = &[
         CapabilitySet::READ,
         "Read bounded opt-in browser diagnostics.",
     ),
+    variant(
+        "policy_explain",
+        None,
+        CapabilitySet::EMPTY,
+        "Explain the authority in force.",
+    ),
 ];
 
 /// Return every reachable requirement variant for one advertised tool.
@@ -248,6 +254,7 @@ pub fn requirements(operation: &Operation) -> CapabilitySet {
         | Operation::Wait(_)
         | Operation::Diagnose(_) => CapabilitySet::READ,
         Operation::ResizeWindow(_) => CapabilitySet::EMPTY,
+        Operation::ExplainPolicy(_) => CapabilitySet::EMPTY,
         Operation::Click(_)
         | Operation::TypeText(_)
         | Operation::PressKey(_)
@@ -357,6 +364,7 @@ mod tests {
                 json!({"action":"save","target":"target_1"})
             }
             ("browser_diagnose", None) => json!({}),
+            ("policy_explain", None) => json!({}),
             (tool, variant) => panic!(
                 "DIRECTORY grew a (tool={tool}, variant={variant:?}) entry with no fixture in \
                  this test; add one so its requirements stay cross-checked against decode()"
@@ -390,6 +398,7 @@ mod tests {
             "browser_dialog",
             "browser_record",
             "browser_diagnose",
+            "policy_explain",
         ]
         .into_iter()
         .collect();

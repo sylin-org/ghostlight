@@ -292,7 +292,7 @@ The 1.0 policy product is restored on current orchestrator seams through `44f84e
   intersection, sacred destinations, stable denial ids, grant attribution, and managed publish
   sequence are live.
 - Policy-aware catalog projection emits the standard MCP tool-list change notification while
-  all-open remains the exact 23-tool catalog.
+  all-open remains the exact 24-tool catalog.
 - Local and managed policy reload atomically for future snapshots. Bad replacements keep last
   valid; configured cold start without authority fails closed.
 - Customer-hosted file or HTTPS delivery uses signed monotonic bundles, required Ed25519, optional
@@ -761,7 +761,7 @@ full visible browser matrix remain owed.
 
 - One Rust 2021 workspace builds four roles: the shared typed bridge, `ghostlight` orchestrator,
   generic MCP connector, and opaque browser connector.
-- The orchestrator owns the 23-tool model-facing catalog, workspace aggregate, one executor and
+- The orchestrator owns the 24-tool model-facing catalog, workspace aggregate, one executor and
   completion path, immutable authority snapshots, runtime controls, content-minimized audit,
   browser port, and content-free presentation decisions.
 - The page-context JavaScript tool is `browser_execute`, not `browser_evaluate`. The execute name
@@ -1163,15 +1163,11 @@ The executor-split batch is complete through `4d633fbc`.
 On 2026-08-24 the owner promoted four items below into the pre-freeze window
 ([tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md)): the ServiceClient adoption (landed
 the same day -- the bridge is now every edge's handshake home), the unsettled-row color
-treatment (landed the same day), the model-facing policy explain operation, and ADR-0105 stages
+treatment (landed the same day), the model-facing policy explain operation (landed the same day
+as [ADR-0136](adr/0136-model-facing-policy-explain.md) and `policy_explain`), and ADR-0105 stages
 2 and 3. They remain listed here until their tasks land; everything else in this section stays
 outside 1.0.
 
-- ADR-0121 Decision 3's always-available policy explain operation still exists only as a CLI command
-  over a file path. The 23-tool catalog has no policy tool, so the model cannot ask what current
-  authority permits, even though a person now can.
-  [ADR-0122](adr/0122-readable-policy-destination-and-authored-user-layer.md) Decision 9 defers the
-  model-facing rendering to a later ADR; the projection it would use exists.
 - ADR-0105 stages 2 and 3 are blocked on an owner decision, recorded in that ADR's amendment.
   Identifying the socket peer and verifying a signature are both raw Win32 FFI, and the workspace
   sets `unsafe_code = "forbid"`, which no scoped `#[allow]` can override. The choice is to relax

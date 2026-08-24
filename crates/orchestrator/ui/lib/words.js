@@ -370,7 +370,8 @@
     browser_sequence: "workwheel",
     browser_flow: "workwheel",
     browser_record: "camera",
-    browser_diagnose: "scan"
+    browser_diagnose: "scan",
+    policy_explain: "scan"
   };
 
   const glyphFor = entry =>

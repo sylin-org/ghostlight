@@ -1486,7 +1486,7 @@ mod tests {
     fn every_catalog_tool_has_a_medallion() {
         let app = &surface_source();
         let tools = crate::language::catalog();
-        assert_eq!(tools.len(), 23, "expected the complete catalog");
+        assert_eq!(tools.len(), 24, "expected the complete catalog");
         for tool in tools {
             assert!(
                 app.contains(&format!("{}: \"", tool.name)),

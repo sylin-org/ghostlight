@@ -132,6 +132,9 @@ pub enum Operation {
     Record(Record),
     /// Read bounded opt-in browser diagnostics.
     Diagnose(Diagnose),
+
+    /// Explain the authority in force (ADR-0136).
+    ExplainPolicy(ExplainPolicy),
 }
 
 impl Operation {
@@ -167,6 +170,7 @@ impl Operation {
             Self::HandleDialog(value) => &value.restrictions,
             Self::Record(value) => &value.restrictions,
             Self::Diagnose(value) => &value.restrictions,
+            Self::ExplainPolicy(value) => &value.restrictions,
         }
     }
 
@@ -197,6 +201,7 @@ impl Operation {
             Self::HandleDialog(_) => "browser_dialog",
             Self::Record(_) => "browser_record",
             Self::Diagnose(_) => "browser_diagnose",
+            Self::ExplainPolicy(_) => "policy_explain",
         }
     }
 }
@@ -878,6 +883,16 @@ pub struct Diagnose {
     pub restrictions: RequestRestrictions,
 }
 
+/// Input for the always-available policy explain operation (ADR-0136).
+///
+/// There is nothing to configure: the projection is compiled from the authority in force, so the
+/// input carries only the shared request restrictions every tool accepts.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct ExplainPolicy {
+    #[serde(flatten)]
+    pub restrictions: RequestRestrictions,
+}
+
 /// A model-language validation failure before work starts.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum LanguageError {
@@ -1131,6 +1146,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_dialog" => decode_dialog(input),
         "browser_record" => decode_record(input),
         "browser_diagnose" => decode_diagnose(input),
+        "policy_explain" => decode_explain_policy(input),
         other => Err(LanguageError::UnknownTool(other.into())),
     }
 }
@@ -1431,6 +1447,11 @@ fn decode_diagnose(input: Value) -> Result<Operation, LanguageError> {
         },
     )?;
     Ok(Operation::Diagnose(value))
+}
+
+fn decode_explain_policy(input: Value) -> Result<Operation, LanguageError> {
+    let value: ExplainPolicy = parse(input, &[], |_| Ok(()))?;
+    Ok(Operation::ExplainPolicy(value))
 }
 
 fn has_field(input: &Value, field: &str) -> bool {
@@ -2415,11 +2436,11 @@ mod tests {
     #[test]
     fn catalog_has_unique_exact_tools_and_typo_closed_schemas() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 23);
+        assert_eq!(catalog.len(), 24);
         let mut names: Vec<_> = catalog.iter().map(|tool| tool.name.as_str()).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 23);
+        assert_eq!(names.len(), 24);
         for tool in catalog {
             assert!(tool.input_schema.is_object());
             assert!(tool.output_schema.is_some());

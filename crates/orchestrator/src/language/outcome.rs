@@ -194,6 +194,8 @@ pub enum SavedTo {
 pub enum Outcome {
     /// The workspace's bound tabs were listed, read live from the browser.
     TabsListed { count: usize },
+    /// The authority in force was explained to the model (ADR-0136).
+    PolicyExplained { capabilities: usize, layers: usize },
     /// A semantic selector matched zero or several visible controls.
     SelectorUnresolved { matched: usize },
     /// One governed result-aware flow finished.
@@ -384,6 +386,14 @@ impl Outcome {
             Self::TabsListed { count } => {
                 format!("Listed {}.", counted(*count, "bound tab", "bound tabs"))
             }
+            Self::PolicyExplained {
+                capabilities,
+                layers,
+            } => format!(
+                "Explained current authority across {} over {}.",
+                counted(*capabilities, "capability area", "capability areas"),
+                counted(*layers, "layer", "layers")
+            ),
             Self::TabActivated { host } => {
                 format!("Brought {} into view.", place(host, "the controlled tab"))
             }
@@ -693,6 +703,13 @@ impl Outcome {
             Self::TabsListed { count }
             | Self::SequenceRan {
                 completed: count, ..
+            } => Observed {
+                count: measured(*count),
+                ..Observed::default()
+            },
+            Self::PolicyExplained {
+                capabilities: count,
+                ..
             } => Observed {
                 count: measured(*count),
                 ..Observed::default()
@@ -1396,6 +1413,20 @@ mod tests {
             (Outcome::TabsListed { count: 4 }, "Listed 4 bound tabs."),
             (Outcome::TabsListed { count: 1 }, "Listed 1 bound tab."),
             (
+                Outcome::PolicyExplained {
+                    capabilities: 8,
+                    layers: 2,
+                },
+                "Explained current authority across 8 capability areas over 2 layers.",
+            ),
+            (
+                Outcome::PolicyExplained {
+                    capabilities: 1,
+                    layers: 1,
+                },
+                "Explained current authority across 1 capability area over 1 layer.",
+            ),
+            (
                 Outcome::TabActivated {
                     host: Some("example.com".into()),
                 },
@@ -1834,6 +1865,13 @@ mod tests {
 
         let counted = [
             (Outcome::TabsListed { count: 3 }, 3),
+            (
+                Outcome::PolicyExplained {
+                    capabilities: 3,
+                    layers: 1,
+                },
+                3,
+            ),
             (
                 Outcome::TextRead {
                     words: 3,

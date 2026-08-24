@@ -27,8 +27,9 @@ Keep a 0.8 package and a 1.0 source build apart; they are not interchangeable.
 
 ## What you get
 
-- **24 browser tools** covering tabs, navigation, reading a page, screenshots, semantic clicks and
-  hovers, form input, file upload, scripts, waits, short sequences, and dialogs. One call carries
+- **24 catalog tools**: 23 browser tools covering tabs, navigation, reading a page, screenshots,
+  semantic clicks and hovers, form input, file upload, scripts, waits, short sequences, and
+  dialogs, plus one policy tool that explains the authority in force. One call carries
   the intent; Ghostlight performs the browser steps behind it.
 - **One truthful answer per call**: what happened, what changed in the browser, what is ready, and
   whether running it again is safe. Ghostlight writes that answer, never the page, and adds at most

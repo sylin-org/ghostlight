@@ -4,9 +4,36 @@ One task = one commit. RESUME HERE is always the first open task.
 
 ## RESUME HERE
 
-Next task: T3 (model-facing policy explain tool). T1 and T2 are complete.
+Next task: T4 (ADR-0105 stages 2 and 3). T1 through T3 are complete.
 
 ## Tasks
+
+### T3 -- model-facing policy explain tool
+
+Status: COMPLETE (2026-08-24).
+
+Landed shape: [ADR-0136](../../adr/0136-model-facing-policy-explain.md) closes the ADR-0122
+Decision 9 deferral. `policy_explain` joins the catalog as its twenty-fourth tool with an EMPTY
+requirement set, local-read annotations (open_world false), no browser crossing, and no workspace
+lease. The handler serves `GovernanceFacade::effective_authority()` -- the same compilation the
+workbench renders -- with layer document texts and filesystem paths withheld from model results
+per ADR-0136 Decision 2. New `Outcome::PolicyExplained { capabilities, layers }` carries the
+sentence and measurement; oracle pins cover singular/plural and sentence/measurement agreement.
+Every 23-pin moved to 24: EXPECTED_TOOL_NAMES, annotations table, language count assertions,
+capability-map id set plus decode fixture, desktop medallion test, cli/process/live journey
+counts. Active-truth docs reconciled: LANGUAGE (new section), ARCHITECTURE, ACCEPTANCE,
+STATUS, README (its stale "24 browser tools" claim is now precise), RELEASE-CHECKLIST G7 row
+(was a stale "22-tool").
+
+Live proof on the deployed Windows authority after the sanctioned dev-loop deploy:
+`ghostlight call policy_explain "{}"` returned status succeeded, effect none, repeat-safe,
+summary "Explained current authority across 4 capability areas over 0 layers." on the all-open
+machine, with no path fields in the payload. `tests/live-journey.mjs` served the exact 24-tool
+catalog against real attached Chrome and completed open/read/screenshot/region work.
+
+Gates: fmt; clippy `-D warnings`; full workspace suite (391 Rust); 137 extension tests;
+node --check on changed scripts; process-journey and cli-journey against `.target-t1/debug`;
+live-journey against the deployed stack.
 
 ### T2 -- unsettled readiness rows get color treatment
 

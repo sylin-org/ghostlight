@@ -174,6 +174,13 @@ pub fn catalog() -> Vec<ToolDefinition> {
             diagnose_schema(),
             Hints::browser_read(),
         ),
+        tool(
+            "policy_explain",
+            "Explain policy",
+            "Read the authority in force as one compiled answer: situation sentence, one line per capability with its deciding layer, the rules behind those lines, permanent ceilings, and each layer's document. Available under every authority, including all-open; use it to learn why another call was refused or what is allowed before acting.",
+            explain_policy_schema(),
+            Hints::local_read(),
+        ),
     ]
 }
 
@@ -204,6 +211,16 @@ impl Hints {
             destructive: false,
             idempotent: true,
             open_world: true,
+        }
+    }
+
+    /// A read that never touches a browser or the network at all (ADR-0136).
+    const fn local_read() -> Self {
+        Self {
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+            open_world: false,
         }
     }
 
@@ -1417,6 +1434,11 @@ fn record_id_branch(action: &str, description: &str) -> Value {
     )
 }
 
+/// Input schema for the policy explain operation: nothing beyond the shared restrictions.
+fn explain_policy_schema() -> Value {
+    examples(object(Vec::new(), Vec::new()), vec![json!({})])
+}
+
 fn diagnose_schema() -> Value {
     examples(
         object(
@@ -1610,7 +1632,7 @@ mod tests {
     use crate::governance::GovernanceFacade;
     use crate::language::RequestRestrictions;
 
-    const EXPECTED_TOOL_NAMES: [&str; 23] = [
+    const EXPECTED_TOOL_NAMES: [&str; 24] = [
         "browser_tabs",
         "browser_navigate",
         "browser_history",
@@ -1634,6 +1656,7 @@ mod tests {
         "browser_flow",
         "browser_record",
         "browser_diagnose",
+        "policy_explain",
     ];
 
     #[test]
@@ -1724,6 +1747,7 @@ mod tests {
             ("browser_flow", false, true, false, true),
             ("browser_record", false, true, false, true),
             ("browser_diagnose", true, false, true, true),
+            ("policy_explain", true, false, true, false),
         ];
 
         for (tool, &(name, read_only, destructive, idempotent, open_world)) in
