@@ -19,6 +19,34 @@ test("credential metadata is classified without inspecting values", () => {
   assert.equal(shared.isCredentialMetadata({ type: "text", name: "display_name" }), false);
 });
 
+test("a plain primary click plans the native dispatch", () => {
+  assert.deepEqual(shared.activationPlan({ button: "primary", click_count: 1, modifiers: [] }), { native: true, clicks: [] });
+});
+
+test("modified and repeated clicks plan synthetic events with the right geometry", () => {
+  const double = shared.activationPlan({ button: "primary", click_count: 2, modifiers: [] });
+  assert.equal(double.native, false);
+  assert.equal(double.clicks.length, 2);
+  for (const init of double.clicks) {
+    assert.equal(init.button, 0);
+    assert.equal(init.detail, 2);
+    assert.equal(init.bubbles, true);
+    assert.equal(init.cancelable, true);
+    assert.equal(init.composed, true);
+  }
+  const right = shared.activationPlan({ button: "right", click_count: 1, modifiers: [] });
+  assert.deepEqual(right.clicks, [{ bubbles: true, cancelable: true, composed: true, button: 2, detail: 1, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false }]);
+  const middle = shared.activationPlan({ button: "middle", click_count: 3, modifiers: [] });
+  assert.equal(middle.clicks.length, 3);
+  assert.ok(middle.clicks.every((init) => init.button === 1 && init.detail === 3));
+});
+
+test("modifier keys ride every planned synthetic click", () => {
+  const plan = shared.activationPlan({ button: "primary", click_count: 1, modifiers: ["Control", "Shift"] });
+  assert.equal(plan.native, false);
+  assert.deepEqual(plan.clicks, [{ bubbles: true, cancelable: true, composed: true, button: 0, detail: 1, ctrlKey: true, metaKey: false, shiftKey: true, altKey: false }]);
+});
+
 test("presentation labels are fixed and content-free", () => {
   assert.equal(shared.presentationLabel("start"), "Ghostlight starting");
   assert.equal(shared.presentationLabel("attention"), "Ghostlight needs you");
@@ -328,7 +356,12 @@ test("browser actions return the subject in the effect receipt without a describ
   const content = readFileSync(join(root, "content.js"), "utf8");
   const worker = readFileSync(join(root, "service-worker.js"), "utf8");
 
-  assert.match(content, /return \{ activated: true, subject \}/);
+  assert.match(content, /sendResponse\(\{ ok: true, result: \{ activated: true, subject \} \}\)/);
+  assert.match(
+    content,
+    /sendResponse\(\{ ok: true, result: \{ activated: true, subject \} \}\)[\s\S]*?element\.click\(\)/,
+    "the activation reply must cross to the worker before the blocking dispatch runs"
+  );
   assert.match(content, /source_subject: actionSubject\(source\)/);
   assert.match(content, /destination_subject: actionSubject\(destination\)/);
   assert.match(worker, /outcome: "activated"[\s\S]*?subject: result\.subject/);

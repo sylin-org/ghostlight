@@ -200,6 +200,25 @@
     return { kind: "heartbeat_ack", sequence: frame.sequence };
   }
 
+  // Plan one activation's dispatch without touching the DOM, so the content script can send its
+  // reply before the click runs: a handler that opens a page-blocking dialog freezes the page's
+  // main thread inside the dispatch, and a reply that waited for the dispatch to finish could
+  // then never arrive. `native` selects element.click(); otherwise each entry in `clicks` is a
+  // plain MouseEventInit-shaped object for new MouseEvent("click", init).
+  function activationPlan(message) {
+    const modifiers = Array.isArray(message.modifiers) ? message.modifiers : [];
+    if (message.button === "primary" && message.click_count === 1 && modifiers.length === 0) {
+      return { native: true, clicks: [] };
+    }
+    const modifierInit = { ctrlKey: modifiers.includes("Control"), metaKey: modifiers.includes("Meta"), shiftKey: modifiers.includes("Shift"), altKey: modifiers.includes("Alt") };
+    const button = message.button === "middle" ? 1 : message.button === "right" ? 2 : 0;
+    const clicks = [];
+    for (let count = 0; count < message.click_count; count += 1) {
+      clicks.push({ bubbles: true, cancelable: true, composed: true, button, detail: message.click_count, ...modifierInit });
+    }
+    return { native: false, clicks };
+  }
+
   return Object.freeze({
     NATIVE_HOST_NAME,
     ADAPTER_PROTOCOL_MAJOR,
@@ -210,6 +229,7 @@
     modifierMask,
     keyDescriptor,
     dragPackets,
+    activationPlan,
     presentationLabel,
     activityLabel,
     browserEventFrame,

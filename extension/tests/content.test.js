@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const vm = require("node:vm");
+const sharedModule = require("../lib/shared.js");
 
 function contentHarness() {
   let listener;
@@ -130,6 +131,7 @@ function contentHarness() {
     scrollBy() {},
     scrollTo() {},
     GhostlightShared: {
+      ...sharedModule,
       bounded(value, maximum) { return String(value ?? "").slice(0, maximum); },
       isCredentialMetadata() { return false; }
     },
@@ -148,10 +150,17 @@ function contentHarness() {
     { filename: "content.js" }
   );
 
-  async function send(message) {
+  async function send(message, observe) {
     return new Promise((resolve) => {
-      const asynchronous = listener(message, {}, resolve);
-      assert.equal(asynchronous, true);
+      const asynchronous = listener(message, {}, (value) => {
+        observe?.("reply");
+        resolve(value);
+      });
+      // Activation answers synchronously through sendResponse and closes the channel; every
+      // other primitive keeps the channel open and answers later.
+      if (asynchronous !== true && asynchronous !== false) {
+        throw new Error("listener returned an unexpected channel flag");
+      }
     });
   }
 
@@ -249,6 +258,44 @@ test("the activation receipt names the physical element it used", async () => {
   assert.equal(activated.result.subject.role, "button");
   assert.equal(activated.result.subject.name, "Save changes");
   assert.deepEqual(harness.input.events, ["click"]);
+});
+
+test("the activation reply crosses to the worker before the dispatch runs", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "submit";
+  harness.input.setAttribute("value", "Save changes");
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+
+  const order = [];
+  harness.input.click = () => order.push("dispatch");
+  const response = await harness.send(
+    { kind: "activate", locator: inspected.result.targets[0].locator, button: "primary", click_count: 1 },
+    (phase) => order.push(phase)
+  );
+
+  assert.deepEqual(order, ["reply", "dispatch"]);
+  assert.equal(response.result.activated, true);
+  assert.equal(response.result.subject.name, "Save changes");
+});
+
+test("an unactionable activation target still refuses before any reply", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "submit";
+  harness.input.setAttribute("value", "Save changes");
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+
+  harness.input.disabled = true;
+  const refused = await harness.send({
+    kind: "activate",
+    locator: inspected.result.targets[0].locator,
+    button: "primary",
+    click_count: 1
+  });
+
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /disabled/);
 });
 
 test("observation polling stops at its physical timeout without overshooting", async () => {
