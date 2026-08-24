@@ -1270,18 +1270,40 @@ impl ApplicationExecutor {
             };
         }
         if error.effect_unknown() {
-            let facts = match &error {
-                BrowserError::EffectUnknown(detail) => {
-                    json!({"reason":"browser_effect_unknown","detail":detail})
-                }
-                _ => json!({"reason":"browser_effect_unknown"}),
+            // Every after-dispatch class is an honest unknown: name its phase so the caller
+            // can tell a silent adapter from a spent deadline, and give deadlines their own
+            // sentence instead of the disconnection costume they used to wear.
+            let (refusal, facts) = match &error {
+                BrowserError::EffectUnknown(detail) => (
+                    Refusal::EffectUnknown,
+                    json!({"reason":"browser_effect_unknown","detail":detail,"phase":"adapter_reported"}),
+                ),
+                BrowserError::DeadlineAfterDispatch => (
+                    Refusal::DeadlineExpired {
+                        before_dispatch: false,
+                    },
+                    json!({"reason":"deadline","phase":"after_dispatch"}),
+                ),
+                BrowserError::DisconnectedAfterDispatch | BrowserError::CancelledAfterDispatch => (
+                    Refusal::EffectUnknown,
+                    json!({"reason":"browser_effect_unknown","phase":"after_dispatch"}),
+                ),
+                _ => (
+                    Refusal::EffectUnknown,
+                    json!({"reason":"browser_effect_unknown","phase":"unknown"}),
+                ),
             };
-            return self.unknown(
+            return self.unknown(context, decision, physical_id, refusal, facts);
+        }
+        if matches!(error, BrowserError::DeadlineBeforeDispatch) {
+            return self.failed(
                 context,
                 decision,
                 physical_id,
-                Refusal::EffectUnknown,
-                facts,
+                Refusal::DeadlineExpired {
+                    before_dispatch: true,
+                },
+                json!({"reason":"deadline","phase":"before_dispatch"}),
             );
         }
         let status = if matches!(error, BrowserError::CancelledBeforeDispatch) {
@@ -2031,6 +2053,46 @@ mod tests {
                 "{name} effect-unknown classification drifted"
             );
         }
+    }
+
+    /// Deadlines speak for themselves instead of claiming disconnection, and carry their
+    /// phase so the caller can tell a spent budget from a silent adapter.
+    #[test]
+    fn deadlines_speak_for_themselves_instead_of_claiming_disconnection() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
+
+        browser.push(Err(BrowserError::DeadlineBeforeDispatch));
+        let before = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(before.status, Status::Failed);
+        assert!(before
+            .summary
+            .contains("ran out of time before reaching the browser"));
+        assert!(!before.summary.contains("disconnected"));
+        assert_eq!(before.facts["reason"], "deadline");
+        assert_eq!(before.facts["phase"], "before_dispatch");
+
+        browser.push(Err(BrowserError::DeadlineAfterDispatch));
+        let after = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(after.status, Status::Unknown);
+        assert!(after
+            .summary
+            .contains("ran out of time before the browser confirmed"));
+        assert!(!after.summary.contains("disconnected"));
+        assert_eq!(after.facts["reason"], "deadline");
+        assert_eq!(after.facts["phase"], "after_dispatch");
     }
 
     /// An adapter's honest effect-unknown receipt renders as unknown with the browser's own

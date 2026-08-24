@@ -838,6 +838,11 @@ pub enum Refusal {
     CredentialHandoff,
     /// The browser returned a receipt outside the negotiated contract.
     IncompatibleReceipt,
+    /// The job ran out of time.
+    DeadlineExpired {
+        /// True when the deadline fired before any dispatch could happen.
+        before_dispatch: bool,
+    },
     /// The browser answered the job with its own bounded refusal.
     BrowserPrimitive { detail: String },
     /// The browser stopped before a physical effect.
@@ -891,6 +896,13 @@ impl Refusal {
             }
             Self::BrowserPrimitive { detail } => {
                 return format!("The browser refused this job: {detail}.");
+            }
+            Self::DeadlineExpired { before_dispatch } => {
+                if *before_dispatch {
+                    "The job ran out of time before reaching the browser."
+                } else {
+                    "Sent, but the job ran out of time before the browser confirmed."
+                }
             }
             Self::BrowserStopped { .. } => "The browser disconnected before anything happened.",
             Self::BrowserAmbiguous => {
@@ -971,6 +983,10 @@ impl Refusal {
             }
             Self::BrowserPrimitive { .. } => vec![
                 "Read the browser's stated reason, adjust the call or the page, then repeat."
+                    .into(),
+            ],
+            Self::DeadlineExpired { .. } => vec![
+                "Repeat with a longer timeout_ms when the page genuinely needs more time."
                     .into(),
             ],
             Self::BrowserAmbiguous | Self::BrowserUnknown => vec![
@@ -2002,6 +2018,18 @@ mod tests {
             (
                 Refusal::RecordingExportFailed,
                 "The recording could not be turned into a replay.",
+            ),
+            (
+                Refusal::DeadlineExpired {
+                    before_dispatch: true,
+                },
+                "The job ran out of time before reaching the browser.",
+            ),
+            (
+                Refusal::DeadlineExpired {
+                    before_dispatch: false,
+                },
+                "Sent, but the job ran out of time before the browser confirmed.",
             ),
         ];
         for (refusal, expected) in summaries {
