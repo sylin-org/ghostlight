@@ -118,6 +118,12 @@
     });
   }
 
+  // The refusal names the exact control so a model can ask its human for one precise thing.
+  function credentialHandoffError(element) {
+    const name = shared.bounded(accessibleName(element) || element.id || "", 80);
+    return new Error(`credential-class target requires user handoff: the ${roleFor(element)}${name ? ` "${name}"` : ""}`);
+  }
+
   function observation(element) {
     return {
       locator: locatorFor(element),
@@ -256,7 +262,7 @@
 
   function fillElement(element, value) {
     requireActionable(element, "fill");
-    if (credentialClass(element)) throw new Error("credential-class target requires user handoff");
+    if (credentialClass(element)) throw credentialHandoffError(element);
     element.scrollIntoView({ block: "center", inline: "center" });
     element.focus({ preventScroll: true });
     if (element instanceof HTMLSelectElement) {
@@ -290,8 +296,16 @@
     if (!element.isConnected) throw new Error("stale browser locator");
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
-    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0) {
-      throw new Error(`target is not visible for ${intent}`);
+    if (style.display === "none" || element.getAttribute("aria-hidden") === "true" || style.visibility === "hidden" || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0) {
+      // Naming the exact predicate is the difference between a dead end and a decision: the
+      // driver can scroll, reopen, or report instead of guessing what "not visible" meant.
+      const reason =
+        style.display === "none" ? "display:none"
+        : element.getAttribute("aria-hidden") === "true" ? "aria-hidden"
+        : style.visibility === "hidden" ? "visibility:hidden"
+        : Number(style.opacity) === 0 ? "opacity:0"
+        : "zero-size";
+      throw new Error(`target is not visible for ${intent} (${reason})`);
     }
     if (element.disabled || element.getAttribute("aria-disabled") === "true" || element.closest("[inert]")) {
       throw new Error(`target is disabled for ${intent}`);
@@ -419,7 +433,7 @@
       if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
       if (message.kind === "query_semantic") return { targets: querySemanticTargets(message) };
       if (message.kind === "describe_focused") { const element = document.activeElement; if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
-      if (message.kind === "clear_focused") { const element = requireActionable(document.activeElement, "type"); if (credentialClass(element)) throw new Error("credential-class target requires user handoff"); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
+      if (message.kind === "clear_focused") { const element = requireActionable(document.activeElement, "type"); if (credentialClass(element)) throw credentialHandoffError(element); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
       if (message.kind === "drop_files") {
         const dropTarget = document.elementFromPoint(message.x, message.y);
         if (!dropTarget) throw new Error("no element is at the drop point");
@@ -430,7 +444,7 @@
       }
       if (message.kind === "geometry") return geometry(resolve(message.locator));
       if (message.kind === "focus") { const element = requireActionable(resolve(message.locator), "focus"); const subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center" }); element.focus({ preventScroll: true }); return { focused: true, subject }; }
-      if (message.kind === "clear") { const element = requireActionable(resolve(message.locator), "type"); if (credentialClass(element)) throw new Error("credential-class target requires user handoff"); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
+      if (message.kind === "clear") { const element = requireActionable(resolve(message.locator), "type"); if (credentialClass(element)) throw credentialHandoffError(element); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
       if (message.kind === "scroll") {
         let subject = null;
         if (message.locator) { const element = requireActionable(resolve(message.locator), "scroll"); subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); }

@@ -133,8 +133,7 @@ function contentHarness() {
     scrollTo() {},
     GhostlightShared: {
       ...sharedModule,
-      bounded(value, maximum) { return String(value ?? "").slice(0, maximum); },
-      isCredentialMetadata() { return false; }
+      bounded(value, maximum) { return String(value ?? "").slice(0, maximum); }
     },
     GhostlightPresentation: {
       render() { return false; },
@@ -348,6 +347,40 @@ test("a submit control outside the resolved form refuses before any reply", asyn
 
   assert.equal(refused.ok, false);
   assert.match(refused.error, /not contained/);
+});
+
+test("invisibility refusals name the exact predicate", async () => {
+  const harness = contentHarness();
+  harness.input.type = "submit";
+  harness.input.setAttribute("value", "Save changes");
+  let inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const locator = inspected.result.targets[0].locator;
+
+  // Hidden by the hidden attribute -> display:none per computed style.
+  const hidden = await harness.send({ kind: "activate", locator, button: "primary", click_count: 1 });
+  assert.equal(hidden.ok, false);
+  assert.match(hidden.error, /target is not visible for activate \(display:none\)/);
+
+  // Hidden by aria-hidden even when rendered.
+  harness.input.hidden = false;
+  harness.input.setAttribute("aria-hidden", "true");
+  const ariaHidden = await harness.send({ kind: "activate", locator, button: "primary", click_count: 1 });
+  assert.equal(ariaHidden.ok, false);
+  assert.match(ariaHidden.error, /target is not visible for activate \(aria-hidden\)/);
+});
+
+test("credential handoff names the exact control", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "password";
+  harness.input.setAttribute("aria-label", "Master password");
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const locator = inspected.result.targets[0].locator;
+
+  const refused = await harness.send({ kind: "fill", fields: [{ locator, value: "hunter2" }] });
+
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /requires user handoff: the textbox "Master password"/);
 });
 
 test("observation polling stops at its physical timeout without overshooting", async () => {
