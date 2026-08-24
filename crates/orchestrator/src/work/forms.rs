@@ -64,6 +64,7 @@ impl ApplicationExecutor {
                 }
             } else {
                 match self.resolve_target(
+                    context,
                     lease,
                     value
                         .tab
@@ -90,7 +91,7 @@ impl ApplicationExecutor {
         let selected = selected.expect("validated non-empty fields");
         let submit = match value.submit_target.as_deref() {
             Some(handle) => {
-                match self.resolve_target(lease, Some(selected.handle.as_str()), handle) {
+                match self.resolve_target(context, lease, Some(selected.handle.as_str()), handle) {
                     Ok((_, target)) => Some(target),
                     Err(error) => return self.workspace_failure(context, error),
                 }
@@ -187,7 +188,7 @@ impl ApplicationExecutor {
                 Err(terminal) => return terminal,
             }
         } else {
-            match self.resolve_target(lease, value.tab.as_deref(), &value.target) {
+            match self.resolve_target(context, lease, value.tab.as_deref(), &value.target) {
                 Ok(value) => value,
                 Err(error) => return self.workspace_failure(context, error),
             }
@@ -280,6 +281,7 @@ impl ApplicationExecutor {
         let dropping = value.view.is_some();
         let (selected, target_locator, target_role, drop) = if dropping {
             let location = match self.resolve_location(
+                context,
                 lease,
                 value.tab.as_deref(),
                 None,
@@ -309,6 +311,7 @@ impl ApplicationExecutor {
             }
         } else {
             match self.resolve_target(
+                context,
                 lease,
                 value.tab.as_deref(),
                 value.target.as_deref().expect("validated target"),
@@ -528,6 +531,7 @@ impl ApplicationExecutor {
         value: &PressKey,
     ) -> Terminal {
         let (selected, locator, focused_role) = match self.resolve_optional_target(
+            context,
             lease,
             value.tab.as_deref(),
             value.target.as_deref(),
@@ -637,6 +641,7 @@ impl ApplicationExecutor {
         value: &Wait,
     ) -> Terminal {
         let (selected, locator, _target_role) = match self.resolve_optional_target(
+            context,
             lease,
             value.tab.as_deref(),
             value.target.as_deref(),

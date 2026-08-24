@@ -52,19 +52,17 @@ Deviations: none yet.
 
 ### T4 -- stale-target refusals arrive pre-recovered
 
-Status: NOT STARTED. Recon done 2026-08-24, recorded so the next session starts warm:
+Status: COMPLETE (windows-codex, 2026-08-24). `TargetState` retains the bounded accessible
+name plus the page-authored role string at registration; `stale_target_context` exposes
+them for handles that no longer resolve; `record_stale_candidates` re-queries the live page
+by exactly that name+role through the governed read path (authorized, same dispatch seam)
+and holds up to three {role,name} candidates for the invocation. `workspace_failure` then
+attaches them as `recovery_candidates`. Silence on empty name, governance denial, or query
+failure is deliberate. The old "fails before browser dispatch" test was upgraded to the new
+contract: exactly one extra crossing (the candidate probe), the click itself never
+dispatches, and candidates ride in facts.
 
-- The single chokepoint is the executor's `resolve_target` wrapper (work/mod.rs) -- every
-  handle-based family passes through it.
-- `workspace::TargetState` retains tab handle, generation, locator, credential_class, and
-  role -- but NOT the accessible name. T4 therefore requires adding a bounded `name`
-  at registration time (register_targets) plus a `stale_target_context(handle)` accessor;
-  without the name, role-only re-query matches too much.
-- Staleness has three distinct exits inside lease.resolve_target: unknown handle (nothing
-  to recover from), tab entry gone, and generation mismatch. Only the last two carry a
-  recoverable context; keep unknown-handle refusals undecorated.
-
-Deviations: none yet.
+Deviations: none.
 
 ### T5 -- actionability refusals name the failing predicate
 

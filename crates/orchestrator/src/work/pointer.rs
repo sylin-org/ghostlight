@@ -30,6 +30,7 @@ impl ApplicationExecutor {
             }
         } else {
             match self.resolve_location(
+                context,
                 lease,
                 value.tab.as_deref(),
                 value.target.as_deref(),
@@ -164,6 +165,7 @@ impl ApplicationExecutor {
             return self.perform_wheel(context, lease, value, view_handle);
         }
         let (selected, locator, revealed_role) = match self.resolve_optional_target(
+            context,
             lease,
             value.tab.as_deref(),
             value.target.as_deref(),
@@ -250,6 +252,7 @@ impl ApplicationExecutor {
         view_handle: &str,
     ) -> Terminal {
         let location = match self.resolve_location(
+            context,
             lease,
             value.tab.as_deref(),
             None,
@@ -445,6 +448,7 @@ impl ApplicationExecutor {
         value: &Hover,
     ) -> Terminal {
         let location = match self.resolve_location(
+            context,
             lease,
             value.tab.as_deref(),
             value.target.as_deref(),
@@ -532,16 +536,20 @@ impl ApplicationExecutor {
             value.source_target.as_deref(),
             value.destination_target.as_deref(),
         ) {
-            let (selected, source) = match self.resolve_target(lease, value.tab.as_deref(), source)
-            {
-                Ok(value) => value,
-                Err(error) => return self.workspace_failure(context, error),
-            };
-            let (_, destination) =
-                match self.resolve_target(lease, Some(selected.handle.as_str()), destination) {
+            let (selected, source) =
+                match self.resolve_target(context, lease, value.tab.as_deref(), source) {
                     Ok(value) => value,
                     Err(error) => return self.workspace_failure(context, error),
                 };
+            let (_, destination) = match self.resolve_target(
+                context,
+                lease,
+                Some(selected.handle.as_str()),
+                destination,
+            ) {
+                Ok(value) => value,
+                Err(error) => return self.workspace_failure(context, error),
+            };
             self.emit(DomainEvent::TargetIndicated {
                 invocation: context.invocation.into(),
                 workspace: context.workspace.as_str().into(),
@@ -561,6 +569,7 @@ impl ApplicationExecutor {
         } else {
             let view_handle = value.view.as_deref().expect("language validated view");
             let start_location = match self.resolve_location(
+                context,
                 lease,
                 value.tab.as_deref(),
                 None,

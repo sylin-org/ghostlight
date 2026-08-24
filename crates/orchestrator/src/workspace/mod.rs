@@ -135,6 +135,19 @@ pub struct ImageState {
     pub data: String,
 }
 
+/// What a stale target handle still knows, offered so its refusal can carry fresh candidates.
+#[derive(Clone, Debug)]
+pub struct StaleTargetContext {
+    /// Physical tab the control lived on; still alive in this context.
+    pub physical_id: u64,
+    /// Last governed URL of that tab.
+    pub url: String,
+    /// Bounded accessible name the page gave the control.
+    pub name: String,
+    /// Page-authored role string for re-querying.
+    pub role_page: String,
+}
+
 /// Immutable selected controlled-tab facts used by the executor.
 #[derive(Clone, Debug)]
 pub struct SelectedTab {
@@ -218,6 +231,11 @@ struct TargetState {
     locator: String,
     credential_class: bool,
     role: TargetRole,
+    /// Page-authored role string, retained so a stale handle can be re-queried by what the
+    /// page itself called this control.
+    role_page: String,
+    /// Bounded accessible name, retained for the same re-query purpose.
+    name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -1024,6 +1042,8 @@ impl WorkspaceLease {
                     // door observed targets come through. The page's own string is never stored
                     // and so can never reach a sentence written to the audit.
                     role: TargetRole::classify(&target.role),
+                    role_page: target.role.clone(),
+                    name: target.name.clone(),
                 },
             );
             mapped.push((handle, target.clone()));
@@ -1074,6 +1094,25 @@ impl WorkspaceLease {
             locator: target.locator.clone(),
             credential_class: target.credential_class,
             role: target.role,
+        })
+    }
+
+    /// Last-known context for a target handle that no longer resolves, so a refusal can offer
+    /// fresh candidates from the live page. `None` when the handle never belonged to this
+    /// workspace or its whole tab is gone.
+    ///
+    /// The context is deliberately narrow: the physical tab to re-query, the governed URL it
+    /// last had, and what the page itself called the control. No page content travels.
+    pub fn stale_target_context(&self, requested: &str) -> Option<StaleTargetContext> {
+        let state = self.store.lock();
+        let workspace = state.workspaces.get(&self.workspace)?;
+        let target = workspace.targets.get(&TargetHandle(requested.into()))?;
+        let tab = workspace.tabs.get(&target.tab)?;
+        Some(StaleTargetContext {
+            physical_id: tab.physical_id,
+            url: tab.url.clone(),
+            name: target.name.clone(),
+            role_page: target.role_page.clone(),
         })
     }
 

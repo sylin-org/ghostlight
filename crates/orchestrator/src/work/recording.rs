@@ -253,10 +253,11 @@ impl ApplicationExecutor {
     ) -> Result<(RecordingDestination, Decision, Option<u64>, usize), Box<Terminal>> {
         if let Some(requested_target) = value.target.as_deref() {
             let lease = lease.expect("recording target save holds the workspace lease");
-            let (selected, target) = match self.resolve_target(lease, None, requested_target) {
-                Ok(value) => value,
-                Err(error) => return Err(Box::new(self.workspace_failure(context, error))),
-            };
+            let (selected, target) =
+                match self.resolve_target(context, lease, None, requested_target) {
+                    Ok(value) => value,
+                    Err(error) => return Err(Box::new(self.workspace_failure(context, error))),
+                };
             let decision = self.authorize(context, Capability::Write, Some(selected.url.as_str()));
             if !decision.allowed {
                 return Err(Box::new(self.blocked(

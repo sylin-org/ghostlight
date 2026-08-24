@@ -85,6 +85,7 @@ pub struct ApplicationExecutor {
     audit: Arc<dyn AuditSink>,
     active_authority: ActiveAuthorityRegistry,
     observations: ObservationRegistry,
+    stale_candidates: StaleCandidateRegistry,
 }
 
 /// Current immutable invocation snapshots used only to govern asynchronous browser events.
@@ -138,6 +139,10 @@ fn deregister_active_authority(
 /// which happens exactly once per invocation.
 type ObservationRegistry = Arc<Mutex<HashMap<String, Observed>>>;
 
+/// Fresh candidate controls attached to one invocation's stale-target refusal, consumed by the
+/// completion path exactly once. Values are language-authored {role,name} objects.
+type StaleCandidateRegistry = Arc<Mutex<HashMap<String, Vec<Value>>>>;
+
 impl ApplicationExecutor {
     /// Construct the orchestrator's only model-requested mutation entry point.
     #[must_use]
@@ -160,6 +165,7 @@ impl ApplicationExecutor {
             audit,
             active_authority: Arc::new(Mutex::new(HashMap::new())),
             observations: Arc::new(Mutex::new(HashMap::new())),
+            stale_candidates: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -389,6 +395,9 @@ impl ApplicationExecutor {
         let observed = self
             .take_observation(&terminal.result.invocation)
             .merged(terminal.observed.clone());
+        // Unconsumed candidate sets belong only to stale-target failures; drop strays here so
+        // nothing leaks across invocations.
+        let _ = self.take_stale_candidates(&terminal.result.invocation);
         let record = AuditRecord::now(
             &terminal.result.invocation,
             workspace.as_str(),
@@ -599,13 +608,14 @@ impl ApplicationExecutor {
 
     fn resolve_optional_target(
         &self,
+        context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         target: Option<&str>,
     ) -> Result<(SelectedTab, Option<String>, Option<TargetRole>), WorkspaceError> {
         match target {
             Some(target) => {
-                let (tab, target) = self.resolve_target(lease, requested_tab, target)?;
+                let (tab, target) = self.resolve_target(context, lease, requested_tab, target)?;
                 Ok((tab, Some(target.locator), Some(target.role)))
             }
             None => Ok((lease.select_tab(requested_tab)?, None, None)),
@@ -614,18 +624,72 @@ impl ApplicationExecutor {
 
     fn resolve_target(
         &self,
+        context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         target: &str,
     ) -> Result<(SelectedTab, SelectedTarget), WorkspaceError> {
-        if let Some(requested) = requested_tab {
-            let tab = lease.select_tab(Some(requested))?;
-            let target = lease.resolve_target(target, Some(&tab))?;
-            Ok((tab, target))
-        } else {
-            let target = lease.resolve_target(target, None)?;
-            let tab = lease.select_tab(Some(target.tab.as_str()))?;
-            Ok((tab, target))
+        let result = match requested_tab {
+            Some(requested) => {
+                let tab = lease.select_tab(Some(requested))?;
+                lease
+                    .resolve_target(target, Some(&tab))
+                    .map(|resolved| (tab, resolved))
+            }
+            None => {
+                let target = lease.resolve_target(target, None)?;
+                let tab = lease.select_tab(Some(target.tab.as_str()))?;
+                Ok((tab, target))
+            }
+        };
+        // A stale handle is where recovery is cheapest: the page still has controls matching
+        // what that handle used to be called. Offer up to three of them so the refusal
+        // arrives pre-recovered instead of sending the driver back to inspect.
+        if matches!(&result, Err(WorkspaceError::StaleTarget)) {
+            self.record_stale_candidates(context, lease, target);
+        }
+        result
+    }
+
+    /// Best-effort fresh candidates for a stale target handle. Silence on any failure or
+    /// governance denial is deliberate -- the refusal stays truthful without them.
+    fn record_stale_candidates(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        target_handle: &str,
+    ) {
+        let Some(info) = lease.stale_target_context(target_handle) else {
+            return;
+        };
+        if info.name.trim().is_empty() {
+            return;
+        }
+        let decision = self.authorize(context, Capability::Read, Some(info.url.as_str()));
+        if !decision.allowed {
+            return;
+        }
+        if let Ok(BrowserOutcome::Targets { targets, .. }) = self.dispatch(
+            context,
+            BrowserCommand::QuerySemantic {
+                tab_id: info.physical_id,
+                name: info.name.clone(),
+                role: Some(info.role_page.clone()),
+                exact: false,
+                form_scope: false,
+            },
+        ) {
+            let candidates: Vec<Value> = targets
+                .iter()
+                .take(3)
+                .map(|target| json!({"role":target.role,"name":target.name}))
+                .collect();
+            if !candidates.is_empty() {
+                self.stale_candidates
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(context.invocation.to_owned(), candidates);
+            }
         }
     }
 
@@ -774,7 +838,12 @@ impl ApplicationExecutor {
                     .into_iter()
                     .next()
                     .expect("one observed target registers one handle");
-                match self.resolve_target(lease, Some(selected.handle.as_str()), handle.as_str()) {
+                match self.resolve_target(
+                    context,
+                    lease,
+                    Some(selected.handle.as_str()),
+                    handle.as_str(),
+                ) {
                     Ok(value) => Ok(value),
                     Err(error) => Err(self.workspace_failure(context, error)),
                 }
@@ -789,6 +858,7 @@ impl ApplicationExecutor {
     #[allow(clippy::too_many_arguments)]
     fn resolve_location(
         &self,
+        context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         target: Option<&str>,
@@ -797,7 +867,7 @@ impl ApplicationExecutor {
         y: Option<f64>,
     ) -> Result<ResolvedLocation, WorkspaceError> {
         if let Some(target) = target {
-            let (tab, target) = self.resolve_target(lease, requested_tab, target)?;
+            let (tab, target) = self.resolve_target(context, lease, requested_tab, target)?;
             return Ok(ResolvedLocation::Target { tab, target });
         }
         let view = view.expect("language validated view location");
@@ -1002,6 +1072,14 @@ impl ApplicationExecutor {
     /// registry bounded by work in flight rather than by work ever done.
     fn take_observation(&self, invocation: &str) -> Observed {
         self.observations().remove(invocation).unwrap_or_default()
+    }
+
+    /// Consume any candidates recorded for this invocation's stale-target refusal.
+    fn take_stale_candidates(&self, invocation: &str) -> Option<Vec<Value>> {
+        self.stale_candidates
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(invocation)
     }
 
     fn observations(&self) -> std::sync::MutexGuard<'_, HashMap<String, Observed>> {
@@ -1345,6 +1423,10 @@ impl ApplicationExecutor {
         } else {
             Status::Failed
         };
+        let mut facts = json!({"reason":reason.as_fact()});
+        if let Some(candidates) = self.take_stale_candidates(context.invocation) {
+            facts["recovery_candidates"] = Value::Array(candidates);
+        }
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
@@ -1353,7 +1435,7 @@ impl ApplicationExecutor {
                 Readiness::Unknown,
                 status == Status::Failed,
                 &summary,
-                json!({"reason":reason.as_fact()}),
+                facts,
                 refusal.next_steps(),
             ),
             decision: if status == Status::Blocked {
@@ -2080,6 +2162,96 @@ mod tests {
                 "{name} effect-unknown classification drifted"
             );
         }
+    }
+
+    /// A stale target handle arrives pre-recovered: fresh candidates matching what the dead
+    /// handle used to be called ride in the refusal facts, taken from the live page.
+    #[test]
+    fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
+
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+        let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
+
+        browser.push(Ok(BrowserOutcome::Targets {
+            tab_id: 7,
+            targets: vec![ObservedTarget {
+                locator: "btn-1".into(),
+                role: "button".into(),
+                name: "Save".into(),
+                state: vec![],
+                credential_class: false,
+            }],
+        }));
+        let inspected = executor.execute(
+            &workspace,
+            "browser_inspect",
+            json!({"tab":tab_handle,"scope":"controls","max_items":10}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(
+            inspected.status,
+            Status::Succeeded,
+            "inspect failed: {}",
+            inspected.summary
+        );
+
+        let target_handle = inspected.facts["items"][0]["target"]
+            .as_str()
+            .expect("no target handle in inspect facts")
+            .to_owned();
+
+        // Commit a navigation: the document generation moves and the old handle goes stale.
+        browser.push(Ok(BrowserOutcome::Navigated {
+            tab: tab(7, "https://example.com/next"),
+            committed_urls: vec![],
+        }));
+        let _ = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/next","tab":tab_handle}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        // The page still has its Save button under a fresh locator. Clicking by the stale
+        // handle fails -- with the live candidate riding in the facts.
+        browser.push(Ok(BrowserOutcome::Targets {
+            tab_id: 7,
+            targets: vec![ObservedTarget {
+                locator: "btn-2".into(),
+                role: "button".into(),
+                name: "Save".into(),
+                state: vec![],
+                credential_class: false,
+            }],
+        }));
+        let clicked = executor.execute(
+            &workspace,
+            "browser_click",
+            json!({"tab":tab_handle,"target":target_handle}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(clicked.status, Status::Failed);
+        assert_eq!(clicked.facts["reason"], "stale_target");
+        let candidates = clicked.facts["recovery_candidates"].as_array().unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0]["name"], "Save");
+        assert_eq!(candidates[0]["role"], "button");
     }
 
     /// Deadlines speak for themselves instead of claiming disconnection, and carry their
@@ -3813,6 +3985,17 @@ mod tests {
         );
         assert_eq!(navigated.status, Status::Succeeded);
         let before = browser.calls().len();
+        // The live page still has a button answering to the old name.
+        browser.push(Ok(BrowserOutcome::Targets {
+            tab_id: 7,
+            targets: vec![ObservedTarget {
+                locator: "new".into(),
+                role: "button".into(),
+                name: "Old".into(),
+                state: vec![],
+                credential_class: false,
+            }],
+        }));
         let stale = executor.execute(
             &workspace,
             "browser_click",
@@ -3822,7 +4005,16 @@ mod tests {
         );
         assert_eq!(stale.status, Status::Failed);
         assert_eq!(stale.facts["reason"], "stale_target");
-        assert_eq!(browser.calls().len(), before);
+        // Exactly one extra crossing happened: the candidate probe. The click itself never
+        // dispatched.
+        assert_eq!(browser.calls().len(), before + 1);
+        assert!(matches!(
+            browser.calls().last(),
+            Some(BrowserCommand::QuerySemantic { name, .. })
+                if name == "Old"
+        ));
+        let candidates = stale.facts["recovery_candidates"].as_array().unwrap();
+        assert_eq!(candidates[0]["name"], "Old");
     }
 
     #[test]

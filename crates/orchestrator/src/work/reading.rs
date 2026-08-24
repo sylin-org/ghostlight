@@ -24,7 +24,7 @@ impl ApplicationExecutor {
         max_chars: usize,
     ) -> Terminal {
         let (selected, locator, _) =
-            match self.resolve_optional_target(lease, requested_tab, target) {
+            match self.resolve_optional_target(context, lease, requested_tab, target) {
                 Ok(value) => value,
                 Err(error) => return self.workspace_failure(context, error),
             };
@@ -121,11 +121,11 @@ impl ApplicationExecutor {
         root: Option<&str>,
         max_depth: usize,
     ) -> Terminal {
-        let (selected, locator, _) = match self.resolve_optional_target(lease, requested_tab, root)
-        {
-            Ok(value) => value,
-            Err(error) => return self.workspace_failure(context, error),
-        };
+        let (selected, locator, _) =
+            match self.resolve_optional_target(context, lease, requested_tab, root) {
+                Ok(value) => value,
+                Err(error) => return self.workspace_failure(context, error),
+            };
         let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
@@ -352,6 +352,7 @@ impl ApplicationExecutor {
             (selected, command, CaptureKind::Region)
         } else {
             let (selected, locator, _) = match self.resolve_optional_target(
+                context,
                 lease,
                 value.tab.as_deref(),
                 value.target.as_deref(),
