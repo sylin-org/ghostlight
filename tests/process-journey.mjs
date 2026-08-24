@@ -715,7 +715,12 @@ try {
   assert.equal(cancelled.status, "unknown");
   assert.equal(cancelled.effect, "unknown");
   assert.equal(cancelled.repeat_safe, false);
-  assert.deepEqual(cancelled.next_steps, []);
+  // An effect whose fate is unknown names the open-dialog hypothesis and the observation
+  // route (d5a8c5de); it never suggests replaying the interrupted call.
+  assert.deepEqual(cancelled.next_steps, [
+    "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly.",
+    "Then observe the page with browser_read or browser_inspect to learn what happened.",
+  ]);
 
   const closed = structured(await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: restartedHandle } }));
   assert.equal(closed.status, "succeeded");
