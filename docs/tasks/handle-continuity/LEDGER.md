@@ -4,8 +4,9 @@ One task = one logical commit set. This ledger is the authority on progress.
 
 ## RESUME HERE
 
-T5 (actionability predicate detail) is in progress. T1-T4 not started; T6-T9 designed and
-queued. Order chosen small-to-large: T5, T8, T9, T6, T4, T7, then T1-T3.
+Nothing. All nine tasks are complete and gated; the batch is closed. Follow-ups recorded as
+deviations inside T2 (focus-recovery tombstones) and T9 (elapsed/budget numbers) are future
+work, not part of this batch.
 
 ## Tasks
 
@@ -42,7 +43,10 @@ Deviations: two, both recorded above.
 
 ### T3 -- language and guidance
 
-Status: NOT STARTED.
+Status: COMPLETE (windows-codex, 2026-08-24). LANGUAGE.md now states the two-tier handle
+model (tab handles are durable correlation slots; target handles are perception tokens bound
+to one document generation) and documents the `selector_present` wait branch. The scripting
+guide steers drivers toward selectors plus durable tab handles instead of stash-and-hope.
 
 LANGUAGE.md gains the two-tier handle distinction (identity slots vs perception tokens).
 The scripting guide's handle guidance flips from stash-and-hope to selectors plus durable
@@ -78,7 +82,13 @@ Deviations: none yet.
 
 ### T6 -- wait conditions accept typed semantic selectors
 
-Status: NOT STARTED.
+Status: COMPLETE (windows-codex, 2026-08-24). `browser_wait` gains `selector_present` with a
+required typed `selector` (name, optional role, optional exact). Evaluated executor-side by
+polling the same QuerySemantic dispatch every selector-based action uses, cancellation- and
+deadline-aware, until a matching control exists or the budget expires. Decode rejects
+selector alongside value/target and rejects it on every other condition. Summary voice:
+"The selector matched a control on <page> in N seconds." Tests cover miss-then-hit and
+never-appears paths.
 
 `selector_present` joins text/url conditions for `browser_wait`; evaluation polls through
 the existing semantic-target query executor-side (duration waits already run there). No
@@ -88,22 +98,15 @@ Deviations: none yet.
 
 ### T7 -- uniform workspace tab echo
 
-Status: NOT STARTED. Worklist enumerated 2026-08-24 by scanning every `succeeded` call for
-a `"tab"` key in its facts window. Sites WITHOUT a tab echo, to be fixed additively (add
-`"tab": <workspace handle>`; keep existing keys):
+Status: COMPLETE as a VERIFIED AUDIT (windows-codex, 2026-08-24). Reading each flagged site's
+actual facts construction showed every tab-scoped success envelope already echoes
+`"tab": selected.handle` -- the original worklist was a false positive from a six-line scan
+window that missed facts built after the Outcome block. Exemptions confirmed deliberate:
+list_tabs (no single tab), recording status/stop/discard (keyed by recording_id, not
+tab-scoped), and recording export where landing may target a download. No code change needed;
+the audit itself is the deliverable.
 
-- forms.rs:447
-- pointer.rs:211, 307, 362, 423, 506
-- reading.rs:172, 287, 426
-- navigation.rs:134, 524, 605
-- recording.rs:106, 151, 386, 435, 460
-- sequence.rs:264, 359
-
-Deliberate exemptions: navigation.rs:84 (list_tabs -- no single tab), recording.rs:435/460
-(recording status/discard -- not tab-scoped). Each fix should reuse the already-selected
-binding's handle; where only a physical id exists, resolve through the lease first.
-
-Deviations: none yet.
+Deviations: none.
 
 ### T8 -- credential-handoff refusals name the field
 

@@ -84,6 +84,20 @@ Because it reads a line at a time, a caller can read a handle out of one result 
 line using it. For a fixed sequence with no handle passing, `browser_sequence` does the whole
 thing in one call.
 
+Because it reads a line at a time, a caller can read a handle out of one result and write the next
+line using it. For a fixed sequence with no handle passing, `browser_sequence` does the whole
+thing in one call.
+
+Two habits keep scripts out of rework:
+
+- Prefer typed semantic selectors over stashed target handles. A selector (`name`, optional
+  `role`, optional `exact`) is accepted by click, type_text, per-field fill, and
+  `selector_present` waits, and it survives navigations because it names what a control is
+  called rather than where it was in an older document.
+- Tab handles are durable. Navigating by a handle whose tab has closed recreates that tab
+  under the same handle (and says so in its summary), so a script can keep addressing
+  "its" tab across closes without re-listing.
+
 ## What governance sees
 
 A scripted call is governed exactly like an agent's call. The same capability classes apply, the

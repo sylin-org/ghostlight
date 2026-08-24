@@ -36,8 +36,15 @@ and `execute`.
 
 An optional `tab` selects an opaque controlled tab. Omission selects the only controlled tab, or
 the sole active controlled tab when ownership is unambiguous. Otherwise the call is rejected and
-points to `browser_tabs`. Target handles are tied to a tab and document generation. A committed
-navigation makes prior target handles stale.
+points to `browser_tabs`. Tab handles are durable correlation slots: navigating by a handle whose
+tab has closed recreates that tab through the governed open path under the same handle and says
+so in the summary. Closing a handle whose tab is already gone succeeds without touching the
+browser. Target handles are different by design -- they are perception, not identity. A target
+handle is tied to one tab and document generation, a committed navigation makes prior target
+handles stale, and acting on one forces re-inspection of a page the model has actually seen.
+Typed semantic selectors (name, optional role, optional exact match) are accepted wherever target
+handles are, including `selector_present` waits, so drivers can prefer what a control is called
+over stashing handles.
 
 View handles are returned by screenshots. They bind rendered coordinates to one tab, document
 generation, viewport origin, viewport size, device scale, and zoom. Coordinate input is rejected
@@ -280,9 +287,10 @@ Wait for one explicit observable condition. Shortest call: `{"condition":"load_r
 
 Inputs use one condition-specific branch: `load_ready` accepts neither value nor target;
 `url_contains`, `text_present`, and `text_absent` require `value`; `target_present` and
-`target_absent` require `target`; `duration` requires a whole millisecond `value` from 0 to 10000
-and waits executor-side. Every branch accepts optional `tab`, `timeout_ms`, and restrictions.
-Capability: `read`.
+`target_absent` require `target`; `selector_present` requires a typed `selector` and polls the
+live page until a control matching it exists; `duration` requires a whole millisecond `value`
+from 0 to 10000 and waits executor-side. Every branch accepts optional `tab`, `timeout_ms`, and
+restrictions. Capability: `read`.
 
 Facts: `tab`, `condition`, `satisfied`, `elapsed_ms`, and governed readiness.
 
