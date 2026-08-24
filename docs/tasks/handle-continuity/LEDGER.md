@@ -142,4 +142,10 @@ Deviations: none yet.
 
 ## Evidence
 
-- (appended per task)
+- Final full-integration round, 2026-08-24, at HEAD after all nine tasks: fmt/clippy clean,
+  388 Rust tests, 137 extension tests, 10 launcher tests, 4 MCPB tests green; isolated
+  workspace build; process journey (updated: post-disconnect the tabs read now refuses,
+  which IS the empty-registry signal), CLI and PowerShell journeys (PowerShell fake adapter
+  gained the ListTabs primitive that live-read listing now dispatches), workbench surface,
+  policy grammar, capability matrix, JS syntax checks. Whole-catalog foundry demo green
+  end to end against the deployed release graph, desk beats included.
