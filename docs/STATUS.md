@@ -1161,10 +1161,10 @@ The executor-split batch is complete through `4d633fbc`.
 ## Owed
 
 On 2026-08-24 the owner promoted four items below into the pre-freeze window
-([tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md)): the ServiceClient adoption, the
-unsettled-row color treatment, the model-facing policy explain operation, and ADR-0105 stages 2
-and 3. They remain listed here until their tasks land; everything else in this section stays
-outside 1.0.
+([tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md)): the ServiceClient adoption (landed
+the same day -- the bridge is now every edge's handshake home), the unsettled-row color
+treatment, the model-facing policy explain operation, and ADR-0105 stages 2 and 3. They remain
+listed here until their tasks land; everything else in this section stays outside 1.0.
 
 - ADR-0121 Decision 3's always-available policy explain operation still exists only as a CLI command
   over a file path. The 23-tool catalog has no policy tool, so the model cannot ask what current
@@ -1180,8 +1180,6 @@ outside 1.0.
   that invariant for one audited module or to depend on a wrapper crate on a security-sensitive
   path. Until then the channel stays attribution: the `channels` switch decides whether an intake
   may open a session, which is a weaker claim than knowing who is calling.
-- `crates/mcp-connector` still has its own copy of the service handshake and did not adopt
-  `ServiceClient`. One home exists now; the connector should move to it.
 - The extension stylesheet could move to its own module now that it is static. Lowest value of the
   maintainability steps; needs about eight test assertions reworked.
 - GIF quality remains deferred. The vendored encoder quantizes each frame to its own 256-colour

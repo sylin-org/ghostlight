@@ -4,13 +4,25 @@ One task = one commit. RESUME HERE is always the first open task.
 
 ## RESUME HERE
 
-Next task: T1 (ServiceClient handshake adoption). Nothing landed yet.
+Next task: T2 (unsettled-row color treatment). T1 is complete.
 
 ## Tasks
 
 ### T1 -- mcp-connector adopts the shared service handshake
 
-Status: PENDING.
+Status: COMPLETE (2026-08-24).
+
+Landed shape: `ghostlight_bridge::client::connect_split` is now the single negotiation home
+(runtime read, pre-dial major refusal, dial, hello write, accepted-major check, catalog fetch)
+returning a split `Connection { writer, reader, session, server, catalog }`.
+`ServiceClient::connect` delegates to it, and the MCP edge's reconnect loop consumes it while
+keeping its own reader-thread pump, cancel forwarding, and uuid correlation -- those are edge
+concerns ServiceClient does not model. Both major-version checks that only the connector copy
+performed now protect every caller, including the CLI edge. Three socket-level unit tests cover
+negotiation+invoke, pre-dial runtime refusal, and refused-hello code passthrough.
+
+Gates: fmt; workspace clippy `-D warnings`; 391 Rust tests; 137 extension tests;
+process-journey against `.target-t1/debug`.
 
 Design note (verified 2026-08-24): the duplicate is `crates/mcp-connector/src/service_session.rs`
 `connect()` (~lines 158-205) versus `crates/bridge/src/client.rs` `ServiceClient::connect`

@@ -6,13 +6,12 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use ghostlight_bridge::framing::{read_json_line, write_json_line};
 use ghostlight_bridge::lifecycle::request_orchestrator_start;
-use ghostlight_bridge::runtime::{read_runtime, runtime_file};
+use ghostlight_bridge::runtime::runtime_file;
 use ghostlight_bridge::service::{
     IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, ToolDefinition,
-    SERVICE_BRIDGE_MAJOR,
 };
 
 /// Protocol-neutral events emitted by the reconnecting service session.
@@ -163,45 +162,23 @@ fn connect(
     ServerProfile,
     Vec<ToolDefinition>,
 )> {
-    let endpoint = read_runtime(&runtime_file()).context("read runtime endpoint")?;
-    if endpoint.service_bridge_major != SERVICE_BRIDGE_MAJOR {
-        bail!("runtime service bridge major is incompatible");
-    }
-    let mut stream = TcpStream::connect(("127.0.0.1", endpoint.service_port))
-        .context("connect Ghostlight service")?;
-    stream.set_nodelay(true)?;
-    write_json_line(
-        &mut stream,
-        &ServiceRequest::Hello {
-            major: SERVICE_BRIDGE_MAJOR,
-            token: endpoint.token,
-            client_label: client_label.into(),
-            channel: IntakeChannel::Mcp,
-            // The MCP edge keeps its workspace bound to the connection: a client that goes away
-            // has no later call to gather.
-            session: None,
-        },
+    // Negotiation lives once in the bridge (ADR-0105 Decision 4); the edge keeps only its
+    // reconnect loop, event pump, and concurrent-request plumbing.
+    let connection = ghostlight_bridge::client::connect_split(
+        &runtime_file(),
+        client_label,
+        IntakeChannel::Mcp,
+        // The MCP edge keeps its workspace bound to the connection: a client that goes away
+        // has no later call to gather.
+        None,
     )
-    .context("send service hello")?;
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let server = match read_json_line::<ServiceResponse>(&mut reader)
-        .context("read service hello")?
-    {
-        Some(ServiceResponse::HelloAccepted { major, server, .. })
-            if major == SERVICE_BRIDGE_MAJOR =>
-        {
-            server
-        }
-        Some(ServiceResponse::Error { message, .. }) => bail!("service rejected edge: {message}"),
-        _ => bail!("service returned an invalid hello response"),
-    };
-    write_json_line(&mut stream, &ServiceRequest::Catalog).context("request catalog")?;
-    let catalog = match read_json_line::<ServiceResponse>(&mut reader).context("read catalog")? {
-        Some(ServiceResponse::Catalog { tools }) => tools,
-        Some(ServiceResponse::Error { message, .. }) => bail!("catalog failed: {message}"),
-        _ => bail!("service returned an invalid catalog response"),
-    };
-    Ok((stream, reader, server, catalog))
+    .context("connect Ghostlight service")?;
+    Ok((
+        connection.writer,
+        connection.reader,
+        connection.server,
+        connection.catalog,
+    ))
 }
 
 fn read_until_disconnected(
