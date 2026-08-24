@@ -1,95 +1,94 @@
 # Foundry demo press_key diagnosis
 
-Status: IN PROGRESS. Started 2026-08-24. This ledger is the authority on where the
-investigation stands. It records what was eliminated, what was established, and the exact
-next step, so any agent can resume after a context wipe.
+Status: RESOLVED for the press_key failure; one follow-up defect (desk bell) documented at the
+bottom. Started 2026-08-24, resolved same day. This ledger records what was eliminated, what
+caused the failure, what was fixed, and the exact next defect with its mechanism.
 
 ## The question
 
-`scripts/demo-foundry.ps1` fails deterministically at the `key to end` beat
+`scripts/demo-foundry.ps1` failed deterministically at the `key to end` beat
 (`browser_press_key`, key End, target the Release name textbox) with status failed and the
 summary "The browser disconnected before anything happened." Standalone press_key calls,
-short repros, and big-GIF repros all pass. Four-plus failures, always the same beat, at
-multiple pacings.
+short repros, and big-GIF repros all passed. Multiple failures across pacings, always the
+same beat.
 
-## MACHINE-LOCAL STATE -- read before resuming (as of 2026-08-24 ~10:50 local)
+## Root cause 1 -- resolved: the keyboard beat targeted a control the story had hidden
 
-- The live authority has been swapped for diagnosis: `target/release/ghostlight.exe` is an
-  instrumented dev build. Pristine backup: `target/release/ghostlight.exe.pre-diag.bak`.
-  RESTORE THE BACKUP BEFORE ANY RELEASE WORK OR COMMIT OF BINARIES.
-- Temporary source instrumentation (marked `TEMPORARY DIAGNOSTIC` in comments) exists in
-  `crates/orchestrator/src/browser/mod.rs` and `crates/orchestrator/src/work/mod.rs`.
-  Revert with `git checkout -- crates/orchestrator`. NEVER COMMIT IT.
-- Throwaway scripts live outside the tree in `C:/Users/onose/AppData/Local/Temp/opencode/`:
-  `demo-foundry-probe.ps1` (story variant: frame + zoom beats removed, probe scroll +
-  roster read before press_key, timestamps, prints FACTS on unexpected status) and
-  `poll-relay.ps1` (concurrent roster poller). Trace log: `liveness-trace.log` there too.
-- One authority, one browser: Google Chrome, id `browser_c21b2f55e68e4276b6c35b02efde0beb`,
-  attended. The extension reconnects to a restarted authority automatically within seconds
-  and keeps the same browser id.
+Two defects stacked on top of each other:
 
-## Eliminated hypotheses (with evidence)
+1. **Demo script defect.** `Complete release packet` replaces the packet view. After it runs,
+   the Release name textbox is no longer renderable: the extension refuses to focus it
+   (`primitive_failed: target is not visible for focus`) and equally refuses a scroll-reveal
+   (`target is not visible for scroll`). Every passing repro passed only because it skipped
+   the completion beats and left the form visible.
+2. **Presentation defect.** The orchestrator folded that honest adapter refusal into
+   `BrowserError::Primitive(message)` and then rendered it through the browser-stopped
+   fallthrough in `work/mod.rs`, announcing a disconnection that never happened and dropping
+   the extension's message entirely. This disguise is what turned one evening of debugging
+   into an investigation of transport ghosts.
 
-1. Two authorities / PATH mismatch between demo and probes. One authority; demo resolved
-   `target/release` (first existing candidate).
-2. A second connected browser serving polls while the demo pins another. Roster shows
-   exactly one browser at all times.
-3. Transport dead at the failure moment. Concurrent polls succeeded 190 ms before and after
-   failures. Caveat learned later: `browser_tabs list` never crosses the liveness gate or
-   the wire, so polls only prove the authority process was up.
-4. Window-resize and zoom beats prime the failure. Probe variant with both removed still
-   fails at the same beat.
-5. GIF size / save-replay encode teardown. A 13-second replay repro passed.
-6. Discard teardown. `-KeepRecording` still fails.
-7. Liveness machinery (stale flag, 45 s ack timeout, heartbeat ticks). Instrumented trace
-   across a full failing run: zero stale transitions, every ack within 1.2 s, all ticks
-   clean, connection healthy through and after the failure.
-8. Workspace pin resolution (`choose_browser`). The traced refusal arm in
-   `work/mod.rs::target_browser` never fired; in-session scroll + roster succeed
-   milliseconds before press_key fails.
-9. Browser identity change mid-story. Authority restart + reconnect kept the same id.
+### Fixes landed
 
-## Established facts
+- `fix(language)`: new `Refusal::BrowserPrimitive { detail }`; primitive adapter errors now
+  route through `routing_refusal` with facts `{"reason":"browser_primitive_failed",
+  "detail":...}` and render "The browser refused this job: <detail>." Two tests pin the
+  rendering and the facts.
+- `fix(demo)`: both `demo-foundry.ps1` and `demo-foundry.sh` now run the keyboard beat while
+  the packet form is still on screen (after `release packet`, before `complete`), where End
+  has real meaning: it carries the caret to the end of the value just typed.
 
-- The sentence "The browser disconnected before anything happened." is NOT evidence of
-  disconnection. It is the fallthrough rendering at `work/mod.rs` (~line 1283):
-  `Refusal::BrowserStopped` is produced for EVERY BrowserError that survives the routing,
-  effect-unknown, and cancellation checks -- including `Primitive`, `Protocol`,
-  `CapabilityVersion`, `RecoveryFailed`, and `DisconnectedAfterDispatch`.
-- Instrumented run 2026-08-24 10:34:38: press_key dispatched three sub-commands; all three
-  piggyback heartbeats were acknowledged within milliseconds; total orchestrator time was
-  32 ms; CLI facts carried `"reason":"browser_primitive_failed"`.
-  `browser_reason()` maps that string to `BrowserError::Primitive(_)` -- an ADAPTER ERROR
-  FRAME from the extension. The extension processed the command and answered with an error.
-- The extension's error message text is discarded end-to-end: `adapter_error` folds it into
-  `Primitive(message)`, the terminal rendering emits only summary + reason string, and the
-  audit record stores neither. Nobody can see what the extension actually said. This is a
-  real product defect independent of the demo (finding #1).
-- Earlier runs (previous session) showed CLI facts `"reason":"browser_disconnected"`,
-  which maps ONLY to true `DisconnectedBeforeDispatch`. So there may be two distinct modes:
-  an earlier genuine pre-disconnect mode, and tonight's primitive mode. Unverified whether
-  they share a root cause.
-- `browser_record save` crosses zero liveness probes during its 8-16 s encode: recording
-  export does not ride `call_inner`.
-- Controlled-tab listing is session/workspace-scoped, which is why concurrent poll sessions
-  saw zero tabs while the demo had one open.
-- Post-completion page state is the new suspect: press_key targets the Release name textbox
-  AFTER `Complete release packet` transitioned the page. Every passing repro skipped the
-  completion beats. Leading hypothesis: the extension legitimately errors on the key
-  dispatch against post-completion page state (focus/interactability/target staleness),
-  and the misleading fallthrough sentence disguised it as a disconnect.
+Proven live end-to-end against the deployed authority: every beat through `key to end`
+succeeds.
 
-## Next steps, in order
+## Investigation trail worth keeping
 
-1. Add tracing of adapter error frames (code, message, effect_unknown) in
-   `read_adapter`, and a Debug dump of the error in the work fallthrough terminal builder.
-   Rebuild, redeploy over `target/release/ghostlight.exe`.
-2. Minimal repro: drive the story through `complete release packet` standalone, then issue
-   the identical press_key. Capture the extension's actual message from the trace.
-3. Decide the fix split: (a) presentation must render `Primitive` honestly and carry the
-   message; (b) whatever the extension-side cause turns out to be; (c) re-examine whether
-   the earlier true-disconnect mode still exists once (a) stops masking everything.
-4. Restore `target/release/ghostlight.exe.pre-diag.bak`, revert instrumentation, run gates
-   (`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-   `cargo test --workspace`, `npm test` from `extension/`, `node --check` on changed
-   extension JS), commit fixes and docs separately.
+- Concurrent `browser_tabs list` polls never cross the liveness gate or the wire; they prove
+  only that the authority process is up. Tab listing is session-scoped, which is why poller
+  sessions saw zero tabs while the demo held one.
+- An instrumented-authority trace across a full failing run showed: zero liveness-stale
+  transitions, every heartbeat acknowledged within milliseconds, all three of press_key's
+  sub-dispatches dispatched AND acknowledged, failure in 32 ms. That exonerated the entire
+  liveness machinery and browser resolution in one run and forced the search onto the
+  rendering layer, where the real cause was hiding behind the fallthrough sentence.
+- `browser_record save` crosses no dispatch probes during its encode window; recording
+  export does not ride the command path.
+
+## Machine-state rule learned en route
+
+Live authority swaps must go through `scripts/dev-loop.ps1`. Hand-copying binaries over
+`target/release` and killing processes by hand races connector demand-start, which produced
+two live instances (and two workbench windows) mid-diagnosis. Recorded as a standing
+preference in [../../MEMORY.md](../../MEMORY.md).
+
+## Follow-up defect -- open: clicks into page-blocking dialogs never confirm
+
+First exposed by this diagnosis: every earlier failure aborted the demo before the desk
+stage, so the desk beats had not run since the capability-restoration click changes.
+
+Mechanism, verified to the wire:
+
+1. The desk stage's bell handler calls `window.prompt()` synchronously
+   (`/assets/demo.js`, `on("desk-bell", "click", ...)`; the page's own comment calls it "a
+   real page-blocking dialog").
+2. Extension activation confirms through the content script
+   (`service-worker.js activate()` -> `content(tab_id, {kind:"activate"...})`), which lives
+   on the page's blocked main thread. The reply is physically impossible once the dialog is
+   open.
+3. No receipt and no error frame arrive; the trace shows only the orchestrator's own
+   cancellation being acknowledged after the 8 s default deadline
+   (`operation_timeout` fallback). `DeadlineAfterDispatch` then renders honestly as
+   "Sent, but the browser never confirmed what happened." -- the rendering path is correct;
+   the extension behavior is not.
+
+Fix direction sketched (needs its own pass, owner eyes, and tests): during activation, race
+the content-script reply against the debugger-side dialog-opened event that
+`lib/debugger.js` already tracks browser-process-side; a dialog opening for the target's tab
+during the click window IS activation evidence and can complete the receipt (subject may be
+absent; `Activated.subject` is already optional). Never treat dialog-open as failure.
+
+## Environment state
+
+Clean. Instrumentation reverted from source; instrumented binaries deleted; the live
+authority was rebuilt and redeployed through `scripts/dev-loop.ps1 -Action Deploy
+-Component orchestrator` and serves from `target/release`. Throwaway probe scripts remain
+only under the machine-local temp directory outside the repository.

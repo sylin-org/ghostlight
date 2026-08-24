@@ -89,6 +89,12 @@ the owner wants, and what this project learned the hard way.
   deployed live projection. A small fixture may prove layout, but it cannot prove completeness.
 - **Persist before handoff.** Update STATUS, the relevant ADR or task evidence, and this file when a
   durable fact changes, and commit before writing a restart prompt.
+- **Live swaps only through `scripts/dev-loop.ps1`.** Never hand-copy a binary over
+  `target/release`, never kill-and-restart the authority by hand. The script's `deploy.lock`
+  suppresses demand-start while it works; bypassing it makes the connector respawn the authority
+  mid-swap, which produced two live instances and two workbench windows at once (2026-08-24,
+  foundry press_key diagnosis). If the service seems stuck, deploy again through the script; do
+  not improvise around it.
 
 ## Durable lessons
 

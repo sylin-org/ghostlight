@@ -5,16 +5,17 @@ Last updated: 2026-08-24.
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
 
-## In flight: foundry demo press_key diagnosis
+## In flight: foundry demo follow-ups
 
-The full-catalog foundry demo fails deterministically at its `key to end` beat with a sentence
-that claims the browser disconnected. Instrumented-authority evidence shows that sentence is a
-fallthrough rendering (`Refusal::BrowserStopped` in `work/mod.rs`) and the real event is an
-adapter error frame folded into `BrowserError::Primitive`, whose extension-authored message is
-discarded before any human or model can read it. The live authority on this machine is
-temporarily swapped to an instrumented dev build (pristine backup beside it); see
-[demo-press-key-diagnosis](tasks/demo-press-key-diagnosis/LEDGER.md) for the machine state,
-eliminated hypotheses, and next steps before touching browser-relay code.
+The foundry demo's press_key failure is resolved: the beat now runs while the packet form is
+still visible, and primitive adapter refusals render the browser's own reason instead of a
+phantom disconnection (see
+[demo-press-key-diagnosis](tasks/demo-press-key-diagnosis/LEDGER.md) for the full trail).
+One follow-up defect is documented there and still open: clicks into page-blocking dialogs
+(the desk stage bell) never confirm, because content-script activation cannot reply once a
+synchronous `prompt()` has frozen the page. Live authority swaps on development machines go
+through `scripts/dev-loop.ps1` only; hand swaps race connector demand-start and produce
+duplicate instances.
 
 ## Published capability restoration
 
