@@ -90,9 +90,13 @@ modified primary clicks previously synthesized `button: 2` (right-click) instead
 Pins include a behavioral ordering test (reply strictly before dispatch) and a source pin
 that will fail if anyone reintroduces reply-after-dispatch.
 
-Live verification is pending one owner action: reload the unpacked extension at
-`chrome://extensions`, then rerun `scripts/demo-foundry.ps1` end to end -- the desk-stage
-beats should now pass.
+Live verification completed 2026-08-24 after the owner reloaded the unpacked extension:
+`scripts/demo-foundry.ps1` ran green through all 41 beats, including `key to end`,
+`ring once`, `dialog answer`, `ring again`, and `bell silent`. One pacing nuance observed
+with the early-reply design: the activation receipt can arrive a few milliseconds before
+the opened dialog becomes observable, so a fast `dialog status` immediately after a click
+may legitimately report no dialog yet; the demo's beats still pass because each beat
+reports truthfully.
 
 ## Sprint companions landed the same day
 

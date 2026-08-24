@@ -7,15 +7,15 @@ preserved `docs/0.8/` material carry history; this file does not rewrite it.
 
 ## In flight: foundry demo follow-ups
 
-The foundry demo's press_key failure is resolved, and the desk-stage blocking-dialog click
-defect has its extension fix landed: activation now replies before dispatching, so a
-`window.prompt()`-opening handler can no longer swallow the receipt. Live proof of the desk
-beats is pending one unpacked-extension reload at `chrome://extensions`, then a full
-`scripts/demo-foundry.ps1` run. Effect-unknown receipts render truthfully with the browser's
-own reason, the audit carries bounded refusal facts for non-successes, and RELEASE-CHECKLIST
-G1 gained the whole-catalog demo as a standing gate. See
-[demo-press-key-diagnosis](tasks/demo-press-key-diagnosis/LEDGER.md). Live authority swaps on
-development machines go through `scripts/dev-loop.ps1` only.
+Both foundry defects are fixed and proven live on the development graph: after the owner
+reloaded the unpacked extension, `scripts/demo-foundry.ps1` ran green through all 41 beats,
+including the press_key coda and every desk-stage dialog beat. Effect-unknown receipts
+render truthfully with the browser's own reason, the audit carries bounded refusal facts
+for non-successes, and RELEASE-CHECKLIST G1 gained the whole-catalog demo as a standing
+gate. See [demo-press-key-diagnosis](tasks/demo-press-key-diagnosis/LEDGER.md). What
+remains for 1.0 is the release-environment track: G0 freeze, provenance-bound candidate,
+clean-machine install rows, and the store resubmission. Live authority swaps on development
+machines go through `scripts/dev-loop.ps1` only.
 
 ## Published capability restoration
 
