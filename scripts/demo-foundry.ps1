@@ -235,6 +235,11 @@ $null = Step 'release packet' 'browser_fill_form' @{
     tab    = $tab
     fields = @($Release.GetEnumerator() | ForEach-Object { @{ target = (Target $after 'textbox' $_.Key); value = $_.Value } })
 }
+# Completion replaces the packet view, so this is the keyboard beat's only honest moment: the
+# Release name field is filled and visible, and End carries its caret to the end of the value.
+$null = Step 'key to end' 'browser_press_key' @{
+    tab = $tab; target = (Target $after 'textbox' 'Release name'); key = 'End'
+}
 $null = Step 'complete' 'browser_click' @{ tab = $tab; target = (Target $after 'button' 'Complete release packet') }
 
 # 6. Try to leave the domain. The refusal is the point, so anything else fails the run.
@@ -256,9 +261,6 @@ if (-not $KeepRecording) {
 # prompt() gives browser_dialog something honest to status, answer, and dismiss.
 $null = Step 'scroll stage' 'browser_scroll' @{ tab = $tab; direction = 'down'; amount = 'page' }
 $null = Step 'scroll back' 'browser_scroll' @{ tab = $tab; direction = 'up'; amount = 'medium' }
-$null = Step 'key to end' 'browser_press_key' @{
-    tab = $tab; target = (Target $after 'textbox' 'Release name'); key = 'End'
-}
 $null = Step 'read title' 'browser_execute' @{ tab = $tab; script = 'document.title' }
 $null = Step 'seq scroll-wait' 'browser_sequence' @{
     tab = $tab

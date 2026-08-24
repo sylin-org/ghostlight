@@ -215,6 +215,8 @@ step 'release packet' browser_fill_form "$(jq -nc \
     {target:$release_owner,value:"Maya Chen"},
     {target:$qa_note,value:"Revision B clears the foil mask and the Sylin back stamp."}
   ]}')" succeeded
+# Completion replaces the packet view, so this is the keyboard beat's only honest moment.
+step 'key to end' browser_press_key "$(jq -nc --arg tab "$tab" --arg target "$release_name" '{tab:$tab,target:$target,key:"End"}')" succeeded
 step complete browser_click "$(jq -nc --arg tab "$tab" --arg target "$complete" '{tab:$tab,target:$target}')" succeeded
 step off-domain browser_navigate "$(jq -nc --arg tab "$tab" --arg url "$off_domain" '{tab:$tab,url:$url,restrict_hosts:["sylin.org"]}')" blocked
 step 'save replay' browser_record "$(jq -nc --arg target "$replay" '{action:"save",target:$target}')" succeeded
@@ -232,7 +234,6 @@ fi
 # prompt() gives browser_dialog something honest to status, answer, and dismiss.
 step 'scroll stage' browser_scroll "$(jq -nc --arg tab "$tab" '{tab:$tab,direction:"down",amount:"page"}')" succeeded
 step 'scroll back' browser_scroll "$(jq -nc --arg tab "$tab" '{tab:$tab,direction:"up",amount:"medium"}')" succeeded
-step 'key to end' browser_press_key "$(jq -nc --arg tab "$tab" --arg target "$release_name" '{tab:$tab,target:$target,key:"End"}')" succeeded
 step 'read title' browser_execute "$(jq -nc --arg tab "$tab" '{tab:$tab,script:"document.title"}')" succeeded
 step 'seq scroll-wait' browser_sequence "$(jq -nc --arg tab "$tab" '{tab:$tab,steps:[{action:"scroll",direction:"down",amount:"small"},{action:"wait",condition:"text_present",value:"SYLIN"}]}')" succeeded
 step 'flow title-find' browser_flow "$(jq -nc --arg tab "$tab" '{tab:$tab,steps:[{id:"title",tool:"browser_execute",arguments:{script:"document.title"}},{id:"find it",tool:"browser_find",arguments:{text:{flow_ref:{step:"title",pointer:"/facts/value"}}}}]}')" succeeded
