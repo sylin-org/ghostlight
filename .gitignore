@@ -6,6 +6,10 @@
 /target/
 /.target-*/
 /target-*/
+
+# Throwaway fixtures for live lanes: seeded configuration forests and other scratch inputs
+# a real executable is pointed at for one proof. Never tracked, never shipped; safe to delete.
+/.tmp/
 /crates/orchestrator/gen/
 /crates/orchestrator/binaries/
 
