@@ -43,6 +43,20 @@ one-call recreation for dead tabs.
    `repeat_safe:false` on recovered work (+ tests).
 3. T3 documentation: LANGUAGE.md two-tier handle distinction; scripting guide steers
    drivers toward selectors plus durable tab handles instead of stash-and-hope.
+4. T4 stale-target refusals arrive pre-recovered: the refusal carries up to three current
+   candidate targets matching the dead handle's role/name, labeled as observations.
+5. T5 actionability refusals name the exact failing predicate (display:none,
+   visibility:hidden, opacity:0, zero-size, disabled, inert).
+6. T6 wait conditions accept typed semantic selectors alongside handles
+   (`selector_present`) so waiting never forces pre-resolution.
+7. T7 every tab-scoped success envelope echoes the workspace `tab` handle under the same
+   key.
+8. T8 credential-handoff refusals name the exact field (bounded role + name/id).
+9. T9 deadline honesty and transparency: deadline variants stop wearing the browser-stopped
+   sentence; refusals carry phase (before/after dispatch), elapsed, and budget.
+
+Standing rule for all of them: every new sentence is authored in the language layer with a
+pinned oracle; delight never bends truth.
 
 ## Environment
 
