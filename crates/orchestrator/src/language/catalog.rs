@@ -16,70 +16,70 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_tabs",
             "Browser tabs",
-            "List controlled tabs, focus one exact tab, or close one exact tab. Use list to recover current tab_ handles.",
+            "List, focus, or close controlled tabs. Use list to recover fresh tab_ handles for later calls.",
             tabs_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_navigate",
             "Navigate",
-            "Go to an absolute HTTP(S) URL. Reuses the obvious controlled tab by default; set new_tab true to create one.",
+            "Go to an absolute HTTP(S) URL in a controlled tab. Reuses the obvious tab by default; set new_tab true to create one.",
             navigate_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_history",
             "Browser history",
-            "Move back or forward, or reload the current page. A new document invalidates prior target_ and view_ handles.",
+            "Move back or forward, or reload the current page. A new document invalidates prior target_ and view_ handles, so collect fresh ones afterward.",
             history_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_window",
             "Browser window",
-            "Set tab zoom or resize the containing browser window. Either change invalidates current view_ handles.",
+            "Set zoom for one tab or resize the containing browser window. Either change invalidates current view_ handles, so take a fresh screenshot before more coordinate work.",
             window_schema(),
             Hints::local_mutation(false),
         ),
         tool(
             "browser_read",
             "Read page",
-            "Read bounded useful prose from a page or target. Use browser_inspect or browser_find when you need target_ handles.",
+            "Read bounded useful prose from a page or one target. When the goal is a target_ handle to act on, use browser_inspect or browser_find instead.",
             read_schema(),
             Hints::browser_read(),
         ),
         tool(
             "browser_inspect",
             "Inspect page",
-            "Inspect semantic controls or structure and receive fresh target_ handles for later actions.",
+            "Inspect semantic controls or page structure and receive fresh target_ handles for later actions. With scope document it also snapshots structure and diffs it against the previous snapshot of that tab.",
             inspect_schema(),
             Hints::browser_read(),
         ),
         tool(
             "browser_find",
             "Find on page",
-            "Find ranked semantic targets by visible or accessible text and receive fresh target_ handles.",
+            "Find ranked semantic targets by visible or accessible text and receive fresh target_ handles. The fastest route to a control when you know its label.",
             find_schema(),
             Hints::browser_read(),
         ),
         tool(
             "browser_screenshot",
             "Take screenshot",
-            "Capture the viewport, full page, one semantic target, or a magnified region from a current view_. The result includes a fresh view_ handle.",
+            "Capture the viewport, the full page, one target, or a magnified region. Every capture returns a fresh view_ handle that later coordinate calls and region captures are built from.",
             screenshot_schema(),
             Hints::browser_read(),
         ),
         tool(
             "browser_click",
             "Click",
-            "Click a current target_ handle or an exact point from a current view_ screenshot.",
+            "Click a current target_ handle or an exact point from a current view_ screenshot. Prefer a target when one is known; points suit canvases and maps.",
             click_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_scroll",
             "Scroll",
-            "Scroll the page, defaulting to down by a medium amount, or reveal one current target_ handle.",
+            "Scroll the page, defaulting to down by a medium amount, or reveal one current target_. Wheel scrolling at exact coordinates needs a current view_.",
             scroll_schema(),
             Hints::browser_action(false),
         ),
@@ -93,21 +93,21 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_fill_form",
             "Fill form",
-            "Fill several ordinary form fields. It does not submit unless submit_target is supplied; credential fields stay with the user.",
+            "Fill one to thirty ordinary form fields in one call. Nothing submits unless submit_target names the control, and credential fields stop so the user can enter their secret.",
             fill_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_type_text",
             "Type text",
-            "Type through per-character browser input events. Prefer browser_fill_form when typing events do not matter.",
+            "Type text through real per-character keyboard input. Use browser_fill_form instead when plain values are enough.",
             type_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_press_key",
             "Press key",
-            "Send one named key or one literal character, optionally to a current target_ handle.",
+            "Send one named key or one literal character, optionally aimed at a current target_. Use strokes for shortcuts such as Control-a.",
             key_schema(),
             Hints::browser_action(true),
         ),
@@ -128,49 +128,49 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_dialog",
             "Browser dialog",
-            "Inspect, accept, dismiss, or respond to the current JavaScript dialog.",
+            "Inspect, accept, dismiss, or answer the current JavaScript dialog. A dialog blocks its page until it is handled, so deal with it before other work on that tab.",
             dialog_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_upload",
             "Upload files",
-            "Upload explicitly supplied local paths, bounded inline files, or one captured image to an ordinary file input, or drop one captured image at a current-view point.",
+            "Attach explicitly supplied local paths, bounded inline files, or one captured image to an ordinary file input, or drop one captured image at a point in a current view.",
             upload_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_execute",
             "Execute JavaScript",
-            "Execute explicit bounded JavaScript in the page main world. It may read, mutate, or navigate the page.",
+            "Run bounded JavaScript in the page main world. It may read, mutate, or navigate, so prefer a semantic tool when one fits.",
             evaluate_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_sequence",
             "Run sequence",
-            "Run two to eight fully specified click, fill, type, key, scroll, hover, or wait steps on one tab.",
+            "Run two to eight fully specified click, fill, type, key, scroll, hover, or wait steps on one tab, stopping at the first failed step.",
             sequence_call_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_flow",
             "Run flow",
-            "Run one to twenty fully specified steps on one tab. Each step names a current tool and supplies its arguments; later arguments may reference earlier step results. Supports dry run and a bounded result budget.",
+            "Compose one to twenty steps on one tab. Each step names a current tool and supplies its arguments; later arguments may reference earlier step results. Dry run decodes everything without dispatching.",
             flow_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_record",
             "Record browser",
-            "Start, inspect, stop, save, or discard a bounded memory-only browser recording. Save auto-stops; omit recording only when exactly one is eligible.",
+            "Record browser work as a short memory-only GIF: start, check status, stop, save, or discard. Save auto-stops an active capture; omit recording only when exactly one is eligible.",
             record_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_diagnose",
             "Diagnose page",
-            "Read bounded opt-in console and network observations. Defaults to problems from both sources; sensitive request data is never collected.",
+            "Read opt-in console and network observations for a tab. Observation begins with the first call, so earlier activity is absent; reload or reproduce to capture it. Sensitive request data is never collected.",
             diagnose_schema(),
             Hints::browser_read(),
         ),
@@ -567,7 +567,7 @@ fn screenshot_schema() -> Value {
                         "view",
                         handle(
                             "view_",
-                            "Current screenshot view that defines the region coordinates.",
+                            "Screenshot view whose image defines these coordinates; take a screenshot first, then pass its view_ handle.",
                         ),
                     ),
                     (
@@ -633,7 +633,7 @@ fn click_schema() -> Value {
                             "view",
                             handle(
                                 "view_",
-                                "Current screenshot view that defines the coordinates.",
+                                "Screenshot view that defines these coordinates; take one first if you have none.",
                             ),
                         ),
                         ("x", coordinate("Horizontal CSS coordinate in the view.")),
@@ -712,7 +712,7 @@ fn scroll_schema() -> Value {
                         "view",
                         handle(
                             "view_",
-                            "Current screenshot view that defines the coordinates.",
+                            "Screenshot view that defines these coordinates; take one first if you have none.",
                         ),
                     ),
                     ("x", coordinate("Horizontal CSS coordinate in the view.")),
@@ -753,7 +753,7 @@ fn hover_schema() -> Value {
                         "view",
                         handle(
                             "view_",
-                            "Current screenshot view that defines the coordinates.",
+                            "Screenshot view that defines these coordinates; take one first if you have none.",
                         ),
                     ),
                     ("x", coordinate("Horizontal CSS coordinate in the view.")),
@@ -934,7 +934,7 @@ fn drag_schema() -> Value {
                 vec![
                     (
                         "view",
-                        handle("view_", "Current screenshot view that defines both points."),
+                        handle("view_", "Screenshot view that defines both points; take one first if you have none."),
                     ),
                     ("start_x", coordinate("Horizontal source coordinate.")),
                     ("start_y", coordinate("Vertical source coordinate.")),
@@ -1009,10 +1009,10 @@ fn wait_branch(
 fn dialog_schema() -> Value {
     union(
         vec![
-            dialog_branch("status", false),
-            dialog_branch("accept", false),
-            dialog_branch("dismiss", false),
-            dialog_branch("respond", true),
+            dialog_branch("status", "Report whether a dialog is open.", false),
+            dialog_branch("accept", "Accept the open dialog.", false),
+            dialog_branch("dismiss", "Dismiss the open dialog.", false),
+            dialog_branch("respond", "Answer a prompt with text.", true),
         ],
         vec![
             json!({"action":"status"}),
@@ -1021,9 +1021,9 @@ fn dialog_schema() -> Value {
     )
 }
 
-fn dialog_branch(action: &str, text_required: bool) -> Value {
+fn dialog_branch(action: &str, action_description: &str, text_required: bool) -> Value {
     let mut fields = vec![
-        ("action", constant(action, "Dialog action.")),
+        ("action", constant(action, action_description)),
         ("tab", tab()),
     ];
     let mut required = vec!["action"];
@@ -1056,7 +1056,7 @@ fn upload_schema() -> Value {
                 ),
                 (
                     "source_image",
-                    handle("image_","One captured image handle to attach, or to drop at a view point."),
+                    handle("image_","Captured image_ handle from an earlier screenshot. Attach it to a file input, or drop it at a view point."),
                 ),
                 (
                     "view",
@@ -1717,6 +1717,68 @@ mod tests {
             assert_eq!(annotations.destructive_hint, Some(destructive), "{name}");
             assert_eq!(annotations.idempotent_hint, Some(idempotent), "{name}");
             assert_eq!(annotations.open_world_hint, Some(open_world), "{name}");
+        }
+    }
+
+    #[test]
+    fn catalog_descriptions_teach_the_remedy() {
+        let tools = catalog();
+        let description = |name: &str| -> String {
+            tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .unwrap_or_else(|| panic!("missing {name}"))
+                .description
+                .clone()
+        };
+
+        assert!(
+            description("browser_history").contains("collect fresh ones"),
+            "navigation must teach that stale handles need recollection"
+        );
+        assert!(
+            description("browser_window").contains("take a fresh screenshot"),
+            "window changes must teach that coordinate work needs a new view"
+        );
+        assert!(
+            description("browser_dialog").contains("blocks its page"),
+            "dialog handling must teach that dialogs block their page"
+        );
+        assert!(
+            description("browser_diagnose").contains("Observation begins with the first call"),
+            "diagnose must teach when observation starts"
+        );
+
+        let screenshot = tool_schema("browser_screenshot");
+        let view = property(&screenshot, "view").expect("screenshot view property");
+        assert!(
+            view.get("description")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("take a screenshot first")),
+            "region capture must teach where its view comes from"
+        );
+
+        let click = tool_schema("browser_click");
+        let click_view = property(&click, "view").expect("click view property");
+        assert!(
+            click_view
+                .get("description")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("take one first")),
+            "coordinate clicks must teach where their view comes from"
+        );
+    }
+
+    #[test]
+    fn catalog_strings_are_ascii() {
+        for tool in catalog() {
+            assert!(tool.name.is_ascii(), "{} name", tool.name);
+            assert!(tool.description.is_ascii(), "{} description", tool.name);
+            let annotations = tool.annotations.as_ref().expect("annotations are required");
+            let title = annotations.title.as_deref().expect("title is required");
+            assert!(title.is_ascii(), "{} title", tool.name);
+            let schema = serde_json::to_string(&tool.input_schema).expect("schema serializes");
+            assert!(schema.is_ascii(), "{} schema", tool.name);
         }
     }
 
