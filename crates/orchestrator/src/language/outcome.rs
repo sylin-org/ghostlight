@@ -655,11 +655,26 @@ impl Outcome {
                 truncated: true, ..
             } => vec!["Narrow the subtree root or depth to capture the rest.".into()],
             Self::SelectorUnresolved { .. } => vec![
-                "Inspect the page or use browser_find to register an explicit target, or narrow the selector with role and exact.".into(),
+                "Use browser_find with text visible on the page, inspect for fresh handles, or narrow the selector with role and exact.".into(),
+            ],
+            Self::FlowRan {
+                completed,
+                total,
+                ..
+            } if completed < total => vec![
+                "Use the per-step results to find what went wrong, fix that step, and run the flow again."
+                    .into(),
+            ],
+            Self::SequenceRan { completed, total } if completed < total => vec![
+                "Find the step that stopped the sequence in the results, fix it, and run the sequence again."
+                    .into(),
             ],
             Self::Waited {
                 satisfied: false, ..
-            } => vec!["Inspect the current page before choosing another action.".into()],
+            } => vec![
+                "Read or inspect the page to see its current state before choosing another action."
+                    .into(),
+            ],
             Self::DiagnosticsRead {
                 count: 0,
                 capture_started: true,
@@ -871,7 +886,7 @@ impl Refusal {
                 "A credential-class field requires user handoff in the visible browser."
             }
             Self::IncompatibleReceipt => {
-                "The browser adapter returned an incompatible primitive receipt."
+                "The browser answered in a form Ghostlight does not recognize."
             }
             Self::BrowserStopped { .. } => "The browser disconnected before anything happened.",
             Self::BrowserAmbiguous => {
@@ -930,14 +945,21 @@ impl Refusal {
     pub fn next_steps(&self) -> Vec<String> {
         match self {
             Self::InvalidRequest => {
-                vec!["Correct the call using the advertised tool schema.".into()]
+                vec!["Match the call to the advertised schema; the invalid_input detail states exactly what to change.".into()]
             }
+            Self::DeadlineBeforeStart => vec![
+                "Repeat the call when the current Ghostlight action has finished.".into(),
+            ],
             Self::LocalInterlock => vec![
                 "The user can change the relevant Ghostlight extension setting or perform the action directly."
                     .into(),
             ],
             Self::CredentialHandoff => vec![
                 "Complete the credential field in the visible browser, then inspect the page again."
+                    .into(),
+            ],
+            Self::IncompatibleReceipt => vec![
+                "Reload or update the Ghostlight extension in that browser, then repeat the call."
                     .into(),
             ],
             Self::BrowserStopped { reconnect: true } => {
@@ -983,6 +1005,12 @@ impl Refusal {
                 }
             },
             Self::WorkspaceUnusable { reason } => reason.next_steps(),
+            Self::FilesUnreadable => vec![
+                "Confirm each path is an existing file within Ghostlight's upload limits.".into(),
+            ],
+            Self::CaptureTooLarge => vec![
+                "Capture the viewport or a smaller region instead of the full page.".into(),
+            ],
             Self::RecordingUnavailable => vec![
                 "Use browser_record with action status and an explicit recording handle when more than one exists."
                     .into(),
@@ -1076,10 +1104,20 @@ impl WorkspaceReason {
             Self::StaleView => {
                 vec!["Call browser_screenshot to obtain a current view handle.".into()]
             }
+            Self::TabHeld => vec![
+                "Resume browser work from the Ghostlight window or tray, then repeat the call."
+                    .into(),
+            ],
             Self::WorkspaceBusy => {
                 vec!["Wait for the active Ghostlight invocation to finish.".into()]
             }
-            Self::TabHeld | Self::OwnershipMismatch | Self::WorkspaceClosed => vec![],
+            Self::OwnershipMismatch => {
+                vec!["Collect fresh handles from this session, then continue with those.".into()]
+            }
+            Self::WorkspaceClosed => vec![
+                "Start over; the next call opens a fresh session and old handles will not work."
+                    .into(),
+            ],
         }
     }
 }
@@ -1920,7 +1958,7 @@ mod tests {
             ),
             (
                 Refusal::IncompatibleReceipt,
-                "The browser adapter returned an incompatible primitive receipt.",
+                "The browser answered in a form Ghostlight does not recognize.",
             ),
             (
                 Refusal::BrowserStopped { reconnect: false },
@@ -1965,6 +2003,28 @@ mod tests {
             assert_eq!(refusal.summary(), expected);
         }
         assert_eq!(
+            Refusal::InvalidRequest.next_steps(),
+            vec!["Match the call to the advertised schema; the invalid_input detail states exactly what to change."]
+        );
+        assert_eq!(
+            Refusal::DeadlineBeforeStart.next_steps(),
+            vec!["Repeat the call when the current Ghostlight action has finished."]
+        );
+        assert_eq!(
+            Refusal::IncompatibleReceipt.next_steps(),
+            vec![
+                "Reload or update the Ghostlight extension in that browser, then repeat the call."
+            ]
+        );
+        assert_eq!(
+            Refusal::FilesUnreadable.next_steps(),
+            vec!["Confirm each path is an existing file within Ghostlight's upload limits."]
+        );
+        assert_eq!(
+            Refusal::CaptureTooLarge.next_steps(),
+            vec!["Capture the viewport or a smaller region instead of the full page."]
+        );
+        assert_eq!(
             Refusal::LocalInterlock.next_steps(),
             vec!["The user can change the relevant Ghostlight extension setting or perform the action directly."]
         );
@@ -1993,6 +2053,103 @@ mod tests {
         );
         assert_eq!(refusal.observed().host.as_deref(), Some("localhost"));
         assert!(Refusal::InvalidRequest.observed().host.is_none());
+    }
+
+    /// Every workspace reason names its own way back, or deliberately none.
+    #[test]
+    fn workspace_reasons_teach_their_own_recovery() {
+        assert_eq!(
+            WorkspaceReason::TabUnavailable.next_steps(),
+            vec!["Call browser_tabs with action list to obtain current tab handles."]
+        );
+        assert_eq!(
+            WorkspaceReason::StaleTarget.next_steps(),
+            vec!["Call browser_inspect or browser_find to obtain current target handles."]
+        );
+        assert_eq!(
+            WorkspaceReason::StaleView.next_steps(),
+            vec!["Call browser_screenshot to obtain a current view handle."]
+        );
+        assert_eq!(
+            WorkspaceReason::TabHeld.next_steps(),
+            vec!["Resume browser work from the Ghostlight window or tray, then repeat the call."]
+        );
+        assert_eq!(
+            WorkspaceReason::WorkspaceBusy.next_steps(),
+            vec!["Wait for the active Ghostlight invocation to finish."]
+        );
+        assert_eq!(
+            WorkspaceReason::OwnershipMismatch.next_steps(),
+            vec!["Collect fresh handles from this session, then continue with those."]
+        );
+        assert_eq!(
+            WorkspaceReason::WorkspaceClosed.next_steps(),
+            vec!["Start over; the next call opens a fresh session and old handles will not work."]
+        );
+    }
+
+    /// Outcome guidance leads with the recovery action and stays truthful about partial work.
+    #[test]
+    fn outcome_next_steps_teach_the_fix() {
+        assert_eq!(
+            Outcome::SelectorUnresolved { matched: 0 }.next_steps(),
+            vec!["Use browser_find with text visible on the page, inspect for fresh handles, or narrow the selector with role and exact."]
+        );
+        assert_eq!(
+            Outcome::FlowRan {
+                completed: 2,
+                total: 5,
+                stopped: true,
+            }
+            .next_steps(),
+            vec!["Use the per-step results to find what went wrong, fix that step, and run the flow again."]
+        );
+        assert!(Outcome::FlowRan {
+            completed: 5,
+            total: 5,
+            stopped: false,
+        }
+        .next_steps()
+        .is_empty());
+        assert_eq!(
+            Outcome::SequenceRan {
+                completed: 2,
+                total: 5,
+            }
+            .next_steps(),
+            vec!["Find the step that stopped the sequence in the results, fix it, and run the sequence again."]
+        );
+        assert_eq!(
+            Outcome::Waited {
+                condition: "text_present".into(),
+                elapsed_ms: 8_000,
+                satisfied: false,
+                host: None,
+            }
+            .next_steps(),
+            vec![
+                "Read or inspect the page to see its current state before choosing another action."
+            ]
+        );
+        assert_eq!(
+            Outcome::DiagnosticsRead {
+                count: 0,
+                capture_started: true,
+                problems_only: true,
+                host: None,
+            }
+            .next_steps(),
+            vec!["Reproduce the problem or reload the page, then call browser_diagnose again."]
+        );
+        assert_eq!(
+            Outcome::DocumentInspected {
+                nodes: 200,
+                truncated: true,
+                compared: false,
+            }
+            .next_steps(),
+            vec!["Narrow the subtree root or depth to capture the rest."]
+        );
     }
 
     #[test]
