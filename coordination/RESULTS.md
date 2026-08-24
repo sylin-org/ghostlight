@@ -1,46 +1,36 @@
-# Latest coordination result
+# Latest result
 
-- Updated: 2026-08-16
-- From: windows-codex
-- To: linux-codex
-- Status: the remainder of the reference-experience epic is delegated to the Linux lane
-- Tested implementation: `358711e2` on `dev`
+## [0017] Lane brief -- Linux verification of the foundry sprint (windows-codex to linux-codex)
 
-## Context
+Authority: verify and, if needed, fix with regression coverage. No main merge, no tag, no
+publish/store/release action, no network behavior added.
 
-**Your entry point is `docs/tasks/reference-experience/START-HERE-LINUX.md`.** Open it first and
-follow it top to bottom. It is written to be read cold: what to read and in what order, the
-authority order, environment facts labelled as-of, nine tasks with their owning code and STOP
-conditions, the literal gate commands, a NEVER list where every entry names its one sanctioned
-exception, and the failure protocol.
+Lane head: origin/dev at `8f400eaf` or later on dev.
 
-This file exists only to hand you that pointer and to record the boundary. Everything operational
-is in the entry point, and the ledger is the authority on progress.
+Full self-contained instructions:
+`docs/tasks/demo-press-key-diagnosis/START-HERE-LINUX.md` -- follow top to bottom.
 
-## Scope
+Summary of what must happen:
 
-S1 through S6 are complete and were gated on a Windows host at `1d5629e6`. The Windows session is
-not implementing further stages. You own:
+1. Sync to the lane head; record the exact HEAD sha in your evidence.
+2. Source gates: fmt, warnings-denied Clippy, full Rust workspace tests, extension npm tests.
+3. Rebuild and deploy your established user-level candidate from this exact revision
+   (orchestrator plus both connectors), then explicitly reload the unpacked extension at
+   chrome://extensions. The reload is mandatory: the content script changed, and skipping it
+   reproduces the old defect.
+4. Run `scripts/demo-foundry.sh` end to end against the ordinary visible Chromium profile.
+   Required: every beat green, including mid-story `key to end` and the desk-stage
+   ring/status/answer/dismiss sequence.
+5. Honest-rendering spot checks: one deliberate primitive refusal shows "The browser refused
+   this job: ..." with facts `browser_primitive_failed` + detail (never a disconnection
+   sentence); one failing audit record carries `refusal_facts`; success records do not.
+6. Add a dated CachyOS record under docs/testing/, link it from the diagnosis ledger, update
+   STATUS.md's in-flight paragraph if stale, commit logical changes separately, push dev,
+   report back via CHAT.md.
 
-- V1 through V5, verifying work that landed but could only be compiled on Windows. These map to
-  ledger deviations 3, 5, 7, and 2, plus the environment rows.
-- S7a, S7b, and S7c, the readiness work, separated because their verification stories differ. S7a
-  is a governance-schema change and should start a fresh session.
-- S8, the evaluation, whose release-blocking Linux lifecycle is the Ubuntu GNOME Wayland L1-L9 run
-  that ADR-0123 already made mandatory.
+Context: this proves the same-day Windows sprint that fixed the foundry press_key failure
+and the desk-bell blocking-dialog hang (activation now replies before dispatching). Full
+mechanisms: `docs/tasks/demo-press-key-diagnosis/LEDGER.md`.
 
-The WSL environment row stays with the Windows host.
-
-## Release coupling
-
-The owner decided on 2026-08-16 that 1.0 does not release until this epic is done. The epic is on
-the release critical path and S8's evidence is release evidence. An accurate `BLOCKED` is worth
-more than an optimistic pass; the second kind ships a release on evidence that was not real.
-
-## Boundaries
-
-- Never add telemetry, an update ping, or any outbound network request. ADR-0028 Decision 9 is
-  permanent and public trust and legal documents depend on it.
-- Never edit an existing pin in `PINS.md`. If a pin is wrong, STOP and say so in `CHAT.md`.
-- Never merge `main`, tag, sign, publish, or release.
-- A blocked task with a clear reason is a good outcome. A task completed by guessing is not.
+Known honest nuance, not a defect: with reply-before-dispatch, a fast dialog status right
+after a click may truthfully see no dialog yet. Beats still pass.
