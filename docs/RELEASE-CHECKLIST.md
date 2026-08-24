@@ -194,6 +194,9 @@ Nothing in this gate makes the adapter publicly visible.
   hash. The store build is deterministic, so a mismatch means the wrong artifact.
 - [ ] Submit for review with staged publication, so review approval does not silently make the
   adapter public.
+- [ ] Take G2 custody before opening this gate: a staged review goes stale the moment the package
+  changes, so submission is ordered strictly after the frozen candidate's bytes are assembled,
+  verified, and held locally.
 - [ ] Reach the distribution state chosen in G0, and record which route was used.
 - [ ] Install the reviewed adapter from the store on a live-lane machine and confirm its extension id
   and version match the candidate.
