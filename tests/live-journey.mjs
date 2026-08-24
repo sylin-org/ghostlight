@@ -62,7 +62,7 @@ try {
   notify("notifications/initialized");
 
   const listed = await request("tools/list");
-  assert.equal(listed.result.tools.length, 22);
+  assert.equal(listed.result.tools.length, 23);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
 
   const opened = structured(await request("tools/call", {
