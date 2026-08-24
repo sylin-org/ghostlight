@@ -977,6 +977,18 @@ fn wait_schema() -> Value {
                 None,
                 Some("Current target that must disappear."),
             ),
+            object(
+                vec![
+                    (
+                        "condition",
+                        constant("selector_present", "Observable condition."),
+                    ),
+                    ("tab", tab()),
+                    ("timeout_ms", timeout()),
+                    ("selector", semantic_selector()),
+                ],
+                vec!["condition", "selector"],
+            ),
             wait_branch(
                 "duration",
                 Some("Whole milliseconds, zero through ten thousand."),

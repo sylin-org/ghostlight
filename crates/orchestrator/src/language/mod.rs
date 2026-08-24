@@ -717,6 +717,10 @@ pub struct Wait {
     pub value: Option<String>,
     #[serde(default)]
     pub target: Option<String>,
+    /// Typed semantic selector for `selector_present`: waiting on what the page calls a
+    /// control, without pre-resolving any handle.
+    #[serde(default)]
+    pub selector: Option<SemanticSelector>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
@@ -1101,7 +1105,14 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_wait" => Operation::Wait(parse(
             input,
-            &["condition", "tab", "value", "target", "timeout_ms"],
+            &[
+                "condition",
+                "tab",
+                "value",
+                "target",
+                "selector",
+                "timeout_ms",
+            ],
             validate_wait,
         )?)
         .into_ok(),
@@ -2021,6 +2032,28 @@ fn validate_press_key(value: &PressKey) -> Result<(), LanguageError> {
 fn validate_wait(value: &Wait) -> Result<(), LanguageError> {
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_timeout(value.timeout_ms)?;
+    if value.condition == "selector_present" {
+        let selector = value
+            .selector
+            .as_ref()
+            .ok_or_else(|| LanguageError::Invalid("selector_present requires selector".into()))?;
+        if selector.name.trim().is_empty() {
+            return Err(LanguageError::Invalid(
+                "selector_present requires a non-empty name".into(),
+            ));
+        }
+        if value.value.is_some() || value.target.is_some() {
+            return Err(LanguageError::Invalid(
+                "selector_present accepts neither value nor target".into(),
+            ));
+        }
+        return validate_restrictions(&value.restrictions);
+    }
+    if value.selector.is_some() {
+        return Err(LanguageError::Invalid(
+            "only selector_present accepts selector".into(),
+        ));
+    }
     validate_condition(
         &value.condition,
         value.value.as_deref(),

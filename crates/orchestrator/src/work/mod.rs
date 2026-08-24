@@ -2254,6 +2254,69 @@ mod tests {
         assert_eq!(candidates[0]["role"], "button");
     }
 
+    /// Waiting on a typed semantic selector polls the live page and succeeds the moment the
+    /// control exists -- no handle pre-resolution required.
+    #[test]
+    fn waiting_on_a_semantic_selector_polls_the_live_page() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+        let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
+
+        // One miss, then the control appears.
+        browser.push(Ok(BrowserOutcome::Targets {
+            tab_id: 7,
+            targets: vec![],
+        }));
+        browser.push(Ok(BrowserOutcome::Targets {
+            tab_id: 7,
+            targets: vec![ObservedTarget {
+                locator: "b-1".into(),
+                role: "button".into(),
+                name: "Ready".into(),
+                state: vec![],
+                credential_class: false,
+            }],
+        }));
+        let waited = executor.execute(
+            &workspace,
+            "browser_wait",
+            json!({"tab":tab_handle,"condition":"selector_present","selector":{"name":"Ready","role":"button"}}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(waited.status, Status::Succeeded);
+        assert_eq!(waited.facts["condition"], "selector_present");
+        assert_eq!(waited.facts["satisfied"], true);
+
+        // A selector that never shows up inside its budget fails decisively.
+        for _ in 0..5 {
+            browser.push(Ok(BrowserOutcome::Targets {
+                tab_id: 7,
+                targets: vec![],
+            }));
+        }
+        let missed = executor.execute(
+            &workspace,
+            "browser_wait",
+            json!({"tab":tab_handle,"condition":"selector_present","selector":{"name":"Never","role":"button"},"timeout_ms":250}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(missed.status, Status::Failed);
+        assert_eq!(missed.facts["satisfied"], false);
+    }
+
     /// Deadlines speak for themselves instead of claiming disconnection, and carry their
     /// phase so the caller can tell a spent budget from a silent adapter.
     #[test]

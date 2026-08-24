@@ -1282,6 +1282,11 @@ fn waited(condition: &str, elapsed_ms: u64, satisfied: bool, host: &Option<Strin
         "url_contains" => (Some("The address"), "matched", "never matched"),
         "target_present" => (Some("The target"), "appeared", "never appeared"),
         "target_absent" => (Some("The target"), "disappeared", "never disappeared"),
+        "selector_present" => (
+            Some("The selector"),
+            "matched a control",
+            "matched no control",
+        ),
         _ => (Some("The condition"), "was met", "was never met"),
     };
     let location = place(host, "the page");

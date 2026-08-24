@@ -715,6 +715,95 @@ impl ApplicationExecutor {
                 observed: outcome.observed(),
             };
         }
+        // Waiting on what the page calls a control: polled executor-side through the same
+        // semantic query every selector-based action uses, so no handle pre-resolution is
+        // needed and a stale handle can never be required to wait.
+        if value.condition == "selector_present" {
+            let Some(selector) = value.selector.as_ref() else {
+                return self.failed(
+                    context,
+                    decision,
+                    Some(selected.physical_id),
+                    Refusal::InvalidRequest,
+                    json!({"reason":"invalid_request"}),
+                );
+            };
+            let started = Instant::now();
+            let budget_end = started
+                + std::cmp::min(
+                    std::time::Duration::from_millis(value.timeout_ms),
+                    context.deadline.saturating_duration_since(started),
+                );
+            let mut satisfied = false;
+            loop {
+                if context.cancellation.is_cancelled() {
+                    return self.browser_failure(
+                        context,
+                        decision,
+                        crate::browser::BrowserError::CancelledBeforeDispatch,
+                        Some(selected.physical_id),
+                    );
+                }
+                match self.dispatch(
+                    context,
+                    BrowserCommand::QuerySemantic {
+                        tab_id: selected.physical_id,
+                        name: selector.name.clone(),
+                        role: selector.role.clone(),
+                        exact: selector.exact,
+                        form_scope: false,
+                    },
+                ) {
+                    Ok(BrowserOutcome::Targets { targets, .. }) if !targets.is_empty() => {
+                        satisfied = true;
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        return self.browser_failure(
+                            context,
+                            decision,
+                            error,
+                            Some(selected.physical_id),
+                        )
+                    }
+                }
+                if Instant::now() >= budget_end || Instant::now() >= context.deadline {
+                    break;
+                }
+                std::thread::sleep(std::cmp::min(
+                    std::time::Duration::from_millis(100),
+                    context.deadline.saturating_duration_since(Instant::now()),
+                ));
+            }
+            let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let status = if satisfied {
+                Status::Succeeded
+            } else {
+                Status::Failed
+            };
+            let outcome = Outcome::Waited {
+                condition: value.condition.clone(),
+                elapsed_ms,
+                satisfied,
+                host: observed_host(&selected.url),
+            };
+            return Terminal {
+                result: InvocationResult::new(
+                    context.invocation,
+                    status,
+                    Effect::None,
+                    readiness(selected.readiness),
+                    true,
+                    outcome.summary().as_str(),
+                    json!({"tab":selected.handle.as_str(),"condition":"selector_present","satisfied":satisfied,"elapsed_ms":elapsed_ms}),
+                    outcome.next_steps(),
+                ),
+                decision,
+                physical_id: Some(selected.physical_id),
+                observed: outcome.observed(),
+            };
+        }
         match self.dispatch(
             context,
             BrowserCommand::Observe {

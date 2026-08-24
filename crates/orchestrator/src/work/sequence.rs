@@ -167,6 +167,7 @@ impl ApplicationExecutor {
                         tab: Some(selected.handle.as_str().into()),
                         value: condition_value.clone(),
                         target: target.clone(),
+                        selector: None,
                         timeout_ms: value.timeout_ms,
                         restrictions: value.restrictions.clone(),
                     },
