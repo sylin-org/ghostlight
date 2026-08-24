@@ -5,20 +5,23 @@ Last updated: 2026-08-24.
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
 
-## In flight: foundry demo follow-ups
+## In flight: 1.0 release pipeline
 
-Both foundry defects are fixed and proven live on the development graph. Windows passed all 41
-beats through `scripts/demo-foundry.ps1` after the owner reloaded the unpacked extension. The
-[CachyOS verification](testing/foundry-linux-live-verification-2026-08-24.md) then passed the same
-41 beats through `scripts/demo-foundry.sh` against an exact optimized three-sibling user candidate
-and explicitly reloaded unpacked adapter. Both runs include the press_key coda and every desk-stage
-dialog beat. Linux also proved that a primitive adapter refusal renders the browser's reason and
-that only non-success audit records carry bounded refusal facts. RELEASE-CHECKLIST G1 carries the
-whole-catalog demo as a standing gate. See
-[demo-press-key-diagnosis](tasks/demo-press-key-diagnosis/LEDGER.md). What
-remains for 1.0 is the release-environment track: G0 freeze, provenance-bound candidate,
-clean-machine install rows, and the store resubmission. Live authority swaps on development
-machines go through `scripts/dev-loop.ps1` only.
+Engineering batches are closed: the foundry sprint, the interface-truth polish, and the
+nine-task handle-continuity batch are landed, gated, and proven live on Windows plus
+verified on CachyOS (see tasks/demo-press-key-diagnosis/ and tasks/handle-continuity/).
+The 1.0.0 extension was rebuilt deterministically from foundry-sprint source, resubmitted
+to the Chrome Web Store (PENDING_REVIEW, STAGED_PUBLISH, sha256 f7b9a6ad...), and that
+review replaces the stale one -- see
+[extension-store-submission-2026-08-24](testing/extension-store-submission-2026-08-24.md).
+Release tooling now exists: scripts/release-preflight.ps1 (one-command G1 gates plus
+evidence skeleton), declare-freeze/assert-freeze (G0), verify-custody.ps1 (G2).
+
+Next: the owner closes the two open G0 decisions (store-adapter route for live lanes is
+decided -- submit-and-wait staged; Owed-exclusions confirmation remains) and names the
+frozen revision. Then G1 runs at the frozen sha (preflight plus the Linux verification
+lane via coordination/CHAT.md), G2 assembles and takes custody, and the environment lanes
+follow. Live authority swaps go through scripts/dev-loop.ps1 only.
 
 ## Published capability restoration
 
