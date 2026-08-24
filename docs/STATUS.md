@@ -1162,17 +1162,28 @@ The executor-split batch is complete through `4d633fbc`.
   action tagging, and perceptual palettes are still unbuilt. Output size is no longer the pressure
   it was: a browser-local save may spend 16 MiB, and anything over its budget is thinned rather
   than refused.
-- The foreign-entry evidence gap outlived every integration shape. ADR-0125 Decision 2 and the
-  reference-experience epic both require showing what Ghostlight found, what it owns, and what it
-  would change, but a blocked target still asserts that a configuration is malformed or foreign
-  without showing the evidence for it. It was built once during the ADR-0130 and ADR-0128 attempts
-  and was reverted with them
-  ([ADR-0129](adr/0129-integration-roster-reverted-to-cards.md) Decision 4). Re-landing it is
-  independent of whatever layout the destination eventually takes.
 - `origin/main` still carries 0.8, and the two branches have diverged rather than staying linear.
   Deciding when the 1.0 line is promoted is a release decision; see "Where the branches stand".
 - ADR-0084's complete browser-window attention routing remains deferred; only the narrow Chromium
   slice is implemented.
+
+## Blocked-target evidence
+
+[ADR-0135](adr/0135-blocked-target-evidence.md) closes ADR-0129 Decision 4 through the
+[evidence-1 batch](tasks/evidence-1/), completed on 2026-08-24. A blocked integration card now
+shows what Ghostlight found instead of only asserting that something is wrong:
+`RegistrationState::Foreign` carries the bounded command line it saw, `inspect()` names the
+actual cause (foreign entry, malformed configuration, or unreadable file) instead of one
+conflated sentence, and an optional orchestrator-authored `evidence` field travels on
+`HarnessSummary`, rendered verbatim by the card the destination already has. Ownership behavior
+is untouched: foreign entries are still never overwritten or removed, and blocked targets still
+offer no automatic repair. Proven by unit pins across JSON, TOML, and YAML dialects, a surface
+journey assertion, and -- after the release orchestrator swap -- `ghostlight doctor --json`
+against a seeded foreign configuration under redirected user roots reading the exact evidence
+sentence back from the deployed binary. The one unproven sliver is the paragraph's appearance in
+the real workbench window, which needs a person at the screen; the ledger records it as an
+owner-visible glance rather than claiming it.
+
 
 ## Release gates still requiring an owner or release environment
 
