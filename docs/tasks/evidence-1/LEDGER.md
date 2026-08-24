@@ -14,7 +14,7 @@ boundary. `RESUME HERE` names the only next task.
 | --- | --- | --- | --- |
 | E1 projection evidence | COMPLETE | `feat(install): carry blocked-target evidence` | `5e5725fa`; Foreign carries the bounded found command, three cause-specific details, optional evidence field, 4 new pins, gate green. |
 | E2 card rendering | COMPLETE | `feat(workbench): show blocked-target evidence` | `203ea6b4`; verbatim evidence paragraph on blocked rows, tone-bordered style, journey assertion, preview fixtures modernized, gate green. |
-| E3 live proof + close | COMPLETE | `test(integrations): prove blocked-target evidence live` | this commit; swap pid 33280 -> 31488; deployed-binary doctor --json read the exact evidence sentence from a seeded foreign file; STATUS Owed item closed. |
+| E3 live proof + close | COMPLETE | `test(integrations): prove blocked-target evidence live` | `a3fab76d`; swap pid 33280 -> 31488; deployed-binary doctor --json read the exact evidence sentence from a seeded foreign file; STATUS Owed item closed. |
 
 ## Deviations
 
