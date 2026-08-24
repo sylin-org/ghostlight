@@ -5,13 +5,12 @@ task boundary. `RESUME HERE` names the only next task.
 
 ## RESUME HERE
 
-- State: READY. No task has started.
+- State: D1 IN PROGRESS.
 - Next task: D1, validation messages in `crates/orchestrator/src/language/mod.rs`.
-- Baseline: `dev` at `dcabf582` (fix(language): teach through invalid-input guidance).
-- Already landed in the baseline: decode-failure next-steps carry the specific validation detail;
-  the four "view is required" sites teach the screenshot-first remedy.
-- Known live-verification debt: the swapped authority has not yet been re-probed for these two
-  changes; D4 owns that check.
+- Baseline: `dev` at `6944507a` (docs(status): full catalog proven live).
+- Already landed before the batch: decode-failure next-steps carry the specific validation detail;
+  the four region-view sites teach the screenshot-first remedy; dialog attempt-first handling;
+  dialog-aware EffectUnknown guidance. D1-D3 must not regress those.
 
 ## Task table
 

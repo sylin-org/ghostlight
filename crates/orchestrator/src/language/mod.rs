@@ -1144,10 +1144,12 @@ fn decode_tabs(input: Value) -> Result<Operation, LanguageError> {
                 ))
             }
             "focus" | "close" => validate_handle(
-                value
-                    .tab
-                    .as_deref()
-                    .ok_or_else(|| LanguageError::Invalid("tab is required".into()))?,
+                value.tab.as_deref().ok_or_else(|| {
+                    LanguageError::Invalid(
+                        "action focus and action close need a tab: the handle of the tab to act on"
+                            .into(),
+                    )
+                })?,
                 "tab_",
             )?,
             _ => {}
@@ -1273,7 +1275,7 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
                 "zoom" => {
                     let percent = value
                         .percent
-                        .ok_or_else(|| LanguageError::Invalid("percent is required".into()))?;
+                        .ok_or_else(|| LanguageError::Invalid("action zoom needs percent: the zoom level as a whole number, 25 to 500".into()))?;
                     validate_range(usize::from(percent), 25, 500, "percent")?;
                     if value.width.is_some() || value.height.is_some() {
                         return Err(LanguageError::Invalid(
@@ -1282,12 +1284,18 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
                     }
                 }
                 "resize" => {
-                    let width = value
-                        .width
-                        .ok_or_else(|| LanguageError::Invalid("width is required".into()))?;
-                    let height = value
-                        .height
-                        .ok_or_else(|| LanguageError::Invalid("height is required".into()))?;
+                    let width = value.width.ok_or_else(|| {
+                        LanguageError::Invalid(
+                            "action resize needs width and height: the outer window size in pixels"
+                                .into(),
+                        )
+                    })?;
+                    let height = value.height.ok_or_else(|| {
+                        LanguageError::Invalid(
+                            "action resize needs width and height: the outer window size in pixels"
+                                .into(),
+                        )
+                    })?;
                     validate_range(width as usize, 320, 7_680, "width")?;
                     validate_range(height as usize, 240, 4_320, "height")?;
                     if value.percent.is_some() {
@@ -1328,10 +1336,11 @@ fn decode_dialog(input: Value) -> Result<Operation, LanguageError> {
         validate_optional_handle(value.tab.as_deref(), "tab_")?;
         match value.action.as_str() {
             "respond" => validate_text_allow_empty(
-                value
-                    .text
-                    .as_deref()
-                    .ok_or_else(|| LanguageError::Invalid("text is required".into()))?,
+                value.text.as_deref().ok_or_else(|| {
+                    LanguageError::Invalid(
+                        "action respond needs text: the prompt response, which may be empty".into(),
+                    )
+                })?,
                 2_000,
                 "text",
             )?,
@@ -1436,7 +1445,9 @@ fn ensure_fields(input: &Value, fields: &[&str]) -> Result<(), LanguageError> {
         .ok_or_else(|| LanguageError::Invalid("input must be an object".into()))?;
     for key in object.keys() {
         if !fields.contains(&key.as_str()) && !COMMON_FIELDS.contains(&key.as_str()) {
-            return Err(LanguageError::Invalid(format!("unknown field `{key}`")));
+            return Err(LanguageError::Invalid(format!(
+                "unknown field `{key}`: check this tool's advertised fields"
+            )));
         }
     }
     Ok(())
@@ -1632,13 +1643,18 @@ fn validate_screenshot(value: &TakeScreenshot) -> Result<(), LanguageError> {
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
             validate_coordinate(
-                coordinate.ok_or_else(|| LanguageError::Invalid(format!("{name} is required")))?,
+                coordinate.ok_or_else(|| LanguageError::Invalid("region capture needs x and y: the top-left corner of the rectangle in view coordinates".into()))?,
                 name,
             )?;
         }
         for (name, extent) in [("width", value.width), ("height", value.height)] {
             validate_extent(
-                extent.ok_or_else(|| LanguageError::Invalid(format!("{name} is required")))?,
+                extent.ok_or_else(|| {
+                    LanguageError::Invalid(
+                        "region capture needs width and height: the rectangle size in CSS pixels"
+                            .into(),
+                    )
+                })?,
                 name,
             )?;
         }
@@ -1716,16 +1732,16 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
             validate_coordinate(
-                coordinate.ok_or_else(|| LanguageError::Invalid(format!("{name} is required")))?,
+                coordinate.ok_or_else(|| LanguageError::Invalid("coordinate wheel scrolling needs x and y: the point to scroll at, in view coordinates".into()))?,
                 name,
             )?;
         }
         validate_range(
-            usize::from(
-                value
-                    .ticks
-                    .ok_or_else(|| LanguageError::Invalid("ticks is required".into()))?,
-            ),
+            usize::from(value.ticks.ok_or_else(|| {
+                LanguageError::Invalid(
+                    "coordinate wheel scrolling needs ticks: how far to scroll, 1 to 10".into(),
+                )
+            })?),
             1,
             10,
             "ticks",
@@ -1812,14 +1828,14 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
             value
                 .source_target
                 .as_deref()
-                .ok_or_else(|| LanguageError::Invalid("source_target is required".into()))?,
+                .ok_or_else(|| LanguageError::Invalid("drag by targets needs source_target and destination_target: current handles from browser_find or browser_inspect".into()))?,
             "target_",
         )?;
         validate_handle(
             value
                 .destination_target
                 .as_deref()
-                .ok_or_else(|| LanguageError::Invalid("destination_target is required".into()))?,
+                .ok_or_else(|| LanguageError::Invalid("drag by targets needs destination_target as well as source_target: where to drop".into()))?,
             "target_",
         )?;
     } else {
@@ -1837,7 +1853,7 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
             ("end_y", value.end_y),
         ] {
             validate_coordinate(
-                coordinate.ok_or_else(|| LanguageError::Invalid(format!("{name} is required")))?,
+                coordinate.ok_or_else(|| LanguageError::Invalid("drag by coordinates needs all four of start_x, start_y, end_x, and end_y: the two view points to drag between".into()))?,
                 name,
             )?;
         }
@@ -1896,7 +1912,11 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
             validate_coordinate(
-                coordinate.ok_or_else(|| LanguageError::Invalid(format!("{name} is required")))?,
+                coordinate.ok_or_else(|| {
+                    LanguageError::Invalid(
+                        "dropping an image needs x and y: the view point to drop at".into(),
+                    )
+                })?,
                 name,
             )?;
         }
@@ -2195,10 +2215,16 @@ fn validate_restrictions(value: &RequestRestrictions) -> Result<(), LanguageErro
 
 fn validate_url(value: &str) -> Result<(), LanguageError> {
     if value.len() > 4_096 {
-        return Err(LanguageError::Invalid("url exceeds 4096 bytes".into()));
+        return Err(LanguageError::Invalid(format!(
+            "url is limited to 4096 bytes; got {}",
+            value.len()
+        )));
     }
-    let parsed =
-        Url::parse(value).map_err(|_| LanguageError::Invalid("url must be absolute".into()))?;
+    let parsed = Url::parse(value).map_err(|_| {
+        LanguageError::Invalid(
+            "url must be absolute: include the scheme, as in https://example.com".into(),
+        )
+    })?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err(LanguageError::Invalid(
             "url must use http or https and include a host".into(),
@@ -2212,7 +2238,7 @@ fn validate_timeout(value: u64) -> Result<(), LanguageError> {
         Ok(())
     } else {
         Err(LanguageError::Invalid(format!(
-            "timeout_ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}"
+            "timeout_ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}; got {value}"
         )))
     }
 }
@@ -2227,7 +2253,7 @@ fn validate_range(
         Ok(())
     } else {
         Err(LanguageError::Invalid(format!(
-            "{field} must be between {minimum} and {maximum}"
+            "{field} must be between {minimum} and {maximum}; got {value}"
         )))
     }
 }
@@ -2237,7 +2263,8 @@ fn validate_choice(value: &str, choices: &[&str], field: &str) -> Result<(), Lan
         Ok(())
     } else {
         Err(LanguageError::Invalid(format!(
-            "{field} has unsupported value `{value}`"
+            "{field} must be one of {}: got `{value}`",
+            choices.join(", ")
         )))
     }
 }
@@ -2247,7 +2274,7 @@ fn validate_handle(value: &str, prefix: &str) -> Result<(), LanguageError> {
         Ok(())
     } else {
         Err(LanguageError::Invalid(format!(
-            "handle must start with {prefix}"
+            "handles start with {prefix}; pass one exactly as a previous result issued it"
         )))
     }
 }
@@ -2268,11 +2295,12 @@ fn validate_text_allow_empty(
     maximum: usize,
     field: &str,
 ) -> Result<(), LanguageError> {
-    if value.chars().count() <= maximum {
+    let length = value.chars().count();
+    if length <= maximum {
         Ok(())
     } else {
         Err(LanguageError::Invalid(format!(
-            "{field} exceeds {maximum} characters"
+            "{field} is limited to {maximum} characters; got {length}"
         )))
     }
 }
@@ -2293,9 +2321,10 @@ fn validate_key(value: &str) -> Result<(), LanguageError> {
     if NAMED_KEYS.contains(&value) || value.chars().count() == 1 {
         Ok(())
     } else {
-        Err(LanguageError::Invalid(
-            "key must be one character or a supported named key".into(),
-        ))
+        Err(LanguageError::Invalid(format!(
+            "key must be one character or a supported named key: {}",
+            NAMED_KEYS.join(", ")
+        )))
     }
 }
 
@@ -2408,6 +2437,37 @@ mod tests {
             json!({"condition":"target_present","value":"x"})
         )
         .is_err());
+    }
+
+    #[test]
+    fn validation_messages_teach_the_expected_shape() {
+        let error = decode("browser_tabs", json!({"action":"nope"})).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "invalid input: action must be one of list, focus, close: got `nope`"
+        );
+        let error = decode("browser_window", json!({"action":"zoom","percent":900})).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "invalid input: percent must be between 25 and 500; got 900"
+        );
+        let error = decode("browser_tabs", json!({"action":"close","tab":"nope"})).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "invalid input: handles start with tab_; pass one exactly as a previous result issued it"
+        );
+        let error = decode(
+            "browser_press_key",
+            json!({"key":"a","tab":"tab_x","oops":1}),
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .starts_with("invalid input: unknown field `oops`:"));
+        let error = decode("browser_press_key", json!({"key":"PageLeft"})).unwrap_err();
+        assert!(error
+            .to_string()
+            .starts_with("invalid input: key must be one character or a supported named key: "));
     }
 
     #[test]
