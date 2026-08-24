@@ -937,6 +937,61 @@ impl WorkspaceLease {
         Ok(())
     }
 
+    /// Recreate one dead tab binding under its existing durable handle.
+    ///
+    /// Continuation, not resurrection: the new physical tab starts a fresh document with no
+    /// history, and the caller's handle keeps referring to "this workspace's tab slot".
+    pub fn restore_tab(
+        &self,
+        handle: &str,
+        tab: &PhysicalTab,
+    ) -> Result<SelectedTab, WorkspaceError> {
+        let handle = TabHandle(handle.into());
+        let held = {
+            let state = self.store.lock();
+            let held = state
+                .workspaces
+                .get(&self.workspace)
+                .and_then(|workspace| workspace.tabs.get(&handle))
+                .map(|dead| dead.held)
+                .unwrap_or(false);
+            if state.workspaces.iter().any(|(id, candidate)| {
+                id != &self.workspace
+                    && candidate
+                        .tabs
+                        .values()
+                        .any(|known| known.physical_id == tab.tab_id)
+            }) {
+                return Err(WorkspaceError::PhysicalTabOwned);
+            }
+            if state.workspaces.iter().any(|(id, candidate)| {
+                id != &self.workspace && candidate.tabs.contains_key(&handle)
+            }) {
+                return Err(WorkspaceError::NotOwnedTab);
+            }
+            held
+        };
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        for known in workspace.tabs.values_mut() {
+            known.active = false;
+        }
+        let value = TabState {
+            physical_id: tab.tab_id,
+            generation: 0,
+            url: tab.url.clone(),
+            title: tab.title.clone(),
+            readiness: tab.readiness,
+            active: true,
+            held,
+        };
+        workspace.tabs.insert(handle.clone(), value.clone());
+        Ok(selected(&handle, &value))
+    }
+
     /// Map observed browser targets to fresh opaque generation-bound handles.
     pub fn register_targets(
         &self,

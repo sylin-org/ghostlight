@@ -1170,6 +1170,21 @@ impl From<WorkspaceError> for WorkspaceReason {
     }
 }
 
+/// Authored sentence for a navigation that recreated a dead tab binding.
+#[must_use]
+pub fn page_recovered_summary(host: Option<&str>) -> String {
+    match host {
+        Some(host) => format!("That tab was gone; opened {host} in a new tab."),
+        None => "That tab was gone; opened the requested page in a new tab.".into(),
+    }
+}
+
+/// Authored sentence for closing what was already closed.
+#[must_use]
+pub fn tab_already_closed_summary() -> String {
+    "That tab was already closed.".into()
+}
+
 /// Content-free observations about one action.
 ///
 /// This is deliberately not `InvocationResult::facts`. Facts legitimately carry page text and

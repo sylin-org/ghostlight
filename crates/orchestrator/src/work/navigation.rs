@@ -6,12 +6,14 @@ use serde_json::{json, Value};
 use crate::browser::BrowserError;
 use crate::events::DomainEvent;
 use crate::governance::{Capability, CapabilitySet, Decision};
-use crate::language::outcome::{Outcome, Refusal};
+use crate::language::outcome::{
+    page_recovered_summary, tab_already_closed_summary, Outcome, Refusal,
+};
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
     bounded, observed_host, readiness, ApplicationExecutor, CloseCompensation, Effect,
-    InvocationContext, Readiness, Terminal,
+    InvocationContext, InvocationResult, Readiness, Status, Terminal,
 };
 
 impl ApplicationExecutor {
@@ -190,6 +192,21 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
+        self.settle_opened_tab(context, lease, tab, controlled, commits, true)
+    }
+
+    /// Govern the just-opened tab: landing authorization with close compensation, governed
+    /// landing, and the opened-page receipt. Shared by first opens and dead-tab recovery so
+    /// both ride exactly the same governance.
+    fn settle_opened_tab(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        tab: ghostlight_bridge::browser::PhysicalTab,
+        controlled: SelectedTab,
+        commits: Vec<String>,
+        created: bool,
+    ) -> Terminal {
         self.emit(DomainEvent::TabCreated {
             invocation: context.invocation.into(),
             workspace: context.workspace.as_str().into(),
@@ -202,25 +219,25 @@ impl ApplicationExecutor {
                 CloseCompensation::Closed => self.blocked_at(
                     context,
                     landing,
-                    Some(tab.tab_id),
+                    Some(controlled.physical_id),
                     Effect::None,
                     true,
                     json!({"reason":landing.reason.as_str(),"compensated":true}),
-                    observed_host(&tab.url),
+                    observed_host(&controlled.url),
                 ),
                 CloseCompensation::Retained => self.blocked_at(
                     context,
                     landing,
-                    Some(tab.tab_id),
+                    Some(controlled.physical_id),
                     Effect::Applied,
                     false,
                     json!({"reason":landing.reason.as_str(),"compensated":false,"retained":true}),
-                    observed_host(&tab.url),
+                    observed_host(&controlled.url),
                 ),
                 CloseCompensation::Unknown => self.unknown(
                     context,
                     landing,
-                    Some(tab.tab_id),
+                    Some(controlled.physical_id),
                     Refusal::LandingDeniedUnknown,
                     json!({"reason":landing.reason.as_str(),"compensated":false}),
                 ),
@@ -236,7 +253,7 @@ impl ApplicationExecutor {
             tab: governed.handle.clone(),
             physical_id: governed.physical_id,
         });
-        self.succeeded(context, landing, Some(governed.physical_id), Effect::Applied, readiness(governed.readiness), false, Outcome::PageOpened { host: observed_host(&governed.url) }, json!({"tab":governed.handle.as_str(),"url":governed.url,"title":governed.title,"created":true,"document_generation":governed.generation}))
+        self.succeeded(context, landing, Some(governed.physical_id), Effect::Applied, readiness(governed.readiness), false, Outcome::PageOpened { host: observed_host(&governed.url) }, json!({"tab":governed.handle.as_str(),"url":governed.url,"title":governed.title,"created":created,"document_generation":governed.generation}))
     }
 
     pub(super) fn navigate_page(
@@ -263,6 +280,60 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(WorkspaceError::NoTab) if requested_tab.is_none() => {
                 return self.open_page(context, lease, url)
+            }
+            // The caller's durable tab handle points at a tab that is gone. Recreate it
+            // through the governed open path under the same handle, and say so plainly.
+            Err(WorkspaceError::StaleTab) if requested_tab.is_some() => {
+                let handle = requested_tab.expect("guarded above");
+                let client_label = match self.workspaces.client_label(context.workspace) {
+                    Ok(label) => label,
+                    Err(error) => return self.workspace_failure(context, error),
+                };
+                let group_title = format!("Ghostlight - {}", bounded(&client_label, 80));
+                let decision = self.authorize(context, Capability::Read, Some(url));
+                if !decision.allowed {
+                    return self.blocked_at(
+                        context,
+                        decision,
+                        None,
+                        Effect::None,
+                        true,
+                        json!({"reason":decision.reason.as_str()}),
+                        observed_host(url),
+                    );
+                }
+                let (tab, commits) = match self.dispatch(
+                    context,
+                    BrowserCommand::OpenTab {
+                        url: url.into(),
+                        group_title,
+                    },
+                ) {
+                    Ok(BrowserOutcome::TabOpened {
+                        tab,
+                        committed_urls,
+                    }) => (tab, committed_urls),
+                    Ok(_) => return self.protocol_failure(context, decision, None),
+                    Err(error) => return self.browser_failure(context, decision, error, None),
+                };
+                let controlled = match lease.restore_tab(handle, &tab) {
+                    Ok(tab) => tab,
+                    Err(error) => return self.workspace_failure(context, error),
+                };
+                let mut terminal =
+                    self.settle_opened_tab(context, lease, tab, controlled, commits, true);
+                if terminal.result.status == Status::Succeeded {
+                    terminal.result.repeat_safe = false;
+                    if let Some(host) = terminal.observed.host.as_deref() {
+                        terminal.result.summary = page_recovered_summary(Some(host));
+                    } else {
+                        terminal.result.summary = page_recovered_summary(None);
+                    }
+                    if let Some(facts) = terminal.result.facts.as_object_mut() {
+                        facts.insert("recovered".into(), json!("new_tab"));
+                    }
+                }
+                return terminal;
             }
             Err(error) => return self.workspace_failure(context, error),
         };
@@ -474,6 +545,38 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         requested: &str,
     ) -> Terminal {
+        // Closing what is already gone is the desired state achieved, not an error.
+        if matches!(
+            lease.select_tab(Some(requested)),
+            Err(WorkspaceError::StaleTab)
+        ) {
+            let decision = self.authorize_tab_close(context);
+            if !decision.allowed {
+                return self.blocked(
+                    context,
+                    decision,
+                    None,
+                    Effect::None,
+                    true,
+                    json!({"tab":requested,"reason":decision.reason.as_str()}),
+                );
+            }
+            return Terminal {
+                result: InvocationResult::new(
+                    context.invocation,
+                    Status::Succeeded,
+                    Effect::None,
+                    Readiness::NotApplicable,
+                    true,
+                    tab_already_closed_summary().as_str(),
+                    json!({"tab":requested,"closed":false,"already_gone":true}),
+                    vec![],
+                ),
+                decision,
+                physical_id: None,
+                observed: Default::default(),
+            };
+        }
         let selected = match lease.select_tab(Some(requested)) {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),

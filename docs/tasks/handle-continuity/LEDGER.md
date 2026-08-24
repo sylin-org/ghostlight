@@ -25,15 +25,20 @@ Deviations: recovery-by-launch rejected; recovery-by-bounded-wait chosen.
 
 ### T2 -- tab-handle continuation
 
-Status: NOT STARTED.
+Status: COMPLETE for navigate and close (windows-codex, 2026-08-24). `navigate` by a
+handle whose binding is gone recreates the tab through the governed OpenTab path under the
+SAME handle (`WorkspaceLease::restore_tab`, preserving the governance hold), reports
+" That tab was gone; opened <host> in a new tab." with facts recovered=new_tab and
+repeat_safe=false. `close` of an already-gone handle succeeds plainly ("That tab was
+already closed.", effect none) without touching the browser. Landing governance, hold-on-
+denied-landing, compensation, and events ride the shared settle_opened_tab path verbatim.
+Deviation recorded: focus/activate recovery is deferred -- recreating a dead binding for
+focus needs a tombstoned last-known URL (bindings are deleted on TabClosed today); add a
+bounded tombstone when that follow-up lands. Second deviation: an unknown handle is
+indistinguishable from a closed one in v1, so a typo'd handle creates a tab whose summary
+makes the recovery visible; tombstones refine this too.
 
-Depends on T1 only in spirit; can run in parallel. Key seams: binding resolution (where
-TabUnavailable-class refusals originate), the OpenPage path for governed recreation,
-same-handle rebind on recovery, per-tool semantics per BOOTSTRAP D1. New regression tests:
-navigate-to-dead-tab recreates and rebinds with repeat_safe false; close-of-dead-tab
-succeeds as already-gone; focus-of-dead-tab recreates and brings it forward.
-
-Deviations: none yet.
+Deviations: two, both recorded above.
 
 ### T3 -- language and guidance
 

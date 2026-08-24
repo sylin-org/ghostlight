@@ -2122,6 +2122,58 @@ mod tests {
         assert_eq!(after.facts["phase"], "after_dispatch");
     }
 
+    /// Navigating by a durable tab handle that points at a closed tab recreates it through
+    /// the governed open path, rebinds the same handle, and reports the recovery plainly.
+    #[test]
+    fn navigating_to_a_dead_tab_recreates_it_under_the_same_handle() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(9, "https://example.com/again"),
+            committed_urls: vec!["https://example.com/again".into()],
+        }));
+
+        let recovered = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/again","tab":"tab_deadbeefdeadbeefdeadbeefdeadbeef"}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(recovered.status, Status::Succeeded);
+        assert_eq!(recovered.effect, Effect::Applied);
+        assert!(!recovered.repeat_safe);
+        assert_eq!(
+            recovered.facts["tab"],
+            json!("tab_deadbeefdeadbeefdeadbeefdeadbeef")
+        );
+        assert_eq!(recovered.facts["recovered"], "new_tab");
+        assert!(recovered.summary.contains("That tab was gone"));
+        assert!(matches!(browser.calls()[0], BrowserCommand::OpenTab { .. }));
+    }
+
+    /// Closing an already-gone tab achieves the desired state without touching the browser.
+    #[test]
+    fn closing_an_already_gone_tab_succeeds_without_touching_the_browser() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
+
+        let closed = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"close","tab":"tab_gone"}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(closed.status, Status::Succeeded);
+        assert_eq!(closed.effect, Effect::None);
+        assert_eq!(closed.summary, "That tab was already closed.");
+        assert_eq!(closed.facts["already_gone"], true);
+        assert_eq!(browser.calls().len(), 0);
+    }
+
     /// An adapter's honest effect-unknown receipt renders as unknown with the browser's own
     /// reason, never as an incompatible receipt.
     #[test]
